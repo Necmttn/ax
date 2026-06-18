@@ -1316,7 +1316,13 @@ export function cmdSetup(
         } else {
             const args = ["-y", "skills", "add", "Necmttn/ax", "-g", ...agents.flatMap((a) => ["-a", a]), "-y"];
             console.log(`  skills: npx ${args.join(" ")}`);
-            const r = spawnSync("npx", args, { stdio: "inherit" });
+            // Run from HOME, never the caller's cwd. `skills add -g` is a global
+            // op, but npx reads the nearest package.json first - and if the
+            // caller sits inside an npm/bun workspace whose `overrides` npm
+            // dislikes (e.g. dogfooding inside the ax monorepo), npx aborts with
+            // EOVERRIDE before it ever fetches `skills`. A neutral cwd keeps the
+            // surrounding project from poisoning the global install.
+            const r = spawnSync("npx", args, { stdio: "inherit", cwd: HOME });
             if (r.status === 0) console.log(`  skills: installed for ${agents.join(", ")}`);
             else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
         }
