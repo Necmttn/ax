@@ -626,7 +626,7 @@ const costImagesTool: AxMcpTool = defineMcpTool({
 const costRoutabilityTool: AxMcpTool = defineMcpTool({
     name: "cost_routability",
     description:
-        `Main-thread routability lens: of main-agent (non-subagent) spend, how much sat in routable class-runs (gather -> haiku, mechanical-impl / niche-research -> sonnet) vs genuine judgment, with estimated savings repriced one tier down. Deterministic (tool composition + JUDGMENT_GUARD_RE text guard); turn-level by default. Use to see how much main-thread work could have been a cheaper subagent. ${NEXT_PROTOCOL_HINT}`,
+        `Main-thread routability lens: of main-agent (non-subagent) spend, how much sat in routable class-runs (gather, mechanical-impl / niche-research) vs genuine judgment, with estimated savings repriced one tier down. Covers Claude (-> haiku/sonnet) AND Codex (-> gpt-5-nano/gpt-5-mini), classified + repriced separately; the result has a per-provider breakdown in 'providers' plus combined totals. Deterministic (tool composition + JUDGMENT_GUARD_RE text guard); turn-level by default. Use to see how much main-thread work could have been a cheaper subagent. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         days: z
             .number()

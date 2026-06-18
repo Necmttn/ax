@@ -290,23 +290,39 @@ const costSplitCommand = Command.make(
 // ax cost routability [--days=N] [--min-run=N] [--json]
 // ---------------------------------------------------------------------------
 
-function renderRoutability(r: RoutabilityResult): string {
-    const usdFmt = (n: number) => `$${n.toFixed(2)}`;
+const usdFmt = (n: number) => `$${n.toFixed(2)}`;
+
+/** One provider's summary line + per-class table. */
+function renderRoutabilityProvider(r: RoutabilityResult, label: string): string[] {
     const out: string[] = [];
-    out.push(`main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}`);
-    out.push("");
-    out.push("class            runs   turns   main_cost    tier     repriced    est_savings");
+    out.push(`[${label}] main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}`);
+    out.push("class            runs   turns   main_cost    tier         repriced    est_savings");
     for (const row of r.rows) {
         if (row.verdict === "stays") {
-            out.push(`${"stays main".padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${"-".padEnd(7)} ${"-".padStart(10)}  ${"-".padStart(11)}`);
+            out.push(`${"stays main".padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${"-".padEnd(11)} ${"-".padStart(10)}  ${"-".padStart(11)}`);
         } else {
-            out.push(`${row.class.padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${(row.tier ?? "").padEnd(7)} ${usdFmt(row.repricedUsd ?? 0).padStart(10)}  ${usdFmt(row.estSavingsUsd ?? 0).padStart(11)}`);
+            out.push(`${row.class.padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${(row.tier ?? "").padEnd(11)} ${usdFmt(row.repricedUsd ?? 0).padStart(10)}  ${usdFmt(row.estSavingsUsd ?? 0).padStart(11)}`);
         }
     }
-    out.push("");
+    return out;
+}
+
+function renderRoutability(r: RoutabilityResult): string {
+    const out: string[] = [];
+    const providers = r.providers.length > 0 ? r.providers : [r];
+
+    if (providers.length > 1) {
+        out.push(`total main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}`);
+        out.push("");
+    }
+    for (const p of providers) {
+        out.push(...renderRoutabilityProvider(p, p.provider));
+        out.push("");
+    }
     out.push("estimate: edit/read turns are assumed mechanically routable; reasoning before an");
     out.push("edit isn't visible in the transcript, so read this as an upper-ish bound, not ground");
-    out.push("truth. judgment-text turns stay on frontier by design. claude main-agent only.");
+    out.push("truth. judgment-text turns stay on frontier by design. claude + codex main-agent.");
+    out.push("codex exec_command is split read/write via command_norm; ambiguous norms stay on main.");
     out.push("next: ax dispatches --candidates   # the subagent-side leak");
     return out.join("\n");
 }
