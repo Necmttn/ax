@@ -20,6 +20,18 @@ interface SkillLookupRow {
     readonly bytes?: unknown;
 }
 
+function skillUpsertPayload(content: SkillContent): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+        name: content.name,
+        scope: content.scope,
+        dir_path: content.dir_path,
+        content_hash: content.content_hash,
+    };
+    if (content.description != null) payload.description = content.description;
+    if (content.bytes !== undefined) payload.bytes = content.bytes;
+    return payload;
+}
+
 export function skillRecordIdFromLookup(raw: unknown, fallbackName: SkillName): RecordId {
     if (raw instanceof RecordId) return raw;
     if (typeof raw === "string") {
@@ -57,15 +69,15 @@ export function upsertSkillByName(
                     name: content.name,
                     scope: content.scope,
                     hash: content.content_hash,
-                    prev: prevHash ?? null,
-                    bytes: content.bytes ?? null,
-                    prevBytes: typeof existing?.bytes === "number" ? existing.bytes : null,
+                    prev: prevHash ?? undefined,
+                    bytes: content.bytes ?? undefined,
+                    prevBytes: typeof existing?.bytes === "number" ? existing.bytes : undefined,
                     change: isNew ? "added" : "changed",
                 },
             ));
         }
 
-        yield* db.upsert(id, { ...content });
+        yield* db.upsert(id, skillUpsertPayload(content));
         return id;
     });
 }
