@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.1](https://github.com/Necmttn/ax/compare/v0.34.0...v0.34.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* omit null skill descriptions during ingest ([#560](https://github.com/Necmttn/ax/issues/560)) ([ab59f24](https://github.com/Necmttn/ax/commit/ab59f24521195d1fc96feec978e90e0c39213643))
+* **setup:** run npx skills install from HOME, not caller cwd ([#562](https://github.com/Necmttn/ax/issues/562)) ([91f2af3](https://github.com/Necmttn/ax/commit/91f2af324389528ecaad2c8f61b2089677d50bfb))
+* **studio:** speed up shared transcript viewer ([b8a7eb3](https://github.com/Necmttn/ax/commit/b8a7eb36a37bf1453828541dc01e20105c5eee89))
+
 ## [0.34.0](https://github.com/Necmttn/ax/compare/v0.33.0...v0.34.0) (2026-06-18)
 
 
