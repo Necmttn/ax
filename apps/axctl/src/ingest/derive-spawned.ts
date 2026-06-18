@@ -15,7 +15,8 @@ SELECT
     session,
     name,
     ts,
-    output_excerpt
+    output_excerpt,
+    input_json
 FROM tool_call
 WHERE name = "spawn_agent" OR name = "Task"
 ORDER BY ts ASC;`;
@@ -65,6 +66,7 @@ const collectSources = (
         const name = stringField(raw, "name");
         const ts = dateField(raw, "ts");
         const output = stringField(raw, "output_excerpt");
+        const inputJson = stringField(raw, "input_json");
         if (!id || !session || !name || !ts) continue;
         out.push(normalizeDelegationToolCall({
             provider: providerForSpawnTool(name),
@@ -73,6 +75,7 @@ const collectSources = (
             ts,
             toolName: name,
             outputExcerpt: output,
+            inputJson,
         }));
     }
     return out;
@@ -131,12 +134,19 @@ export const deriveSpawned = (): Effect.Effect<
             const toolLit = surrealLiteral(src.toolName);
             const nickLit =
                 src.nickname === null ? "NONE" : surrealLiteral(src.nickname);
+            // agent_type + description come from the spawn-call args (codex). They
+            // drive `ax dispatches` (SPAWNED_SQL filters agent_type != NONE), so
+            // without them codex dispatches never surface in the table.
+            const agentTypeLit =
+                src.agentType === null ? "NONE" : surrealLiteral(src.agentType);
+            const descriptionLit =
+                src.description === null ? "NONE" : surrealLiteral(src.description);
             // Idempotent: dedupe by (in,out,tool_call) before inserting.
             yield* db.query(
                 `DELETE spawned WHERE in = ${parentId} AND out = ${childId} AND tool_call = ${callId};`,
             );
             yield* db.query(
-                `RELATE ${parentId} -> spawned -> ${childId} SET ts = d${surrealLiteral(src.ts)}, tool = ${toolLit}, tool_call = ${callId}, nickname = ${nickLit};`,
+                `RELATE ${parentId} -> spawned -> ${childId} SET ts = d${surrealLiteral(src.ts)}, tool = ${toolLit}, tool_call = ${callId}, nickname = ${nickLit}, agent_type = ${agentTypeLit}, description = ${descriptionLit};`,
             );
             written += 1;
         }
