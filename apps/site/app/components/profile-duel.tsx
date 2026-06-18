@@ -35,6 +35,7 @@ import {
     fmtMoney,
     fmtPct,
     groupSkills,
+    HighlightsBlocks,
     RawTable,
     SectionIntro,
     SkillRow,
@@ -333,15 +334,19 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                 </div>
             </section>
 
-            {/* taste: patterns, when present on either side */}
-            {((a.taste && a.taste.patterns.length > 0) || (b.taste && b.taste.patterns.length > 0)) && (
+            {/* taste: user-authored highlights (their words) + mined patterns, per side */}
+            {(a.highlights || b.highlights
+                || (a.taste && a.taste.patterns.length > 0)
+                || (b.taste && b.taste.patterns.length > 0)) && (
                 <section className="pf-section">
-                    <SectionIntro eyebrow="taste" title="Taste" note="patterns ax keeps seeing" />
+                    <SectionIntro eyebrow="taste" title="Taste" note="in their words, and what ax keeps seeing" />
                     <div className="duel-cols">
                         <DuelColumn login={a.github} color={SELF_COLOR} ring={SELF_COLOR}>
+                            <HighlightsBlocks highlights={a.highlights} />
                             <TastePatterns profile={a} />
                         </DuelColumn>
                         <DuelColumn login={b.github} color={VS_COLOR} ring={VS_COLOR}>
+                            <HighlightsBlocks highlights={b.highlights} />
                             <TastePatterns profile={b} />
                         </DuelColumn>
                     </div>

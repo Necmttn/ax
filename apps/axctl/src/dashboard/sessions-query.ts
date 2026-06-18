@@ -103,7 +103,7 @@ const enrichSessions = (
                     >(
                         `SELECT
                             (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
-                            (SELECT VALUE text_excerpt FROM turn WHERE session = ${lit} AND role = 'user' ORDER BY seq ASC LIMIT 1)[0] AS first_user_message
+                            (SELECT text_excerpt, seq FROM turn WHERE session = ${lit} AND role = 'user' ORDER BY seq ASC LIMIT 1)[0].text_excerpt AS first_user_message
                          FROM ONLY ${lit};`,
                     );
                     const enriched = result?.[0] ?? null;

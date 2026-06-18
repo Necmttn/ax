@@ -33,6 +33,7 @@ axctl costs for --terms <a,b,c> [--since=N] # cost for sessions matching any ter
 axctl costs for --commit <sha>              # cost for sessions that produced a commit
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
+axctl memory ops [--events] [--days=N]      # Claude memory-file activity (writes/edits to ~/.claude/.../memory/*.md)
 axctl quota [--statusline|--swiftbar]       # Claude plan usage (5h/7d windows); statusline + menubar output
 axctl dojo agenda [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]  # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
 axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write the morning report for a completed dojo run
@@ -49,6 +50,8 @@ axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]
                                             # publish profile gist + one-time community registration PR
 axctl profile unpublish                     # delete the published gist + local consent
+axctl profile interview [--force]              # emit a brief; an agent interviews you for profile highlights
+axctl profile interview submit [--file=PATH]   # validate highlights JSON (stdin/--file) -> ~/.ax/profile-highlights.json
 axctl pricing [--query <model>]             # inspect imported model pricing rows
 axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
 axctl roles                                 # list role labels with skill counts

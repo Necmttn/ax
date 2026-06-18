@@ -341,6 +341,40 @@ describe("trendingSkills", () => {
     });
 });
 
+describe("validateProfileV1 highlights", () => {
+    const base = {
+        v: 1, github: "octocat", generated_at: "2026-06-17T00:00:00Z", window_days: 30,
+        stats: { sessions: 1, active_days: 1, streak_days: 1, tokens: { prompt: 1, completion: 1, total: 2 }, models: [], harnesses: [] },
+        rig: { skills: [], hooks: [], routing_table: false },
+    };
+
+    test("accepts a full highlights block", () => {
+        const p = validateProfileV1({
+            ...base,
+            highlights: {
+                authored_at: "2026-06-17T00:00:00Z",
+                setup: [{ title: "t", what: "w", why: "y", link: "https://x.dev" }],
+                skills: [{ name: "tdd", source: "superpowers", summary: "s" }],
+                taste: "ship clean",
+                wins: [{ text: "shipped", evidence: "PR #1" }],
+            },
+        });
+        expect(p.highlights?.taste).toBe("ship clean");
+        expect(p.highlights?.setup?.[0]?.title).toBe("t");
+    });
+
+    test("rejects a setup row missing why", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            highlights: { authored_at: "x", setup: [{ title: "t", what: "w" }] },
+        })).toThrow();
+    });
+
+    test("profile without highlights still validates", () => {
+        expect(validateProfileV1(base).highlights).toBeUndefined();
+    });
+});
+
 describe("urls", () => {
     test("registration + gist raw urls", () => {
         expect(registrationRawUrl("Necmttn")).toBe(

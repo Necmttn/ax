@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { Schema } from "effect";
 import {
     PATTERN_CATEGORIES,
     decodeProfile,
+    Highlights,
     type ProfileV1,
 } from "./schema.ts";
 
@@ -386,6 +388,34 @@ describe("new enriched daily fields (optional)", () => {
                 skills: [{ name: "tdd", source: "superpowers", runs: 88, downstream_share: "high" }],
                 hooks: [], routing_table: false,
             },
+        })).toThrow();
+    });
+});
+
+describe("Highlights schema", () => {
+    test("Highlights decodes a full block", () => {
+        const decode = Schema.decodeUnknownSync(Highlights);
+        const v = decode({
+            authored_at: "2026-06-17T00:00:00Z",
+            setup: [{ title: "loader", what: "injects code", why: "saves time", link: "https://x.dev" }],
+            skills: [{ name: "tdd", source: "superpowers", summary: "tests first" }],
+            taste: "I optimize for landed-clean commits.",
+            wins: [{ text: "duel page", evidence: "PR #527" }],
+        });
+        expect(v.setup?.[0]?.title).toBe("loader");
+        expect(v.wins?.[0]?.evidence).toBe("PR #527");
+    });
+
+    test("Highlights decodes a taste-only block", () => {
+        const v = Schema.decodeUnknownSync(Highlights)({ authored_at: "2026-06-17T00:00:00Z", taste: "ship clean" });
+        expect(v.taste).toBe("ship clean");
+        expect(v.setup).toBeUndefined();
+    });
+
+    test("Highlights rejects a setup row missing `why`", () => {
+        expect(() => Schema.decodeUnknownSync(Highlights)({
+            authored_at: "2026-06-17T00:00:00Z",
+            setup: [{ title: "x", what: "y" }],
         })).toThrow();
     });
 });

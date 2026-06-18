@@ -56,6 +56,7 @@ SELECT out.name AS skill, count() AS count
 FROM invoked
 WHERE ts > time::now() - ${DAYS}d
   AND out.name IS NOT NONE
+  AND out.dir_path != "(synthetic)"
 GROUP BY skill
 ORDER BY count DESC
 LIMIT 50;`;
