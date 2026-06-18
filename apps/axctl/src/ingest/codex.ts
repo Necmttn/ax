@@ -59,6 +59,7 @@ import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
+import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
@@ -78,6 +79,10 @@ interface CodexSession {
     model: string | null;
     /** Last-seen turn_context reasoning effort: minimal|low|medium|high|xhigh. */
     reasoning_effort: string | null;
+    /** session_meta.thread_source: "user" (main) | "subagent" (spawned agent). */
+    thread_source: string | null;
+    /** session_meta.parent_thread_id - the spawning parent session (subagents only). */
+    parent_thread_id: string | null;
     started_at: string;
     ended_at: string;
 }
@@ -788,6 +793,8 @@ function createCodexExtractor(
                     model_provider: stringField(payload, "model_provider"),
                     model: stringField(payload, "model"),
                     reasoning_effort: null,
+                    thread_source: stringField(payload, "thread_source"),
+                    parent_thread_id: stringField(payload, "parent_thread_id"),
                     started_at: stringField(payload, "timestamp") ?? ts,
                     ended_at: ts,
                 };
@@ -1157,7 +1164,10 @@ export const __testStreamCodexFileGuarded = (
 
 export const __testCompactCodexToolCall = compactCodexToolCall;
 
-const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[] => {
+const buildCodexTokenUsageStatements = (
+    usage: CodexTokenUsage | null,
+    source: "codex" | "codex-subagent" = "codex",
+): string[] => {
     if (!usage) return [];
     const cost = estimateCost({
         modelKey: usage.model,
@@ -1171,7 +1181,7 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
         // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
         buildSessionTokenUsageStatement({
             sessionId: usage.session,
-            source: "codex",
+            source,
             model: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
@@ -1200,12 +1210,13 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
 
 const buildCodexTurnTokenUsageStatements = (
     usages: readonly CodexTurnTokenUsage[],
+    source: "codex" | "codex-subagent" = "codex",
 ): string[] =>
     usages.map((usage) =>
         buildTurnTokenUsageStatement({
             sessionId: usage.session,
             seq: usage.seq,
-            source: "codex",
+            source,
             model: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
@@ -1316,8 +1327,8 @@ const buildCodexBatchStatements = (
         toCodexNormalizedBatch(batch, payloadMaxBytes),
         { clearExisting },
     ),
-    ...buildCodexTokenUsageStatements(batch.tokenUsage),
-    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
+    ...buildCodexTokenUsageStatements(batch.tokenUsage, codexSourceForThread(batch.session?.thread_source)),
+    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages, codexSourceForThread(batch.session?.thread_source)),
 ];
 
 export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
@@ -1471,7 +1482,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         cwd: session.cwd ?? undefined,
                         model: concreteCodexModel(session) ?? undefined,
                         reasoning_effort: session.reasoning_effort ?? undefined,
-                        source: "codex",
+                        source: codexSourceForThread(session.thread_source),
                         started_at: new Date(session.started_at),
                         ended_at: new Date(session.ended_at),
                         raw_file: rawPointer ?? undefined,

@@ -156,6 +156,47 @@ describe("Codex transcript extraction", () => {
         expect(sql).toContain("context_window: 258400");
     });
 
+    test("tags subagent sessions (thread_source) with source codex-subagent", () => {
+        const lines = (threadSource: string | null) => [
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-06-16T22:53:06.000Z",
+                payload: {
+                    id: "codex-sub-1",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "openai",
+                    model: "gpt-5.5",
+                    ...(threadSource ? { thread_source: threadSource, parent_thread_id: "codex-parent-1" } : {}),
+                    timestamp: "2026-06-16T22:53:06.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-06-16T22:53:08.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: { input_tokens: 1000, cached_input_tokens: 250, output_tokens: 125, reasoning_output_tokens: 75, total_tokens: 1200 },
+                        last_token_usage: { input_tokens: 1000, cached_input_tokens: 250, output_tokens: 125, reasoning_output_tokens: 75, total_tokens: 1200 },
+                    },
+                },
+            }),
+        ];
+
+        const subSql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines("subagent"))!, 1200).join("\n");
+        expect(subSql).toContain('source: "codex-subagent"');
+        expect(subSql).not.toContain('source: "codex"');
+
+        const mainSql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines("user"))!, 1200).join("\n");
+        expect(mainSql).toContain('source: "codex"');
+        expect(mainSql).not.toContain('source: "codex-subagent"');
+
+        // No thread_source (older transcripts) defaults to main codex.
+        const legacySql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines(null))!, 1200).join("\n");
+        expect(legacySql).toContain('source: "codex"');
+        expect(legacySql).not.toContain('source: "codex-subagent"');
+    });
+
     test("does not treat model_provider as a concrete model", () => {
         const extracted = __testExtractCodexJsonlLines([
             JSON.stringify({

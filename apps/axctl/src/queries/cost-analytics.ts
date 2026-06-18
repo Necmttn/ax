@@ -16,6 +16,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { surrealLiteral } from "@ax/lib/json";
 import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
+import { originOfSource } from "../ingest/source-origin.ts";
 
 // ---------------------------------------------------------------------------
 // Shared constants + SQL-boundary helpers
@@ -217,8 +218,8 @@ ORDER BY cost_usd DESC;
 `;
 
 /**
- * Aggregate into (origin × model) cells where origin is "main" (source !=
- * 'claude-subagent') or "subagent" (source == 'claude-subagent').
+ * Aggregate into (origin × model) cells where origin is "subagent" for any
+ * subagent source (claude-subagent / codex-subagent) and "main" otherwise.
  * Aggregation + share computation run in JS after a single DB scan.
  */
 export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
@@ -248,8 +249,7 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
         let totalCacheCreate = 0;
 
         for (const row of rows) {
-            const origin: "main" | "subagent" =
-                stringFieldOr(row, "source") === "claude-subagent" ? "subagent" : "main";
+            const origin = originOfSource(stringFieldOr(row, "source"));
             const model = row.model == null ? "(unattributed)" : String(row.model);
             const key = `${origin}\x00${model}`;
 

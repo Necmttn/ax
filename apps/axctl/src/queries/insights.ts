@@ -41,6 +41,7 @@ export interface SchemaTableSpec {
 }
 
 import { graphHealthSql } from "./graph-health.ts";
+import { CODEX_SOURCES_SQL } from "../ingest/source-origin.ts";
 
 export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "skill", stage: "active", note: "Installed skills and slash commands." },
@@ -883,7 +884,7 @@ SELECT
     context_pressure,
     ts
 FROM session_health
-WHERE source = "codex" AND estimated_tokens > 0
+WHERE source IN ${CODEX_SOURCES_SQL} AND estimated_tokens > 0
 ORDER BY estimated_tokens DESC, tool_errors DESC, turns DESC, ts DESC
 LIMIT ${safeLimit};`.trim();
 }
