@@ -31,6 +31,39 @@ describe("skill upsert", () => {
 
         expect(tc.upserts.map((u) => String(u.id))).toEqual([`skill:${skillRecordKey(sn("new:skill"))}`]);
     });
+
+    test("omits nullish option fields from the upsert payload", async () => {
+        const tc = makeTestSurrealClient();
+
+        await Effect.runPromise(upsertSkillByName(tc.client, {
+            name: sn("no-description"),
+            scope: "test",
+            dir_path: "/tmp/no-description",
+            description: null,
+            content_hash: "hash",
+            bytes: undefined,
+        }));
+
+        expect(tc.upserts).toHaveLength(1);
+        expect(tc.upserts[0]!.content).toEqual({
+            name: sn("no-description"),
+            scope: "test",
+            dir_path: "/tmp/no-description",
+            content_hash: "hash",
+        });
+
+        const revisionCall = tc.calls.find((call) => call.sql.includes("CREATE skill_revision"));
+        expect(revisionCall?.bindings).toEqual({
+            skill: tc.upserts[0]!.id,
+            name: sn("no-description"),
+            scope: "test",
+            hash: "hash",
+            prev: undefined,
+            bytes: undefined,
+            prevBytes: undefined,
+            change: "added",
+        });
+    });
 });
 
 describe("skillsStage", () => {
