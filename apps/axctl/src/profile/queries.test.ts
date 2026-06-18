@@ -13,6 +13,7 @@ import {
     fetchSpawnedCount,
     fetchTokenTotals,
     fetchTopTools,
+    fetchWindowedInvocations,
     fetchWrappedCounts,
 } from "./queries.ts";
 
@@ -33,11 +34,14 @@ describe("fetchTokenTotals", () => {
 });
 
 describe("fetchDailyActivity", () => {
-    test("returns day keys", async () => {
+    test("returns day keys from session table (not turn)", async () => {
         const db = makeMockDb([[[{ date: "2026-06-11" }, { date: "2026-06-12" }]]]);
         const r = await runWithMock(db, fetchDailyActivity({ windowDays: 30 }));
         expect(r).toEqual(["2026-06-11", "2026-06-12"]);
-        expect(db.captured[0]).toContain('time::format(ts, "%Y-%m-%d")');
+        // Fix 1a: must use session.started_at (fast) not turn.ts (full-scan)
+        expect(db.captured[0]).toContain('time::format(started_at, "%Y-%m-%d")');
+        expect(db.captured[0]).toContain("FROM session");
+        expect(db.captured[0]).not.toContain("FROM turn");
     });
 });
 
@@ -102,7 +106,10 @@ describe("fetchDailyActivityFull", () => {
         expect(r[0]).toEqual({ date: "2026-06-11", sessions: 5, tokens: 100_000 });
         expect(r[1]).toEqual({ date: "2026-06-12", sessions: 3, tokens: 80_000 });
         expect(db.captured[0]).toContain("time::now() - 30d");
-        expect(db.captured[0]).toContain("array::len(array::distinct(session))");
+        // Fix 1b: must use session table (fast) not turn table full-scan
+        expect(db.captured[0]).toContain("FROM session");
+        expect(db.captured[0]).toContain("count() AS sessions");
+        expect(db.captured[0]).not.toContain("array::len(array::distinct(session))");
     });
 
     test("day with no tokens entry gets tokens=0", async () => {
@@ -290,5 +297,30 @@ describe("fetchWrappedCounts", () => {
         expect(r.verification_calls).toBe(500);
         expect(r.context_calls).toBe(300);
         expect(r.tool_calls).toBe(1000);
+    });
+});
+
+describe("fetchWindowedInvocations", () => {
+    test("uses denormalized session field (not in.session deref) and filters NONE rows", async () => {
+        const db = makeMockDb([[[
+            { session: "session:1", skill: "tdd", ts: "2026-06-12T10:00:00Z" },
+            // pre-denormalization edge: session = NONE (stringified to "NONE")
+            { session: "NONE", skill: "tdd", ts: "2026-06-12T11:00:00Z" },
+            // null session (js null)
+            { session: null, skill: "ship", ts: "2026-06-12T12:00:00Z" },
+        ]]]);
+        const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 30 }));
+        // Fix 2: SQL must read the denormalized `session` field, not `in.session`
+        expect(db.captured[0]).toContain("type::string(session) AS session");
+        expect(db.captured[0]).not.toContain("in.session");
+        // Fix 2: NONE and null rows are filtered out in JS
+        expect(r).toHaveLength(1);
+        expect(r[0]).toEqual({ session: "session:1", skill: "tdd", ts: "2026-06-12T10:00:00Z" });
+    });
+
+    test("empty invocations -> empty array", async () => {
+        const db = makeMockDb([[[]]]);
+        const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 7 }));
+        expect(r).toHaveLength(0);
     });
 });

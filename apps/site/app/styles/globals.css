@@ -12523,6 +12523,40 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-pattern-sum { font-size: 13.5px; line-height: 1.5; margin: 2px 0 4px; }
 .pf-pattern-ev { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
+/* ----- 05b taste highlights (user-authored: their words / weapons / rig / wins) ----- */
+.pf-words { margin: 0 0 1.5rem; padding-left: 1rem; border-left: 2px solid var(--green, currentColor); }
+.pf-words p { font-style: italic; }
+.pf-words cite { display: block; opacity: 0.6; font-size: 0.85em; }
+.pf-weapons { margin-bottom: 1.5rem; }
+.pf-weapons h3 { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--muted); margin: 0 0 0.75rem; }
+.pf-weapons-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; align-items: start; }
+.pf-weapon { border: 1px solid var(--line, rgba(127,127,127,0.3)); border-radius: 6px; }
+.pf-weapon-summary { list-style: none; cursor: pointer; padding: 1rem 1.9rem 1rem 1rem; position: relative; }
+.pf-weapon-summary::-webkit-details-marker { display: none; }
+.pf-weapon-title { font-weight: 600; margin-bottom: 0.25rem; }
+.pf-weapon-what { margin: 0; font-size: 0.9em; }
+.pf-weapon-detail { padding: 0 1rem 1rem; }
+.pf-weapon-why { margin: 0; opacity: 0.7; font-size: 0.9em; }
+.pf-weapon-link { display: inline-block; margin-top: 0.45rem; font-family: var(--mono); font-size: 0.76em; opacity: 0.7; color: inherit; }
+.pf-learn { margin-bottom: 1.5rem; }
+.pf-learn h3 { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--muted); margin: 0 0 0.5rem; }
+.pf-learn-row { border-bottom: 1px solid var(--line, rgba(127,127,127,0.15)); }
+.pf-learn-summary { list-style: none; cursor: pointer; display: flex; gap: 0.75rem; align-items: baseline; padding: 0.4rem 1.5rem 0.4rem 0; position: relative; }
+.pf-learn-summary::-webkit-details-marker { display: none; }
+.pf-learn-name { font-family: var(--mono); font-size: 13px; }
+.pf-learn-src { opacity: 0.5; font-size: 0.8em; }
+.pf-learn-sum { font-size: 0.88em; margin: 0 0 0.5rem; opacity: 0.82; }
+/* shared disclosure chevron: points down, flips up when the <details> is open */
+.pf-toggle { position: absolute; top: 1.05rem; right: 0.9rem; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s ease; opacity: 0.55; }
+.pf-learn-summary .pf-toggle { top: 0.55rem; right: 0.2rem; }
+summary:hover .pf-toggle { opacity: 0.95; }
+details[open] > summary .pf-toggle { transform: rotate(-135deg); }
+.pf-wins { margin-bottom: 1.5rem; }
+.pf-wins h3 { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--muted); margin: 0 0 0.5rem; }
+.pf-win { display: flex; justify-content: space-between; gap: 1rem; padding: 0.2rem 0; }
+.pf-win-ev { opacity: 0.6; font-size: 0.85em; white-space: nowrap; }
+.pf-taste-divider { margin: 1.5rem 0 0.75rem; opacity: 0.6; font-size: 0.85em; text-transform: lowercase; font-family: var(--mono); letter-spacing: 0.05em; }
+
 /* ----- unanswered-challenge command (UnclaimedChallenger in the vs overlay) ----- */
 .pf-empty-cmd {
     display: block;

@@ -15,6 +15,8 @@
  * Bindings: $weeks (number, default 12 if absent).
  */
 
+import { SUBAGENT_SOURCES_SQL } from "../ingest/source-origin.ts";
+
 const W = 12; // default lookback - keep in sync with WEEKS_LOOKBACK below
 export const WEEKS_LOOKBACK = W;
 
@@ -117,6 +119,6 @@ WHERE ts > time::now() - ${W}w
   AND is_first = true
   AND in.session IS NOT NONE
   AND out.name IS NOT NONE
-  AND in.session.source != "claude-subagent"
+  AND in.session.source NOT IN ${SUBAGENT_SOURCES_SQL}
 ORDER BY session ASC, turn_index ASC
 LIMIT 50000;`;

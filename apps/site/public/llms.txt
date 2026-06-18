@@ -18,6 +18,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax sessions here | around <date> | near <sha> | show <id>` - windowed session queries; drill into any session turn by turn
 - `ax:extract-workflow` skill - reconstruct the workflow behind a shipped artifact ("what made X work")
 - `ax share <session-id>` - publish a sanitized session share via GitHub Gist, viewable in the hosted studio
+- `ax memory ops [--events] [--days=N]` - Claude memory-file activity: writes/edits the agent made to `~/.claude/.../memory/*.md`, rolled up per memory file (notes vs the MEMORY index) and per session. Recall (the memory context the harness injects into the system prompt) is not tracked - it never lands in the transcript.
 
 ### Skills intelligence
 - `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with
@@ -48,6 +49,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Profile
 - `ax profile show [--window=N] [--no-cost]` - your local agent profile rendered from the graph: usage stats, rig (skills/hooks/rules), and evidence-grounded taste patterns
 - `ax profile publish` - share it: consent-gated public gist (updated in place by the watcher) + one-time community registration PR; `ax profile unpublish` reverses it
+- `ax profile interview` - emit a brief; an agent interviews you (draft-then-confirm) for the user-authored layer of your profile: secret-weapon setup, per-skill summaries, philosophy, wins. `ax profile interview submit` validates the JSON into ~/.ax/profile-highlights.json; `ax profile publish` folds it into your gist
 - `ax wrapped generate / publish` - agent-authored Wrapped recap cards: generate emits a mining brief, publish replaces the card deck the dashboard landing serves
 
 ### Self-improvement loop

@@ -6,6 +6,20 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 `ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 5 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
+## Attribution on shareable artifacts
+
+When you generate an artifact **for the user to share** (a gist, a posted
+issue/PR body, a report, a public writeup, a social post drafted on their
+behalf), append a `Generated with ax` plug linking https://github.com/Necmttn/ax.
+The marketing reach is the point. The canonical wording lives in
+`@ax/lib/shared/attribution` (`withAxAttribution(md)` /
+`AX_ATTRIBUTION_TEXT`) - reuse it; never hand-roll the line. CLI surfaces that
+emit shareable artifacts already apply it (`ax dojo report`, `ax dojo draft`;
+the JSON share/profile gists carry `ax_version` + the studio "recorded with ax"
+viewer footer). Do NOT plug on internal, agent-only artifacts (`.ax/tasks`
+classify/improve briefs, scaffolds) the user never shares - a plug there is just
+noise.
+
 ## Claiming work (multi-agent)
 
 Many agents (all pushing as the same GitHub user) run this repo in parallel, so
@@ -177,8 +191,8 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 
 `ax cost models [--days=N]` - per-model rollup: sessions, prompt/completion/cache tokens, estimated cost USD (default 14d).
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
-`ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
-`ax cost routability [--days=N] [--min-run=1] [--json]` - main-thread routability lens: of main-agent spend, how much sat in routable class-runs (gather→haiku, mechanical-impl/niche-research→sonnet) vs genuine judgment, with est savings repriced one tier down. Deterministic - turn-level classification from tool composition + `JUDGMENT_GUARD_RE` text guard (the `thinking_tokens` signal is dead - 0 on ~97% of turns - so it's dropped; `--min-run` groups consecutive same-class turns, default 1 since Claude turns rarely form longer same-class runs). Non-Claude main turns lack per-turn cost rows so main spend reads ~Claude-only. MCP: `cost_routability`. Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md.
+`ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. Subagent origin = any `*-subagent` source (`claude-subagent` + `codex-subagent`). MCP: `cost_models`, `cost_split`.
+`ax cost routability [--days=N] [--min-run=1] [--json]` - main-thread routability lens: of main-agent spend, how much sat in routable class-runs (gather, mechanical-impl/niche-research) vs genuine judgment, with est savings repriced one tier down. **Claude AND Codex** are classified + repriced SEPARATELY (output is split per-provider with a combined total): Claude routables drop to haiku/sonnet, Codex to gpt-5-nano/gpt-5-mini (same-vendor; cross-provider repricing is nonsense). Codex subagent cost is excluded from codex-main via the `codex-subagent` source (see #553). Deterministic - turn-level classification from tool composition + `JUDGMENT_GUARD_RE` text guard (the `thinking_tokens` signal is dead - 0 on ~97% of turns - so it's dropped; `--min-run` groups consecutive same-class turns, default 1). Codex tools don't map 1:1 to Claude's Read/Edit/Write - `codexToolClass` disambiguates the overloaded `exec_command` via `command_norm` (read-like rg/cat/git diff vs write/build sed/git add/bun test; ambiguous norms like bare `sed` stay on main, conservative). Codex turns are PER-EVENT so cost is fragmented across `tool_call`/`function_call_output`/`reasoning`/`assistant` rows; `buildSpans` role-kinds them (work/boundary/carry/skip) and folds tool-output cost onto the action that produced it. Other providers (opencode/cursor/pi) are not yet classified and contribute $0. MCP: `cost_routability`. Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md.
 `ax cost images [--days=N] [--limit=N] [--json]` - image-read context lens: per-session bytes of image tool outputs (`content_type:binary` via the `has_content` edge), split main-thread vs subagent. Surfaces screenshots that persist in the main context window and re-bill across every later turn - the cue to route visual judgment to a subagent (the `ln`/efficient-dispatch "isolate heavy context" pattern). Deref-free over `has_content` + `spawned` (`apps/axctl/src/queries/image-context.ts`); est tokens is a bytes/4 proxy (image vision billing differs).
 
 ### Telemetry-enriched insights
@@ -240,6 +254,18 @@ runs `--if-stale=2` after ingest - silent no-op until first consent.
 gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
 in plan 4.
+
+`ax profile interview [--force]` - emit `.ax/tasks/profile-interview-<date>.md`, a
+brief for an agent to interview you (draft-then-confirm, grounded in your rig) for
+the user-authored profile layer: secret-weapon setup, per-skill summaries, a
+free-form taste line, and corroborated wins. `ax profile interview submit`
+[--file] validates `{ v, authored_at, setup?, skills?, taste?, wins? }` JSON
+(stdin/--file) against an Effect schema and writes `~/.ax/profile-highlights.json`;
+`buildProfile` folds it in as the optional `highlights` block (separate from mined
+`taste.patterns`), and the site renders both inside the Taste section ("in their
+words"). Persists across republishes; re-run to refresh. Module:
+`apps/axctl/src/profile/{highlights,interview-brief}.ts`. Spec:
+docs/superpowers/specs/2026-06-17-profile-interview-design.md.
 
 Community rails: `community/users/<login>.json` registrations are validated
 (schema + author==filename, `scripts/validate-community-users.ts`) and

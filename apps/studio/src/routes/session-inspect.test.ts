@@ -22,10 +22,16 @@ describe("rawBlockTextStyle", () => {
         const hovered = rawBlockTextStyle({ tone, active: false, hovered: true, mismatch: false });
         const mismatch = rawBlockTextStyle({ tone, active: false, hovered: false, mismatch: true });
 
-        expect(hovered.background).toBe(tone.bg);
+        expect(hovered.background).toBe(`color-mix(in srgb, ${tone.bar} 18%, var(--term-bg))`);
         expect(hovered.borderBottom).toBe(`1px solid ${tone.bar}`);
         expect(mismatch.background).toBe("transparent");
         expect(mismatch.borderBottom).toBe("1px dotted var(--gold)");
+    });
+
+    test("uses dark-surface foreground for emphasized transcript blocks", () => {
+        const active = rawBlockTextStyle({ tone, active: true, hovered: false, mismatch: false });
+
+        expect(active.color).toBe(`color-mix(in srgb, ${tone.bar} 28%, var(--term-fg))`);
     });
 });
 

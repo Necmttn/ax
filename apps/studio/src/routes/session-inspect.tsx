@@ -440,9 +440,11 @@ export function rawBlockTextStyle({
     mismatch: boolean;
 }): CSSProperties {
     const emphasized = active || hovered || mismatch;
+    const blockBg = `color-mix(in srgb, ${tone.bar} 18%, var(--term-bg))`;
+    const blockFg = `color-mix(in srgb, ${tone.bar} 28%, var(--term-fg))`;
     return {
-        background: hovered ? tone.bg : "transparent",
-        color: emphasized ? tone.fg : "inherit",
+        background: hovered ? blockBg : "transparent",
+        color: emphasized ? blockFg : "inherit",
         outline: "none",
         outlineOffset: 1,
         borderBottom: mismatch
@@ -833,7 +835,7 @@ function AnnotatedRawText({
             // Dark transcript surface (catppuccin-mocha editor bg) so the
             // dark-themed fenced-code tokens sit on their own ground.
             background: "var(--term-bg)",
-            color: "var(--ink)",
+            color: "var(--term-fg)",
             borderRadius: 6,
         }}>
             {rawParts.length > 0 ? rawParts : rawText}

@@ -392,10 +392,10 @@ export const resolveSkillSparTask = (
             baselineSession = sess.id;
 
             // Derive first user turn text_excerpt (the canonical first-message field).
-            const promptRows = yield* db.query<[Array<string | null>]>(
-                `SELECT VALUE text_excerpt FROM turn WHERE session = ${recordLiteral("session", key)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
+            const promptRows = yield* db.query<[Array<{ text_excerpt: string | null }>]>(
+                `SELECT text_excerpt, seq FROM turn WHERE session = ${recordLiteral("session", key)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
             );
-            const promptText = promptRows?.[0]?.[0] ?? null;
+            const promptText = promptRows?.[0]?.[0]?.text_excerpt ?? null;
             if (!promptText) {
                 return yield* Effect.fail(
                     new SparCaptureError(
@@ -476,10 +476,10 @@ export const resolveSkillSparTask = (
 
             // Derive the task text from the first user turn in the chosen session.
             const bestKey = recordKeyPart(best!.id, "session") ?? best!.id;
-            const promptRows = yield* db.query<[Array<string | null>]>(
-                `SELECT VALUE text_excerpt FROM turn WHERE session = ${recordLiteral("session", bestKey)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
+            const promptRows = yield* db.query<[Array<{ text_excerpt: string | null }>]>(
+                `SELECT text_excerpt, seq FROM turn WHERE session = ${recordLiteral("session", bestKey)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
             );
-            const promptText = promptRows?.[0]?.[0] ?? null;
+            const promptText = promptRows?.[0]?.[0]?.text_excerpt ?? null;
             if (!promptText) {
                 return yield* Effect.fail(
                     new SparCaptureError(
