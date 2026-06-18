@@ -14,11 +14,26 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { stream } from "@durable-streams/client";
 import {
     createDurableIngestStream,
+    encodeIngestStreamEventJson,
     type DurableIngestStream,
 } from "./ingest-stream-durable.ts";
 import type { IngestStreamEvent } from "../ingest/stream-events.ts";
 
 const E2E_ENABLED = process.env.AX_STREAM_E2E === "1";
+
+describe("encodeIngestStreamEventJson", () => {
+    test("serializes valid events with the existing JSON shape", () => {
+        expect(encodeIngestStreamEventJson({ kind: "stage_started", runId: "r", stage: "discover" })).toBe(
+            JSON.stringify({ kind: "stage_started", runId: "r", stage: "discover" }),
+        );
+    });
+
+    test("rejects invalid events before Durable Stream append", () => {
+        // Simulates a malformed runtime value crossing the TypeScript boundary.
+        const malformed = { kind: "stage_finished", runId: "r", stage: "s", status: "completed", durationMs: 1 } as unknown as IngestStreamEvent;
+        expect(() => encodeIngestStreamEventJson(malformed)).toThrow();
+    });
+});
 
 describe(
     E2E_ENABLED

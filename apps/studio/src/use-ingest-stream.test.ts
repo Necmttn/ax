@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
-import { applyEvent, type IngestStreamState } from "./use-ingest-stream.ts";
+import { applyEvent, decodeStreamItems, type IngestStreamState } from "./use-ingest-stream.ts";
 
 const IDLE: IngestStreamState = {
     stages: {},
@@ -18,6 +18,22 @@ const failure = (filePath: string): { filePath: string; tag: string; message: st
     filePath,
     tag: "DbError",
     message: "boom",
+});
+
+describe("decodeStreamItems", () => {
+    test("returns valid ingest events and counts malformed items", () => {
+        const batch = decodeStreamItems([
+            { kind: "stage_started", runId: "r", stage: "claude" },
+            { kind: "stage_finished", runId: "r", stage: "claude", status: "completed", durationMs: 1 },
+            { kind: "run_finished", runId: "r", status: "completed", durationMs: 2 },
+        ]);
+
+        expect(batch.events).toEqual([
+            { kind: "stage_started", runId: "r", stage: "claude" },
+            { kind: "run_finished", runId: "r", status: "completed", durationMs: 2 },
+        ]);
+        expect(batch.invalidCount).toBe(1);
+    });
 });
 
 describe("applyEvent: stage_file_failures", () => {

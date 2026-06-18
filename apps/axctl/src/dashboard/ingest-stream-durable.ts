@@ -1,6 +1,8 @@
 import { DurableStream, DurableStreamError } from "@durable-streams/client";
-import type { IngestStreamEvent } from "../ingest/stream-events.ts";
+import { encodeIngestStreamEventJson, type IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 import { ingestStreamName, type IngestStreamBus } from "./ingest-stream.ts";
+
+export { encodeIngestStreamEventJson };
 
 export interface DurableIngestStream extends IngestStreamBus {
     /** Base URL of the running sidecar, e.g. "http://127.0.0.1:58200". */
@@ -77,8 +79,9 @@ export async function createDurableIngestStream(
     };
 
     const publish = async (runId: string, event: IngestStreamEvent): Promise<void> => {
+        const encoded = encodeIngestStreamEventJson(event);
         const handle = await openHandle(runId);
-        await handle.append(JSON.stringify(event));
+        await handle.append(encoded);
         if (event.kind === "run_finished") {
             // EOF so dashboards stop tailing; evict so a future run with the
             // same id (shouldn't happen with uuids) re-creates cleanly.

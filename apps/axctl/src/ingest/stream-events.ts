@@ -1,5 +1,10 @@
 import type { TraceEvent } from "@ax/lib/live-traces/types";
-import type { IngestFileFailure, IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
+import { Option } from "effect";
+import {
+    decodeIngestFileFailureSnapshotOption,
+    type IngestFileFailure,
+    type IngestStreamEvent,
+} from "@ax/lib/shared/ingest-stream-events";
 
 // Re-export so existing axctl importers (`from ".../ingest/stream-events.ts"`)
 // keep resolving the type unchanged after the contract moved to @ax/lib/shared.
@@ -51,18 +56,11 @@ const readFileFailures = (
     if (typeof raw !== "string") return null;
     try {
         const parsed: unknown = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null) return null;
-        const { total, failures } = parsed as { total?: unknown; failures?: unknown };
-        if (typeof total !== "number" || !Number.isFinite(total) || total <= 0) return null;
-        if (!Array.isArray(failures)) return null;
-        const details: IngestFileFailure[] = [];
-        for (const f of failures) {
-            if (typeof f !== "object" || f === null) return null;
-            const { filePath, tag, message } = f as Record<string, unknown>;
-            if (typeof filePath !== "string" || typeof tag !== "string" || typeof message !== "string") return null;
-            details.push({ filePath, tag, message });
-        }
-        return { total, failures: details };
+        const decoded = decodeIngestFileFailureSnapshotOption(parsed);
+        if (Option.isNone(decoded)) return null;
+        const snapshot = decoded.value;
+        if (!Number.isFinite(snapshot.total) || snapshot.total <= 0) return null;
+        return { total: snapshot.total, failures: [...snapshot.failures] };
     } catch {
         return null;
     }
