@@ -10,6 +10,7 @@ import { SessionTimelineView } from "./session-timeline.tsx";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
 import { TextWithFences } from "../highlight/HighlightedCode.tsx";
+import { parseFences } from "../highlight/lang.ts";
 import { ToolResultView } from "./tool-result.tsx";
 import { ToolRow } from "./tool-row.tsx";
 import { extractImagePaths } from "./turn-images.ts";
@@ -794,6 +795,8 @@ function AnnotatedRawText({
     const blocks = visibleTextBlocks(content);
     const activeSeq = targetBlockSeq(activeTarget);
     const [hoverSeq, setHoverSeq] = useState<number | null>(null);
+    const hasFencedCode = rawText.includes("```") &&
+        parseFences(rawText).some((segment) => segment.type === "fence");
 
     const rawParts: ReactNode[] = [];
     let cursor = 0;
@@ -826,17 +829,18 @@ function AnnotatedRawText({
     return (
         <pre style={{
             margin: 0,
-            padding: 10,
+            padding: hasFencedCode ? 10 : "2px 0 0",
             maxHeight,
             overflow: "auto",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             font: "12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
-            // Dark transcript surface (catppuccin-mocha editor bg) so the
-            // dark-themed fenced-code tokens sit on their own ground.
-            background: "var(--term-bg)",
-            color: "var(--term-fg)",
-            borderRadius: 6,
+            // Dark transcript surface only when dark-themed fenced-code tokens
+            // need their own ground; plain parsed prose should read like the
+            // normal transcript, not a terminal output block.
+            background: hasFencedCode ? "var(--term-bg)" : "transparent",
+            color: hasFencedCode ? "var(--term-fg)" : "inherit",
+            borderRadius: hasFencedCode ? 6 : 0,
         }}>
             {rawParts.length > 0 ? rawParts : rawText}
         </pre>
