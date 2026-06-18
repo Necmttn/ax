@@ -107,7 +107,7 @@ const dbPlist = (
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>ulimit -n 8192; exec "${surrealPath}" start --user root --pass root --bind ${bind.host}:${bind.port} --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
+    <string>ulimit -n 65536; exec "${surrealPath}" start --user root --pass root --bind ${bind.host}:${bind.port} --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -139,15 +139,18 @@ const dbPlist = (
     RocksDB opens one FD per .sst file plus WAL, MANIFEST, and OPTIONS files.
     A 100MB+ store easily clears macOS launchd's default 256 soft cap and
     /api/skills (which fans out many concurrent reads) starts returning
-    "Too many open files" errors. Raise to a comfortable headroom.
+    "Too many open files" errors. The store grows unbounded as telemetry
+    accumulates - a real dogfood DB hit 734 .sst files and the prior 8192 cap
+    was reachable for heavy users (ingest then fails / the watcher wedges).
+    Raised to generous headroom, well under macOS kern.maxfilesperproc (~245k).
   -->
   <key>SoftResourceLimits</key>
   <dict>
-    <key>NumberOfFiles</key><integer>8192</integer>
+    <key>NumberOfFiles</key><integer>65536</integer>
   </dict>
   <key>HardResourceLimits</key>
   <dict>
-    <key>NumberOfFiles</key><integer>16384</integer>
+    <key>NumberOfFiles</key><integer>131072</integer>
   </dict>
 </dict>
 </plist>
