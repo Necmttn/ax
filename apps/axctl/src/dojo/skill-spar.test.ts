@@ -485,7 +485,7 @@ describe("resolveSkillSparTask", () => {
                     [{ id: "session:s1", source: "claude" }],
                 ],
                 // turn text_excerpt for the picked session
-                "text_excerpt FROM turn WHERE session": [["Fix the bug"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Fix the bug" }]],
             },
         });
 
@@ -517,7 +517,7 @@ describe("resolveSkillSparTask", () => {
                 "source FROM": [
                     [{ id: "session:s2", source: "claude" }],
                 ],
-                "text_excerpt FROM turn WHERE session": [["Do the loaded task"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Do the loaded task" }]],
             },
         });
 
@@ -547,7 +547,7 @@ describe("resolveSkillSparTask", () => {
                         { id: "session:s2", source: "claude" },
                     ],
                 ],
-                "text_excerpt FROM turn WHERE session": [["Newer task"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Newer task" }]],
             },
         });
 
@@ -618,7 +618,7 @@ describe("resolveSkillSparTask", () => {
                     [{ id: "session:s42" }],
                 ],
                 // Turn text_excerpt for the explicit session
-                "text_excerpt FROM turn WHERE session": [["Custom task"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Custom task" }]],
             },
         });
 
@@ -647,7 +647,7 @@ describe("resolveSkillSparTask", () => {
                 "source FROM": [
                     [{ id: "session:s1", source: "claude" }],
                 ],
-                "text_excerpt FROM turn WHERE session": [["Task text"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Task text" }]],
             },
         });
 
@@ -685,7 +685,7 @@ describe("resolveSkillSparTask", () => {
                 "source FROM": [
                     [{ id: "session:s1", source: "claude" }],
                 ],
-                "text_excerpt FROM turn WHERE session": [["HEAD task"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "HEAD task" }]],
             },
         });
 
@@ -751,7 +751,7 @@ describe("resolveSkillSparTask", () => {
                         { id: "session:s2", source: "claude" },
                     ],
                 ],
-                "text_excerpt FROM turn WHERE session": [["Winner via loaded ts"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Winner via loaded ts" }]],
             },
         });
 
@@ -777,7 +777,7 @@ describe("resolveSkillSparTask", () => {
                 "source FROM": [
                     [{ id: "session:s1", source: "claude" }],
                 ],
-                "text_excerpt FROM turn WHERE session": [["Repo task"]],
+                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Repo task" }]],
             },
         });
 
@@ -834,7 +834,7 @@ describe("resolveSkillSparTask", () => {
                     [{ id: "session:s1", source: "claude" }],
                 ],
                 // turn query returns empty: no user turns in this session
-                "text_excerpt FROM turn WHERE session": [[]],
+                "text_excerpt, seq FROM turn WHERE session": [[]],
             },
         });
 
@@ -855,7 +855,7 @@ describe("resolveSkillSparTask", () => {
                     [{ id: "session:s42" }],
                 ],
                 // turn query returns empty
-                "text_excerpt FROM turn WHERE session": [[]],
+                "text_excerpt, seq FROM turn WHERE session": [[]],
             },
         });
 

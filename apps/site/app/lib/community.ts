@@ -39,6 +39,28 @@ export interface ProfileSkill {
     readonly runs: number;
     readonly downstream_share?: number;
 }
+export interface ProfileSetupItem {
+    readonly title: string;
+    readonly what: string;
+    readonly why: string;
+    readonly link?: string;
+}
+export interface ProfileSkillSummary {
+    readonly name: string;
+    readonly source: string;
+    readonly summary: string;
+}
+export interface ProfileWin {
+    readonly text: string;
+    readonly evidence?: string;
+}
+export interface ProfileHighlights {
+    readonly authored_at: string;
+    readonly setup?: readonly ProfileSetupItem[];
+    readonly skills?: readonly ProfileSkillSummary[];
+    readonly taste?: string;
+    readonly wins?: readonly ProfileWin[];
+}
 export interface TastePattern {
     readonly category: string;
     readonly name: string;
@@ -115,6 +137,7 @@ export interface ProfileV1 {
     readonly activity?: { readonly daily: readonly ProfileDailyRow[] };
     readonly insights?: ProfileInsights;
     readonly workflow?: ProfileWorkflow;
+    readonly highlights?: ProfileHighlights;
 }
 
 const optNum = (v: unknown, what: string): void => {
@@ -122,6 +145,24 @@ const optNum = (v: unknown, what: string): void => {
 };
 const optStr = (v: unknown, what: string): void => {
     if (v !== undefined) str(v, what);
+};
+
+/**
+ * Validate an optional array of object rows: guards `Array.isArray` + `isRecord`
+ * per element, then runs `check` for the element-specific field validation.
+ * No-op when the array is absent (the field is optional).
+ */
+const validateRows = (
+    arr: unknown,
+    name: string,
+    check: (row: Record<string, unknown>) => void,
+): void => {
+    if (arr === undefined) return;
+    if (!Array.isArray(arr)) throw new Error(`invalid ${name}`);
+    for (const row of arr) {
+        if (!isRecord(row)) throw new Error(`invalid ${name} row`);
+        check(row);
+    }
 };
 
 /**
@@ -239,6 +280,27 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             for (const step of arc.steps) str(step, "workflow.arc.step");
             num(arc.count, "workflow.arc.count");
         }
+    }
+    if (value.highlights !== undefined) {
+        const h = value.highlights;
+        if (!isRecord(h)) throw new Error("invalid highlights");
+        str(h.authored_at, "highlights.authored_at");
+        validateRows(h.setup, "highlights.setup", (s) => {
+            str(s.title, "setup.title");
+            str(s.what, "setup.what");
+            str(s.why, "setup.why");
+            optStr(s.link, "setup.link");
+        });
+        validateRows(h.skills, "highlights.skills", (s) => {
+            str(s.name, "highlights.skill.name");
+            str(s.source, "highlights.skill.source");
+            str(s.summary, "highlights.skill.summary");
+        });
+        optStr(h.taste, "highlights.taste");
+        validateRows(h.wins, "highlights.wins", (w) => {
+            str(w.text, "win.text");
+            optStr(w.evidence, "win.evidence");
+        });
     }
     return value as unknown as ProfileV1;
 }

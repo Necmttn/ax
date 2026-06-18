@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     WRAPPED_DAILY_ACTIVITY_SQL,
+    WRAPPED_SKILLS_SQL,
     WRAPPED_SPAWNED_SQL,
     WRAPPED_TOKEN_USAGE_SQL,
     WRAPPED_USAGE_SQL,
@@ -28,5 +29,11 @@ describe("wrapped queries", () => {
         expect(WRAPPED_TOKEN_USAGE_SQL).toContain("FROM session_token_usage");
         expect(WRAPPED_TOKEN_USAGE_SQL).toContain("math::sum(estimated_tokens)");
         expect(WRAPPED_TOKEN_USAGE_SQL).toContain("GROUP ALL");
+    });
+
+    test("skills query excludes synthetic Codex builtin tools", () => {
+        expect(WRAPPED_SKILLS_SQL).toContain("FROM invoked");
+        expect(WRAPPED_SKILLS_SQL).toContain("out.name IS NOT NONE");
+        expect(WRAPPED_SKILLS_SQL).toContain('out.dir_path != "(synthetic)"');
     });
 });

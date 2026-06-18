@@ -33,7 +33,7 @@ import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
 import { buildToolOutputMixPattern, deriveTastePatterns } from "./taste.ts";
-import { decodeProfile, type ProfileV1 } from "./schema.ts";
+import { decodeProfile, type Highlights, type ProfileV1 } from "./schema.ts";
 import { deriveWorkflowArcs } from "./workflow.ts";
 import { computeDownstreamShares } from "./downstream.ts";
 
@@ -44,6 +44,7 @@ export interface ProfileEnv {
     readonly hookFiles: ReadonlyArray<string>;
     readonly hasRoutingTable: boolean;
     readonly rulesMarkdown: string | null;
+    readonly highlights: Highlights | null;
 }
 
 export const buildProfile = Effect.fn("profile.buildProfile")(
@@ -190,6 +191,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
             ...(enrichedDaily.length > 0 ? { activity: { daily: enrichedDaily } } : {}),
             ...(insights !== null ? { insights } : {}),
             ...(workflowArcs.length > 0 ? { workflow: { arcs: workflowArcs } } : {}),
+            ...(env.highlights !== null ? { highlights: env.highlights } : {}),
         });
         return profile;
     },

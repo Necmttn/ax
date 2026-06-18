@@ -148,11 +148,11 @@ const ALREADY_SQL = `SELECT type::string(in) AS tid FROM has_content;`;
 
 /** ROWS_SQL scoped by an optional since window (watcher runs pass 1d; full
  *  re-derives pass undefined to scan everything). */
-const rowsSql = (sinceDays: number | undefined): string => `
+export const rowsSql = (sinceDays: number | undefined): string => `
 SELECT type::string(id) AS id, type::string(session) AS session, name,
        input_json AS inputJson, output_excerpt AS outputExcerpt,
        string::len(output_json) AS bytes, type::string(ts) AS ts
-FROM tool_call WHERE output_json != NONE${sinceAndClause(sinceDays)};
+FROM tool_call WHERE output_json != NONE ${sinceAndClause(sinceDays)};
 `;
 
 export interface DeriveContentTypeStats {

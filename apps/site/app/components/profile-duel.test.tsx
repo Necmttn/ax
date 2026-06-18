@@ -49,4 +49,12 @@ describe("profile-duel.tsx (source contract)", () => {
     it("guards missing optional data instead of crashing", () => {
         expect(src).toContain("pf-quiet");
     });
+
+    it("renders user-authored highlights (In their words) per side, not just mined patterns", () => {
+        // the duel taste section must share the highlights renderer with the
+        // single dossier - else the user-authored layer disappears on /vs/.
+        expect(src).toContain("HighlightsBlocks");
+        expect(src).toMatch(/highlights=\{a\.highlights\}/);
+        expect(src).toMatch(/highlights=\{b\.highlights\}/);
+    });
 });

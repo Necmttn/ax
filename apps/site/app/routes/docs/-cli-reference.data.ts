@@ -152,6 +152,28 @@ total: $61.22  (14 days)`,
         ],
       },
       {
+        name: "memory",
+        sub: ["ops"],
+        job: "Claude memory-file activity: writes/edits the agent made to its ~/.claude/.../memory/*.md files.",
+        signature: "ax memory ops [--events] [--days=N] [--limit=N] [--json]",
+        flags: [
+          { flag: "--events", desc: "raw op stream instead of the per-file rollup" },
+          { flag: "--days=N", desc: "window (default 30)" },
+          { flag: "--limit=N", desc: "cap rows (default 40)" },
+        ],
+        receipt: `$ ax memory ops --days=30
+slug                       kind    writes  edits  sessions last_seen
+MEMORY                     index        1    130        70 2026-06-17 10:44:33
+recap-deck-unification     note         1      0         1 2026-06-17 10:44:06
+
+116 notes  131 index edits  383 ops  86 sessions  (30 days)`,
+        detail: [
+          "Memory is model-driven: the agent saves memories by calling Write/Edit on files under ~/.claude/.../memory/, already captured as `edited` edges - this view labels and rolls them up.",
+          "Default is a per-file rollup (notes vs the MEMORY index, writes vs edits, distinct sessions); --events gives the raw op stream.",
+          "Recall (the memory context the harness injects into the system prompt) is not tracked - it never lands in the transcript, so it would need a live capture hook.",
+        ],
+      },
+      {
         name: "dispatches",
         sub: ["compile-routing"],
         job: "Subagent dispatch table sorted by child cost, with a candidates view for cheap-model routing.",
@@ -514,7 +536,7 @@ enforce-worktree  -  14 days
         name: "profile",
         sub: ["show", "publish", "unpublish"],
         job: "Render, publish, or unpublish your ax profile (stats + rig + taste).",
-        signature: "ax profile show [--window=N] | publish [--yes] | unpublish",
+        signature: "ax profile show [--window=N] | publish [--yes] | unpublish | interview [submit]",
         flags: [
           { flag: "--window=N", desc: "days of history to summarize (default 30)" },
           { flag: "--no-cost", desc: "omit cost figures (sticky across republishes)" },
@@ -529,6 +551,7 @@ ax profile - @octocat  (last 30d)
           "ax profile publish creates a public gist once and PATCHes it in place; the first run shows the exact JSON, asks for consent, then opens a community registration PR.",
           "--if-stale=<hours> is the watcher path: a no-op until first consent, then it republishes when stale.",
           "ax profile unpublish deletes the gist and local publish state (and resets the sticky --no-cost).",
+          "ax profile interview emits a brief; an agent interviews you (draft-then-confirm) and pipes the result to `ax profile interview submit`, which validates it into ~/.ax/profile-highlights.json. The next `ax profile publish` folds these user-authored highlights into your gist.",
         ],
       },
     ],

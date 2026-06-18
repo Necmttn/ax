@@ -5,6 +5,7 @@ import {
     buildRoutingProposalStatements,
     buildSkillProposalStatements,
     dedupeSig,
+    deriveDirectiveProposalRows,
     deriveGuidanceProposalRows,
     deriveImageContextProposalRow,
     deriveRoutingProposalRow,
@@ -128,6 +129,57 @@ describe("buildSkillProposalStatements", () => {
         expect(sql).toMatch(/\bfrequency\s*=\s*5/);
         expect(sql).toMatch(/\bconfidence\s*=\s*"high"/);
         expect(sql).toContain("UPSERT skill_proposal:");
+    });
+});
+
+describe("deriveDirectiveProposalRows (directive mining v1)", () => {
+    const cand = (text: string, o: Partial<{ turnKey: string; ts: string; pattern: string }> = {}) => ({
+        turnKey: o.turnKey ?? "t1",
+        sessionId: "session:s1",
+        text,
+        pattern: o.pattern ?? "remember to",
+        ts: o.ts ?? "2026-06-17T10:00:00.000Z",
+    });
+
+    test("aggregates frequency across identically-worded directives", () => {
+        const { rows } = deriveDirectiveProposalRows([
+            cand("Remember to dogfood before showing me.", { turnKey: "a" }),
+            cand("Remember to dogfood before showing me.", { turnKey: "b", ts: "2026-06-18T00:00:00.000Z" }),
+        ]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.frequency).toBe(2);
+        expect(rows[0]!.title).toBe("Directive: Remember to dogfood before showing me.");
+        expect(rows[0]!.confidence).toBe("medium"); // freq 2
+        expect(rows[0]!.evidenceSummary).toEqual(["turn:a", "turn:b"]);
+    });
+
+    test("emits guidance form with a stable dedupe sig (accumulates, not forks)", () => {
+        const a = deriveDirectiveProposalRows([cand("Always run the tests.")]).rows[0]!;
+        const b = deriveDirectiveProposalRows([cand("Always run the tests.")]).rows[0]!;
+        expect(a.sig).toBe(b.sig);
+        expect(a.sig).toBe(dedupeSig("guidance", normalizeTitle(a.title)));
+    });
+
+    test("minFrequency filters one-off directives; skipped counted", () => {
+        const { rows, skipped } = deriveDirectiveProposalRows(
+            [cand("Make sure you use absolute paths.")],
+            { minFrequency: 2 },
+        );
+        expect(rows).toHaveLength(0);
+        expect(skipped).toBe(1);
+    });
+
+    test("sorts by frequency desc and caps at the limit", () => {
+        const candidates = [
+            cand("Always wrap copy in code blocks."),
+            cand("Always wrap copy in code blocks."),
+            cand("Always wrap copy in code blocks."),
+            cand("Remember to commit each part."),
+        ];
+        const { rows } = deriveDirectiveProposalRows(candidates, { limit: 1 });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.title).toContain("wrap copy");
+        expect(rows[0]!.frequency).toBe(3);
     });
 });
 

@@ -111,6 +111,12 @@ describe("listSessionsHere", () => {
         expect(enrich).toContain("AND role = 'user'");
         expect(enrich).toContain("LIMIT 1");
         expect(enrich).not.toContain("session IN");
+        // Regression #540: SurrealDB >=3.1.2 rejects `SELECT VALUE x ... ORDER BY seq`
+        // ("Missing order idiom `seq` in statement selection") because the order
+        // idiom is absent from the projection. The first-user-message subquery must
+        // therefore select `seq` and pluck the field rather than use SELECT VALUE.
+        expect(enrich).not.toMatch(/SELECT\s+VALUE\b[^)]*ORDER BY seq/);
+        expect(enrich).toMatch(/SELECT text_excerpt, seq FROM turn[^)]*ORDER BY seq/);
     });
 
     test("orders by started_at DESC", async () => {
