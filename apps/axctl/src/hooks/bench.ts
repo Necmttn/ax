@@ -19,6 +19,11 @@ import type { HookSummaryRow } from "../queries/hooks.ts";
 import { loadHookMeta } from "./sdk-install.ts";
 import type { InstallableHookMeta } from "./sdk-install.ts";
 
+const exitProcess = (code: number): never => {
+    process.exit(code);
+    throw new Error(`process.exit(${code}) returned`);
+};
+
 export interface PerFireStats {
     readonly p50: number; readonly p95: number;
     readonly min: number; readonly max: number; readonly mean: number;
@@ -396,15 +401,15 @@ export const benchHook = (
         const meta = yield* loadHookMeta(absFile).pipe(
             Effect.catchTags({
                 SdkHookImportError: (e) =>
-                    Effect.sync(() => {
+                    Effect.promise(async () => {
                         process.stderr.write(`cannot import hook file ${absFile}: ${e.reason}\n`);
-                        process.exit(1);
-                    }) as Effect.Effect<never>,
+                        return exitProcess(1);
+                    }),
                 SdkHookValidationError: (e) =>
-                    Effect.sync(() => {
+                    Effect.promise(async () => {
                         process.stderr.write(`${absFile}: ${e.reason}\n`);
-                        process.exit(1);
-                    }) as Effect.Effect<never>,
+                        return exitProcess(1);
+                    }),
             }),
         );
 

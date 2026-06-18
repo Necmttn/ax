@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
+import { DbError } from "@ax/lib/errors";
 import { QuotaEnvTest } from "../quota/quota-env.ts";
 import { writeDraft } from "./outbox.ts";
 import { gatherReport, renderReport } from "./report.ts";
@@ -81,10 +82,11 @@ describe("gatherReport", () => {
         expect(out.budgetLine).toContain("spendable");
     });
 
-    test("DB failure degrades to empty verdicts/proposals, never aborts", async () => {
-        const failDb = Layer.succeed(SurrealClient, {
-            query: <T>(_: string) => Effect.fail(new Error("db down")) as Effect.Effect<T, unknown>,
-        } as never);
+	test("DB failure degrades to empty verdicts/proposals, never aborts", async () => {
+	    const failDb = Layer.succeed(SurrealClient, {
+	        query: <T>(_: string) =>
+	            Effect.fail(new DbError({ operation: "query", message: "db down" })) as Effect.Effect<T, DbError>,
+	    } as never);
         const nowMs = Date.parse("2026-06-13T05:00:00.000Z");
         const out = await Effect.runPromise(
             gatherReport({ sinceMs: nowMs - 3_600_000, nowMs, notes: "", outboxDir: "/no/such/dir" }).pipe(

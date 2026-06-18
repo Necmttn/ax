@@ -8,7 +8,7 @@
  * fetchNextActions (below) orchestrates fetching and calls these builders.
  */
 
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type {
     NextActionCard,
@@ -52,6 +52,14 @@ const bonus = (n: number): number => Math.max(0, Math.min(9, Math.round(n)));
 
 /** Maximum cards returned per source builder. */
 const PER_SOURCE_CAP = 5;
+
+class NextActionSourceTimeoutError extends Schema.TaggedErrorClass<NextActionSourceTimeoutError>(
+    "NextActionSourceTimeoutError",
+)("NextActionSourceTimeoutError", {
+    source: Schema.String,
+    timeoutMs: Schema.Number,
+    message: Schema.String,
+}) {}
 
 /** Shared builder trailer: sort by impact descending, cap at PER_SOURCE_CAP. */
 const capByImpact = (cards: NextActionCard[]): NextActionCard[] =>
@@ -448,11 +456,17 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
     ): Effect.Effect<A, never, SurrealClient> => {
         const timeoutMs = nextActionSourceTimeoutMs(source, opts?.sourceTimeoutMs);
         return eff.pipe(
-            Effect.timeoutOrElse({
-                duration: `${timeoutMs} millis`,
-                orElse: () =>
-                    Effect.fail(new Error(`source ${source} timed out after ${timeoutMs}ms`)),
-            }),
+	            Effect.timeoutOrElse({
+	                duration: `${timeoutMs} millis`,
+	                orElse: () =>
+	                    Effect.fail(
+	                        new NextActionSourceTimeoutError({
+	                            source,
+	                            timeoutMs,
+	                            message: `source ${source} timed out after ${timeoutMs}ms`,
+	                        }),
+	                    ),
+	            }),
             Effect.catch((err) =>
                 Effect.sync(() => {
                     notes.push({ source, note: String(err) });

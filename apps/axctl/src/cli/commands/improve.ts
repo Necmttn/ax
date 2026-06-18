@@ -1,5 +1,5 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, Option } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
@@ -22,6 +22,13 @@ import { printNextLinks } from "../next-format.ts";
 import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
+
+class ImproveProposeJsonError extends Schema.TaggedErrorClass<ImproveProposeJsonError>(
+    "ImproveProposeJsonError",
+)("ImproveProposeJsonError", {
+    source: Schema.String,
+    message: Schema.String,
+}) {}
 
 /**
  * axctl improve - surface the experiment-loop proposal shortlist.
@@ -593,10 +600,14 @@ const cmdImprovePropose = (input: { readonly file: string | undefined; readonly 
         const raw = input.file !== undefined
             ? yield* Effect.tryPromise(() => Bun.file(input.file as string).text())
             : yield* Effect.tryPromise(() => Bun.stdin.text());
-        const parsed = yield* Effect.try({
-            try: () => JSON.parse(raw) as unknown,
-            catch: (err) => new Error(`invalid JSON on ${input.file ? input.file : "stdin"}: ${err instanceof Error ? err.message : String(err)}`),
-        });
+	        const parsed = yield* Effect.try({
+	            try: () => JSON.parse(raw) as unknown,
+	            catch: (err) =>
+	                new ImproveProposeJsonError({
+	                    source: input.file ? input.file : "stdin",
+	                    message: err instanceof Error ? err.message : String(err),
+	                }),
+	        });
         const result = yield* runPropose(parsed);
         if (input.json) {
             console.log(compactPrint(result));

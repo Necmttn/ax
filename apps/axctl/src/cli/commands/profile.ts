@@ -4,7 +4,7 @@
  *   first run shows the exact JSON, asks for consent, then opens a community registration PR.
  * `ax profile unpublish` - delete the published gist and local publish state.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
@@ -36,6 +36,12 @@ import {
     saveHighlightsFile,
     type HighlightsFile,
 } from "../../profile/highlights.ts";
+
+class ProfileInterviewJsonError extends Schema.TaggedErrorClass<ProfileInterviewJsonError>(
+    "ProfileInterviewJsonError",
+)("ProfileInterviewJsonError", {
+    message: Schema.String,
+}) {}
 
 // ---------------------------------------------------------------------------
 // Environment gathering (the only IO in this file)
@@ -271,13 +277,13 @@ const profileShowCommand = Command.make(
                 windowDays: window,
                 includeCost: !noCost,
                 env,
-            }).pipe(
-                Effect.timeout("40 seconds"),
-                Effect.catchTag("TimeoutError", () =>
-                    Effect.sync(() =>
-                        fail(
-                            `ax profile show timed out (>40s) - your graph may be very large (Codex-heavy). ` +
-                            `Try a smaller window: ax profile show --window=7`,
+	            }).pipe(
+	                Effect.timeout("40 seconds"),
+	                Effect.catchTag("TimeoutError", () =>
+	                    Effect.promise(async () =>
+	                        fail(
+	                            `ax profile show timed out (>40s) - your graph may be very large (Codex-heavy). ` +
+	                            `Try a smaller window: ax profile show --window=7`,
                         ),
                     ),
                 ),
@@ -462,11 +468,14 @@ const profileUnpublishCommand = Command.make("unpublish", {}, () => cmdProfileUn
 // ---------------------------------------------------------------------------
 
 export const cmdProfileInterviewSubmit = (input: { readonly rawJson: string; readonly path: string }) =>
-    Effect.gen(function* () {
-        const parsed = yield* Effect.try({
-            try: () => JSON.parse(input.rawJson) as unknown,
-            catch: (err) => new Error(`invalid JSON: ${err instanceof Error ? err.message : String(err)}`),
-        });
+	    Effect.gen(function* () {
+	        const parsed = yield* Effect.try({
+	            try: () => JSON.parse(input.rawJson) as unknown,
+	            catch: (err) =>
+	                new ProfileInterviewJsonError({
+	                    message: err instanceof Error ? err.message : String(err),
+	                }),
+	        });
         const file: HighlightsFile = yield* decodeHighlightsFile(parsed);
         yield* Effect.promise(() => saveHighlightsFile(input.path, file));
         return file;

@@ -9,6 +9,7 @@ const captured: string[] = [];
 const stubDb = Layer.succeed(SurrealClient, {
     query: <T>(sql: string) => { captured.push(sql); return Effect.succeed([[]] as unknown as T); },
 } as never);
+const writerEnv = OtelWriterLive.pipe(Layer.provide(stubDb));
 
 const row: OtelMetricPointRow = {
     harness: "claude", metric: "claude_code.cost.usage", value: 0.12, unit: "USD",
@@ -30,7 +31,7 @@ describe("OtelWriter", () => {
             Effect.gen(function* () {
                 const w = yield* OtelWriter;
                 yield* w.writeMetrics([row]);
-            }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)),
+            }).pipe(Effect.provide(writerEnv)),
         );
         const sql = captured.join("\n");
         expect(sql).toContain("UPSERT otel_metric_point:");
@@ -44,7 +45,7 @@ describe("OtelWriter", () => {
             Effect.gen(function* () {
                 const w = yield* OtelWriter;
                 yield* w.writeSpans([span]);
-            }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)),
+            }).pipe(Effect.provide(writerEnv)),
         );
         const sql = captured.join("\n");
         expect(sql).toContain("UPSERT otel_span:");
@@ -57,7 +58,7 @@ describe("OtelWriter", () => {
             Effect.gen(function* () {
                 const w = yield* OtelWriter;
                 yield* w.writeMetrics([]);
-            }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)),
+            }).pipe(Effect.provide(writerEnv)),
         );
         expect(captured).toHaveLength(0);
     });
@@ -72,7 +73,7 @@ test("writeLogs issues an UPSERT into otel_log_event with token cols", async () 
     };
     await Effect.runPromise(Effect.gen(function* () {
         const w = yield* OtelWriter; yield* w.writeLogs([row]);
-    }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)));
+    }).pipe(Effect.provide(writerEnv)));
     const sql = captured.join("\n");
     expect(sql).toContain("UPSERT otel_log_event:");
     expect(sql).toContain("input_tokens = 9994");
@@ -82,6 +83,6 @@ test("writeLogs empty → no query", async () => {
     captured.length = 0;
     await Effect.runPromise(Effect.gen(function* () {
         const w = yield* OtelWriter; yield* w.writeLogs([]);
-    }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)));
+    }).pipe(Effect.provide(writerEnv)));
     expect(captured).toHaveLength(0);
 });

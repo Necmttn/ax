@@ -57,7 +57,7 @@ import { defaultQuotaCachePath } from "../../quota/cache.ts";
 import { QuotaEnvLive } from "../../quota/quota-env.ts";
 import { getQuota } from "../../quota/quota.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { fail, jsonFlag, optionValue } from "./shared.ts";
+import { exitProcess, fail, jsonFlag, optionValue } from "./shared.ts";
 
 // ---------------------------------------------------------------------------
 // pure resolution helpers (exported for unit tests)
@@ -335,7 +335,7 @@ const resolveRepo = Effect.gen(function* () {
     const pwd = yield* resolvePwdRepository().pipe(
         Effect.catchTag("NotAGitRepoError", (err) => {
             console.error(`ax dojo: not in a git repository (cwd=${err.cwd})`);
-            return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+            return exitEffect(1);
         }),
     );
     const mainRepoRoot = yield* resolveMainRepoRoot(pwd.repoRoot);
@@ -401,6 +401,9 @@ export const makeSkillSparId = (skillName: string, now: Date): string => {
     return slug ? `${slug}-${hash6}-${date}` : `${hash6}-${date}`;
 };
 
+const exitEffect = (code: number): Effect.Effect<never> =>
+    Effect.promise(async () => exitProcess(code));
+
 const sparPlanCommand = Command.make(
     "spar-plan",
     {
@@ -442,7 +445,7 @@ const sparPlanCommand = Command.make(
                 }).pipe(
                     Effect.catchTag("SparCaptureError", (err) => {
                         console.error(`ax dojo spar-plan: ${err.message}`);
-                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                        return exitEffect(1);
                     }),
                 );
 
@@ -513,7 +516,7 @@ const sparPlanCommand = Command.make(
                 ).pipe(
                     Effect.catchTag("SparCaptureError", (err) => {
                         console.error(`ax dojo spar-plan: ${err.message}`);
-                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                        return exitEffect(1);
                     }),
                 );
 
@@ -568,7 +571,7 @@ const sparScoreCommand = Command.make(
             const content = yield* fs.readFileString(briefPath).pipe(
                 Effect.catchTag("PlatformError", () => {
                     console.error(`ax dojo spar-score: no spar brief at ${briefPath}`);
-                    return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                    return exitEffect(1);
                 }),
             );
             if (selectSparScoreKind(content) === "skill") {
@@ -580,7 +583,7 @@ const sparScoreCommand = Command.make(
                     console.error(
                         `ax dojo spar-score: could not parse skill-spar brief at ${briefPath}`,
                     );
-                    return yield* Effect.sync(() => process.exit(1));
+                    return yield* exitEffect(1);
                 }
                 const { mainRepoRoot } = yield* resolveRepo;
                 // sinceForChurn: same derivation as the code-delta path (new Date(brief.createdAt))
@@ -588,7 +591,7 @@ const sparScoreCommand = Command.make(
                 const result = yield* scoreSkillSpar(skillBrief, mainRepoRoot, sinceForChurn).pipe(
                     Effect.catchTag("SparCaptureError", (err) => {
                         console.error(`ax dojo spar-score: ${err.message}`);
-                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                        return exitEffect(1);
                     }),
                 );
                 yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
@@ -610,7 +613,7 @@ const sparScoreCommand = Command.make(
             const brief = parseSparBrief(content);
             if (brief === null) {
                 console.error(`ax dojo spar-score: could not parse spar brief at ${briefPath}`);
-                return yield* Effect.sync(() => process.exit(1));
+                return yield* exitEffect(1);
             }
 
             // brief.worktree is relative to the MAIN repo root; sessions store an
@@ -629,7 +632,7 @@ const sparScoreCommand = Command.make(
                 console.error(
                     `ax dojo spar-score: no variant session found in ${variantCwd} since ${brief.createdAt} - has the agent run the task in the worktree yet?`,
                 );
-                return yield* Effect.sync(() => process.exit(1));
+                return yield* exitEffect(1);
             }
 
             // Stamp the variant session's labels with "spar" so behavioral

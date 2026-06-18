@@ -38,7 +38,13 @@ export const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
  */
 export function fail(message: string): never {
     console.error(message);
-    process.exit(2);
+    exitProcess(2);
+}
+
+/** Terminate the CLI while keeping Effect.sync thunks typed as synchronous. */
+export function exitProcess(code: number): never {
+    process.exit(code);
+    throw new Error(`process.exit(${code}) returned`);
 }
 
 /**

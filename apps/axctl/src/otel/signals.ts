@@ -7,7 +7,6 @@
  */
 import type { Effect } from "effect";
 import type { Schema } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import type { OtelDecodeError, Signal } from "./signal.ts";
 import { decodeLogsPayload, decodeMetricsPayload, decodeTracePayload } from "./decode.ts";
@@ -38,7 +37,7 @@ export interface OtelSignalSpec<P, Row> {
     readonly table: string;
     readonly decode: (json: unknown) => Effect.Effect<P, OtelDecodeError>;
     readonly normalize: (payload: P) => Row[];
-    readonly write: (writer: OtelWriterShape) => (rows: readonly Row[]) => Effect.Effect<void, DbError, SurrealClient>;
+    readonly write: (writer: OtelWriterShape) => (rows: readonly Row[]) => Effect.Effect<void, DbError>;
     /** Statement renderer (flat SQL, kept in writer.ts) - used by the column gate. */
     readonly stmt: (row: Row, i: number) => string;
     /** Declared SET column names - gated `⊇` the Row schema fields. */

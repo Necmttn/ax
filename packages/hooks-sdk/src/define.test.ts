@@ -38,7 +38,7 @@ describe("runHook", () => {
     const boom = defineHook({
       name: "boom",
       events: ["PreToolUse"],
-      run: () => Effect.sync(() => { throw new Error("bug"); }),
+      run: () => Effect.die(new Error("bug")),
     });
     const r = await Effect.runPromise(
       runHook(boom, JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {}, cwd: "/r" }), {}).pipe(

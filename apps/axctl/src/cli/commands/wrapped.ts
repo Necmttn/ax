@@ -11,13 +11,20 @@
  *     the wrapped_card set. The dashboard landing serves the new deck on
  *     its next fetch.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { renderWrappedGenerateBrief } from "../../dashboard/wrapped-generate-brief.ts";
 import { runPublishCards } from "../../dashboard/wrapped-cards.ts";
 import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag, optionValue } from "./shared.ts";
+
+class WrappedPublishJsonError extends Schema.TaggedErrorClass<WrappedPublishJsonError>(
+    "WrappedPublishJsonError",
+)("WrappedPublishJsonError", {
+    source: Schema.String,
+    message: Schema.String,
+}) {}
 
 const cmdWrappedGenerate = (input: { readonly force: boolean }) =>
     Effect.gen(function* () {
@@ -39,13 +46,14 @@ const cmdWrappedPublish = (input: { readonly file: string | undefined; readonly 
         const raw = input.file !== undefined
             ? yield* Effect.tryPromise(() => Bun.file(input.file as string).text())
             : yield* Effect.tryPromise(() => Bun.stdin.text());
-        const parsed = yield* Effect.try({
-            try: () => JSON.parse(raw) as unknown,
-            catch: (err) =>
-                new Error(
-                    `invalid JSON on ${input.file ? input.file : "stdin"}: ${err instanceof Error ? err.message : String(err)}`,
-                ),
-        });
+	        const parsed = yield* Effect.try({
+	            try: () => JSON.parse(raw) as unknown,
+	            catch: (err) =>
+	                new WrappedPublishJsonError({
+	                    source: input.file ? input.file : "stdin",
+	                    message: err instanceof Error ? err.message : String(err),
+	                }),
+	        });
         const result = yield* runPublishCards(parsed);
         if (input.json) {
             console.log(compactPrint(result));
