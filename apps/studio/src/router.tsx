@@ -5,6 +5,7 @@ import {
     Link,
     Outlet,
 } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 import { Shell } from "./Shell.tsx";
 import { SkillsRoute } from "./routes/skills.tsx";
 import { ToolFailuresRoute } from "./routes/tools.tsx";
@@ -26,9 +27,10 @@ import { UsageRoute } from "./routes/usage.tsx";
 import { CostRoute } from "./routes/cost.tsx";
 import { LabRoute } from "./routes/lab.tsx";
 import { SigilGalleryRoute } from "./routes/sigil-gallery.tsx";
-import { ReviewView } from "./routes/review-view.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
+
+const LazyReviewView = lazy(() => import("./routes/review-view.tsx").then((module) => ({ default: module.ReviewView })));
 
 const rootRoute = createRootRoute({
     component: () => (
@@ -240,11 +242,13 @@ function NarrationDemoRoute() {
                 <h2>Story review surface (prototype)</h2>
                 <span className="meta">sample narration · schema v1</span>
             </header>
-            <ReviewView
-                data={{ turns: sampleNarrationTurns }}
-                narration={sampleNarration}
-                onOpenTranscript={() => {}}
-            />
+            <Suspense fallback={<div className="loading">Loading review…</div>}>
+                <LazyReviewView
+                    data={{ turns: sampleNarrationTurns }}
+                    narration={sampleNarration}
+                    onOpenTranscript={() => {}}
+                />
+            </Suspense>
         </section>
     );
 }

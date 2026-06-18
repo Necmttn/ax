@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { InspectSpanKind, SessionInspectPayload } from "@ax/lib/shared/dashboard-types";
-import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
+import { spliceHookFires, type RenderItem } from "@ax/lib/shared/hook-fire-splice";
 import { FilterBar, type FilterBarProps } from "./inspector-filter-bar.tsx";
 import { pairImageAttachments } from "./image-pairing.ts";
 import { callKey, pairToolResults } from "./tool-pairing.ts";
@@ -17,6 +17,13 @@ import {
 export interface TranscriptProps {
     /** The session payload to render (parent or subagent). */
     readonly data: SessionInspectPayload;
+    /** Optional mounted turn window. `data.turns` stays the full session for
+     *  cost progress, totals, and inspector state while this list controls the
+     *  expensive transcript DOM. */
+    readonly renderedTurns?: SessionInspectPayload["turns"];
+    /** Hook fires paired with `renderedTurns`; omitted means render all hooks
+     *  in `data.hook_fires`. */
+    readonly renderedHookFires?: SessionInspectPayload["hook_fires"];
     /**
      * Chrome rendered above the FilterBar: the `{turns} turns · {chars} chars`
      * line plus any caller-specific bars (live shows project + spawn/parent
@@ -38,6 +45,9 @@ export interface TranscriptProps {
      * the `<Turn>` via its `childrenSpawnedHere` prop (DB-routed SpawnMarkers).
      */
     readonly childrenSpawnedHereForTurn?: (turnSeq: number) => ReadonlyArray<SpawnChildDto> | undefined;
+    /** Leading content inside the transcript list, before mounted turns. Used
+     *  by the share route for virtual scroll spacers. */
+    readonly renderBeforeTurns?: () => ReactNode;
     /**
      * Share route: extra markers rendered *after* each `<Turn>` as siblings
      * (harness-hook markers + in-bundle ShareSpawnMarkers).
@@ -45,6 +55,28 @@ export interface TranscriptProps {
     readonly renderAfterTurn?: (turnSeq: number) => ReactNode;
     /** Trailing content after the turn list (live route's pagination sentinel). */
     readonly renderAfterTurns?: () => ReactNode;
+}
+
+export interface TranscriptRenderModel {
+    readonly items: ReadonlyArray<RenderItem>;
+    readonly resultByCall: Map<string, string>;
+    readonly skillContentByCall: Map<string, string>;
+    readonly consumedResultSeqs: Set<number>;
+    readonly imagePathsByTurn: Map<number, string[]>;
+    readonly consumedImageSeqs: Set<number>;
+}
+
+export function buildTranscriptRenderModel(data: Pick<SessionInspectPayload, "turns" | "hook_fires">): TranscriptRenderModel {
+    const toolPairing = pairToolResults(data.turns);
+    const imagePairing = pairImageAttachments(data.turns);
+    return {
+        items: spliceHookFires(data.turns, data.hook_fires),
+        resultByCall: toolPairing.resultByCall,
+        skillContentByCall: toolPairing.skillContentByCall,
+        consumedResultSeqs: toolPairing.consumedResultSeqs,
+        imagePathsByTurn: imagePairing.imagePathsByTurn,
+        consumedImageSeqs: imagePairing.consumedSeqs,
+    };
 }
 
 /**
@@ -64,20 +96,18 @@ export function Transcript({
     setSelection,
     visibleSeq,
     childrenSpawnedHereForTurn,
+    renderBeforeTurns,
     renderAfterTurn,
     renderAfterTurns,
+    renderedTurns,
+    renderedHookFires,
 }: TranscriptProps) {
-    // Pair each tool_use turn's calls with the immediately-following
-    // tool_result turn(s). Those result turns are merged INTO the call card
-    // (so the consumed seqs are dropped from the standalone turn list below);
-    // unmatched/orphan tool_result turns survive and render via ToolResultView.
-    const { resultByCall, skillContentByCall, consumedResultSeqs } = pairToolResults(data.turns);
-    // Fold "pure image attachment" turns (text is essentially just
-    // `[Image: source: …]`) into the referencing message turn: the image
-    // renders on the anchor, the standalone attachment turn collapses - exactly
-    // like tool call→result above. A consumed seq from EITHER pass is dropped
-    // from the standalone list, so the two consumed sets are unioned below.
-    const { imagePathsByTurn, consumedSeqs: consumedImageSeqs } = pairImageAttachments(data.turns);
+    const turnsToRender = renderedTurns ?? data.turns;
+    const hooksToRender = renderedHookFires ?? data.hook_fires;
+    const renderModel = useMemo(
+        () => buildTranscriptRenderModel({ turns: turnsToRender, hook_fires: hooksToRender }),
+        [turnsToRender, hooksToRender],
+    );
     return (
         <>
             {header}
@@ -120,7 +150,8 @@ export function Transcript({
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {spliceHookFires(data.turns, data.hook_fires).map((item) => {
+                    {renderBeforeTurns?.()}
+                    {renderModel.items.map((item) => {
                         if (item.kind === "hook_fire") {
                             return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
                         }
@@ -128,19 +159,19 @@ export function Transcript({
                         // A result turn merged into a preceding call's card,
                         // or a pure-image-attachment turn folded into its
                         // referencing message, is not rendered standalone.
-                        if (consumedResultSeqs.has(turn.seq) || consumedImageSeqs.has(turn.seq)) return null;
+                        if (renderModel.consumedResultSeqs.has(turn.seq) || renderModel.consumedImageSeqs.has(turn.seq)) return null;
                         const after = renderAfterTurn?.(turn.seq);
                         return (
-                            <div key={`turn-${turn.seq}`}>
+                            <div key={`turn-${turn.seq}`} data-turn-frame={turn.seq}>
                                 <Turn
                                     turn={turn}
                                     anchored={anchoredSeq === turn.seq}
                                     childrenSpawnedHere={childrenSpawnedHereForTurn?.(turn.seq)}
                                     activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
                                     onInspect={setSelection}
-                                    resultFor={(callIndex) => resultByCall.get(callKey(turn.seq, callIndex))}
-                                    skillContentFor={(callIndex) => skillContentByCall.get(callKey(turn.seq, callIndex))}
-                                    imagePaths={imagePathsByTurn.get(turn.seq)}
+                                    resultFor={(callIndex) => renderModel.resultByCall.get(callKey(turn.seq, callIndex))}
+                                    skillContentFor={(callIndex) => renderModel.skillContentByCall.get(callKey(turn.seq, callIndex))}
+                                    imagePaths={renderModel.imagePathsByTurn.get(turn.seq)}
                                 />
                                 {after}
                             </div>

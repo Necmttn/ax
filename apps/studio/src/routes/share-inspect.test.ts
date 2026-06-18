@@ -8,11 +8,18 @@ import {
     fetchShareManifest,
     fetchShareNarration,
     gistRawUrl,
+    hookFiresForTurnWindow,
+    initialShareTurnWindow,
     inspectPayloadFromShare,
     isShareManifest,
     rawSessionFileUrl,
     SESSION_MAP_MIN_LANE_W,
     spanKindForShareTurn,
+    shareRenderWindow,
+    shareVirtualSpacerHeights,
+    shareWindowAroundIndex,
+    shareWindowForAnchor,
+    shareWindowForScrollOffset,
     type ShareManifest,
     type ShareSubagentCard,
 } from "./share-inspect.tsx";
@@ -53,6 +60,62 @@ describe("spanKindForShareTurn", () => {
             intent_kind: "organic_task",
             text: "lets run review all command",
         }))).toBe("user_input");
+    });
+});
+
+describe("shareWindowForAnchor", () => {
+    test("keeps first paint small", () => {
+        expect(initialShareTurnWindow(456)).toEqual({ start: 0, end: 80 });
+    });
+
+    test("renders a small adjacent overscan around the active window", () => {
+        expect(shareRenderWindow({ start: 0, end: 80 }, 456)).toEqual({ start: 0, end: 92 });
+        expect(shareRenderWindow({ start: 172, end: 332 }, 456)).toEqual({ start: 160, end: 344 });
+    });
+
+    test("keeps the current window when the anchor is already mounted", () => {
+        expect(shareWindowForAnchor({ start: 0, end: 80 }, 40, 456)).toEqual({ start: 0, end: 80 });
+    });
+
+    test("opens an overscanned review-sized window around a late anchor instead of a full prefix", () => {
+        expect(shareWindowForAnchor({ start: 0, end: 80 }, 400, 456)).toEqual({ start: 296, end: 456 });
+    });
+
+    test("keeps enough following context for a middle anchor", () => {
+        expect(shareWindowForAnchor({ start: 0, end: 80 }, 220, 456)).toEqual({ start: 172, end: 332 });
+    });
+
+    test("maps scroll position to a bounded window", () => {
+        expect(shareWindowForScrollOffset(0, 456, 180)).toEqual({ start: 0, end: 160 });
+        expect(shareWindowForScrollOffset(180 * 220, 456, 180)).toEqual({ start: 172, end: 332 });
+        expect(shareWindowForScrollOffset(Number.POSITIVE_INFINITY, 456, 180)).toEqual({ start: 296, end: 456 });
+    });
+
+    test("keeps final anchors on a full final page", () => {
+        expect(shareWindowAroundIndex(455, 456)).toEqual({ start: 296, end: 456 });
+    });
+
+    test("computes virtual spacer heights from the mounted window", () => {
+        expect(shareVirtualSpacerHeights({ start: 80, end: 160 }, 456, 100)).toEqual({
+            before: 8000,
+            after: 29600,
+        });
+    });
+});
+
+describe("hookFiresForTurnWindow", () => {
+    test("keeps only hook fires whose timestamps belong to the mounted turn window", () => {
+        const hooks = [
+            { idx: 1, ts: "2026-06-18T00:00:00Z" },
+            { idx: 2, ts: "2026-06-18T00:01:00Z" },
+            { idx: 3, ts: "2026-06-18T00:02:00Z" },
+        ] as Parameters<typeof hookFiresForTurnWindow>[0];
+        const turns = [
+            { ts: "2026-06-18T00:00:30Z" },
+            { ts: "2026-06-18T00:01:30Z" },
+        ];
+
+        expect(hookFiresForTurnWindow(hooks, turns).map((hook) => hook.idx)).toEqual([2]);
     });
 });
 

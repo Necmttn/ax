@@ -536,7 +536,7 @@ export function useVisibleTurnSeq(
     fallbackSeq: number | null,
 ): number | null {
     const [visibleSeq, setVisibleSeq] = useState<number | null>(fallbackSeq);
-    const turnSeqKey = turns.map((turn) => turn.seq).join(",");
+    const turnSeqKey = useMemo(() => turns.map((turn) => turn.seq).join(","), [turns]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -549,23 +549,13 @@ export function useVisibleTurnSeq(
         const update = () => {
             raf = 0;
             const anchorY = JUMP_TARGET_SCROLL_MARGIN + 24;
-            let candidate: number | null = null;
-            for (const turn of turns) {
-                const el = document.getElementById(`turn-${turn.seq}`);
-                if (!el) continue;
+            const candidate = findVisibleTurnSeq(turns, anchorY, (seq) => {
+                const el = document.getElementById(`turn-${seq}`);
+                if (!el) return null;
                 const rect = el.getBoundingClientRect();
-                if (rect.bottom < anchorY) {
-                    candidate = turn.seq;
-                    continue;
-                }
-                if (rect.top <= anchorY) {
-                    candidate = turn.seq;
-                    break;
-                }
-                if (candidate == null) candidate = turn.seq;
-                break;
-            }
-            setVisibleSeq(candidate ?? fallbackSeq ?? turns[0]?.seq ?? null);
+                return { top: rect.top, bottom: rect.bottom };
+            }, fallbackSeq);
+            setVisibleSeq(candidate ?? turns[0]?.seq ?? null);
         };
         const schedule = () => {
             if (raf) return;
@@ -583,6 +573,44 @@ export function useVisibleTurnSeq(
     }, [fallbackSeq, turnSeqKey]);
 
     return visibleSeq;
+}
+
+export function findVisibleTurnSeq(
+    turns: ReadonlyArray<Pick<InspectTurnDto, "seq">>,
+    anchorY: number,
+    rectForSeq: (seq: number) => { readonly top: number; readonly bottom: number } | null,
+    fallbackSeq: number | null,
+): number | null {
+    if (turns.length === 0) return fallbackSeq;
+
+    let lo = 0;
+    let hi = turns.length - 1;
+    let candidateIndex: number | null = null;
+    while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const rect = rectForSeq(turns[mid]!.seq);
+        if (!rect) {
+            hi = mid - 1;
+            continue;
+        }
+        if (rect.bottom < anchorY) {
+            lo = mid + 1;
+        } else {
+            candidateIndex = mid;
+            hi = mid - 1;
+        }
+    }
+
+    if (candidateIndex == null) {
+        const last = turns[turns.length - 1]!;
+        return rectForSeq(last.seq) ? last.seq : fallbackSeq;
+    }
+
+    const candidate = turns[candidateIndex]!;
+    const rect = rectForSeq(candidate.seq);
+    if (!rect) return fallbackSeq;
+    if (rect.top <= anchorY || candidateIndex === 0) return candidate.seq;
+    return turns[candidateIndex - 1]?.seq ?? candidate.seq;
 }
 
 export function CostRail({

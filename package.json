@@ -50,6 +50,7 @@
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
     "build": "bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl",
+    "bench:share-viewer": "bun scripts/bench/share-viewer-bench.ts",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
     "check:site-cli-reference": "bun scripts/check-site-cli-reference.ts",
     "check:release-announcements": "bun scripts/check-release-announcements.ts",
