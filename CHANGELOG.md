@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.34.0](https://github.com/Necmttn/ax/compare/v0.33.0...v0.34.0) (2026-06-18)
+
+
+### Features
+
+* **attribution:** "Generated with ax" watermark on shareable artifacts ([#541](https://github.com/Necmttn/ax/issues/541)) ([d2347dc](https://github.com/Necmttn/ax/commit/d2347dcf0ac4a1ba4d2f1fd7ef55531000b0b3a6))
+* **cost:** extend routability lens to Codex/gpt-5.x sessions ([#546](https://github.com/Necmttn/ax/issues/546)) ([#552](https://github.com/Necmttn/ax/issues/552)) ([828c68a](https://github.com/Necmttn/ax/commit/828c68a571026faf510ceebfa80d11038f998421))
+* **ingest:** attribute Codex subagent cost separately (codex-subagent) ([#553](https://github.com/Necmttn/ax/issues/553)) ([#554](https://github.com/Necmttn/ax/issues/554)) ([27f01d2](https://github.com/Necmttn/ax/commit/27f01d2564b8d5ee9c380ae969f05bf8bf3f8395))
+* **ingest:** surface Codex spawn_agent dispatches in ax dispatches ([#555](https://github.com/Necmttn/ax/issues/555)) ([#556](https://github.com/Necmttn/ax/issues/556)) ([469d949](https://github.com/Necmttn/ax/commit/469d949b22ddd6d32e598e1534d13191493bebb8))
+* **profile:** ax profile interview — user-authored highlights ([#539](https://github.com/Necmttn/ax/issues/539)) ([0c3f7ef](https://github.com/Necmttn/ax/commit/0c3f7ef2aeeaf2b42ccac98d75a269db9ef16859))
+* **site:** collapse highlight weapons + skills into click-toggle disclosure ([#544](https://github.com/Necmttn/ax/issues/544)) ([8effc1f](https://github.com/Necmttn/ax/commit/8effc1f5b828e5b1025336a147210f994d022cf0))
+
+
+### Bug Fixes
+
+* **install:** raise SurrealDB open-file limit to 65536 ([#558](https://github.com/Necmttn/ax/issues/558)) ([#559](https://github.com/Necmttn/ax/issues/559)) ([105366d](https://github.com/Necmttn/ax/commit/105366dde0a7ee48778425f5cef52b96c88988ad))
+* **lib:** warn instead of silently defaulting to epoch in isoTimestamp ([#540](https://github.com/Necmttn/ax/issues/540)) ([#548](https://github.com/Necmttn/ax/issues/548)) ([5eb766e](https://github.com/Necmttn/ax/commit/5eb766e6bba48cd89e37857343030e78ac16ea34))
+* **profile:** replace turn-table scans + add timeout/diagnostics to profile show ([#540](https://github.com/Necmttn/ax/issues/540)) ([#547](https://github.com/Necmttn/ax/issues/547)) ([ebcdddf](https://github.com/Necmttn/ax/commit/ebcdddf901100bb5c52e86cd0622f4f65e377080))
+* **sessions:** SurrealDB 3.1.2 ORDER BY idiom parse error ([#540](https://github.com/Necmttn/ax/issues/540)) ([#543](https://github.com/Necmttn/ax/issues/543)) ([3022472](https://github.com/Necmttn/ax/commit/30224729339016f3f859db2e7aa36457a5da106e))
+* **studio:** restore shared transcript contrast ([24dd504](https://github.com/Necmttn/ax/commit/24dd504acb4909be2952f99ddfb131882ca45a22))
+* **wrapped:** exclude synthetic Codex tools from skill counts ([#540](https://github.com/Necmttn/ax/issues/540)) ([#545](https://github.com/Necmttn/ax/issues/545)) ([801a940](https://github.com/Necmttn/ax/commit/801a940f540012a613a260b860c7156b64513c72))
+
 ## [0.33.0](https://github.com/Necmttn/ax/compare/v0.32.0...v0.33.0) (2026-06-17)
 
 
