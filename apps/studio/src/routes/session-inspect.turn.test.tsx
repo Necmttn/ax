@@ -111,3 +111,43 @@ test("Turn renders a tool_result body via ToolResultView (stripped wrapper)", ()
     expect(html).toContain("hello world");
     expect(html).not.toContain("local-command-stdout");
 });
+
+test("plain parsed assistant prose does not render inside a terminal block", () => {
+    const text = "Now the wrapped-brief pattern + profile schema/render + dossier.";
+    const turn = {
+        seq: 34,
+        role: "assistant",
+        semantic_role: "assistant_text",
+        ts: null,
+        char_count: text.length,
+        raw_text: text,
+        spans: [{ kind: "assistant_text", text }],
+        token_usage: null,
+        content: {
+            parser_id: "test-parser",
+            parser_version: "1",
+            blockset_hash: "hash",
+            blocks: [
+                {
+                    seq: 0,
+                    parent_seq: null,
+                    kind: "paragraph",
+                    role: "assistant",
+                    heading: null,
+                    text,
+                    text_excerpt: text,
+                    start_offset: 0,
+                    end_offset: text.length,
+                    confidence: 1,
+                    atoms: [],
+                },
+            ],
+        },
+    };
+    const html = renderToStaticMarkup(
+        // deno-lint-ignore no-explicit-any
+        <Turn turn={turn as any} anchored={false} activeTarget={null} onInspect={() => {}} />,
+    );
+    expect(html).toContain(text);
+    expect(html).not.toContain("background:var(--term-bg)");
+});
