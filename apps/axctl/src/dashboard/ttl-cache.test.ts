@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { makeTtlCachedFetch } from "./ttl-cache.ts";
+
+class CacheComputeError extends Schema.TaggedErrorClass<CacheComputeError>(
+    "CacheComputeError",
+)("CacheComputeError", {
+    message: Schema.String,
+}) {}
 
 describe("makeTtlCachedFetch", () => {
     test("caches within TTL, single compute shared", async () => {
@@ -42,12 +48,12 @@ describe("makeTtlCachedFetch", () => {
         const cache = makeTtlCachedFetch(
             "test",
             () =>
-                Effect.suspend(() => {
-                    calls += 1;
-                    return calls === 1
-                        ? Effect.fail(new Error("db hiccup"))
-                        : Effect.succeed(calls);
-                }),
+	                Effect.suspend(() => {
+	                    calls += 1;
+	                    return calls === 1
+	                        ? Effect.fail(new CacheComputeError({ message: "db hiccup" }))
+	                        : Effect.succeed(calls);
+	                }),
             "1 minute",
         );
         await expect(Effect.runPromise(cache.fetch())).rejects.toThrow("db hiccup");

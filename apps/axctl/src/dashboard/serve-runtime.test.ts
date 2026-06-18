@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { makeServeRuntime, type RuntimeLike } from "./serve-runtime.ts";
+
+class HandlerBoom extends Schema.TaggedErrorClass<HandlerBoom>("HandlerBoom")(
+    "HandlerBoom",
+    { message: Schema.String },
+) {}
 
 /**
  * Fake RuntimeLike factory: `built: false` simulates a runtime whose layer
@@ -58,11 +63,11 @@ describe("makeServeRuntime", () => {
         expect(made.length).toBe(2);
     });
 
-    test("a handler error on a healthy runtime does NOT swap", async () => {
-        const healthy = fakeRuntime({ built: true });
-        const { handle, made } = handleWith(healthy);
+	    test("a handler error on a healthy runtime does NOT swap", async () => {
+	        const healthy = fakeRuntime({ built: true });
+	        const { handle, made } = handleWith(healthy);
 
-        await expect(handle.runner(Effect.fail(new Error("handler boom")))).rejects.toThrow();
+	        await expect(handle.runner(Effect.fail(new HandlerBoom({ message: "handler boom" })))).rejects.toThrow();
         expect(healthy.disposed).toBe(false);
         expect(await handle.runner(Effect.succeed("ok"))).toBe("ok");
         expect(made.length).toBe(1);

@@ -141,13 +141,12 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
     // layer's OUTPUT: route handlers declare them through the router's
     // `Requires` channel, which `toWebHandler` satisfies from the built
     // context at request time - `Layer.provide` into the group does not.
-    const appLayer = Layer.mergeAll(
+    const platformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+    const routesLayer = Layer.mergeAll(
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
         Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
         opts.services ?? AppLayer,
-        BunFileSystem.layer,
-        BunPath.layer,
     ).pipe(
         Layer.provide([
             SystemGroupLive,
@@ -160,11 +159,12 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             OtelGroupLive,
             RoutingGroupLive,
         ]),
-        // FileSystem/Path appear twice deliberately: in the mergeAll OUTPUT
-        // for request-time handler requirements, and here for the build-time
-        // needs of HttpApiBuilder.layer (same layer objects, memoized once).
-        Layer.provide([BunHttpPlatform.layer, BunFileSystem.layer, BunPath.layer, Etag.layer]),
+        // FileSystem/Path are provided beneath the route builder for build-time
+        // needs. The final app layer merges platformLayer back into the output
+        // for request-time handler requirements.
+        Layer.provide([BunHttpPlatform.layer, platformLayer, Etag.layer]),
     );
+    const appLayer = Layer.mergeAll(routesLayer, platformLayer);
     const build = (): ContractWebHandler =>
         HttpRouter.toWebHandler(appLayer, {
             memoMap: opts.memoMap,

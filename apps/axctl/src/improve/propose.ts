@@ -207,6 +207,12 @@ export const buildProposeStatements = (
 export const decodeProposeInput = (raw: unknown) =>
     Schema.decodeUnknownEffect(ProposeInputSchema)(raw);
 
+export class ImproveProposeInputError extends Schema.TaggedErrorClass<ImproveProposeInputError>(
+    "ImproveProposeInputError",
+)("ImproveProposeInputError", {
+    message: Schema.String,
+}) {}
+
 /** Same guard as the dashboard SQL console: read-only statements only. */
 export const isReadOnlyEvidenceQuery = (sql: string): boolean =>
     /^(SELECT|RETURN)\b/i.test(sql.trim());
@@ -214,14 +220,14 @@ export const isReadOnlyEvidenceQuery = (sql: string): boolean =>
 export const runPropose = Effect.fn("improve.runPropose")(function* (raw: unknown) {
     const input = yield* decodeProposeInput(raw);
     if (input.evidence_query !== undefined && !isReadOnlyEvidenceQuery(input.evidence_query)) {
-        return yield* Effect.fail(
-            new Error("evidence_query must be a read-only SELECT or RETURN statement"),
-        );
+        return yield* new ImproveProposeInputError({
+            message: "evidence_query must be a read-only SELECT or RETURN statement",
+        });
     }
     if ((input.hypothesis_template === undefined) !== (input.evidence_query === undefined)) {
-        return yield* Effect.fail(
-            new Error("hypothesis_template and evidence_query must be provided together"),
-        );
+        return yield* new ImproveProposeInputError({
+            message: "hypothesis_template and evidence_query must be provided together",
+        });
     }
     const sig = dedupeSig(input.form, normalizeTitle(input.title));
     const db = yield* SurrealClient;

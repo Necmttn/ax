@@ -291,11 +291,11 @@ describe("defect handling", () => {
     // We test this via runHook directly.
     const { runHook } = await import("../define.ts");
     const boom = {
-      name: "boom",
-      events: ["PreToolUse"] as const,
-      matcher: { tools: ["Agent"] },
-      run: () => Effect.sync((): never => { throw new Error("simulated defect"); }),
-    };
+	      name: "boom",
+	      events: ["PreToolUse"] as const,
+	      matcher: { tools: ["Agent"] },
+	      run: () => Effect.die(new Error("simulated defect")),
+	    };
     const result = await Effect.runPromise(
       runHook(
         boom,

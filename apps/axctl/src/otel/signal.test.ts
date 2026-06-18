@@ -20,8 +20,8 @@ const stubDb = Layer.succeed(SurrealClient, {
     query: <T>(sql: string) => { captured.push(sql); return Effect.succeed([[]] as unknown as T); },
 } as never);
 
-const writerEnv = Layer.mergeAll(OtelWriterLive, stubDb);
-const runWrite = async (eff: Effect.Effect<void, unknown, OtelWriter | SurrealClient>) => {
+const writerEnv = OtelWriterLive.pipe(Layer.provide(stubDb));
+const runWrite = async (eff: Effect.Effect<void, unknown, OtelWriter>) => {
     captured.length = 0;
     await Effect.runPromise(eff.pipe(Effect.provide(writerEnv)) as Effect.Effect<void>);
     return captured.join("\n");

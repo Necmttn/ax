@@ -1,5 +1,4 @@
-import { Context, Layer } from "effect";
-import type { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import {
@@ -19,9 +18,9 @@ import {
 import { writeRows } from "./signal.ts";
 
 export interface OtelWriterShape {
-    readonly writeMetrics: (rows: readonly OtelMetricPointRow[]) => Effect.Effect<void, DbError, SurrealClient>;
-    readonly writeSpans: (rows: readonly OtelSpanRow[]) => Effect.Effect<void, DbError, SurrealClient>;
-    readonly writeLogs: (rows: readonly OtelLogEventRow[]) => Effect.Effect<void, DbError, SurrealClient>;
+    readonly writeMetrics: (rows: readonly OtelMetricPointRow[]) => Effect.Effect<void, DbError>;
+    readonly writeSpans: (rows: readonly OtelSpanRow[]) => Effect.Effect<void, DbError>;
+    readonly writeLogs: (rows: readonly OtelLogEventRow[]) => Effect.Effect<void, DbError>;
 }
 
 export class OtelWriter extends Context.Service<OtelWriter, OtelWriterShape>()("ax/otel/OtelWriter") {}
@@ -97,8 +96,20 @@ export const logStmt = (r: OtelLogEventRow, i: number): string =>
     `attrs = ${surrealOptionString(r.attrs)}, ` +
     `observed_at = ${surrealDate(r.observed_at)};`;
 
-export const OtelWriterLive: Layer.Layer<OtelWriter> = Layer.succeed(OtelWriter, {
-    writeMetrics: (rows) => writeRows(rows, metricStmt),
-    writeSpans: (rows) => writeRows(rows, spanStmt),
-    writeLogs: (rows) => writeRows(rows, logStmt),
-});
+export const OtelWriterLive: Layer.Layer<OtelWriter, never, SurrealClient> =
+    Layer.effect(OtelWriter)(
+        Effect.gen(function* () {
+            const db = yield* SurrealClient;
+            const write = <Row>(
+                rows: readonly Row[],
+                stmt: (row: Row, i: number) => string,
+            ): Effect.Effect<void, DbError> =>
+                writeRows(rows, stmt).pipe(Effect.provideService(SurrealClient, db));
+
+            return OtelWriter.of({
+                writeMetrics: (rows) => write(rows, metricStmt),
+                writeSpans: (rows) => write(rows, spanStmt),
+                writeLogs: (rows) => write(rows, logStmt),
+            });
+        }),
+    );
