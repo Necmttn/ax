@@ -5,7 +5,12 @@ import type { AgentProviderName } from "./provider-events.ts";
 
 export type PlanStatus = "pending" | "in_progress" | "completed" | "abandoned";
 
-export type PlanSource = "claude_todowrite" | "claude_task" | "codex_update_plan";
+export type PlanSource =
+    | "claude_todowrite"
+    | "claude_task"
+    | "claude_sidecar_plan"
+    | "claude_sidecar_task"
+    | "codex_update_plan";
 
 export type ProviderPlanSignalStatus = "available" | "unavailable";
 
@@ -91,7 +96,7 @@ export type PlanSnapshotWriteInput = {
     readonly snapshot: NormalizedPlanSnapshot;
     readonly snapshotSeq: number;
     readonly createdAt: string;
-    readonly toolCallKey: string;
+    readonly toolCallKey?: string | null;
 };
 
 function stableHash(input: string): string {
@@ -395,9 +400,9 @@ export const providerPlanSignalAvailability: Readonly<Record<AgentProviderName, 
     claude: {
         provider: "claude",
         status: "available",
-        planSources: ["claude_todowrite", "claude_task"],
+        planSources: ["claude_todowrite", "claude_task", "claude_sidecar_plan", "claude_sidecar_task"],
         toolNames: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
-        evidence: "Claude transcript tool_use and tool_result blocks expose TodoWrite todos and Task tool plan signals.",
+        evidence: "Claude transcript tool_use and tool_result blocks expose TodoWrite todos and Task tool plan signals; Claude plans/tasks sidecars can also surface visible plan snapshots.",
     },
     codex: {
         provider: "codex",
@@ -515,12 +520,12 @@ export function planSnapshotKey(input: {
     readonly sessionId: string;
     readonly source: string;
     readonly snapshotSeq: number;
-    readonly toolCallKey: string;
+    readonly toolCallKey?: string | null;
 }): string {
     return [
         planKey(input.sessionId, input.provider, input.source),
         `snapshot_${input.snapshotSeq.toString(10).padStart(6, "0")}`,
-        stableHash(input.toolCallKey).slice(0, 12),
+        stableHash(input.toolCallKey ?? "sidecar").slice(0, 12),
     ].join("__");
 }
 
@@ -533,7 +538,7 @@ export function planItemKey(input: {
     readonly toolCallKey?: string | null;
 }): string {
     const key = planKey(input.sessionId, input.provider, input.source);
-    if (input.source === "claude_task") {
+    if (input.source === "claude_task" || input.source === "claude_sidecar_task") {
         const externalId = nonEmptyString(input.externalId ?? null);
         if (externalId) {
             return [
@@ -577,6 +582,7 @@ export function toPlanSnapshotWrite({
     createdAt,
     toolCallKey,
 }: PlanSnapshotWriteInput): PlanSnapshotWrite {
+    const normalizedToolCallKey = toolCallKey ?? null;
     const items = snapshot.items.map((item) => ({
         key: planItemKey({
             provider: snapshot.provider,
@@ -584,7 +590,7 @@ export function toPlanSnapshotWrite({
             source: snapshot.source,
             seq: item.seq,
             externalId: item.externalId,
-            toolCallKey,
+            toolCallKey: normalizedToolCallKey,
         }),
         externalId: item.externalId,
         seq: item.seq,
@@ -605,9 +611,9 @@ export function toPlanSnapshotWrite({
             sessionId: snapshot.sessionId,
             source: snapshot.source,
             snapshotSeq,
-            toolCallKey,
+            toolCallKey: normalizedToolCallKey,
         }),
-        toolCallKey,
+        toolCallKey: normalizedToolCallKey,
         itemsJson: snapshot.items,
         explanation: snapshot.explanation,
         ts: snapshot.ts,

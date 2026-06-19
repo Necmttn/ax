@@ -386,6 +386,8 @@ describe("plan normalization", () => {
         expect(providerPlanSignalAvailability.claude.planSources).toEqual([
             "claude_todowrite",
             "claude_task",
+            "claude_sidecar_plan",
+            "claude_sidecar_task",
         ]);
         expect(providerPlanSignalAvailability.claude.toolNames).toEqual([
             "TodoWrite",
@@ -396,6 +398,7 @@ describe("plan normalization", () => {
         ]);
         expect(providerPlanSignalAvailability.claude.evidence).toContain("TodoWrite");
         expect(providerPlanSignalAvailability.claude.evidence).toContain("Task");
+        expect(providerPlanSignalAvailability.claude.evidence).toContain("sidecar");
     });
 
     test("does not invent plan snapshots for unavailable providers", () => {

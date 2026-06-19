@@ -303,7 +303,7 @@ const snapshotSummary = (snapshot: PlanSnapshotWrite): string =>
 const planItemDeleteStatement = (snapshot: PlanSnapshotWrite, item: PlanSnapshotItemWrite): string | null => {
     const itemRef = recordRef("plan_item", item.key);
     const planRef = recordRef("plan", snapshot.planKey);
-    if (snapshot.source === "claude_task") {
+    if (snapshot.source === "claude_task" || snapshot.source === "claude_sidecar_task") {
         if (item.externalId && item.externalId.trim().length > 0) {
             return `DELETE plan_item WHERE plan = ${planRef} AND external_id = ${surrealString(item.externalId)} AND id != ${itemRef};`;
         }

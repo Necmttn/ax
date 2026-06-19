@@ -6,9 +6,11 @@ import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     buildClaudeSidecarStatements,
+    buildClaudeSidecarPlanSnapshotStatements,
     claudeSidecarArtifactKey,
     claudeSidecarsStage,
     discoverClaudeSidecarArtifacts,
+    discoverClaudeSidecarPlanSnapshots,
 } from "./claude-sidecars.ts";
 
 const FsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -174,6 +176,130 @@ describe("buildClaudeSidecarStatements", () => {
         expect(statement).not.toContain("stats-cache.json");
         expect(statement).not.toContain("secret");
         expect(statement).not.toContain(process.env.HOME ?? "__no_home__");
+    });
+});
+
+describe("discoverClaudeSidecarPlanSnapshots", () => {
+    test("surfaces tasks and plans sidecars as visible plan snapshots", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const sessionId = "11111111-2222-4333-8444-555555555555";
+        await write(
+            transcriptsDir,
+            `${project}/tasks/${sessionId}/tasks.json`,
+            JSON.stringify({
+                tasks: [
+                    {
+                        id: "task-a",
+                        subject: "Inspect sidecar task list",
+                        active_form: "Inspecting sidecar task list",
+                        status: "active",
+                    },
+                    {
+                        id: "task-b",
+                        description: "Document visible plans",
+                        status: "completed",
+                    },
+                ],
+            }),
+        );
+        await write(
+            transcriptsDir,
+            `${project}/plans/${sessionId}/plan.md`,
+            [
+                "- [ ] Add sidecar task snapshots",
+                "- [x] Keep raw sidecar blobs private",
+            ].join("\n"),
+        );
+
+        const snapshots = await runFs(discoverClaudeSidecarPlanSnapshots({ transcriptsDir, project }));
+
+        expect(snapshots).toHaveLength(2);
+        const taskSnapshot = snapshots.find((snapshot) => snapshot.source === "claude_sidecar_task");
+        const planSnapshot = snapshots.find((snapshot) => snapshot.source === "claude_sidecar_plan");
+        expect(taskSnapshot).toMatchObject({
+            sessionId,
+            explanation: "Claude tasks sidecar",
+            status: "in_progress",
+            toolCallKey: null,
+        });
+        expect(taskSnapshot?.items).toEqual([
+            {
+                key: expect.stringContaining("__item_external__task_a__"),
+                externalId: "task-a",
+                seq: 1,
+                content: "Inspect sidecar task list",
+                activeForm: "Inspecting sidecar task list",
+                status: "in_progress",
+            },
+            {
+                key: expect.stringContaining("__item_external__task_b__"),
+                externalId: "task-b",
+                seq: 2,
+                content: "Document visible plans",
+                activeForm: null,
+                status: "completed",
+            },
+        ]);
+        expect(planSnapshot).toMatchObject({
+            sessionId,
+            explanation: "Claude plans sidecar",
+            status: "pending",
+            toolCallKey: null,
+        });
+        expect(planSnapshot?.items.map((item) => ({ text: item.content, status: item.status }))).toEqual([
+            { text: "Add sidecar task snapshots", status: "pending" },
+            { text: "Keep raw sidecar blobs private", status: "completed" },
+        ]);
+    });
+
+    test("skips sidecar task and plan content without a detectable session id", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        await write(transcriptsDir, `${project}/tasks/task.json`, JSON.stringify({ subject: "No session" }));
+        await write(transcriptsDir, `${project}/plans/plan.md`, "- [ ] No session");
+
+        const snapshots = await runFs(discoverClaudeSidecarPlanSnapshots({ transcriptsDir, project }));
+
+        expect(snapshots).toEqual([]);
+    });
+});
+
+describe("buildClaudeSidecarPlanSnapshotStatements", () => {
+    test("writes plan snapshot rows for parsed sidecar plans", () => {
+        const statements = buildClaudeSidecarPlanSnapshotStatements([
+            {
+                planKey: "claude__s1__claude_sidecar_plan__abc",
+                sessionId: "s1",
+                source: "claude_sidecar_plan",
+                status: "pending",
+                createdAt: "2026-06-18T00:00:00.000Z",
+                updatedAt: "2026-06-18T00:00:00.000Z",
+                snapshotKey: "claude__s1__claude_sidecar_plan__abc__snapshot_000001",
+                toolCallKey: null,
+                itemsJson: [
+                    { externalId: null, seq: 1, content: "Visible sidecar plan", activeForm: null, status: "pending" },
+                ],
+                explanation: "Claude plans sidecar",
+                ts: "2026-06-18T00:00:00.000Z",
+                items: [
+                    {
+                        key: "claude__s1__claude_sidecar_plan__abc__item_001",
+                        externalId: null,
+                        seq: 1,
+                        content: "Visible sidecar plan",
+                        activeForm: null,
+                        status: "pending",
+                    },
+                ],
+            },
+        ]);
+        const sql = statements.join("\n");
+
+        expect(sql).toContain("UPSERT plan_snapshot:");
+        expect(sql).toContain("UPSERT plan_item:");
+        expect(sql).toContain("Visible sidecar plan");
+        expect(sql).toContain("tool_call: NONE");
     });
 });
 
