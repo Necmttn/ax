@@ -320,6 +320,12 @@ default-exporting `defineHook({ name, events, matcher, run })`; fire path is
 `bun <file>.ts` (no axctl in the hot path; ~70ms). Verdicts: allow / block /
 warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
 
+- SDK hooks are **source-checkout only** - they run as `bun <file>` against the
+  packages/hooks-sdk workspace, which a compiled binary doesn't bundle. On a
+  compiled binary `ax hooks init`/`install` print a fallback-path message
+  (`isCompiledBinary()` / `COMPILED_BINARY_SDK_HOOK_HELP`) instead of dead-ending
+  on the internal `SdkPathNotFoundError` (#564); native (non-SDK) `ax hooks add`
+  still works there.
 - `ax hooks init` - scaffold `~/.ax/hooks` (file: dep on packages/hooks-sdk;
   re-run after the SDK moves - the dep is an absolute path)
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
