@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.2](https://github.com/Necmttn/ax/compare/v0.34.1...v0.34.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **hooks:** clear errors for SDK hooks on compiled binary ([#564](https://github.com/Necmttn/ax/issues/564)) ([#565](https://github.com/Necmttn/ax/issues/565)) ([b13a261](https://github.com/Necmttn/ax/commit/b13a26190638f0106047da39a8fff7b33ee92b45))
+
 ## [0.34.1](https://github.com/Necmttn/ax/compare/v0.34.0...v0.34.1) (2026-06-18)
 
 
