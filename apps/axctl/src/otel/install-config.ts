@@ -1,11 +1,29 @@
 interface ClaudeSettings { env?: Record<string, string>; [k: string]: unknown }
 
-const CC_ENV = (endpoint: string): Record<string, string> => ({
-    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
-    OTEL_METRICS_EXPORTER: "otlp",
-    OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
-    OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
-});
+const trimEndpoint = (endpoint: string): string => endpoint.replace(/\/+$/, "");
+
+const CC_ENV = (endpoint: string): Record<string, string> => {
+    const base = trimEndpoint(endpoint);
+    return {
+        CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+        OTEL_METRICS_EXPORTER: "otlp",
+        OTEL_LOGS_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+        OTEL_EXPORTER_OTLP_ENDPOINT: base,
+        OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${base}/v1/logs`,
+    };
+};
+
+const CC_TRACE_ENV = (endpoint: string): Record<string, string> => {
+    const base = trimEndpoint(endpoint);
+    return {
+        CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+        OTEL_TRACES_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "http/json",
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${base}/v1/traces`,
+    };
+};
 
 /** Merge ax's telemetry env into Claude settings, preserving everything else. */
 export const applyClaudeOtelEnv = (
@@ -13,6 +31,19 @@ export const applyClaudeOtelEnv = (
     endpoint: string,
 ): ClaudeSettings & { env: Record<string, string> } => {
     const env = { ...(settings.env ?? {}), ...CC_ENV(endpoint) };
+    return { ...settings, env };
+};
+
+/** Add Claude trace export env. This is intentionally separate and opt-in. */
+export const applyClaudeTraceOtelEnv = (
+    settings: ClaudeSettings,
+    endpoint: string,
+): ClaudeSettings & { env: Record<string, string> } => {
+    const env = {
+        ...(settings.env ?? {}),
+        CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+        ...CC_TRACE_ENV(endpoint),
+    };
     return { ...settings, env };
 };
 

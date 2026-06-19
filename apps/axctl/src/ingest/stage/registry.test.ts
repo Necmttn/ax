@@ -62,6 +62,14 @@ describe("StageRegistry", () => {
         expect(keys.indexOf("turn-analysis")).toBeGreaterThan(keys.indexOf("turn-content-blocks"));
     });
 
+    it("registers claude-config after agent-def with catalog deps", () => {
+        const keys = ALL_STAGES.map((stage) => stage.meta.key);
+        const stage = ALL_STAGES.find((s) => s.meta.key === "claude-config");
+        expect(stage?.meta.deps).toEqual(["skills", "commands", "agent-def"]);
+        expect(stage?.meta.tags).toEqual(["ingest"]);
+        expect(keys.indexOf("claude-config")).toBe(keys.indexOf("agent-def") + 1);
+    });
+
     it("all stage keys are unique (no duplicates)", () => {
         const keys = ALL_STAGES.map((s) => s.meta.key);
         const uniqueKeys = new Set(keys);

@@ -94,6 +94,45 @@ DEFINE INDEX IF NOT EXISTS session_workspace_started ON session FIELDS workspace
 -- indexes above don't cover it. See GitHub issue #76.
 DEFINE INDEX IF NOT EXISTS session_started ON session FIELDS started_at;
 
+-- Metadata-only Claude Code sidecar artifacts under .claude/projects/<project>/.
+-- Stores bounded file metadata and hashes only; never raw paste/image caches,
+-- raw API bodies, absolute home paths, or large tool-result bodies.
+DEFINE TABLE IF NOT EXISTS claude_sidecar_artifact SCHEMAFULL;
+DEFINE FIELD kind               ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD project            ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD safe_relative_path ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD path_hash          ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD size               ON claude_sidecar_artifact TYPE int;
+DEFINE FIELD mtime              ON claude_sidecar_artifact TYPE datetime;
+DEFINE FIELD content_hash       ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD session            ON claude_sidecar_artifact TYPE option<record<session>>;
+DEFINE FIELD relation_ids_json  ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD relation_attrs_json ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD observed_at        ON claude_sidecar_artifact TYPE datetime;
+DEFINE FIELD excerpt            ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD attrs_json         ON claude_sidecar_artifact TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_path_hash ON claude_sidecar_artifact FIELDS path_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_session ON claude_sidecar_artifact FIELDS session;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_kind_project ON claude_sidecar_artifact FIELDS kind, project;
+
+-- Tool calls that produced or later inspected Claude Code sidecar artifacts.
+-- Stores the graph edge and bounded structured facts only; absolute sidecar
+-- paths and raw large outputs stay out of the DB.
+DEFINE TABLE IF NOT EXISTS used_sidecar_artifact TYPE RELATION FROM tool_call TO claude_sidecar_artifact SCHEMAFULL;
+DEFINE FIELD session      ON used_sidecar_artifact TYPE option<record<session>>;
+DEFINE FIELD action       ON used_sidecar_artifact TYPE string;         -- produced | read | searched | inspected
+DEFINE FIELD source       ON used_sidecar_artifact TYPE string;         -- output_excerpt | read_input | command_text
+DEFINE FIELD sidecar_kind ON used_sidecar_artifact TYPE string;
+DEFINE FIELD path_hash    ON used_sidecar_artifact TYPE string;
+DEFINE FIELD command_tool ON used_sidecar_artifact TYPE option<string>;
+DEFINE FIELD pattern      ON used_sidecar_artifact TYPE option<string>;
+DEFINE FIELD offset       ON used_sidecar_artifact TYPE option<int>;
+DEFINE FIELD limit        ON used_sidecar_artifact TYPE option<int>;
+DEFINE FIELD ts           ON used_sidecar_artifact TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_in ON used_sidecar_artifact FIELDS in;
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_out ON used_sidecar_artifact FIELDS out;
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_session_action ON used_sidecar_artifact FIELDS session, action;
+
 DEFINE TABLE agent_provider SCHEMAFULL;
 DEFINE FIELD name           ON agent_provider TYPE string;
 DEFINE FIELD display_name   ON agent_provider TYPE string;
@@ -374,7 +413,8 @@ DEFINE FIELD created_at     ON plan_item TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan_item TYPE option<datetime>;
 DEFINE FIELD first_seen_at  ON plan_item TYPE option<datetime>;
 DEFINE FIELD last_seen_at   ON plan_item TYPE option<datetime>;
-DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE;
+REMOVE INDEX IF EXISTS plan_item_plan_seq ON plan_item;
+DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq;
 
 DEFINE TABLE artifact SCHEMAFULL;
 DEFINE FIELD kind           ON artifact TYPE string;
@@ -784,6 +824,41 @@ DEFINE FIELD file_evidence     ON guidance_revision TYPE option<string>;
 DEFINE FIELD observed_at       ON guidance_revision TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS guidance_revision_source_hash ON guidance_revision FIELDS source_path, content_hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS guidance_revision_scope ON guidance_revision FIELDS scope, observed_at;
+
+-- Provider-compatible metadata inventory for guidance/config artifacts.
+-- Safe-by-default: stores hashes, counts, event/server/key names, and redacted
+-- coarse paths only. Never raw file bodies, env values, hook commands,
+-- permission patterns, memory text, or absolute home paths.
+DEFINE TABLE IF NOT EXISTS guidance_config_artifact SCHEMAFULL;
+DEFINE FIELD provider                 ON guidance_config_artifact TYPE string;
+DEFINE FIELD kind                     ON guidance_config_artifact TYPE string;
+DEFINE FIELD scope                    ON guidance_config_artifact TYPE string;
+DEFINE FIELD safe_path                ON guidance_config_artifact TYPE string;
+DEFINE FIELD path_hash                ON guidance_config_artifact TYPE string;
+DEFINE FIELD authority_kind           ON guidance_config_artifact TYPE string;
+DEFINE FIELD authority_hash           ON guidance_config_artifact TYPE string;
+DEFINE FIELD content_hash             ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD parse_status             ON guidance_config_artifact TYPE string;
+DEFINE FIELD bytes                    ON guidance_config_artifact TYPE int;
+DEFINE FIELD token_estimate           ON guidance_config_artifact TYPE int;
+DEFINE FIELD command_hashes_json      ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD hook_event_names_json    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD matcher_count            ON guidance_config_artifact TYPE int;
+DEFINE FIELD mcp_server_names_json    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD env_keys_json            ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD enabled_tool_count       ON guidance_config_artifact TYPE option<int>;
+DEFINE FIELD model                    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD reasoning_effort         ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD output_style             ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD permission_allow_count   ON guidance_config_artifact TYPE int;
+DEFINE FIELD permission_ask_count     ON guidance_config_artifact TYPE int;
+DEFINE FIELD permission_deny_count    ON guidance_config_artifact TYPE int;
+DEFINE FIELD metadata_json            ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD observed_at              ON guidance_config_artifact TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact FIELDS provider, path_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact FIELDS provider, kind, scope;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_authority ON guidance_config_artifact FIELDS provider, authority_hash;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact FIELDS parse_status;
 
 DEFINE TABLE stack SCHEMAFULL;
 DEFINE FIELD name        ON stack TYPE string;
@@ -1926,6 +2001,50 @@ DEFINE FIELD status_code      ON otel_log_event TYPE option<number>;
 DEFINE FIELD attrs            ON otel_log_event TYPE option<string>;
 DEFINE FIELD observed_at      ON otel_log_event TYPE datetime;
 DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id;
+
+DEFINE TABLE harness_tool_event SCHEMAFULL;
+DEFINE FIELD session         ON harness_tool_event TYPE record<session>;
+DEFINE FIELD harness         ON harness_tool_event TYPE string;
+DEFINE FIELD event_kind      ON harness_tool_event TYPE string;
+DEFINE FIELD tool_name       ON harness_tool_event TYPE option<string>;
+DEFINE FIELD tool_call       ON harness_tool_event TYPE option<record<tool_call>>;
+DEFINE FIELD provider_event  ON harness_tool_event TYPE option<record<agent_event>>;
+DEFINE FIELD otel_event      ON harness_tool_event TYPE option<record<otel_log_event>>;
+DEFINE FIELD prompt_id       ON harness_tool_event TYPE option<string>;
+DEFINE FIELD tool_use_id     ON harness_tool_event TYPE option<string>;
+DEFINE FIELD decision        ON harness_tool_event TYPE option<string>;
+DEFINE FIELD decision_source ON harness_tool_event TYPE option<string>;
+DEFINE FIELD success         ON harness_tool_event TYPE option<bool>;
+DEFINE FIELD error_type      ON harness_tool_event TYPE option<string>;
+DEFINE FIELD duration_ms     ON harness_tool_event TYPE option<number>;
+DEFINE FIELD attrs           ON harness_tool_event TYPE option<string>;
+DEFINE FIELD observed_at     ON harness_tool_event TYPE datetime;
+DEFINE INDEX IF NOT EXISTS harness_tool_event_session ON harness_tool_event FIELDS session;
+DEFINE INDEX IF NOT EXISTS harness_tool_event_kind ON harness_tool_event FIELDS event_kind;
+
+DEFINE TABLE harness_run_context SCHEMAFULL;
+DEFINE FIELD session             ON harness_run_context TYPE record<session>;
+DEFINE FIELD harness             ON harness_run_context TYPE string;
+DEFINE FIELD surface             ON harness_run_context TYPE option<string>;
+DEFINE FIELD entrypoint          ON harness_run_context TYPE option<string>;
+DEFINE FIELD deployment_provider ON harness_run_context TYPE option<string>;
+DEFINE FIELD auth_mode           ON harness_run_context TYPE option<string>;
+DEFINE FIELD model_provider      ON harness_run_context TYPE option<string>;
+DEFINE FIELD model               ON harness_run_context TYPE option<string>;
+DEFINE FIELD reasoning_effort    ON harness_run_context TYPE option<string>;
+DEFINE FIELD reasoning_summary   ON harness_run_context TYPE option<string>;
+DEFINE FIELD approval_policy     ON harness_run_context TYPE option<string>;
+DEFINE FIELD sandbox_policy      ON harness_run_context TYPE option<string>;
+DEFINE FIELD permission_profile  ON harness_run_context TYPE option<string>;
+DEFINE FIELD web_search_mode     ON harness_run_context TYPE option<string>;
+DEFINE FIELD mcp_servers         ON harness_run_context TYPE option<string>;
+DEFINE FIELD app_version         ON harness_run_context TYPE option<string>;
+DEFINE FIELD terminal_type       ON harness_run_context TYPE option<string>;
+DEFINE FIELD source_event        ON harness_run_context TYPE option<record<otel_log_event>>;
+DEFINE FIELD attrs               ON harness_run_context TYPE option<string>;
+DEFINE FIELD observed_at         ON harness_run_context TYPE datetime;
+DEFINE INDEX IF NOT EXISTS harness_run_context_session ON harness_run_context FIELDS session;
+DEFINE INDEX IF NOT EXISTS harness_run_context_harness ON harness_run_context FIELDS harness;
 
 -- ---------------------------------------------------------------------------
 -- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard

@@ -68,8 +68,30 @@ const LOG_ALLOWLIST: Record<string, ReadonlySet<string>> = {
         "codex.turn_ttft", "codex.conversation_starts",
     ]),
     claude: new Set([
-        "claude_code.tool_decision", "claude_code.skill_activated",
-        "claude_code.user_prompt", "claude_code.api_error",
+        "claude_code.tool_decision",
+        "claude_code.skill_activated",
+        "claude_code.user_prompt",
+        "claude_code.api_error",
+        "claude_code.tool_result",
+        "claude_code.api_request",
+        "claude_code.api_refusal",
+        "claude_code.permission_mode_changed",
+        "claude_code.mcp_server_connection",
+        "claude_code.plugin_installed",
+        "claude_code.plugin_loaded",
+        "claude_code.hook_registered",
+        "claude_code.hook_execution_start",
+        "claude_code.hook_execution_complete",
+        "claude_code.hook_plugin_metrics",
+        "claude_code.compaction",
+        "claude_code.auth",
+        "claude_code.internal_error",
+        "claude_code.api_retries_exhausted",
+        "claude_code.feedback_survey",
+        // Raw API body events are intentionally omitted: they can carry prompt,
+        // system, message, and tool payloads. Keep normalized logs signal-only.
+        // "claude_code.api_request_body",
+        // "claude_code.api_response_body",
     ]),
 };
 
@@ -86,6 +108,26 @@ const eventTime = (
     return nanoToDate(observedNano ?? nano);
 };
 
+const bodyString = (body: unknown): string | null => {
+    if (typeof body === "string") return body;
+    if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+    const value = (body as { readonly stringValue?: unknown }).stringValue;
+    return typeof value === "string" ? value : null;
+};
+
+const canonicalLogEventName = (
+    harness: string,
+    body: unknown,
+    attrEventName: string | number | boolean | null | undefined,
+): string | null => {
+    if (harness !== "claude") return typeof attrEventName === "string" ? attrEventName : null;
+
+    const fromBody = bodyString(body);
+    if (fromBody?.startsWith("claude_code.")) return fromBody;
+    if (typeof attrEventName !== "string" || attrEventName === "") return null;
+    return attrEventName.startsWith("claude_code.") ? attrEventName : `claude_code.${attrEventName}`;
+};
+
 export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] =>
     walkResources(
         payload.resourceLogs,
@@ -98,8 +140,8 @@ export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] =>
             const out: OtelLogEventRow[] = [];
             for (const rec of sl.logRecords) {
                 const a = attrMap(rec.attributes);
-                const eventName = a.get("event.name");
-                if (typeof eventName !== "string") continue;
+                const eventName = canonicalLogEventName(harness, rec.body, a.get("event.name"));
+                if (eventName === null) continue;
                 if (!allow || !allow.has(eventName)) continue;
                 out.push({
                     harness,
