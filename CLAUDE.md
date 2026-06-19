@@ -293,6 +293,20 @@ not depend on effect).
 `ax routing compile [--out=PATH]` - merge-preserving regenerate of `~/.ax/hooks/routing-table.json` (defaults refresh, `origin: user` classes survive; refuses to overwrite a corrupt file). `ax dispatches compile-routing` is an alias.
 `ax routing tune [--days=N] [--dry-run] [--emit-brief] [--apply=id,...] [--out=PATH]` - mine unmatched expensive inherit dispatches for new routing classes (two-token prefix clustering, ≥3 members, suggests sonnet). Auto-applies non-judgment proposals to `~/.ax/hooks/routing-table.json` as `origin: user`; judgment-flagged ones (review/design/plan/audit/...) only ship via `--emit-brief` → `.ax/tasks/routing-tune-<date>.md` → agent backtest → `--apply=ids` (carry the brief's `--days` window).
 `ax routing show` - effective table with class origins.
+`ax routing impact begin --arm=off|on [--label]` / `end` / `report [--share] [--json]` -
+forward A/B receipt for the routing loop (#575). Captures an `ax quota` snapshot at
+the start/end of a routing-off work block and a routing-on block (state:
+`~/.ax/routing-impact.json`), then `report` diffs **5h plan-window utilization
+consumed per unit work** off vs on - the "1.Nx more work per $200 window" proof a
+fixed-plan user actually feels (you don't pay per token; the window is the budget).
+Token-equiv $ + assistant-turns (work proxy) ride along; inherit-rate-in-window is a
+deferred enrichment. Honest constraints: quota is live-only (no historical timeline,
+hence forward capture); window RESETS mid-block are detected (`resets_at` change or
+utilization drop) and the delta omitted; matched work across blocks is the operator's
+responsibility. route-dispatch is advisory, so the real A/B variable is routing
+PRACTICE (hook nudge + explicit `model:`), not "hook on/off". Pure compute +
+state in `apps/axctl/src/routing-impact/` (DB-free, exhaustively tested); CLI in
+`cli/commands/ax-routing-impact.ts`. `report --share` appends the ax plug.
 The routing-table file is now the source of truth for BOTH the route-dispatch hook and `ax dispatches --candidates` (unify done); `ROUTING_CLASSES` remains the shipped default seed. The committed `/routing-tune` workflow stays the dev-side tool for tuning the defaults themselves.
 
 ## Recommend + apply guidance to your own agent files

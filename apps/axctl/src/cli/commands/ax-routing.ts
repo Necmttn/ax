@@ -34,6 +34,7 @@ import {
 import { usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, parseCsvFlag } from "./shared.ts";
+import { routingImpactCommand } from "./ax-routing-impact.ts";
 
 const printProposals = (proposals: ReadonlyArray<TuneProposal>) => {
     console.log(
@@ -254,7 +255,7 @@ export const routingRootCommand = Command.make("routing").pipe(
     Command.withDescription(
         "Routing-table operations: tune (mine your dispatch history), compile (regenerate defaults), show.",
     ),
-    Command.withSubcommands([tuneCommand, compileCommand, showCommand]),
+    Command.withSubcommands([tuneCommand, compileCommand, showCommand, routingImpactCommand]),
 );
 
 export const axRoutingRuntime: RuntimeManifest = {
@@ -266,6 +267,10 @@ export const axRoutingRuntime: RuntimeManifest = {
                 tune: "db",
                 compile: "none",
                 show: "none",
+                // begin/end only need quota (they provide QuotaEnvLive themselves);
+                // report queries the graph. Keyed on argv[1]="impact", so the whole
+                // group shares one runtime - "db", consistent with ax analytics.
+                impact: "db",
             },
         },
         hidden: false,
