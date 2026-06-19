@@ -356,6 +356,67 @@ export function AxResult({ children }: { children?: ReactNode }) {
   );
 }
 
+// --- ActionList / ActionItem ------------------------------------------------
+// The "do this now" block: the scannable, paste-ready steps a skimmer can act on
+// without reading the prose. Same austere editorial language as the rest of the
+// kit - a heavy ink top rule (heavier than the hairlines around it, so the eye
+// stops), a mono eyebrow, serif numbered steps, and each command broken out into
+// the article's own pale terminal-receipt treatment. No card, no glow, no
+// animation. <ActionItem> is a marker the parent reads via Children (like
+// <SplitSeg>/<Bar>); the block renders deterministically (SSR/prerender safe).
+type ActionItemProps = {
+  /** the imperative one-liner, e.g. "Measure whether helpers are a real cost" */
+  title: ReactNode;
+  /** paste-ready command(s) for this step; multiline allowed */
+  cmd?: string;
+  /** supporting prose under the title */
+  children?: ReactNode;
+};
+
+// Marker - never renders alone; ActionList reads its props.
+export function ActionItem(_props: ActionItemProps) {
+  return null;
+}
+
+type ActionListProps = {
+  /** mono eyebrow, default "Do this now" */
+  eyebrow?: ReactNode;
+  /** headline above the steps */
+  title?: ReactNode;
+  /** muted one-liner under the headline */
+  sub?: ReactNode;
+  children?: ReactNode;
+};
+
+export function ActionList({ eyebrow = "Do this now", title, sub, children }: ActionListProps) {
+  const items = Children.toArray(children).filter(isValidElement) as ReactElement<ActionItemProps>[];
+  return (
+    <section className="bk-do">
+      <div className="bk-do-head">
+        <span className="bk-do-eyebrow">{eyebrow}</span>
+        {title ? <span className="bk-do-title">{title}</span> : null}
+        {sub ? <span className="bk-do-sub">{sub}</span> : null}
+      </div>
+      <ol className="bk-do-list">
+        {items.map((it, i) => (
+          <li className="bk-do-step" key={i}>
+            <p className="bk-do-step-title">
+              <span className="bk-do-n">{i + 1}</span>
+              {it.props.title}
+            </p>
+            {it.props.children ? <p className="bk-do-step-desc">{it.props.children}</p> : null}
+            {it.props.cmd ? (
+              <pre className="bk-do-cmd">
+                <code>{it.props.cmd.trim()}</code>
+              </pre>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Components map handed to <MDXContent>. The lowercase `a` keeps external links
 // safe; the capitalized entries are the article kit. Prose typography itself is
@@ -384,4 +445,6 @@ export const mdxComponents = {
   BarChart,
   Bar,
   AxResult,
+  ActionList,
+  ActionItem,
 };

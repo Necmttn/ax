@@ -15330,6 +15330,93 @@ details[open] > summary .pf-toggle { transform: rotate(-135deg); }
 .blog-essay .bk-ax-model { color: var(--ink); border-bottom: 1px dotted var(--line); }
 .blog-essay .bk-ax-warn { color: var(--red); font-weight: 600; }
 
+/* --- ActionList: the "do this now" block (austere, no card/glow/animation) --- */
+.blog-essay .bk-do {
+  margin: 52px auto;
+  border-top: 2px solid var(--ink);
+  padding-top: 18px;
+}
+.blog-essay .bk-do-head {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.blog-essay .bk-do-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+}
+.blog-essay .bk-do-title {
+  font-family: var(--serif);
+  font-size: clamp(21px, 2.6vw, 26px);
+  line-height: 1.18;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+}
+.blog-essay .bk-do-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.blog-essay .bk-do-list {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+}
+.blog-essay .bk-do-step {
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+.blog-essay .bk-do-step:first-child { padding-top: 4px; border-top: none; }
+.blog-essay .bk-do-step-title {
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0;
+  max-width: none;
+}
+.blog-essay .bk-do-n {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+  margin-right: 10px;
+}
+.blog-essay .bk-do-step-desc {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 6px 0 0;
+  max-width: none;
+}
+.blog-essay .bk-do-step-desc code { color: var(--ink); }
+.blog-essay .bk-do-cmd {
+  margin: 12px 0 0;
+  min-width: 0;
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.blog-essay .bk-do-cmd code {
+  display: block;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink);
+  white-space: pre;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
 @media (max-width: 640px) {
   .blog-essay { --bk-read: 100%; }
   .blog-essay p { font-size: 17px; line-height: 1.62; }
