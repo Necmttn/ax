@@ -12,6 +12,10 @@
 // afterwards so the manifest never lands in git.
 import { spawnSync } from "node:child_process";
 import { writeManifest, writeStub } from "./gen-studio-embed.ts";
+import {
+    writeManifest as writeHooksManifest,
+    writeStub as writeHooksStub,
+} from "./gen-hooks-embed.ts";
 
 const entry = process.argv[2] ?? "apps/axctl/src/cli/index.ts";
 const outfile = process.argv[3] ?? "dist/axctl";
@@ -31,6 +35,7 @@ const describe = gitDescribe();
 let status = 1;
 try {
     writeManifest();
+    writeHooksManifest();
     const result = spawnSync(
         "bun",
         [
@@ -46,8 +51,9 @@ try {
     );
     status = result.status ?? 1;
 } finally {
-    // Always restore the committed empty stub - even on a failed compile - so
-    // the working tree never carries the generated manifest.
+    // Always restore the committed empty stubs - even on a failed compile - so
+    // the working tree never carries the generated manifests.
     writeStub();
+    writeHooksStub();
 }
 process.exit(status);

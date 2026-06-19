@@ -39,6 +39,8 @@ solo.yml
 # studio build output (daemon dist/ is covered by the generic dist/ rule)
 apps/studio/dist-studio/
 apps/studio/dist-desktop/
+# SDK-hook bundles embedded into the compiled binary (scripts/gen-hooks-embed.ts)
+apps/axctl/.hooks-embed-build/
 # studio staged into the site by scripts/stage-studio.ts (generated, not committed)
 apps/site/public/studio/
 

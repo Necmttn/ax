@@ -7,9 +7,11 @@ import { HookProviderRegistryDefault, ALL_HOOK_PROVIDERS } from "./providers/reg
 import {
     resolveSdkPath,
     scaffoldWorkspace,
+    scaffoldFromEmbed,
     isCompiledBinary,
     COMPILED_BINARY_SDK_HOOK_HELP,
 } from "./sdk-workspace.ts";
+import { HOOKS_EMBED } from "./hooks-embed.gen.ts";
 import {
     readAllHooks,
     addHook,
@@ -180,11 +182,33 @@ const initCommand = Command.make(
     },
     ({ dir, noInstall }) =>
         Effect.gen(function* () {
-            if (isCompiledBinary()) {
-                process.stderr.write(`${COMPILED_BINARY_SDK_HOOK_HELP}\n`);
-                process.exit(1);
-            }
             const workspaceDir = expandTilde(dir);
+
+            // Compiled binary: no source tree to make a `file:` dep against, so
+            // scaffold the pre-bundled standalone hooks baked into the binary.
+            // They inline effect and fire as `bun <file>.js` - no package.json,
+            // no `bun install`, fully offline. (issue #573, follow-up to #564)
+            if (isCompiledBinary()) {
+                if (Object.keys(HOOKS_EMBED).length === 0) {
+                    // Defensive: a binary built without the embed manifest. Should
+                    // not happen via `bun run build`, but don't dead-end opaquely.
+                    process.stderr.write(`${COMPILED_BINARY_SDK_HOOK_HELP}\n`);
+                    process.exit(1);
+                }
+                const written = yield* scaffoldFromEmbed(HOOKS_EMBED, workspaceDir);
+                console.log(`hook workspace ready at ${workspaceDir} (bundled hooks for the compiled binary)`);
+                if (written.length === 0) {
+                    console.log("  (all hooks already present - nothing written)");
+                } else {
+                    for (const path of written) console.log(`  wrote ${path}`);
+                }
+                console.log("");
+                console.log("requires `bun` on PATH (hooks fire as `bun <file>.js`).");
+                console.log("next steps:");
+                console.log(`  ax hooks install ${workspaceDir}/route-dispatch.js --providers=claude`);
+                return;
+            }
+
             const sdkPath = yield* resolveSdkPath();
             const written = yield* scaffoldWorkspace({
                 dir: workspaceDir,
@@ -199,7 +223,7 @@ const initCommand = Command.make(
             console.log(`  ax hooks backtest ${workspaceDir}/enforce-worktree.ts --days=14   (replay history through it first)`);
             console.log(`  ax hooks install ${workspaceDir}/enforce-worktree.ts --providers=claude,codex`);
         }),
-).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks)"));
+).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks; bundled .js hooks on a compiled binary)"));
 
 const KNOWN_PROVIDERS = ALL_HOOK_PROVIDERS.map((p) => p.name);
 
@@ -212,14 +236,11 @@ const installCommand = Command.make(
     },
     ({ file, providers, scope }) =>
         Effect.gen(function* () {
-            // A compiled binary can't dynamically import a .ts hook file (no bun
-            // runtime + no @ax/hooks-sdk workspace), so installing one would
-            // dead-end on an opaque import error. Tell the user the supported
-            // path up front. (issue #564)
-            if (isCompiledBinary()) {
-                process.stderr.write(`${COMPILED_BINARY_SDK_HOOK_HELP}\n`);
-                process.exit(1);
-            }
+            // Works on both source (.ts against the @ax/hooks-sdk workspace) and a
+            // compiled binary (the standalone .js bundles `ax hooks init` wrote
+            // from the embed - self-contained, so the binary can dynamically
+            // import them to read meta). A missing file is caught by
+            // installHookFile (SdkHookFileNotFoundError). (issue #573)
             const path = yield* Path.Path;
             const absFile = path.resolve(expandTilde(file));
             const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);

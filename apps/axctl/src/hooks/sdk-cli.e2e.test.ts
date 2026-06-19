@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,38 +44,64 @@ describe("ax hooks install (issue #564 - file-not-found)", () => {
 });
 
 /**
- * Compiled-binary guidance (papercut #2). Building a --compile binary in CI is
- * too heavy to do per-run, so this only runs when a prebuilt binary path is
- * supplied via AX_E2E_COMPILED_BIN (e.g. `bun run build` then point at
- * dist/axctl). Verified manually on a real compiled binary; see PR #565.
+ * Compiled binary: SDK hooks WORK from embedded bundles (issue #573). Building a
+ * --compile binary in CI is too heavy per-run, so these run only when a prebuilt
+ * binary path is supplied via AX_E2E_COMPILED_BIN (`bun run build`, then point at
+ * dist/axctl). They also need a live DB (the hooks group provisions it eagerly),
+ * so gate on AX_E2E_DB=1 too. A throwaway HOME isolates the writes from the real
+ * ~/.ax and ~/.claude.
  */
-describe("ax hooks init/install (issue #564 - compiled binary)", () => {
+describe("ax hooks init/install on a compiled binary (issue #573)", () => {
     const compiledBin = process.env.AX_E2E_COMPILED_BIN;
+    const enabled = !!compiledBin && e2eDb;
 
-    test.skipIf(!compiledBin)(
-        "init prints the source-checkout fallback and exits non-zero (not SdkPathNotFoundError)",
-        () => {
-            const cli = spawnSync(compiledBin!, ["hooks", "init"], { encoding: "utf-8" });
-            expect(cli.status).not.toBe(0);
-            const out = `${cli.stdout}${cli.stderr}`;
-            expect(out).toContain("SDK (TypeScript) hooks need a source checkout");
-            expect(out).toContain("git clone https://github.com/Necmttn/ax");
-            expect(out).not.toContain("SdkPathNotFoundError");
-        },
-    );
+    const runBin = (home: string, ...args: string[]) =>
+        spawnSync(compiledBin!, args, {
+            encoding: "utf-8",
+            env: { ...process.env, HOME: home },
+        });
 
-    test.skipIf(!compiledBin)(
-        "install prints the fallback and exits non-zero (not SdkHookImportError)",
-        () => {
-            const cli = spawnSync(
-                compiledBin!,
-                ["hooks", "install", "/tmp/whatever.ts", "--providers=claude"],
-                { encoding: "utf-8" },
-            );
-            expect(cli.status).not.toBe(0);
-            const out = `${cli.stdout}${cli.stderr}`;
-            expect(out).toContain("SDK (TypeScript) hooks need a source checkout");
-            expect(out).not.toContain("SdkHookImportError");
-        },
-    );
+    const initHome = (): string => {
+        const home = mkdtempSync(join(tmpdir(), "ax-bin-home-"));
+        const cli = runBin(home, "hooks", "init");
+        expect(cli.status).toBe(0);
+        return home;
+    };
+
+    test.skipIf(!enabled)("init writes standalone bundled .js hooks and exits 0", () => {
+        const home = mkdtempSync(join(tmpdir(), "ax-bin-home-"));
+        const cli = runBin(home, "hooks", "init");
+        expect(cli.status).toBe(0);
+        const out = `${cli.stdout}${cli.stderr}`;
+        expect(out).toContain("bundled hooks for the compiled binary");
+        expect(out).not.toContain("SdkPathNotFoundError");
+        const rd = join(home, ".ax/hooks/route-dispatch.js");
+        expect(existsSync(rd)).toBe(true);
+        // standalone bundle = effect inlined, NOT the thin `.ts` wrapper that
+        // imports the (absent) @ax/hooks-sdk workspace
+        expect(readFileSync(rd, "utf8")).not.toContain('from "@ax/hooks-sdk');
+    });
+
+    test.skipIf(!enabled)("a written hook fires standalone via bun (offline, exit 0)", () => {
+        const home = initHome();
+        const rd = join(home, ".ax/hooks/route-dispatch.js");
+        const fired = spawnSync("bun", [rd], {
+            encoding: "utf-8",
+            input: JSON.stringify({ tool_name: "Agent", tool_input: { description: "map the repo" } }),
+        });
+        // defects fail OPEN, and a quiet hook emits nothing - the contract here
+        // is just "runs to a clean exit with no node_modules present".
+        expect(fired.status).toBe(0);
+    });
+
+    test.skipIf(!enabled)("install registers a bundled hook (binary imports the .js for meta)", () => {
+        const home = initHome();
+        const rd = join(home, ".ax/hooks/route-dispatch.js");
+        const cli = runBin(home, "hooks", "install", rd, "--providers=claude");
+        expect(cli.status).toBe(0);
+        const out = `${cli.stdout}${cli.stderr}`;
+        expect(out).toContain("installed claude PreToolUse");
+        expect(out).not.toContain("SdkHookImportError");
+        expect(readFileSync(join(home, ".claude/settings.json"), "utf8")).toContain("route-dispatch.js");
+    });
 });
