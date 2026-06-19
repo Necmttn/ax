@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import {
+    spanEnd,
+    spanEvent,
+    spanStart,
+    traceEnd,
+    type SpanEvent,
+    type SpanStart,
+} from "@ax/lib/live-traces/types";
 import { ingestStreamEventFromTrace, type IngestStreamEvent } from "./stream-events.ts";
 
 describe("ingest stream events", () => {
     test("maps a SpanStart to a stage-started event", () => {
         const ev = ingestStreamEventFromTrace(
-            { _tag: "SpanStart", traceId: "ingest:run123", spanId: "s1", name: "skills" } as never,
+            spanStart("ingest:run123", "s1", "skills"),
             { spanNames: new Map() },
         );
         expect(ev).toEqual({ kind: "stage_started", runId: "run123", stage: "skills" } as IngestStreamEvent);
@@ -13,7 +21,7 @@ describe("ingest stream events", () => {
     test("maps a SpanEnd (ok) to a stage-finished event with status", () => {
         const names = new Map([["s1", "skills"]]);
         const ev = ingestStreamEventFromTrace(
-            { _tag: "SpanEnd", traceId: "ingest:run123", spanId: "s1", status: "ok", durationMs: 12 } as never,
+            spanEnd("ingest:run123", "s1", "ok", 12),
             { spanNames: names },
         );
         expect(ev).toEqual({ kind: "stage_finished", runId: "run123", stage: "skills", status: "ok", durationMs: 12 });
@@ -21,14 +29,14 @@ describe("ingest stream events", () => {
 
     test("maps TraceEnd to run_finished", () => {
         const ev = ingestStreamEventFromTrace(
-            { _tag: "TraceEnd", traceId: "ingest:run123", status: "completed", durationMs: 99 } as never,
+            traceEnd("ingest:run123", "completed", 99),
             { spanNames: new Map() },
         );
         expect(ev).toEqual({ kind: "run_finished", runId: "run123", status: "completed", durationMs: 99 });
     });
 
     test("returns null for unrelated events", () => {
-        expect(ingestStreamEventFromTrace({ _tag: "SpanEvent", traceId: "ingest:x", spanId: "s", name: "n" } as never, { spanNames: new Map() })).toBeNull();
+        expect(ingestStreamEventFromTrace(spanEvent("ingest:x", "s", "n"), { spanNames: new Map() })).toBeNull();
     });
 
     test("maps an attribute:ingest.fileFailures SpanEvent to stage_file_failures, keyed to the stage span", () => {
@@ -38,13 +46,7 @@ describe("ingest stream events", () => {
             failures: [{ filePath: "/p/a.jsonl", tag: "DbError", message: "boom" }],
         };
         const ev = ingestStreamEventFromTrace(
-            {
-                _tag: "SpanEvent",
-                traceId: "ingest:run123",
-                spanId: "s1",
-                name: "attribute:ingest.fileFailures",
-                attributes: { value: JSON.stringify(snapshot) },
-            } as never,
+            spanEvent("ingest:run123", "s1", "attribute:ingest.fileFailures", undefined, { value: JSON.stringify(snapshot) }),
             { spanNames: names },
         );
         expect(ev).toEqual({
@@ -67,17 +69,24 @@ describe("ingest stream events", () => {
         ];
         for (const value of cases) {
             const ev = ingestStreamEventFromTrace(
-                {
-                    _tag: "SpanEvent",
-                    traceId: "ingest:run123",
-                    spanId: "s1",
-                    name: "attribute:ingest.fileFailures",
-                    attributes: { value },
-                } as never,
+                spanEvent("ingest:run123", "s1", "attribute:ingest.fileFailures", undefined, { value }),
                 { spanNames: new Map([["s1", "claude"]]) },
             );
             expect(ev).toBeNull();
         }
+    });
+
+    test("drops fileFailures payloads whose failure entries do not match the shared schema", () => {
+        const ev = ingestStreamEventFromTrace(
+            spanEvent("ingest:run123", "s1", "attribute:ingest.fileFailures", undefined, {
+                value: JSON.stringify({
+                    total: 2,
+                    failures: [{ filePath: "/p/a.jsonl", tag: "DbError", message: 42 }],
+                }),
+            }),
+            { spanNames: new Map([["s1", "claude"]]) },
+        );
+        expect(ev).toBeNull();
     });
 
     test("emits stage_progress once current + total are both known, with rate + eta", () => {
@@ -87,19 +96,43 @@ describe("ingest stream events", () => {
             spanCounts: new Map<string, Record<string, number>>(),
             index: { started: 0 },
         };
+        const start: SpanStart = {
+            _tag: "SpanStart",
+            traceId: "ingest:r",
+            spanId: "s1",
+            name: "claude/transcripts",
+            attributes: {},
+            timestamp: 1000,
+        };
         ingestStreamEventFromTrace(
-            { _tag: "SpanStart", traceId: "ingest:r", spanId: "s1", name: "claude/transcripts", timestamp: 1000 } as never,
+            start,
             ctx,
         );
         // Total only -> not yet determinate -> null.
+        const total: SpanEvent = {
+            _tag: "SpanEvent",
+            traceId: "ingest:r",
+            spanId: "s1",
+            name: "attribute:ingest.count.totalFiles",
+            attributes: { value: 200 },
+            timestamp: 1000,
+        };
         const partial = ingestStreamEventFromTrace(
-            { _tag: "SpanEvent", traceId: "ingest:r", spanId: "s1", name: "attribute:ingest.count.totalFiles", attributes: { value: 200 }, timestamp: 1000 } as never,
+            total,
             ctx,
         );
         expect(partial).toBeNull();
         // Now current arrives 5s in -> 50/200 @ 10/s, 150 left -> 15s.
+        const current: SpanEvent = {
+            _tag: "SpanEvent",
+            traceId: "ingest:r",
+            spanId: "s1",
+            name: "attribute:ingest.count.currentFile",
+            attributes: { value: 50 },
+            timestamp: 6000,
+        };
         const ev = ingestStreamEventFromTrace(
-            { _tag: "SpanEvent", traceId: "ingest:r", spanId: "s1", name: "attribute:ingest.count.currentFile", attributes: { value: 50 }, timestamp: 6000 } as never,
+            current,
             ctx,
         );
         expect(ev).toMatchObject({ kind: "stage_progress", stage: "claude/transcripts", current: 50, total: 200, stageIndex: 1 });

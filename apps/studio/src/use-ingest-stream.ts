@@ -1,6 +1,11 @@
 import { useEffect, useReducer } from "react";
 import { stream, type StreamResponse } from "@durable-streams/client";
-import type { IngestFileFailure, IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
+import { Option } from "effect";
+import {
+    decodeIngestStreamEventOption,
+    type IngestFileFailure,
+    type IngestStreamEvent,
+} from "@ax/lib/shared/ingest-stream-events";
 
 /**
  * Live ingest view over Durable Streams.
@@ -67,6 +72,27 @@ type Action =
     | { readonly type: "reset" }
     | { readonly type: "event"; readonly event: IngestStreamEvent; readonly offset?: string }
     | { readonly type: "error"; readonly message: string };
+
+export interface DecodedStreamItems {
+    readonly events: ReadonlyArray<IngestStreamEvent>;
+    readonly invalidCount: number;
+}
+
+export function decodeStreamItems(items: ReadonlyArray<unknown>): DecodedStreamItems {
+    const events: IngestStreamEvent[] = [];
+    let invalidCount = 0;
+    for (const item of items) {
+        Option.match(decodeIngestStreamEventOption(item), {
+            onSome: (event) => {
+                events.push(event);
+            },
+            onNone: () => {
+                invalidCount += 1;
+            },
+        });
+    }
+    return { events, invalidCount };
+}
 
 /** Fold one ingest event into state. Idempotent: re-applying a finished stage
  *  (or a duplicate run_started) leaves state unchanged. Exported for tests. */
@@ -167,12 +193,12 @@ export function useIngestStream(streamUrl: string | null): IngestStreamState {
         let receivedAny = false;
         const controller = new AbortController();
         let unsubscribe: (() => void) | null = null;
-        let session: StreamResponse<IngestStreamEvent> | null = null;
+        let session: StreamResponse<unknown> | null = null;
 
         (async () => {
             try {
                 // Default offset ("-1") => replay from start, then live deltas.
-                const res = await stream<IngestStreamEvent>({
+                const res = await stream<unknown>({
                     url: streamUrl,
                     live: true,
                     signal: controller.signal,
@@ -200,7 +226,14 @@ export function useIngestStream(streamUrl: string | null): IngestStreamState {
                 unsubscribe = res.subscribeJson((batch) => {
                     if (cancelled) return;
                     if (batch.items.length > 0) receivedAny = true;
-                    for (const event of batch.items) {
+                    const decoded = decodeStreamItems(batch.items);
+                    if (decoded.invalidCount > 0) {
+                        dispatch({
+                            type: "error",
+                            message: `received ${decoded.invalidCount} invalid ingest stream event${decoded.invalidCount === 1 ? "" : "s"}`,
+                        });
+                    }
+                    for (const event of decoded.events) {
                         dispatch({ type: "event", event, offset: batch.offset });
                     }
                 });

@@ -8,8 +8,9 @@
  *
  * Migration is strangler-style, one route family at a time; endpoints not
  * yet listed here are still served by the legacy route table. SSE
- * /api/events and binary /api/image stay OUTSIDE the contract permanently
- * (streaming/binary shapes that don't fit HttpApi).
+ * /api/events, Durable Stream tails returned by /api/ingest, and binary
+ * /api/image stay outside HttpApi routing. Live-ingest stream event payloads
+ * are still schema-typed separately in @ax/lib/shared/ingest-stream-events.
  *
  * This module must stay daemon-agnostic: no imports from apps/* (the studio
  * bundles it for the browser).
@@ -1021,8 +1022,9 @@ export class IngestTriggerResult extends Schema.Class<IngestTriggerResult>("ax/I
 }) {}
 
 /**
- * The live family's JSON endpoint. SSE /api/events and binary /api/image
- * stay OUTSIDE the contract permanently (module doc above).
+ * The live family's JSON trigger endpoint. The returned Durable Stream URL is
+ * not an HttpApi route, but its event payload is schema-typed in
+ * @ax/lib/shared/ingest-stream-events.
  */
 export const LiveGroup = HttpApiGroup.make("live")
     .add(
