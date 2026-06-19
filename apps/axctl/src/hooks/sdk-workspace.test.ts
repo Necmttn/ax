@@ -6,6 +6,7 @@ import { Effect, Layer, FileSystem, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     scaffoldWorkspace,
+    scaffoldFromEmbed,
     isCompiledBinary,
     COMPILED_BINARY_SDK_HOOK_HELP,
 } from "./sdk-workspace.ts";
@@ -126,6 +127,67 @@ describe("scaffoldWorkspace", () => {
         const dir = join(base, "nested", "hooks");
         await run(scaffoldWorkspace({ dir, sdkPath: "/sdk", install: false }));
         expect(existsSync(join(dir, "package.json"))).toBe(true);
+    });
+});
+
+describe("scaffoldFromEmbed", () => {
+    // Build a fake embed map by writing "bundle" files to a source dir and
+    // mapping guard -> their paths (Bun.file reads real disk paths here, just
+    // like it reads /$bunfs paths in the compiled binary).
+    const fakeEmbed = (): { embed: Record<string, string>; bodies: Record<string, string> } => {
+        const src = mk();
+        const bodies: Record<string, string> = {
+            "route-dispatch": "// bundled route-dispatch\nexport default { name: 'route-dispatch' };\n",
+            "enforce-worktree": "// bundled enforce-worktree\nexport default { name: 'enforce-worktree' };\n",
+        };
+        const embed: Record<string, string> = {};
+        for (const [guard, body] of Object.entries(bodies)) {
+            const p = join(src, `${guard}.bundle.js`);
+            writeFileSync(p, body);
+            embed[guard] = p;
+        }
+        return { embed, bodies };
+    };
+
+    test("writes each embedded hook to <dir>/<guard>.js with the bundle bytes", async () => {
+        const { embed, bodies } = fakeEmbed();
+        const dir = join(mk(), "hooks");
+        const written = await run(scaffoldFromEmbed(embed, dir));
+
+        for (const [guard, body] of Object.entries(bodies)) {
+            const dest = join(dir, `${guard}.js`);
+            expect(existsSync(dest)).toBe(true);
+            expect(readFileSync(dest, "utf8")).toBe(body);
+            expect(written).toContain(dest);
+        }
+        expect(written.length).toBe(Object.keys(bodies).length);
+    });
+
+    test("does not overwrite an existing hook (preserves user edits)", async () => {
+        const { embed } = fakeEmbed();
+        const dir = mk();
+        const rdPath = join(dir, "route-dispatch.js");
+        writeFileSync(rdPath, "// user edited\n");
+
+        const written = await run(scaffoldFromEmbed(embed, dir));
+
+        expect(readFileSync(rdPath, "utf8")).toBe("// user edited\n");
+        expect(written).not.toContain(rdPath);
+        // the other hook still gets written
+        expect(existsSync(join(dir, "enforce-worktree.js"))).toBe(true);
+    });
+
+    test("creates the target dir if missing", async () => {
+        const { embed } = fakeEmbed();
+        const dir = join(mk(), "nested", "hooks");
+        await run(scaffoldFromEmbed(embed, dir));
+        expect(existsSync(join(dir, "route-dispatch.js"))).toBe(true);
+    });
+
+    test("empty embed map writes nothing", async () => {
+        const dir = mk();
+        const written = await run(scaffoldFromEmbed({}, dir));
+        expect(written).toEqual([]);
     });
 });
 

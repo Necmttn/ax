@@ -2,6 +2,7 @@ import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { Schema } from "effect";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
+import { GUARD_NAMES, starterHookContent } from "./guard-names.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -100,18 +101,6 @@ export interface ScaffoldOptions {
     readonly install: boolean;
 }
 
-const GUARD_NAMES = [
-    "enforce-worktree",
-    "enforce-worktree-write",
-    // Claude-only: suggests cheaper model when Agent dispatch has no explicit model set.
-    // Codex has no Agent-tool dispatch equivalent; this hook is a no-op there.
-    "route-dispatch",
-    // Claude-only: fires at SessionStart to refresh the quota cache and inject a
-    // /dojo nudge when the spend mode is splurge (quota budget resets soon).
-    // Codex has no SessionStart equivalent; harmless to scaffold but won't fire.
-    "refresh-quota",
-] as const;
-
 const packageJsonContent = (sdkPath: string): string =>
     `${JSON.stringify(
         {
@@ -125,9 +114,6 @@ const packageJsonContent = (sdkPath: string): string =>
         null,
         2,
     )}\n`;
-
-const starterHookContent = (guardName: string): string =>
-    `import hook from "@ax/hooks-sdk/hooks/${guardName}";\nimport { runMain } from "@ax/hooks-sdk/define";\n\nexport default hook;\nif (import.meta.main) void runMain(hook);\n`;
 
 /**
  * Scaffold a hook workspace at `dir`:
@@ -200,5 +186,44 @@ export const scaffoldWorkspace = (
             });
         }
 
+        return written;
+    });
+
+// ---------------------------------------------------------------------------
+// scaffoldFromEmbed (compiled-binary path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compiled-binary scaffold: write each embedded, pre-bundled standalone hook to
+ * `<dir>/<guard>.js` (only if absent - never clobber user edits). No
+ * package.json and no `bun install`: the bundles inline effect, so they fire as
+ * `bun <file>.js` with no node_modules. `embed` is `HOOKS_EMBED` (key = guard
+ * name, value = the `/$bunfs` path baked in by gen-hooks-embed.ts); passed in so
+ * the function stays unit-testable with a fixture map.
+ *
+ * Returns the list of `.js` paths newly written.
+ */
+export const scaffoldFromEmbed = (
+    embed: Record<string, string>,
+    dir: string,
+): Effect.Effect<ReadonlyArray<string>, PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+
+        yield* fs.makeDirectory(dir, { recursive: true });
+
+        const written: string[] = [];
+        for (const [guard, embeddedPath] of Object.entries(embed)) {
+            const dest = pathSvc.join(dir, `${guard}.js`);
+            const exists = yield* fs.exists(dest);
+            if (exists) continue;
+            // Bun.file reads both real disk files (tests) and embedded /$bunfs
+            // paths (compiled binary). The read is infallible by construction
+            // (the path comes from the embed map the binary baked in).
+            const content = yield* Effect.promise(() => Bun.file(embeddedPath).text());
+            yield* writeFileAtomic(dest, content, { backup: false });
+            written.push(dest);
+        }
         return written;
     });

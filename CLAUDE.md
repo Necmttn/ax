@@ -320,14 +320,27 @@ default-exporting `defineHook({ name, events, matcher, run })`; fire path is
 `bun <file>.ts` (no axctl in the hot path; ~70ms). Verdicts: allow / block /
 warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
 
-- SDK hooks are **source-checkout only** - they run as `bun <file>` against the
-  packages/hooks-sdk workspace, which a compiled binary doesn't bundle. On a
-  compiled binary `ax hooks init`/`install` print a fallback-path message
-  (`isCompiledBinary()` / `COMPILED_BINARY_SDK_HOOK_HELP`) instead of dead-ending
-  on the internal `SdkPathNotFoundError` (#564); native (non-SDK) `ax hooks add`
-  still works there.
-- `ax hooks init` - scaffold `~/.ax/hooks` (file: dep on packages/hooks-sdk;
-  re-run after the SDK moves - the dep is an absolute path)
+- **Two scaffold paths by build (`isCompiledBinary()` = running inside `/$bunfs`):**
+  - *Source checkout*: `ax hooks init` writes editable `.ts` hooks + a
+    `package.json` with a `file:` dep on packages/hooks-sdk, then `bun install`.
+    Hooks fire as `bun <file>.ts` against the workspace.
+  - *Compiled binary*: no source tree to `file:`-dep, so the binary embeds a
+    **pre-bundled standalone `.js` per guard** (effect inlined) via codegen -
+    `scripts/gen-hooks-embed.ts` mirrors `gen-studio-embed.ts`: bundles each
+    starter hook to `apps/axctl/.hooks-embed-build/<guard>.js`, rewrites
+    `hooks-embed.gen.ts` with `{ type: "file" }` imports, build-axctl.ts compiles
+    then restores the committed empty stub. `ax hooks init` writes those bundles
+    to `~/.ax/hooks/*.js` (no package.json, no `bun install`); they fire as
+    `bun <file>.js` offline. (#573, follow-up to #564.) Both still require `bun`
+    on PATH. `@ax` npm scope is taken, so embedding beats publishing.
+- `GUARD_NAMES` + the starter wrapper live in the dep-free `guard-names.ts`
+  (shared by the runtime scaffolder and the build-time bundler).
+- `ax hooks install <file>` works on **both** builds: a compiled binary can
+  dynamically import the self-contained `.js` bundle to read its meta. A missing
+  file fails with `SdkHookFileNotFoundError` (#564); native (non-SDK)
+  `ax hooks add` works everywhere.
+- `ax hooks init` - scaffold `~/.ax/hooks` (source: `file:` dep on
+  packages/hooks-sdk, re-run after the SDK moves; binary: writes embedded bundles)
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
