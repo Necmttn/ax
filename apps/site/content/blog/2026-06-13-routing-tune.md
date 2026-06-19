@@ -80,11 +80,21 @@ So I built the loop that finds it and closes it. ax is free, open source, and lo
 
 ## The three-minute version
 
-If you only do three things:
-
-1. **Measure whether helpers are a real part of your bill.** Install ax, ingest 30 days, run `ax cost split` and `ax dispatches`. If the helper spend is noise, stop here - you're done.
-2. **See which expensive helper runs could've used a cheaper model.** `ax dispatches --candidates --days=30` puts a dollar figure on it. Mine was $605/month.
-3. **If that number's worth it, install the hook** that nudges future helper tasks onto the cheaper tier. Today that auto-advice runs on Claude Code only - ax still *measures* the leak on Codex, Cursor, OpenCode and Pi, you just steer it by hand there for now.
+<ActionList eyebrow="Do this now · 3 commands" title="If you only do three things">
+  <ActionItem title="Measure whether helpers are a real part of your bill." cmd={`curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | sh
+ax ingest --since=30
+ax cost split && ax dispatches`}>
+    Install ax, ingest 30 days, read the split. If the helper spend is noise, stop here - you're done.
+  </ActionItem>
+  <ActionItem title="See which expensive helper runs could've used a cheaper model." cmd="ax dispatches --candidates --days=30">
+    Puts a dollar figure on it. Mine was $605/month.
+  </ActionItem>
+  <ActionItem title="If that number's worth it, install the hook that routes future helpers cheaper." cmd={`ax hooks init
+ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude
+npx skills add Necmttn/ax`}>
+    Today that auto-advice runs on Claude Code only - ax still *measures* the leak on Codex, Cursor, OpenCode and Pi, you just steer it by hand there for now.
+  </ActionItem>
+</ActionList>
 
 That's the whole loop. Everything below is the deep version for people who want to tune it hard - 17 rules across measure, tune, operate, and adapt. Skim the headings; dive where it matters.
 
