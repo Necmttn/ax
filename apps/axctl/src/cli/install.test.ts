@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+    agentDoctorCheck,
+    dbPortConflict,
     findDesktopApp,
     formatDaemonStatus,
     formatDoctorReport,
@@ -10,6 +12,45 @@ import {
     type DaemonStatus,
     type DoctorReport,
 } from "./install.ts";
+
+describe("dbPortConflict (IDE-model helper is not a foreign conflict, #568)", () => {
+    const holder = { pid: 9473, command: "/Users/x/result/bin/surreal start --bind 127.0.0.1:8521" };
+    test("no holder → no conflict", () => {
+        expect(dbPortConflict(null, null, false)).toBeNull();
+    });
+    test("our own launchd ax-db pid → no conflict", () => {
+        expect(dbPortConflict(holder, 9473, false)).toBeNull();
+    });
+    test("foreign holder (non-IDE) → conflict", () => {
+        expect(dbPortConflict(holder, 123, false)).toEqual(holder);
+    });
+    test("IDE model + surreal holder → suppressed (app helper owns the port)", () => {
+        expect(dbPortConflict(holder, null, true)).toBeNull();
+    });
+    test("IDE model + non-surreal holder → still a conflict", () => {
+        const other = { pid: 4242, command: "other-db" };
+        expect(dbPortConflict(other, null, true)).toEqual(other);
+    });
+});
+
+describe("agentDoctorCheck (absent LaunchAgents are OK in IDE model, #568)", () => {
+    const absent = { label: "com.necmttn.ax-watch", plist: "/tmp/w.plist", plistExists: false, loaded: false, pid: null };
+    test("non-IDE macOS: absent agent → not ok", () => {
+        const c = agentDoctorCheck(absent, false, true);
+        expect(c.ok).toBe(false);
+        expect(c.detail).toContain("not loaded");
+    });
+    test("IDE model: absent agent → ok, owned by app", () => {
+        const c = agentDoctorCheck(absent, true, true);
+        expect(c.ok).toBe(true);
+        expect(c.detail).toContain("ax studio app");
+    });
+    test("loaded agent → ok in either model", () => {
+        const loaded = { label: "com.necmttn.ax-db", plist: "/tmp/db.plist", plistExists: true, loaded: true, pid: 1 };
+        expect(agentDoctorCheck(loaded, false, true).ok).toBe(true);
+        expect(agentDoctorCheck(loaded, true, true).ok).toBe(true);
+    });
+});
 
 describe("findDesktopApp (desktop owns the daemon → CLI skips LaunchAgents)", () => {
     const candidates = [
@@ -85,6 +126,7 @@ describe("cli install operations", () => {
                 conflict: null,
                 runtimeStatePath: "/tmp/ax/runtime.json",
             },
+            ideModel: false,
             agents: [
                 {
                     label: "com.necmttn.ax-db",
@@ -122,9 +164,35 @@ describe("cli install operations", () => {
                 conflict: { pid: 4242, command: "other-db" },
                 runtimeStatePath: "/tmp/ax/runtime.json",
             },
+            ideModel: false,
             agents: [],
         };
         expect(formatDaemonStatus(status)).toContain("conflict: port 8521 held by pid=4242 (other-db)");
+    });
+
+    test("IDE model: daemon status notes app ownership, no conflict warning", () => {
+        const status: DaemonStatus = {
+            platform: "darwin",
+            macosLaunchd: true,
+            dataDir: "/tmp/ax",
+            logDir: "/tmp/ax/logs",
+            dbListening: true,
+            endpoint: {
+                host: "127.0.0.1",
+                port: 8521,
+                url: "ws://127.0.0.1:8521",
+                listening: true,
+                conflict: null, // suppressed in IDE model (app helper owns the port)
+                runtimeStatePath: "/tmp/ax/runtime.json",
+            },
+            ideModel: true,
+            agents: [
+                { label: "com.necmttn.ax-db", plist: "/tmp/db.plist", plistExists: false, loaded: false, pid: null },
+            ],
+        };
+        const text = formatDaemonStatus(status);
+        expect(text).toContain("model: IDE");
+        expect(text).not.toContain("conflict: port");
     });
 
     test("formats doctor checks", () => {
