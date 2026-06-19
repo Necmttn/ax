@@ -45,6 +45,9 @@ axctl dispatches [--candidates] [--economy] # subagent dispatch routing analytic
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
 axctl routing show                          # effective routing table with class origins
+axctl routing impact begin --arm=off|on     # start an A/B work block (snapshots the 5h plan window)
+axctl routing impact end                     # close the open block
+axctl routing impact report [--share]       # routing off-vs-on receipt, per 5h plan window
 axctl profile show [--window=N] [--no-cost] # local profile: stats + rig + taste from the graph
 axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards for the dashboard landing
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]

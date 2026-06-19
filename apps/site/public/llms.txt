@@ -33,6 +33,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax routing tune` - mine the user's own dispatch history for new routing classes; judgment work is never auto-routed (vetted via --emit-brief agent backtest)
 - `ax routing compile` - regenerate the routing table that drives the route-dispatch hook and the efficient-dispatch skill, preserving user-mined classes (`ax dispatches compile-routing` is an alias)
 - `ax routing show` - effective routing table with class origins
+- `ax routing impact begin|end|report` - forward A/B receipt: snapshot the 5h plan window at the start/end of a routing-off block and a routing-on block, then `report` shows work-per-window off vs on (the "1.Nx more work per $200 window" proof). `report --share` appends the ax plug
 - `efficient-dispatch` skill - orchestration pattern: the main model keeps judgment and review, mechanical dispatches carry an explicit cheaper model
 - `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
 - `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
