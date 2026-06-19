@@ -64,7 +64,13 @@ interface RoutabilityResult {
 // Formatters
 // ---------------------------------------------------------------------------
 
-const fmt = (n: number) => `$${n.toFixed(4)}`;
+const fmt = (n: number) =>
+  n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 // ---------------------------------------------------------------------------
