@@ -17,6 +17,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { normalizeModelName } from "../ingest/model-pricing.ts";
+import { CODEX_SOURCES_SQL } from "../ingest/source-origin.ts";
 import { fetchSparSessionIds } from "./spar-sessions.ts";
 
 // ---------------------------------------------------------------------------
@@ -120,7 +121,7 @@ SELECT
     math::sum(reasoning_output_tokens ?? 0) AS reasoning_tokens,
     math::sum(completion_tokens ?? 0) AS completion_tokens
 FROM session_token_usage
-WHERE source = 'codex'
+WHERE source IN ${CODEX_SOURCES_SQL}
   AND ts > time::now() - ${days(sinceDays)}d
 GROUP BY model;
 `;

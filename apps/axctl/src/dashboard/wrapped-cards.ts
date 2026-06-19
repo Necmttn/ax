@@ -29,6 +29,12 @@ export type PublishInput = typeof PublishInputSchema.Type;
 
 const MAX_CARDS = 24;
 
+export class WrappedPublishInputError extends Schema.TaggedErrorClass<WrappedPublishInputError>(
+    "WrappedPublishInputError",
+)("WrappedPublishInputError", {
+    message: Schema.String,
+}) {}
+
 const CARDS_SQL = `SELECT question, headline, body, sensitivity, position, series, series_label FROM wrapped_card ORDER BY position ASC;`;
 
 export const fetchWrappedCards = Effect.fn("dashboard.fetchWrappedCards")(
@@ -69,12 +75,12 @@ export const runPublishCards = Effect.fn("dashboard.runPublishCards")(function* 
 ) {
     const input = yield* Schema.decodeUnknownEffect(PublishInputSchema)(raw);
     if (input.cards.length === 0) {
-        return yield* Effect.fail(new Error("publish needs at least 1 card"));
+        return yield* new WrappedPublishInputError({ message: "publish needs at least 1 card" });
     }
     if (input.cards.length > MAX_CARDS) {
-        return yield* Effect.fail(
-            new Error(`publish accepts at most ${MAX_CARDS} cards (got ${input.cards.length})`),
-        );
+        return yield* new WrappedPublishInputError({
+            message: `publish accepts at most ${MAX_CARDS} cards (got ${input.cards.length})`,
+        });
     }
     const db = yield* SurrealClient;
     for (const stmt of buildPublishStatements(input)) {

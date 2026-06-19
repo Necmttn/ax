@@ -11,6 +11,7 @@ import {
     loadHookMeta,
     filterAlreadyInstalled,
     installHookFile,
+    SdkHookFileNotFoundError,
     SdkHookImportError,
     SdkHookValidationError,
 } from "./sdk-install.ts";
@@ -254,6 +255,18 @@ describe("installHookFile", () => {
         );
         return file;
     };
+
+    test("fails with SdkHookFileNotFoundError (not SdkHookImportError) when the file is missing", async () => {
+        const missing = join(mk(), "does-not-exist.ts");
+        const err = await runFull(
+            installHookFile(missing, ["claude"], "global")
+                .pipe(Effect.flip, Effect.provide(fullLayer)) as Effect.Effect<unknown, never, never>,
+        );
+        expect(err).toBeInstanceOf(SdkHookFileNotFoundError);
+        expect(err).not.toBeInstanceOf(SdkHookImportError);
+        expect((err as SdkHookFileNotFoundError).file).toBe(missing);
+        expect((err as SdkHookFileNotFoundError).reason).toContain("file not found");
+    });
 
     test("fails with SdkHookValidationError when the path is not absolute", async () => {
         const err = await runFull(

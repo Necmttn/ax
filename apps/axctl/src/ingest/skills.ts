@@ -269,7 +269,7 @@ export const ingestSkills = (): Effect.Effect<
                         name: SkillName.make(item.skill.name),
                         scope: item.scope,
                         dir_path: item.dir_path,
-                        description: item.skill.description ?? null,
+                        description: item.skill.description,
                         content_hash: hash,
                         bytes: item.bytes,
                     });

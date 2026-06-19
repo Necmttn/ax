@@ -38,12 +38,14 @@ import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
+import { deriveDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
     readonly guidanceProposals: number;
     readonly routingProposals: number;
     readonly imageContextProposals: number;
+    readonly directiveProposals: number;
     readonly skipped: number;
 }
 
@@ -105,6 +107,75 @@ const defaultGuidanceTargetFor = (layer: string): string => {
     // The user can move them; this is just a hint for the scaffold.
     if (layer === "boundary" || layer === "verification") return "CLAUDE.md";
     return "AGENTS.md";
+};
+
+// ---------------------------------------------------------------------------
+// Directive proposals (form='guidance') - v1 MVP of directive mining.
+// Proactive standing-instruction user turns (detector in directives.ts) become
+// guidance proposals via the existing pipeline. Recurrence = how many times the
+// user restated the same directive (the frequency the verdict layer measures).
+// Spec: docs/superpowers/specs/2026-06-17-directive-mining-design.md §0.1.
+// ---------------------------------------------------------------------------
+
+const DIRECTIVE_TITLE_MAX = 90;
+const DIRECTIVE_PROPOSAL_LIMIT = 12;
+
+const directiveTitle = (text: string): string => {
+    const oneLine = text.replace(/\s+/g, " ").trim();
+    const clipped = oneLine.length > DIRECTIVE_TITLE_MAX
+        ? `${oneLine.slice(0, DIRECTIVE_TITLE_MAX - 1)}…`
+        : oneLine;
+    return `Directive: ${clipped}`;
+};
+
+export const deriveDirectiveProposalRows = (
+    candidates: ReadonlyArray<DirectiveCandidate>,
+    opts: { readonly minFrequency?: number; readonly limit?: number } = {},
+): { readonly rows: GuidanceProposalRow[]; readonly skipped: number } => {
+    const minFrequency = opts.minFrequency ?? 1;
+    const limit = opts.limit ?? DIRECTIVE_PROPOSAL_LIMIT;
+
+    // Group by normalized title so an identically-worded directive restated
+    // across turns/sessions accumulates frequency (the recurrence signal).
+    const groups = new Map<string, {
+        title: string; pattern: string; freq: number; lastTs: string; turnKeys: string[];
+    }>();
+    for (const c of candidates) {
+        const title = directiveTitle(c.text);
+        const key = normalizeTitle(title);
+        const g = groups.get(key);
+        if (g) {
+            g.freq += 1;
+            if (c.ts > g.lastTs) g.lastTs = c.ts;
+            if (g.turnKeys.length < 5) g.turnKeys.push(c.turnKey);
+        } else {
+            groups.set(key, { title, pattern: c.pattern, freq: 1, lastTs: c.ts, turnKeys: [c.turnKey] });
+        }
+    }
+
+    let skipped = 0;
+    const rows: GuidanceProposalRow[] = [];
+    for (const g of groups.values()) {
+        if (g.freq < minFrequency) { skipped += 1; continue; }
+        const sig = dedupeSig("guidance", normalizeTitle(g.title));
+        rows.push({
+            proposalKey: proposalKeyFor("guidance", g.title, sig),
+            title: g.title,
+            hypothesis:
+                `Stated as a standing instruction ${g.freq}× (marker: "${g.pattern}"). ` +
+                `Codify it in your agent guidance so it's applied without being restated.`,
+            fileTarget: "CLAUDE.md",
+            section: "directives",
+            suggestedText: g.title.replace(/^Directive:\s*/, ""),
+            confidence: g.freq >= 3 ? "high" : g.freq >= 2 ? "medium" : "low",
+            frequency: g.freq,
+            sig,
+            evidenceSummary: g.turnKeys.map((k) => `turn:${k}`),
+        });
+    }
+    // Strongest (most-restated, then most-recent) first; cap to avoid a firehose.
+    rows.sort((a, b) => b.frequency - a.frequency);
+    return { rows: rows.slice(0, limit), skipped };
 };
 
 export const buildGuidanceProposalStatements = (
@@ -615,13 +686,36 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             ? buildImageContextProposalStatements(imageContextRow, existingSigs)
             : [];
 
-        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts], { chunkSize: 500 });
+        // Directive proposals (form='guidance'): mine proactive standing
+        // instructions from user turns. Scoped to a fixed 90d window (not
+        // ctx.sinceDays) so cross-session recurrence is captured consistently
+        // whether this is a --since=1 watcher run or a full ingest. Tolerant:
+        // a query failure leaves the other proposal forms unaffected.
+        // Exclude claude-subagent-source turns: a subagent's first user turn is
+        // the dispatch PROMPT ("You are implementing ONE task..."), not a user
+        // directive - the other dominant false-positive class from the smoke.
+        const directiveTurns = yield* Effect.orElseSucceed(
+            db.query<[DirectiveTurnRow[]]>(`
+SELECT type::string(id) AS id, type::string(session) AS session, text_excerpt, type::string(ts) AS ts
+FROM turn
+WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
+  AND ts > time::now() - 90d AND session.source != "claude-subagent";`)
+                .pipe(Effect.map((rows) => rows?.[0] ?? [])),
+            () => [] as DirectiveTurnRow[],
+        );
+        const directiveCandidates = deriveDirectiveCandidates(directiveTurns);
+        const { rows: directiveRows, skipped: directiveSkipped } =
+            deriveDirectiveProposalRows(directiveCandidates);
+        const directiveStmts = buildGuidanceProposalStatements(directiveRows, existingSigs);
+
+        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts], { chunkSize: 500 });
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
             routingProposals: routingRow ? 1 : 0,
             imageContextProposals: imageContextRow ? 1 : 0,
-            skipped: skillSkipped + guidanceSkipped,
+            directiveProposals: directiveRows.length,
+            skipped: skillSkipped + guidanceSkipped + directiveSkipped,
         };
     });
 
@@ -654,6 +748,7 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     guidanceProposals: Schema.Number,
     routingProposals: Schema.Number,
     imageContextProposals: Schema.Number,
+    directiveProposals: Schema.Number,
 }) {}
 
 export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
@@ -665,11 +760,12 @@ export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessSer
             const result = yield* deriveProposals({ minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals`,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals`,
                 skillProposals: result.skillProposals,
                 guidanceProposals: result.guidanceProposals,
                 routingProposals: result.routingProposals,
                 imageContextProposals: result.imageContextProposals,
+                directiveProposals: result.directiveProposals,
             });
         }),
 };

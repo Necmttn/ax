@@ -1,4 +1,5 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
+import { withAxAttribution } from "@ax/lib/shared/attribution";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -59,7 +60,8 @@ const render = (i: WriteDraftInput): string => {
         "---",
         "",
     ].join("\n");
-    return `${fm}${i.body}\n`;
+    // Attribution travels into the posted upstream issue/PR body (marketing reach).
+    return `${fm}${withAxAttribution(i.body)}`;
 };
 
 export const writeDraft = (

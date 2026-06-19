@@ -110,6 +110,27 @@ const Workflow = Schema.Struct({
     arcs: Schema.Array(WorkflowArc),
 });
 
+export const Highlights = Schema.Struct({
+    authored_at: Schema.String,
+    setup: Schema.optional(Schema.Array(Schema.Struct({
+        title: Schema.String,
+        what: Schema.String,
+        why: Schema.String,
+        link: Schema.optional(Schema.String),
+    }))),
+    skills: Schema.optional(Schema.Array(Schema.Struct({
+        name: Schema.String,
+        source: Schema.String,
+        summary: Schema.String,
+    }))),
+    taste: Schema.optional(Schema.String),
+    wins: Schema.optional(Schema.Array(Schema.Struct({
+        text: Schema.String,
+        evidence: Schema.optional(Schema.String),
+    }))),
+});
+export type Highlights = typeof Highlights.Type;
+
 const DailyModelRow = Schema.Struct({
     name: Schema.String,
     tokens: Schema.Number,
@@ -170,6 +191,7 @@ export const ProfileV1 = Schema.Struct({
     activity: Schema.optional(Activity),
     insights: Schema.optional(Insights),
     workflow: Schema.optional(Workflow),
+    highlights: Schema.optional(Highlights),
 });
 export type ProfileV1 = typeof ProfileV1.Type;
 

@@ -10,6 +10,7 @@
  */
 import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { withAxAttribution } from "@ax/lib/shared/attribution";
 import {
     listProposalsCreatedSince,
     listVerdictsLockedSince,
@@ -62,7 +63,7 @@ export const renderReport = (data: ReportData): string => {
     if (data.notes.trim().length > 0) {
         blocks.push(`## Notes\n${data.notes}`);
     }
-    return `${blocks.join("\n\n")}\n`;
+    return withAxAttribution(blocks.join("\n\n"));
 };
 
 export interface GatherReportInput {

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type {
@@ -15,7 +16,6 @@ import { shortSessionId } from "@ax/lib/shared/session-id";
 import type { SessionTimelinePayload } from "../api.ts";
 import { FilesTouchedPanel } from "./files-touched-panel.tsx";
 import { isSessionNarration, type SessionNarration } from "./narration-types.ts";
-import { ReviewView } from "./review-view.tsx";
 import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 import { SessionTimelineBody } from "./session-timeline.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -29,11 +29,109 @@ type ShareViewMode = "transcript" | "timeline" | "review" | "story";
 // be fetched + parsed once, then served from cache on every navigation.
 const IMMUTABLE_SHARE_QUERY = { staleTime: Infinity, gcTime: Infinity } as const;
 
-// Mount only this many turns initially, then grow on scroll. content-visibility
-// virtualizes paint, but React still MOUNTS every turn + runs its per-turn
-// dissection up front - on a 291-turn session that's the multi-second hang.
-// Windowing the mount (like the live inspector's PAGE_SIZE) is the real fix.
-const SHARE_PAGE_SIZE = 80;
+// Keep first paint small, then use a wider scroll window. A thin virtual
+// window benchmarks well for End-key jumps but blanks during real fast scroll:
+// the viewport can land in a spacer before React mounts the next rows.
+const SHARE_INITIAL_WINDOW_SIZE = 80;
+const SHARE_SCROLL_WINDOW_SIZE = 160;
+const SHARE_RENDER_OVERSCAN = 12;
+const SHARE_ANCHOR_CONTEXT = 48;
+const SHARE_ESTIMATED_TURN_HEIGHT = 180;
+const SHARE_MIN_TURN_HEIGHT = 72;
+const SHARE_MAX_TURN_HEIGHT = 720;
+const LazyReviewView = lazy(() => import("./review-view.tsx").then((module) => ({ default: module.ReviewView })));
+
+export interface ShareTurnWindow {
+    readonly start: number;
+    readonly end: number;
+}
+
+export function initialShareTurnWindow(totalTurns: number): ShareTurnWindow {
+    return { start: 0, end: Math.min(SHARE_INITIAL_WINDOW_SIZE, totalTurns) };
+}
+
+function sameShareTurnWindow(a: ShareTurnWindow, b: ShareTurnWindow): boolean {
+    return a.start === b.start && a.end === b.end;
+}
+
+export function shareWindowAroundIndex(
+    anchorIndex: number,
+    totalTurns: number,
+    windowSize: number = SHARE_SCROLL_WINDOW_SIZE,
+): ShareTurnWindow {
+    if (totalTurns <= 0) return { start: 0, end: 0 };
+    const size = Math.min(Math.max(1, Math.floor(windowSize)), totalTurns);
+    const clampedAnchor = Math.min(totalTurns - 1, Math.max(0, Math.floor(anchorIndex)));
+    const maxStart = Math.max(0, totalTurns - size);
+    const start = Math.min(maxStart, Math.max(0, clampedAnchor - SHARE_ANCHOR_CONTEXT));
+    return { start, end: Math.min(totalTurns, start + size) };
+}
+
+export function shareWindowForAnchor(
+    current: ShareTurnWindow,
+    anchorIndex: number,
+    totalTurns: number,
+): ShareTurnWindow {
+    if (anchorIndex >= current.start && anchorIndex < current.end) return current;
+    return shareWindowAroundIndex(anchorIndex, totalTurns);
+}
+
+export function shareWindowForScrollOffset(
+    offsetPx: number,
+    totalTurns: number,
+    estimatedTurnHeight: number,
+): ShareTurnWindow {
+    if (offsetPx === Number.POSITIVE_INFINITY) return shareWindowAroundIndex(totalTurns - 1, totalTurns);
+    const height = Number.isFinite(estimatedTurnHeight) && estimatedTurnHeight > 0
+        ? estimatedTurnHeight
+        : SHARE_ESTIMATED_TURN_HEIGHT;
+    return shareWindowAroundIndex(Math.floor(Math.max(0, offsetPx) / height), totalTurns);
+}
+
+export function shareRenderWindow(
+    window: ShareTurnWindow,
+    totalTurns: number,
+    overscan: number = SHARE_RENDER_OVERSCAN,
+): ShareTurnWindow {
+    const extra = Math.max(0, Math.floor(overscan));
+    return {
+        start: Math.max(0, window.start - extra),
+        end: Math.min(totalTurns, window.end + extra),
+    };
+}
+
+export function shareVirtualSpacerHeights(
+    window: ShareTurnWindow,
+    totalTurns: number,
+    estimatedTurnHeight: number,
+): { readonly before: number; readonly after: number } {
+    const height = Number.isFinite(estimatedTurnHeight) && estimatedTurnHeight > 0
+        ? estimatedTurnHeight
+        : SHARE_ESTIMATED_TURN_HEIGHT;
+    return {
+        before: Math.max(0, Math.round(window.start * height)),
+        after: Math.max(0, Math.round((totalTurns - window.end) * height)),
+    };
+}
+
+const turnTsMs = (ts: string | null | undefined): number | null => {
+    const ms = Date.parse(ts ?? "");
+    return Number.isFinite(ms) ? ms : null;
+};
+
+export function hookFiresForTurnWindow(
+    hookFires: ReadonlyArray<HookFireDto>,
+    turns: ReadonlyArray<Pick<InspectTurnDto, "ts">>,
+): ReadonlyArray<HookFireDto> {
+    const times = turns.map((turn) => turnTsMs(turn.ts)).filter((ms): ms is number => ms != null);
+    if (times.length === 0) return [];
+    const start = Math.min(...times);
+    const end = Math.max(...times);
+    return hookFires.filter((hook) => {
+        const ms = turnTsMs(hook.ts);
+        return ms != null && ms >= start && ms <= end;
+    });
+}
 
 interface ShareHarnessHookView {
     readonly idx: number;
@@ -757,22 +855,27 @@ function InspectBody({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Mount-windowing: render the first N turns, grow on scroll / on a jump that
-    // targets a turn past the window. The full list stays in `data.turns` so
-    // jump/find/cost-rail still see everything.
-    const [visibleCount, setVisibleCount] = useState(() => Math.min(SHARE_PAGE_SIZE, data.turns.length));
+    // Mount-windowing: render the first N turns, grow on scroll. Hash/search
+    // jumps to a late turn switch to a bounded target neighborhood instead of
+    // mounting every preceding turn.
+    const [turnWindow, setTurnWindow] = useState(() => initialShareTurnWindow(data.turns.length));
+    const turnWindowRef = useRef(turnWindow);
+    const listStartRef = useRef<HTMLDivElement | null>(null);
+    const estimatedTurnHeightRef = useRef(SHARE_ESTIMATED_TURN_HEIGHT);
+    const [estimatedTurnHeight, setEstimatedTurnHeight] = useState(SHARE_ESTIMATED_TURN_HEIGHT);
     // Reset the window when the session being viewed changes (subagent switch).
     useEffect(() => {
-        setVisibleCount(Math.min(SHARE_PAGE_SIZE, data.turns.length));
+        setTurnWindow(initialShareTurnWindow(data.turns.length));
+        estimatedTurnHeightRef.current = SHARE_ESTIMATED_TURN_HEIGHT;
+        setEstimatedTurnHeight(SHARE_ESTIMATED_TURN_HEIGHT);
     }, [data.source_path, data.turns.length]);
-    const loadMore = (n?: number) =>
+    useEffect(() => {
+        turnWindowRef.current = turnWindow;
+    }, [turnWindow]);
+    const loadMore = () =>
         new Promise<void>((resolve) => {
-            setVisibleCount((c) => Math.min(data.turns.length, c + Math.max(n ?? SHARE_PAGE_SIZE, SHARE_PAGE_SIZE)));
-            // Resolve after the grow has rendered so FilterBar's post-loadMore
-            // scrollIntoView finds the now-mounted target.
             requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         });
-    const sentinelRef = useRef<HTMLDivElement | null>(null);
     // Harness hooks (guardrail fires) anchored to their nearest turn, + the
     // combined jump idx list ("next hook fire" cycles file-context + harness).
     const harnessByTurn = useMemo(() => {
@@ -785,13 +888,23 @@ function InspectBody({
         }
         return map;
     }, [harnessHooks]);
+    const renderWindow = useMemo(() => shareRenderWindow(turnWindow, data.turns.length), [turnWindow, data.turns.length]);
+    const windowedTurns = useMemo(() => data.turns.slice(renderWindow.start, renderWindow.end), [data.turns, renderWindow]);
+    const windowedHookFires = useMemo(
+        () => hookFiresForTurnWindow(data.hook_fires, windowedTurns),
+        [data.hook_fires, windowedTurns],
+    );
+    const windowedSeqs = useMemo(() => new Set(windowedTurns.map((turn) => turn.seq)), [windowedTurns]);
     const hookFireIdxs = [
-        ...data.hook_fires.map((h) => h.idx),
-        ...(harnessHooks ?? []).map((h) => HARNESS_HOOK_IDX_BASE + h.idx),
+        ...windowedHookFires.map((h) => h.idx),
+        ...(harnessHooks ?? [])
+            .filter((h) => h.anchor_turn_seq != null && windowedSeqs.has(h.anchor_turn_seq))
+            .map((h) => HARNESS_HOOK_IDX_BASE + h.idx),
     ];
     const hookFireIdxsRef = useRef<ReadonlyArray<number>>([]);
     hookFireIdxsRef.current = hookFireIdxs;
-    const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
+    const spacerHeights = shareVirtualSpacerHeights(renderWindow, data.turns.length, estimatedTurnHeight);
+    const visibleSeq = useVisibleTurnSeq(windowedTurns, anchoredSeq ?? windowedTurns[0]?.seq ?? data.turns[0]?.seq ?? null);
     const [selection, setSelection] = useInspectSelection(data);
     // Spawn-turn seqs power the "next spawn" jump button + match the inline
     // spawn markers below.
@@ -806,39 +919,79 @@ function InspectBody({
         return () => window.removeEventListener("hashchange", onHashChange);
     }, []);
 
-    // A jump/hash targeting a turn past the window grows it to include the target.
+    // A jump/hash targeting a turn outside the mounted range opens a bounded
+    // neighborhood around the target instead of rendering the full prefix.
     useEffect(() => {
         if (anchoredSeq == null) return;
         const idx = data.turns.findIndex((t) => t.seq === anchoredSeq);
-        if (idx >= 0 && idx >= visibleCount) setVisibleCount(idx + 1);
-    }, [anchoredSeq, data.turns, visibleCount]);
+        if (idx >= 0) setTurnWindow((window) => shareWindowForAnchor(window, idx, data.turns.length));
+    }, [anchoredSeq, data.turns]);
 
     useEffect(() => {
         if (anchoredSeq == null) return;
         document.getElementById(`turn-${anchoredSeq}`)?.scrollIntoView({ behavior: "auto", block: "start" });
-    }, [anchoredSeq, data.turns.length, visibleCount]);
+    }, [anchoredSeq, data.turns.length, turnWindow]);
 
-    // Grow the window as the bottom sentinel scrolls into view.
+    useLayoutEffect(() => {
+        const heights = windowedTurns
+            .map((turn) => document.querySelector<HTMLElement>(`[data-turn-frame="${turn.seq}"]`)?.getBoundingClientRect().height ?? 0)
+            .filter((height) => height > 0);
+        if (heights.length === 0) return;
+        const avg = heights.reduce((sum, height) => sum + height, 0) / heights.length;
+        const bounded = Math.min(SHARE_MAX_TURN_HEIGHT, Math.max(SHARE_MIN_TURN_HEIGHT, avg));
+        if (Math.abs(bounded - estimatedTurnHeightRef.current) < 6) return;
+        estimatedTurnHeightRef.current = bounded;
+        setEstimatedTurnHeight(bounded);
+    }, [windowedTurns]);
+
+    // Scroll-position virtualization: map page scroll to an approximate turn
+    // index and keep only a bounded neighborhood mounted. This makes End-key /
+    // scroll-to-bottom land directly on the final window instead of mounting
+    // every preceding row.
     useEffect(() => {
-        const el = sentinelRef.current;
-        if (!el || visibleCount >= data.turns.length) return;
-        const obs = new IntersectionObserver(
-            (entries) => {
-                if (entries.some((e) => e.isIntersecting)) {
-                    setVisibleCount((c) => Math.min(data.turns.length, c + SHARE_PAGE_SIZE));
-                }
-            },
-            { rootMargin: "1200px 0px" },
-        );
-        obs.observe(el);
-        return () => obs.disconnect();
-    }, [visibleCount, data.turns.length]);
-
-    const windowedTurns = useMemo(() => data.turns.slice(0, visibleCount), [data.turns, visibleCount]);
+        if (typeof window === "undefined" || data.turns.length <= SHARE_INITIAL_WINDOW_SIZE) return;
+        const normalizeWheelDelta = (event: WheelEvent): number => {
+            if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * window.innerHeight;
+            if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+            return event.deltaY;
+        };
+        const update = (scrollY: number, sync: boolean) => {
+            const startEl = listStartRef.current;
+            if (!startEl) return;
+            const listTop = startEl.getBoundingClientRect().top + window.scrollY;
+            const doc = document.documentElement;
+            const clampedScrollY = Math.max(0, Math.min(scrollY, doc.scrollHeight - window.innerHeight));
+            const nearDocumentEnd = clampedScrollY + window.innerHeight >= doc.scrollHeight - 16;
+            const offset = nearDocumentEnd
+                ? Number.POSITIVE_INFINITY
+                : Math.max(0, clampedScrollY - listTop);
+            const next = shareWindowForScrollOffset(offset, data.turns.length, estimatedTurnHeightRef.current);
+            if (sameShareTurnWindow(turnWindowRef.current, next)) return;
+            turnWindowRef.current = next;
+            const commit = () => setTurnWindow((current) => sameShareTurnWindow(current, next) ? current : next);
+            if (sync) flushSync(commit);
+            else commit();
+        };
+        const onScroll = () => update(window.scrollY, true);
+        const onWheel = (event: WheelEvent) => {
+            update(window.scrollY + normalizeWheelDelta(event), true);
+        };
+        const onResize = () => update(window.scrollY, false);
+        window.addEventListener("wheel", onWheel, { passive: true });
+        window.addEventListener("scroll", onScroll, { passive: true });
+        window.addEventListener("resize", onResize);
+        return () => {
+            window.removeEventListener("wheel", onWheel);
+            window.removeEventListener("scroll", onScroll);
+            window.removeEventListener("resize", onResize);
+        };
+    }, [data.turns.length]);
 
     return (
         <Transcript
-            data={{ ...data, turns: windowedTurns }}
+            data={data}
+            renderedTurns={windowedTurns}
+            renderedHookFires={windowedHookFires}
             anchoredSeq={anchoredSeq}
             selection={selection}
             setSelection={setSelection}
@@ -846,7 +999,7 @@ function InspectBody({
             filterBar={{
                 turns: data.turns,
                 anchorSeqs: spawnAnchorSeqs,
-                loadedCount: visibleCount,
+                loadedCount: data.turns.length,
                 totalCount: data.turns.length,
                 appendLoading: false,
                 loadMore,
@@ -888,12 +1041,25 @@ function InspectBody({
                     </>
                 );
             }}
+            renderBeforeTurns={() => (
+                <>
+                    <div ref={listStartRef} data-share-transcript-start="true" />
+                    {spacerHeights.before > 0 ? <div aria-hidden="true" style={{ height: spacerHeights.before }} /> : null}
+                </>
+            )}
             renderAfterTurns={() =>
-                visibleCount < data.turns.length ? (
-                    <div ref={sentinelRef} style={{ padding: "12px var(--strip-x)", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
-                        loading {data.turns.length - visibleCount} more turns…
+                <>
+                    {spacerHeights.after > 0 ? <div aria-hidden="true" style={{ height: spacerHeights.after }} /> : null}
+                    <div
+                        data-share-window-summary="true"
+                        data-window-start={turnWindow.start}
+                        data-window-end={turnWindow.end}
+                        data-window-total={data.turns.length}
+                        style={{ padding: "12px var(--strip-x)", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}
+                    >
+                        showing turns {turnWindow.start + 1}-{turnWindow.end} of {data.turns.length}
                     </div>
-                ) : null
+                </>
             }
         />
     );
@@ -1556,7 +1722,8 @@ function MultiFileShareView(props: {
             {view === "story" && narrationQuery.data && data ? (
                 // The Story tab is the review surface with the narration as
                 // its why lane - files/diffs primary, narrative as annotation.
-                <ReviewView
+                <Suspense fallback={<div className="loading">Loading review…</div>}>
+                    <LazyReviewView
                     key={`story-${selectedFile}`}
                     data={data}
                     timeline={fileQuery.data?.session_timeline ?? null}
@@ -1565,11 +1732,13 @@ function MultiFileShareView(props: {
                         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#turn-${seq}`);
                         setView("transcript");
                     }}
-                />
+                    />
+                </Suspense>
             ) : view === "timeline" && fileQuery.data?.session_timeline ? (
                 <SessionTimelineBody data={fileQuery.data.session_timeline} />
             ) : view === "review" && data ? (
-                <ReviewView
+                <Suspense fallback={<div className="loading">Loading review…</div>}>
+                    <LazyReviewView
                     // Keyed by file for the same reason as InspectBody below.
                     key={`rev-${selectedFile}`}
                     data={data}
@@ -1581,7 +1750,8 @@ function MultiFileShareView(props: {
                         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#turn-${seq}`);
                         setView("transcript");
                     }}
-                />
+                    />
+                </Suspense>
             ) : data ? (
                 <InspectBody
                     // Keyed by file: jump-cursor/anchor state must not leak from

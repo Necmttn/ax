@@ -1,4 +1,4 @@
-import { useMemo, useRef, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import type { InspectTurnDto } from "@ax/lib/shared/dashboard-types";
@@ -38,6 +38,21 @@ const SUMMARY_STYLE: CSSProperties = {
     color: "var(--muted)",
     cursor: "pointer",
 };
+
+export function filesTouchedStartsOpen(fileCount: number): boolean {
+    return fileCount <= 40;
+}
+
+export function hasFileDirectoryCollision(paths: ReadonlyArray<string>): boolean {
+    const files = new Set(paths);
+    for (const path of paths) {
+        const parts = path.split("/");
+        for (let i = 1; i < parts.length; i += 1) {
+            if (files.has(parts.slice(0, i).join("/"))) return true;
+        }
+    }
+    return false;
+}
 
 function summaryLine(model: FilesTouchedModel): string {
     const edited = model.files.filter((f) => f.status != null).length;
@@ -83,7 +98,46 @@ function decorationFor(model: FilesTouchedModel, path: string): { text: string; 
     return { text, title };
 }
 
-export function FilesTouchedTree({ model, onSelect, initialSelectedPath, maxHeight = TREE_MAX_H }: {
+function FilesTouchedList({ model, onSelect }: {
+    readonly model: FilesTouchedModel;
+    readonly onSelect: (file: FileTouch) => void;
+}) {
+    return (
+        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+            {model.files.map((file) => {
+                const decoration = decorationFor(model, file.path);
+                return (
+                    <button
+                        key={file.absPath}
+                        type="button"
+                        onClick={() => onSelect(file)}
+                        title={decoration?.title}
+                        style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            gap: 8,
+                            minWidth: 0,
+                            padding: "5px 7px",
+                            border: "1px solid var(--line)",
+                            background: "var(--page)",
+                            color: "var(--ink)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            font: "11px/1.4 ui-monospace, monospace",
+                        }}
+                    >
+                        <span style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {file.path}
+                        </span>
+                        {decoration?.text ? <span style={{ flex: "0 0 auto", color: "var(--muted)" }}>{decoration.text}</span> : null}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+function FilesTouchedTreeInner({ model, onSelect, initialSelectedPath, maxHeight = TREE_MAX_H }: {
     readonly model: FilesTouchedModel;
     /** Fired with the clicked file. The tree model is create-once; the latest
      *  callback is read through a ref so re-renders don't go stale. */
@@ -131,6 +185,18 @@ export function FilesTouchedTree({ model, onSelect, initialSelectedPath, maxHeig
     );
 }
 
+export function FilesTouchedTree(props: {
+    readonly model: FilesTouchedModel;
+    readonly onSelect: (file: FileTouch) => void;
+    readonly initialSelectedPath?: string;
+    readonly maxHeight?: number;
+}) {
+    if (hasFileDirectoryCollision(props.model.files.map((file) => file.path))) {
+        return <FilesTouchedList model={props.model} onSelect={props.onSelect} />;
+    }
+    return <FilesTouchedTreeInner {...props} />;
+}
+
 /**
  * "Files touched" panel for a session transcript: every file the agent
  * read/edited/wrote, folded into one collapsible directory tree. Edited files
@@ -143,18 +209,23 @@ export function FilesTouchedPanel({ turns, onJump }: {
     readonly onJump?: (seq: number) => void;
 }) {
     const model = useMemo(() => buildFilesTouched(turns), [turns]);
+    const [open, setOpen] = useState(() => filesTouchedStartsOpen(model.files.length));
     if (model.files.length === 0) return null;
     const jump = onJump ?? ((seq: number) => {
         window.location.hash = `turn-${seq}`;
     });
     return (
-        <details style={PANEL_STYLE} open={model.files.length <= 40}>
+        <details
+            style={PANEL_STYLE}
+            open={open}
+            onToggle={(event) => setOpen(event.currentTarget.open)}
+        >
             <summary style={SUMMARY_STYLE}>
                 {summaryLine(model)}
                 {model.root ? <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}> · {model.root}</span> : null}
                 <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> - click a file to jump to where it was touched</span>
             </summary>
-            <FilesTouchedTree model={model} onSelect={(f) => jump(f.firstSeq)} />
+            {open ? <FilesTouchedTree model={model} onSelect={(f) => jump(f.firstSeq)} /> : null}
         </details>
     );
 }

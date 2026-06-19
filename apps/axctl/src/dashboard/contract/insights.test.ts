@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { DbError } from "@ax/lib/errors";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
 /** Stub DB returning empty result tuples - enough for null/empty paths. */
@@ -79,10 +80,12 @@ describe("insights handlers", () => {
 describe("contract handler self-healing", () => {
     test("a failed layer build answers 500 and recovers on the next request", async () => {
         let attempts = 0;
-        const flaky = Layer.effect(SurrealClient)(Effect.suspend(() => {
-            attempts += 1;
-            if (attempts === 1) return Effect.fail(new Error("db down at boot"));
-            return Effect.succeed({
+	    const flaky = Layer.effect(SurrealClient)(Effect.suspend(() => {
+	        attempts += 1;
+	        if (attempts === 1) {
+	            return Effect.fail(new DbError({ operation: "connect", message: "db down at boot" }));
+	        }
+	        return Effect.succeed({
                 query: () => Effect.succeed([[]]),
                 raw: null,
             } as unknown as SurrealClientShape);

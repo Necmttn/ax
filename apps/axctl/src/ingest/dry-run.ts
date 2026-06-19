@@ -186,7 +186,7 @@ const dbSessionCounts = (): Effect.Effect<SessionTally, never, SurrealClient> =>
             // on-disk walk also counts, so they fold into the claude tally to
             // keep the comparison apples-to-apples.
             if (row.source === "claude" || row.source === "claude-subagent") claude += n;
-            else if (row.source === "codex") codex += n;
+            else if (row.source === "codex" || row.source === "codex-subagent") codex += n;
             else if (row.source === "pi") pi += n;
             // opencode/cursor (and unknown sources) are ignored: their on-disk
             // session counts aren't known either, so they never drive the ETA.

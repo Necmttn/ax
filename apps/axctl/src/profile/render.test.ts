@@ -107,6 +107,7 @@ const env = {
     hookFiles: ["enforce-worktree.ts"],
     hasRoutingTable: true,
     rulesMarkdown: "- rule one\n- rule two",
+    highlights: null,
 };
 
 describe("buildProfile", () => {
@@ -210,5 +211,32 @@ describe("buildProfile", () => {
         const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
         expect(p.activity).toBeUndefined();
         expect(p.insights).toBeUndefined();
+    });
+
+    test("buildProfile attaches highlights from env", async () => {
+        const db = makeMockDb(mockResults);
+        const profile = await runWithMock(db, buildProfile({
+            windowDays: 30,
+            includeCost: true,
+            env: {
+                github: "octocat", generatedAt: "2026-06-12T00:00:00Z", today: "2026-06-12",
+                hookFiles: [], hasRoutingTable: false, rulesMarkdown: null,
+                highlights: { authored_at: "2026-06-17T00:00:00Z", taste: "ship clean" },
+            },
+        }));
+        expect(profile.highlights?.taste).toBe("ship clean");
+    });
+
+    test("buildProfile omits highlights when env.highlights is null", async () => {
+        const db = makeMockDb(mockResults);
+        const profile = await runWithMock(db, buildProfile({
+            windowDays: 30,
+            includeCost: true,
+            env: {
+                github: "octocat", generatedAt: "2026-06-12T00:00:00Z", today: "2026-06-12",
+                hookFiles: [], hasRoutingTable: false, rulesMarkdown: null, highlights: null,
+            },
+        }));
+        expect(profile.highlights).toBeUndefined();
     });
 });

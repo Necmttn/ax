@@ -132,6 +132,41 @@ describe("looseLineParse list-format fallback", () => {
             await rm(root, { recursive: true, force: true });
         }
     });
+
+    test("missing, empty, and null descriptions do not upsert SQL null", async () => {
+        const root = await mkdtemp(join(tmpdir(), "ax-skill-test-description-"));
+        const prevSkillDirs = process.env["AX_SKILLS_DIRS"];
+        const skillsDir = join(root, "skills");
+        process.env["AX_SKILLS_DIRS"] = skillsDir;
+        try {
+            const fixtures = [
+                ["no-frontmatter", "# Body only\n"],
+                ["empty-description", "---\nname: empty-description\ndescription:\n---\n# Body\n"],
+                ["null-description", "---\nname: null-description\ndescription: null\n---\n# Body\n"],
+            ] as const;
+
+            for (const [name, content] of fixtures) {
+                const skillDir = join(skillsDir, name);
+                await mkdir(skillDir, { recursive: true });
+                await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
+            }
+
+            const { layer, upserts } = makeMockDb(undefined, { denyWrites: false });
+            const stats = await Effect.runPromise(
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
+            );
+
+            expect(stats.count).toBe(3);
+            expect(upserts).toHaveLength(3);
+            for (const upsert of upserts) {
+                expect(upsert.content).not.toHaveProperty("description");
+            }
+        } finally {
+            if (prevSkillDirs === undefined) delete process.env["AX_SKILLS_DIRS"];
+            else process.env["AX_SKILLS_DIRS"] = prevSkillDirs;
+            await rm(root, { recursive: true, force: true });
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------

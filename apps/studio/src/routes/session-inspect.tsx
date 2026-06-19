@@ -10,6 +10,7 @@ import { SessionTimelineView } from "./session-timeline.tsx";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
 import { TextWithFences } from "../highlight/HighlightedCode.tsx";
+import { parseFences } from "../highlight/lang.ts";
 import { ToolResultView } from "./tool-result.tsx";
 import { ToolRow } from "./tool-row.tsx";
 import { extractImagePaths } from "./turn-images.ts";
@@ -149,7 +150,7 @@ function compactTokenCount(usage: TurnTokenUsageDetail): string | null {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
 }
 
-type CostProgress = {
+export type CostProgress = {
     seq: number | null;
     exactTurns: number;
     estimatedTokens: number;
@@ -171,25 +172,87 @@ const EMPTY_COST_PROGRESS: CostProgress = {
     outputCostUsd: 0,
 };
 
+export interface CostProgressIndex {
+    readonly exactTurnCount: number;
+    readonly through: (seq: number | null) => CostProgress;
+}
+
+export function buildCostProgressIndex(
+    turns: ReadonlyArray<Pick<InspectTurnDto, "seq" | "token_usage">>,
+): CostProgressIndex {
+    const bySeq = new Map<number, CostProgress>();
+    const seqs: number[] = [];
+    let acc: CostProgress = EMPTY_COST_PROGRESS;
+
+    for (const turn of turns) {
+        const usage = turn.token_usage;
+        acc = usage
+            ? {
+                seq: turn.seq,
+                exactTurns: acc.exactTurns + 1,
+                estimatedTokens: acc.estimatedTokens + (numberOrNull(usage.estimated_tokens) ?? 0),
+                totalCostUsd: acc.totalCostUsd + (numberOrNull(usage.estimated_cost_usd) ?? 0),
+                freshInputCostUsd: acc.freshInputCostUsd + (numberOrNull(usage.estimated_input_cost_usd) ?? 0),
+                cacheWriteCostUsd: acc.cacheWriteCostUsd + (numberOrNull(usage.estimated_cache_creation_cost_usd) ?? 0),
+                cacheReadCostUsd: acc.cacheReadCostUsd + (numberOrNull(usage.estimated_cache_read_cost_usd) ?? 0),
+                outputCostUsd: acc.outputCostUsd + (numberOrNull(usage.estimated_output_cost_usd) ?? 0),
+            }
+            : { ...acc, seq: turn.seq };
+        bySeq.set(turn.seq, acc);
+        seqs.push(turn.seq);
+    }
+
+    const through = (seq: number | null): CostProgress => {
+        if (seq == null) return EMPTY_COST_PROGRESS;
+        const exact = bySeq.get(seq);
+        if (exact) return exact;
+
+        let lo = 0;
+        let hi = seqs.length - 1;
+        let best: CostProgress | null = null;
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            const candidateSeq = seqs[mid]!;
+            if (candidateSeq <= seq) {
+                best = bySeq.get(candidateSeq) ?? best;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return best ? { ...best, seq } : { ...EMPTY_COST_PROGRESS, seq };
+    };
+
+    return { exactTurnCount: acc.exactTurns, through };
+}
+
 export function costProgressThrough(
     turns: ReadonlyArray<Pick<InspectTurnDto, "seq" | "token_usage">>,
     seq: number | null,
 ): CostProgress {
-    if (seq == null) return EMPTY_COST_PROGRESS;
-    return turns.reduce<CostProgress>((acc, turn) => {
-        if (turn.seq > seq || !turn.token_usage) return acc;
-        const usage = turn.token_usage;
-        return {
-            seq,
-            exactTurns: acc.exactTurns + 1,
-            estimatedTokens: acc.estimatedTokens + (numberOrNull(usage.estimated_tokens) ?? 0),
-            totalCostUsd: acc.totalCostUsd + (numberOrNull(usage.estimated_cost_usd) ?? 0),
-            freshInputCostUsd: acc.freshInputCostUsd + (numberOrNull(usage.estimated_input_cost_usd) ?? 0),
-            cacheWriteCostUsd: acc.cacheWriteCostUsd + (numberOrNull(usage.estimated_cache_creation_cost_usd) ?? 0),
-            cacheReadCostUsd: acc.cacheReadCostUsd + (numberOrNull(usage.estimated_cache_read_cost_usd) ?? 0),
-            outputCostUsd: acc.outputCostUsd + (numberOrNull(usage.estimated_output_cost_usd) ?? 0),
-        };
-    }, { ...EMPTY_COST_PROGRESS, seq });
+    return buildCostProgressIndex(turns).through(seq);
+}
+
+export function inspectTurnWindowEnd(
+    payload: Pick<SessionInspectPayload, "turn_window" | "total_turns">,
+): number {
+    const end = payload.turn_window.offset + payload.turn_window.limit;
+    return Math.max(0, Math.min(payload.total_turns, end));
+}
+
+export function remainingInspectTurns(
+    payload: Pick<SessionInspectPayload, "turn_window" | "total_turns">,
+): number {
+    return Math.max(0, payload.total_turns - inspectTurnWindowEnd(payload));
+}
+
+export function mergedInspectTurnWindow(
+    prev: Pick<SessionInspectPayload, "turn_window">,
+    page: Pick<SessionInspectPayload, "turn_window">,
+): SessionInspectPayload["turn_window"] {
+    const prevEnd = prev.turn_window.offset + prev.turn_window.limit;
+    const pageEnd = page.turn_window.offset + page.turn_window.limit;
+    return { offset: 0, limit: Math.max(prevEnd, pageEnd) };
 }
 
 function turnTokenUsageTitle(turn: InspectTurnDto): string {
@@ -440,9 +503,11 @@ export function rawBlockTextStyle({
     mismatch: boolean;
 }): CSSProperties {
     const emphasized = active || hovered || mismatch;
+    const blockBg = `color-mix(in srgb, ${tone.bar} 18%, var(--term-bg))`;
+    const blockFg = `color-mix(in srgb, ${tone.bar} 28%, var(--term-fg))`;
     return {
-        background: hovered ? tone.bg : "transparent",
-        color: emphasized ? tone.fg : "inherit",
+        background: hovered ? blockBg : "transparent",
+        color: emphasized ? blockFg : "inherit",
         outline: "none",
         outlineOffset: 1,
         borderBottom: mismatch
@@ -533,7 +598,7 @@ export function useVisibleTurnSeq(
     fallbackSeq: number | null,
 ): number | null {
     const [visibleSeq, setVisibleSeq] = useState<number | null>(fallbackSeq);
-    const turnSeqKey = turns.map((turn) => turn.seq).join(",");
+    const turnSeqKey = useMemo(() => turns.map((turn) => turn.seq).join(","), [turns]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -546,23 +611,13 @@ export function useVisibleTurnSeq(
         const update = () => {
             raf = 0;
             const anchorY = JUMP_TARGET_SCROLL_MARGIN + 24;
-            let candidate: number | null = null;
-            for (const turn of turns) {
-                const el = document.getElementById(`turn-${turn.seq}`);
-                if (!el) continue;
+            const candidate = findVisibleTurnSeq(turns, anchorY, (seq) => {
+                const el = document.getElementById(`turn-${seq}`);
+                if (!el) return null;
                 const rect = el.getBoundingClientRect();
-                if (rect.bottom < anchorY) {
-                    candidate = turn.seq;
-                    continue;
-                }
-                if (rect.top <= anchorY) {
-                    candidate = turn.seq;
-                    break;
-                }
-                if (candidate == null) candidate = turn.seq;
-                break;
-            }
-            setVisibleSeq(candidate ?? fallbackSeq ?? turns[0]?.seq ?? null);
+                return { top: rect.top, bottom: rect.bottom };
+            }, fallbackSeq);
+            setVisibleSeq(candidate ?? turns[0]?.seq ?? null);
         };
         const schedule = () => {
             if (raf) return;
@@ -582,6 +637,141 @@ export function useVisibleTurnSeq(
     return visibleSeq;
 }
 
+export function findVisibleTurnSeq(
+    turns: ReadonlyArray<Pick<InspectTurnDto, "seq">>,
+    anchorY: number,
+    rectForSeq: (seq: number) => { readonly top: number; readonly bottom: number } | null,
+    fallbackSeq: number | null,
+): number | null {
+    if (turns.length === 0) return fallbackSeq;
+
+    let lo = 0;
+    let hi = turns.length - 1;
+    let candidateIndex: number | null = null;
+    while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const rect = rectForSeq(turns[mid]!.seq);
+        if (!rect) {
+            hi = mid - 1;
+            continue;
+        }
+        if (rect.bottom < anchorY) {
+            lo = mid + 1;
+        } else {
+            candidateIndex = mid;
+            hi = mid - 1;
+        }
+    }
+
+    if (candidateIndex == null) {
+        const last = turns[turns.length - 1]!;
+        return rectForSeq(last.seq) ? last.seq : fallbackSeq;
+    }
+
+    const candidate = turns[candidateIndex]!;
+    const rect = rectForSeq(candidate.seq);
+    if (!rect) return fallbackSeq;
+    if (rect.top <= anchorY || candidateIndex === 0) return candidate.seq;
+    return turns[candidateIndex - 1]?.seq ?? candidate.seq;
+}
+
+function usePrefersReducedMotion(): boolean {
+    const [reduced, setReduced] = useState(false);
+    useEffect(() => {
+        if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+        const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+        const update = () => setReduced(query.matches);
+        update();
+        query.addEventListener("change", update);
+        return () => query.removeEventListener("change", update);
+    }, []);
+    return reduced;
+}
+
+function useAnimatedNumber(value: number | null | undefined, reducedMotion: boolean, durationMs = 180): number | null {
+    const target = numberOrNull(value);
+    const [display, setDisplay] = useState<number | null>(target);
+    const displayRef = useRef<number | null>(target);
+
+    useEffect(() => {
+        if (target == null) {
+            displayRef.current = null;
+            setDisplay(null);
+            return;
+        }
+
+        const startValue = displayRef.current;
+        if (
+            startValue == null ||
+            reducedMotion ||
+            durationMs <= 0 ||
+            typeof window === "undefined" ||
+            typeof window.requestAnimationFrame !== "function"
+        ) {
+            displayRef.current = target;
+            setDisplay(target);
+            return;
+        }
+
+        if (Math.abs(startValue - target) < 0.000001) {
+            displayRef.current = target;
+            setDisplay(target);
+            return;
+        }
+
+        let raf = 0;
+        const start = window.performance.now();
+        const tick = (now: number) => {
+            const t = Math.min(1, (now - start) / durationMs);
+            const eased = 1 - Math.pow(1 - t, 3);
+            const next = startValue + (target - startValue) * eased;
+            displayRef.current = next;
+            setDisplay(next);
+            if (t < 1) {
+                raf = window.requestAnimationFrame(tick);
+            } else {
+                displayRef.current = target;
+                setDisplay(target);
+            }
+        };
+        raf = window.requestAnimationFrame(tick);
+        return () => {
+            if (raf) window.cancelAnimationFrame(raf);
+        };
+    }, [target, durationMs, reducedMotion]);
+
+    return display;
+}
+
+function AnimatedMetric({
+    value,
+    format,
+    minWidthCh,
+    reducedMotion,
+    style,
+}: {
+    readonly value: number | null | undefined;
+    readonly format: (value: number | null) => string;
+    readonly minWidthCh: number;
+    readonly reducedMotion: boolean;
+    readonly style?: CSSProperties;
+}) {
+    const displayed = useAnimatedNumber(value, reducedMotion);
+    return (
+        <span
+            style={{
+                display: "inline-block",
+                minWidth: `${minWidthCh}ch`,
+                textAlign: "right",
+                fontVariantNumeric: "tabular-nums",
+                ...style,
+            }}
+        >
+            {format(displayed)}
+        </span>
+    );
+}
+
 export function CostRail({
     data,
     currentSeq,
@@ -595,11 +785,13 @@ export function CostRail({
 }) {
     const usage = data.token_usage;
     const sessionCost = tokenCostTotal(usage);
-    const progress = costProgressThrough(data.turns, currentSeq);
-    const exactTurnCount = data.turns.filter((turn) => turn.token_usage).length;
+    const costIndex = useMemo(() => buildCostProgressIndex(data.turns), [data.turns]);
+    const progress = costIndex.through(currentSeq);
+    const exactTurnCount = costIndex.exactTurnCount;
+    const reducedMotion = usePrefersReducedMotion();
     const progressPct = sessionCost && sessionCost > 0
-        ? `${((progress.totalCostUsd / sessionCost) * 100).toFixed(1)}%`
-        : "-";
+        ? (progress.totalCostUsd / sessionCost) * 100
+        : null;
     const rows = [
         ["fresh", progress.freshInputCostUsd, "var(--blue)", "Fresh input billed at normal input price."],
         ["cache write", progress.cacheWriteCostUsd, "var(--gold)", "Cache creation cost reported by provider usage."],
@@ -637,17 +829,42 @@ export function CostRail({
                     title="Exact provider token usage summed through the currently visible turn. Missing transcript rows are not estimated in this rail."
                     style={{ marginTop: 6, color: "var(--ink)", font: "700 20px/1 ui-monospace, monospace" }}
                 >
-                    {fmtUsd(progress.totalCostUsd)}
+                    <AnimatedMetric
+                        value={progress.totalCostUsd}
+                        format={fmtUsd}
+                        minWidthCh={8}
+                        reducedMotion={reducedMotion}
+                    />
                 </div>
                 <div style={{ marginTop: 5, color: "var(--muted)", font: "10px/1.35 ui-monospace, monospace" }}>
-                    through #{currentSeq ?? "-"} · {progressPct} of session
+                    through #{currentSeq ?? "-"} ·{" "}
+                    <AnimatedMetric
+                        value={progressPct}
+                        format={(value) => value == null ? "-" : `${value.toFixed(1)}%`}
+                        minWidthCh={6}
+                        reducedMotion={reducedMotion}
+                    /> of session
                 </div>
             </div>
             <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "5px 8px", margin: 0, padding: "8px 9px", font: "10px/1.25 ui-monospace, monospace" }}>
                 <dt style={{ color: "var(--muted)" }}>exact turns</dt>
-                <dd style={{ margin: 0, fontWeight: 700 }}>{progress.exactTurns}/{exactTurnCount}</dd>
+                <dd style={{ margin: 0, fontWeight: 700 }}>
+                    <AnimatedMetric
+                        value={progress.exactTurns}
+                        format={(value) => `${Math.round(value ?? 0)}/${exactTurnCount}`}
+                        minWidthCh={5}
+                        reducedMotion={reducedMotion}
+                    />
+                </dd>
                 <dt style={{ color: "var(--muted)" }}>tokens</dt>
-                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtCount(progress.estimatedTokens)}</dd>
+                <dd style={{ margin: 0, fontWeight: 700 }}>
+                    <AnimatedMetric
+                        value={progress.estimatedTokens}
+                        format={(value) => fmtCount(value == null ? null : Math.round(value))}
+                        minWidthCh={7}
+                        reducedMotion={reducedMotion}
+                    />
+                </dd>
                 <dt style={{ color: "var(--muted)" }}>session total</dt>
                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(sessionCost)}</dd>
             </dl>
@@ -659,7 +876,14 @@ export function CostRail({
                         style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--line)", background: "var(--panel)", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
                     >
                         <span style={{ color: "var(--muted)" }}>{label}</span>
-                        <strong>{fmtUsd(value)}</strong>
+                        <strong>
+                            <AnimatedMetric
+                                value={value}
+                                format={fmtUsd}
+                                minWidthCh={7}
+                                reducedMotion={reducedMotion}
+                            />
+                        </strong>
                     </div>
                 ))}
             </div>
@@ -792,6 +1016,8 @@ function AnnotatedRawText({
     const blocks = visibleTextBlocks(content);
     const activeSeq = targetBlockSeq(activeTarget);
     const [hoverSeq, setHoverSeq] = useState<number | null>(null);
+    const hasFencedCode = rawText.includes("```") &&
+        parseFences(rawText).some((segment) => segment.type === "fence");
 
     const rawParts: ReactNode[] = [];
     let cursor = 0;
@@ -824,17 +1050,18 @@ function AnnotatedRawText({
     return (
         <pre style={{
             margin: 0,
-            padding: 10,
+            padding: hasFencedCode ? 10 : "2px 0 0",
             maxHeight,
             overflow: "auto",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             font: "12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
-            // Dark transcript surface (catppuccin-mocha editor bg) so the
-            // dark-themed fenced-code tokens sit on their own ground.
-            background: "var(--term-bg)",
-            color: "var(--ink)",
-            borderRadius: 6,
+            // Dark transcript surface only when dark-themed fenced-code tokens
+            // need their own ground; plain parsed prose should read like the
+            // normal transcript, not a terminal output block.
+            background: hasFencedCode ? "var(--term-bg)" : "transparent",
+            color: hasFencedCode ? "var(--term-fg)" : "inherit",
+            borderRadius: hasFencedCode ? 6 : 0,
         }}>
             {rawParts.length > 0 ? rawParts : rawText}
         </pre>
@@ -1509,15 +1736,16 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
     /** Fetch the next page of turns and append them to the cached payload. */
     const loadMore = async (count: number = PAGE_SIZE) => {
         if (!data) return;
-        if (data.turns.length >= data.total_turns) return;
+        if (remainingInspectTurns(data) <= 0) return;
         // Synchronous ref check beats `appendLoading` state which is stale
         // across rapid back-to-back callers in the same tick.
         if (loadingRef.current) return;
         loadingRef.current = true;
         setAppendLoading(true);
         try {
+            const turnOffset = inspectTurnWindowEnd(data);
             const page = await api.sessionInspect(decoded, {
-                turnOffset: data.turns.length,
+                turnOffset,
                 turnLimit: count,
             });
             queryClient.setQueryData<typeof data>(baseKey, (prev) => {
@@ -1533,7 +1761,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                 return {
                     ...prev,
                     turns: [...prev.turns, ...page.turns],
-                    turn_window: { offset: 0, limit: prev.turns.length + page.turns.length },
+                    turn_window: mergedInspectTurnWindow(prev, page),
                     hook_fires: mergedHooks,
                 };
             });
@@ -1547,8 +1775,9 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
     // pages to include it before scrolling.
     useEffect(() => {
         if (anchoredSeq == null || !data) return;
-        if (anchoredSeq < data.turns.length) return;
-        const needed = anchoredSeq + 20 - data.turns.length;
+        const loadedTurnCount = inspectTurnWindowEnd(data);
+        if (anchoredSeq < loadedTurnCount) return;
+        const needed = anchoredSeq + 20 - loadedTurnCount;
         void loadMore(Math.max(needed, PAGE_SIZE));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [anchoredSeq, data]);
@@ -1578,12 +1807,14 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         [data?.children],
     );
     const visibleSeq = useVisibleTurnSeq(data?.turns ?? [], anchoredSeq ?? data?.turns[0]?.seq ?? null);
+    const loadedTurnCount = data ? inspectTurnWindowEnd(data) : 0;
+    const remainingTurnCount = data ? remainingInspectTurns(data) : 0;
 
     // IntersectionObserver on a sentinel triggers the next page load.
     const sentinelRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
         if (!data) return;
-        if (data.turns.length >= data.total_turns) return;
+        if (remainingInspectTurns(data) <= 0) return;
         const el = sentinelRef.current;
         if (!el) return;
         const obs = new IntersectionObserver((entries) => {
@@ -1594,7 +1825,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         obs.observe(el);
         return () => obs.disconnect();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [data?.turns.length, data?.total_turns]);
+    }, [loadedTurnCount, data?.total_turns]);
 
     return (
         <section className="panel">
@@ -1630,7 +1861,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                     filterBar={{
                         turns: data.turns,
                         anchorSeqs,
-                        loadedCount: data.turns.length,
+                        loadedCount: loadedTurnCount,
                         totalCount: data.total_turns,
                         appendLoading,
                         loadMore,
@@ -1701,7 +1932,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                         </>
                     }
                     renderAfterTurns={() =>
-                        data.turns.length < data.total_turns ? (
+                        remainingTurnCount > 0 ? (
                             <div
                                 ref={sentinelRef}
                                 style={{
@@ -1711,7 +1942,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                             >
                                 {appendLoading
                                     ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
-                                    : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
+                                    : `loaded ${loadedTurnCount.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
                                 {!appendLoading ? (
                                     <>
                                         {" "}
@@ -1724,7 +1955,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                         >load 200 more</button>
                                         {" "}
                                         <button
-                                            onClick={() => void loadMore(data.total_turns - data.turns.length)}
+                                            onClick={() => void loadMore(remainingTurnCount)}
                                             style={{
                                                 padding: "2px 10px", fontSize: 11, border: "1px solid var(--line)",
                                                 background: "var(--panel)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",

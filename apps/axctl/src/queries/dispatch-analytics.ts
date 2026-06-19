@@ -27,6 +27,7 @@ import {
 } from "@ax/hooks-sdk/routing-table";
 import { resolveDispatchModel } from "@ax/hooks-sdk/resolve-dispatch-model";
 import { type ModelPricing } from "../ingest/model-pricing.ts";
+import { SUBAGENT_SOURCES_SQL } from "../ingest/source-origin.ts";
 import { MODEL_ALIASES, reprice as repriceUsage, type RepriceUsage } from "./reprice.ts";
 import {
     defaultRoutingTablePath,
@@ -253,7 +254,7 @@ SELECT
     estimated_cost_usd AS cost_usd
 FROM session_token_usage
 WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-  AND source = 'claude-subagent';
+  AND source IN ${SUBAGENT_SOURCES_SQL};
 `;
 
 const TOOL_CALLS_SQL = (sinceDays: number) => `
@@ -271,7 +272,7 @@ SELECT
     type::string(id) AS session_id,
     model
 FROM session
-WHERE source != 'claude-subagent'
+WHERE source NOT IN ${SUBAGENT_SOURCES_SQL}
   AND started_at > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d;
 `;
 
@@ -289,7 +290,7 @@ SELECT type::string(session) AS session_id, model, cost_usd, turns FROM (
         count() AS turns
     FROM turn_token_usage
     WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-      AND source = 'claude-subagent'
+      AND source IN ${SUBAGENT_SOURCES_SQL}
       AND model != NONE
     GROUP BY session, model
 );
