@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ax - cost routing</title>
+<link rel="stylesheet" href="../theme.css" />
+<style>
+  /* template-specific layout (shared primitives live in theme.css) */
+  .hook{margin-top:24px;max-width:1080px}
+  .u{} /* declared in theme */
+
+  .bento{margin-top:24px;flex:1;min-height:0;display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+
+  /* HERO - 1.0x -> 1.4x */
+  .hero-tile{display:flex;flex-direction:column;justify-content:center}
+  .hero-tile .big{display:flex;align-items:baseline;gap:14px}
+  .hero-tile .from{font-family:var(--doto);font-weight:700;font-size:72px;line-height:.74;color:var(--sec)}
+  .hero-tile .from .u{font-size:34px}
+  .hero-tile .arrow{font-size:60px;color:var(--sec);font-weight:300;line-height:.8;align-self:center}
+  .hero-tile .to{font-family:var(--doto);font-weight:700;font-size:138px;line-height:.74;color:var(--green);
+    animation:glowGreen 2s var(--ease) infinite}
+  .hero-tile .to .u{font-size:64px;opacity:.9}
+  .hero-tile .cap2{margin-top:16px;font-size:26px;color:var(--pri);font-weight:600}
+  .hero-tile .sub2{margin-top:6px;font-size:18px;color:var(--sec);max-width:520px}
+
+  .side{display:flex;flex-direction:column;gap:16px}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;flex:1;min-height:0}
+  .stat{display:flex;flex-direction:column}
+  .stat .name{font-family:var(--mono);font-size:20px;color:var(--pri);font-weight:600}
+  .stat .name .tag{display:block;font-size:13px;font-weight:400;letter-spacing:.04em;margin-top:3px;min-height:16px}
+  .stat.codex .name .tag{color:var(--amber)}
+  .stat .pct{margin-top:auto;display:flex;align-items:baseline;gap:3px}
+  .stat .pct .d{font-family:var(--doto);font-weight:700;font-size:82px;line-height:.74}
+  .stat .pct .u{font-size:36px}
+  .stat.codex .pct{color:var(--amber)} .stat.codex .pct .d{animation:glowAmber 2s var(--ease) infinite}
+  .stat.claude .pct{color:var(--blue)}
+  .stat .mlabel{font-family:var(--mono);font-size:14px;color:var(--dim);margin:4px 0 11px}
+  .stat .seg{height:14px}
+
+  /* RECOVERABLE - $7,624 is the second-loudest element */
+  .recover-tile{display:flex;flex-direction:column;justify-content:center}
+  .recover-tile .rmoney{display:flex;align-items:baseline;gap:3px;margin-top:2px;
+    font-family:var(--doto);font-weight:700;font-size:74px;line-height:.78;color:var(--green);
+    text-shadow:0 0 30px color-mix(in srgb,var(--green) 48%,transparent);animation:glowGreen 2s var(--ease) infinite}
+  .recover-tile .rmoney .u{font-size:30px}
+  .recover-tile .rsub{font-family:var(--mono);font-size:15px;color:var(--sec);margin-top:8px}
+  .recover-tile .rcredit{font-family:var(--mono);font-size:13px;color:var(--dim);margin-top:10px}
+  .recover-tile .rcredit b{color:var(--sec);font-weight:600}
+</style>
+</head>
+<body>
+  <div class="frame">
+    <canvas id="net" data-period="6" data-count="72" data-seed="1337"></canvas>
+    <div class="vig"></div>
+
+    <div class="content">
+      <div class="chip"><span class="dot"></span> ax cost routability &nbsp;·&nbsp; <b>30 days</b> &nbsp;·&nbsp; real transcripts</div>
+
+      <div class="hook">You're paying frontier-model prices to run <span class="g"><code>grep</code></span>.</div>
+
+      <div class="bento">
+        <div class="tile hero-tile" id="heroTile">
+          <div class="tlabel">same $200 plan</div>
+          <div class="big">
+            <span class="from">1.0<span class="u">×</span></span>
+            <span class="arrow">→</span>
+            <span class="to">1.4<span class="u">×</span></span>
+          </div>
+          <div class="cap2">more agent runtime</div>
+          <div class="sub2">route mechanical work down, keep judgment on frontier.</div>
+        </div>
+
+        <div class="side">
+          <div class="pair">
+            <div class="tile stat codex">
+              <div class="name">codex<span class="tag">worst offender</span></div>
+              <div class="pct"><span class="d">60</span><span class="u">%</span></div>
+              <div class="mlabel">rg / cat / sed / build</div>
+              <div class="seg" data-total="26" data-on="16" data-color="var(--amber)" data-grad="1"></div>
+            </div>
+            <div class="tile stat claude">
+              <div class="name">claude<span class="tag"></span></div>
+              <div class="pct"><span class="d">23</span><span class="u">%</span></div>
+              <div class="mlabel">mechanical work</div>
+              <div class="seg" data-total="26" data-on="6" data-color="var(--blue)" data-grad="1"></div>
+            </div>
+          </div>
+          <div class="tile recover-tile">
+            <div class="tlabel">recoverable waste</div>
+            <div class="rmoney">$7,624<span class="u">/mo</span></div>
+            <div class="rsub">36% of spend was mechanical, repriced one tier down.</div>
+            <div class="rcredit">measured across real transcripts · <b>ax</b> · local transcript cost routing</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../components/segbar.js"></script>
+  <script src="../components/particles.js"></script>
+</body>
+</html>
