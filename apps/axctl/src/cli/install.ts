@@ -608,6 +608,13 @@ export interface DaemonStatus {
     readonly dbListening: boolean;
     readonly endpoint: DaemonEndpoint;
     readonly agents: readonly AgentRuntimeStatus[];
+    /**
+     * IDE model: the `ax studio` desktop app is installed and owns surreal +
+     * serve via its SMAppService helper, so the background LaunchAgents are
+     * intentionally absent and the DB port is held by the app's helper - both
+     * are healthy states, not failures (#568).
+     */
+    readonly ideModel: boolean;
 }
 
 export interface DoctorCheck {
@@ -725,18 +732,52 @@ export function resolveDaemonHostPort(
     return { host: state.db.host, port: state.db.port, url: dbUrlFromState(state) };
 }
 
-function collectDaemonEndpoint(): Effect.Effect<DaemonEndpoint, never, FileSystem.FileSystem> {
+/**
+ * Decide whether a DB-port holder is a genuine foreign conflict. Returns null
+ * (no conflict) when the holder is our own launchd ax-db agent, OR - in IDE
+ * model - when the holder is a surreal process: that's the `ax studio` app's
+ * helper legitimately owning the DB port, not a foreign conflict (#568).
+ * Pure, so the suppression rule is unit-testable.
+ */
+export function dbPortConflict(
+    holder: PortHolder | null,
+    loadedPid: number | null,
+    ideModel: boolean,
+): PortHolder | null {
+    if (!holder) return null;
+    if (loadedPid !== null && holder.pid === loadedPid) return null;
+    if (ideModel && /surreal/i.test(holder.command)) return null;
+    return holder;
+}
+
+/**
+ * Doctor check for one background LaunchAgent. In IDE model the desktop app
+ * owns the daemons, so an absent/unloaded agent is the expected, healthy state
+ * - not a failure (#568). Pure, so the IDE-model carve-out is unit-testable.
+ */
+export function agentDoctorCheck(
+    agent: AgentRuntimeStatus,
+    ideModel: boolean,
+    macos: boolean,
+): DoctorCheck {
+    return {
+        name: agent.label,
+        ok: ideModel || !macos || (agent.plistExists && agent.loaded),
+        detail: ideModel && !agent.loaded
+            ? "owned by ax studio app (IDE model)"
+            : `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
+    };
+}
+
+function collectDaemonEndpoint(
+    ideModel: boolean,
+): Effect.Effect<DaemonEndpoint, never, FileSystem.FileSystem> {
     return Effect.gen(function* () {
         const state = yield* readRuntimeState();
         const { host, port, url } = resolveDaemonHostPort(state, process.env.AX_DB_URL);
         const probe = probePort(port);
         const loadedPid = loadedDbPid();
-        // Treat conflict as "another process is listening", not us. When launchd
-        // says our DB agent owns this PID, suppress the conflict in the report.
-        const conflict =
-            probe.holder && loadedPid !== null && probe.holder.pid === loadedPid
-                ? null
-                : probe.holder;
+        const conflict = dbPortConflict(probe.holder, loadedPid, ideModel);
         return {
             host,
             port,
@@ -748,9 +789,21 @@ function collectDaemonEndpoint(): Effect.Effect<DaemonEndpoint, never, FileSyste
     });
 }
 
+/** True when the `ax studio` desktop app is installed (IDE daemon model). */
+function detectIdeModel(): Effect.Effect<boolean, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        for (const candidate of DESKTOP_APP_CANDIDATES) {
+            if (yield* fs.exists(candidate).pipe(orAbsent(false))) return true;
+        }
+        return false;
+    });
+}
+
 function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.FileSystem> {
     return Effect.gen(function* () {
-        const endpoint = yield* collectDaemonEndpoint();
+        const ideModel = yield* detectIdeModel();
+        const endpoint = yield* collectDaemonEndpoint(ideModel);
         return {
             platform: process.platform,
             macosLaunchd: isMacos(),
@@ -758,6 +811,7 @@ function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.Fi
             logDir: LOG_DIR,
             dbListening: endpoint.listening,
             endpoint,
+            ideModel,
             agents: [
                 yield* launchdStatus(DB_LABEL, DB_PLIST),
                 yield* launchdStatus(WATCH_LABEL, WATCH_PLIST),
@@ -785,6 +839,9 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
         `  logs: ${status.logDir}`,
         `  runtime-state: ${ep.runtimeStatePath}`,
     ];
+    if (status.ideModel) {
+        lines.push("  model: IDE (ax studio app owns surreal + serve; LaunchAgents intentionally absent)");
+    }
     if (ep.conflict) {
         lines.push(
             `  conflict: port ${ep.port} held by pid=${ep.conflict.pid} (${ep.conflict.command}); rerun 'axctl install' to pick a free port`,
@@ -972,20 +1029,21 @@ export function collectDoctorReport(): Effect.Effect<
                 ok: daemon.dbListening && daemon.endpoint.conflict === null,
                 detail: daemon.dbListening
                     ? daemon.endpoint.conflict === null
-                        ? `${daemon.endpoint.host}:${daemon.endpoint.port} is listening`
+                        ? daemon.ideModel
+                            ? `${daemon.endpoint.host}:${daemon.endpoint.port} is listening (ax studio app)`
+                            : `${daemon.endpoint.host}:${daemon.endpoint.port} is listening`
                         : `${daemon.endpoint.host}:${daemon.endpoint.port} held by pid=${daemon.endpoint.conflict.pid} (${daemon.endpoint.conflict.command}); rerun 'axctl install' to pick a free port`
-                    : `${daemon.endpoint.host}:${daemon.endpoint.port} is not listening`,
+                    : daemon.ideModel
+                        ? `${daemon.endpoint.host}:${daemon.endpoint.port} not listening - open ax studio (it owns the DB in IDE model)`
+                        : `${daemon.endpoint.host}:${daemon.endpoint.port} is not listening`,
             },
             {
                 name: "runtime-state",
                 ok: runtimeStateExists,
                 detail: daemon.endpoint.runtimeStatePath,
             },
-            ...daemon.agents.map((agent): DoctorCheck => ({
-                name: agent.label,
-                ok: !isMacos() || (agent.plistExists && agent.loaded),
-                detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
-            })),
+            ...daemon.agents.map((agent): DoctorCheck =>
+                agentDoctorCheck(agent, daemon.ideModel, isMacos())),
         ];
         if (watcherPlistText !== null) {
             checks.push(watcherProfilePublishDoctorCheck(watcherPlistText));
@@ -1086,12 +1144,31 @@ export function cmdInstall(): Effect.Effect<
             console.log(
                 "  it owns surreal + serve + schema (IDE model) - skipping background LaunchAgents",
             );
+            // Graceful handoff (#568): only drop the ax-db LaunchAgent once the
+            // desktop app's helper is actually serving the DB. Tearing it down
+            // before the replacement is live left the DB down with no listener.
+            // Probe the configured port; a surreal holder that ISN'T our own
+            // launchd ax-db pid is the app helper.
+            const dbProbe = probePort(bind.chosen);
+            const ourDbPid = loadedDbPid();
+            const helperServesDb =
+                dbProbe.listening && dbProbe.holder !== null
+                && (ourDbPid === null || dbProbe.holder.pid !== ourDbPid)
+                && /surreal/i.test(dbProbe.holder.command);
+            const toMigrate = [WATCH_PLIST, DERIVE_PLIST, QUOTA_REFRESH_PLIST, SERVE_PLIST];
+            if (helperServesDb) toMigrate.unshift(DB_PLIST);
             let migrated = 0;
-            for (const plist of [DB_PLIST, WATCH_PLIST, DERIVE_PLIST, QUOTA_REFRESH_PLIST, SERVE_PLIST]) {
+            for (const plist of toMigrate) {
                 if (yield* unloadAgent(plist)) migrated += 1;
             }
             if (migrated > 0) {
                 console.log(`  migrated ${migrated} pre-existing LaunchAgent(s) (unloaded + removed)`);
+            }
+            if (!helperServesDb) {
+                // The app isn't serving the DB yet - keep ax-db so the DB stays
+                // up, and tell the user how to finish the handoff.
+                console.log("  ax studio isn't serving the DB yet - keeping the ax-db LaunchAgent so the DB stays up");
+                console.log("  → open ax studio + approve its background item (System Settings ▸ Login Items), then rerun 'axctl install'");
             }
         } else {
         yield* fs.writeFileString(
