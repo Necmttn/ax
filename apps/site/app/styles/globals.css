@@ -14900,7 +14900,9 @@ details[open] > summary .pf-toggle { transform: rotate(-135deg); }
 .blog-essay > .bk-statgrid,
 .blog-essay > .bk-pull,
 .blog-essay > .bk-callout,
-.blog-essay > .bk-wide {
+.blog-essay > .bk-wide,
+.blog-essay > pre,
+.blog-essay > .bk-axresult {
   max-width: var(--bk-wide);
 }
 
@@ -15019,11 +15021,24 @@ details[open] > summary .pf-toggle { transform: rotate(-135deg); }
 .blog-essay pre {
   min-width: 0;
   overflow-x: auto;
+  margin: 24px auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--ink);
 }
 .blog-essay pre code {
   display: block;
   min-width: 0;
   white-space: pre;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
 }
 .blog-essay figure[data-rehype-pretty-code-figure] {
   min-width: 0;
@@ -15402,14 +15417,14 @@ details[open] > summary .pf-toggle { transform: rotate(-135deg); }
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px 18px;
 }
 .blog-essay .bk-do-cmd code {
   display: block;
   min-width: 0;
   font-family: var(--mono);
   font-size: 12.5px;
-  line-height: 1.7;
+  line-height: 1.62;
   color: var(--ink);
   white-space: pre;
   background: none;
