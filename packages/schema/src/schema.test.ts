@@ -258,6 +258,22 @@ describe("Claude sidecar artifact schema", () => {
             "DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_kind_project ON claude_sidecar_artifact FIELDS kind, project",
         );
     });
+
+    test("sidecar usage relation links tool calls to Claude sidecar artifacts", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS used_sidecar_artifact TYPE RELATION FROM tool_call TO claude_sidecar_artifact SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD session      ON used_sidecar_artifact TYPE option<record<session>>");
+        expect(schema).toContain("DEFINE FIELD action       ON used_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD source       ON used_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD sidecar_kind ON used_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD path_hash    ON used_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD command_tool ON used_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD pattern      ON used_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD offset       ON used_sidecar_artifact TYPE option<int>");
+        expect(schema).toContain("DEFINE FIELD limit        ON used_sidecar_artifact TYPE option<int>");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_in ON used_sidecar_artifact FIELDS in");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_out ON used_sidecar_artifact FIELDS out");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_session_action ON used_sidecar_artifact FIELDS session, action");
+    });
 });
 
 describe("guidance/config artifact inventory schema", () => {

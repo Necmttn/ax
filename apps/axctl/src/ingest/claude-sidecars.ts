@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
@@ -9,13 +9,16 @@ import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import {
+    recordKeyPart,
     recordRef,
+    surrealDate,
     surrealJsonTextOption,
     surrealObject,
     surrealOptionDate,
+    surrealOptionInt,
     surrealOptionString,
     surrealString,
-} from "@ax/lib/shared/surql";
+} from "@ax/lib/shared/surreal";
 import { buildPlanSnapshotStatements, type PlanSnapshotWrite } from "./evidence-writers.ts";
 import {
     toPlanSnapshotWrite,
@@ -30,6 +33,7 @@ const MAX_CONTENT_HASH_BYTES = 64 * 1024;
 const MAX_PLAN_SIDECAR_BYTES = 64 * 1024;
 const MAX_VISIBLE_PLAN_ITEMS = 100;
 const MAX_VISIBLE_PLAN_ITEM_CHARS = 500;
+const MAX_USAGE_DETAIL_CHARS = 240;
 
 export const CLAUDE_SIDECAR_DIRS = [
     "tool-results",
@@ -68,6 +72,35 @@ export interface IngestClaudeSidecarsStats {
     readonly discovered: number;
     readonly written: number;
     readonly planSnapshotsWritten: number;
+    readonly usageEdgesWritten: number;
+}
+
+export type ClaudeSidecarUsageAction = "produced" | "read" | "searched" | "inspected";
+
+export interface ClaudeSidecarUsageEdge {
+    readonly toolCallKey: string;
+    readonly artifactKey: string;
+    readonly sessionId: string | null;
+    readonly action: ClaudeSidecarUsageAction;
+    readonly source: "output_excerpt" | "read_input" | "command_text";
+    readonly sidecarKind: ClaudeSidecarKind;
+    readonly pathHash: string;
+    readonly commandTool: string | null;
+    readonly pattern: string | null;
+    readonly offset: number | null;
+    readonly limit: number | null;
+    readonly ts: string;
+}
+
+export interface ClaudeToolCallSidecarRow {
+    readonly id: string;
+    readonly session: string | null;
+    readonly name: string | null;
+    readonly inputJson: string | null;
+    readonly outputExcerpt: string | null;
+    readonly commandText: string | null;
+    readonly commandNorm: string | null;
+    readonly ts: string | null;
 }
 
 const sha256 = (input: string | Uint8Array): string =>
@@ -95,6 +128,75 @@ const pathDepth = (relativePath: string): number =>
 
 const dateFromStatMtime = (mtime: Option.Option<Date>): Date =>
     Option.getOrElse(mtime, () => new Date(0));
+
+const normalizePathString = (value: string): string =>
+    value.replace(/\\/g, "/").replace(/\/+$/, "");
+
+const stripTrailingPathPunctuation = (value: string): string =>
+    value.replace(/[),.;:]+$/g, "");
+
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const isSidecarKindSegment = (value: string): value is (typeof CLAUDE_SIDECAR_DIRS)[number] =>
+    (CLAUDE_SIDECAR_DIRS as readonly string[]).includes(value);
+
+const sidecarKindFromParts = (parts: readonly string[]): ClaudeSidecarKind | null => {
+    if (parts[0] === "stats-cache.json") return "stats-cache";
+    if (parts[0] && isSidecarKindSegment(parts[0])) return parts[0];
+    if (parts[0] && uuidRe.test(parts[0]) && parts[1] && isSidecarKindSegment(parts[1])) return parts[1];
+    return null;
+};
+
+export interface ClaudeSidecarPathRef {
+    readonly project: string;
+    readonly relativePath: string;
+    readonly kind: ClaudeSidecarKind;
+    readonly pathHash: string;
+}
+
+export const claudeSidecarPathRefFromPath = (
+    input: {
+        readonly path: string;
+        readonly transcriptsDir: string;
+    },
+): ClaudeSidecarPathRef | null => {
+    const root = `${normalizePathString(input.transcriptsDir)}/`;
+    const candidate = stripTrailingPathPunctuation(normalizePathString(input.path));
+    if (!candidate.startsWith(root)) return null;
+    const relative = normalizeRel(candidate.slice(root.length));
+    const [project, ...parts] = relative.split("/").filter(Boolean);
+    if (!project || !validProjectSlug(project) || parts.length === 0) return null;
+    const kind = sidecarKindFromParts(parts);
+    if (!kind) return null;
+    const relativePath = normalizeRel(parts.join("/"));
+    return {
+        project,
+        relativePath,
+        kind,
+        pathHash: sha256(normalizeRel(`${project}/${relativePath}`)),
+    };
+};
+
+export const extractClaudeSidecarPathRefs = (
+    input: {
+        readonly text: string | null | undefined;
+        readonly transcriptsDir: string;
+    },
+): ClaudeSidecarPathRef[] => {
+    if (!input.text) return [];
+    const root = normalizePathString(input.transcriptsDir);
+    const pathRe = new RegExp(`${escapeRegExp(root)}/[^\\s"'<>]+`, "g");
+    const refs = new Map<string, ClaudeSidecarPathRef>();
+    for (const match of input.text.matchAll(pathRe)) {
+        const ref = claudeSidecarPathRefFromPath({
+            path: match[0] ?? "",
+            transcriptsDir: input.transcriptsDir,
+        });
+        if (ref) refs.set(ref.pathHash, ref);
+    }
+    return [...refs.values()];
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -430,6 +532,7 @@ const discoverProjectSidecars = (
     Effect.gen(function* () {
         if (!validProjectSlug(project)) return [];
         const path = yield* Path.Path;
+        const fs = yield* FileSystem.FileSystem;
         const projectRoot = path.join(transcriptsDir, project);
         const out: ClaudeSidecarArtifact[] = [];
 
@@ -443,6 +546,25 @@ const discoverProjectSidecars = (
                 observedAt,
             });
             out.push(...records);
+        }
+
+        const entries = yield* fs.readDirectory(projectRoot).pipe(orAbsent<ReadonlyArray<string>>([]));
+        for (const sessionDir of entries) {
+            if (!uuidRe.test(sessionDir)) continue;
+            const sessionRoot = path.join(projectRoot, sessionDir);
+            const sessionRootKind = yield* classifyNoFollow(sessionRoot);
+            if (sessionRootKind !== "Directory") continue;
+            for (const kind of CLAUDE_SIDECAR_DIRS) {
+                const records = yield* walkSidecarDir({
+                    kind,
+                    project,
+                    rootDir: projectRoot,
+                    dirPath: path.join(sessionRoot, kind),
+                    relativePrefix: normalizeRel(path.join(sessionDir, kind)),
+                    observedAt,
+                });
+                out.push(...records);
+            }
         }
 
         const statsCache = yield* discoverFile({
@@ -581,6 +703,7 @@ const discoverProjectSidecarPlanSnapshots = (
 ): Effect.Effect<DiscoveredSidecarPlanSnapshot[], never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!validProjectSlug(project)) return [];
+        const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const projectRoot = path.join(transcriptsDir, project);
         const rootKind = yield* classifyNoFollow(projectRoot);
@@ -594,6 +717,22 @@ const discoverProjectSidecarPlanSnapshots = (
                 relativePrefix: kind,
             });
             out.push(...snapshots);
+        }
+        const entries = yield* fs.readDirectory(projectRoot).pipe(orAbsent<ReadonlyArray<string>>([]));
+        for (const sessionDir of entries) {
+            if (!uuidRe.test(sessionDir)) continue;
+            const sessionRoot = path.join(projectRoot, sessionDir);
+            const sessionRootKind = yield* classifyNoFollow(sessionRoot);
+            if (sessionRootKind !== "Directory") continue;
+            for (const kind of ["plans", "tasks"] as const) {
+                const snapshots = yield* walkSidecarPlanDir({
+                    kind,
+                    project,
+                    dirPath: path.join(sessionRoot, kind),
+                    relativePrefix: normalizeRel(path.join(sessionDir, kind)),
+                });
+                out.push(...snapshots);
+            }
         }
         return out;
     });
@@ -636,6 +775,227 @@ export const discoverClaudeSidecarPlanSnapshots = (
 export const buildClaudeSidecarPlanSnapshotStatements = (
     snapshots: readonly PlanSnapshotWrite[],
 ): string[] => snapshots.flatMap(buildPlanSnapshotStatements);
+
+const numberField = (record: Record<string, unknown>, field: string): number | null => {
+    const value = record[field];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
+
+const detailText = (value: string | null | undefined): string | null => {
+    const text = value?.trim();
+    if (!text) return null;
+    return text.length > MAX_USAGE_DETAIL_CHARS
+        ? `${text.slice(0, MAX_USAGE_DETAIL_CHARS)}...`
+        : text;
+};
+
+const SEARCH_COMMANDS = new Set(["rg", "grep", "ag", "ack", "fd"]);
+const INSPECT_COMMANDS = new Set(["cat", "bat", "sed", "awk", "head", "tail", "less", "more", "wc", "python", "python3", "node", "bun"]);
+
+const commandWords = (command: string): string[] =>
+    [...command.matchAll(/[A-Za-z0-9_.-]+/g)].map((match) => match[0] ?? "");
+
+const commandToolFromText = (command: string | null | undefined): string | null => {
+    if (!command) return null;
+    const words = commandWords(command);
+    for (const word of words) {
+        if (SEARCH_COMMANDS.has(word) || INSPECT_COMMANDS.has(word)) return word;
+    }
+    return words.find((word) => !word.includes("=")) ?? null;
+};
+
+const usageActionForCommand = (commandTool: string | null): ClaudeSidecarUsageAction =>
+    commandTool && SEARCH_COMMANDS.has(commandTool) ? "searched" : "inspected";
+
+const unquoteShellWord = (value: string): string =>
+    ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))
+        ? value.slice(1, -1)
+        : value;
+
+const extractSearchPattern = (
+    command: string | null | undefined,
+    commandTool: string | null,
+    transcriptsDir: string,
+): string | null => {
+    if (!command || !commandTool || !SEARCH_COMMANDS.has(commandTool)) return null;
+    const words = command.match(/"[^"]*"|'[^']*'|\S+/g)?.map(unquoteShellWord) ?? [];
+    const commandIndex = words.findIndex((word) => word === commandTool || word.endsWith(`/${commandTool}`));
+    if (commandIndex < 0) return null;
+    for (const word of words.slice(commandIndex + 1)) {
+        if (word.startsWith("-")) continue;
+        if (claudeSidecarPathRefFromPath({ path: word, transcriptsDir })) continue;
+        return detailText(word);
+    }
+    return null;
+};
+
+const usageEdgeKey = (edge: ClaudeSidecarUsageEdge): string =>
+    sha256([
+        edge.toolCallKey,
+        edge.artifactKey,
+        edge.action,
+        edge.source,
+        edge.commandTool ?? "",
+        edge.pattern ?? "",
+        edge.offset?.toString(10) ?? "",
+        edge.limit?.toString(10) ?? "",
+    ].join("\0"));
+
+const sidecarArtifactMap = (
+    artifacts: readonly ClaudeSidecarArtifact[],
+): Map<string, ClaudeSidecarArtifact> => {
+    const out = new Map<string, ClaudeSidecarArtifact>();
+    for (const artifact of artifacts) out.set(artifact.pathHash, artifact);
+    return out;
+};
+
+export const buildClaudeSidecarUsageEdges = (
+    input: {
+        readonly rows: readonly ClaudeToolCallSidecarRow[];
+        readonly artifacts: readonly ClaudeSidecarArtifact[];
+        readonly transcriptsDir: string;
+    },
+): ClaudeSidecarUsageEdge[] => {
+    const artifacts = sidecarArtifactMap(input.artifacts);
+    const out = new Map<string, ClaudeSidecarUsageEdge>();
+
+    const push = (
+        row: ClaudeToolCallSidecarRow,
+        ref: ClaudeSidecarPathRef,
+        details: Omit<ClaudeSidecarUsageEdge, "toolCallKey" | "artifactKey" | "sessionId" | "sidecarKind" | "pathHash" | "ts">,
+    ) => {
+        const artifact = artifacts.get(ref.pathHash);
+        if (!artifact) return;
+        const toolCallKey = recordKeyPart(row.id, "tool_call");
+        if (!toolCallKey) return;
+        const sessionId = recordKeyPart(row.session, "session");
+        const edge: ClaudeSidecarUsageEdge = {
+            toolCallKey,
+            artifactKey: claudeSidecarArtifactKey(artifact),
+            sessionId,
+            sidecarKind: artifact.kind,
+            pathHash: artifact.pathHash,
+            ts: row.ts ?? artifact.mtime.toISOString(),
+            ...details,
+        };
+        out.set(usageEdgeKey(edge), edge);
+    };
+
+    for (const row of input.rows) {
+        for (const ref of extractClaudeSidecarPathRefs({ text: row.outputExcerpt, transcriptsDir: input.transcriptsDir })) {
+            push(row, ref, {
+                action: "produced",
+                source: "output_excerpt",
+                commandTool: null,
+                pattern: null,
+                offset: null,
+                limit: null,
+            });
+        }
+
+        const parsedInput = row.inputJson ? decodeJsonOrNull(row.inputJson) : null;
+        if (isRecord(parsedInput)) {
+            const filePath = firstNonEmpty(
+                stringField(parsedInput, "file_path"),
+                stringField(parsedInput, "path"),
+            );
+            for (const ref of extractClaudeSidecarPathRefs({ text: filePath, transcriptsDir: input.transcriptsDir })) {
+                push(row, ref, {
+                    action: "read",
+                    source: "read_input",
+                    commandTool: row.name === "Read" ? "Read" : null,
+                    pattern: null,
+                    offset: numberField(parsedInput, "offset"),
+                    limit: numberField(parsedInput, "limit"),
+                });
+            }
+        }
+
+        if (row.commandText) {
+            const commandTool = commandToolFromText(row.commandNorm) ?? commandToolFromText(row.commandText);
+            for (const ref of extractClaudeSidecarPathRefs({ text: row.commandText, transcriptsDir: input.transcriptsDir })) {
+                push(row, ref, {
+                    action: usageActionForCommand(commandTool),
+                    source: "command_text",
+                    commandTool,
+                    pattern: extractSearchPattern(row.commandText, commandTool, input.transcriptsDir),
+                    offset: null,
+                    limit: null,
+                });
+            }
+        }
+    }
+
+    return [...out.values()].sort((a, b) =>
+        `${a.toolCallKey}\0${a.artifactKey}\0${a.action}\0${a.source}`.localeCompare(
+            `${b.toolCallKey}\0${b.artifactKey}\0${b.action}\0${b.source}`,
+        )
+    );
+};
+
+const queryClaudeToolCallRowsForSessions = (
+    db: SurrealClientShape,
+    sessionIds: readonly string[],
+): Effect.Effect<ClaudeToolCallSidecarRow[], DbError> =>
+    Effect.gen(function* () {
+        if (sessionIds.length === 0) return [];
+        const rows: ClaudeToolCallSidecarRow[] = [];
+        for (let i = 0; i < sessionIds.length; i += 100) {
+            const chunk = sessionIds.slice(i, i + 100);
+            const refs = chunk.map((sessionId) => recordRef("session", sessionId)).join(", ");
+            const [result] = yield* db.query<[ClaudeToolCallSidecarRow[]]>(`
+SELECT type::string(id) AS id,
+       type::string(session) AS session,
+       name,
+       input_json AS inputJson,
+       output_excerpt AS outputExcerpt,
+       command_text AS commandText,
+       command_norm AS commandNorm,
+       type::string(ts) AS ts
+FROM tool_call
+WHERE session IN [${refs}];
+`);
+            rows.push(...(result ?? []));
+        }
+        return rows;
+    });
+
+const discoverClaudeSidecarUsageEdges = (
+    input: {
+        readonly db: SurrealClientShape;
+        readonly transcriptsDir: string;
+        readonly artifacts: readonly ClaudeSidecarArtifact[];
+    },
+): Effect.Effect<ClaudeSidecarUsageEdge[], DbError> =>
+    Effect.gen(function* () {
+        const sessionIds = [
+            ...new Set(input.artifacts.map((artifact) => artifact.sessionId).filter((sessionId): sessionId is string => !!sessionId)),
+        ];
+        const rows = yield* queryClaudeToolCallRowsForSessions(input.db, sessionIds);
+        return buildClaudeSidecarUsageEdges({
+            rows,
+            artifacts: input.artifacts,
+            transcriptsDir: input.transcriptsDir,
+        });
+    });
+
+export const buildClaudeSidecarUsageStatements = (
+    edges: readonly ClaudeSidecarUsageEdge[],
+): string[] =>
+    edges.map((edge) =>
+        `RELATE ${recordRef("tool_call", edge.toolCallKey)}->${recordRef("used_sidecar_artifact", usageEdgeKey(edge))}->${recordRef("claude_sidecar_artifact", edge.artifactKey)} SET ${[
+            `session = ${edge.sessionId ? recordRef("session", edge.sessionId) : "NONE"}`,
+            `action = ${surrealString(edge.action)}`,
+            `source = ${surrealString(edge.source)}`,
+            `sidecar_kind = ${surrealString(edge.sidecarKind)}`,
+            `path_hash = ${surrealString(edge.pathHash)}`,
+            `command_tool = ${surrealOptionString(edge.commandTool)}`,
+            `pattern = ${surrealOptionString(edge.pattern)}`,
+            `offset = ${surrealOptionInt(edge.offset)}`,
+            `limit = ${surrealOptionInt(edge.limit)}`,
+            `ts = ${surrealDate(edge.ts)}`,
+        ].join(", ")};`
+    );
 
 export const claudeSidecarArtifactKey = (record: Pick<ClaudeSidecarArtifact, "pathHash">): string =>
     safeKeyPart(record.pathHash);
@@ -682,8 +1042,14 @@ export const ingestClaudeSidecars = (
             transcriptsDir: cfg.paths.transcriptsDir,
             ...(project === undefined ? {} : { project }),
         });
+        const usageEdges = yield* discoverClaudeSidecarUsageEdges({
+            db,
+            transcriptsDir: cfg.paths.transcriptsDir,
+            artifacts: records,
+        });
         const statements = [
             ...buildClaudeSidecarStatements(records),
+            ...buildClaudeSidecarUsageStatements(usageEdges),
             ...buildClaudeSidecarPlanSnapshotStatements(planSnapshots),
         ];
         yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeSidecars" });
@@ -691,6 +1057,7 @@ export const ingestClaudeSidecars = (
             discovered: records.length,
             written: records.length,
             planSnapshotsWritten: planSnapshots.length,
+            usageEdgesWritten: usageEdges.length,
         };
     });
 
@@ -698,6 +1065,7 @@ export class ClaudeSidecarsStats extends BaseStageStats.extend<ClaudeSidecarsSta
     artifactsDiscovered: Schema.Number,
     artifactsWritten: Schema.Number,
     planSnapshotsWritten: Schema.Number,
+    usageEdgesWritten: Schema.Number,
 }) {}
 
 export const claudeSidecarsStage: StageDef<
@@ -711,10 +1079,11 @@ export const claudeSidecarsStage: StageDef<
             const result = yield* ingestClaudeSidecars(ctx.claudeProject);
             return ClaudeSidecarsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `ingested ${result.written} Claude sidecar artifacts and ${result.planSnapshotsWritten} sidecar plan snapshots`,
+                summary: `ingested ${result.written} Claude sidecar artifacts, ${result.usageEdgesWritten} sidecar usage edges, and ${result.planSnapshotsWritten} sidecar plan snapshots`,
                 artifactsDiscovered: result.discovered,
                 artifactsWritten: result.written,
                 planSnapshotsWritten: result.planSnapshotsWritten,
+                usageEdgesWritten: result.usageEdgesWritten,
             });
         }),
 };

@@ -7,10 +7,13 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     buildClaudeSidecarStatements,
     buildClaudeSidecarPlanSnapshotStatements,
+    buildClaudeSidecarUsageEdges,
+    buildClaudeSidecarUsageStatements,
     claudeSidecarArtifactKey,
     claudeSidecarsStage,
     discoverClaudeSidecarArtifacts,
     discoverClaudeSidecarPlanSnapshots,
+    extractClaudeSidecarPathRefs,
 } from "./claude-sidecars.ts";
 
 const FsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -134,6 +137,22 @@ describe("discoverClaudeSidecarArtifacts", () => {
         expect(record?.sessionId).toBe(sessionId);
         expect(record?.relationIds).toEqual({ session_id: sessionId });
     });
+
+    test("discovers real Claude session-scoped sidecar directories", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const sessionId = "11111111-2222-4333-8444-555555555555";
+        await write(transcriptsDir, `${project}/${sessionId}/tool-results/big-output.txt`, "large output");
+        await write(transcriptsDir, `${project}/${sessionId}/shell-snapshots/shell.txt`, "pwd");
+
+        const records = await runFs(discoverClaudeSidecarArtifacts({ transcriptsDir, project }));
+
+        expect(records.map((record) => record.kind).sort()).toEqual(["shell-snapshots", "tool-results"]);
+        expect(records.every((record) => record.sessionId === sessionId)).toBe(true);
+        expect(records.every((record) => record.safeRelativePath.startsWith(`${project}/`))).toBe(true);
+        expect(JSON.stringify(records)).not.toContain("big-output.txt");
+        expect(JSON.stringify(records)).not.toContain("shell.txt");
+    });
 });
 
 describe("buildClaudeSidecarStatements", () => {
@@ -176,6 +195,94 @@ describe("buildClaudeSidecarStatements", () => {
         expect(statement).not.toContain("stats-cache.json");
         expect(statement).not.toContain("secret");
         expect(statement).not.toContain(process.env.HOME ?? "__no_home__");
+    });
+});
+
+describe("Claude sidecar usage edges", () => {
+    test("extracts sidecar path refs from absolute Claude project paths", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const sessionId = "11111111-2222-4333-8444-555555555555";
+        const artifactPath = await write(transcriptsDir, `${project}/${sessionId}/tool-results/big-output.txt`, "large output");
+
+        const [ref] = extractClaudeSidecarPathRefs({
+            transcriptsDir,
+            text: `Full output saved to: ${artifactPath}`,
+        });
+
+        expect(ref).toMatchObject({
+            project,
+            relativePath: `${sessionId}/tool-results/big-output.txt`,
+            kind: "tool-results",
+        });
+        expect(ref?.pathHash).toHaveLength(64);
+    });
+
+    test("links produced, read, and searched tool-result sidecars to tool calls", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const sessionId = "11111111-2222-4333-8444-555555555555";
+        const artifactPath = await write(transcriptsDir, `${project}/${sessionId}/tool-results/big-output.txt`, "large output");
+        const artifacts = await runFs(discoverClaudeSidecarArtifacts({ transcriptsDir, project }));
+
+        const edges = buildClaudeSidecarUsageEdges({
+            transcriptsDir,
+            artifacts,
+            rows: [
+                {
+                    id: "tool_call:producer",
+                    session: `session:${sessionId}`,
+                    name: "Bash",
+                    inputJson: null,
+                    outputExcerpt: `<persisted-output>\nFull output saved to: ${artifactPath}\nPreview`,
+                    commandText: null,
+                    commandNorm: null,
+                    ts: "2026-06-19T00:00:00.000Z",
+                },
+                {
+                    id: "tool_call:reader",
+                    session: `session:${sessionId}`,
+                    name: "Read",
+                    inputJson: JSON.stringify({ file_path: artifactPath, offset: 600, limit: 120 }),
+                    outputExcerpt: null,
+                    commandText: null,
+                    commandNorm: null,
+                    ts: "2026-06-19T00:01:00.000Z",
+                },
+                {
+                    id: "tool_call:searcher",
+                    session: `session:${sessionId}`,
+                    name: "Bash",
+                    inputJson: null,
+                    outputExcerpt: null,
+                    commandText: `rg -n "needle" ${artifactPath}`,
+                    commandNorm: "rg -n",
+                    ts: "2026-06-19T00:02:00.000Z",
+                },
+            ],
+        });
+
+        expect(edges.map((edge) => edge.action).sort()).toEqual(["produced", "read", "searched"]);
+        expect(edges.find((edge) => edge.action === "read")).toMatchObject({
+            toolCallKey: "reader",
+            offset: 600,
+            limit: 120,
+            commandTool: "Read",
+        });
+        expect(edges.find((edge) => edge.action === "searched")).toMatchObject({
+            toolCallKey: "searcher",
+            commandTool: "rg",
+            pattern: "needle",
+        });
+
+        const sql = buildClaudeSidecarUsageStatements(edges).join("\n");
+        expect(sql).toContain("->used_sidecar_artifact:");
+        expect(sql).toContain("action = \"produced\"");
+        expect(sql).toContain("action = \"read\"");
+        expect(sql).toContain("action = \"searched\"");
+        expect(sql).toContain("pattern = \"needle\"");
+        expect(sql).toContain("offset = 600");
+        expect(sql).not.toContain(artifactPath);
     });
 });
 
@@ -262,6 +369,23 @@ describe("discoverClaudeSidecarPlanSnapshots", () => {
         const snapshots = await runFs(discoverClaudeSidecarPlanSnapshots({ transcriptsDir, project }));
 
         expect(snapshots).toEqual([]);
+    });
+
+    test("surfaces session-scoped sidecar plans", async () => {
+        const transcriptsDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const sessionId = "11111111-2222-4333-8444-555555555555";
+        await write(transcriptsDir, `${project}/${sessionId}/plans/plan.md`, "- [ ] Inspect persisted output");
+
+        const snapshots = await runFs(discoverClaudeSidecarPlanSnapshots({ transcriptsDir, project }));
+
+        expect(snapshots).toHaveLength(1);
+        expect(snapshots[0]).toMatchObject({
+            sessionId,
+            source: "claude_sidecar_plan",
+            toolCallKey: null,
+        });
+        expect(snapshots[0]?.items[0]?.content).toBe("Inspect persisted output");
     });
 });
 

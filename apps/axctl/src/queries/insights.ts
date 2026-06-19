@@ -49,6 +49,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "role", stage: "active", note: "Skill role labels used for weighting and grouping." },
     { table: "session", stage: "active", note: "Claude and Codex transcript sessions." },
     { table: "claude_sidecar_artifact", stage: "active", note: "Metadata-only Claude project sidecars linked to sessions when safe." },
+    { table: "used_sidecar_artifact", stage: "active", note: "Tool calls that produced, read, searched, or inspected Claude sidecar artifacts." },
     { table: "agent_provider", stage: "active", note: "Agent transcript provider identities." },
     { table: "agent_model", stage: "active", note: "Agent model catalogue with pricing and context metadata." },
     { table: "agent_session", stage: "active", note: "Provider-native session rows linked to normalized sessions." },

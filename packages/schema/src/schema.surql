@@ -115,6 +115,24 @@ DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_path_hash ON claude_sidecar_a
 DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_session ON claude_sidecar_artifact FIELDS session;
 DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_kind_project ON claude_sidecar_artifact FIELDS kind, project;
 
+-- Tool calls that produced or later inspected Claude Code sidecar artifacts.
+-- Stores the graph edge and bounded structured facts only; absolute sidecar
+-- paths and raw large outputs stay out of the DB.
+DEFINE TABLE IF NOT EXISTS used_sidecar_artifact TYPE RELATION FROM tool_call TO claude_sidecar_artifact SCHEMAFULL;
+DEFINE FIELD session      ON used_sidecar_artifact TYPE option<record<session>>;
+DEFINE FIELD action       ON used_sidecar_artifact TYPE string;         -- produced | read | searched | inspected
+DEFINE FIELD source       ON used_sidecar_artifact TYPE string;         -- output_excerpt | read_input | command_text
+DEFINE FIELD sidecar_kind ON used_sidecar_artifact TYPE string;
+DEFINE FIELD path_hash    ON used_sidecar_artifact TYPE string;
+DEFINE FIELD command_tool ON used_sidecar_artifact TYPE option<string>;
+DEFINE FIELD pattern      ON used_sidecar_artifact TYPE option<string>;
+DEFINE FIELD offset       ON used_sidecar_artifact TYPE option<int>;
+DEFINE FIELD limit        ON used_sidecar_artifact TYPE option<int>;
+DEFINE FIELD ts           ON used_sidecar_artifact TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_in ON used_sidecar_artifact FIELDS in;
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_out ON used_sidecar_artifact FIELDS out;
+DEFINE INDEX IF NOT EXISTS used_sidecar_artifact_session_action ON used_sidecar_artifact FIELDS session, action;
+
 DEFINE TABLE agent_provider SCHEMAFULL;
 DEFINE FIELD name           ON agent_provider TYPE string;
 DEFINE FIELD display_name   ON agent_provider TYPE string;
