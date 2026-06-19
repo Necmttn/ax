@@ -23,6 +23,40 @@ export class BunInstallError extends Schema.TaggedErrorClass<BunInstallError>(
 }) {}
 
 // ---------------------------------------------------------------------------
+// Compiled-binary detection + fallback guidance
+// ---------------------------------------------------------------------------
+
+/**
+ * True when axctl is running from a `bun build --compile` binary rather than a
+ * source checkout. Compiled binaries live inside bun's virtual filesystem
+ * (`/$bunfs/root/...`), so the packages/hooks-sdk source tree is absent and SDK
+ * (TypeScript) hooks - which run as `bun <file>` against that workspace - can be
+ * neither scaffolded nor installed.
+ */
+export const isCompiledBinary = (): boolean =>
+    import.meta.dir.includes("$bunfs") || import.meta.url.includes("$bunfs");
+
+/**
+ * The next-step guidance to print when an SDK-hook command (init/install) is
+ * invoked on a compiled binary. Tells the user the supported path instead of
+ * dead-ending on an internal SdkPathNotFoundError. (issue #564)
+ */
+export const COMPILED_BINARY_SDK_HOOK_HELP = [
+    "SDK (TypeScript) hooks need a source checkout of ax.",
+    "They run as `bun <file>` against the @ax/hooks-sdk workspace, which the",
+    "compiled binary does not bundle - so `ax hooks init`/`install` can't work here.",
+    "",
+    "To author/install hooks like route-dispatch:",
+    "  git clone https://github.com/Necmttn/ax && cd ax && bun install",
+    "  ./apps/axctl/bin/axctl hooks init   # then `... hooks install <file>`",
+    "",
+    "On a compiled binary you can still:",
+    "  - route models by setting `model:` explicitly per dispatch (efficient-dispatch skill)",
+    "  - measure routing with `ax dispatches` / `ax cost split`",
+    "  - add native (non-SDK) hooks via `ax hooks add --command=\"...\"`",
+].join("\n");
+
+// ---------------------------------------------------------------------------
 // resolveSdkPath
 // ---------------------------------------------------------------------------
 

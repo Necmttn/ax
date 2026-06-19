@@ -4,7 +4,12 @@ import { prettyPrint } from "@ax/lib/json";
 import { HOME } from "@ax/lib/paths";
 import { optionValue } from "../config-core/cli-util.ts";
 import { HookProviderRegistryDefault, ALL_HOOK_PROVIDERS } from "./providers/registry.ts";
-import { resolveSdkPath, scaffoldWorkspace } from "./sdk-workspace.ts";
+import {
+    resolveSdkPath,
+    scaffoldWorkspace,
+    isCompiledBinary,
+    COMPILED_BINARY_SDK_HOOK_HELP,
+} from "./sdk-workspace.ts";
 import {
     readAllHooks,
     addHook,
@@ -175,6 +180,10 @@ const initCommand = Command.make(
     },
     ({ dir, noInstall }) =>
         Effect.gen(function* () {
+            if (isCompiledBinary()) {
+                process.stderr.write(`${COMPILED_BINARY_SDK_HOOK_HELP}\n`);
+                process.exit(1);
+            }
             const workspaceDir = expandTilde(dir);
             const sdkPath = yield* resolveSdkPath();
             const written = yield* scaffoldWorkspace({
@@ -203,8 +212,16 @@ const installCommand = Command.make(
     },
     ({ file, providers, scope }) =>
         Effect.gen(function* () {
+            // A compiled binary can't dynamically import a .ts hook file (no bun
+            // runtime + no @ax/hooks-sdk workspace), so installing one would
+            // dead-end on an opaque import error. Tell the user the supported
+            // path up front. (issue #564)
+            if (isCompiledBinary()) {
+                process.stderr.write(`${COMPILED_BINARY_SDK_HOOK_HELP}\n`);
+                process.exit(1);
+            }
             const path = yield* Path.Path;
-            const absFile = path.resolve(file);
+            const absFile = path.resolve(expandTilde(file));
             const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);
 
             // Validate provider names against the registry

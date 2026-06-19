@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, FileSystem, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { scaffoldWorkspace } from "./sdk-workspace.ts";
+import {
+    scaffoldWorkspace,
+    isCompiledBinary,
+    COMPILED_BINARY_SDK_HOOK_HELP,
+} from "./sdk-workspace.ts";
 
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -122,5 +126,20 @@ describe("scaffoldWorkspace", () => {
         const dir = join(base, "nested", "hooks");
         await run(scaffoldWorkspace({ dir, sdkPath: "/sdk", install: false }));
         expect(existsSync(join(dir, "package.json"))).toBe(true);
+    });
+});
+
+describe("isCompiledBinary", () => {
+    test("false when running from source (the test runner)", () => {
+        // The test suite always runs from a source checkout via bun, never from
+        // a `--compile` binary, so detection must report false here.
+        expect(isCompiledBinary()).toBe(false);
+    });
+
+    test("fallback help names the supported path and concrete next steps", () => {
+        expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("source checkout");
+        expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("git clone https://github.com/Necmttn/ax");
+        expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("hooks init");
+        expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("ax hooks add");
     });
 });

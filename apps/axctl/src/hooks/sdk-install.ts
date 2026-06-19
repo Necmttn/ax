@@ -17,6 +17,13 @@ import { HookProviderRegistry } from "./providers/registry.ts";
 // Errors
 // ---------------------------------------------------------------------------
 
+export class SdkHookFileNotFoundError extends Schema.TaggedErrorClass<SdkHookFileNotFoundError>(
+    "SdkHookFileNotFoundError",
+)("SdkHookFileNotFoundError", {
+    file: Schema.String,
+    reason: Schema.String,
+}) {}
+
 export class SdkHookImportError extends Schema.TaggedErrorClass<SdkHookImportError>(
     "SdkHookImportError",
 )("SdkHookImportError", {
@@ -221,6 +228,7 @@ export const installHookFile = (
     opts: InstallHookFileOptions = {},
 ): Effect.Effect<
     ReadonlyArray<InstallResult>,
+    | SdkHookFileNotFoundError
     | SdkHookImportError
     | SdkHookValidationError
     | PlatformError
@@ -236,6 +244,20 @@ export const installHookFile = (
             return yield* new SdkHookValidationError({
                 file,
                 reason: "hook file path must be absolute",
+            });
+        }
+
+        // Stat the path BEFORE attempting a dynamic import. A missing file
+        // otherwise surfaces as a confusing `SdkHookImportError: dynamic import
+        // failed` (with `$bunfs/root` resolver noise on a compiled binary),
+        // which reads like an internal packaging bug rather than "you passed a
+        // path that doesn't exist". (issue #564)
+        const fs = yield* FileSystem.FileSystem;
+        const exists = yield* fs.exists(file);
+        if (!exists) {
+            return yield* new SdkHookFileNotFoundError({
+                file,
+                reason: `file not found: ${file}`,
             });
         }
 
