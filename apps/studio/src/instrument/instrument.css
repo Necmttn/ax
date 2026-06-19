@@ -737,3 +737,172 @@
 @keyframes arc-slam { 60% { transform: scale(1.3); } to { transform: scale(1); } }
 .arc-humor { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-top: 8px; font-style: italic; }
 @media (prefers-reduced-motion: reduce) { .arc-glyph i { animation: none; transform: none; } }
+
+/* ===========================================================================
+   SURFACE: Team Metrics (.v-tm-*) - dense metrics board modelled on the
+   HumanLayer team-metrics page, mapped onto ax's local graph. Reuses the
+   .v-team-* roster + .v-mc-split channels; adds the masthead, range toggles,
+   chart grid, and the BarChart (.rdx-chart) primitive.
+   ========================================================================= */
+.v-tm { display: flex; flex-direction: column; gap: 14px; }
+.v-tm-mast { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.v-tm-sub { margin: -6px 0 2px; max-width: 70ch; line-height: 1.5; }
+.v-tm-ranges { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.v-tm-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.v-tm-toggle .rdx-label { margin-right: 6px; }
+.v-tm-toggle button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--sec);
+    background: none; border: 1px solid transparent; border-radius: 7px; padding: 4px 9px; cursor: pointer;
+    transition: 0.14s var(--ease); white-space: nowrap;
+}
+.v-tm-toggle button:hover { color: var(--pri); border-color: var(--border-hi); }
+.v-tm-toggle button.on { color: var(--display); background: var(--surface2); border-color: var(--border-hi); }
+
+/* chart grid: 4-up on wide, 2-up mid, 1-up narrow (mirrors HumanLayer) */
+.v-tm-charts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1180px) { .v-tm-charts { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .v-tm-charts { grid-template-columns: 1fr; } }
+.v-tm-chart { gap: 12px; padding: 16px 16px 12px; }
+.v-tm-chart-head { display: flex; flex-direction: column; gap: 4px; }
+.v-tm-chart-total { font-size: 30px; }
+.v-tm-chart-total small { font-size: 14px; }
+
+/* roster + channels: roster wider than channels */
+.v-tm-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .v-tm-grid { grid-template-columns: 1fr; } }
+.v-tm-grid .v-team-roster { max-height: 360px; }
+.v-tm-grid .nf-list { max-height: 312px; }
+
+/* horizontal share bar for the model channels (no Segbar dependency) */
+.v-tm-bar { display: block; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.v-tm-bar > span { display: block; height: 100%; border-radius: 3px; }
+
+/* ---- BarChart (.rdx-chart) - sparse SVG bar/line w/ axes ---- */
+.rdx-chart { position: relative; width: 100%; display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
+.rdx-chart svg { width: 100%; flex: 1 1 auto; min-height: 0; overflow: visible; }
+.rdx-chart-grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rdx-chart-tick { fill: var(--dim); font-family: var(--mono); font-size: 8px; }
+.rdx-chart-x { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--dim); padding-left: 26px; }
+.rdx-chart-x span { flex: 1; text-align: center; }
+.rdx-chart-x span:first-child { text-align: left; }
+.rdx-chart-x span:last-child { text-align: right; }
+
+/* ---- tabbed selectable roster ---- */
+.v-tm-roster-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.v-tm-tabs { display: inline-flex; gap: 2px; }
+.v-tm-tabs button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sec);
+    background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 9px; cursor: pointer; transition: 0.14s var(--ease);
+}
+.v-tm-tabs button:hover { color: var(--pri); }
+.v-tm-tabs button.on { color: var(--display); border-bottom-color: var(--accent); }
+
+.v-team-rt tr.v-tm-row { cursor: pointer; }
+.v-team-rt tr.v-tm-row.sel td { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.v-team-rt tr.v-tm-row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.v-tm-check {
+    width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--border-hi); flex: none; display: inline-block;
+    transition: 0.12s var(--ease);
+}
+.v-tm-check.on { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--surface); }
+.v-team-who .v-tm-check { margin-right: 2px; }
+
+.v-tm-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.v-tm-chip { font-family: var(--mono); font-size: 10px; color: var(--sec); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+.v-tm-chip.team { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); letter-spacing: 0.04em; }
+
+/* ---- side-by-side compare panel ---- */
+.v-tm-compare { padding: 0; gap: 0; }
+.v-tm-clear { font-family: var(--mono); font-size: 11px; color: var(--sec); background: none; border: 1px solid var(--border-hi); border-radius: 6px; padding: 3px 10px; cursor: pointer; transition: 0.14s var(--ease); }
+.v-tm-clear:hover { color: var(--pri); border-color: var(--sec); }
+.v-tm-compare-scroll { overflow-x: auto; }
+.v-tm-compare-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
+.v-tm-compare-table th { text-align: left; font-weight: 400; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); padding: 8px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.v-tm-compare-table th.r, .v-tm-compare-table td.r { text-align: right; }
+.v-tm-compare-table td { padding: 10px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.v-tm-compare-table tr:last-child td { border-bottom: 0; }
+.v-tm-compare-k { color: var(--sec); }
+.v-tm-compare-table td.lead { color: var(--accent); font-weight: 600; }
+
+/* ===========================================================================
+   Fake paywall (production): blurred community-compare board + sales CTA.
+   ========================================================================= */
+/* Clip the locked teaser to roughly one screen so the paywall card pins at the
+   bottom of the visible preview (not the bottom of the very tall full board). */
+.v-tm-locked { position: relative; height: 88dvh; overflow: hidden; }
+.v-tm-blur {
+    /* Readable by DEFAULT - the board is the demo, so prospects see exactly what
+       they get. It only blurs while the paywall card is hovered (the "almost
+       yours" tease), via :has() below. */
+    pointer-events: none; user-select: none;
+    filter: none; opacity: 0.94;
+    transition: filter 0.3s var(--ease), opacity 0.3s var(--ease);
+}
+.v-tm-locked:has(.v-tm-paywall-card:hover) .v-tm-blur {
+    filter: blur(6px) saturate(0.85); opacity: 0.5;
+}
+/* Teaser reorder: float the cost-breakdown table (the functions roster) to the
+   TOP so it reads in full above the bottom-anchored card; push the charts down
+   under the card where they're less critical. `.v-tm` is a flex column. */
+.v-tm-locked .v-tm-mast { order: 0; }
+.v-tm-locked .v-tm-sub { order: 1; }
+.v-tm-locked .v-tm-hero { order: 2; }
+.v-tm-locked .v-tm-grid { order: 3; }
+.v-tm-locked .v-tm-charts { order: 4; }
+.v-tm-locked .v-tm-compare { order: 5; }
+
+/* ---- hero scoreboard strip (teaser): 3 outcome tiles + a "so what" line ---- */
+.v-tm-hero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.v-tm-hero-cap { grid-column: 1 / -1; margin: 2px 0 0; line-height: 1.5; color: var(--sec); text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.v-tm-hero-cap b { color: var(--pri); font-weight: 600; }
+@media (max-width: 720px) { .v-tm-hero { grid-template-columns: 1fr; } }
+.v-tm-herotile { gap: 8px; padding: 16px 18px; }
+.v-tm-herostat { font-size: 38px; }
+.v-tm-herostat small { font-size: 18px; color: var(--sec); }
+.v-tm-trend { font-family: var(--mono); font-size: 11.5px; color: var(--sec); display: flex; align-items: center; gap: 6px; }
+.v-tm-trend .arr { font-size: 10px; }
+.v-tm-trend.up .arr, .v-tm-trend.down .arr { color: var(--green); } /* down $/PR is GOOD */
+
+/* ---- outcome leaderboard table ---- */
+.v-tm-out th.dim, .v-tm-out td.dim { color: var(--dim); }
+.v-tm-out td.dim { font-weight: 400; }
+.v-tm-share { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+.v-tm-share .v-tm-bar { flex: 1; }
+.v-tm-share b { font-family: var(--mono); font-weight: 600; color: var(--pri); font-size: 12px; width: 30px; text-align: right; }
+.v-tm-paywall {
+    /* anchored bottom-RIGHT so the hero strip + breakdown table stay fully
+       visible on the left; the scrim only deepens toward the bottom-right
+       corner where the compact card sits. */
+    position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-end; justify-content: flex-end;
+    padding: 0 28px 32px; pointer-events: none;
+    background: radial-gradient(90% 75% at 88% 100%,
+        color-mix(in srgb, var(--bg) 55%, transparent) 0%,
+        color-mix(in srgb, var(--bg) 24%, transparent) 48%,
+        transparent 74%);
+}
+.v-tm-paywall-card {
+    pointer-events: auto;
+    max-width: 372px; width: 100%; gap: 0; padding: 22px 24px 20px; text-align: left;
+    border-color: var(--border-hi);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 30px 80px -28px rgba(0,0,0,0.7);
+}
+.v-tm-paywall-kicker { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); margin-bottom: 16px; }
+.v-tm-paywall-h { font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 4vw, 38px); line-height: 1.05; letter-spacing: -0.01em; color: var(--display); margin: 0 0 12px; }
+.v-tm-paywall-lede { font-size: 14.5px; line-height: 1.55; color: var(--sec); margin: 0 0 18px; max-width: 42ch; }
+.v-tm-paywall-feats { list-style: none; margin: 0 0 22px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.v-tm-paywall-feats li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; line-height: 1.4; color: var(--pri); }
+.v-tm-paywall-feats li b { font-weight: 600; color: var(--display); }
+.v-tm-persona { margin-left: auto; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex: none; }
+.v-tm-paywall-cta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.v-tm-paywall-btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 11px;
+    background: var(--accent); color: #06140b; border: 1px solid var(--accent);
+    font: 600 14.5px/1 var(--sans); text-decoration: none; transition: 0.16s var(--ease);
+}
+.v-tm-paywall-btn:hover { filter: brightness(1.07); transform: translateY(-1px); }
+.v-tm-paywall-sales { font-family: var(--mono); font-size: 12.5px; color: var(--sec); text-decoration: none; border-bottom: 1px solid var(--border-hi); padding-bottom: 1px; }
+.v-tm-paywall-sales:hover { color: var(--pri); border-color: var(--sec); }
+.v-tm-paywall-foot { margin-top: 16px; letter-spacing: 0.1em; }
+@media (prefers-reduced-motion: reduce) { .v-tm-paywall-btn:hover { transform: none; } }

@@ -111,3 +111,65 @@ export function GlyphReel({ seed = 0, dim = "#222222", lit = "#ffffff" }: { seed
 export function Led({ tone = "green" }: { tone?: "green" | "accent" | "alert" | "red" }) {
     return <span className={`rdx-led ${tone}`} aria-hidden="true" />;
 }
+
+const fmtTick = (n: number): string => {
+    const r = Math.round(n);
+    if (r >= 1e6) return (r / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (r >= 1e3) return (r / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(r);
+};
+
+/**
+ * Sparse vertical bar / line chart - the nullframe equivalent of the HumanLayer
+ * team-metrics chart cards. Responsive SVG (viewBox + preserveAspectRatio none);
+ * colours come from CSS vars on the .rdx scope. `labels` are x-axis tick captions
+ * spread across the width; the y-axis shows max / mid / 0.
+ */
+export function BarChart({
+    data, color = "var(--accent)", labels = [], height = 120, kind = "bar",
+}: {
+    data: ReadonlyArray<number>;
+    color?: string;
+    labels?: ReadonlyArray<string>;
+    height?: number;
+    kind?: "bar" | "line";
+}) {
+    const W = 320, H = 100, padL = 26, padB = 6, padT = 6, padR = 4;
+    const max = Math.max(1, ...data);
+    const n = Math.max(1, data.length);
+    const iw = W - padL - padR, ih = H - padT - padB;
+    const x = (i: number) => padL + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+    const y = (v: number) => padT + ih - (v / max) * ih;
+    const bw = Math.max(2, Math.min(14, iw / n - 3));
+    const ticks = [max, max / 2, 0];
+    return (
+        <div className="rdx-chart" style={{ height }}>
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">
+                {ticks.map((t, i) => {
+                    const ty = padT + (i / (ticks.length - 1)) * ih;
+                    return (
+                        <g key={i}>
+                            <line x1={padL} y1={ty} x2={W - padR} y2={ty} className="rdx-chart-grid" />
+                            <text x={padL - 5} y={ty + 3} textAnchor="end" className="rdx-chart-tick">{fmtTick(t)}</text>
+                        </g>
+                    );
+                })}
+                {kind === "line" ? (
+                    <polyline
+                        points={data.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
+                        fill="none" stroke={color} strokeWidth={1.6} vectorEffect="non-scaling-stroke"
+                    />
+                ) : (
+                    data.map((v, i) => (
+                        <rect key={i} x={x(i) - bw / 2} y={y(v)} width={bw}
+                            height={Math.max(0, padT + ih - y(v))} rx={1} fill={color}
+                            opacity={v === 0 ? 0.18 : 1} />
+                    ))
+                )}
+            </svg>
+            {labels.length > 0 && (
+                <div className="rdx-chart-x">{labels.map((l, i) => <span key={i}>{l}</span>)}</div>
+            )}
+        </div>
+    );
+}

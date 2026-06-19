@@ -25,6 +25,7 @@ import { MissionControl } from "./instrument/mission-control.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { UsageRoute } from "./routes/usage.tsx";
 import { CostRoute } from "./routes/cost.tsx";
+import { TeamMetricsRoute } from "./instrument/team-metrics.tsx";
 import { LabRoute } from "./routes/lab.tsx";
 import { SigilGalleryRoute } from "./routes/sigil-gallery.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
@@ -216,6 +217,12 @@ const costRoute = createRoute({
     component: CostRoute,
 });
 
+const teamRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/team",
+    component: TeamMetricsRoute,
+});
+
 const labRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/lab",
@@ -278,6 +285,7 @@ const routeTree = rootRoute.addChildren([
     improveRoute,
     usageRoute,
     costRoute,
+    teamRoute,
     labRoute,
     sigilGalleryRoute,
     narrationDemoRoute,
