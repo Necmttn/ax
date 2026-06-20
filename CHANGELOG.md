@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.35.0](https://github.com/Necmttn/ax/compare/v0.34.2...v0.35.0) (2026-06-19)
+
+
+### Features
+
+* **hooks:** embed bundled SDK hooks in the compiled binary ([#573](https://github.com/Necmttn/ax/issues/573)) ([#574](https://github.com/Necmttn/ax/issues/574)) ([b152fb5](https://github.com/Necmttn/ax/commit/b152fb544f2dd4c3302dc8c4b3a3961763db9cb6))
+* **routing:** ax routing impact — off-vs-on receipt per 5h plan window ([#575](https://github.com/Necmttn/ax/issues/575)) ([#576](https://github.com/Necmttn/ax/issues/576)) ([b783eac](https://github.com/Necmttn/ax/commit/b783eacc521286235fb379e9b0d4b288e6ba185c))
+* **studio:** team metrics board + ax-for-teams paywall ([#567](https://github.com/Necmttn/ax/issues/567)) ([61645a5](https://github.com/Necmttn/ax/commit/61645a512af92547b36b896914a20d6a023a4d42))
+
+
+### Bug Fixes
+
+* **install:** make IDE daemon model graceful + doctor-aware ([#568](https://github.com/Necmttn/ax/issues/568)) ([#572](https://github.com/Necmttn/ax/issues/572)) ([1867d12](https://github.com/Necmttn/ax/commit/1867d12ba08a663f940e5aa6aa1fadfaac54dc01))
+* keep inspect pagination on server window ([7726163](https://github.com/Necmttn/ax/commit/772616308c338969c8f05c7c840ae731cfdf347a))
+
 ## [0.34.2](https://github.com/Necmttn/ax/compare/v0.34.1...v0.34.2) (2026-06-19)
 
 
