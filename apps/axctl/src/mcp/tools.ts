@@ -53,7 +53,7 @@ import {
 } from "../dashboard/role-queries.ts";
 import { recommend, normalizeRecommendInput } from "../improve/recommend.ts";
 import { showExperiment } from "../improve/show.ts";
-import { listProposals, normalizeListProposalsInput } from "../improve/list.ts";
+import { listDirectiveProposals, listProposals, normalizeListProposalsInput } from "../improve/list.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import {
@@ -741,6 +741,30 @@ const dojoAgendaTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const directivesListTool: AxMcpTool = defineMcpTool({
+    name: "directives_list",
+    description:
+        "List tracked directive proposals (guidance form, section=directives), sorted by recurrence (frequency). Returns rows with id, title, status, confidence and dedupe_sig. Use to see what directive candidates have been mined and whether they are still open. Read-only.",
+    inputSchema: {
+        status: z
+            .string()
+            .optional()
+            .describe('Status filter (default "open"; pass "all" to disable).'),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max proposals to return (default 30)."),
+    },
+    run: async (args, rt) => {
+        const status = args.status ?? "open";
+        const limit = args.limit ?? 30;
+        const rows = await rt.runPromise(listDirectiveProposals(status, limit));
+        return { proposals: rows };
+    },
+});
+
 /**
  * All registered MCP tools. `server.ts` iterates this array to register +
  * wrap each one.
@@ -769,4 +793,5 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costRoutabilityTool,
     dispatchesTool,
     dojoAgendaTool,
+    directivesListTool,
 ];

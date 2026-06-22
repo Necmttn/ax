@@ -34,6 +34,7 @@ import { harnessStage } from "../harness.ts";
 import { digestStage } from "../../digest/digest-stage.ts";
 import { usageStage } from "../../usage/usage-stage.ts";
 import { contentTypesStage } from "../derive-content-types.ts";
+import { directiveNgramsStage } from "../derive-directive-ngrams.ts";
 
 export type { StageDef } from "./types.ts";
 
@@ -63,7 +64,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

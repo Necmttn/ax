@@ -14,6 +14,7 @@
  * verdict all come for free from `deriveProposals` + `improve`.
  */
 import { isHarnessInjected } from "./signals/core.ts";
+import { tokens } from "./outcomes.ts";
 
 // Standing-rule lead-ins: each is a strong proactive-directive signal on its
 // own (unlike bare "always"/"never", which need an imperative verb - see below
@@ -116,3 +117,70 @@ export function deriveDirectiveCandidates(
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// A5: Lift-ranked candidate scoring
+// ---------------------------------------------------------------------------
+
+export interface ScoredDirectiveCandidate extends DirectiveCandidate {
+    readonly score: number;   // max lift among the candidate's ngrams; seed-base when cold
+    readonly source: "lift" | "seed";
+}
+
+// Seed score: any real positive lift entry outranks a cold-table candidate.
+const SEED_SCORE = 0;
+
+/**
+ * Generate 1–4-grams from directive candidate text for lift-table lookup.
+ *
+ * Uses the same stop-word-filtered token stream as `tallyNgramOutcomes`
+ * (via `tokens()` from outcomes.ts), so ngram keys exactly match those
+ * stored in the `directive_ngram` lift table. Directive signal markers like
+ * "always", "never", "remember", "dogfood" survive the filter; only
+ * connective particles ("from", "on", "to") are stripped.
+ */
+function directiveCandidateNgrams(text: string): string[] {
+    const words = tokens(text);
+    const result: string[] = [];
+    for (let n = 1; n <= 4; n++) {
+        for (let i = 0; i <= words.length - n; i++) {
+            result.push(words.slice(i, i + n).join(" "));
+        }
+    }
+    return result;
+}
+
+/**
+ * Rank directive candidates by the learned per-user lift table.
+ *
+ * For each candidate: tokenize text, generate 1–4-grams, look each up in
+ * `liftTable`, take the MAX lift found. `source="lift"` iff at least one
+ * ngram had a positive entry; else `source="seed"` with score=SEED_SCORE so
+ * any real positive lift outranks. Sort by score desc (stable).
+ *
+ * Pure: the DB read of liftTable lives in deriveProposals.
+ */
+export const scoreDirectiveCandidates = (
+    candidates: readonly DirectiveCandidate[],
+    liftTable: ReadonlyMap<string, number>,
+): ScoredDirectiveCandidate[] => {
+    const scored = candidates.map((c): ScoredDirectiveCandidate => {
+        const ngrams = directiveCandidateNgrams(c.text);
+        let maxLift: number | null = null;
+
+        for (const ng of ngrams) {
+            const lift = liftTable.get(ng);
+            if (lift !== undefined && lift > 0) {
+                if (maxLift === null || lift > maxLift) maxLift = lift;
+            }
+        }
+
+        return maxLift !== null
+            ? { ...c, score: maxLift, source: "lift" }
+            : { ...c, score: SEED_SCORE, source: "seed" };
+    });
+
+    // Stable sort (JS Array.sort is stable) by score descending; ties preserve
+    // original order so cold-table runs maintain v1 ordering.
+    return scored.sort((a, b) => b.score - a.score);
+};

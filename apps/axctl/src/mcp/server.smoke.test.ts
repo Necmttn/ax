@@ -31,6 +31,7 @@ const EXPECTED_TOOLS = [
     "cost_routability",
     "dispatches",
     "dojo_agenda",
+    "directives_list",
 ] as const;
 
 describe("axMcpTools registry", () => {

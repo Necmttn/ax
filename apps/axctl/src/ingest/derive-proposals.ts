@@ -38,7 +38,7 @@ import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
-import { deriveDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
+import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
@@ -704,8 +704,27 @@ WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
             () => [] as DirectiveTurnRow[],
         );
         const directiveCandidates = deriveDirectiveCandidates(directiveTurns);
+
+        // A5: Load the per-user directive lift table (built by the directive-ngrams
+        // stage) and score candidates so the limit in deriveDirectiveProposalRows
+        // keeps the highest-signal ones. Tolerant: if the table is empty or the
+        // query fails, scoring falls back to seed order (v1 ordering preserved).
+        const directiveLiftMap = yield* Effect.orElseSucceed(
+            db.query<[Array<{ ngram: string; lift: number }>]>(`
+SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
+                .pipe(Effect.map((rows) => {
+                    const map = new Map<string, number>();
+                    for (const r of rows?.[0] ?? []) {
+                        map.set(r.ngram, r.lift);
+                    }
+                    return map as ReadonlyMap<string, number>;
+                })),
+            () => new Map<string, number>() as ReadonlyMap<string, number>,
+        );
+        const scoredDirectiveCandidates = scoreDirectiveCandidates(directiveCandidates, directiveLiftMap);
+
         const { rows: directiveRows, skipped: directiveSkipped } =
-            deriveDirectiveProposalRows(directiveCandidates);
+            deriveDirectiveProposalRows(scoredDirectiveCandidates);
         const directiveStmts = buildGuidanceProposalStatements(directiveRows, existingSigs);
 
         yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts], { chunkSize: 500 });

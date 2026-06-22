@@ -128,13 +128,13 @@ export function deriveCommandOutcomes(rows: readonly ToolCallOutcomeRow[]): Comm
     });
 }
 
-const STOP_WORDS = new Set([
+export const STOP_WORDS = new Set([
     "the", "and", "for", "that", "this", "with", "you", "can", "are", "was", "were", "have", "has", "but", "not", "from", "into",
     "if", "there", "to", "see", "your", "our", "their", "then", "when", "what", "how", "why", "does", "did", "would", "should",
     "could", "let", "lets", "we", "my", "me", "it", "its", "is", "in", "on", "as", "of", "or", "be", "so", "do",
 ]);
 
-function tokens(text: string): string[] {
+export function tokens(text: string): string[] {
     return text
         .toLowerCase()
         .replace(/`[^`]+`/g, " ")
