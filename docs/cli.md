@@ -48,6 +48,10 @@ axctl routing show                          # effective routing table with class
 axctl routing impact begin --arm=off|on     # start an A/B work block (snapshots the 5h plan window)
 axctl routing impact end                     # close the open block
 axctl routing impact report [--share]       # routing off-vs-on receipt, per 5h plan window
+axctl directives mine [--days=N] [--emit-brief] [--json]
+                                            # rank candidate directive turns by n-gram lift; --emit-brief writes .ax/tasks/directives-<date>.md
+axctl directives list [--status=...] [--json]  # tracked directive proposals (section=directives), sorted by recurrence
+axctl directives ngrams [--limit=N] [--json]   # the learned per-user directive lift table (directive_ngram rows, lift = outcome-rate / base-rate)
 axctl profile show [--window=N] [--no-cost] # local profile: stats + rig + taste from the graph
 axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards for the dashboard landing
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]
@@ -195,6 +199,24 @@ hook fires in the window (unlinked from outcomes - attributing an advisory to th
 resulting dispatch requires a clean PreToolUse→spawn join that isn't available;
 deferred). By-class table sorted by overspend. Use `--candidates` for the
 per-dispatch view of the expensive-tier rows.
+
+## Directive mining
+
+`ax directives mine [--days=N] [--emit-brief] [--json]` - rank candidate directive
+turns by n-gram lift. Reads the last N days of user turns (default 90), scores
+each by the learned per-user lift table (`directive_ngram`), and prints a ranked
+table. `--emit-brief` writes `.ax/tasks/directives-<date>.md` for an agent to
+review; accepted proposals land via `ax improve accept <id>`. `--json` emits raw
+scored rows.
+
+`ax directives list [--status=open|all] [--json]` - list tracked directive proposals
+(`guidance_proposal.section = 'directives'`), sorted by recurrence (frequency).
+Default status filter is `open`; `--status=all` includes accepted and rejected rows.
+
+`ax directives ngrams [--limit=N] [--json]` - show the learned per-user directive
+lift table (`directive_ngram` rows sorted by lift desc). `lift = outcome-rate /
+base-rate`; higher = stronger directional signal. Populated at ingest. Default
+`--limit=50`. MCP: `directives_list`.
 
 ## Grounded agent files (`axctl improve`)
 

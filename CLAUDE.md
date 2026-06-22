@@ -322,6 +322,12 @@ state in `apps/axctl/src/routing-impact/` (DB-free, exhaustively tested); CLI in
 `cli/commands/ax-routing-impact.ts`. `report --share` appends the ax plug.
 The routing-table file is now the source of truth for BOTH the route-dispatch hook and `ax dispatches --candidates` (unify done); `ROUTING_CLASSES` remains the shipped default seed. The committed `/routing-tune` workflow stays the dev-side tool for tuning the defaults themselves.
 
+### Directive mining
+
+`ax directives mine [--days=N] [--emit-brief] [--json]` - rank candidate directive turns by n-gram lift (default 90d). Without `--emit-brief` prints a scored table; with it, writes `.ax/tasks/directives-<date>.md` for agent review. Rides the existing improve pipeline: accepted proposals land via `ax improve accept <id>`.
+`ax directives list [--status=open|all] [--json]` - tracked directive proposals (section="directives"), sorted by recurrence. Discriminated from other guidance proposals by `guidance_proposal.section = 'directives'` (set at ingest, no new schema field).
+`ax directives ngrams [--limit=N] [--json]` - the learned per-user lift table (`directive_ngram` rows sorted by lift desc; lift = outcome-rate / base-rate). Populated at ingest; re-run `ax ingest` to refresh. MCP: `directives_list`.
+
 ## Recommend + apply guidance to your own agent files
 
 `axctl improve recommend / accept / lint / show` ship the v0 grounded-files

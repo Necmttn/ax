@@ -407,6 +407,31 @@ published 6 wrapped cards - the dashboard landing serves them now`,
           "ax wrapped publish replaces the wrapped_card set from { cards: [{question, headline, body, sensitivity?}] } JSON.",
         ],
       },
+      {
+        name: "directives",
+        sub: ["mine", "list", "ngrams"],
+        job: "Mine candidate directive turns by lift, track proposals, and inspect the n-gram lift table.",
+        signature: "ax directives mine [--days=N] [--emit-brief] | list [--status=...] | ngrams [--limit=N]",
+        flags: [
+          { flag: "--emit-brief", desc: "(mine) write .ax/tasks/directives-<date>.md for agent review" },
+          { flag: "--days=N", desc: "(mine) look-back window in days (default 90)" },
+          { flag: "--status=open|all", desc: "(list) filter by proposal status (default open)" },
+          { flag: "--limit=N", desc: "(ngrams) cap rows (default 50)" },
+          { flag: "--json", desc: "machine output on any sub-verb" },
+        ],
+        receipt: `$ ax directives mine --days=90
+#    score  src    pattern             ts          session              text
+1     2.41  lift   always use         2026-06-20  session:7f2a3b4c     always use Effect.gen for...
+2     1.88  lift   prefer typed       2026-06-19  session:9d1e0a2f     prefer typed schemas over...
+
+12 candidates (90 days)  emit brief: ax directives mine --emit-brief`,
+        detail: [
+          "ax directives mine ranks user-turn candidates by n-gram lift (learned from correction events at ingest); --emit-brief writes .ax/tasks/directives-<date>.md for agent review, --json emits raw scored rows.",
+          "ax directives list shows tracked directive proposals (guidance_proposal.section=directives), sorted by recurrence; --status=all includes accepted/rejected.",
+          "ax directives ngrams shows the learned per-user directive lift table (directive_ngram rows sorted by lift desc); lift = outcome-rate / base-rate, higher = stronger directional signal.",
+          "Accepted proposals land via: ax improve accept <id>. Directive mining runs at ingest (derive phase); re-run ax ingest to refresh the lift table. MCP: directives_list.",
+        ],
+      },
     ],
   },
   {
