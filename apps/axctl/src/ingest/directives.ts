@@ -133,40 +133,18 @@ const SEED_SCORE = 0;
 /**
  * Generate 1–4-grams from directive candidate text for lift-table lookup.
  *
- * Returns the union of:
- *   - raw n-grams (no stop-word filter) - needed because directive phrases
- *     like "from now on" / "never commit" embed stop words as their markers
- *   - filtered n-grams via `tokens()` from outcomes.ts (DRY) - mirrors how
- *     the lift table is built in `tallyNgramOutcomes`
- * Using both sets ensures matching regardless of how the table was populated.
+ * Uses the same stop-word-filtered token stream as `tallyNgramOutcomes`
+ * (via `tokens()` from outcomes.ts), so ngram keys exactly match those
+ * stored in the `directive_ngram` lift table. Directive signal markers like
+ * "always", "never", "remember", "dogfood" survive the filter; only
+ * connective particles ("from", "on", "to") are stripped.
  */
 function directiveCandidateNgrams(text: string): string[] {
-    // Raw words: same lowercasing/splitting as tokens() but WITHOUT stop-word
-    // removal, so directive markers like "from now on" stay intact.
-    const rawWords = text
-        .toLowerCase()
-        .replace(/`[^`]+`/g, " ")
-        .replace(/https?:\/\/\S+/g, " ")
-        .split(/[^a-z0-9_'-]+/)
-        .map((t) => t.replace(/^['-]+|['-]+$/g, ""))
-        .filter((t) => t.length >= 2);
-
-    // Filtered words (via DRY import of tokens()): includes n-grams built the
-    // same way as tallyNgramOutcomes so we match those keys too.
-    const filteredWords = tokens(text);
-
-    const seen = new Set<string>();
+    const words = tokens(text);
     const result: string[] = [];
-
-    for (const words of [rawWords, filteredWords]) {
-        for (let n = 1; n <= 4; n++) {
-            for (let i = 0; i <= words.length - n; i++) {
-                const ng = words.slice(i, i + n).join(" ");
-                if (!seen.has(ng)) {
-                    seen.add(ng);
-                    result.push(ng);
-                }
-            }
+    for (let n = 1; n <= 4; n++) {
+        for (let i = 0; i <= words.length - n; i++) {
+            result.push(words.slice(i, i + n).join(" "));
         }
     }
     return result;

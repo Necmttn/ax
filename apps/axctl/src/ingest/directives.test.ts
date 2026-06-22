@@ -87,7 +87,7 @@ describe("scoreDirectiveCandidates", () => {
             { turnKey: "t1", sessionId: "s1", text: "from now on always dogfood before showing", pattern: "from now on", ts: "2026-06-01T00:00:00Z" },
             { turnKey: "t2", sessionId: "s2", text: "never skip the typecheck", pattern: "never-verb", ts: "2026-06-02T00:00:00Z" },
         ];
-        const lift = new Map<string, number>([["from now", 9.0], ["now on", 8.0]]); // t1's ngrams have high lift; t2's not in table
+        const lift = new Map<string, number>([["always", 9.0]]); // t1 contains "always" (survives tokens() filter); t2's ngrams not in table
         const out = scoreDirectiveCandidates(candidates, lift);
         expect(out[0].turnKey).toBe("t1");          // ranked first
         expect(out[0].source).toBe("lift");
