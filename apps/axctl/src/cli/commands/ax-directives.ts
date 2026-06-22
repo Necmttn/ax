@@ -18,8 +18,9 @@
 import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
-import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { prettyPrint } from "@ax/lib/json";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurnRow } from "../../ingest/directives.ts";
+import { listDirectiveProposals, type ProposalRow } from "../../improve/list.ts";
 import { fetchDirectiveLift } from "../../queries/directive-ngrams.ts";
 import { renderDirectivesBrief } from "../directives-brief-template.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -134,27 +135,11 @@ const listCommand = Command.make(
     },
     ({ status, json }) =>
         Effect.gen(function* () {
-            const db = yield* SurrealClient;
             const statusFilter = optionValue(status) ?? "open";
 
-            const whereStatus = statusFilter !== "all"
-                ? `AND p.status = ${surrealLiteral(statusFilter)}`
-                : "";
-
-            const sql = `
-SELECT type::string(p.id) AS id, p.form, p.title, p.hypothesis, p.dedupe_sig,
-       p.frequency, p.confidence, p.status, type::string(p.created_at) AS created_at
-FROM proposal AS p
-WHERE p.form = "guidance"
-  AND p.id IN (SELECT proposal FROM guidance_proposal WHERE section = "directives")
-  ${whereStatus}
-ORDER BY p.frequency DESC, p.created_at DESC
-LIMIT 30;`;
-
-            const [rows] = yield* db.query<[Array<Record<string, unknown>>]>(sql).pipe(
-                Effect.orElseSucceed(() => [[] as Array<Record<string, unknown>>]),
+            const proposals = yield* listDirectiveProposals(statusFilter).pipe(
+                Effect.orElseSucceed(() => [] as ReadonlyArray<ProposalRow>),
             );
-            const proposals = rows ?? [];
 
             if (json) {
                 console.log(prettyPrint(proposals));
