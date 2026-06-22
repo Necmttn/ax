@@ -97,6 +97,70 @@ describe("buildSpans", () => {
   });
 });
 
+describe("buildSpans judgment carry (Claude prose->edit split)", () => {
+  // Claude splits one assistant message into separate turn rows: a prose turn
+  // (text, no tools) then its tool-use turns (empty text). The judgment guard
+  // only reads ONE turn's text, so edit turns riding behind judgment reasoning
+  // misclassify as mechanical-impl. The carry propagates judgment text from a
+  // prose turn onto the following tool-only turns of the same message.
+  it("demotes edit turns riding behind judgment prose out of routable", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", ["Read"]), // interactive (adjacent to user)
+      turn(3, "assistant", [], { text: "Let me review the design before editing" }), // design-decision, sets sticky
+      turn(4, "assistant", ["Edit"]), // empty text, sticky -> demoted (would be mechanical-impl)
+      turn(5, "assistant", ["Edit"]), // demoted
+    ];
+    const spans = buildSpans(turns, 1);
+    expect(spans.find((s) => s.cls === "mechanical-impl")).toBeUndefined();
+    const judgment = spans.find((s) => s.cls === "design-decision");
+    expect(judgment?.turnCount).toBe(3); // prose + 2 edits
+    expect(judgment?.routable).toBe(false);
+  });
+
+  it("leaves edits mechanical when the leading prose carries no judgment", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", ["Read"]),
+      turn(3, "assistant", [], { text: "Now let me update the file" }), // no judgment keyword
+      turn(4, "assistant", ["Edit"]), // mechanical-impl (no carry)
+    ];
+    const mech = buildSpans(turns, 1).find((s) => s.cls === "mechanical-impl");
+    expect(mech?.turnCount).toBe(1);
+    expect(mech?.routable).toBe(true);
+  });
+
+  it("resets the carry at the next message's prose turn", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", ["Read"]),
+      turn(3, "assistant", [], { text: "review the plan" }), // sticky on
+      turn(4, "assistant", ["Edit"]), // demoted
+      turn(5, "assistant", [], { text: "now apply the rename" }), // non-judgment text -> sticky off
+      turn(6, "assistant", ["Edit"]), // mechanical-impl (carry reset)
+    ];
+    const spans = buildSpans(turns, 1);
+    // exactly one mechanical-impl span (turn 6); turn 4 was demoted
+    expect(spans.filter((s) => s.cls === "mechanical-impl")).toHaveLength(1);
+    expect(spans.some((s) => s.cls === "design-decision")).toBe(true);
+  });
+
+  it("resets the carry at a user boundary", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", [], { text: "audit the security model" }), // adjacent->interactive, but sticky on
+      turn(3, "assistant", ["Edit"]), // demoted (sticky survives the forced-interactive turn)
+      turn(4, "user", []), // boundary -> sticky reset
+      turn(5, "assistant", ["Edit"]), // adjacent->interactive
+      turn(6, "assistant", ["Edit"]), // mechanical-impl (carry was reset)
+    ];
+    const spans = buildSpans(turns, 1);
+    // exactly one mechanical-impl span (turn 6); turn 3 was demoted pre-boundary
+    expect(spans.filter((s) => s.cls === "mechanical-impl")).toHaveLength(1);
+    expect(spans.some((s) => s.cls === "design-decision")).toBe(true);
+  });
+});
+
 describe("aggregateRoutability", () => {
   const catalog = new Map<string, ModelPricing>([
     [MODEL_ALIASES.sonnet, { provider: "anthropic", inputPerMillionUsd: 3, outputPerMillionUsd: 15, cacheReadPerMillionUsd: 0.3, cacheCreationPerMillionUsd: 3.75, fastMultiplier: 1, pricingSource: "test" }],

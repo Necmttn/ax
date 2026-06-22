@@ -319,9 +319,10 @@ function renderRoutability(r: RoutabilityResult): string {
         out.push(...renderRoutabilityProvider(p, p.provider));
         out.push("");
     }
-    out.push("estimate: edit/read turns are assumed mechanically routable; reasoning before an");
-    out.push("edit isn't visible in the transcript, so read this as an upper-ish bound, not ground");
-    out.push("truth. judgment-text turns stay on frontier by design. claude + codex main-agent.");
+    out.push("estimate: edit/read turns are assumed mechanically routable; thinking before an");
+    out.push("edit is stripped from the transcript, so read this as an upper-ish bound, not ground");
+    out.push("truth. judgment-text turns stay on frontier, and edits riding behind a judgment");
+    out.push("prose turn in the same message are carried with it. claude + codex main-agent.");
     out.push("codex exec_command is split read/write via command_norm; ambiguous norms stay on main.");
     out.push("next: ax dispatches --candidates   # the subagent-side leak");
     return out.join("\n");
