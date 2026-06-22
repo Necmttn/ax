@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { computeLift } from "./directive-ngrams.ts";
+import { computeLift, tallyNgramOutcomes } from "./directive-ngrams.ts";
 
 test("lift ranks outcome-leading ngrams above filler", () => {
   const rows = [
@@ -20,4 +20,23 @@ test("sparsity guard drops ngrams below thresholds", () => {
 test("baseRate of zero yields zero lift, never NaN/Infinity", () => {
   const rows = [{ ngram: "x y", n: 2, occurrences: 5, outcomes: 0, sessions: 3 }];
   expect(computeLift(rows, 0, { minOccurrences: 5, minSessions: 3 })[0].lift).toBe(0);
+});
+
+test("tallyNgramOutcomes credits ngrams whose turn precedes an in-window same-session outcome", () => {
+  const turns = [
+    { id: "t1", sid: "sA", seq: 1, ts: "2026-06-01T00:00:00Z", text_excerpt: "remember to dogfood before showing me" },
+    { id: "t2", sid: "sA", seq: 50, ts: "2026-06-01T05:00:00Z", text_excerpt: "remember to dogfood before showing me" }, // outcome ts before this turn - out of window
+    { id: "t3", sid: "sB", seq: 1, ts: "2026-06-02T00:00:00Z", text_excerpt: "can you explain this" },
+  ];
+  const outcomes = [
+    { sid: "sA", ts: "2026-06-01T00:30:00Z" }, // after t1 (in window), before t2 (t2 has no outcome)
+  ];
+  const rows = tallyNgramOutcomes(turns, outcomes, { windowTurns: 20 });
+  const dogfood = rows.find((r) => r.ngram === "remember dogfood" || r.ngram.includes("dogfood"));
+  // ngrams from t1 are credited (t1 is before the outcome); t2 contributes to occurrences but not outcomes
+  expect(dogfood).toBeDefined();
+  expect(dogfood!.outcomes).toBeGreaterThanOrEqual(1);
+  // ngram only from sB (no outcome in sB) gets 0 outcomes
+  const explainRow = rows.find((r) => r.ngram.includes("explain"));
+  expect(explainRow?.outcomes ?? 0).toBe(0);
 });
