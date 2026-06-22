@@ -336,11 +336,11 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 18 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 19 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `dispatches`, `dojo_agenda`) so an agent can query the graph in-context. Run from source (no
+`cost_routability`, `dispatches`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
