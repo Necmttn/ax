@@ -278,6 +278,15 @@ export function buildSpans(
   const spans: Span[] = [];
   let cur: { cls: WorkClass; turnCount: number; usage: RepriceUsage } | null = null;
   let adjacentToBoundary = false; // next work turn neighbours a user turn
+  // Judgment carry: Claude splits one assistant message into separate turn rows
+  // - a prose turn (text) then its tool-use turns (empty text). classifyTurn
+  // reads only ONE turn's text, so edit turns riding behind judgment reasoning
+  // misclassify as mechanical-impl. A prose turn carrying JUDGMENT_GUARD_RE text
+  // sets this sticky flag; the following tool-only turns of the same message
+  // inherit it and are held off the routable path. A new prose turn (next
+  // message) re-evaluates it; a user boundary clears it. Conservative: it only
+  // demotes (never promotes), so the routability estimate can only tighten.
+  let judgmentSticky = false;
 
   const flush = () => {
     if (!cur) return;
@@ -289,7 +298,7 @@ export function buildSpans(
   for (const t of turns) {
     const kind = roleKind(t.role);
     if (kind === "skip") continue;
-    if (kind === "boundary") { flush(); adjacentToBoundary = true; continue; }
+    if (kind === "boundary") { flush(); adjacentToBoundary = true; judgmentSticky = false; continue; }
     if (kind === "carry") {
       // Tool-output cost belongs to the action that produced it (open span).
       if (cur) cur.usage = addUsage(cur.usage, t.usage);
@@ -297,8 +306,17 @@ export function buildSpans(
       continue;
     }
     // work
-    const cls = classifyTurn(t, adjacentToBoundary);
+    // A turn carrying its own text starts a new assistant message - re-evaluate
+    // the judgment carry from that text. Tool-only turns (empty text) keep the
+    // value set by the prose turn that opened their message.
+    const turnText = t.text?.trim() ?? "";
+    if (turnText.length > 0) judgmentSticky = JUDGMENT_GUARD_RE.test(turnText);
+    let cls = classifyTurn(t, adjacentToBoundary);
     adjacentToBoundary = false;
+    // Hold judgment-adjacent edits off the routable path: fold them into the
+    // design-decision (non-routable) class so they group with the reasoning
+    // that drove them.
+    if (judgmentSticky && ROUTABLE_CLASS_TIER[cls] !== undefined) cls = "design-decision";
     if (cur && cur.cls === cls) {
       cur.turnCount += 1;
       cur.usage = addUsage(cur.usage, t.usage);
