@@ -18,7 +18,7 @@
 import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
-import { prettyPrint } from "@ax/lib/json";
+import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurnRow } from "../../ingest/directives.ts";
 import { fetchDirectiveLift } from "../../queries/directive-ngrams.ts";
 import { renderDirectivesBrief } from "../directives-brief-template.ts";
@@ -138,7 +138,7 @@ const listCommand = Command.make(
             const statusFilter = optionValue(status) ?? "open";
 
             const whereStatus = statusFilter !== "all"
-                ? `AND p.status = "${statusFilter}"`
+                ? `AND p.status = ${surrealLiteral(statusFilter)}`
                 : "";
 
             const sql = `
