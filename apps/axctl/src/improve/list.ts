@@ -90,16 +90,16 @@ export const listDirectiveProposals = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const whereStatus = status !== "all"
-            ? `AND p.status = ${surrealLiteral(status)}`
+            ? `AND status = ${surrealLiteral(status)}`
             : "";
         const sql = `
-SELECT type::string(p.id) AS id, p.form, p.title, p.hypothesis, p.dedupe_sig,
-       p.frequency, p.confidence, p.status, type::string(p.created_at) AS created_at
-FROM proposal AS p
-WHERE p.form = "guidance"
-  AND p.id IN (SELECT proposal FROM guidance_proposal WHERE section = "directives")
+SELECT type::string(id) AS id, form, title, hypothesis, dedupe_sig,
+       frequency, confidence, status, type::string(created_at) AS created_at
+FROM proposal
+WHERE form = "guidance"
+  AND id IN (SELECT proposal FROM guidance_proposal WHERE section = "directives")
   ${whereStatus}
-ORDER BY p.frequency DESC, p.created_at DESC
+ORDER BY frequency DESC, created_at DESC
 LIMIT ${limit};`;
         const result = yield* db.query<[ProposalRow[]]>(sql);
         return result?.[0] ?? [];
