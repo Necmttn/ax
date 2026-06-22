@@ -48,6 +48,48 @@ export const NEXT_PROTOCOL_HINT =
 // Shared link constructors
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Studio deeplinks
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a Studio deeplink points. Resolved by the caller (CLI handler / MCP
+ * tool) via `resolveStudioTarget` so these builders stay pure - the dashboard
+ * module owns pidfile/port discovery.
+ */
+export interface StudioDeeplink {
+    /** `http://localhost:<port>` - no trailing slash. */
+    readonly baseUrl: string;
+    /** A managed ax daemon appears to be running. Tunes the link copy. */
+    readonly live: boolean;
+}
+
+/**
+ * The Studio session route - single source of the deeplink shape so agents
+ * never have to read frontend route code or guess the URL (issue #563). Bare
+ * session id (the `session:⟨…⟩` wrapper is stripped) keeps the URL clean.
+ */
+export const studioSessionUrl = (baseUrl: string, sessionId: string): string =>
+    `${baseUrl.replace(/\/+$/, "")}/sessions/${toBareSessionId(sessionId)}`;
+
+/**
+ * "Open in Studio" deeplink for a session. Carries the URL as the transport;
+ * when no daemon is up the URL still uses the default port (stable route) and
+ * the description points the user at `ax serve`. Works for normal and
+ * subagent sessions alike - the route renders both.
+ */
+export const studioSessionLink = (
+    sessionId: string,
+    studio: StudioDeeplink,
+    priority = 7,
+): NavLink => ({
+    description: studio.live
+        ? "Open this session in ax Studio"
+        : "Open this session in ax Studio (start the daemon first: ax serve)",
+    url: studioSessionUrl(studio.baseUrl, sessionId),
+    ui: { priority, group: "navigate" },
+});
+
 /** Drill-in link for a session id - dual transport. */
 export const sessionShowLink = (
     sessionId: string,
@@ -124,6 +166,8 @@ const ALL_SOURCES: ReadonlyArray<RecallSource> = ["turn", "commit", "skill"];
 
 export interface RecallNextOptions {
     readonly requestedSources: ReadonlyArray<RecallSource>;
+    /** When set, each turn hit gains an "open in Studio" deeplink. */
+    readonly studio?: StudioDeeplink;
 }
 
 export interface RecallWithNext {
@@ -142,7 +186,10 @@ export const buildRecallNext = (
 ): RecallWithNext => {
     const hits: Array<WithNext<RecallHit>> = r.hits.map((h) => ({
         ...h,
-        next: [sessionShowLink(h.session_id, "Read the session this turn belongs to")],
+        next: [
+            sessionShowLink(h.session_id, "Read the session this turn belongs to"),
+            ...(opts.studio ? [studioSessionLink(h.session_id, opts.studio)] : []),
+        ],
     }));
 
     const top: NavLink[] = [];
@@ -205,6 +252,8 @@ export interface SessionsNextOptions {
     readonly date?: string | undefined;
     readonly days?: number | undefined;
     readonly project?: string | null | undefined;
+    /** When set, each session row gains an "open in Studio" deeplink. */
+    readonly studio?: StudioDeeplink;
 }
 
 export interface SessionsWithNext {
@@ -222,7 +271,10 @@ export const buildSessionsNext = (
 ): SessionsWithNext => {
     const sessions: Array<WithNext<SessionRow>> = rows.map((row) => ({
         ...row,
-        next: [sessionShowLink(row.id)],
+        next: [
+            sessionShowLink(row.id),
+            ...(opts.studio ? [studioSessionLink(row.id, opts.studio)] : []),
+        ],
     }));
 
     const top: NavLink[] = [];
@@ -292,6 +344,7 @@ export const buildSessionsNext = (
  */
 export const buildSessionShowNext = (
     p: SessionViewPayload,
+    studio?: StudioDeeplink,
 ): ReadonlyArray<NavLink> => {
     const top: NavLink[] = [];
     const overview = p.session.overview;
@@ -305,6 +358,11 @@ export const buildSessionShowNext = (
         cwd: overview.cwd,
     });
     if (resume) top.push(resume);
+
+    // ③ Open this focused session in Studio (issue #563) - the user can see
+    //    the timeline/graph in the UI. Below resume so the harness command
+    //    stays the flagship, above the expand-subagents affordance.
+    if (studio) top.push(studioSessionLink(id, studio, 8));
 
     if (p.session.parent) {
         top.push(

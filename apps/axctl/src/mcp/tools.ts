@@ -40,6 +40,7 @@ import {
     normalizeSessionsAroundOpts,
 } from "../dashboard/sessions-query.ts";
 import { fetchEnrichedSession } from "../queries/enriched-session.ts";
+import { resolveStudioTarget } from "../dashboard/serve-instance.ts";
 import {
     fetchSkillsWeighted,
     normalizeSkillsWeightedParams,
@@ -210,8 +211,10 @@ const recallTool: AxMcpTool = defineMcpTool({
         });
 
         const result = await rt.runPromise(fetchRecall(params));
+        const studio = await resolveStudioTarget();
         const { hits, next } = buildRecallNext(result, {
             requestedSources: resolveRecallSources(params.sources),
+            studio,
         });
         return { ...result, hits, next };
     },
@@ -249,10 +252,12 @@ const sessionsAroundTool: AxMcpTool = defineMcpTool({
             ...(args.project !== undefined ? { project: args.project } : {}),
         });
         const rows = await rt.runPromise(listSessionsAround(opts));
+        const studio = await resolveStudioTarget();
         return buildSessionsNext(rows, {
             date: args.date,
             ...(args.days !== undefined ? { days: args.days } : {}),
             ...(args.project !== undefined ? { project: args.project } : {}),
+            studio,
         });
     },
 });
@@ -297,7 +302,8 @@ const sessionShowTool: AxMcpTool = defineMcpTool({
             }),
         );
         const payload = enriched.view!;
-        return { ...payload, next: buildSessionShowNext(payload) };
+        const studio = await resolveStudioTarget();
+        return { ...payload, next: buildSessionShowNext(payload, studio) };
     },
 });
 

@@ -122,6 +122,19 @@ page shows only when no studio is bundled at all. The hosted
 `ax.necmttn.com/studio/` stays a **mock-fixtures demo** (no live daemon); the
 CLI banner points only at the local URL via `serveStudioUrl` (`banner.ts`).
 
+**Session deeplinks (#563)** - the stable Studio session route is
+`http://localhost:<port>/sessions/<bare-session-id>` (`studioSessionUrl` in
+`apps/axctl/src/nav/next-links.ts` is the single source of the shape; agents
+must NOT reconstruct it from frontend route code). Session-oriented outputs
+carry it as a `NavLink` `url` transport (the third transport beside `call`/`cmd`,
+group `navigate`): `ax sessions show` (top-level), `ax sessions here|around|near`
++ `ax recall` (per row/hit), and the matching MCP tools (`session_show`,
+`sessions_around`, `recall`). Port + liveness come from `resolveStudioTarget`
+(`serve-instance.ts`) - it reads the serve pidfile + signal-0s the pid (NO
+network probe, so common queries pay no round-trip); when no daemon is up it
+emits the default-port URL and the link copy nudges `ax serve`. Works for normal
+and subagent sessions (the route renders both).
+
 ### Live ingest in the dashboard
 
 - `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.

@@ -6,6 +6,7 @@
  * through `withoutDb`.
  */
 import { homedir } from "node:os";
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { posixPath } from "@ax/lib/shared/path";
 
 export interface ServePidfile {
@@ -143,4 +144,37 @@ export async function probeServePort(
 /** Narrow an unknown throw to the listen-failure we handle specially. */
 export function isAddrInUse(err: unknown): boolean {
     return isRecord(err) && (err as { code?: string }).code === "EADDRINUSE";
+}
+
+/** Where Studio deeplinks point: the base URL + whether a daemon is up. */
+export interface StudioTarget {
+    /** `http://localhost:<port>` - no trailing slash. */
+    readonly baseUrl: string;
+    readonly port: number;
+    /** A managed ax daemon appears to be running (its pid is alive). */
+    readonly live: boolean;
+}
+
+/**
+ * Resolve the Studio base URL for deeplinks in session-oriented output.
+ *
+ * Reads the serve pidfile (a cheap local file read) and signal-0 checks the
+ * recorded pid - NO network probe, because these deeplinks decorate common,
+ * latency-sensitive commands (`ax recall`, `ax sessions ...`) and must not
+ * pay a port round-trip on every call. When no live managed daemon is
+ * recorded, falls back to the default port: the route is stable, so the URL
+ * is correct either way; `live` only tunes the description (run `ax serve`).
+ */
+export async function resolveStudioTarget(
+    path = servePidfilePath(),
+): Promise<StudioTarget> {
+    const pidfile = await readServePidfile(path);
+    if (pidfile && isPidAlive(pidfile.pid)) {
+        return { baseUrl: `http://localhost:${pidfile.port}`, port: pidfile.port, live: true };
+    }
+    return {
+        baseUrl: `http://localhost:${DEFAULT_DASHBOARD_PORT}`,
+        port: DEFAULT_DASHBOARD_PORT,
+        live: false,
+    };
 }

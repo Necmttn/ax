@@ -7,9 +7,11 @@ import {
     probeServePort,
     readServePidfile,
     removeServePidfile,
+    resolveStudioTarget,
     servePidfilePath,
     writeServePidfile,
 } from "./serve-instance.ts";
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 
 const tmp = mkdtempSync(join(tmpdir(), "ax-serve-instance-"));
 const pidfile = join(tmp, "serve.json");
@@ -106,6 +108,44 @@ describe("probeServePort", () => {
         const port = portOf(server);
         await server.stop(true);
         expect(await probeServePort(port)).toEqual({ kind: "none" });
+    });
+});
+
+describe("resolveStudioTarget", () => {
+    test("no pidfile → default port, not live", async () => {
+        const target = await resolveStudioTarget(join(tmp, "absent.json"));
+        expect(target).toEqual({
+            baseUrl: `http://localhost:${DEFAULT_DASHBOARD_PORT}`,
+            port: DEFAULT_DASHBOARD_PORT,
+            live: false,
+        });
+    });
+
+    test("pidfile with a live pid → recorded port, live", async () => {
+        const path = join(tmp, "studio-live.json");
+        // process.pid is guaranteed alive (it's us) - exercises the live branch.
+        await writeServePidfile(
+            { pid: process.pid, port: 4321, startedAt: "2026-06-22T00:00:00.000Z", axVersion: "0.34.2" },
+            path,
+        );
+        expect(await resolveStudioTarget(path)).toEqual({
+            baseUrl: "http://localhost:4321",
+            port: 4321,
+            live: true,
+        });
+    });
+
+    test("pidfile with a dead pid → default port, not live", async () => {
+        const path = join(tmp, "studio-dead.json");
+        // pid 1 is init; signal-0 to it from a normal user throws EPERM (=alive),
+        // so use an implausibly high pid that is almost certainly not running.
+        await writeServePidfile(
+            { pid: 2_000_000_000, port: 4321, startedAt: "2026-06-22T00:00:00.000Z", axVersion: "0.34.2" },
+            path,
+        );
+        const target = await resolveStudioTarget(path);
+        expect(target.live).toBe(false);
+        expect(target.port).toBe(DEFAULT_DASHBOARD_PORT);
     });
 });
 

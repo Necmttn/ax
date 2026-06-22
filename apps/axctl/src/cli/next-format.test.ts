@@ -25,6 +25,26 @@ describe("renderNextFooter", () => {
         expect(out).toBe("");
     });
 
+    test("renders url-only links (the Studio deeplink transport)", () => {
+        const out = renderNextFooter([
+            {
+                description: "Open this session in ax Studio",
+                url: "http://localhost:1738/sessions/abc",
+                ui: { group: "navigate" },
+            },
+        ]);
+        expect(out).toContain("http://localhost:1738/sessions/abc");
+        expect(out).toContain("# Open this session in ax Studio");
+    });
+
+    test("cmd wins over url when a link carries both", () => {
+        const out = renderNextFooter([
+            { description: "dual", cmd: "ax sessions show abc", url: "http://x/y" },
+        ]);
+        expect(out).toContain("ax sessions show abc");
+        expect(out).not.toContain("http://x/y");
+    });
+
     test("sorts by priority desc and caps at 4", () => {
         const links = [1, 2, 3, 4, 5].map((p) =>
             link({ cmd: `cmd-${p}`, ui: { priority: p } }),

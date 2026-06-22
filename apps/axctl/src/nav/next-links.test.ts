@@ -15,6 +15,9 @@ import {
     buildSkillsRolesNext,
     buildRolesNext,
     buildImproveProposalsNext,
+    studioSessionUrl,
+    studioSessionLink,
+    type StudioDeeplink,
 } from "./next-links.ts";
 
 const UUID_A = "019e2531-b552-7b53-a029-c780adbb6560";
@@ -273,6 +276,71 @@ describe("buildSessionShowNext", () => {
     test("no overview → empty next", () => {
         const next = buildSessionShowNext(view(detail({ overview: null })));
         expect(next).toHaveLength(0);
+    });
+
+    test("studio target → top-level open-in-Studio deeplink", () => {
+        const studio: StudioDeeplink = { baseUrl: "http://localhost:1738", live: true };
+        const next = buildSessionShowNext(view(detail({})), studio);
+        const open = next.find((l) => l.ui?.group === "navigate");
+        expect(open?.url).toBe(`http://localhost:1738/sessions/${UUID_A}`);
+        expect(open?.description).toBe("Open this session in ax Studio");
+    });
+});
+
+describe("studio deeplinks (#563)", () => {
+    test("studioSessionUrl uses the stable /sessions/<id> route, bare id, no double slash", () => {
+        expect(studioSessionUrl("http://localhost:1738", UUID_A)).toBe(
+            `http://localhost:1738/sessions/${UUID_A}`,
+        );
+        // trailing slash on base is tolerated
+        expect(studioSessionUrl("http://localhost:1738/", UUID_A)).toBe(
+            `http://localhost:1738/sessions/${UUID_A}`,
+        );
+        // session:⟨…⟩ wrapper is stripped to the bare uuid
+        expect(studioSessionUrl("http://localhost:1738", `session:⟨${UUID_A}⟩`)).toBe(
+            `http://localhost:1738/sessions/${UUID_A}`,
+        );
+    });
+
+    test("not-live target keeps the default-port URL but nudges `ax serve`", () => {
+        const link = studioSessionLink(UUID_A, { baseUrl: "http://localhost:1738", live: false });
+        expect(link.url).toBe(`http://localhost:1738/sessions/${UUID_A}`);
+        expect(link.description).toContain("ax serve");
+    });
+
+    test("buildSessionsNext attaches a per-row Studio deeplink when studio is set", () => {
+        const studio: StudioDeeplink = { baseUrl: "http://localhost:1738", live: true };
+        const { sessions } = buildSessionsNext([row({})], { studio });
+        const open = sessions[0]?.next?.find((l) => l.ui?.group === "navigate");
+        expect(open?.url).toBe(`http://localhost:1738/sessions/${UUID_A}`);
+        // drill-in is still present alongside it
+        expect(sessions[0]?.next?.some((l) => l.call?.tool === "session_show")).toBe(true);
+    });
+
+    test("buildSessionsNext without studio leaves rows at one drill-in (backward compatible)", () => {
+        const { sessions } = buildSessionsNext([row({})]);
+        expect(sessions[0]?.next).toHaveLength(1);
+        expect(sessions[0]?.next?.some((l) => l.ui?.group === "navigate")).toBe(false);
+    });
+
+    test("buildRecallNext attaches a per-hit Studio deeplink when studio is set", () => {
+        const studio: StudioDeeplink = { baseUrl: "http://localhost:1738", live: true };
+        const { hits } = buildRecallNext(recallResponse([hit({})]), {
+            requestedSources: ["turn"],
+            studio,
+        });
+        const open = hits[0]?.next?.find((l) => l.ui?.group === "navigate");
+        expect(open?.url).toBe(`http://localhost:1738/sessions/${UUID_A}`);
+    });
+
+    test("subagent session still gets a Studio deeplink (route renders both)", () => {
+        const studio: StudioDeeplink = { baseUrl: "http://localhost:1738", live: true };
+        const { sessions } = buildSessionsNext(
+            [row({ source: "claude-subagent", id: "claude-subagent-zzz" })],
+            { studio },
+        );
+        const open = sessions[0]?.next?.find((l) => l.ui?.group === "navigate");
+        expect(open?.url).toBe("http://localhost:1738/sessions/claude-subagent-zzz");
     });
 });
 

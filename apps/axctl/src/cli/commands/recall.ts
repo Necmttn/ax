@@ -11,6 +11,7 @@ import {
 } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
+import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
@@ -259,8 +260,10 @@ const cmdRecall = (opts: RecallCliOpts) =>
             scope,
             ...(types !== null ? { types } : {}),
         }));
+        const studio = yield* Effect.promise(() => resolveStudioTarget());
         const { hits, next } = buildRecallNext(result, {
             requestedSources: resolveRecallSources(sources),
+            studio,
         });
         if (opts.json) {
             console.log(prettyPrint({ ...result, hits, next }));
