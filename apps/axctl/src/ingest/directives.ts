@@ -14,6 +14,7 @@
  * verdict all come for free from `deriveProposals` + `improve`.
  */
 import { isHarnessInjected } from "./signals/core.ts";
+import { tokens } from "./outcomes.ts";
 
 // Standing-rule lead-ins: each is a strong proactive-directive signal on its
 // own (unlike bare "always"/"never", which need an imperative verb - see below
@@ -116,3 +117,92 @@ export function deriveDirectiveCandidates(
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// A5: Lift-ranked candidate scoring
+// ---------------------------------------------------------------------------
+
+export interface ScoredDirectiveCandidate extends DirectiveCandidate {
+    readonly score: number;   // max lift among the candidate's ngrams; seed-base when cold
+    readonly source: "lift" | "seed";
+}
+
+// Seed score: any real positive lift entry outranks a cold-table candidate.
+const SEED_SCORE = 0;
+
+/**
+ * Generate 1–4-grams from directive candidate text for lift-table lookup.
+ *
+ * Returns the union of:
+ *   - raw n-grams (no stop-word filter) - needed because directive phrases
+ *     like "from now on" / "never commit" embed stop words as their markers
+ *   - filtered n-grams via `tokens()` from outcomes.ts (DRY) - mirrors how
+ *     the lift table is built in `tallyNgramOutcomes`
+ * Using both sets ensures matching regardless of how the table was populated.
+ */
+function directiveCandidateNgrams(text: string): string[] {
+    // Raw words: same lowercasing/splitting as tokens() but WITHOUT stop-word
+    // removal, so directive markers like "from now on" stay intact.
+    const rawWords = text
+        .toLowerCase()
+        .replace(/`[^`]+`/g, " ")
+        .replace(/https?:\/\/\S+/g, " ")
+        .split(/[^a-z0-9_'-]+/)
+        .map((t) => t.replace(/^['-]+|['-]+$/g, ""))
+        .filter((t) => t.length >= 2);
+
+    // Filtered words (via DRY import of tokens()): includes n-grams built the
+    // same way as tallyNgramOutcomes so we match those keys too.
+    const filteredWords = tokens(text);
+
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const words of [rawWords, filteredWords]) {
+        for (let n = 1; n <= 4; n++) {
+            for (let i = 0; i <= words.length - n; i++) {
+                const ng = words.slice(i, i + n).join(" ");
+                if (!seen.has(ng)) {
+                    seen.add(ng);
+                    result.push(ng);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * Rank directive candidates by the learned per-user lift table.
+ *
+ * For each candidate: tokenize text, generate 1–4-grams, look each up in
+ * `liftTable`, take the MAX lift found. `source="lift"` iff at least one
+ * ngram had a positive entry; else `source="seed"` with score=SEED_SCORE so
+ * any real positive lift outranks. Sort by score desc (stable).
+ *
+ * Pure: the DB read of liftTable lives in deriveProposals.
+ */
+export const scoreDirectiveCandidates = (
+    candidates: readonly DirectiveCandidate[],
+    liftTable: ReadonlyMap<string, number>,
+): ScoredDirectiveCandidate[] => {
+    const scored = candidates.map((c): ScoredDirectiveCandidate => {
+        const ngrams = directiveCandidateNgrams(c.text);
+        let maxLift: number | null = null;
+
+        for (const ng of ngrams) {
+            const lift = liftTable.get(ng);
+            if (lift !== undefined && lift > 0) {
+                if (maxLift === null || lift > maxLift) maxLift = lift;
+            }
+        }
+
+        return maxLift !== null
+            ? { ...c, score: maxLift, source: "lift" }
+            : { ...c, score: SEED_SCORE, source: "seed" };
+    });
+
+    // Stable sort (JS Array.sort is stable) by score descending; ties preserve
+    // original order so cold-table runs maintain v1 ordering.
+    return scored.sort((a, b) => b.score - a.score);
+};

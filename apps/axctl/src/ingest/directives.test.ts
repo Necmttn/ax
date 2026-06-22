@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matchDirective, deriveDirectiveCandidates } from "./directives.ts";
+import { matchDirective, deriveDirectiveCandidates, scoreDirectiveCandidates } from "./directives.ts";
 
 describe("matchDirective", () => {
     test("matches explicit standing-rule lead-ins", () => {
@@ -78,5 +78,28 @@ describe("deriveDirectiveCandidates", () => {
             turn({ id: "turn:2", text_excerpt: "From now on, always verify before claiming done." }),
         ]);
         expect(out.map((c) => c.turnKey)).toEqual(["2"]);
+    });
+});
+
+describe("scoreDirectiveCandidates", () => {
+    test("ranks high-lift candidates above seed-only ones", () => {
+        const candidates = [
+            { turnKey: "t1", sessionId: "s1", text: "from now on always dogfood before showing", pattern: "from now on", ts: "2026-06-01T00:00:00Z" },
+            { turnKey: "t2", sessionId: "s2", text: "never skip the typecheck", pattern: "never-verb", ts: "2026-06-02T00:00:00Z" },
+        ];
+        const lift = new Map<string, number>([["from now", 9.0], ["now on", 8.0]]); // t1's ngrams have high lift; t2's not in table
+        const out = scoreDirectiveCandidates(candidates, lift);
+        expect(out[0].turnKey).toBe("t1");          // ranked first
+        expect(out[0].source).toBe("lift");
+        expect(out.find((c) => c.turnKey === "t2")!.source).toBe("seed"); // no lift match → seed fallback
+        expect(out[0].score).toBeGreaterThan(out.find((c) => c.turnKey === "t2")!.score);
+    });
+
+    test("cold table → all seed, original order preserved by stable sort", () => {
+        const candidates = [
+            { turnKey: "t1", sessionId: "s1", text: "remember to dogfood", pattern: "remember to", ts: "2026-06-01T00:00:00Z" },
+        ];
+        const out = scoreDirectiveCandidates(candidates, new Map());
+        expect(out[0].source).toBe("seed");
     });
 });
