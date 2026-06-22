@@ -1,11 +1,12 @@
 /**
  * CLI rendering for NavLinks - the `next:` footer.
  *
- * Text output shows `cmd` links only (a terminal user can't paste an MCP
- * call); priority-sorted, capped at 4, with the description as a dim ANSI
- * comment after the command - matching the inline-ANSI convention used by
- * cmdRecall / formatSessionsTable. `--json` output carries the full NavLink
- * objects instead, so agents driving the CLI get both transports.
+ * Text output shows links with a `cmd` or `url` payload (a terminal user
+ * can't paste an MCP call, but can run a command or open a URL);
+ * priority-sorted, capped at 4, with the description as a dim ANSI comment
+ * after the payload - matching the inline-ANSI convention used by cmdRecall /
+ * formatSessionsTable. `--json` output carries the full NavLink objects
+ * instead, so agents driving the CLI get every transport.
  */
 import type { NavLink } from "@ax/lib/shared/nav-link";
 import { sortNavLinks } from "@ax/lib/shared/nav-link";
@@ -15,20 +16,22 @@ const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
 /**
- * Render the `next:` footer. Returns "" when no link has a `cmd` - callers
- * can append unconditionally.
+ * Render the `next:` footer. Returns "" when no link has a `cmd` or `url`
+ * payload - callers can append unconditionally. A `cmd` wins over `url` when
+ * both are present (a runnable command is the richer terminal affordance).
  */
 export const renderNextFooter = (
     links: ReadonlyArray<NavLink>,
 ): string => {
-    const cmds = sortNavLinks(links)
-        .filter((l): l is NavLink & { cmd: string } => typeof l.cmd === "string")
+    const rows = sortNavLinks(links)
+        .map((l) => ({ link: l, payload: l.cmd ?? l.url }))
+        .filter((r): r is { link: NavLink; payload: string } => typeof r.payload === "string")
         .slice(0, MAX_FOOTER_LINKS);
-    if (cmds.length === 0) return "";
+    if (rows.length === 0) return "";
 
-    const width = Math.max(...cmds.map((l) => l.cmd.length));
-    const lines = cmds.map(
-        (l) => `  ${l.cmd.padEnd(width)}   ${DIM}# ${l.description}${RESET}`,
+    const width = Math.max(...rows.map((r) => r.payload.length));
+    const lines = rows.map(
+        (r) => `  ${r.payload.padEnd(width)}   ${DIM}# ${r.link.description}${RESET}`,
     );
     return `\nnext:\n${lines.join("\n")}`;
 };

@@ -38,6 +38,7 @@ import { fetchSessionChurnSummary, formatSessionChurnSummary } from "../../metri
 import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
+import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
 import { resolvePwdRepository, type PwdResolution } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
@@ -222,7 +223,8 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
             : allRows.filter((r) => r.source !== "claude-subagent");
         const hiddenSubagents = allRows.length - visible.length;
         const rows = limit === null ? visible : visible.slice(0, limit);
-        const { sessions, next } = buildSessionsNext(rows);
+        const studio = yield* Effect.promise(() => resolveStudioTarget());
+        const { sessions, next } = buildSessionsNext(rows, { studio });
 
         if (json) {
             console.log(prettyPrint({ sessions, next }));
@@ -281,10 +283,12 @@ const cmdSessionsAround = (input: {
         const rows = yield* listSessionsAround(
             normalizeSessionsAroundOpts({ date, days, project }),
         );
+        const studio = yield* Effect.promise(() => resolveStudioTarget());
         const { sessions, next } = buildSessionsNext(rows, {
             date: positional,
             days,
             project,
+            studio,
         });
 
         if (json) {
@@ -345,7 +349,8 @@ const cmdSessionsNear = (input: {
         }
 
         const rows = yield* listSessionsNear({ from, to, repositoryKey });
-        const { sessions, next } = buildSessionsNext(rows);
+        const studio = yield* Effect.promise(() => resolveStudioTarget());
+        const { sessions, next } = buildSessionsNext(rows, { studio });
 
         if (json) {
             console.log(prettyPrint({ sessions, next }));
@@ -455,7 +460,8 @@ const cmdSessionShow = (input: {
             catchDbErrorAndExit("axctl session show"),
         );
 
-        const next = buildSessionShowNext(payload);
+        const studio = yield* Effect.promise(() => resolveStudioTarget());
+        const next = buildSessionShowNext(payload, studio);
 
         if (useJson) {
             console.log(renderSessionJson(payload, { metrics, next }));
