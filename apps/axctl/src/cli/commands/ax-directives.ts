@@ -21,7 +21,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurnRow } from "../../ingest/directives.ts";
 import { listDirectiveProposals, type ProposalRow } from "../../improve/list.ts";
-import { fetchDirectiveLift } from "../../queries/directive-ngrams.ts";
+import type { LiftRow } from "../../queries/directive-ngrams.ts";
 import { renderDirectivesBrief } from "../directives-brief-template.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, requirePositiveInt } from "./shared.ts";
@@ -181,10 +181,11 @@ const ngramsCommand = Command.make(
     ({ limit, json }) =>
         Effect.gen(function* () {
             const validLimit = requirePositiveInt("directives ngrams", "limit", limit);
-            const liftRows = yield* fetchDirectiveLift({
-                sinceDays: 90,
-                limit: validLimit,
-            });
+            const db = yield* SurrealClient;
+            const [rawRows] = yield* db.query<[LiftRow[]]>(
+                `SELECT ngram, n, occurrences, outcomes, sessions, lift FROM directive_ngram ORDER BY lift DESC LIMIT ${validLimit};`,
+            ).pipe(Effect.orElseSucceed(() => [[] as LiftRow[]]));
+            const liftRows: LiftRow[] = rawRows ?? [];
 
             if (json) {
                 console.log(prettyPrint(liftRows));
