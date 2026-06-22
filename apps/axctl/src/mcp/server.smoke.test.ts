@@ -248,10 +248,19 @@ describe("NavLink next[] wiring", () => {
         };
         const rt = { runPromise: () => Promise.resolve(stub) } as never;
         const result = (await byName("recall").run({ q: "timeline" }, rt)) as {
-            hits: ReadonlyArray<{ next?: ReadonlyArray<unknown> }>;
+            hits: ReadonlyArray<{
+                next?: ReadonlyArray<{ call?: { tool?: string }; url?: string }>;
+            }>;
             next: ReadonlyArray<{ cmd?: string }>;
         };
-        expect(result.hits[0]?.next).toHaveLength(1);
+        // per-hit: drill-in (session_show) + open-in-Studio deeplink (#563)
+        expect(result.hits[0]?.next).toHaveLength(2);
+        expect(result.hits[0]?.next?.some((l) => l.call?.tool === "session_show")).toBe(true);
+        expect(
+            result.hits[0]?.next?.some((l) =>
+                l.url?.endsWith("/sessions/019e2531-b552-7b53-a029-c780adbb6560"),
+            ),
+        ).toBe(true);
         expect(
             result.next.some((l) => l.cmd === "codex resume 019e2531-b552-7b53-a029-c780adbb6560"),
         ).toBe(true);
