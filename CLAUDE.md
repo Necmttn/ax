@@ -179,7 +179,7 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 `ax sessions around <date> [--days=N] [--project=PATH]` - date window, default ±3d.
 `ax sessions near <sha>` - predecessor→commit window (adaptive); falls back to ±3d for orphan commits.
 `ax sessions show <id> [--expand=<uuid>|--all] [--by-role] [--json]` - drill into one session.
-`ax sessions churn [--here|--project=PATH] [--source=S] [--since=N]` - verification churn by session/source: landed vs edit vs repair LOC, failed checks, episodes (failure opens, same-family pass closes, 30min expiry). Default 30d window.
+`ax sessions churn [--here|--project=PATH] [--source=S] [--since=N]` - verification churn by session/source: landed vs edit vs repair LOC, failed checks, episodes (failure opens, same-family pass closes, 30min expiry). Default 30d window. MCP: `sessions_churn` (explicit `project` path, no `--here`).
 
 ### Cross-source recall
 
@@ -337,14 +337,15 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 20 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 21 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
-`session_metrics`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
+`session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
 `cost_routability`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
-exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
+exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.
+Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
 
 ## Hooks SDK
 

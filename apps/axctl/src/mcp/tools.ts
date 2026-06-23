@@ -55,11 +55,13 @@ import { recommend, normalizeRecommendInput } from "../improve/recommend.ts";
 import { showExperiment } from "../improve/show.ts";
 import { listDirectiveProposals, listProposals, normalizeListProposalsInput } from "../improve/list.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
+import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import {
     NEXT_PROTOCOL_HINT,
     buildRecallNext,
     buildSessionsNext,
+    buildSessionsChurnNext,
     buildSessionShowNext,
     buildSkillsWeightedNext,
     buildSkillsByRoleNext,
@@ -523,6 +525,54 @@ const sessionMetricsTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const sessionsChurnTool: AxMcpTool = defineMcpTool({
+    name: "sessions_churn",
+    description:
+        `Verification-churn rollup by session and source: landed vs edit vs repair LOC, failed/passed checks, and episodes (a failure after an edit opens one, a same-family pass closes it, 30min expiry). Returns an envelope { generatedAt, filters, aggregates, hotSessions, next } - aggregates roll up per provider, hotSessions are the highest-churn sessions with per-row drill-in links. Mirrors \`ax sessions churn\`. Pass \`project\` (a repo root / cwd path) to scope - the git-resolved \`--here\` form is CLI-only. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .max(3650)
+            .optional()
+            .describe("Window in days (default 30, max 3650)."),
+        project: z
+            .string()
+            .optional()
+            .describe("Filter to sessions whose project or cwd equals this path (e.g. a repo root)."),
+        source: z
+            .string()
+            .optional()
+            .describe("Filter to one provider source (e.g. claude, codex, claude-subagent)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .max(500)
+            .optional()
+            .describe("Max hot-session rows to return (default 20, max 500)."),
+    },
+    run: async (args, rt) => {
+        // Mirror the CLI clamp (1..3650 days) so MCP and `ax sessions churn`
+        // agree on window semantics.
+        const sinceDays = args.days ?? 30;
+        const since = new Date(
+            Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86_400_000,
+        );
+        const summary = await rt.runPromise(
+            fetchSessionChurnSummary({
+                since,
+                project: args.project ?? null,
+                source: args.source ?? null,
+                limit: args.limit ?? 20,
+            }),
+        );
+        const studio = await resolveStudioTarget();
+        return buildSessionsChurnNext(summary, { studio });
+    },
+});
+
 const signalShowTool: AxMcpTool = defineMcpTool({
     name: "signal_show",
     description:
@@ -802,6 +852,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     improveShowTool,
     improveListTool,
     sessionMetricsTool,
+    sessionsChurnTool,
     signalShowTool,
     costModelsTool,
     costSplitTool,

@@ -19,6 +19,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     improve_show: ["sigOrId"],
     improve_list: ["form", "limit", "status"],
     session_metrics: ["limit", "project", "sinceDays"],
+    sessions_churn: ["days", "limit", "project", "source"],
     signal_show: ["id", "limit"],
     cost_models: ["days"],
     cost_split: ["days"],

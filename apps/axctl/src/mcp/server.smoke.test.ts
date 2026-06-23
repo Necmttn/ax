@@ -24,6 +24,7 @@ const EXPECTED_TOOLS = [
     "improve_show",
     "improve_list",
     "session_metrics",
+    "sessions_churn",
     "signal_show",
     "cost_models",
     "cost_split",
