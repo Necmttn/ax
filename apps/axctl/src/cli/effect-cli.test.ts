@@ -218,6 +218,7 @@ describe("effect cli", () => {
         const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s) => s.meta.key);
         // All stages in the registry with the "derive" tag:
         expect([...keys].sort()).toEqual([
+            "advice",
             "classifier-results",
             "closure",
             "content-types",

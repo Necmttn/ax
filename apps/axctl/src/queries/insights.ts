@@ -44,6 +44,7 @@ import { graphHealthSql } from "./graph-health.ts";
 import { CODEX_SOURCES_SQL } from "../ingest/source-origin.ts";
 
 export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
+    { table: "advice", stage: "active", note: "Hook advice ledger rows from ~/.ax/hooks/advise-log.jsonl (route-dispatch additionalContext)." },
     { table: "skill", stage: "active", note: "Installed skills and slash commands." },
     { table: "skill_revision", stage: "active", note: "Append-only skill content-change log (drift over time)." },
     { table: "agent_def", stage: "active", note: "Agent definition files (~/.claude/agents) with reconcile lifecycle." },
