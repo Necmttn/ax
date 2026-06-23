@@ -73,6 +73,7 @@ import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../qu
 import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
+import { fetchAdviceLedger } from "../queries/advice-ledger.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../nav/next-links.ts";
 import { assembleAgenda, collectAgendaItems } from "../dojo/agenda.ts";
@@ -697,6 +698,21 @@ const dispatchesTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const dispatchesAdviceTool: AxMcpTool = defineMcpTool({
+    name: "dispatches_advice",
+    description:
+        `Route advice -> dispatch outcome. Joins the hook advice ledger (~/.ax/hooks/advise-log.jsonl, written by advise-tap.ts) to the spawned dispatches it advised on (same parent session + description), and judges whether the child ran the suggested cheaper model. Returns rows (ts, description, suggested_model, child_model, followed) + summary (advised, matched, followed, notFollowed, unmatched, followThroughPct). Closes the advice->outcome attribution gap. Empty until the tap accumulates advise rows. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z.number().int().positive().optional().describe("Window in days (default 14)."),
+        limit: z.number().int().positive().optional().describe("Max advice rows to return (default 30)."),
+    },
+    run: async (args, rt) => {
+        const days = args.days ?? COST_DEFAULT_WINDOW_DAYS;
+        const limit = args.limit ?? 30;
+        return await rt.runPromise(fetchAdviceLedger({ sinceDays: days, limit }));
+    },
+});
+
 const dojoAgendaTool: AxMcpTool = defineMcpTool({
     name: "dojo_agenda",
     description:
@@ -768,5 +784,6 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costImagesTool,
     costRoutabilityTool,
     dispatchesTool,
+    dispatchesAdviceTool,
     dojoAgendaTool,
 ];

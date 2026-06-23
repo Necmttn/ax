@@ -180,6 +180,8 @@ recap-deck-unification     note         1      0         1 2026-06-17 10:44:06
         signature: "ax dispatches [--days=N] [--limit=N] [--candidates]",
         flags: [
           { flag: "--candidates", desc: "inherit + expensive + routing-class match, with est. savings" },
+          { flag: "--economy", desc: "of routable dispatches, how many ran cheap vs expensive + Advise fire count" },
+          { flag: "--advice", desc: "route advice → dispatch outcome: did advised dispatches run the suggested cheaper model?" },
           { flag: "--days=N", desc: "window (default 14)" },
           { flag: "--limit=N", desc: "rows in the table (default 30)" },
         ],
@@ -194,6 +196,7 @@ top classes: run-tests ($1.55), lint-format ($0.78)`,
           "ax dispatches: the default table shows ts, agent_type, description, dispatch_model (\"inherit\" when unset), child_model, child_cost_usd, plus a summary (count, % inherit, total subagent cost).",
           "ax dispatches --candidates filters to inherit + expensive (fable/opus) dispatches that match a routing class, suggesting a cheaper model and estimated savings per dispatch.",
           "ax dispatches compile-routing is an alias of `ax routing compile` (writes ~/.ax/hooks/routing-table.json from the built-in defaults, preserving origin:user classes).",
+          "ax dispatches --advice joins the hook advice ledger (~/.ax/hooks/advise-log.jsonl) to the dispatches it advised on and reports follow-through (did advised dispatches actually run the suggested cheaper model). Dark until the advise-tap accumulates rows.",
         ],
       },
       {

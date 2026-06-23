@@ -35,6 +35,7 @@ import {
     compileRouting,
     compileRoutingSkillMd,
 } from "../../queries/dispatch-analytics.ts";
+import { fetchAdviceLedger } from "../../queries/advice-ledger.ts";
 import { loadEffectiveRoutingTable } from "../../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../../nav/next-links.ts";
 import { pct, usd } from "../render.ts";
@@ -52,6 +53,7 @@ const cmdDispatches = (input: {
     readonly limit: number;
     readonly candidates: boolean;
     readonly economy: boolean;
+    readonly advice: boolean;
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
@@ -185,6 +187,47 @@ const cmdDispatches = (input: {
             return;
         }
 
+        if (input.advice) {
+            const result = yield* fetchAdviceLedger({ sinceDays: input.sinceDays, limit: input.limit });
+
+            if (input.json) {
+                console.log(prettyPrint(result));
+                return;
+            }
+
+            const s = result.summary;
+            console.log(`route advice -> outcome  (${input.sinceDays} days)\n`);
+            if (s.advised === 0) {
+                console.log("(no advise rows in the window - the advice ledger lights up as ~/.ax/hooks/advise-log.jsonl fills)");
+                console.log("ensure the tap is wired: bun ~/.ax/hooks/advise-tap.ts <hook> in the PreToolUse[Agent] command.");
+                return;
+            }
+
+            type AdvRow = { ts: string; description: string; suggested: string; child: string; followed: string };
+            const advRows: AdvRow[] = result.rows.slice(0, input.limit).map((r) => ({
+                ts: r.ts.slice(0, 19),
+                description: r.description ?? "",
+                suggested: r.suggested_model ?? "",
+                child: r.child_model ?? "(unmatched)",
+                followed: r.followed === null ? "-" : r.followed ? "yes" : "NO",
+            }));
+            const advCols: Column<AdvRow>[] = [
+                { header: "ts", get: (r) => r.ts, width: 19, overflow: "clip" },
+                { header: "description", get: (r) => r.description, width: 44, overflow: "ellipsis" },
+                { header: "suggested", get: (r) => r.suggested, width: 10, overflow: "clip" },
+                { header: "child_model", get: (r) => r.child, width: 26, overflow: "ellipsis" },
+                { header: "followed", get: (r) => r.followed, align: "right", width: 8 },
+            ];
+            console.log(renderTable({ columns: advCols, rows: advRows }));
+
+            console.log(
+                `\nadvised ${s.advised}  matched ${s.matched}  followed ${s.followed}  not-followed ${s.notFollowed}  unmatched ${s.unmatched}`,
+            );
+            console.log(`follow-through: ${pct(s.followThroughPct / 100)} (of judgeable matches)`);
+            console.log(`note: advice text lives ONLY in ~/.ax/hooks/advise-log.jsonl - CC never logs PreToolUse additionalContext.`);
+            return;
+        }
+
         // Default: full dispatch table
         const result = yield* fetchDispatches({ sinceDays: input.sinceDays, limit: input.limit });
 
@@ -251,19 +294,21 @@ const dispatchesMainCommand = Command.make(
         limit: positiveLimit(30),
         candidates: Flag.boolean("candidates").pipe(Flag.withDefault(false)),
         economy: Flag.boolean("economy").pipe(Flag.withDefault(false)),
+        advice: Flag.boolean("advice").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ days, limit, candidates, economy, json }) => {
+    ({ days, limit, candidates, economy, advice, json }) => {
         if (!Number.isInteger(days) || days <= 0) {
             fail(`ax dispatches: --days must be a positive integer (got "${days}")`);
         }
-        return cmdDispatches({ sinceDays: days, limit, candidates, economy, json });
+        return cmdDispatches({ sinceDays: days, limit, candidates, economy, advice, json });
     },
 ).pipe(
     Command.withDescription(
         "Subagent dispatch analytics: table of dispatches sorted by child cost, with dispatch model, child model, cost. " +
         "--days=N (default 14)  --limit=N (default 30)  --candidates (inherit + expensive + routing match)  " +
-        "--economy (spend-mode effectiveness lens: cheap vs expensive for routable dispatches + Advise fire count)  --json",
+        "--economy (spend-mode effectiveness lens: cheap vs expensive for routable dispatches + Advise fire count)  " +
+        "--advice (route advice -> dispatch outcome: did advised dispatches run the suggested cheaper model?)  --json",
     ),
 );
 

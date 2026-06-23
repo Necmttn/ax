@@ -303,6 +303,7 @@ not depend on effect).
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`. Routed dispatches whose child ran legs on another model are marked `!` with a dropped-cost footer - the harness drops the Agent `model` override on SendMessage/compact continuations; per-model legs come from `turn_token_usage` (`child_legs`/`model_dropped`/`dropped_cost_usd` in `--json`).
 `ax dispatches --candidates [--days=N]` - inherit + expensive (fable/opus) + routing-class match filter. Shows suggested model + est savings per dispatch. Footer: total est savings, top 3 classes by savings.
 `ax dispatches --economy [--days=N]` - effectiveness lens: of inherit dispatches matching a route-down class, how many ran cheap (sonnet/haiku) vs expensive (fable/opus)? Overspend cost + est savings by class + count of route-dispatch Advise hook fires (unlinked - advice→outcome attribution deferred). Use --candidates for the per-dispatch view.
+`ax dispatches --advice [--days=N] [--limit=N] [--json]` - route advice → dispatch outcome (closes the --economy "unlinked" gap). PreToolUse[Agent] hooks can only ADVISE (CC bugs #39814/#40580 exempt the Agent tool from block/updatedInput), and CC never writes the injected `additionalContext` to the transcript - so the advice is invisible to ax. `~/.ax/hooks/advise-tap.ts` wraps the route hook and persists each fire (keyed by the `session_id` CC hands the hook on stdin) to `~/.ax/hooks/advise-log.jsonl`. The `advice` ingest stage loads that ledger (since-aware, idempotent, never truncated) into the `advice` table; `fetchAdviceLedger` joins each advise to its `spawned` dispatch (same parent session + description, nearest ts) and judges follow-through (did the child run the suggested cheaper tier, or any non-frontier = honored-in-spirit). Reports advised/matched/followed/notFollowed/unmatched + follow-through %. **Dark until the tap accumulates rows** (new sessions only). Modules: `apps/axctl/src/advice/{model,advice-stage}.ts`, `apps/axctl/src/queries/advice-ledger.ts`. MCP: `dispatches_advice`.
 `ax routing compile [--out=PATH]` - merge-preserving regenerate of `~/.ax/hooks/routing-table.json` (defaults refresh, `origin: user` classes survive; refuses to overwrite a corrupt file). `ax dispatches compile-routing` is an alias.
 `ax routing tune [--days=N] [--dry-run] [--emit-brief] [--apply=id,...] [--out=PATH]` - mine unmatched expensive inherit dispatches for new routing classes (two-token prefix clustering, ≥3 members, suggests sonnet). Auto-applies non-judgment proposals to `~/.ax/hooks/routing-table.json` as `origin: user`; judgment-flagged ones (review/design/plan/audit/...) only ship via `--emit-brief` → `.ax/tasks/routing-tune-<date>.md` → agent backtest → `--apply=ids` (carry the brief's `--days` window).
 `ax routing show` - effective table with class origins.
@@ -330,11 +331,11 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 18 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 19 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `dispatches`, `dojo_agenda`) so an agent can query the graph in-context. Run from source (no
+`cost_routability`, `dispatches`, `dispatches_advice`, `dojo_agenda`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.

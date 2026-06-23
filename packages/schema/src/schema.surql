@@ -1502,6 +1502,23 @@ DEFINE FIELD tool_use_id  ON spawned TYPE option<string>;       -- from agent-<i
 DEFINE INDEX IF NOT EXISTS spawned_in   ON spawned FIELDS in;
 DEFINE INDEX IF NOT EXISTS spawned_out  ON spawned FIELDS out;
 
+-- Hook advice ledger: one row per PreToolUse[Agent] hook fire, written by
+-- ~/.ax/hooks/advise-tap.ts. CC injects route advice as additionalContext but
+-- never logs it (and the OTLP hook span has no payload), so this is the only
+-- place the advice text survives. `session` links the PARENT/advised session;
+-- the advice is joined to its dispatch (the `spawned` edge FROM that session) by
+-- description at query time. Closes the advice->outcome attribution gap that
+-- `ax dispatches --economy` footnotes as deferred.
+DEFINE TABLE advice SCHEMAFULL;
+DEFINE FIELD ts              ON advice TYPE datetime;
+DEFINE FIELD session         ON advice TYPE option<record<session>>;  -- parent/advised session
+DEFINE FIELD tool            ON advice TYPE option<string>;           -- normally "Agent"
+DEFINE FIELD description     ON advice TYPE option<string>;           -- dispatch tool_input.description (join key)
+DEFINE FIELD verdict         ON advice TYPE string DEFAULT "allow";   -- "advise" | "allow"
+DEFINE FIELD advice_text     ON advice TYPE option<string>;           -- the injected additionalContext
+DEFINE FIELD suggested_model ON advice TYPE option<string>;           -- tier parsed from advice_text
+DEFINE INDEX IF NOT EXISTS advice_ts ON advice FIELDS ts;
+
 DEFINE TABLE agent_event_child TYPE RELATION FROM agent_event TO agent_event SCHEMAFULL;
 DEFINE FIELD agent_session ON agent_event_child TYPE record<agent_session>;
 DEFINE FIELD provider      ON agent_event_child TYPE record<agent_provider>;
