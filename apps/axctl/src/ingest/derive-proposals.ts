@@ -39,6 +39,7 @@ import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
+import { fetchWorkflowArcs, type ArcCandidate } from "../queries/workflow-sequences.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
@@ -46,6 +47,7 @@ export interface DeriveProposalsStats {
     readonly routingProposals: number;
     readonly imageContextProposals: number;
     readonly directiveProposals: number;
+    readonly workflowProposals: number;
     readonly skipped: number;
 }
 
@@ -174,6 +176,66 @@ export const deriveDirectiveProposalRows = (
         });
     }
     // Strongest (most-restated, then most-recent) first; cap to avoid a firehose.
+    rows.sort((a, b) => b.frequency - a.frequency);
+    return { rows: rows.slice(0, limit), skipped };
+};
+
+// ---------------------------------------------------------------------------
+// Workflow proposals (form='guidance', section='workflows') - v1
+// Recurring skill-arc sequences (mined by mineArcs) become guidance proposals
+// so the agent can codify their best workflows. Reuses GuidanceProposalRow +
+// buildGuidanceProposalStatements; section="workflows" discriminates from
+// section="directives" proposals in guidance_proposal. Mirrors the directive
+// path exactly but with section="workflows". Spec: milestone B (issue #588).
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_TITLE_MAX = 130;
+const WORKFLOW_PROPOSAL_LIMIT = 20;
+
+const workflowTitle = (steps: readonly string[]): string => {
+    const raw = `Workflow: ${steps.join(" → ")}`;
+    return raw.length > WORKFLOW_TITLE_MAX ? `${raw.slice(0, WORKFLOW_TITLE_MAX - 1)}…` : raw;
+};
+
+export const deriveWorkflowProposalRows = (
+    arcs: readonly ArcCandidate[],
+    opts?: { readonly minSessions?: number; readonly limit?: number },
+): { readonly rows: GuidanceProposalRow[]; readonly skipped: number } => {
+    const minSessions = opts?.minSessions ?? 3;
+    const limit = opts?.limit ?? WORKFLOW_PROPOSAL_LIMIT;
+
+    let skipped = 0;
+    const rows: GuidanceProposalRow[] = [];
+    const seenSigs = new Set<string>();
+
+    for (const arc of arcs) {
+        if (arc.support < minSessions) { skipped += 1; continue; }
+        const title = workflowTitle(arc.steps);
+        const normTitle = normalizeTitle(title);
+        const sig = dedupeSig("workflow", normTitle);
+        if (seenSigs.has(sig)) { skipped += 1; continue; }
+        seenSigs.add(sig);
+
+        const confidence: string =
+            arc.support >= 5 ? "high" : arc.support >= 3 ? "medium" : "low";
+
+        rows.push({
+            proposalKey: proposalKeyFor("workflow", title, sig),
+            title,
+            hypothesis:
+                `This ${arc.steps.length}-skill sequence recurred across ${arc.support} sessions: ` +
+                arc.steps.join(" → ") +
+                `. Codify it as a workflow in your skills or CLAUDE.md so future sessions follow it automatically.`,
+            fileTarget: "CLAUDE.md",
+            section: "workflows",
+            suggestedText: arc.steps.join(" → "),
+            confidence,
+            frequency: arc.support,
+            sig,
+            evidenceSummary: [`support: ${arc.support} sessions`, `steps: ${arc.steps.join(", ")}`],
+        });
+    }
+
     rows.sort((a, b) => b.frequency - a.frequency);
     return { rows: rows.slice(0, limit), skipped };
 };
@@ -727,14 +789,28 @@ SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
             deriveDirectiveProposalRows(scoredDirectiveCandidates);
         const directiveStmts = buildGuidanceProposalStatements(directiveRows, existingSigs);
 
-        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts], { chunkSize: 500 });
+        // Workflow proposals (form='guidance', section='workflows'): derive recurring
+        // skill-arc patterns into codification suggestions (milestone B, #588).
+        // Query failure is tolerated - other proposal forms are unaffected.
+        const workflowArcs = yield* Effect.orElseSucceed(
+            fetchWorkflowArcs(),
+            () => [] as ArcCandidate[],
+        );
+        const { rows: workflowRows, skipped: workflowSkipped } =
+            deriveWorkflowProposalRows(workflowArcs);
+        const workflowStmts = workflowRows.length > 0
+            ? buildGuidanceProposalStatements(workflowRows, existingSigs)
+            : [];
+
+        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts, ...workflowStmts], { chunkSize: 500 });
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
             routingProposals: routingRow ? 1 : 0,
             imageContextProposals: imageContextRow ? 1 : 0,
             directiveProposals: directiveRows.length,
-            skipped: skillSkipped + guidanceSkipped + directiveSkipped,
+            workflowProposals: workflowRows.length,
+            skipped: skillSkipped + guidanceSkipped + directiveSkipped + workflowSkipped,
         };
     });
 
@@ -759,7 +835,7 @@ export const ProposalsKey = Schema.Literal("proposals");
 export type ProposalsKey = typeof ProposalsKey.Type;
 
 /**
- * Proposals stage - derives Skill + Guidance + Routing + Image-Context Proposals from cumulated evidence.
+ * Proposals stage - derives Skill + Guidance + Routing + Image-Context + Workflow Proposals from cumulated evidence.
  * Depends on {@link ClosureKey}. Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
  */
 export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("ProposalsStats")({
@@ -768,6 +844,7 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     routingProposals: Schema.Number,
     imageContextProposals: Schema.Number,
     directiveProposals: Schema.Number,
+    workflowProposals: Schema.Number,
 }) {}
 
 export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
@@ -779,12 +856,13 @@ export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessSer
             const result = yield* deriveProposals({ minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals`,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals, ${result.workflowProposals} workflow proposals`,
                 skillProposals: result.skillProposals,
                 guidanceProposals: result.guidanceProposals,
                 routingProposals: result.routingProposals,
                 imageContextProposals: result.imageContextProposals,
                 directiveProposals: result.directiveProposals,
+                workflowProposals: result.workflowProposals,
             });
         }),
 };

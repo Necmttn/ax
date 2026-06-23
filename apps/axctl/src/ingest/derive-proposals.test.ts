@@ -10,6 +10,7 @@ import {
     deriveImageContextProposalRow,
     deriveRoutingProposalRow,
     deriveSkillProposalRows,
+    deriveWorkflowProposalRows,
     IMAGE_CONTEXT_THRESHOLD_MB,
     normalizeTitle,
     parseMetrics,
@@ -413,5 +414,69 @@ describe("buildImageContextProposalStatements", () => {
         expect(sql).not.toMatch(/\bstatus\s*=/);
         expect(sql).not.toMatch(/\bbaseline\s*=/);
         expect(sql).toMatch(/\bfrequency\s*=\s*7/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Workflow proposal tests (B3)
+// ---------------------------------------------------------------------------
+
+describe("deriveWorkflowProposalRows", () => {
+    test("maps arcs to guidance/workflows proposal rows with correct title/frequency/section/sig", () => {
+        const { rows } = deriveWorkflowProposalRows([
+            { steps: ["plan", "tdd", "review", "commit"], support: 5 },
+            { steps: ["recall", "read", "edit", "test"], support: 3 },
+        ], { minSessions: 3 });
+        expect(rows).toHaveLength(2);
+        expect(rows[0]!.title).toContain("Workflow:");
+        expect(rows[0]!.title).toContain("plan");
+        expect(rows[0]!.frequency).toBe(5); // support → frequency
+        expect(rows[0]!.section).toBe("workflows"); // discriminator
+        // stable sig: same arc → same sig
+        const again = deriveWorkflowProposalRows([{ steps: ["plan", "tdd", "review", "commit"], support: 5 }]);
+        expect(again.rows[0]!.sig).toBe(rows[0]!.sig);
+    });
+
+    test("skips arcs below minSessions and counts them in skipped", () => {
+        const { rows, skipped } = deriveWorkflowProposalRows(
+            [{ steps: ["a", "b", "c"], support: 2 }],
+            { minSessions: 3 },
+        );
+        expect(rows).toHaveLength(0);
+        expect(skipped).toBe(1);
+    });
+
+    test("defaults to minSessions=3 when not specified", () => {
+        const { rows, skipped } = deriveWorkflowProposalRows([
+            { steps: ["a", "b", "c"], support: 3 },
+            { steps: ["x", "y", "z"], support: 2 },
+        ]);
+        expect(rows).toHaveLength(1);
+        expect(skipped).toBe(1);
+    });
+
+    test("buildGuidanceProposalStatements emits section='workflows' in SQL for workflow rows", () => {
+        const { rows } = deriveWorkflowProposalRows([
+            { steps: ["plan", "tdd", "review"], support: 4 },
+        ]);
+        const sql = buildGuidanceProposalStatements(rows, new Set()).join("\n");
+        expect(sql).toContain("section: \"workflows\"");
+        expect(sql).toContain("form: \"guidance\"");
+        expect(sql).toContain("UPSERT guidance_proposal:");
+    });
+
+    test("sig is stable across independent calls with same arc", () => {
+        const a = deriveWorkflowProposalRows([{ steps: ["plan", "tdd", "commit"], support: 4 }]).rows[0]!;
+        const b = deriveWorkflowProposalRows([{ steps: ["plan", "tdd", "commit"], support: 9 }]).rows[0]!;
+        expect(a.sig).toBe(b.sig); // support changes don't affect sig
+    });
+
+    test("sorts rows by frequency desc (highest support first)", () => {
+        const { rows } = deriveWorkflowProposalRows([
+            { steps: ["a", "b", "c"], support: 3 },
+            { steps: ["d", "e", "f", "g"], support: 7 },
+        ]);
+        expect(rows[0]!.frequency).toBe(7);
+        expect(rows[1]!.frequency).toBe(3);
     });
 });
