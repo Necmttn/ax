@@ -1,9 +1,13 @@
 /**
- * Recurring skill-arc detector (pure, DB-free).
+ * Recurring skill-arc detector (pure, DB-free) + DB-backed fetch wrapper.
  *
  * `buildPerSession` reshapes flat SeqRow query results into per-session ordered
  * skill lists. `mineArcs` finds gapped ordered subsequences (arcs) that recur
  * across >= minSessions distinct sessions.
+ *
+ * `fetchWorkflowArcs` is the Effect.fn wrapper that runs
+ * WORKFLOW_SESSION_SEQUENCES_SQL (12-week fixed window, v1) → coerces rows →
+ * buildPerSession → mineArcs.
  *
  * Algorithm:
  *   1. For each session, enumerate all ordered subsequences of length minLen..maxLen.
@@ -18,6 +22,11 @@
  * MAX_SESSION_SKILLS before subsequence generation to bound per-session cost.
  * A global dedup set then reduces the support-count pass.
  */
+
+import { Effect } from "effect";
+import type { DbError } from "@ax/lib/errors";
+import { SurrealClient } from "@ax/lib/db";
+import { WORKFLOW_SESSION_SEQUENCES_SQL } from "./workflow.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -192,3 +201,49 @@ export const mineArcs = (
 
     return kept.slice(0, limit).map(({ steps, support }) => ({ steps, support }));
 };
+
+// ---------------------------------------------------------------------------
+// DB-backed fetch (Effect wrapper over WORKFLOW_SESSION_SEQUENCES_SQL)
+// ---------------------------------------------------------------------------
+
+export interface FetchArcsInput {
+    readonly minSessions?: number;
+    readonly limit?: number;
+}
+
+/**
+ * Runs WORKFLOW_SESSION_SEQUENCES_SQL (fixed 12-week window, v1), coerces
+ * rows to SeqRow[], then buildPerSession → mineArcs.
+ *
+ * NOTE: the time window is fixed at W=12 weeks in the SQL constant; there is
+ * no per-call override in v1.
+ */
+export const fetchWorkflowArcs: (
+    input?: FetchArcsInput,
+) => Effect.Effect<ArcCandidate[], DbError, SurrealClient> = Effect.fn(
+    "queries.fetchWorkflowArcs",
+)(function* (input?: FetchArcsInput) {
+    const db = yield* SurrealClient;
+
+    const [rawRows] = yield* db.query<[Array<Record<string, unknown>>]>(
+        WORKFLOW_SESSION_SEQUENCES_SQL,
+    );
+
+    const rows: SeqRow[] = (rawRows ?? [])
+        .map((row) => ({
+            session: row.session == null ? "" : String(row.session),
+            skill: row.skill == null ? "" : String(row.skill),
+            turn_index:
+                typeof row.turn_index === "number"
+                    ? row.turn_index
+                    : Number(row.turn_index ?? 0),
+            ts: row.ts instanceof Date ? row.ts : String(row.ts ?? ""),
+        }))
+        .filter((r) => r.session !== "" && r.skill !== "");
+
+    const perSession = buildPerSession(rows);
+    return mineArcs(perSession, {
+        ...(input?.minSessions !== undefined && { minSessions: input.minSessions }),
+        ...(input?.limit !== undefined && { limit: input.limit }),
+    });
+});
