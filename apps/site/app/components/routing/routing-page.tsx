@@ -175,19 +175,19 @@ export function RoutingPage() {
         <div className="section-head">
           <span className="section-num">03 / The safety rule</span>
           <h2>
-            Judgment work <em>never</em> tiers down.
+            Judgment work <em>never</em> gets nudged down.
           </h2>
           <p className="section-lede">
-            Your obvious objection: won&rsquo;t quality drop? No &mdash; ax refuses to
-            auto-route anything that needs taste. Your reviews, your design calls, your
-            plans stay on the frontier model.
+            Your obvious objection: won&rsquo;t quality drop? No &mdash; ax never even
+            suggests tiering down anything that needs taste. Your reviews, your design
+            calls, your plans stay on the frontier model.
           </p>
         </div>
 
         <div className="rt-lanes">
           <div className="rt-lane is-down">
             <h3>
-              <span className="dot" /> tiers down automatically
+              <span className="dot" /> flagged to tier down
             </h3>
             <ul>
               <li>
@@ -210,7 +210,7 @@ export function RoutingPage() {
             </h3>
             <ul>
               <li>
-                Code review <span className="dim">(quality gate, never auto-routed)</span>
+                Code review <span className="dim">(quality gate, never flagged)</span>
               </li>
               <li>
                 Design &amp; UX <span className="dim">(taste does not tier down)</span>
@@ -226,10 +226,11 @@ export function RoutingPage() {
         </div>
 
         <div className="rt-brief-note">
-          <b>Judgment proposals ship as a brief, not a change.</b> When ax spots
-          judgment-shaped work, it ships the proposal as a written brief your agent
-          stress-tests against your own history before anything applies. Quality stays on
-          the frontier model; only routine work moves.
+          <b>ax advises &mdash; you route.</b> ax flags mechanical dispatches and nudges
+          the cheaper model at dispatch time; your agent still makes the call (a Claude
+          Code hook can&rsquo;t rewrite a dispatch, so it suggests, it doesn&rsquo;t
+          enforce). Judgment-shaped work never gets nudged &mdash; it ships as a written
+          brief your agent stress-tests against your own history before any class is added.
         </div>
       </section>
 
