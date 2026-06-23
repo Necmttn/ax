@@ -23,6 +23,8 @@ import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurn
 import { listDirectiveProposals, type ProposalRow } from "../../improve/list.ts";
 import type { LiftRow } from "../../queries/directive-ngrams.ts";
 import { renderDirectivesBrief } from "../directives-brief-template.ts";
+import { renderWorkflowsBrief } from "../workflows-brief-template.ts";
+import { fetchWorkflowArcs } from "../../queries/workflow-sequences.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, requirePositiveInt } from "./shared.ts";
 
@@ -214,14 +216,70 @@ const ngramsCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax directives workflows
+// ---------------------------------------------------------------------------
+
+const workflowsCommand = Command.make(
+    "workflows",
+    {
+        emitBrief: Flag.boolean("emit-brief").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ emitBrief, json }) =>
+        Effect.gen(function* () {
+            const arcs = yield* fetchWorkflowArcs().pipe(
+                Effect.orElseSucceed(() => []),
+            );
+
+            if (emitBrief) {
+                const date = new Date().toISOString().slice(0, 10);
+                const briefPath = `.ax/tasks/workflows-${date}.md`;
+                const fs = yield* FileSystem.FileSystem;
+                const p = yield* Path.Path;
+                yield* fs.makeDirectory(p.dirname(briefPath), { recursive: true }).pipe(Effect.orDie);
+                yield* fs.writeFileString(briefPath, renderWorkflowsBrief(arcs, { date })).pipe(Effect.orDie);
+                if (json) {
+                    console.log(prettyPrint({ brief: briefPath, candidates: arcs.length }));
+                    return;
+                }
+                console.log(`brief written: ${briefPath} (${arcs.length} workflow arc candidates)`);
+                console.log(`hand it to your agent; accepted workflows can be codified via: ax improve accept <id>`);
+                return;
+            }
+
+            if (json) {
+                console.log(prettyPrint(arcs));
+                return;
+            }
+
+            if (arcs.length === 0) {
+                console.log(`(no workflow arc candidates in the last 12 weeks - need ≥ 3 sessions with matching arc)`);
+                return;
+            }
+
+            console.log(`${"#".padEnd(3)}  ${"sup".padStart(5)}  steps`);
+            for (let i = 0; i < arcs.length; i++) {
+                const arc = arcs[i]!;
+                console.log(`${String(i + 1).padEnd(3)}  ${String(arc.support).padStart(5)}  ${arc.steps.join(" → ")}`);
+            }
+            console.log(`\n${arcs.length} workflow arc candidates  emit brief: ax directives workflows --emit-brief`);
+        }),
+).pipe(
+    Command.withDescription(
+        "Mine recurring skill-arc workflows from session history (fixed 12-week window). " +
+        "--emit-brief (write agent brief)  --json",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax directives (group)
 // ---------------------------------------------------------------------------
 
 export const directivesRootCommand = Command.make("directives").pipe(
     Command.withDescription(
-        "Directive-mining v2 read surface: mine (rank candidates), list (tracked proposals), ngrams (lift table).",
+        "Directive-mining v2 read surface: mine (rank candidates), list (tracked proposals), ngrams (lift table), workflows (recurring arcs).",
     ),
-    Command.withSubcommands([mineCommand, listCommand, ngramsCommand]),
+    Command.withSubcommands([mineCommand, listCommand, ngramsCommand, workflowsCommand]),
 );
 
 export const axDirectivesRuntime: RuntimeManifest = {
@@ -233,6 +291,7 @@ export const axDirectivesRuntime: RuntimeManifest = {
                 mine: "db",
                 list: "db",
                 ngrams: "db",
+                workflows: "db",
             },
         },
         hidden: false,
