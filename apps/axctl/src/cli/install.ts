@@ -1066,7 +1066,7 @@ export function collectDoctorReport(): Effect.Effect<
                     ? `no ingest_run rows stuck in status "running"`
                     : `${staleIngestRuns.length} ingest_run row(s) stuck in status "running" past the ` +
                         `${ingestTimeoutSeconds}s ingest timeout (${ids}); the run crashed or was killed ` +
-                        `without finalizing - run 'ax ingest reap' to settle them`,
+                        `without finalizing - the next 'ax ingest' auto-sweeps them, or run 'ax ingest reap' now`,
             });
         }
         const onboarding = yield* buildOnboardingReport();
