@@ -222,16 +222,11 @@ const ngramsCommand = Command.make(
 const workflowsCommand = Command.make(
     "workflows",
     {
-        days: Flag.integer("days").pipe(Flag.withDefault(90)),
         emitBrief: Flag.boolean("emit-brief").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ days, emitBrief, json }) =>
+    ({ emitBrief, json }) =>
         Effect.gen(function* () {
-            if (!Number.isInteger(days) || days <= 0) {
-                fail(`ax directives workflows: --days must be a positive integer (got "${days}")`);
-            }
-
             const arcs = yield* fetchWorkflowArcs().pipe(
                 Effect.orElseSucceed(() => []),
             );
@@ -242,7 +237,7 @@ const workflowsCommand = Command.make(
                 const fs = yield* FileSystem.FileSystem;
                 const p = yield* Path.Path;
                 yield* fs.makeDirectory(p.dirname(briefPath), { recursive: true }).pipe(Effect.orDie);
-                yield* fs.writeFileString(briefPath, renderWorkflowsBrief(arcs, { date, days })).pipe(Effect.orDie);
+                yield* fs.writeFileString(briefPath, renderWorkflowsBrief(arcs, { date })).pipe(Effect.orDie);
                 if (json) {
                     console.log(prettyPrint({ brief: briefPath, candidates: arcs.length }));
                     return;
@@ -258,7 +253,7 @@ const workflowsCommand = Command.make(
             }
 
             if (arcs.length === 0) {
-                console.log(`(no workflow arc candidates in the last ${days} days - need ≥ 3 sessions with matching arc)`);
+                console.log(`(no workflow arc candidates in the last 12 weeks - need ≥ 3 sessions with matching arc)`);
                 return;
             }
 
@@ -271,8 +266,8 @@ const workflowsCommand = Command.make(
         }),
 ).pipe(
     Command.withDescription(
-        "Mine recurring skill-arc workflows from session history. " +
-        "--days=N (default 90)  --emit-brief (write agent brief)  --json",
+        "Mine recurring skill-arc workflows from session history (fixed 12-week window). " +
+        "--emit-brief (write agent brief)  --json",
     ),
 );
 

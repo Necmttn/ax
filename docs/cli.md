@@ -52,7 +52,7 @@ axctl directives mine [--days=N] [--emit-brief] [--json]
                                             # rank candidate directive turns by n-gram lift; --emit-brief writes .ax/tasks/directives-<date>.md
 axctl directives list [--status=...] [--json]  # tracked directive proposals (section=directives), sorted by recurrence
 axctl directives ngrams [--limit=N] [--json]   # the learned per-user directive lift table (directive_ngram rows, lift = outcome-rate / base-rate)
-axctl directives workflows [--days=N] [--emit-brief] [--json]
+axctl directives workflows [--emit-brief] [--json]
                                             # mine recurring skill-arc workflows; --emit-brief writes .ax/tasks/workflows-<date>.md
 axctl profile show [--window=N] [--no-cost] # local profile: stats + rig + taste from the graph
 axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards for the dashboard landing
@@ -220,7 +220,7 @@ lift table (`directive_ngram` rows sorted by lift desc). `lift = outcome-rate /
 base-rate`; higher = stronger directional signal. Populated at ingest. Default
 `--limit=50`. MCP: `directives_list`.
 
-`ax directives workflows [--days=N] [--emit-brief] [--json]` - mine recurring
+`ax directives workflows [--emit-brief] [--json]` - mine recurring
 skill-arc workflows from session history. Finds ordered sequences of skills
 (length 3–6) that recur across ≥ 3 distinct sessions (gapped, maximal arcs only).
 `--emit-brief` writes `.ax/tasks/workflows-<date>.md` for agent review (is this

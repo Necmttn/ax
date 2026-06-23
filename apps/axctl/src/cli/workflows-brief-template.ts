@@ -10,7 +10,6 @@ export type { ArcCandidate };
 
 export interface WorkflowsBriefOpts {
     readonly date: string;
-    readonly days: number;
 }
 
 /**
@@ -29,11 +28,11 @@ export const renderWorkflowsBrief = (
     arcs: ReadonlyArray<ArcCandidate>,
     opts: WorkflowsBriefOpts,
 ): string => {
-    const { date, days } = opts;
+    const { date } = opts;
     const lines: string[] = [
         `# workflows brief - ${date}`,
         "",
-        `Recurring skill-arc candidates mined from the last ${days} days of sessions.`,
+        `Recurring skill-arc candidates mined from the last 12 weeks of sessions.`,
         "Each entry is an ordered sequence of skills that co-occurred across ≥ 3 sessions.",
         "",
         "## Your task (agent)",
@@ -46,7 +45,7 @@ export const renderWorkflowsBrief = (
     ];
 
     if (arcs.length === 0) {
-        lines.push(`(no workflow arc candidates found in the last ${days} days)`);
+        lines.push(`(no workflow arc candidates found in the last 12 weeks)`);
         lines.push("");
         return lines.join("\n");
     }

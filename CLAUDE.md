@@ -328,7 +328,7 @@ The routing-table file is now the source of truth for BOTH the route-dispatch ho
 `ax directives mine [--days=N] [--emit-brief] [--json]` - rank candidate directive turns by n-gram lift (default 90d). Without `--emit-brief` prints a scored table; with it, writes `.ax/tasks/directives-<date>.md` for agent review. Rides the existing improve pipeline: accepted proposals land via `ax improve accept <id>`.
 `ax directives list [--status=open|all] [--json]` - tracked directive proposals (section="directives"), sorted by recurrence. Discriminated from other guidance proposals by `guidance_proposal.section = 'directives'` (set at ingest, no new schema field).
 `ax directives ngrams [--limit=N] [--json]` - the learned per-user lift table (`directive_ngram` rows sorted by lift desc; lift = outcome-rate / base-rate). Populated at ingest; re-run `ax ingest` to refresh. MCP: `directives_list`.
-`ax directives workflows [--days=N] [--emit-brief] [--json]` - mine recurring skill-arc workflows from session history. Finds ordered sequences of skills (length 3–6) that recur across ≥ 3 distinct sessions (gapped, maximal arcs only, top 50 by support). `--emit-brief` writes `.ax/tasks/workflows-<date>.md` for agent review; without it prints a ranked arc table.
+`ax directives workflows [--emit-brief] [--json]` - mine recurring skill-arc workflows from session history (fixed 12-week window). Finds ordered sequences of skills (length 3–6) that recur across ≥ 3 distinct sessions (gapped, maximal arcs only, top 50 by support). `--emit-brief` writes `.ax/tasks/workflows-<date>.md` for agent review; without it prints a ranked arc table.
 
 ## Recommend + apply guidance to your own agent files
 

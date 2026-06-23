@@ -4,7 +4,7 @@ import { renderWorkflowsBrief } from "./workflows-brief-template.ts";
 test("renderWorkflowsBrief lists each arc with steps, support, and a fill block", () => {
   const md = renderWorkflowsBrief(
     [{ steps: ["brainstorming", "writing-plans", "subagent-driven-development", "review"], support: 7 }],
-    { date: "2026-06-23", days: 90 },
+    { date: "2026-06-23" },
   );
   expect(md).toContain("# ");                       // header
   expect(md.toLowerCase()).toContain("workflow");
@@ -15,7 +15,7 @@ test("renderWorkflowsBrief lists each arc with steps, support, and a fill block"
 });
 
 test("renderWorkflowsBrief handles empty arc list", () => {
-  const md = renderWorkflowsBrief([], { date: "2026-06-23", days: 90 });
+  const md = renderWorkflowsBrief([], { date: "2026-06-23" });
   expect(typeof md).toBe("string");
   expect(md.length).toBeGreaterThan(0);
 });
