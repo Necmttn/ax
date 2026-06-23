@@ -24,7 +24,7 @@ import {
     planRejectCandidate,
 } from "./lifecycle.ts";
 import { interventionFormSpec, isInterventionForm, type InterventionForm } from "./intervention-forms.ts";
-import { scaffoldSkill, type ScaffoldResult } from "./skill-scaffold.ts";
+import { scaffoldSkill, type ScaffoldInput, type ScaffoldResult } from "./skill-scaffold.ts";
 import { renderTaskFile, type TaskInput } from "./task-template.ts";
 
 export type ImproveActionStatus =
@@ -118,25 +118,15 @@ interface FullProposalRow extends ProposalRow {
     } | null;
 }
 
-// scaffoldSkill can fail with a PlatformError on filesystem faults. We recover
-// it into a structured `{ error }` here so acceptProposal can map the failure
-// to a `missing_payload` result (matching main's try/catch-to-message
-// behavior) rather than propagating the PlatformError up its E channel.
-const trySafeScaffold = (
-    row: ProposalRow,
-    payload: NonNullable<ProposalRow["skill_payload"]>,
+// Shared inner: wrap a scaffoldSkill call in the PlatformError→{error} recovery
+// so callers can map filesystem faults to a `missing_payload` result rather than
+// propagating up the E channel.
+const runSafeScaffold = (
+    skillInput: ScaffoldInput,
     opts: AcceptOptions,
 ): Effect.Effect<{ result: ScaffoldResult } | { error: string }, never, FileSystem.FileSystem> =>
     scaffoldSkill({
-        input: {
-            title: row.title,
-            hypothesis: row.hypothesis,
-            proposedBehavior: String(payload.proposed_behavior ?? ""),
-            triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
-            expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
-            dedupeSig: row.dedupe_sig,
-            nowIso: new Date().toISOString(),
-        },
+        input: skillInput,
         ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
         ...(opts.force === undefined ? {} : { force: opts.force }),
     }).pipe(
@@ -145,6 +135,35 @@ const trySafeScaffold = (
             Effect.succeed({ error: err.message } as { result: ScaffoldResult } | { error: string }),
         ),
     );
+
+// Build ScaffoldInput from a skill_payload proposal row; delegates to runSafeScaffold.
+const trySafeScaffold = (
+    row: ProposalRow,
+    payload: NonNullable<ProposalRow["skill_payload"]>,
+    opts: AcceptOptions,
+): Effect.Effect<{ result: ScaffoldResult } | { error: string }, never, FileSystem.FileSystem> =>
+    runSafeScaffold({
+        title: row.title,
+        hypothesis: row.hypothesis,
+        proposedBehavior: String(payload.proposed_behavior ?? ""),
+        triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+        expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
+        dedupeSig: row.dedupe_sig,
+        nowIso: new Date().toISOString(),
+    }, opts);
+
+/**
+ * Pure routing predicate: should this proposal auto-scaffold a SKILL.md instead
+ * of emitting a .ax/tasks/ brief?
+ *
+ * True only for form="guidance" + section="workflows" (milestone B, #588).
+ * All other guidance sections (e.g. "directives") and all other forms stay on
+ * the existing brief/inline-marker path.
+ */
+export const shouldScaffoldWorkflowSkill = (
+    row: { readonly form: string; readonly guidance_payload?: { readonly section?: string | null } | null },
+): boolean =>
+    row.form === "guidance" && row.guidance_payload?.section === "workflows";
 
 const fetchFullProposal = (idLiteral: string) =>
     Effect.gen(function* () {
@@ -433,6 +452,56 @@ export const acceptProposal = (
                     baseline: typeof (row as unknown as Record<string, unknown>).baseline === "string"
                         ? String((row as unknown as Record<string, unknown>).baseline)
                         : null,
+                },
+            };
+        }
+
+        // autoScaffold=true && form=guidance && section=workflows: scaffold SKILL.md stub (#588)
+        // Uses suggested_text (the arc "plan → tdd → review → commit") as the stub body.
+        // Directives and all other guidance sections fall through to the brief path below.
+        if (opts.autoScaffold && shouldScaffoldWorkflowSkill(row)) {
+            validateSig(row.dedupe_sig);
+            const scaffoldOutcome = yield* runSafeScaffold({
+                title: row.title,
+                hypothesis: row.hypothesis,
+                proposedBehavior: row.guidance_payload?.suggested_text ?? row.hypothesis,
+                dedupeSig: row.dedupe_sig,
+                nowIso: new Date().toISOString(),
+            }, opts);
+            if ("error" in scaffoldOutcome) {
+                return {
+                    status: "missing_payload",
+                    message: `scaffold failed: ${scaffoldOutcome.error}`,
+                };
+            }
+            const wfScaffold: ScaffoldResult = scaffoldOutcome.result;
+            if (wfScaffold.skipped) {
+                return {
+                    status: "scaffold_exists",
+                    message: `existing scaffold at ${wfScaffold.path} (pass force=true to overwrite)`,
+                    artifact_path: wfScaffold.path,
+                };
+            }
+            yield* db.query(`
+                UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
+                UPSERT ${recordRef("experiment", experimentKey)} MERGE {
+                    proposal: ${recordRef("proposal", proposalKey)},
+                    artifact_path: ${surrealLiteral(wfScaffold.path)},
+                    scaffolded_at: time::now(),
+                    status: '${experimentStatus}'
+                };
+            `);
+            return {
+                status: "ok",
+                proposal_id: `proposal:${proposalKey}`,
+                experiment_id: experimentId,
+                artifact_path: wfScaffold.path,
+                proposal: {
+                    title: row.title,
+                    hypothesis: row.hypothesis,
+                    triggerPattern: null,
+                    proposedBehavior: row.guidance_payload?.suggested_text ?? "",
+                    baseline: null,
                 },
             };
         }

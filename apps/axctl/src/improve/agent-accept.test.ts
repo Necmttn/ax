@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
-import { acceptProposal } from "./actions.ts";
+import { acceptProposal, shouldScaffoldWorkflowSkill } from "./actions.ts";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
 
@@ -497,6 +497,136 @@ describe("acceptProposal - atomic write on DB failure", () => {
         expect(existsSync(taskPath)).toBe(false);
         const remaining = readdirSync(taskDir).filter((f) => f.includes(longSig));
         expect(remaining).toHaveLength(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// shouldScaffoldWorkflowSkill - pure routing predicate (#588)
+// ---------------------------------------------------------------------------
+describe("shouldScaffoldWorkflowSkill routing predicate", () => {
+    test("true for form=guidance + section=workflows", () => {
+        expect(shouldScaffoldWorkflowSkill({
+            form: "guidance",
+            guidance_payload: { section: "workflows" },
+        })).toBe(true);
+    });
+
+    test("false for form=guidance + section=directives (stays brief path)", () => {
+        expect(shouldScaffoldWorkflowSkill({
+            form: "guidance",
+            guidance_payload: { section: "directives" },
+        })).toBe(false);
+    });
+
+    test("false for form=guidance + no section", () => {
+        expect(shouldScaffoldWorkflowSkill({
+            form: "guidance",
+            guidance_payload: { section: null },
+        })).toBe(false);
+        expect(shouldScaffoldWorkflowSkill({
+            form: "guidance",
+            guidance_payload: {},
+        })).toBe(false);
+        expect(shouldScaffoldWorkflowSkill({
+            form: "guidance",
+            guidance_payload: null,
+        })).toBe(false);
+    });
+
+    test("false for form=skill (unchanged skill path)", () => {
+        expect(shouldScaffoldWorkflowSkill({
+            form: "skill",
+            guidance_payload: null,
+        })).toBe(false);
+    });
+
+    test("false for other forms", () => {
+        for (const form of ["hook", "automation", "subagent", "harness_check"]) {
+            expect(shouldScaffoldWorkflowSkill({
+                form,
+                guidance_payload: { section: "workflows" },
+            })).toBe(false);
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// acceptProposal - workflow scaffold path (#588)
+// ---------------------------------------------------------------------------
+describe("acceptProposal - workflow guidance scaffold path", () => {
+    test("guidance + section=workflows + autoScaffold=true scaffolds SKILL.md", async () => {
+        const scaffoldBaseDir = mkdtempSync(join(tmpdir(), "ax-wf-scaffold-"));
+        const sig = "workflow__plan_tdd_review";
+        const proposalRow = {
+            id: "proposal:wf1",
+            form: "guidance",
+            title: "Workflow: plan → tdd → review",
+            hypothesis: "This 3-skill sequence recurred across 5 sessions: plan → tdd → review.",
+            dedupe_sig: sig,
+            frequency: 5,
+            confidence: "high",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "CLAUDE.md",
+                section: "workflows",
+                suggested_text: "plan → tdd → review",
+            },
+        };
+
+        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: sig, autoScaffold: true, scaffoldBaseDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        // Scaffolded a skill file, not a task brief
+        expect(result.artifact_path).toBeDefined();
+        expect(result.task_path).toBeUndefined();
+        expect(existsSync(result.artifact_path!)).toBe(true);
+        // SKILL.md body uses suggested_text (the arc) as proposedBehavior
+        const body = readFileSync(result.artifact_path!, "utf-8");
+        expect(body).toContain("plan → tdd → review");
+        // proposal field is populated for --with-agent enrichment
+        expect(result.proposal?.proposedBehavior).toBe("plan → tdd → review");
+    });
+
+    test("guidance + section=directives + autoScaffold=true stays on brief path (not scaffold)", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-dir-task-"));
+        const sig = "guidance__directive_abc";
+        const proposalRow = {
+            id: "proposal:dir1",
+            form: "guidance",
+            title: "Always run typecheck before commit",
+            hypothesis: "Typecheck missed 4 times in 3 sessions.",
+            dedupe_sig: sig,
+            frequency: 4,
+            confidence: "high",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: "directives",
+                suggested_text: "Run typecheck before every commit.",
+            },
+        };
+
+        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: sig, autoScaffold: true, taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        // Falls through to the task-brief path, not a scaffold
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(result.artifact_path).toBeUndefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=guidance");
     });
 });
 

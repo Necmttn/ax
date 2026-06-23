@@ -232,6 +232,9 @@ export const deriveWorkflowProposalRows = (
             confidence,
             frequency: arc.support,
             sig,
+            // Session IDs are not available on ArcCandidate (mineArcs returns only steps+support);
+            // include what we have (support count + ordered steps). Full per-session ids
+            // would require ArcCandidate to carry them - deferred to a follow-up.
             evidenceSummary: [`support: ${arc.support} sessions`, `steps: ${arc.steps.join(", ")}`],
         });
     }
