@@ -13,10 +13,10 @@
  *      kept arc with support >= its own support.
  *   5. Sort by support desc then steps lexicographically, slice to limit.
  *
- * Combinatorial cost bound: subsequences are generated per-session and deduped
- * globally before the support-count pass; sessions longer than maxLen*2 still
- * produce bounded candidate counts because we skip generation when the session
- * is shorter than minLen and cap subseq length at min(maxLen, session.length).
+ * Combinatorial cost bound: generating length-3..6 subsequences from a session of
+ * length L costs C(L,6) - e.g. L=40 ≈ 3.8M, L=100 ≈ 1.2B. Sessions are capped at
+ * MAX_SESSION_SKILLS before subsequence generation to bound per-session cost.
+ * A global dedup set then reduces the support-count pass.
  */
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,9 @@ export interface ArcCandidate {
     readonly steps: readonly string[];
     readonly support: number;
 }
+
+/** Maximum session length before subsequence generation is truncated. C(40,6) ≈ 3.8M. */
+const MAX_SESSION_SKILLS = 40;
 
 // ---------------------------------------------------------------------------
 // buildPerSession
@@ -127,8 +130,17 @@ export const mineArcs = (
 
     // Step 1: collect all candidate arc keys (deduplicated) across sessions
     const candidateSet = new Set<string>();
+    let warnedTruncation = false;
     for (const skills of perSession.values()) {
-        for (const subseq of subsequences(skills, minLen, maxLen)) {
+        const bounded =
+            skills.length > MAX_SESSION_SKILLS ? skills.slice(0, MAX_SESSION_SKILLS) : skills;
+        if (skills.length > MAX_SESSION_SKILLS && !warnedTruncation) {
+            console.warn(
+                `mineArcs: session with ${skills.length} skills truncated to ${MAX_SESSION_SKILLS} to bound combinatorial cost`,
+            );
+            warnedTruncation = true;
+        }
+        for (const subseq of subsequences(bounded, minLen, maxLen)) {
             candidateSet.add(subseq.join("\0"));
         }
     }
@@ -148,8 +160,14 @@ export const mineArcs = (
 
     if (supportMap.size === 0) return [];
 
-    // Step 3: sort surviving arcs by support desc for maximality pass
-    const surviving = Array.from(supportMap.entries()).sort((a, b) => b[1] - a[1]);
+    // Step 3: sort surviving arcs by support desc for maximality pass.
+    // Secondary key: longer arcs first at equal support, so supersets enter `kept`
+    // before their sub-arcs and the dominated check correctly drops the fragments.
+    const surviving = Array.from(supportMap.entries()).sort((a, b) => {
+        const sd = b[1] - a[1];
+        if (sd !== 0) return sd;
+        return b[0].split("\0").length - a[0].split("\0").length; // longer first on tie
+    });
 
     // Step 4: maximality - drop arc A if there exists arc B such that:
     //   - A is a strict subsequence of B (B is longer), AND

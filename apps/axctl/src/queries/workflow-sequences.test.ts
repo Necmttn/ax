@@ -22,16 +22,16 @@ test("mineArcs finds a gapped arc recurring across >= minSessions sessions", () 
   expect(hit!.support).toBe(3);
 });
 
-test("mineArcs drops a strict subsequence covered by an equal/higher-support superset (maximality)", () => {
+test("mineArcs drops a strict subsequence dominated by an equal-support superset", () => {
   const per = new Map<string, string[]>([
-    ["s1", ["plan", "tdd", "review"]],
-    ["s2", ["plan", "tdd", "review"]],
-    ["s3", ["plan", "tdd", "review"]],
+    ["s1", ["plan", "tdd", "review", "commit"]],
+    ["s2", ["plan", "tdd", "review", "commit"]],
+    ["s3", ["plan", "tdd", "review", "commit"]],
   ]);
   const arcs = mineArcs(per, { minLen: 3, maxLen: 6, minSessions: 3 });
-  // "plan>tdd" (len 2) is below minLen anyway; assert no len-3 fragment duplicates when a superset exists.
-  // Here the maximal arc is plan>tdd>review itself; assert it is present exactly once.
-  expect(arcs.filter((a) => a.steps.join(">") === "plan>tdd>review")).toHaveLength(1);
+  // The 4-step superset has support=3; its 3-step sub-arc is dominated and must be dropped.
+  expect(arcs.find((a) => a.steps.join(">") === "plan>tdd>review")).toBeUndefined();
+  expect(arcs.find((a) => a.steps.join(">") === "plan>tdd>review>commit")).toBeDefined();
 });
 
 test("mineArcs drops arcs below support threshold and below minLen", () => {
@@ -51,4 +51,25 @@ test("mineArcs counts a session at most once toward support", () => {
   ]);
   const arcs = mineArcs(per, { minLen: 3, maxLen: 6, minSessions: 3 });
   expect(arcs.find((a) => a.steps.join(">") === "plan>tdd>review")!.support).toBe(3);
+});
+
+test("mineArcs truncates sessions longer than MAX_SESSION_SKILLS without hanging", () => {
+  // Sessions of length 42 exceed the 40-skill cap; maxLen:3 keeps C(40,3)=9880
+  // candidates per session so the test runs fast. Session-unique tails (x*/y*/z*)
+  // ensure only the 3-skill common prefix arc survives minSessions=3.
+  const tail = (prefix: string) => Array.from({ length: 39 }, (_, i) => `${prefix}${i}`);
+  const per = new Map<string, string[]>([
+    ["s1", ["plan", "tdd", "commit", ...tail("x")]],
+    ["s2", ["plan", "tdd", "commit", ...tail("y")]],
+    ["s3", ["plan", "tdd", "commit", ...tail("z")]],
+  ]);
+  const arcs = mineArcs(per, { minLen: 3, maxLen: 3, minSessions: 3 });
+  // Truncation fires and the common prefix arc is present in results
+  expect(arcs.find((a) => a.steps.join(">") === "plan>tdd>commit")).toBeDefined();
+  // Session-unique tail skills can't reach minSessions=3, so no x*/y*/z* in results
+  for (const arc of arcs) {
+    for (const step of arc.steps) {
+      expect(["plan", "tdd", "commit"].includes(step)).toBe(true);
+    }
+  }
 });
