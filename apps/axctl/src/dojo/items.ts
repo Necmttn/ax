@@ -102,3 +102,31 @@ export const exploreItem = (): DojoItem => ({
     success: "at least one new outbox draft, proposal, or goal package",
     cost_class: "l",
 });
+
+/** Minimal shape of a directive candidate row consumed by the pure mapper. */
+export interface DirectiveCandidate {
+    readonly title?: string;
+}
+
+/**
+ * Pure mapper: N unconfirmed directive candidates -> one "directives" DojoItem.
+ * Returns [] when there are no candidates (self-clearing: item vanishes once
+ * all open section=directives proposals are accepted/rejected).
+ */
+export const directiveCandidateItems = (
+    candidates: readonly DirectiveCandidate[],
+): DojoItem[] => {
+    if (candidates.length === 0) return [];
+    const n = candidates.length;
+    return [
+        {
+            id: "directives:mine",
+            kind: "directives",
+            title: `Mine ${n} unconfirmed directive candidate${n === 1 ? "" : "s"} into proposals`,
+            commands: ["ax directives mine --emit-brief"],
+            success:
+                "directive proposals accepted (section=directives open proposals cleared)",
+            cost_class: "s",
+        },
+    ];
+};

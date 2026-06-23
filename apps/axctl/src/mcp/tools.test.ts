@@ -27,6 +27,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     dispatches: ["candidates", "days", "limit"],
     dispatches_advice: ["days", "limit"],
     dojo_agenda: ["days", "spar"],
+    directives_list: ["limit", "status"],
 };
 
 describe("axMcpTools advertised surface", () => {

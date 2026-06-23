@@ -97,6 +97,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "stack", stage: "active", note: "Lean technology/platform records for applicability matching." },
     { table: "command_outcome", stage: "active", note: "Semantic command result classifications." },
     { table: "user_message_ngram", stage: "active", note: "Derived user-language n-grams for preference and correction mining." },
+    { table: "directive_ngram", stage: "active", note: "Per-user n-gram lift table: which user-turn markers predict captured outcomes (directive mining v2, #587)." },
     { table: "workflow_epoch", stage: "active", note: "Derived workflow eras for before/after comparisons." },
     { table: "session_token_usage", stage: "active", note: "Actual or estimated session token/cache usage." },
     { table: "turn_token_usage", stage: "active", note: "Provider-derived per-turn token/cache usage and priced cost estimates." },

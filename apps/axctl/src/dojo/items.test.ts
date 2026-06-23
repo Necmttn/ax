@@ -4,6 +4,7 @@ import type { SessionChurnRow } from "../metrics/session-churn.ts";
 import type { TuneProposal } from "../queries/routing-tune.ts";
 import {
     churnHotspotItems,
+    directiveCandidateItems,
     exploreItem,
     MINT_THRESHOLD,
     pendingVerdictItems,
@@ -121,5 +122,17 @@ describe("item mappers", () => {
         expect(sparItem().kind).toBe("spar");
         expect(sparItem().cost_class).toBe("xl");
         expect(exploreItem().kind).toBe("explore");
+    });
+
+    test("directiveCandidateItems yields one directives item when unconfirmed candidates exist", () => {
+        const items = directiveCandidateItems([{ title: "stop bare bun test" }, { title: "always use rg" }]);
+        expect(items).toHaveLength(1);
+        expect(items[0]!.kind).toBe("directives");
+        expect(items[0]!.commands).toContain("ax directives mine --emit-brief");
+        expect(items[0]!.success.length).toBeGreaterThan(0);
+    });
+
+    test("directiveCandidateItems yields nothing when there are no candidates", () => {
+        expect(directiveCandidateItems([])).toHaveLength(0);
     });
 });

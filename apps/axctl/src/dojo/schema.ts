@@ -7,6 +7,7 @@ export type DojoCostClass = "s" | "m" | "l" | "xl";
 export type DojoItemKind =
     | "verdict_pending"
     | "brief_unfilled"
+    | "directives"
     | "routing_backtest"
     | "proposal_mint"
     | "experiment"
@@ -17,6 +18,7 @@ export type DojoItemKind =
 export const KIND_PRIORITY: readonly DojoItemKind[] = [
     "verdict_pending",
     "brief_unfilled",
+    "directives",
     "routing_backtest",
     "proposal_mint",
     "experiment",

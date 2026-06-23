@@ -9,7 +9,7 @@
  */
 import { Effect, type FileSystem } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
-import { listProposals } from "../improve/list.ts";
+import { listDirectiveProposals, listProposals } from "../improve/list.ts";
 import { listPendingVerdicts } from "../improve/verdict-pending.ts";
 import { fetchSessionChurnSummary, type SessionChurnRow } from "../metrics/session-churn.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
@@ -17,6 +17,7 @@ import { fetchTuneProposals, type TuneProposal } from "../queries/routing-tune.t
 import { defaultTaskDir, scanTaskDir } from "./briefs.ts";
 import {
     churnHotspotItems,
+    directiveCandidateItems,
     exploreItem,
     pendingVerdictItems,
     proposalMintItem,
@@ -118,6 +119,11 @@ export const collectAgendaItems = (
             [],
         );
         const open = yield* soft("proposals", listProposals({ status: "open" }), []);
+        const directives = yield* soft(
+            "directives",
+            listDirectiveProposals("open"),
+            [],
+        );
         const tune = yield* soft(
             "routing",
             Effect.gen(function* () {
@@ -130,6 +136,7 @@ export const collectAgendaItems = (
         const items: DojoItem[] = [
             ...pendingVerdictItems(verdicts.value),
             ...briefs.value,
+            ...directiveCandidateItems(directives.value),
             ...routingBacktestItems(tune.value, opts.days),
             ...churnHotspotItems(churnRows.value),
         ];
@@ -142,6 +149,7 @@ export const collectAgendaItems = (
                 briefs.failure,
                 churnRows.failure,
                 open.failure,
+                directives.failure,
                 tune.failure,
             ].filter((failure): failure is DojoSourceFailure => failure !== null),
         };

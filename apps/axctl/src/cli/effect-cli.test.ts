@@ -224,6 +224,7 @@ describe("effect cli", () => {
             "content-types",
             "derive-metrics",
             "digest",
+            "directive-ngrams",
             "harness",
             "invoked-positions",
             "loaded-skills",

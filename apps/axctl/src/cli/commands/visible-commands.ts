@@ -29,6 +29,7 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "profile",
     "dispatches",
     "routing",
+    "directives",
     "thinking",
     "digest",
     "team",

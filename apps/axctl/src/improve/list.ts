@@ -76,3 +76,31 @@ export const listProposals = (
         const result = yield* db.query<[ProposalRow[]]>(sql);
         return result?.[0] ?? [];
     });
+
+/**
+ * List directive proposals: guidance_proposal rows with section="directives".
+ * Discriminator: guidance_proposal.section = "directives" (set by
+ * deriveDirectiveProposalRows in ingest/derive-proposals.ts). Shared by the
+ * dojo agenda source and the directives_list MCP tool.
+ */
+export const listDirectiveProposals = (
+    status: string = "open",
+    limit: number = 30,
+): Effect.Effect<ReadonlyArray<ProposalRow>, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const whereStatus = status !== "all"
+            ? `AND status = ${surrealLiteral(status)}`
+            : "";
+        const sql = `
+SELECT type::string(id) AS id, form, title, hypothesis, dedupe_sig,
+       frequency, confidence, status, type::string(created_at) AS created_at
+FROM proposal
+WHERE form = "guidance"
+  AND id IN (SELECT proposal FROM guidance_proposal WHERE section = "directives")
+  ${whereStatus}
+ORDER BY frequency DESC, created_at DESC
+LIMIT ${limit};`;
+        const result = yield* db.query<[ProposalRow[]]>(sql);
+        return result?.[0] ?? [];
+    });

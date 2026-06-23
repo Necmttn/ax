@@ -127,12 +127,12 @@ export function DispatchRoutingShowcase() {
         </div>
 
         <div className="stat" data-kind="harness">
-          <div className="label">where the fix fires</div>
+          <div className="label">where the nudge lands</div>
           <div className="big">
-            2<span className="unit">harnesses</span>
+            Claude<span className="unit">code</span>
           </div>
           <div className="delta">route-dispatch hook · at dispatch time</div>
-          <div className="submeta">claude code + codex</div>
+          <div className="submeta">advisory - suggests, can&rsquo;t rewrite the dispatch</div>
         </div>
       </section>
 
@@ -199,12 +199,13 @@ export function DispatchRoutingShowcase() {
         <div className="step">
           <div className="step-head">
             <span className="n">03</span>
-            <span className="verb">fire</span>
+            <span className="verb">advise</span>
           </div>
           <code>route-dispatch hook</code>
           <p>
-            Suggests the cheaper model at dispatch time, in Claude Code <em>and</em> Codex.
-            The next "Fix ingest run lifecycle" rides sonnet, not fable.
+            Nudges the cheaper model at dispatch time in Claude Code &mdash; advisory, so
+            your agent decides. The next "Fix ingest run lifecycle" gets pointed at sonnet,
+            not fable.
           </p>
         </div>
       </section>

@@ -7,6 +7,7 @@ describe("KIND_PRIORITY", () => {
         expect(KIND_PRIORITY).toEqual([
             "verdict_pending",
             "brief_unfilled",
+            "directives",
             "routing_backtest",
             "proposal_mint",
             "experiment",

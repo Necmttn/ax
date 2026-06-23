@@ -1736,6 +1736,24 @@ DEFINE INDEX IF NOT EXISTS proposal_dedupe_uq    ON proposal FIELDS dedupe_sig U
 DEFINE INDEX IF NOT EXISTS proposal_status_freq  ON proposal FIELDS status, frequency;
 DEFINE INDEX IF NOT EXISTS proposal_form_status  ON proposal FIELDS form, status, created_at;
 
+-- ==== Directive n-gram lift table (#587) ====
+-- Per-user lift table: which n-gram markers in user turns predict a captured
+-- outcome (correction follow-up, friction_event, classifier signal). Keyed by
+-- `ngram` (the whole local DB is per-user, so there is NO user column).
+-- Filled by later tasks in Milestone A; this task only defines the schema.
+DEFINE TABLE directive_ngram SCHEMAFULL;
+DEFINE FIELD ngram        ON directive_ngram TYPE string;
+DEFINE FIELD n            ON directive_ngram TYPE int;            -- token count (1..4)
+DEFINE FIELD occurrences  ON directive_ngram TYPE int DEFAULT 0; -- turns containing the ngram
+DEFINE FIELD outcomes     ON directive_ngram TYPE int DEFAULT 0; -- of those, # followed by a captured outcome
+DEFINE FIELD lift         ON directive_ngram TYPE float DEFAULT 0; -- P(outcome|ngram)/P(outcome)
+DEFINE FIELD sessions     ON directive_ngram TYPE int DEFAULT 0; -- distinct sessions (sparsity guard)
+DEFINE FIELD first_seen   ON directive_ngram TYPE datetime DEFAULT time::now();
+DEFINE FIELD last_seen    ON directive_ngram TYPE option<datetime>;
+DEFINE FIELD refit_at     ON directive_ngram TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS directive_ngram_uq   ON directive_ngram FIELDS ngram UNIQUE;
+DEFINE INDEX IF NOT EXISTS directive_ngram_lift ON directive_ngram FIELDS lift;
+
 -- ==== Per-form payload tables ====
 -- One row per proposal of the matching form. Typed fields per form avoid
 -- the JSON-blob trap that killed the prior orphan tables.
