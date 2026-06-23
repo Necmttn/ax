@@ -48,6 +48,22 @@ export interface ArcCandidate {
 const MAX_SESSION_SKILLS = 40;
 
 // ---------------------------------------------------------------------------
+// Harness-tool exclusion
+// ---------------------------------------------------------------------------
+
+/**
+ * Harness primitive tools are recorded as invoked-skill edges (e.g. Codex's
+ * built-in tools: exec_command, apply_patch, write_stdin, …) but are NOT
+ * codifiable workflow skills - exclude them from arc mining so genuine skills
+ * surface instead of harness-internal noise.
+ */
+export const HARNESS_TOOL_PREFIXES = ["codex:"] as const;
+
+/** Returns true if `name` is a harness primitive pseudo-skill to exclude. */
+export const isHarnessToolSkill = (name: string): boolean =>
+    HARNESS_TOOL_PREFIXES.some((p) => name.startsWith(p));
+
+// ---------------------------------------------------------------------------
 // buildPerSession
 // ---------------------------------------------------------------------------
 
@@ -239,7 +255,7 @@ export const fetchWorkflowArcs: (
                     : Number(row.turn_index ?? 0),
             ts: row.ts instanceof Date ? row.ts : String(row.ts ?? ""),
         }))
-        .filter((r) => r.session !== "" && r.skill !== "");
+        .filter((r) => r.session !== "" && r.skill !== "" && !isHarnessToolSkill(r.skill));
 
     const perSession = buildPerSession(rows);
     return mineArcs(perSession, {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildPerSession, mineArcs } from "./workflow-sequences.ts";
+import { buildPerSession, isHarnessToolSkill, mineArcs } from "./workflow-sequences.ts";
 
 test("buildPerSession orders a session's skills by turn_index", () => {
   const rows = [
@@ -51,6 +51,37 @@ test("mineArcs counts a session at most once toward support", () => {
   ]);
   const arcs = mineArcs(per, { minLen: 3, maxLen: 6, minSessions: 3 });
   expect(arcs.find((a) => a.steps.join(">") === "plan>tdd>review")!.support).toBe(3);
+});
+
+// ---------------------------------------------------------------------------
+// isHarnessToolSkill
+// ---------------------------------------------------------------------------
+
+test("isHarnessToolSkill: codex: prefixed names are harness tools", () => {
+  expect(isHarnessToolSkill("codex:exec_command")).toBe(true);
+  expect(isHarnessToolSkill("codex:apply_patch")).toBe(true);
+  expect(isHarnessToolSkill("codex:write_stdin")).toBe(true);
+  expect(isHarnessToolSkill("codex:update_plan")).toBe(true);
+});
+
+test("isHarnessToolSkill: genuine skill names are not harness tools", () => {
+  expect(isHarnessToolSkill("superpowers:brainstorming")).toBe(false);
+  expect(isHarnessToolSkill("review-all")).toBe(false);
+  expect(isHarnessToolSkill("simplify")).toBe(false);
+  expect(isHarnessToolSkill("composto")).toBe(false);
+});
+
+test("buildPerSession + isHarnessToolSkill filter: harness-tool rows excluded from per-session lists", () => {
+  // Simulate the filter that fetchWorkflowArcs applies before calling buildPerSession.
+  const rawRows = [
+    { session: "s1", skill: "codex:exec_command", ts: "2026-06-01T01:00:00Z", turn_index: 5 },
+    { session: "s1", skill: "plan", ts: "2026-06-01T02:00:00Z", turn_index: 10 },
+    { session: "s1", skill: "codex:apply_patch", ts: "2026-06-01T03:00:00Z", turn_index: 15 },
+    { session: "s1", skill: "tdd", ts: "2026-06-01T04:00:00Z", turn_index: 20 },
+  ];
+  const filtered = rawRows.filter((r) => !isHarnessToolSkill(r.skill));
+  const perSession = buildPerSession(filtered);
+  expect(perSession.get("s1")).toEqual(["plan", "tdd"]);
 });
 
 test("mineArcs truncates sessions longer than MAX_SESSION_SKILLS without hanging", () => {
