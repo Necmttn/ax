@@ -47,6 +47,10 @@ const EXCLUDED_FILES: readonly string[] = [
     // hook's error channel stays `never` under plain bun (~70ms budget).
     // mirrors readRoutingTableSync - fail-open, effect-free.
     "packages/hooks-sdk/src/spend-mode.ts",
+    // Standalone PreToolUse hook wrapper deployed to ~/.ax/hooks/advise-tap.ts;
+    // fires as `bun <file>.ts` outside the axctl Effect runtime, so node fs/os/
+    // path are the correct deps. Committed here for reproducibility, not bundled.
+    "apps/axctl/src/advice/advise-tap.ts",
 ];
 
 const BANNED_SPECIFIERS = [
