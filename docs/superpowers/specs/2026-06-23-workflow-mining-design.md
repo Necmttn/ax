@@ -33,6 +33,7 @@ WORKFLOW_SESSION_SEQUENCES_SQL  (exists)
 
 **Locked decisions (from brainstorm):**
 - **Payload = a scaffolded SKILL.md.** Accepting a workflow proposal scaffolds a stub skill via the existing `improve --auto-scaffold` path; the agent fills real content via the existing `--with-agent` brief. Never auto-writes a final skill (avoids "noisy arc → noisy skill").
+  > **Implementation note (as built):** proposals are minted as **`form="guidance"` + `section="workflows"`** (NOT `form="skill"` - the `skill` proposal form is coupled to a `skill_candidate` record that arcs don't have). `acceptProposal` recognizes `section="workflows"` via the pure `shouldScaffoldWorkflowSkill` predicate and routes `--auto-scaffold` to the SKILL.md path; directives (`section="directives"`) and other guidance stay on the brief/inline path. Wherever this doc or the plan says `form="skill"`, read `form="guidance"` + `section="workflows"`.
 - **Step unit = skills only.** An arc is an ordered sequence of skill invocations from the existing `WORKFLOW_SESSION_SEQUENCES_SQL`. Zero new extraction. Tool-classes/episodes deferred (noisier).
 - **Discriminator = `section="workflows"`** on the guidance/skill proposal payload - mirrors A's `section="directives"` so `list`/dojo/MCP filtering is free.
 - **No new table.** Workflow proposals live in the existing `proposal`/`*_proposal` tables. Recurrence = `frequency`.
