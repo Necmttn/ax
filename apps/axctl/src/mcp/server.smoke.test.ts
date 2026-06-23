@@ -30,6 +30,7 @@ const EXPECTED_TOOLS = [
     "cost_images",
     "cost_routability",
     "dispatches",
+    "dispatches_advice",
     "dojo_agenda",
     "directives_list",
 ] as const;
@@ -45,7 +46,7 @@ describe("axMcpTools registry", () => {
         expect(recall!.inputSchema).toHaveProperty("q");
     });
 
-    it("registers all 18 read-only tools, each well-formed", () => {
+    it("registers all read-only tools, each well-formed", () => {
         expect(axMcpTools.map((t) => t.name).sort()).toEqual(
             [...EXPECTED_TOOLS].sort(),
         );
