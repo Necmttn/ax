@@ -267,6 +267,53 @@ test("attach mode opens window without spawning processes", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// (b2) attach mode: explicit stop() does not kill any processes
+//      (helper backend lifecycle not owned by the app)
+// ---------------------------------------------------------------------------
+
+test("attach mode: stop() is a no-op for processes (does not kill helper backend)", async () => {
+    // When the launchd helper owns surreal + ax serve and the app attached to
+    // them, the app never spawned any supervised process. Calling stop() on
+    // app quit must NOT send SIGTERM/SIGKILL to the helper's processes -
+    // it must be a pure no-op for process lifecycle.
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Explicitly call stop(), as DesktopApp.ts does on before-quit.
+                // In attach mode the manager never populated its `procs` Ref
+                // with surreal/ax-serve handles, so stop() must not emit any
+                // stop events (it guards on null-checks before killing).
+                yield* manager.stop();
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(arbitrationLayer({ mode: "attach" })),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        // After explicit stop() + scope-close finalizer (which also calls stop(),
+        // idempotently), zero process events: nothing was started, nothing is
+        // stopped. The helper's surreal/ax-serve remain alive.
+        return { events: yield* fakeProc.events };
+    });
+
+    const out = await Effect.runPromise(program);
+
+    expect(out.events).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
 // (c) stop tears down in reverse order (ax serve before surreal)
 // ---------------------------------------------------------------------------
 
