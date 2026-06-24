@@ -33,8 +33,8 @@ describe("com.necmttn.ax-studio.helper.plist", () => {
         expect((plist["BundleProgram"] as string).endsWith("/bun")).toBe(true);
     });
 
-    it("BundleProgram targets an arch-specific bin dir (arm64 or x64)", () => {
-        expect(plist["BundleProgram"] as string).toMatch(/\/bin\/(arm64|x64)\/bun$/);
+    it("BundleProgram uses full bundle-relative prefix Contents/Resources/bin/(arm64|x64)/bun", () => {
+        expect(plist["BundleProgram"] as string).toMatch(/^Contents\/Resources\/bin\/(arm64|x64)\/bun$/);
     });
 
     // ── ProgramArguments ────────────────────────────────────────────────────
@@ -51,6 +51,16 @@ describe("com.necmttn.ax-studio.helper.plist", () => {
     it("ProgramArguments contains '--managed-db'", () => {
         const args = plist["ProgramArguments"] as string[];
         expect(args).toContain("--managed-db");
+    });
+
+    it("ProgramArguments contains '--port=1738'", () => {
+        const args = plist["ProgramArguments"] as string[];
+        expect(args).toContain("--port=1738");
+    });
+
+    it("ProgramArguments contains '--ingest-every=2m'", () => {
+        const args = plist["ProgramArguments"] as string[];
+        expect(args).toContain("--ingest-every=2m");
     });
 
     // ── Lifecycle ───────────────────────────────────────────────────────────

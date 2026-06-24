@@ -32,9 +32,13 @@
         ProgramArguments: argv[0] (bun path, bundle-root-relative) + the ax-src
         serve entry + Task-2 flags.
 
-        When BundleProgram is set, launchd runs the process with its working
-        directory at the bundle root so bundle-root-relative paths in
-        ProgramArguments resolve inside the bundle at runtime.
+        NOTE - cwd for this agent is NOT guaranteed to be the bundle root
+        (launchd default cwd is /). The bundle-relative ProgramArguments paths
+        are UNVERIFIED with SMAppService register() - this is validated in Task 8's
+        signed-build smoke. If `ax serve` fails to start at runtime, switch
+        BundleProgram to the shell-wrapper fallback documented in
+        docs/superpowers/notes/2026-06-24-agentservice-contract.md §4 (a launcher
+        that resolves paths relative to its own $0).
 
         - Contents/Resources/bin/arm64/bun      → argv[0] (the program name)
         - Contents/Resources/ax-src/...         → the TypeScript serve entry
