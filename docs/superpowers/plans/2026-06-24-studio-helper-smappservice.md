@@ -13,8 +13,11 @@
 ## Global Constraints
 
 - Electron version: **41.5.0** (no upgrade). `setLoginItemSettings({ type: 'agentService' })` is the API; `mainAppService` is already used for `openAtLogin` (`apps/studio-desktop/src/app/ElectronApp.ts:73`).
-- One signed binary: the helper is the **main app executable** invoked with `--background-helper`. Do NOT introduce a second executable to sign.
-- Helper label: **`com.necmttn.ax-studio-helper`**. App id stays `com.necmttn.ax-studio`. Plist bundled at `Contents/Library/LaunchAgents/com.necmttn.ax-studio-helper.plist`.
+- **Helper form - DECIDED by spikes 1 + 1b (Form A):** the agent plist's `BundleProgram` is the **bundled `bun` Mach-O** (`Contents/Resources/bin/<arch>/bun`), with `ProgramArguments` running an **ax-src helper entry**. There is NO separate compiled helper binary (the main Electron binary can't be a launchd agent - needs WindowServer; and the compiled `axctl` binary can't live-ingest - lmdb won't bundle). The helper MUST run under bundled bun + ax-src. Runtime proven in `.superpowers/sdd/task-1b-microspike-report.md`.
+- Helper serviceName == Label == plist filename: **`com.necmttn.ax-studio.helper`**. App id stays `com.necmttn.ax-studio`. Plist at `Contents/Library/LaunchAgents/com.necmttn.ax-studio.helper.plist`.
+- Plist MUST NOT set `StandardOutPath`/`StandardErrorPath` (macOS 14.4+ rejects SMAppService jobs that do - `SMAppServiceErrorDomain` 22). The helper opens its own log file under `~/.local/share/ax/logs/`.
+- `BundleProgram` is bundle-root-relative (launchd verifies the signature chain to the app's Team ID); never an absolute path.
+- Bundle prerequisite: `stage-ax-source.ts` must `bun install` into the staged `ax-src/` (the shipped bundle currently has no `node_modules`, so bundled bun can't run ax-src). Folded into Task 4.
 - Data dir is shared and singular: `$AX_DATA_DIR ?? ~/.local/share/ax`. Exactly ONE process owns surreal at a time - enforced by `AxDaemonArbitration` port probes. Never run two surreal on `:8521`.
 - Ports: surreal `8521`, ax serve `1738` (`AxDaemonArbitration.ts:21-22`).
 - `check:no-node-fs` gate bans `node:fs`/`node:path` in `apps/` - use Effect `FileSystem`/`Path` (see `findDesktopApp` pattern, `install.ts:86`).
@@ -48,68 +51,63 @@ git commit -m "docs: pin Electron agentService contract for studio helper (#599)
 
 ---
 
-### Task 2: Headless backend entry (`--background-helper`)
+### Task 2: `ax serve --managed-db` + `--ingest-every` (the helper runtime)
+
+**Design (resolved by spikes 1+1b):** the helper plist runs bundled-`bun` against the bundled ax-src `serve` command. So the helper runtime IS `ax serve` with two new flags: `--managed-db` (spawn + supervise bundled surreal as a child, then serve) and `--ingest-every=<dur>` (fork an internal ingest loop). Bundle-location independence: `--managed-db` resolves the surreal binary as a **sibling of `process.execPath`** (bundled bun and surreal both live in `Contents/Resources/bin/<arch>/`), so no absolute paths in the plist. Both flags are also useful for non-desktop users (`ax serve --managed-db` = one-shot self-contained daemon).
 
 **Files:**
-- Create: `apps/studio-desktop/src/helper/program.ts` (headless Effect program)
-- Modify: `apps/studio-desktop/src/main.ts:115-126` (arg branch before UI composition)
-- Test: `apps/studio-desktop/src/helper/program.test.ts`
+- Create: `apps/axctl/src/dashboard/managed-db.ts` (resolve surreal path + spawn/supervise as a child, readiness-gated)
+- Create: `apps/axctl/src/dashboard/serve-ingest-loop.ts` (interval loop calling the in-process ingest entry - the same `runIngest` the `POST /api/ingest` handler forks, NOT an HTTP round-trip)
+- Modify: the `serve` command definition (find it: `rg -n "\"serve\"|serveCommand|cmdServe" apps/axctl/src/cli`) to add the two flags + wire them
+- Test: `apps/axctl/src/dashboard/managed-db.test.ts`, `apps/axctl/src/dashboard/serve-ingest-loop.test.ts`
 
 **Interfaces:**
-- Consumes: `AxBackendManager` (`AxBackendManagerShape { start, stop, snapshot }`, `AxBackendManager.liveLayer`, `backend/AxBackendManager.ts:258-672`); `DesktopIngestScheduler.run(config)` (`backend/DesktopIngestScheduler.ts:54`); `DesktopEnvironment` layer (`app/DesktopEnvironment.ts`); Node platform + `HttpClient` layers (`main.ts:75-83`).
-- Produces: `export const helperProgram: Effect.Effect<void, never, never>` (fully provided at the entry) and `export const isHelperInvocation: (argv: readonly string[]) => boolean`.
+- Consumes: existing serve bootstrap (`apps/axctl/src/dashboard/server.ts`), `@ax/lib/runtime-state` for the db host/port, the existing in-process ingest entry used by `POST /api/ingest` (locate via `rg -n "runIngest|/api/ingest" apps/axctl/src/dashboard`).
+- Produces:
+  - `export const resolveManagedSurrealPath: (execPath: string) => string` - sibling-of-execPath resolution (`<dir(execPath)>/surreal`).
+  - `export const makeManagedDb: (opts: { surrealPath: string; host: string; port: number; dataDir: string }) => Effect.Effect<void, ManagedDbError, Scope.Scope | ChildProcessSpawner | HttpClient>` - spawns surreal, waits on `/health`, registers a scope finalizer that stops it.
+  - `export const runIngestLoop: (opts: { every: Duration.Duration; sinceDays: number }) => Effect.Effect<void>` - `repeat(Schedule.spaced(every))`, fail-soft per iteration.
+  - serve flags: `--managed-db` (boolean), `--ingest-every` (duration string e.g. `2m`, optional).
 
-- [ ] **Step 1: Write the failing test** - `isHelperInvocation` detects the flag and nothing else.
+- [ ] **Step 1: Write the failing test** - `resolveManagedSurrealPath` returns the sibling path.
 
 ```typescript
 import { describe, it, expect } from "bun:test";
-import { isHelperInvocation } from "./program.ts";
+import { resolveManagedSurrealPath } from "./managed-db.ts";
 
-describe("isHelperInvocation", () => {
-  it("true when --background-helper present", () => {
-    expect(isHelperInvocation(["node", "app", "--background-helper"])).toBe(true);
-  });
-  it("false for a normal UI launch", () => {
-    expect(isHelperInvocation(["node", "app"])).toBe(false);
+describe("resolveManagedSurrealPath", () => {
+  it("resolves surreal as a sibling of the bun execPath", () => {
+    expect(resolveManagedSurrealPath("/Applications/ax studio.app/Contents/Resources/bin/arm64/bun"))
+      .toBe("/Applications/ax studio.app/Contents/Resources/bin/arm64/surreal");
   });
 });
 ```
 
 - [ ] **Step 2: Run it, verify it fails**
 
-Run: `cd apps/studio-desktop && bun test src/helper/program.test.ts`
-Expected: FAIL - `isHelperInvocation` not exported.
+Run: `cd apps/axctl && bun test src/dashboard/managed-db.test.ts`
+Expected: FAIL - module not found.
 
-- [ ] **Step 3: Implement the headless program**
+- [ ] **Step 3: Implement `resolveManagedSurrealPath` + `makeManagedDb`** - use Effect `Path` to take `dirname(execPath)` and join `surreal`. `makeManagedDb` spawns via the existing `ChildProcessSpawner` pattern (mirror how the desktop's `SupervisedProcess`/the CLI spawns surreal; reuse the surreal arg shape from `apps/axctl/src/cli/install.ts:108-110` - `start --user root --pass root --bind host:port --log info --allow-experimental=files "rocksdb://<dataDir>/db"`), waits for `GET http://host:port/health`, and adds a `Scope` finalizer that SIGTERMs (then SIGKILLs) the child.
 
-`apps/studio-desktop/src/helper/program.ts` - compose ONLY the backend layers (NO `electronLayer`, window, tray, protocol, menu). Reuse `AxBackendManager.liveLayer`, the `DesktopEnvironment` layer, Node platform services, `HttpClient`. The program: `backendManager.start` → `Effect.forkScoped(DesktopIngestScheduler.run({ sinceDays: 7, interval: Duration.minutes(2) }))` → block forever (`Effect.never`) inside a `Scope` whose finalizer calls `backendManager.stop({ timeout: Duration.seconds(6) })`. Handle SIGTERM/SIGINT → interrupt the scope (launchd sends SIGTERM on unload). Mirror the scoped-program shape in `app/DesktopApp.ts:130-166` but drop every UI concern.
+- [ ] **Step 4: Implement `runIngestLoop`** - fork the in-process ingest entry on `Schedule.spaced(every)`, each iteration `Effect.catchCause`-logged (fail-soft; one bad run never kills the loop).
 
-```typescript
-export const isHelperInvocation = (argv: readonly string[]): boolean =>
-  argv.includes("--background-helper");
+- [ ] **Step 5: Wire the flags into `serve`** - when `--managed-db`, run `makeManagedDb` (scoped) BEFORE binding the HTTP server, so surreal is ready first; when `--ingest-every` is set, `Effect.forkScoped(runIngestLoop(...))` after serve is up. Default values: `--ingest-every` unset = no loop (preserve current behavior). Existing `ax serve` with neither flag is byte-for-byte unchanged.
 
-// helperProgram: backend.start; fork ingest loop; Effect.never; scope finalizer stops backend.
-// Provide: AxBackendManager.liveLayer + DesktopEnvironment.layer + NodeServices + HttpClient.
-```
+- [ ] **Step 6: Run tests + a real local smoke on a TEST port** (never 8521 / the live db).
 
-- [ ] **Step 4: Branch the entry in `main.ts`** - BEFORE the Electron single-instance lock + UI layer composition (`main.ts:115`), check `isHelperInvocation(process.argv)`. If true, run `helperProgram.pipe(NodeRuntime.runMain)` and return - never touch `electronLayer`/`app.whenReady`. Keep `requestSingleInstanceLock` only on the UI path. (The helper and UI are separate launchd/GUI processes; the helper must not grab the GUI single-instance lock.)
-
-- [ ] **Step 5: Run the test, verify pass**
-
-Run: `cd apps/studio-desktop && bun test src/helper/program.test.ts`
-Expected: PASS.
-
-- [ ] **Step 6: Manual smoke (dev)** - ad-hoc-sign the bundled binaries if needed, then run the built main binary with the flag and confirm surreal+serve come up and `curl 127.0.0.1:1738/api/version` answers, with NO Electron window.
-
-Run: `cd apps/studio-desktop && bun run dist-electron/main.cjs --background-helper` (dev entry) - observe backend logs, then `curl -s 127.0.0.1:1738/api/version`.
-Expected: JSON version response; no window.
+Run: `cd apps/axctl && bun test src/dashboard/ && AX_DATA_DIR=/tmp/ax-mdb-smoke bun src/cli/index.ts serve --managed-db --port=8531 --ingest-every=2m` then `curl -s 127.0.0.1:8531/api/version`; Ctrl-C and confirm the child surreal is reaped.
+Expected: tests pass; `/api/version` answers; no orphan surreal after exit.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add apps/studio-desktop/src/helper/ apps/studio-desktop/src/main.ts
-git commit -m "feat(studio-desktop): headless --background-helper backend entry (#599)"
+git add apps/axctl/src/dashboard/managed-db.ts apps/axctl/src/dashboard/serve-ingest-loop.ts apps/axctl/src/dashboard/managed-db.test.ts apps/axctl/src/dashboard/serve-ingest-loop.test.ts
+git add -p   # the serve command file
+git commit -m "feat(serve): --managed-db (supervise surreal child) + --ingest-every loop (#599)"
 ```
+
+**Note for Task 3 (watchdog) + Task 6 (UI arbitration):** the wedge watchdog (Task 3) forks inside the `--managed-db` path here (it owns the surreal child it must restart). The UI app does NOT use `--managed-db`; it keeps `AxBackendManager` attach-mode and connects to the helper's serve (Task 6).
 
 ---
 
@@ -156,7 +154,7 @@ Expected: FAIL - module not found.
 
 - [ ] **Step 3: Implement the watchdog** - a `Ref`-counter loop on `Schedule.spaced(interval)`: probe; on success reset counter to 0; on failure increment; when counter reaches `failuresToTrip`, run `onWedged` and reset counter (so it re-arms after the restart). Pure w.r.t. clock (TestClock-drivable).
 
-- [ ] **Step 4: Wire into `AxBackendManager`** - after surreal readiness in spawn mode (`AxBackendManager.ts:427` region), `Effect.forkScoped` a `makeSurrealWatchdog` whose `probe` does a real `SELECT 1` round-trip (1s timeout) and whose `onWedged` force-restarts the surreal `SupervisedProcess` (SIGKILL the wedged pid - recall SIGTERM was ignored in the incident - then supervisor respawns). Add a structured log line on trip. Skip the watchdog in `attach` mode (the helper, not the UI, owns surreal).
+- [ ] **Step 4: Wire into the `--managed-db` path (Task 2)** - inside `makeManagedDb` (`apps/axctl/src/dashboard/managed-db.ts`), after the surreal child is ready, `Effect.forkScoped` a `makeSurrealWatchdog` whose `probe` does a real `SELECT 1` round-trip (1s timeout) and whose `onWedged` force-restarts the managed surreal child (SIGKILL the wedged pid - recall SIGTERM was ignored in the incident - then re-spawn). Add a structured log line on trip. NOTE: this lives only in `--managed-db` (the helper owns surreal); the UI app runs attach-mode and never starts the watchdog. **Files for this task are therefore `apps/axctl/src/dashboard/SurrealWatchdog.ts` (+ `.test.ts`), not studio-desktop** - run tests with `cd apps/axctl && bun test src/dashboard/SurrealWatchdog.test.ts`, and the commit adds `apps/axctl/src/dashboard/SurrealWatchdog*.ts` + `managed-db.ts`.
 
 - [ ] **Step 5: Run tests, verify pass**
 
@@ -175,20 +173,23 @@ git commit -m "feat(studio-desktop): real-query surreal wedge watchdog + force-r
 ### Task 4: Bundle the agent plist + place the helper program (electron-builder)
 
 **Files:**
-- Create: `apps/studio-desktop/build/com.necmttn.ax-studio-helper.plist` (template; `BundleProgram` + `--background-helper`, `RunAtLoad`, `KeepAlive`)
-- Modify: `apps/studio-desktop/electron-builder.config.cjs` (`extraFiles` to place the plist at `Contents/Library/LaunchAgents/`)
-- Test: `apps/studio-desktop/scripts/verify-helper-bundle.test.ts` (asserts the built/staged tree has the plist at the right path with the right keys)
+- Create: `apps/studio-desktop/build/LaunchAgents/com.necmttn.ax-studio.helper.plist` (Form A plist - `BundleProgram` = bundled bun, `ProgramArguments` = ax-src serve entry)
+- Modify: `apps/studio-desktop/electron-builder.config.cjs` (`extraFiles` placing the plist at `Contents/Library/LaunchAgents/`)
+- Modify: `apps/studio-desktop/scripts/stage-ax-source.ts` (run `bun install --production` in the staged `ax-src/` so bundled bun can resolve ax-src deps - the shipped bundle currently has no `node_modules`; this is the spike-1b blocker)
+- Test: `apps/studio-desktop/scripts/verify-helper-bundle.test.ts` (asserts the staged tree has the plist with the right keys)
 
-**Interfaces:**
-- Consumes: the exact plist shape + path from Task 1's contract note; the KeepAlive/limits shape from the CLI's `dbPlist` (`apps/axctl/src/cli/install.ts:96-157`) - mirror `KeepAlive { SuccessfulExit:false, Crashed:true }`, `SoftResourceLimits NumberOfFiles 65536`, `ThrottleInterval 5`. NOTE: the bundled plist's `ProgramArguments` is the helper binary (NOT a `/bin/bash -lc` - that's the whole point: a Developer-ID-attributed item, not "bash unidentified").
-- Produces: a packaged app whose `Contents/Library/LaunchAgents/com.necmttn.ax-studio-helper.plist` `BundleProgram` resolves to the signed main executable.
+**Interfaces (Form A - from `docs/superpowers/notes/2026-06-24-agentservice-contract.md`):**
+- `BundleProgram` = `Contents/Resources/bin/${arch}/bun` (the bundled, app-signed bun Mach-O; bundle-root-relative).
+- `ProgramArguments` = `[ "ax-src/apps/axctl/src/cli/index.ts", "serve", "--managed-db", "--port=1738", "--ingest-every=2m" ]` - bun runs the bundled ax-src serve entry with the Task-2 flags. (Path is relative to the bundle; bun resolves it from its own `process.execPath` location. Confirm the exact relative form against the staged tree.)
+- `Label` == `com.necmttn.ax-studio.helper` (== filename == serviceName). `KeepAlive`=true, `RunAtLoad`=true, `ProcessType`=Background, `AssociatedBundleIdentifiers`=[`com.necmttn.ax-studio`].
+- **NO `StandardOutPath`/`StandardErrorPath`** (macOS 14.4+ rejects them on SMAppService jobs - the helper opens its own log under `~/.local/share/ax/logs/`).
 
-- [ ] **Step 1: Write the failing test** - given a staged app tree path, assert the plist exists at `Contents/Library/LaunchAgents/com.necmttn.ax-studio-helper.plist`, parses, has `Label == com.necmttn.ax-studio-helper`, `RunAtLoad == true`, a `KeepAlive` dict, and `BundleProgram`/`ProgramArguments` referencing `--background-helper`.
+- [ ] **Step 1: Write the failing test** - given the plist path, assert it parses (`plutil -convert json`) and has: `Label == com.necmttn.ax-studio.helper`, `BundleProgram` ending `/bin/<arch>/bun`, `ProgramArguments` containing `serve` + `--managed-db`, `RunAtLoad == true`, a truthy `KeepAlive`, and **NO `StandardOutPath`/`StandardErrorPath` keys**.
 
 ```typescript
 import { describe, it, expect } from "bun:test";
 import { parseHelperPlist } from "./verify-helper-bundle.ts"; // plutil -convert json wrapper
-// asserts the four keys above from build/com.necmttn.ax-studio-helper.plist
+// asserts the keys above from build/LaunchAgents/com.necmttn.ax-studio.helper.plist
 ```
 
 - [ ] **Step 2: Run it, verify it fails**
@@ -196,9 +197,9 @@ import { parseHelperPlist } from "./verify-helper-bundle.ts"; // plutil -convert
 Run: `cd apps/studio-desktop && bun test scripts/verify-helper-bundle.test.ts`
 Expected: FAIL - plist absent.
 
-- [ ] **Step 3: Author the plist** (`build/com.necmttn.ax-studio-helper.plist`) per Task 1's contract - `Label`, `ProgramArguments` = `[<MacOS/ax studio>, --background-helper]` (or `BundleProgram` form Electron requires), `RunAtLoad true`, `KeepAlive { SuccessfulExit false, Crashed true }`, `SoftResourceLimits NumberOfFiles 65536`, `ThrottleInterval 5`, `StandardOutPath`/`StandardErrorPath` under `~/.local/share/ax/logs/`.
+- [ ] **Step 3: Author the plist** at `build/LaunchAgents/com.necmttn.ax-studio.helper.plist` using the verbatim Form A shape in the contract note (§3 + §4). Mirror only the `KeepAlive`/`SoftResourceLimits NumberOfFiles 65536`/`ThrottleInterval 5` headroom from the CLI's `dbPlist` (`apps/axctl/src/cli/install.ts:96-157`). Do NOT include `StandardOutPath`/`StandardErrorPath`.
 
-- [ ] **Step 4: Wire electron-builder** - add to `electron-builder.config.cjs` `mac` config an `extraFiles` entry copying the plist into `Contents/Library/LaunchAgents/`. Confirm `hardenedRuntime: true` + existing entitlements (`build/entitlements.mac.plist`) sign the plist's target (the main binary already gets signed). No new entitlement needed (helper reuses the app's; `allow-dyld-environment-variables` already present for spawning surreal/bun).
+- [ ] **Step 4: Wire electron-builder + the bundle deps** - (a) add an `extraFiles` entry copying the plist to `Library/LaunchAgents/com.necmttn.ax-studio.helper.plist` (`to` is relative to `Contents/`); (b) update `stage-ax-source.ts` to `bun install` the staged `ax-src/` so bundled bun can run it. electron-builder auto-signs all Mach-Os in the bundle (bun included) under `hardenedRuntime: true` - confirm `entitlementsInherit` covers the bundled bun (it already runs as a child today).
 
 - [ ] **Step 5: Run the bundle test against a staged build, verify pass**
 
