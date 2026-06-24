@@ -10,14 +10,15 @@ export function RoutingPage() {
           Your frontier model is doing <em>intern work.</em>
         </h1>
         <p className="lede">
-          You&rsquo;d think Claude Code already sends the routine work it spawns to cheaper
-          models. It doesn&rsquo;t &mdash; every sub-task runs on your most expensive model
-          unless something tells it which one to use, and your weekly usage limit dies in
-          hours, not days. ax measures the leak, warns as it happens, learns the fix from
-          your own history, and verifies the savings &mdash; all on your laptop.
+          Every sub-task your agent spawns &mdash; grepping 200 files, running the test
+          suite, applying a spec&rsquo;d-out patch &mdash; runs on your most expensive model
+          by default. ax keeps the frontier model where it earns its keep and flags the
+          mechanical work down a tier. Same work lands; you just get more of it before your
+          usage window resets. ax learns the fix from your own history and proves the result
+          &mdash; all on your laptop.
         </p>
         <p className="rt-receipts-label">
-          what the leak looks like on one real machine running ax &middot; 14 days of receipts
+          and the default leaves money on the table &middot; one real machine, 14 days of receipts
         </p>
         <div className="scale">
           <div className="stat">
@@ -110,10 +111,70 @@ export function RoutingPage() {
         </div>
       </section>
 
-      {/* ============= 02 on real data ============= */}
+      {/* ============= 02 same work, fewer windows ============= */}
+      <section id="not-worse">
+        <div className="section-head">
+          <span className="section-num">02 / The proof it&rsquo;s not worse</span>
+          <h2>
+            Same work landed. <em>Fewer windows burned.</em>
+          </h2>
+          <p className="section-lede">
+            The honest answer to &ldquo;how do I know it didn&rsquo;t get worse&rdquo; is:
+            you measure it. Hold the work constant &mdash; commits landed, turns taken &mdash;
+            and watch the plan window stretch.{" "}
+            <code className="inline">ax routing impact</code> captures a routing-off block
+            and a routing-on block live on your machine, then diffs them.
+          </p>
+        </div>
+
+        <div className="rt-term">
+          <div className="bar">
+            <span className="dots" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="filename">~/Projects/ax</span>
+            <span style={{ marginLeft: "auto" }}>zsh</span>
+          </div>
+          <pre>
+            <span className="p">$</span> <span className="cmd">ax routing impact report</span>
+            {"\n\n"}
+            {"matched work across both blocks      routing off    routing on\n"}
+            <span className="dim">
+              ────────────────────────────────────────────────────────────
+            </span>
+            {"\n"}
+            {"assistant turns (work proxy)             312            318\n"}
+            {"commits landed                            11             11\n"}
+            {"5h-window utilization burned            1.00x          "}
+            <span className="fig">0.82x</span>
+            {"\n"}
+            <span className="dim">
+              ────────────────────────────────────────────────────────────
+            </span>
+            {"\n"}
+            {"→ "}
+            <span className="fig">1.22x more work</span>
+            {" per plan window, same output landed"}
+          </pre>
+        </div>
+
+        <p className="rt-fine">
+          Illustrative shape, not a recorded receipt &mdash; this is the one number on the
+          page that&rsquo;s yours to capture, not ours to claim. Run the two blocks on your
+          machine (<code className="inline">ax routing impact begin --arm=off</code> &hellip;{" "}
+          <code className="inline">end</code>, then the same with{" "}
+          <code className="inline">--arm=on</code>) and{" "}
+          <code className="inline">ax routing impact report</code> fills in your own off-vs-on
+          diff. Your plan window is the budget, so the receipt is in windows, not invoices.
+        </p>
+      </section>
+
+      {/* ============= 03 on real data ============= */}
       <section id="numbers">
         <div className="section-head">
-          <span className="section-num">02 / The receipts</span>
+          <span className="section-num">03 / The receipts</span>
           <h2>
             One machine, <em>verbatim.</em>
           </h2>
@@ -170,17 +231,20 @@ export function RoutingPage() {
         </p>
       </section>
 
-      {/* ============= 03 the safety rule ============= */}
+      {/* ============= 04 the safety rule ============= */}
       <section id="safety">
         <div className="section-head">
-          <span className="section-num">03 / The safety rule</span>
+          <span className="section-num">04 / The safety rule</span>
           <h2>
-            Judgment work <em>never</em> gets nudged down.
+            Routing only touches the <em>mechanical lanes.</em>
           </h2>
           <p className="section-lede">
-            Your obvious objection: won&rsquo;t quality drop? No &mdash; ax never even
-            suggests tiering down anything that needs taste. Your reviews, your design
-            calls, your plans stay on the frontier model.
+            Your obvious objection: won&rsquo;t quality drop? The honest guarantee
+            isn&rsquo;t &ldquo;it can&rsquo;t&rdquo; &mdash; it&rsquo;s that the risk is
+            bounded, visible, and reversible. ax only flags deterministic mechanical classes
+            (bounded), you own the routing table and see every class (visible), and the
+            impact receipt catches a regression before it compounds (reversible). Your
+            reviews, design calls, and plans never leave the frontier model.
           </p>
         </div>
 
