@@ -244,7 +244,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
     // SurrealClient tries to connect.
     let managedDbScope: Scope.Closeable | null = null;
     if (managedDb) {
-        const dbHost = process.env.AX_SERVE_HOST ?? DEFAULT_DB_HOST;
+        const dbHost = DEFAULT_DB_HOST;
         const dbPort = DEFAULT_DB_PORT;
         const dataDir =
             process.env.AX_DATA_DIR ??
