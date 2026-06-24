@@ -11,10 +11,11 @@
  * resolves `surreal` as a sibling of the bun binary - both live in
  * `Contents/Resources/bin/<arch>/` inside the app bundle.
  */
-import { Data, Duration, Effect, Schedule, Scope, Stream } from "effect";
-import { HttpClient } from "effect/unstable/http";
+import { Data, Duration, Effect, Ref, Schedule, Scope, Stream } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { posixPath } from "@ax/lib/shared/path";
+import { makeSurrealWatchdog } from "./SurrealWatchdog.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -76,6 +77,22 @@ const READINESS_REQUEST_TIMEOUT = Duration.seconds(2);
 const TERMINATE_GRACE = Duration.seconds(5);
 
 // ---------------------------------------------------------------------------
+// Watchdog constants
+// ---------------------------------------------------------------------------
+
+/**
+ * How long to wait between each SQL probe round-trip.
+ * 15 s is conservative but fast enough to detect a 4-day stall in <1 min.
+ */
+const WATCHDOG_INTERVAL = Duration.seconds(15);
+
+/**
+ * How many consecutive probe failures before we declare a wedge and
+ * force-restart.  3 × 15 s = 45 s before triggering a restart.
+ */
+const WATCHDOG_FAILURES_TO_TRIP = 3;
+
+// ---------------------------------------------------------------------------
 // makeManagedDb
 // ---------------------------------------------------------------------------
 
@@ -129,46 +146,6 @@ export const makeManagedDb = (opts: {
             stderr: "pipe",
         });
 
-        // Spawn the child. The ChildProcessSpawner registers a scope finalizer
-        // that sends the configured killSignal (SIGTERM by default) when the
-        // enclosing scope closes.
-        const handle = yield* spawner.spawn(command).pipe(
-            Effect.mapError((cause) =>
-                new ManagedDbError({
-                    message: `Failed to spawn surreal: ${String(cause.message ?? cause)}`,
-                    cause,
-                }),
-            ),
-        );
-
-        yield* Effect.logInfo(`[managed-db] surreal spawned`, { pid: handle.pid });
-
-        // Drain stdout/stderr in background (prevent pipe-buffer stall).
-        // Effect.ignore swallows failures from the stream (e.g. if surreal
-        // exits before we drain), so these don't surface as errors.
-        yield* handle.stdout.pipe(
-            Stream.runDrain,
-            Effect.ignore,
-            Effect.forkScoped,
-        );
-        yield* handle.stderr.pipe(
-            Stream.runDrain,
-            Effect.ignore,
-            Effect.forkScoped,
-        );
-
-        // Explicit finalizer: graceful SIGTERM, then SIGKILL after grace period.
-        // The ChildProcessSpawner's own scope finalizer also fires, but explicit
-        // ordering (SIGTERM → sleep → SIGKILL) is cleaner for a DB.
-        yield* Effect.addFinalizer(() =>
-            Effect.gen(function* () {
-                yield* Effect.logInfo("[managed-db] shutting down surreal (SIGTERM)");
-                yield* handle.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore);
-                yield* Effect.sleep(TERMINATE_GRACE);
-                yield* handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore);
-            }),
-        );
-
         // HTTP readiness probe: poll /health until surreal is ready.
         const healthUrl = new URL(`http://${opts.host}:${opts.port}/health`);
         const readyClient = httpClient.pipe(
@@ -177,7 +154,7 @@ export const makeManagedDb = (opts: {
             HttpClient.retry(Schedule.spaced(READINESS_INTERVAL)),
         );
 
-        yield* readyClient.get(healthUrl).pipe(
+        const probeHealth = readyClient.get(healthUrl).pipe(
             Effect.asVoid,
             Effect.timeout(READINESS_TIMEOUT),
             Effect.mapError(() =>
@@ -185,6 +162,124 @@ export const makeManagedDb = (opts: {
                     message: `Timed out waiting for surreal at ${healthUrl.href} (${Duration.toSeconds(READINESS_TIMEOUT)}s)`,
                 }),
             ),
+        );
+
+        // Capture the managed-db scope so that spawnAndReady can register the
+        // spawner's scope finalizer in it even when called from onWedged (which
+        // has no Scope in its own R type).
+        const managedDbScope = yield* Effect.scope;
+
+        // ---------------------------------------------------------------------------
+        // Spawn helper: spawn surreal, drain output streams, wait for readiness.
+        // Returns a handle; registers the spawner's SIGTERM finalizer in the
+        // managed-db scope so that ALL spawned processes are cleaned up when the
+        // overall scope closes.
+        //
+        // Scope is provided via `provideService` so `spawnAndReady` has no Scope
+        // in its own R type, allowing it to be called from `onWedged` (which must
+        // have R = never to satisfy SurrealWatchdogOpts).
+        // ---------------------------------------------------------------------------
+        const spawnAndReady: Effect.Effect<
+            ChildProcessSpawner.ChildProcessHandle,
+            ManagedDbError
+        > = Effect.gen(function* () {
+            // Spawn the child. The ChildProcessSpawner registers a scope finalizer
+            // (SIGTERM) in managedDbScope when the enclosing scope closes.
+            const handle = yield* spawner.spawn(command).pipe(
+                Effect.mapError((cause) =>
+                    new ManagedDbError({
+                        message: `Failed to spawn surreal: ${String(cause.message ?? cause)}`,
+                        cause,
+                    }),
+                ),
+            );
+
+            yield* Effect.logInfo(`[managed-db] surreal spawned`, { pid: handle.pid });
+
+            // Drain stdout/stderr in background (prevent pipe-buffer stall).
+            // Effect.ignore swallows failures from the stream (e.g. if surreal
+            // exits before we drain), so these don't surface as errors.
+            // forkDetach so drain fibers have no Scope requirement; they terminate
+            // naturally when the process exits (pipe closes).
+            yield* handle.stdout.pipe(Stream.runDrain, Effect.ignore, Effect.forkDetach);
+            yield* handle.stderr.pipe(Stream.runDrain, Effect.ignore, Effect.forkDetach);
+
+            yield* probeHealth;
+
+            return handle;
+        }).pipe(
+            // Provide the managed-db scope so spawner.spawn can register its
+            // finalizer there without Scope appearing in spawnAndReady's own R type.
+            Effect.provideService(Scope.Scope, managedDbScope),
+        );
+
+        // Initial spawn.
+        const initialHandle = yield* spawnAndReady;
+
+        // Track the *current* handle in a Ref so the finalizer and watchdog
+        // always operate on the live process, not the originally-spawned one.
+        const handleRef = yield* Ref.make(initialHandle);
+
+        // Explicit finalizer: graceful SIGTERM → wait → SIGKILL.
+        // Reads from handleRef so it always targets the most-recently spawned pid.
+        // The ChildProcessSpawner's own scope finalizers also fire, but those may
+        // target stale pids (already killed by the watchdog); Effect.ignore makes
+        // those no-ops.
+        yield* Effect.addFinalizer(() =>
+            Effect.gen(function* () {
+                yield* Effect.logInfo("[managed-db] shutting down surreal (SIGTERM)");
+                const handle = yield* Ref.get(handleRef);
+                yield* handle.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore);
+                yield* Effect.sleep(TERMINATE_GRACE);
+                yield* handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore);
+            }),
+        );
+
+        // ---------------------------------------------------------------------------
+        // Watchdog: detect a wedged SurrealDB via a real SELECT 1 round-trip.
+        //
+        // `/health` passes on a wedge (socket open, process alive).  An actual SQL
+        // query is the only reliable signal that the DB is serving queries.
+        //
+        // On trip: SIGKILL (not SIGTERM - SIGTERM was ignored in the incident),
+        // then respawn + re-probe health.  Logged as a structured warning.
+        // ---------------------------------------------------------------------------
+        const sqlUrl = new URL(`http://${opts.host}:${opts.port}/sql`);
+        const watchdogProbe: Effect.Effect<boolean> = httpClient.execute(
+            HttpClientRequest.post(sqlUrl).pipe(
+                HttpClientRequest.basicAuth("root", "root"),
+                HttpClientRequest.bodyText("SELECT 1", "text/plain"),
+            ),
+        ).pipe(
+            Effect.timeout(Duration.seconds(1)),
+            Effect.map(() => true as boolean),
+            Effect.orElseSucceed(() => false as boolean),
+        );
+
+        const onWedged: Effect.Effect<void> = Effect.gen(function* () {
+            yield* Effect.logWarning(
+                "[managed-db] watchdog: surreal wedge detected - SIGKILLing and respawning",
+            );
+            const staleHandle = yield* Ref.get(handleRef);
+            // Go straight to SIGKILL - the incident showed SIGTERM was ignored.
+            yield* staleHandle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore);
+            // Respawn and wait for readiness before re-arming the watchdog counter.
+            const newHandle = yield* spawnAndReady;
+            yield* Ref.set(handleRef, newHandle);
+            yield* Effect.logInfo("[managed-db] watchdog: surreal restarted and ready");
+        }).pipe(
+            // Don't let restart errors propagate to the watchdog loop - the loop
+            // re-arms and will try again after the next trip.
+            Effect.ignore,
+        );
+
+        yield* Effect.forkScoped(
+            makeSurrealWatchdog({
+                probe: watchdogProbe,
+                onWedged,
+                interval: WATCHDOG_INTERVAL,
+                failuresToTrip: WATCHDOG_FAILURES_TO_TRIP,
+            }),
         );
 
         yield* Effect.logInfo("[managed-db] surreal is ready");
