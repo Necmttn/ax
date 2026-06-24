@@ -90,6 +90,29 @@ describe("dashboard server", () => {
         expect(parseDashboardServeArgs(["--port=1800"]).port).toBe(1800);
     });
 
+    test("parseDashboardServeArgs: --managed-db defaults to false", () => {
+        expect(parseDashboardServeArgs([]).managedDb).toBe(false);
+    });
+
+    test("parseDashboardServeArgs: --managed-db sets managedDb to true", () => {
+        expect(parseDashboardServeArgs(["--managed-db"]).managedDb).toBe(true);
+    });
+
+    test("parseDashboardServeArgs: --ingest-every defaults to null", () => {
+        expect(parseDashboardServeArgs([]).ingestEvery).toBeNull();
+    });
+
+    test("parseDashboardServeArgs: --ingest-every=2m parses to 2 minutes", () => {
+        const { Duration } = require("effect");
+        const result = parseDashboardServeArgs(["--ingest-every=2m"]);
+        expect(result.ingestEvery).not.toBeNull();
+        expect(Duration.toMillis(result.ingestEvery!)).toBe(2 * 60 * 1000);
+    });
+
+    test("parseDashboardServeArgs: invalid --ingest-every throws", () => {
+        expect(() => parseDashboardServeArgs(["--ingest-every=bad"])).toThrow();
+    });
+
     test("graph explorer is disabled unless explicitly enabled", () => {
         expect(isGraphExplorerEnabled({})).toBe(false);
         expect(isGraphExplorerEnabled({ AX_ENABLE_GRAPH_EXPLORER: "0" })).toBe(false);
