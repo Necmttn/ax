@@ -26,3 +26,14 @@ export type GuardName = (typeof GUARD_NAMES)[number];
  */
 export const starterHookContent = (guardName: string): string =>
     `import hook from "@ax/hooks-sdk/hooks/${guardName}";\nimport { runMain } from "@ax/hooks-sdk/define";\n\nexport default hook;\nif (import.meta.main) void runMain(hook);\n`;
+
+/**
+ * The single dispatcher entry. One spawn runs EVERY guard for an event (decode
+ * once -> run matching guards in-process -> merge -> encode once), replacing N
+ * fat per-guard bundles. Scaffolded as `dispatch.ts` (source) / `dispatch.js`
+ * (binary, embedded like the per-guard bundles) and fired as `bun dispatch.*`.
+ */
+export const DISPATCHER_NAME = "dispatch";
+
+export const dispatcherScaffoldContent = (): string =>
+    `import { runDispatchMain } from "@ax/hooks-sdk/dispatch";\n\nif (import.meta.main) void runDispatchMain();\n`;

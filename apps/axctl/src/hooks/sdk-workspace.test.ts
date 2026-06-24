@@ -65,6 +65,14 @@ describe("scaffoldWorkspace", () => {
         const rqContent = readFileSync(rqPath, "utf8");
         expect(rqContent).toContain('@ax/hooks-sdk/hooks/refresh-quota');
 
+        // The single dispatcher entry is scaffolded alongside the guards.
+        const dispatchPath = join(dir, "dispatch.ts");
+        expect(existsSync(dispatchPath)).toBe(true);
+        expect(written).toContain(dispatchPath);
+        const dispatchContent = readFileSync(dispatchPath, "utf8");
+        expect(dispatchContent).toContain('@ax/hooks-sdk/dispatch');
+        expect(dispatchContent).toContain('runDispatchMain');
+
         // All hook files should be in the written list
         expect(written).toContain(ewPath);
         expect(written).toContain(ewwPath);
@@ -121,7 +129,9 @@ describe("scaffoldWorkspace", () => {
         expect(written).toContain(join(dir, "enforce-worktree-write.ts"));
         expect(written).toContain(join(dir, "route-dispatch.ts"));
         expect(written).toContain(join(dir, "refresh-quota.ts"));
-        expect(written.length).toBe(5);
+        expect(written).toContain(join(dir, "dispatch.ts"));
+        // package.json + 4 guards + the dispatcher entry.
+        expect(written.length).toBe(6);
     });
 
     test("creates dir if it does not exist", async () => {

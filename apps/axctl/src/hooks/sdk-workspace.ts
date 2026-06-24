@@ -2,7 +2,12 @@ import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { Schema } from "effect";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
-import { GUARD_NAMES, starterHookContent } from "./guard-names.ts";
+import {
+    GUARD_NAMES,
+    starterHookContent,
+    DISPATCHER_NAME,
+    dispatcherScaffoldContent,
+} from "./guard-names.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -159,6 +164,13 @@ export const scaffoldWorkspace = (
                 yield* writeFileAtomic(hookPath, starterHookContent(guardName), { backup: false });
                 written.push(hookPath);
             }
+        }
+
+        // 3b. The dispatcher entry (one spawn multiplexes all guards) - only if absent.
+        const dispatchPath = pathSvc.join(opts.dir, `${DISPATCHER_NAME}.ts`);
+        if (!(yield* fs.exists(dispatchPath))) {
+            yield* writeFileAtomic(dispatchPath, dispatcherScaffoldContent(), { backup: false });
+            written.push(dispatchPath);
         }
 
         // 4. bun install

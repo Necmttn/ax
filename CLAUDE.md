@@ -376,7 +376,15 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   file fails with `SdkHookFileNotFoundError` (#564); native (non-SDK)
   `ax hooks add` works everywhere.
 - `ax hooks init` - scaffold `~/.ax/hooks` (source: `file:` dep on
-  packages/hooks-sdk, re-run after the SDK moves; binary: writes embedded bundles)
+  packages/hooks-sdk, re-run after the SDK moves; binary: writes embedded bundles).
+  Also scaffolds the **dispatcher** `dispatch.ts`/`.js` (`DISPATCHER_NAME`): one
+  spawn that multiplexes ALL guards (decode once -> run matching guards
+  in-process -> `mergeVerdicts` -> encode once), replacing N fat per-guard
+  bundles. Standalone bundle ~0.9 MB (one, vs ~1.5 MB across four), embedded +
+  scaffolded like the per-guard bundles. Runtime is live (`bun dispatch.ts`);
+  flipping `ax hooks install --all` to register the single dispatcher (per-event
+  matchers via `dispatchInstallPlan`) + migrate off legacy per-guard entries is
+  the next step, then a daemon `/hooks/eval` fast-path (the latency win).
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -
