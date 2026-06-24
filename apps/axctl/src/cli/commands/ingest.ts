@@ -10,6 +10,8 @@ import type { DbError } from "@ax/lib/errors";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
+import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
+import { AX_VERSION } from "../version.ts";
 import { withIngestLock } from "../../ingest/ingest-lock.ts";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
@@ -262,6 +264,27 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.
         const runId = runIdFor(commandName);
+
+        // Additive schema self-heal (#283), before any DB write this run. A
+        // binary that adds schema fields breaks ingest against a DB whose
+        // schema predates them - SCHEMAFULL rejects the UPSERT - when the user
+        // swapped the binary without re-running the installer (the #251
+        // checksum incident forced exactly that; dev/bench setups hit it too).
+        // Replays the bundled DEFINE TABLE/FIELD statements as IF NOT EXISTS,
+        // sentinel-gated to once per version, so steady-state ingest pays only
+        // an fs.exists. Additive + idempotent + fail-open: on any failure
+        // ingest proceeds exactly as today (honest missing-field verdict #265).
+        yield* healAdditiveSchemaDrift({ version: AX_VERSION, dataDir: cfg.paths.dataDir }).pipe(
+            Effect.tap((r) =>
+                r.applied && r.statements > 0
+                    ? Effect.sync(() =>
+                        process.stderr.write(
+                            `axctl ${commandName}: applied bundled schema (${r.statements} defs) after version change\n`,
+                        ))
+                    : Effect.void,
+            ),
+            Effect.ignore,
+        );
 
         // Sweep ingest_run rows stranded in "running" by crashes / SIGKILL /
         // pre-0.25 binaries before this run starts (#282). Without this, rows
