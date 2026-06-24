@@ -20,7 +20,12 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
-import { GUARD_NAMES, starterHookContent } from "../apps/axctl/src/hooks/guard-names.ts";
+import {
+    GUARD_NAMES,
+    starterHookContent,
+    DISPATCHER_NAME,
+    dispatcherScaffoldContent,
+} from "../apps/axctl/src/hooks/guard-names.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GEN_FILE = join(REPO_ROOT, "apps/axctl/src/hooks/hooks-embed.gen.ts");
@@ -54,20 +59,27 @@ export function writeManifest(): void {
     rmSync(BUILD_DIR, { recursive: true, force: true });
     mkdirSync(BUILD_DIR, { recursive: true });
 
-    const bundles: string[] = [];
-    for (const guard of GUARD_NAMES) {
+    const bundle = (name: string, source: string): void => {
         // Entry wrapper inside apps/axctl so @ax/hooks-sdk resolves.
-        const entry = join(BUILD_DIR, `${guard}.entry.ts`);
-        writeFileSync(entry, starterHookContent(guard));
-        const outfile = join(BUILD_DIR, `${guard}.js`);
+        const entry = join(BUILD_DIR, `${name}.entry.ts`);
+        writeFileSync(entry, source);
+        const outfile = join(BUILD_DIR, `${name}.js`);
         const build = spawnSync(
             "bun",
             ["build", entry, "--target=bun", "--outfile", outfile],
             { cwd: REPO_ROOT, stdio: ["ignore", "ignore", "inherit"] },
         );
-        if (build.status !== 0) throw new Error(`bundling hook '${guard}' failed`);
+        if (build.status !== 0) throw new Error(`bundling hook '${name}' failed`);
+    };
+
+    const bundles: string[] = [];
+    for (const guard of GUARD_NAMES) {
+        bundle(guard, starterHookContent(guard));
         bundles.push(guard);
     }
+    // The single dispatcher (one spawn multiplexes all guards).
+    bundle(DISPATCHER_NAME, dispatcherScaffoldContent());
+    bundles.push(DISPATCHER_NAME);
 
     // Import specifiers are relative to the GEN file's directory.
     const genDir = join(REPO_ROOT, "apps/axctl/src/hooks");
