@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent } from "./types.ts";
 import {
+    buildClearDiagnosticEventStatement,
+    buildClearFrictionEventStatement,
     buildCorrectedByStatements,
     buildDiagnosticEventStatements,
     buildFrictionEventStatements,
@@ -155,5 +157,16 @@ describe("buildDiagnosticEventStatements", () => {
         expect(stmt).toContain("UPSERT diagnostic_event:`tool_failure__abc__call_1` MERGE { ");
         expect(stmt).toContain('kind: "tool_failure", status: "error", text: "Expected 1 failure"');
         expect(stmt).toContain('ts: d"2026-05-09T10:00:00.000Z" };');
+    });
+});
+
+describe("clear-table statements (#549 orphan sweep)", () => {
+    test("bare DELETE (no WHERE) so a full re-derive removes orphaned rows", () => {
+        // Bare DELETE avoids the DELETE-WHERE-on-indexed-field ghost-row footgun
+        // (PR #141); only run on a FULL re-derive that re-emits every row.
+        expect(buildClearFrictionEventStatement()).toBe("DELETE friction_event RETURN NONE;");
+        expect(buildClearDiagnosticEventStatement()).toBe("DELETE diagnostic_event RETURN NONE;");
+        expect(buildClearFrictionEventStatement()).not.toContain("WHERE");
+        expect(buildClearDiagnosticEventStatement()).not.toContain("WHERE");
     });
 });

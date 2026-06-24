@@ -100,6 +100,20 @@ export const buildRecoveredStatements = (edges: readonly RecoveryEdge[]): string
         return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
     });
 
+/**
+ * Truncate the standalone derived event tables before a FULL re-derive (#549).
+ * These rows are written via stable-key UPSERT, so when the current derivation
+ * logic stops emitting a given row (e.g. a classifier change), the old row is
+ * never re-touched and orphans with a stale `ts` (the 1970-epoch residue). On a
+ * full re-derive every row is re-emitted from a complete scan, so clearing
+ * first removes orphans safely. A bare `DELETE` (no WHERE) sidesteps the
+ * DELETE-WHERE-on-indexed-field ghost-row footgun (PR #141). Only safe on a
+ * full derive - a `--since` run must NOT clear (it would drop rows whose source
+ * falls outside the window).
+ */
+export const buildClearFrictionEventStatement = (): string => "DELETE friction_event RETURN NONE;";
+export const buildClearDiagnosticEventStatement = (): string => "DELETE diagnostic_event RETURN NONE;";
+
 export const buildFrictionEventStatements = (
     events: readonly DerivedFrictionEvent[],
 ): string[] =>
