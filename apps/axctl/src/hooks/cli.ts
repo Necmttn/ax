@@ -9,6 +9,7 @@ import {
     scaffoldWorkspace,
     scaffoldFromEmbed,
     isCompiledBinary,
+    listInstallableGuards,
     COMPILED_BINARY_SDK_HOOK_HELP,
 } from "./sdk-workspace.ts";
 import { HOOKS_EMBED } from "./hooks-embed.gen.ts";
@@ -205,7 +206,7 @@ const initCommand = Command.make(
                 console.log("");
                 console.log("requires `bun` on PATH (hooks fire as `bun <file>.js`).");
                 console.log("next steps:");
-                console.log(`  ax hooks install ${workspaceDir}/route-dispatch.js --providers=claude`);
+                console.log(`  ax hooks install --all --providers=claude,codex   (install every guard at once)`);
                 return;
             }
 
@@ -221,7 +222,7 @@ const initCommand = Command.make(
             console.log("");
             console.log("next steps:");
             console.log(`  ax hooks backtest ${workspaceDir}/enforce-worktree.ts --days=14   (replay history through it first)`);
-            console.log(`  ax hooks install ${workspaceDir}/enforce-worktree.ts --providers=claude,codex`);
+            console.log(`  ax hooks install --all --providers=claude,codex   (install every guard at once)`);
         }),
 ).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks; bundled .js hooks on a compiled binary)"));
 
@@ -230,11 +231,13 @@ const KNOWN_PROVIDERS = ALL_HOOK_PROVIDERS.map((p) => p.name);
 const installCommand = Command.make(
     "install",
     {
-        file: Argument.string("file"),
+        file: Argument.string("file").pipe(Argument.optional),
         providers: Flag.string("providers").pipe(Flag.withDefault("claude,codex")),
         scope: Flag.string("scope").pipe(Flag.withDefault("global")),
+        all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        dir: Flag.string("dir").pipe(Flag.withDefault("~/.ax/hooks")),
     },
-    ({ file, providers, scope }) =>
+    ({ file, providers, scope, all, dir }) =>
         Effect.gen(function* () {
             // Works on both source (.ts against the @ax/hooks-sdk workspace) and a
             // compiled binary (the standalone .js bundles `ax hooks init` wrote
@@ -242,7 +245,6 @@ const installCommand = Command.make(
             // import them to read meta). A missing file is caught by
             // installHookFile (SdkHookFileNotFoundError). (issue #573)
             const path = yield* Path.Path;
-            const absFile = path.resolve(expandTilde(file));
             const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);
 
             // Validate provider names against the registry
@@ -252,26 +254,55 @@ const installCommand = Command.make(
                 process.exit(1);
             }
 
-            const results = yield* installHookFile(absFile, providerList, asScope(scope));
-
-            for (const entry of results) {
-                const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
-                if (entry.skipped) {
-                    console.log(`already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
-                    continue;
+            // Resolve the file set: --all installs every guard scaffolded in the
+            // workspace (one command for the whole default set, no per-file
+            // dance); otherwise the single positional file.
+            const filePathArg = optionValue(file);
+            let files: string[];
+            if (all) {
+                const workspaceDir = expandTilde(dir);
+                const guards = yield* listInstallableGuards(workspaceDir);
+                if (guards.length === 0) {
+                    console.error(
+                        `no guard hooks found in ${workspaceDir}. Run 'ax hooks init' first to scaffold them.`,
+                    );
+                    process.exit(1);
                 }
-                console.log(`installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
-                console.log(`  command: ${entry.input.command}`);
+                files = [...guards];
+            } else {
+                if (filePathArg === undefined) {
+                    console.error("pass a hook file path, or --all to install every guard in the workspace.");
+                    process.exit(1);
+                }
+                files = [path.resolve(expandTilde(filePathArg))];
             }
-            const installed = results.filter((r) => !r.skipped).length;
-            const skipped = results.length - installed;
+
+            let installed = 0;
+            let skipped = 0;
+            for (const absFile of files) {
+                if (all) console.log(`${path.basename(absFile)}:`);
+                const results = yield* installHookFile(absFile, providerList, asScope(scope));
+                for (const entry of results) {
+                    const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
+                    const indent = all ? "  " : "";
+                    if (entry.skipped) {
+                        console.log(`${indent}already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
+                        continue;
+                    }
+                    console.log(`${indent}installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
+                    console.log(`${indent}  command: ${entry.input.command}`);
+                }
+                installed += results.filter((r) => !r.skipped).length;
+                skipped += results.filter((r) => r.skipped).length;
+            }
+
             console.log("");
             console.log(`${installed} hook(s) installed${skipped > 0 ? `, ${skipped} skipped (already installed)` : ""}.`);
             if (installed > 0 && providerList.includes("codex")) {
-                console.log("note (codex): approve the new hook when prompted (trust review).");
+                console.log("note (codex): approve the new hook(s) when prompted (trust review).");
             }
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
-).pipe(Command.withDescription("Install a SDK hook file into provider configs (--providers=claude,codex --scope=global)"));
+).pipe(Command.withDescription("Install a SDK hook file into provider configs, or --all to install every scaffolded guard (--providers=claude,codex --scope=global --dir=~/.ax/hooks)"));
 
 const backtestCommand = Command.make(
     "backtest",

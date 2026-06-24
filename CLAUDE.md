@@ -379,6 +379,11 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   packages/hooks-sdk, re-run after the SDK moves; binary: writes embedded bundles)
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
+- `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -
+  one-shot: install EVERY guard scaffolded in the workspace (`.ts` shims or
+  `.js` bundles, resolved by `listInstallableGuards`), no per-file dance. `ax
+  install`'s tail nudges `ax hooks init && ax hooks install --all`. The embed
+  path means a release binary needs NO repo checkout for any of this (#573).
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
 - `ax hooks bench <file> [--days --runs --budget-ms --json]` - latency ledger:

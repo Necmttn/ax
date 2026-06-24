@@ -1307,6 +1307,9 @@ export function cmdInstall(): Effect.Effect<
                 : "    launchctl list | grep 'com.necmttn.ax'   # verify the LaunchAgents loaded",
         );
         console.log();
+        console.log("  set up agent guards (worktree safety + model-routing hooks):");
+        console.log("    axctl hooks init && axctl hooks install --all --providers=claude,codex");
+        console.log();
         console.log("  questions or feedback? join the community:");
         console.log("    https://discord.gg/E4R88Cvr5R");
         console.log();
