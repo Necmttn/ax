@@ -27,6 +27,7 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import type { WithNext } from "@ax/lib/shared/nav-link";
 import type { SessionRow } from "../dashboard/sessions-query.ts";
+import type { SessionChurnSummary, SessionChurnRow } from "../metrics/session-churn.ts";
 import type { RecallSource } from "../dashboard/recall.ts";
 import type { SkillsWeightedResult } from "../dashboard/skills-weighted.ts";
 import type {
@@ -295,11 +296,12 @@ export const buildSessionsNext = (
         }
     }
 
-    // ③ Churn rollup over the same scope - cmd-only until an MCP
-    //    sessions_churn tool exists.
+    // ③ Churn rollup over the same scope - dual transport (the sessions_churn
+    //    MCP tool now exists, #311).
     if (rows.length > 0) {
         top.push({
             description: "Aggregate verification churn (edit vs repair LOC, failed checks) for this scope",
+            call: { tool: "sessions_churn", arguments: opts.project ? { project: opts.project } : {} },
             cmd: opts.project
                 ? `ax sessions churn --project="${opts.project}"`
                 : "ax sessions churn",
@@ -332,6 +334,66 @@ export const buildSessionsNext = (
     }
 
     return { sessions, next: sortNavLinks(top) };
+};
+
+// ---------------------------------------------------------------------------
+// sessions churn
+// ---------------------------------------------------------------------------
+
+/** A churn hot-session row enriched with its drill-in `next` links. */
+export type ChurnRowWithNext = WithNext<SessionChurnRow>;
+
+export interface SessionsChurnWithNext extends Omit<SessionChurnSummary, "hotSessions"> {
+    readonly hotSessions: ReadonlyArray<ChurnRowWithNext>;
+    readonly next: ReadonlyArray<NavLink>;
+}
+
+/**
+ * Attach drill-in + broaden affordances to a churn summary. Each hot session
+ * gets a per-row `next` (drill into the session, open it in Studio); the
+ * top-level `next` flags the hottest session and, on an empty result, teaches
+ * widening the window / dropping the project filter.
+ */
+export const buildSessionsChurnNext = (
+    summary: SessionChurnSummary,
+    opts: { readonly studio?: StudioDeeplink } = {},
+): SessionsChurnWithNext => {
+    const hotSessions: ChurnRowWithNext[] = summary.hotSessions.map((row) => ({
+        ...row,
+        next: [
+            sessionShowLink(row.session),
+            ...(opts.studio ? [studioSessionLink(row.session, opts.studio)] : []),
+        ],
+    }));
+
+    const top: NavLink[] = [];
+
+    // ① Drill into the hottest session (rows arrive churn-sorted).
+    const hottest = summary.hotSessions[0];
+    if (hottest) {
+        top.push(
+            sessionShowLink(
+                hottest.session,
+                "Drill into the highest-churn session",
+                8,
+            ),
+        );
+    }
+
+    // ② Empty result - teach widening the window / dropping the project filter.
+    if (summary.hotSessions.length === 0) {
+        const project = summary.filters.project;
+        top.push({
+            description: project
+                ? "No churn in this scope - drop the project filter and scan all projects"
+                : "No churn in this window - widen --since to scan deeper history",
+            call: { tool: "sessions_churn", arguments: { days: 90 } },
+            cmd: "ax sessions churn --since=90",
+            ui: { priority: 9, group: "search" },
+        });
+    }
+
+    return { ...summary, hotSessions, next: sortNavLinks(top) };
 };
 
 // ---------------------------------------------------------------------------
