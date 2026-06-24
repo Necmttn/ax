@@ -1,8 +1,17 @@
-# Studio desktop - background/daemon model (decided: IDE model)
+# Studio desktop - background/daemon model (decided: IDE model → Option A implemented)
+
+> **UPDATE 2026-06-24 (#599):** Option A is now **IMPLEMENTED**. A 4-day
+> data-plane stall (see `memory/ax-data-plane-fragile-ide-model.md`) made
+> true app-closed capture a hard requirement; the IDE model's "app must be
+> open" accepted tradeoff was no longer acceptable. Option A (SMAppService
+> `agentService` helper) ships in #599 as the background daemon.
+> Implementation plan: `docs/superpowers/plans/2026-06-24-studio-helper-smappservice.md`.
+> Operator guide: see the "Operating the helper" section below.
+> Original Option C decision rationale is preserved intact below.
 
 **Date:** 2026-06-16
-**Status:** Decided - **Option C (IDE model)**. Background-daemon options (A/B)
-rejected.
+**Status (original):** Decided - **Option C (IDE model)**. Background-daemon options (A/B) rejected.
+**Status (current):** **Option A implemented** via #599 (2026-06-24). Option C IDE-model code remains in place; the helper augments it - the UI app attaches to the already-running helper backend rather than spawning its own.
 **Decision owner:** Necmttn
 **Builds on:** `docs/superpowers/specs/2026-06-07-studio-desktop-design.md`
 
@@ -60,9 +69,17 @@ app-closed capture ever becomes a hard requirement, revisit Option A below.
   `agentService` plist (`BundleProgram`, registered via
   `setLoginItemSettings({ type: 'agentService', serviceName })`, verified available
   in Electron 41.5.0) running a headless `AxBackendManager` + polled ingest.
-  Delivers true app-closed ingest as a single Developer-ID item. **Rejected for
-  v0:** most work, not the IDE norm, and unnecessary once the app auto-launches +
-  stays tray-resident. Kept on file as the escape hatch if 24/7 capture is needed.
+  Delivers true app-closed ingest as a single Developer-ID item. **Originally
+  rejected for v0** (most work, not the IDE norm, unnecessary once auto-launch +
+  tray). **NOW IMPLEMENTED via #599 (2026-06-24)** - the 4-day data-plane stall
+  (IDE model; surreal wedge + app crash; `KeepAlive` alone can't fix a wedge) made
+  24/7 app-closed capture a hard requirement. Form A: `BundleProgram` = bundled bun
+  Mach-O (`Contents/Resources/bin/arm64/bun`); `ProgramArguments` run bundled ax-src
+  serve entry with `--managed-db --ingest-every=2m`. Helper registered at app boot;
+  KeepAlive+RunAtLoad in the plist; UI attaches via `AxDaemonArbitration`. A
+  real-query watchdog SIGKILLs+respawns a hung surreal (the wedge fix KeepAlive
+  alone can't provide). `ax daemon status` surfaces a wedged db;
+  `ax daemon restart` triggers recovery.
 - **B - bundle the existing agents as SMAppService agents.** 2–3 attributed items
   instead of 5. **Rejected:** still more background items than C, more moving parts.
 
@@ -110,5 +127,75 @@ app-closed capture ever becomes a hard requirement, revisit Option A below.
 
 ## Not doing (v0)
 
-Headless background daemon (Option A), Windows/Linux services (separate systemd
-track), root `daemonService`.
+~~Headless background daemon (Option A)~~ (now implemented via #599), Windows/Linux
+services (separate systemd track), root `daemonService`.
+
+---
+
+## Operating the helper (added 2026-06-24, #599)
+
+The background helper (`com.necmttn.ax-studio.helper`) is an `agentService` launchd
+job registered by `ax studio.app` at first launch via `setLoginItemSettings({ type:
+'agentService', serviceName: 'com.necmttn.ax-studio.helper', openAtLogin: true })`.
+It runs bundled bun → bundled ax-src `ax serve --managed-db --ingest-every=2m`,
+keeping surreal + the HTTP API on `:1738` alive even when the UI app is closed or
+crashes. A real-query watchdog inside the helper SIGKILLs+respawns a hung surreal
+process (the original 4-day-stall scenario that `KeepAlive` alone cannot fix).
+
+### What the helper does
+
+- Owns surreal on `127.0.0.1:8521` (spawns it as a child via `--managed-db`).
+- Owns `ax serve` on `127.0.0.1:1738` (the same HTTP API `ax studio.app` talks to).
+- Runs an ingest loop every 2 minutes (`--ingest-every=2m`) so the graph stays
+  current even when the app is closed.
+- Survives app quit and crashes (launchd `KeepAlive`+`RunAtLoad`).
+- Surfaces in System Settings → General → Login Items as **"ax studio"** (one
+  Developer-ID-attributed item, not anonymous bash).
+
+### Verifying the helper is running
+
+```bash
+# Check launchd job is registered and running
+launchctl list | grep ax-studio-helper
+
+# Check the ax serve endpoint the helper owns
+ax daemon status
+
+# If the helper is running, /api/version will respond
+curl -s http://127.0.0.1:1738/api/version | jq .
+```
+
+If `ax daemon status` reports a wedged db, run `ax daemon restart` to force a
+SIGKILL+respawn of the stuck surreal process.
+
+### Uninstalling / disabling the helper
+
+The helper is registered by the app and tied to the app's code signature. To
+remove it:
+
+1. **Via the app:** If an unregister UI is present, use it (calls
+   `setLoginItemSettings({ type: 'agentService', serviceName: '...', openAtLogin:
+   false })` internally).
+2. **Via System Settings:** General → Login Items → find "ax studio" under "Allow
+   in the Background" → toggle off or remove.
+3. **Via launchctl (manual):**
+   ```bash
+   launchctl bootout gui/$(id -u)/com.necmttn.ax-studio.helper
+   ```
+   This stops the job for the current login session. It will re-register on the
+   next app launch unless the app also calls `SMAppService.unregister`.
+4. **Fully remove:** Delete `ax studio.app` from `/Applications`. macOS
+   automatically unregisters all `agentService` jobs whose parent app bundle is
+   gone.
+
+### Open smoke item (deferred to maintainer)
+
+The plist's `ProgramArguments` use bundle-root-relative paths (e.g.
+`Contents/Resources/ax-src/apps/axctl/src/cli/index.ts`). Launchd's working
+directory for SMAppService agents is `/` - those paths are NOT auto-resolved by
+launchd the way `BundleProgram` is. **The signed-build smoke (Step 1 of the task-8
+brief) must confirm bun actually starts ax serve.** If the agent starts but `ax
+serve` fails (check `ax daemon status` + `launchctl list | grep ax-studio-helper`
+exit code), switch `BundleProgram` to the shell-wrapper fallback documented in
+`docs/superpowers/notes/2026-06-24-agentservice-contract.md §4`, which resolves
+paths relative to `$0` before exec.
