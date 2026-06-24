@@ -263,6 +263,26 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // failure paths below can address the `ingest_run` row.
         const runId = runIdFor(commandName);
 
+        // Sweep ingest_run rows stranded in "running" by crashes / SIGKILL /
+        // pre-0.25 binaries before this run starts (#282). Without this, rows
+        // left by an old binary warn in `ax doctor` forever - "re-run ax ingest"
+        // never cleared them, training users to ignore doctor. The stranded
+        // filter only matches rows whose newest heartbeat is past the ingest
+        // timeout + grace, so a live concurrent run is never reaped; this run's
+        // own row does not exist yet (runIngest creates it). Best-effort: a reap
+        // failure must never block the actual ingest.
+        yield* reapStaleIngestRuns().pipe(
+            Effect.tap((r) =>
+                r.reaped > 0
+                    ? Effect.sync(() =>
+                        process.stderr.write(
+                            `axctl ${commandName}: reaped ${r.reaped} stranded ingest_run row(s)\n`,
+                        ))
+                    : Effect.void,
+            ),
+            Effect.ignore,
+        );
+
         const work = runIngest({
             command: commandName,
             args,
