@@ -76,6 +76,12 @@ const READINESS_INTERVAL = Duration.millis(250);
 const READINESS_REQUEST_TIMEOUT = Duration.seconds(2);
 const TERMINATE_GRACE = Duration.seconds(5);
 
+/**
+ * Short timeout for the pre-spawn idempotency probe.
+ * Fail-closed: if nothing answers in 1 s we assume "not listening" and spawn.
+ */
+const PRE_SPAWN_PROBE_TIMEOUT = Duration.seconds(1);
+
 // ---------------------------------------------------------------------------
 // Watchdog constants
 // ---------------------------------------------------------------------------
@@ -123,6 +129,38 @@ export const makeManagedDb = (opts: {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const httpClient = yield* HttpClient.HttpClient;
 
+        // Move healthUrl up here so the pre-spawn probe can use it.
+        const healthUrl = new URL(`http://${opts.host}:${opts.port}/health`);
+
+        // ---------------------------------------------------------------------------
+        // Pre-spawn idempotency check (restart-storm guard)
+        // ---------------------------------------------------------------------------
+        // If a healthy surreal is already listening on host:port, attach to it
+        // instead of spawning a new one.
+        //
+        // Failure mode prevented: helper crash → SIGKILL → launchd restarts
+        // helper → new surreal collides with orphan (rocksdb-locked) →
+        // 30-s readiness timeout → exit → restart → storm.
+        //
+        // Fail-closed: timeout / connection error → false → proceed to spawn.
+        // In the attach case we do NOT register a finalizer or start the
+        // watchdog - we didn't spawn the process so we must not kill or
+        // monitor it.
+        const alreadyHealthy = yield* httpClient.pipe(HttpClient.filterStatusOk)
+            .get(healthUrl)
+            .pipe(
+                Effect.timeout(PRE_SPAWN_PROBE_TIMEOUT),
+                Effect.map(() => true as boolean),
+                Effect.orElseSucceed(() => false as boolean),
+            );
+
+        if (alreadyHealthy) {
+            yield* Effect.logInfo(
+                `[managed-db] surreal already healthy on ${opts.host}:${opts.port} - attaching, not spawning`,
+            );
+            return; // no spawn, no finalizer, no watchdog - we don't own this process
+        }
+
         const args = [
             "start",
             "--user", "root",
@@ -147,7 +185,6 @@ export const makeManagedDb = (opts: {
         });
 
         // HTTP readiness probe: poll /health until surreal is ready.
-        const healthUrl = new URL(`http://${opts.host}:${opts.port}/health`);
         const readyClient = httpClient.pipe(
             HttpClient.filterStatusOk,
             HttpClient.transformResponse(Effect.timeout(READINESS_REQUEST_TIMEOUT)),
