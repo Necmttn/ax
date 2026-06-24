@@ -8,8 +8,10 @@ import {
     scaffoldWorkspace,
     scaffoldFromEmbed,
     isCompiledBinary,
+    listInstallableGuards,
     COMPILED_BINARY_SDK_HOOK_HELP,
 } from "./sdk-workspace.ts";
+import { GUARD_NAMES } from "./guard-names.ts";
 
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -203,5 +205,48 @@ describe("isCompiledBinary", () => {
         expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("git clone https://github.com/Necmttn/ax");
         expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("hooks init");
         expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("ax hooks add");
+        // The embed path makes the binary work offline now - the help must NOT
+        // claim SDK hooks need a checkout, and should point at install --all.
+        expect(COMPILED_BINARY_SDK_HOOK_HELP).toContain("hooks install --all");
+    });
+});
+
+describe("listInstallableGuards", () => {
+    test("empty when no guard files scaffolded", async () => {
+        const dir = mk();
+        const found = await run(listInstallableGuards(dir));
+        expect(found).toEqual([]);
+    });
+
+    test("resolves .ts shims from a source scaffold, in GUARD_NAMES order", async () => {
+        const dir = mk();
+        await run(scaffoldWorkspace({ dir, sdkPath: "/abs/packages/hooks-sdk", install: false }));
+        const found = await run(listInstallableGuards(dir));
+        expect(found).toEqual(GUARD_NAMES.map((g) => join(dir, `${g}.ts`)));
+    });
+
+    test("resolves .js bundles when only those are present", async () => {
+        const dir = mk();
+        for (const g of GUARD_NAMES) writeFileSync(join(dir, `${g}.js`), "// bundle\n");
+        const found = await run(listInstallableGuards(dir));
+        expect(found).toEqual(GUARD_NAMES.map((g) => join(dir, `${g}.js`)));
+    });
+
+    test("prefers .ts over .js when both exist for a guard", async () => {
+        const dir = mk();
+        const guard = GUARD_NAMES[0]!;
+        writeFileSync(join(dir, `${guard}.ts`), "// shim\n");
+        writeFileSync(join(dir, `${guard}.js`), "// bundle\n");
+        const found = await run(listInstallableGuards(dir));
+        expect(found).toEqual([join(dir, `${guard}.ts`)]);
+    });
+
+    test("skips guards with no file, keeps the rest in order", async () => {
+        const dir = mk();
+        // scaffold only the second guard as a .js bundle
+        const guard = GUARD_NAMES[1]!;
+        writeFileSync(join(dir, `${guard}.js`), "// bundle\n");
+        const found = await run(listInstallableGuards(dir));
+        expect(found).toEqual([join(dir, `${guard}.js`)]);
     });
 });

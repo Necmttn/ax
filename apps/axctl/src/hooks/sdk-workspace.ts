@@ -38,20 +38,25 @@ export const isCompiledBinary = (): boolean =>
     import.meta.dir.includes("$bunfs") || import.meta.url.includes("$bunfs");
 
 /**
- * The next-step guidance to print when an SDK-hook command (init/install) is
- * invoked on a compiled binary. Tells the user the supported path instead of
- * dead-ending on an internal SdkPathNotFoundError. (issue #564)
+ * Fallback guidance for the rare compiled binary built WITHOUT the bundled-hook
+ * embed manifest (`HOOKS_EMBED` empty). A normal release binary embeds a
+ * standalone `.js` per guard, so `ax hooks init` works fully offline there (no
+ * source checkout, no `bun install` - issue #573); this text only prints when
+ * that manifest is missing, which means a broken build. (issue #564)
  */
 export const COMPILED_BINARY_SDK_HOOK_HELP = [
-    "SDK (TypeScript) hooks need a source checkout of ax.",
-    "They run as `bun <file>` against the @ax/hooks-sdk workspace, which the",
-    "compiled binary does not bundle - so `ax hooks init`/`install` can't work here.",
+    "This axctl binary has no bundled hooks (empty embed manifest) - usually a",
+    "broken/dev build. A normal release embeds the guards, so `ax hooks init`",
+    "writes them to ~/.ax/hooks offline with no repo checkout.",
     "",
-    "To author/install hooks like route-dispatch:",
+    "Fix: reinstall the latest release (curl -fsSL https://ax.necmttn.com/install.sh | sh),",
+    "then `ax hooks init` and `ax hooks install --all --providers=claude,codex`.",
+    "",
+    "Or run from a source checkout:",
     "  git clone https://github.com/Necmttn/ax && cd ax && bun install",
-    "  ./apps/axctl/bin/axctl hooks init   # then `... hooks install <file>`",
+    "  ./apps/axctl/bin/axctl hooks init && ./apps/axctl/bin/axctl hooks install --all",
     "",
-    "On a compiled binary you can still:",
+    "Meanwhile you can still:",
     "  - route models by setting `model:` explicitly per dispatch (efficient-dispatch skill)",
     "  - measure routing with `ax dispatches` / `ax cost split`",
     "  - add native (non-SDK) hooks via `ax hooks add --command=\"...\"`",
@@ -226,4 +231,33 @@ export const scaffoldFromEmbed = (
             written.push(dest);
         }
         return written;
+    });
+
+// ---------------------------------------------------------------------------
+// listInstallableGuards (`ax hooks install --all` resolution)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the on-disk guard files in a scaffolded workspace, one per
+ * `GUARD_NAMES`. Either extension may be present depending on how the workspace
+ * was scaffolded: `.ts` shims on a source checkout, standalone `.js` bundles on
+ * a compiled binary. Prefers `.ts` when both exist (a source checkout that also
+ * has stray bundles). Guards with no file present are skipped, so the result is
+ * the set `ax hooks install --all` can actually install. Returns absolute paths
+ * in `GUARD_NAMES` order.
+ */
+export const listInstallableGuards = (
+    dir: string,
+): Effect.Effect<ReadonlyArray<string>, PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+        const found: string[] = [];
+        for (const guard of GUARD_NAMES) {
+            const tsPath = pathSvc.join(dir, `${guard}.ts`);
+            const jsPath = pathSvc.join(dir, `${guard}.js`);
+            if (yield* fs.exists(tsPath)) found.push(tsPath);
+            else if (yield* fs.exists(jsPath)) found.push(jsPath);
+        }
+        return found;
     });

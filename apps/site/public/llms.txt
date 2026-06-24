@@ -120,7 +120,7 @@ A: The experiment loop: `ax improve recommend` proposes changes with evidence, a
 A: `ax hooks backtest <file> --days=14` - replays your real tool-call history through the hook in-process and reports would-block/would-warn rates.
 
 **Q: How do I write one guard that runs on both Claude Code and Codex?**
-A: `ax hooks init` scaffolds `~/.ax/hooks` (typed Effect TypeScript, `defineHook`); `ax hooks install <file> --providers=claude,codex` fans it out to both configs.
+A: `ax hooks init` scaffolds `~/.ax/hooks` (typed Effect TypeScript, `defineHook`); `ax hooks install <file> --providers=claude,codex` fans it out to both configs, or `ax hooks install --all --providers=claude,codex` installs every scaffolded guard in one shot. A release binary needs no repo checkout for any of this.
 
 **Q: Can my agent query its own history mid-session, without me prompting it?**
 A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 16 tools. The agent asks "where is the spend" or "what did we try before" itself.
