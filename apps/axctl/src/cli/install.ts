@@ -898,7 +898,7 @@ export async function probeDbQueryPure(host: string, port: number): Promise<bool
             body: "SELECT 1;",
             signal: AbortSignal.timeout(1500),
         });
-        return res.ok;
+        return true;
     } catch {
         return false;
     }
@@ -1034,7 +1034,7 @@ export function collectDoctorReport(): Effect.Effect<
         const watcherPlistText = yield* fs
             .readFileString(WATCH_PLIST)
             .pipe(orAbsent<string | null>(null));
-        const dbReachable = daemon.dbListening && daemon.endpoint.conflict === null;
+        const dbReachable = daemon.dbListening && daemon.dbQueryOk !== false && daemon.endpoint.conflict === null;
         const missingBuckets = dbReachable
             ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
             : null;
