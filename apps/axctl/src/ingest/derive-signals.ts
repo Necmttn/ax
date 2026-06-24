@@ -5,6 +5,7 @@ import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import {
+    buildClearDiagnosticEventStatement, buildClearFrictionEventStatement,
     buildCorrectedByStatements, buildDiagnosticEventStatements,
     buildFrictionEventStatements, buildProposedStatements,
     buildRecoveredStatements, buildSkillPairStatements,
@@ -248,6 +249,17 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 attributes: { "signals.count": recoveryBatch.length },
             }),
         );
+        // On a FULL re-derive, clear the standalone derived-event tables before
+        // re-inserting so a row the current logic no longer emits cannot orphan
+        // with a stale ts (#549). `shouldWriteSkillPairs` is exactly the
+        // full-derive gate (sinceDays undefined / <=0); a --since run keeps the
+        // UPSERT-only path so it never drops rows whose source is out of window.
+        if (shouldWriteSkillPairs) {
+            yield* exec([
+                buildClearFrictionEventStatement(),
+                buildClearDiagnosticEventStatement(),
+            ]).pipe(Effect.withSpan("signals.clear.derived-events"));
+        }
         yield* exec(buildFrictionEventStatements(frictionBatch)).pipe(
             Effect.withSpan("signals.write.friction", {
                 attributes: { "signals.count": frictionBatch.length },
