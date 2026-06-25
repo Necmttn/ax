@@ -9,9 +9,10 @@
  *
  *   - per (harness, signal) all-time volume + freshness (last-received age),
  *     reduced to a health verdict (flowing / stale / cold / none);
- *   - correlation coverage: of sessions in the window, how many carry a
- *     `telemetry_of` edge (0% = receiver works but the correlation pass draws
- *     nothing - a real, currently-live failure mode);
+ *   - coverage: of windowed TOP-LEVEL sessions, how many have matching otel
+ *     telemetry, by `session_id` match (NOT the `telemetry_of` edge - that is
+ *     not what enrichment reads; telemetry-rollup.ts joins session_id directly).
+ *     Subagents are excluded (OTLP is emitted at the top-level session);
  *   - OTLP-sourced cost/tokens vs transcript-parsed cost for the same window,
  *     side by side (they are stored separately to avoid double-counting).
  *
@@ -43,7 +44,9 @@ export interface OtelSignalRow {
 }
 
 export interface OtelCoverage {
+    /** windowed TOP-LEVEL sessions (uuid id); subagents excluded - OTLP is emitted at the top-level session, never per-subagent. */
     readonly window_sessions: number;
+    /** windowed top-level sessions whose uuid matches an otel `session_id` */
     readonly linked_sessions: number;
     /** linked / window, 0..100 (0 when no sessions in window) */
     readonly pct: number;
@@ -105,6 +108,19 @@ export const formatAge = (ageMs: number | null): string => {
 export const coveragePct = (linked: number, total: number): number =>
     total <= 0 ? 0 : Math.round((linked / total) * 1000) / 10;
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/**
+ * Extract the bare uuid from either an otel `session_id` (already bare) or a
+ * SurrealDB session record id, which stringifies as `session:⟨uuid⟩` (or a
+ * RecordId object). Returns null when no uuid is present.
+ */
+export const bareUuid = (v: unknown): string | null => {
+    if (v == null) return null;
+    const s = typeof v === "string" ? v : String((v as { id?: unknown }).id ?? v);
+    const m = UUID_RE.exec(s);
+    return m ? m[0].toLowerCase() : null;
+};
+
 // ---------------------------------------------------------------------------
 // Query
 // ---------------------------------------------------------------------------
@@ -156,23 +172,29 @@ export const fetchOtelRollup = (
             a.harness === b.harness ? a.signal.localeCompare(b.signal) : a.harness.localeCompare(b.harness),
         );
 
-        // -- coverage: windowed sessions vs telemetry_of-linked sessions -----
-        const winRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT count() AS n FROM session WHERE started_at > time::now() - ${days}d GROUP ALL;`,
+        // -- coverage: windowed sessions that have matching otel telemetry -----
+        // Measured by session_id match, NOT the telemetry_of edge: the edge is
+        // not what enrichment reads (telemetry-rollup.ts joins on session_id
+        // directly), and otel's `session_id` is a bare uuid while `session.id`
+        // is the escaped `session:⟨uuid⟩` record - so we compare bare uuids in JS.
+        const idRows = (yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT id FROM session WHERE started_at > time::now() - ${days}d;`,
         ))?.[0] ?? [];
-        const window_sessions = numOf(winRows[0]?.n);
+        const windowUuids = idRows.map((r) => bareUuid(r.id)).filter((u): u is string => u !== null);
+        const window_sessions = windowUuids.length;
 
-        let linked_sessions = 0;
-        const edgeRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT in FROM telemetry_of;`,
-        ))?.[0] ?? [];
-        if (edgeRows.length > 0 && window_sessions > 0) {
-            const linkedIds = new Set(edgeRows.map((r) => String(r.in)));
-            const idRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id FROM session WHERE started_at > time::now() - ${days}d;`,
+        const otelSids = new Set<string>();
+        for (const [, table] of SIGNAL_TABLES) {
+            const sidRows = (yield* db.query<[Array<Record<string, unknown>>]>(
+                `SELECT session_id FROM ${table} WHERE session_id != NONE GROUP BY session_id;`,
             ))?.[0] ?? [];
-            for (const r of idRows) if (linkedIds.has(String(r.id))) linked_sessions++;
+            for (const r of sidRows) {
+                const u = bareUuid(r.session_id);
+                if (u !== null) otelSids.add(u);
+            }
         }
+        let linked_sessions = 0;
+        for (const u of windowUuids) if (otelSids.has(u)) linked_sessions++;
 
         // -- cost: OTLP claude cost metric vs transcript (independent cross-check)
         // Only `claude_code.cost.usage` is summed - it is the receiver's own cost

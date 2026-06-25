@@ -171,9 +171,10 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 (previously write-only - data landed in `otel_*` and only enriched insights, with
 nothing to inspect it). Shows per `(harness, signal)` all-time row count +
 freshness reduced to a health verdict (✓ flowing <6h / ⚠ stale <48h / ✗ cold /
-· none); **correlation coverage** (share of windowed sessions carrying a
-`telemetry_of` edge - a live 0% loudly flags that telemetry arrives but the
-correlation pass draws no edges); and OTLP `claude_code.cost.usage` vs
+· none); **coverage** (share of windowed TOP-LEVEL sessions whose uuid matches an
+otel `session_id` - subagents excluded since OTLP is emitted at the top-level
+session; measured by session_id match, NOT the `telemetry_of` edge, because that
+is what enrichment actually joins on); and OTLP `claude_code.cost.usage` vs
 transcript cost over the window (independent cross-check; per-event log token
 sums are intentionally NOT surfaced - they double-count). Query:
 `apps/axctl/src/queries/otel-rollup.ts` (deref-free, signals all-time,

@@ -45,10 +45,10 @@ export function renderOtelRollup(result: OtelRollupResult): string {
 
     const c = result.coverage;
     out.push("");
-    out.push(`correlation: ${integer(c.linked_sessions)}/${integer(c.window_sessions)} sessions linked (${c.pct}%)  [${result.since_days}d]`);
+    out.push(`coverage: ${integer(c.linked_sessions)}/${integer(c.window_sessions)} top-level sessions have telemetry (${c.pct}%)  [${result.since_days}d]`);
     const hasOtlp = result.signals.some((s) => s.count > 0);
     if (hasOtlp && c.window_sessions > 0 && c.pct === 0) {
-        out.push("  ⚠ telemetry is arriving but 0% is correlated to sessions - the telemetry_of pass is drawing no edges (check session.id matching)");
+        out.push("  ⚠ telemetry is arriving but matches 0 sessions in the window - check that the harness session id reaches the receiver");
     }
 
     out.push("");

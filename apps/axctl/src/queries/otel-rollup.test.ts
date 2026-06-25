@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
     FLOWING_MS,
     STALE_MS,
+    bareUuid,
     coveragePct,
     formatAge,
     healthGlyph,
@@ -61,6 +62,27 @@ describe("coveragePct", () => {
     });
 });
 
+describe("bareUuid", () => {
+    const UUID = "019fbf3f-9241-40c3-b699-e1f62e7c5341";
+    it("passes through a bare otel session_id", () => {
+        expect(bareUuid(UUID)).toBe(UUID);
+    });
+    it("extracts from an escaped session record id string", () => {
+        expect(bareUuid(`session:⟨${UUID}⟩`)).toBe(UUID);
+    });
+    it("extracts from a RecordId-like object", () => {
+        expect(bareUuid({ tb: "session", id: UUID })).toBe(UUID);
+    });
+    it("is null for a subagent (non-uuid) id", () => {
+        expect(bareUuid("claude-subagent-a39a240701da6e328")).toBeNull();
+        expect(bareUuid("session:⟨claude-subagent-a39a240701da6e328⟩")).toBeNull();
+    });
+    it("is null for nullish", () => {
+        expect(bareUuid(null)).toBeNull();
+        expect(bareUuid(undefined)).toBeNull();
+    });
+});
+
 describe("renderOtelRollup", () => {
     const base: OtelRollupResult = {
         since_days: 14,
@@ -72,24 +94,24 @@ describe("renderOtelRollup", () => {
         cost: { otlp_usd: 2542.99, transcript_usd: 20674.4 },
     };
 
-    it("warns when telemetry arrives but correlation is 0%", () => {
+    it("warns when telemetry arrives but matches 0 sessions", () => {
         const out = renderOtelRollup(base);
-        expect(out).toContain("0% is correlated");
+        expect(out).toContain("matches 0 sessions");
         expect(out).toContain("claude/metric");
         expect(out).toContain("transcript");
     });
 
     it("does not warn when there is no telemetry at all", () => {
-        const empty: OtelRollupResult = { ...base, signals: [], coverage: { window_sessions: 1501, linked_sessions: 0, pct: 0 } };
+        const empty: OtelRollupResult = { ...base, signals: [], coverage: { window_sessions: 279, linked_sessions: 0, pct: 0 } };
         const out = renderOtelRollup(empty);
         expect(out).toContain("no OTLP telemetry received");
-        expect(out).not.toContain("0% is correlated");
+        expect(out).not.toContain("matches 0 sessions");
     });
 
-    it("does not warn when correlation is healthy", () => {
-        const linked: OtelRollupResult = { ...base, coverage: { window_sessions: 1000, linked_sessions: 900, pct: 90 } };
+    it("does not warn when coverage is healthy", () => {
+        const linked: OtelRollupResult = { ...base, coverage: { window_sessions: 279, linked_sessions: 153, pct: 54.8 } };
         const out = renderOtelRollup(linked);
-        expect(out).not.toContain("0% is correlated");
-        expect(out).toContain("(90%)");
+        expect(out).not.toContain("matches 0 sessions");
+        expect(out).toContain("(54.8%)");
     });
 });

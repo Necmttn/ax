@@ -163,11 +163,11 @@ signal                        rows    last
 ✓ claude/metric             16,700      2h
 ✓ codex/log              1,546,147      1h
 
-correlation: 1,402/1,501 sessions linked (93.4%)  [14d]
+coverage: 153/279 top-level sessions have telemetry (54.8%)  [14d]
 cost [14d]: otlp $2542.99 (claude cost metric)   ·   transcript $20674.40 (all sources)`,
         detail: [
           "Per (harness, signal): all-time row count + freshness reduced to a health verdict (✓ flowing <6h / ⚠ stale <48h / ✗ cold / · none).",
-          "Correlation coverage: share of windowed sessions carrying a telemetry_of edge. A live 0% means telemetry is arriving but not being linked to sessions.",
+          "Coverage: share of windowed top-level sessions whose uuid matches an otel session_id (subagents excluded - OTLP is emitted at the top-level session). A live 0% means telemetry is arriving but its session id is not reaching the receiver.",
           "OTLP claude_code.cost.usage vs transcript cost over the window, as an independent cross-check (per-event log token sums are not surfaced - they double-count).",
         ],
       },
