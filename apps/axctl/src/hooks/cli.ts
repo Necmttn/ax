@@ -9,7 +9,6 @@ import {
     scaffoldWorkspace,
     scaffoldFromEmbed,
     isCompiledBinary,
-    listInstallableGuards,
     COMPILED_BINARY_SDK_HOOK_HELP,
 } from "./sdk-workspace.ts";
 import { HOOKS_EMBED } from "./hooks-embed.gen.ts";
@@ -25,7 +24,8 @@ import {
 } from "./config.ts";
 import type { HookScope } from "./providers/types.ts";
 import { HookNotFoundError } from "./errors.ts";
-import { installHookFile } from "./sdk-install.ts";
+import { installHookFile, stripAxMarker } from "./sdk-install.ts";
+import { installDispatcher, resolveDispatcherPath } from "./dispatch-install.ts";
 import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
 import { benchHook, renderLedger } from "./bench.ts";
@@ -254,55 +254,74 @@ const installCommand = Command.make(
                 process.exit(1);
             }
 
-            // Resolve the file set: --all installs every guard scaffolded in the
-            // workspace (one command for the whole default set, no per-file
-            // dance); otherwise the single positional file.
-            const filePathArg = optionValue(file);
-            let files: string[];
+            // --all installs the SINGLE dispatcher (one spawn multiplexes every
+            // guard) and migrates off any legacy per-guard entries; otherwise
+            // install the single positional file.
             if (all) {
                 const workspaceDir = expandTilde(dir);
-                const guards = yield* listInstallableGuards(workspaceDir);
-                if (guards.length === 0) {
+                const dispatchPath = yield* resolveDispatcherPath(workspaceDir);
+                if (dispatchPath === null) {
                     console.error(
-                        `no guard hooks found in ${workspaceDir}. Run 'ax hooks init' first to scaffold them.`,
+                        `no dispatcher found in ${workspaceDir} (dispatch.ts/.js). Run 'ax hooks init' first to scaffold it.`,
                     );
                     process.exit(1);
                 }
-                files = [...guards];
-            } else {
-                if (filePathArg === undefined) {
-                    console.error("pass a hook file path, or --all to install every guard in the workspace.");
-                    process.exit(1);
+                const { entries, removed } = yield* installDispatcher(
+                    dispatchPath,
+                    workspaceDir,
+                    providerList,
+                    asScope(scope),
+                );
+                const installedEntries = entries.filter((e) => !e.skipped);
+                const skippedEntries = entries.filter((e) => e.skipped);
+                console.log(`dispatcher: ${path.basename(dispatchPath)} (one spawn multiplexes all guards)`);
+                for (const e of installedEntries) {
+                    const m = e.input.matcher ? ` [matcher: ${e.input.matcher}]` : "";
+                    console.log(`  installed ${e.provider} ${e.input.event}${m} -> ${e.writtenPath}`);
                 }
-                files = [path.resolve(expandTilde(filePathArg))];
+                for (const e of skippedEntries) {
+                    const m = e.input.matcher ? ` [matcher: ${e.input.matcher}]` : "";
+                    console.log(`  already installed - skipped ${e.provider} ${e.input.event}${m}`);
+                }
+                for (const r of removed) {
+                    console.log(`  migrated off legacy ${r.provider} ${r.event} (${stripAxMarker(r.command)})`);
+                }
+                console.log("");
+                const parts = [`${installedEntries.length} dispatcher hook(s) installed`];
+                if (skippedEntries.length > 0) parts.push(`${skippedEntries.length} skipped (already installed)`);
+                if (removed.length > 0) parts.push(`${removed.length} legacy per-guard entr${removed.length === 1 ? "y" : "ies"} migrated`);
+                console.log(`${parts.join(", ")}.`);
+                if (installedEntries.length > 0 && providerList.includes("codex")) {
+                    console.log("note (codex): approve the new hook(s) when prompted (trust review).");
+                }
+                return;
             }
 
-            let installed = 0;
-            let skipped = 0;
-            for (const absFile of files) {
-                if (all) console.log(`${path.basename(absFile)}:`);
-                const results = yield* installHookFile(absFile, providerList, asScope(scope));
-                for (const entry of results) {
-                    const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
-                    const indent = all ? "  " : "";
-                    if (entry.skipped) {
-                        console.log(`${indent}already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
-                        continue;
-                    }
-                    console.log(`${indent}installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
-                    console.log(`${indent}  command: ${entry.input.command}`);
-                }
-                installed += results.filter((r) => !r.skipped).length;
-                skipped += results.filter((r) => r.skipped).length;
+            const filePathArg = optionValue(file);
+            if (filePathArg === undefined) {
+                console.error("pass a hook file path, or --all to install the dispatcher (all guards).");
+                process.exit(1);
             }
-
+            const absFile = path.resolve(expandTilde(filePathArg));
+            const results = yield* installHookFile(absFile, providerList, asScope(scope));
+            for (const entry of results) {
+                const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
+                if (entry.skipped) {
+                    console.log(`already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
+                    continue;
+                }
+                console.log(`installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
+                console.log(`  command: ${entry.input.command}`);
+            }
+            const installed = results.filter((r) => !r.skipped).length;
+            const skipped = results.filter((r) => r.skipped).length;
             console.log("");
             console.log(`${installed} hook(s) installed${skipped > 0 ? `, ${skipped} skipped (already installed)` : ""}.`);
             if (installed > 0 && providerList.includes("codex")) {
                 console.log("note (codex): approve the new hook(s) when prompted (trust review).");
             }
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
-).pipe(Command.withDescription("Install a SDK hook file into provider configs, or --all to install every scaffolded guard (--providers=claude,codex --scope=global --dir=~/.ax/hooks)"));
+).pipe(Command.withDescription("Install a SDK hook file into provider configs, or --all to install the dispatcher (multiplexes all guards) + migrate off legacy per-guard entries (--providers=claude,codex --scope=global --dir=~/.ax/hooks)"));
 
 const backtestCommand = Command.make(
     "backtest",

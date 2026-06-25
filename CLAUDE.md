@@ -382,16 +382,20 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   in-process -> `mergeVerdicts` -> encode once), replacing N fat per-guard
   bundles. Standalone bundle ~0.9 MB (one, vs ~1.5 MB across four), embedded +
   scaffolded like the per-guard bundles. Runtime is live (`bun dispatch.ts`);
-  flipping `ax hooks install --all` to register the single dispatcher (per-event
-  matchers via `dispatchInstallPlan`) + migrate off legacy per-guard entries is
-  the next step, then a daemon `/hooks/eval` fast-path (the latency win).
+  `ax hooks install --all` now registers the single dispatcher (see below). A
+  daemon `/hooks/eval` fast-path (the latency win) is the remaining step.
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -
-  one-shot: install EVERY guard scaffolded in the workspace (`.ts` shims or
-  `.js` bundles, resolved by `listInstallableGuards`), no per-file dance. `ax
-  install`'s tail nudges `ax hooks init && ax hooks install --all`. The embed
-  path means a release binary needs NO repo checkout for any of this (#573).
+  one-shot: register the **dispatcher** once per (provider, event) - per-event
+  tool matchers UNION-ed via `dispatchInstallPlan` so it fires only on tools a
+  guard claims - and **migrate off legacy per-guard entries** (ax-owned rows
+  whose command is `bun <dir>/<guard>.{ts,js}`; user-authored hooks are never
+  touched). Pure planning (`planDispatcherInstall` / `planLegacyRemoval` in
+  `dispatch-install.ts`) is unit-tested; `installDispatcher` has an in-process
+  integration test (real temp config, stub DB - `readAllHooks(withEvidence:false)`
+  never touches SurrealClient). `ax install`'s tail nudges `ax hooks init &&
+  ax hooks install --all`. Release binary needs NO repo checkout (#573).
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
 - `ax hooks bench <file> [--days --runs --budget-ms --json]` - latency ledger:
