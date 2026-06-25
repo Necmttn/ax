@@ -72,6 +72,7 @@ import {
     buildCostSplitNext,
 } from "../nav/next-links.ts";
 import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollup.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
@@ -680,6 +681,24 @@ const costImagesTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const otelTool: AxMcpTool = defineMcpTool({
+    name: "otel",
+    description:
+        "OTLP receiver health: per (harness, signal) all-time row count + freshness reduced to a health verdict (flowing <6h / stale <48h / cold / none); session correlation coverage (share of windowed sessions carrying a telemetry_of edge - 0% means telemetry arrives but is not linked to sessions); and OTLP claude cost metric vs transcript cost over the window. Use to check whether harness telemetry is flowing and being correlated.",
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days for coverage + cost (default 14). Signal freshness is all-time."),
+    },
+    run: async (args, rt) => {
+        const sinceDays = args.days ?? OTEL_DEFAULT_WINDOW_DAYS;
+        return await rt.runPromise(fetchOtelRollup({ sinceDays }));
+    },
+});
+
 const costRoutabilityTool: AxMcpTool = defineMcpTool({
     name: "cost_routability",
     description:
@@ -858,6 +877,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costSplitTool,
     costImagesTool,
     costRoutabilityTool,
+    otelTool,
     dispatchesTool,
     dispatchesAdviceTool,
     dojoAgendaTool,

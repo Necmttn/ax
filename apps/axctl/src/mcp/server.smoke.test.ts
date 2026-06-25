@@ -30,6 +30,7 @@ const EXPECTED_TOOLS = [
     "cost_split",
     "cost_images",
     "cost_routability",
+    "otel",
     "dispatches",
     "dispatches_advice",
     "dojo_agenda",
