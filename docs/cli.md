@@ -142,6 +142,23 @@ PR branch or a commit SHA for now.
   tokens (from `token_count.total_token_usage`), with its USD cost
   (`reasoning_cost_usd`) at the model's output rate.
 
+## OTLP receiver health
+
+`ax otel [--days=N] [--json]` is the read surface for the OTLP receiver (the
+`/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax serve` exposes). It
+answers "is harness telemetry flowing, and is it reaching my sessions?":
+
+- **Signal health**: per `(harness, signal)` an all-time row count plus how long
+  ago the last point arrived, reduced to a verdict - `✓ flowing` (<6h),
+  `⚠ stale` (<48h), `✗ cold`, or `· none`.
+- **Coverage**: the share of windowed top-level sessions whose uuid matches an
+  otel `session_id` (subagents excluded - OTLP is emitted at the top-level
+  session). A live 0% means telemetry is arriving but its session id is not
+  reaching the receiver.
+- **Cost cross-check**: OTLP `claude_code.cost.usage` vs transcript-parsed cost
+  over the window (per-event log token sums are not surfaced - they
+  double-count). Also exposed as the `otel` MCP tool.
+
 Fields populate at ingest; sessions ingested before the fields existed read as
 zero until their files are re-ingested (the command prints a hint).
 
@@ -282,6 +299,7 @@ The 17 tools, each mirroring the matching CLI command:
 - **cost_models** - per-model token and cost rollup (`ax cost models`).
 - **cost_split** - cost matrix split by origin x model (`ax cost split`).
 - **cost_routability** - main-thread routable-spend lens with est savings (`ax cost routability`).
+- **otel** - OTLP receiver health: signal freshness, session coverage, cost cross-check (`ax otel`).
 - **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
 - **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
 
