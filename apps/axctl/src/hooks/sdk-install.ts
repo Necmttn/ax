@@ -177,7 +177,7 @@ export interface InstalledHookKey {
 
 /** Strip a trailing ` # ax:<id>` ownership marker (providers embed one on
  *  write, so the stored command differs from the requested one). */
-const stripAxMarker = (command: string): string =>
+export const stripAxMarker = (command: string): string =>
     command.replace(/\s*#\s*ax:[a-z0-9_-]+\s*$/, "");
 
 export interface InstallResult extends InstallPlanEntry {
