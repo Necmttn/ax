@@ -57,7 +57,17 @@ export const decodeHookInput = (
     sessionId: str(raw.session_id),
     cwd: str(raw.cwd) ?? process.cwd(),
     tool: toolName ? { name: toolName, input: asRecord(raw.tool_input) } : null,
+    env: forwardedEnv(raw["_ax_env"]),
     raw,
     parseError,
   };
+};
+
+/** Extract the daemon-forwarded env allowlist: a flat object of string values.
+ *  Non-string values are dropped; a non-object (or absent) yields undefined. */
+const forwardedEnv = (v: unknown): Record<string, string> | undefined => {
+  if (!isRecord(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v)) if (typeof val === "string") out[k] = val;
+  return Object.keys(out).length > 0 ? out : undefined;
 };

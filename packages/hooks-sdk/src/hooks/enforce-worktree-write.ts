@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
+import { readEnv } from "../event.ts";
 import { GitEnv } from "../git-env.ts";
 import { Verdict } from "../verdict.ts";
 import { extractPatchPaths } from "./patch-paths.ts";
@@ -37,7 +38,7 @@ const hook = defineHook({
   matcher: { tools: ["Write", "Edit", "MultiEdit", "apply_patch"] },
   run: (event) =>
     Effect.gen(function* () {
-      if (process.env.ALLOW_MAIN_WRITE === "1") return Verdict.allow;
+      if (readEnv(event, "ALLOW_MAIN_WRITE") === "1") return Verdict.allow;
       const git = yield* GitEnv;
       const home = process.env.HOME ?? "";
       const paths = targetPaths(event.tool?.name ?? "", event.tool?.input ?? {}, event.cwd);

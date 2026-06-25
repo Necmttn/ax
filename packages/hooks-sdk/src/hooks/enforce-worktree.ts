@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
+import { readEnv, type HookEvent } from "../event.ts";
 import { GitEnv } from "../git-env.ts";
 import { Verdict } from "../verdict.ts";
 import { findGitInvocations, type GitInvocation } from "./git-command.ts";
@@ -39,8 +40,8 @@ const isGuardedMutation = (inv: GitInvocation): boolean => {
   return false;
 };
 
-const hasBypass = (name: string, inv: GitInvocation): boolean =>
-  process.env[name] === "1" || inv.env?.[name] === "1";
+const hasBypass = (name: string, inv: GitInvocation, event: HookEvent): boolean =>
+  readEnv(event, name) === "1" || inv.env?.[name] === "1";
 
 const blockDirtyMsg = (target: string, branch: string, command: string) =>
   `BLOCKED: history-mutating git op against a DIRTY primary working tree.
@@ -96,7 +97,7 @@ const hook = defineHook({
 
       // ---- Guard B: history mutation into a DIRTY primary tree ----
       for (const inv of invocations) {
-        if (hasBypass("ALLOW_DIRTY_MAIN_MUTATION", inv)) continue;
+        if (hasBypass("ALLOW_DIRTY_MAIN_MUTATION", inv, event)) continue;
         if (!isGuardedMutation(inv)) continue;
         // Target tree: explicit `git -C <path>` wins, else the event cwd.
         const target = inv.cPath ?? event.cwd;
@@ -114,9 +115,9 @@ const hook = defineHook({
       // the default branch is allowed); block linked worktrees from TAKING
       // the default branch - a branch lives in one worktree at a time, so a
       // worktree holding it locks the primary tree off it.
-      if (process.env.ALLOW_BRANCH_CHECKOUT === "1") return Verdict.allow;
+      if (readEnv(event, "ALLOW_BRANCH_CHECKOUT") === "1") return Verdict.allow;
       for (const inv of invocations) {
-        if (hasBypass("ALLOW_BRANCH_CHECKOUT", inv)) continue;
+        if (hasBypass("ALLOW_BRANCH_CHECKOUT", inv, event)) continue;
         if (inv.verb !== "checkout" && inv.verb !== "switch") continue;
         if (isRestore(inv.verb, inv.args)) continue;
         // Target tree: explicit `git -C <path>` wins, else the event cwd.

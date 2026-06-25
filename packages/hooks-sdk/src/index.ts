@@ -8,6 +8,7 @@ export {
   type DispatchInstallEntry,
 } from "./dispatch.ts";
 export { Verdict } from "./verdict.ts";
+export { readEnv } from "./event.ts";
 export type { Harness, HookEvent, HookEventName } from "./event.ts";
 export { GitEnv, GitEnvLive, GitEnvTest, type GitEnvService } from "./git-env.ts";
 export {

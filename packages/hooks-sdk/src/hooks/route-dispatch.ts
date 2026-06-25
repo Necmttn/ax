@@ -27,6 +27,7 @@
 
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
+import { readEnv } from "../event.ts";
 import { decideVerdict } from "../decide-verdict.ts";
 import { loadRoutingTableOrDefault } from "../routing-table.ts";
 import { resolveDispatchModel } from "../resolve-dispatch-model.ts";
@@ -88,7 +89,7 @@ const hook = defineHook({
       const spendConfig = resolveSpendConfig(table.spendMode as Partial<SpendConfig> | undefined);
 
       // mode (conserve unless a fresh cache says splurge). Env override wins.
-      const envMode = process.env.AX_SPEND_MODE;
+      const envMode = readEnv(event, "AX_SPEND_MODE");
       const computed = computeSpendMode(
         readQuotaCacheSync(defaultQuotaCachePath()),
         Date.now(),
