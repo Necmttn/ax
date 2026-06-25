@@ -152,6 +152,26 @@ total: $61.22  (14 days)`,
         ],
       },
       {
+        name: "otel",
+        job: "OTLP receiver health: is harness telemetry flowing, and is it being correlated to sessions?",
+        signature: "ax otel [--days=N] [--json]",
+        flags: [
+          { flag: "--days=N", desc: "window for coverage + cost (default 14); signal freshness is all-time" },
+        ],
+        receipt: `$ ax otel
+signal                        rows    last
+✓ claude/metric             16,700      2h
+✓ codex/log              1,546,147      1h
+
+correlation: 1,402/1,501 sessions linked (93.4%)  [14d]
+cost [14d]: otlp $2542.99 (claude cost metric)   ·   transcript $20674.40 (all sources)`,
+        detail: [
+          "Per (harness, signal): all-time row count + freshness reduced to a health verdict (✓ flowing <6h / ⚠ stale <48h / ✗ cold / · none).",
+          "Correlation coverage: share of windowed sessions carrying a telemetry_of edge. A live 0% means telemetry is arriving but not being linked to sessions.",
+          "OTLP claude_code.cost.usage vs transcript cost over the window, as an independent cross-check (per-event log token sums are not surfaced - they double-count).",
+        ],
+      },
+      {
         name: "memory",
         sub: ["ops"],
         job: "Claude memory-file activity: writes/edits the agent made to its ~/.claude/.../memory/*.md files.",

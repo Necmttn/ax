@@ -167,6 +167,21 @@ compiled binary). `ax install` writes the harness telemetry config
 advertises `otlp_receiver: true`. Provider name: `otel`. Spec:
 docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 
+`ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
+(previously write-only - data landed in `otel_*` and only enriched insights, with
+nothing to inspect it). Shows per `(harness, signal)` all-time row count +
+freshness reduced to a health verdict (✓ flowing <6h / ⚠ stale <48h / ✗ cold /
+· none); **correlation coverage** (share of windowed sessions carrying a
+`telemetry_of` edge - a live 0% loudly flags that telemetry arrives but the
+correlation pass draws no edges); and OTLP `claude_code.cost.usage` vs
+transcript cost over the window (independent cross-check; per-event log token
+sums are intentionally NOT surfaced - they double-count). Query:
+`apps/axctl/src/queries/otel-rollup.ts` (deref-free, signals all-time,
+coverage+cost windowed). MCP: `otel`. We keep OTLP **content-stripped** on
+purpose - the prompts/responses/tool I/O another tool would scrape from OTLP
+request bodies are already in `turn.text` / `tool_call.input_json|output_json`
+from transcript parsing, so capturing bodies would only duplicate + re-leak them.
+
 ## Workflow extraction commands
 
 ### Scoped ingest
@@ -338,11 +353,11 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 21 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 22 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
+`cost_routability`, `otel`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.

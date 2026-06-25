@@ -23,6 +23,7 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "install",
     "setup",
     "cost",
+    "otel",
     "memory",
     "quota",
     "dojo",

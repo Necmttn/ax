@@ -25,6 +25,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     cost_split: ["days"],
     cost_images: ["days", "limit"],
     cost_routability: ["days", "min_run"],
+    otel: ["days"],
     dispatches: ["candidates", "days", "limit"],
     dispatches_advice: ["days", "limit"],
     dojo_agenda: ["days", "spar"],
