@@ -160,12 +160,16 @@ edges by matching `session.id` (OTLP arrives before the transcript, so the
 ingest run owns linking; idempotent, best-effort via `Effect.ignore`).
 **Session-grain + incremental** (`correlate.ts`): one edge per top-level session
 that has telemetry (the edge means "this session has telemetry"; no data query
-reads it - enrichment joins `session_id` directly), and the candidate set is just
-the existing-but-unlinked sessions, probed via the `session_id` index in 500-id
-chunks - so it does NOT enumerate the whole (~1.5M-row) `otel_log_event` table
-each ingest. otel `session_id` is a bare uuid, `session.id` is `session:⟨uuid⟩`,
-so matching is uuid-to-uuid in JS (the older `type::record("session:"+id)` form
-mis-parsed hyphenated uuids as arithmetic -> zero edges, #610). OTLP cost
+reads it - enrichment joins `session_id` directly). Only telemetry observed in the
+last 2 days is scanned, via the `observed_at` index (a range scan over recent
+rows, ~30ms - NOT a full GROUP BY over the whole ~1.5M-row `otel_log_event`, which
+cost ~8s every ingest), then filtered to existing+unlinked sessions in JS. otel
+`session_id` is a bare uuid, `session.id` is `session:⟨uuid⟩`, so matching is
+uuid-to-uuid in JS (the older `type::record("session:"+id)` form mis-parsed
+hyphenated uuids as arithmetic -> zero edges, #610). All otel index builds are
+`CONCURRENTLY` (a plain `DEFINE INDEX` locks the table while building, wedging the
+daemon when `ax install` re-applies the schema onto an already-large otel table).
+OTLP cost
 is stored separately from file-parsed cost (no double-count). The receiver is
 fail-open (always 2xx so exporters never retry-storm) and JSON-only (ax owns the
 harness config, so it forces `http/json` - no protobuf decode, works in the

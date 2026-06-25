@@ -1991,8 +1991,12 @@ DEFINE INDEX IF NOT EXISTS ingest_file_state_source  ON ingest_file_state FIELDS
 -- Stores harness-push metric data points and trace spans received via the
 -- /v1/metrics and /v1/traces OTLP/JSON receiver endpoints. Linked to the
 -- session graph via the telemetry_of relation. `attrs` is JSON-encoded
--- key-value attributes from the OTLP payload. Both tables index session_id
--- for the correlation pass that emits telemetry_of edges at ingest time.
+-- key-value attributes from the OTLP payload. Tables index session_id (for the
+-- telemetry-enriched rollups) and observed_at (for the incremental correlation
+-- pass that windows recent telemetry). Index builds are CONCURRENTLY: a plain
+-- DEFINE INDEX takes a table lock while it builds, which wedges the daemon when
+-- re-applied to an already-large otel_log_event (codex emits ~1.5M log rows);
+-- CONCURRENTLY builds in the background without locking.
 -- ---------------------------------------------------------------------------
 DEFINE TABLE otel_metric_point SCHEMAFULL;
 DEFINE FIELD harness     ON otel_metric_point TYPE string;
@@ -2005,7 +2009,8 @@ DEFINE FIELD skill_name  ON otel_metric_point TYPE option<string>;
 DEFINE FIELD agent_name  ON otel_metric_point TYPE option<string>;
 DEFINE FIELD attrs       ON otel_metric_point TYPE option<string>;   -- JSON-encoded
 DEFINE FIELD observed_at ON otel_metric_point TYPE datetime;
-DEFINE INDEX IF NOT EXISTS otel_metric_session ON otel_metric_point FIELDS session_id;
+DEFINE INDEX IF NOT EXISTS otel_metric_session ON otel_metric_point FIELDS session_id CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS otel_metric_observed ON otel_metric_point FIELDS observed_at CONCURRENTLY;
 
 DEFINE TABLE otel_span SCHEMAFULL;
 DEFINE FIELD harness        ON otel_span TYPE string;
@@ -2019,7 +2024,8 @@ DEFINE FIELD ended_at       ON otel_span TYPE datetime;
 DEFINE FIELD duration_ms    ON otel_span TYPE number;
 DEFINE FIELD attrs          ON otel_span TYPE option<string>;        -- JSON-encoded
 DEFINE FIELD observed_at    ON otel_span TYPE datetime;
-DEFINE INDEX IF NOT EXISTS otel_span_session ON otel_span FIELDS session_id;
+DEFINE INDEX IF NOT EXISTS otel_span_session ON otel_span FIELDS session_id CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS otel_span_observed ON otel_span FIELDS observed_at CONCURRENTLY;
 
 DEFINE TABLE otel_log_event SCHEMAFULL;
 DEFINE FIELD harness          ON otel_log_event TYPE string;
@@ -2035,7 +2041,8 @@ DEFINE FIELD duration_ms      ON otel_log_event TYPE option<number>;
 DEFINE FIELD status_code      ON otel_log_event TYPE option<number>;
 DEFINE FIELD attrs            ON otel_log_event TYPE option<string>;
 DEFINE FIELD observed_at      ON otel_log_event TYPE datetime;
-DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id;
+DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS otel_log_event_observed ON otel_log_event FIELDS observed_at CONCURRENTLY;
 
 DEFINE TABLE harness_tool_event SCHEMAFULL;
 DEFINE FIELD session         ON harness_tool_event TYPE record<session>;

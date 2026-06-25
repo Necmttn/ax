@@ -4,14 +4,17 @@ import { executeStatements, recordRef } from "@ax/lib/shared/surreal";
 
 const RELATABLE = ["otel_metric_point", "otel_span", "otel_log_event"] as const;
 
-/** session_id IN-list chunk size (mirrors telemetry-rollup.ts). */
-const CHUNK = 500;
-
-const chunk = <T>(xs: readonly T[], n: number): T[][] => {
-    const out: T[][] = [];
-    for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
-    return out;
-};
+/**
+ * Only correlate telemetry observed within this window. The pass runs after
+ * EVERY ingest (incl. the watcher's `--since=1`), so it must be cheap. OTLP
+ * arrives just before / alongside its transcript, so freshly-ingested sessions
+ * always have recent telemetry - a narrow window backed by the `observed_at`
+ * index makes the scan O(recent rows) instead of enumerating the whole (~1.5M
+ * row) otel_log_event table each ingest. Telemetry whose transcript is ingested
+ * more than this many days late stays unlinked, which is fine: nothing reads the
+ * edge for data (enrichment + `ax otel` coverage join `session_id` directly).
+ */
+const SCAN_WINDOW_DAYS = 2;
 
 /**
  * Extract the bare record KEY from a SurrealDB row `id`, which the SDK returns
@@ -55,12 +58,13 @@ const bareUuid = (v: unknown): string | null => {
  * the edge - enrichment joins `session_id` directly), so one representative row
  * per session suffices. Row-grain would write millions of edges no one consumes.
  *
- * INCREMENTAL: the candidate set is exactly the sessions that EXIST but are NOT
- * yet linked, and the otel tables are probed with `session_id IN [candidates]`
- * over the schema's `session_id` index (chunked at 500, like telemetry-rollup.ts).
- * Steady state the candidate set is just the run's new sessions, so the pass is
- * cheap; a full `GROUP BY session_id` over otel_log_event (the old approach) cost
- * ~8s on EVERY ingest by enumerating all 1.5M rows, which this avoids.
+ * INCREMENTAL: only telemetry observed in the last `SCAN_WINDOW_DAYS` is scanned,
+ * via the `observed_at` index (a range scan over recent rows, not a full GROUP BY
+ * over all 1.5M). The earlier full `GROUP BY session_id` cost ~8s on EVERY ingest;
+ * a candidate-set variant re-probed every telemetry-less session forever. Both are
+ * replaced by: window recent telemetry -> filter to existing, unlinked sessions
+ * (in-memory sets) -> relate. Already-linked sessions are skipped, so re-scanning
+ * the same window each run is cheap.
  *
  * Two earlier bugs this replaced:
  *   - `type::record("session:" + session_id)` evaluated the concat as arithmetic
@@ -69,55 +73,50 @@ const bareUuid = (v: unknown): string | null => {
  *     `session.id` is the escaped `session:⟨uuid⟩` record, so we match on bare
  *     uuids in JS instead of trusting `type::record` round-trips.
  *   - the per-row `count(<-telemetry_of)=0` graph traversal idempotency check was
- *     a bottleneck; idempotency is now the in-memory `linked` set (drives the
- *     candidate list, so already-linked sessions are never re-probed).
+ *     a bottleneck; idempotency is now the in-memory `linked` set.
  */
 export const correlateOrphanOtel = () =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
 
-        // Already-linked sessions (telemetry_of stays small - one edge per session).
+        // Existing top-level sessions (uuid id) and sessions already linked.
+        const sessRows = (yield* db.query<[Array<{ id: unknown }>]>(
+            `SELECT id FROM session;`,
+        ))?.[0] ?? [];
+        const sessions = new Set<string>();
+        for (const r of sessRows) { const u = bareUuid(r.id); if (u) sessions.add(u); }
+
         const edgeRows = (yield* db.query<[Array<{ in: unknown }>]>(
             `SELECT in FROM telemetry_of;`,
         ))?.[0] ?? [];
         const linked = new Set<string>();
         for (const r of edgeRows) { const u = bareUuid(r.in); if (u) linked.add(u); }
 
-        // Candidates = existing top-level sessions (uuid id) not yet linked.
-        const sessRows = (yield* db.query<[Array<{ id: unknown }>]>(
-            `SELECT id FROM session;`,
-        ))?.[0] ?? [];
-        const candidates = [...new Set(
-            sessRows.map((r) => bareUuid(r.id)).filter((u): u is string => u !== null),
-        )].filter((u) => !linked.has(u));
-        if (candidates.length === 0) return;
-
-        // For each candidate, find one representative otel row via the indexed
-        // `session_id IN [...]` probe (chunked). First table that has it wins.
+        // One representative recent otel row per session, first table wins.
         const seen = new Set<string>();
         const stmts: string[] = [];
         for (const table of RELATABLE) {
-            const remaining = candidates.filter((u) => !seen.has(u));
-            if (remaining.length === 0) break;
-            for (const part of chunk(remaining, CHUNK)) {
-                const list = part.map((u) => `"${u}"`).join(", ");
-                const rows = (yield* db.query<[Array<{ id: unknown; session_id: unknown }>]>(
-                    `SELECT id, session_id FROM ${table} WHERE session_id IN [${list}] GROUP BY session_id;`,
-                ))?.[0] ?? [];
-                for (const o of rows) {
-                    const u = bareUuid(o.session_id);
-                    if (u === null || seen.has(u)) continue;
-                    // GROUP BY collapses `id` into an array of the group's row ids;
-                    // take the first as the representative. recordKey handles the
-                    // SDK's string|RecordId shape; recordRef escapes it canonically.
-                    const repId = Array.isArray(o.id) ? o.id[0] : o.id;
-                    const recId = recordKey(repId);
-                    if (recId === null) continue;
-                    seen.add(u);
-                    stmts.push(
-                        `RELATE ${recordRef("session", u)}->telemetry_of->${recordRef(table, recId)};`,
-                    );
-                }
+            // WHERE is observed_at-only so the range scan uses the `observed_at`
+            // index; a leading `session_id != NONE` defeated the index (full scan).
+            // NONE / non-uuid session_ids fall out via bareUuid below.
+            const rows = (yield* db.query<[Array<{ id: unknown; session_id: unknown }>]>(
+                `SELECT id, session_id FROM ${table}`
+                + ` WHERE observed_at > time::now() - ${SCAN_WINDOW_DAYS}d`
+                + ` GROUP BY session_id;`,
+            ))?.[0] ?? [];
+            for (const o of rows) {
+                const u = bareUuid(o.session_id);
+                if (u === null || seen.has(u) || linked.has(u) || !sessions.has(u)) continue;
+                // GROUP BY collapses `id` into an array of the group's row ids; take
+                // the first as the representative. recordKey handles the SDK's
+                // string|RecordId shape; recordRef escapes it canonically.
+                const repId = Array.isArray(o.id) ? o.id[0] : o.id;
+                const recId = recordKey(repId);
+                if (recId === null) continue;
+                seen.add(u);
+                stmts.push(
+                    `RELATE ${recordRef("session", u)}->telemetry_of->${recordRef(table, recId)};`,
+                );
             }
         }
         if (stmts.length > 0) yield* executeStatements(stmts);
