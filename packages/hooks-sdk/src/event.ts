@@ -31,9 +31,26 @@ export interface HookEvent {
   /** untouched raw payload for escape hatches. */
   readonly raw: Record<string, unknown>;
   /**
+   * Forwarded environment allowlist (bypass flags, spend mode). Populated from
+   * an `_ax_env` field on the payload - the daemon shim injects the agent's env
+   * here because a daemon-evaluated guard sees the DAEMON's process.env, not the
+   * agent's. Guards read `event.env?.[NAME] ?? process.env[NAME]`, so the
+   * spawned path (where process.env IS the agent's) is unaffected.
+   */
+  readonly env?: Record<string, string> | undefined;
+  /**
    * Set when stdin was non-empty but did not parse to a JSON object
    * (malformed JSON or a non-object value). Decode never throws; this is
    * how callers distinguish garbage input from a genuinely empty payload.
    */
   readonly parseError?: string | undefined;
 }
+
+/**
+ * Read an env var honoring the daemon-forwarded allowlist first, then the
+ * process env. In the spawned path `event.env` is absent and this is just
+ * `process.env[name]`; in the daemon path the agent's forwarded value wins, so
+ * bypass flags (ALLOW_MAIN_WRITE, ...) and spend mode reach the guard.
+ */
+export const readEnv = (event: HookEvent, name: string): string | undefined =>
+  event.env?.[name] ?? process.env[name];

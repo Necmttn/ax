@@ -382,8 +382,20 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   in-process -> `mergeVerdicts` -> encode once), replacing N fat per-guard
   bundles. Standalone bundle ~0.9 MB (one, vs ~1.5 MB across four), embedded +
   scaffolded like the per-guard bundles. Runtime is live (`bun dispatch.ts`);
-  `ax hooks install --all` now registers the single dispatcher (see below). A
-  daemon `/hooks/eval` fast-path (the latency win) is the remaining step.
+  `ax hooks install --all` now registers the single dispatcher (see below).
+- **Daemon fast-path** `POST /hooks/eval` (`ax serve`, `routes/hooks.ts`,
+  capability `hooks_eval`): warm-evaluates the dispatcher via `dispatchEvent`,
+  skipping the cold `bun` spawn + bundle parse. DB-free (only GitEnvLive),
+  fail-open (unreadable body / any error -> allow). **Env-forwarding:** a
+  daemon-evaluated guard sees the DAEMON's `process.env`, not the agent's, so
+  the payload carries an `_ax_env` allowlist (decode -> `event.env`) and guards
+  read `readEnv(event, NAME) = event.env?.[NAME] ?? process.env[NAME]` for
+  bypass flags (`ALLOW_MAIN_WRITE`/`ALLOW_BRANCH_CHECKOUT`/
+  `ALLOW_DIRTY_MAIN_MUTATION`) + `AX_SPEND_MODE` - additive, so the spawned path
+  is unchanged. The endpoint is INERT until the shim ships: stage 3b adds the
+  effect-free bun shim (POST daemon-first, lazy-import the bundle on fallback) +
+  an opt-in install that swaps `bun dispatch.js` for the shim. Verified via
+  `handleDashboardRequest` (no live serve needed).
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -

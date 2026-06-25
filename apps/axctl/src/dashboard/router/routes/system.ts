@@ -28,6 +28,9 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
                 // OTLP receiver is pure HTTP+JSON+SurrealDB (no native dep),
                 // so it works in both source and compiled binary - always true.
                 otlp_receiver: true,
+                // POST /hooks/eval warm-evaluates SDK hooks (DB-free); the hook
+                // shim probes this to decide daemon-first vs spawn fallback.
+                hooks_eval: true,
             }),
     }),
 ];
