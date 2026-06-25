@@ -73,6 +73,15 @@ describe("scaffoldWorkspace", () => {
         expect(dispatchContent).toContain('@ax/hooks-sdk/dispatch');
         expect(dispatchContent).toContain('runDispatchMain');
 
+        // The daemon shim is scaffolded too, with a .ts sibling fallback.
+        const shimPath = join(dir, "dispatch-shim.ts");
+        expect(existsSync(shimPath)).toBe(true);
+        expect(written).toContain(shimPath);
+        const shimContent = readFileSync(shimPath, "utf8");
+        expect(shimContent).toContain('@ax/hooks-sdk/shim-core');
+        expect(shimContent).toContain('runShim');
+        expect(shimContent).toContain('./dispatch.ts');
+
         // All hook files should be in the written list
         expect(written).toContain(ewPath);
         expect(written).toContain(ewwPath);
@@ -130,8 +139,9 @@ describe("scaffoldWorkspace", () => {
         expect(written).toContain(join(dir, "route-dispatch.ts"));
         expect(written).toContain(join(dir, "refresh-quota.ts"));
         expect(written).toContain(join(dir, "dispatch.ts"));
-        // package.json + 4 guards + the dispatcher entry.
-        expect(written.length).toBe(6);
+        expect(written).toContain(join(dir, "dispatch-shim.ts"));
+        // package.json + 4 guards + the dispatcher + the daemon shim.
+        expect(written.length).toBe(7);
     });
 
     test("creates dir if it does not exist", async () => {

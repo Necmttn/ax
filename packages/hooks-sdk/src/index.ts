@@ -5,8 +5,18 @@ export {
   dispatchEvent,
   dispatchInstallPlan,
   runDispatchMain,
+  runDispatchFromStdin,
   type DispatchInstallEntry,
 } from "./dispatch.ts";
+export {
+  FORWARDED_ENV_KEYS,
+  withForwardedEnv,
+  isDaemonOutcome,
+  hookEvalUrl,
+  runShim,
+  type DaemonOutcome,
+  type RunShimOptions,
+} from "./shim-core.ts";
 export { Verdict } from "./verdict.ts";
 export { readEnv } from "./event.ts";
 export type { Harness, HookEvent, HookEventName } from "./event.ts";

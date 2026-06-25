@@ -25,7 +25,7 @@ import {
 import type { HookScope } from "./providers/types.ts";
 import { HookNotFoundError } from "./errors.ts";
 import { installHookFile, stripAxMarker } from "./sdk-install.ts";
-import { installDispatcher, resolveDispatcherPath } from "./dispatch-install.ts";
+import { installDispatcher, resolveDispatcherPath, resolveShimPath } from "./dispatch-install.ts";
 import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
 import { benchHook, renderLedger } from "./bench.ts";
@@ -235,9 +235,10 @@ const installCommand = Command.make(
         providers: Flag.string("providers").pipe(Flag.withDefault("claude,codex")),
         scope: Flag.string("scope").pipe(Flag.withDefault("global")),
         all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        daemon: Flag.boolean("daemon").pipe(Flag.withDefault(false)),
         dir: Flag.string("dir").pipe(Flag.withDefault("~/.ax/hooks")),
     },
-    ({ file, providers, scope, all, dir }) =>
+    ({ file, providers, scope, all, daemon, dir }) =>
         Effect.gen(function* () {
             // Works on both source (.ts against the @ax/hooks-sdk workspace) and a
             // compiled binary (the standalone .js bundles `ax hooks init` wrote
@@ -259,22 +260,31 @@ const installCommand = Command.make(
             // install the single positional file.
             if (all) {
                 const workspaceDir = expandTilde(dir);
-                const dispatchPath = yield* resolveDispatcherPath(workspaceDir);
-                if (dispatchPath === null) {
+                // --daemon installs the shim (POST to `ax serve`, fall back to the
+                // bundle); default installs the dispatcher directly.
+                const commandPath = daemon
+                    ? yield* resolveShimPath(workspaceDir)
+                    : yield* resolveDispatcherPath(workspaceDir);
+                if (commandPath === null) {
+                    const missing = daemon ? "dispatch-shim.ts/.js" : "dispatch.ts/.js";
                     console.error(
-                        `no dispatcher found in ${workspaceDir} (dispatch.ts/.js). Run 'ax hooks init' first to scaffold it.`,
+                        `no ${daemon ? "shim" : "dispatcher"} found in ${workspaceDir} (${missing}). Run 'ax hooks init' first to scaffold it.`,
                     );
                     process.exit(1);
                 }
                 const { entries, removed } = yield* installDispatcher(
-                    dispatchPath,
+                    commandPath,
                     workspaceDir,
                     providerList,
                     asScope(scope),
                 );
                 const installedEntries = entries.filter((e) => !e.skipped);
                 const skippedEntries = entries.filter((e) => e.skipped);
-                console.log(`dispatcher: ${path.basename(dispatchPath)} (one spawn multiplexes all guards)`);
+                console.log(
+                    daemon
+                        ? `daemon shim: ${path.basename(commandPath)} (POST /hooks/eval, falls back to the bundle)`
+                        : `dispatcher: ${path.basename(commandPath)} (one spawn multiplexes all guards)`,
+                );
                 for (const e of installedEntries) {
                     const m = e.input.matcher ? ` [matcher: ${e.input.matcher}]` : "";
                     console.log(`  installed ${e.provider} ${e.input.event}${m} -> ${e.writtenPath}`);
@@ -321,7 +331,7 @@ const installCommand = Command.make(
                 console.log("note (codex): approve the new hook(s) when prompted (trust review).");
             }
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
-).pipe(Command.withDescription("Install a SDK hook file into provider configs, or --all to install the dispatcher (multiplexes all guards) + migrate off legacy per-guard entries (--providers=claude,codex --scope=global --dir=~/.ax/hooks)"));
+).pipe(Command.withDescription("Install a SDK hook file into provider configs, or --all to install the dispatcher (multiplexes all guards) + migrate off legacy per-guard entries; add --daemon to install the warm daemon shim instead (--providers=claude,codex --scope=global --dir=~/.ax/hooks)"));
 
 const backtestCommand = Command.make(
     "backtest",

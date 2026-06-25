@@ -3,7 +3,7 @@ import type { PlatformError } from "effect/PlatformError";
 import type { DbError } from "@ax/lib/errors";
 import type { SurrealClient } from "@ax/lib/db";
 import { dispatchInstallPlan } from "@ax/hooks-sdk/dispatch";
-import { GUARD_NAMES, DISPATCHER_NAME } from "./guard-names.ts";
+import { GUARD_NAMES, DISPATCHER_NAME, SHIM_NAME } from "./guard-names.ts";
 import { addHook, readAllHooks, removeHook } from "./config.ts";
 import { HookProviderRegistry } from "./providers/registry.ts";
 import {
@@ -62,6 +62,18 @@ export const legacyGuardCommands = (dir: string): ReadonlySet<string> => {
     return cmds;
 };
 
+/** Commands in the dispatcher "family" - the dispatcher AND the shim, either
+ *  extension. Switching between `--all` (dispatch) and `--all --daemon` (shim)
+ *  must remove the OTHER family entry so they don't double-fire. */
+export const dispatcherFamilyCommands = (dir: string): ReadonlySet<string> => {
+    const cmds = new Set<string>();
+    for (const name of [DISPATCHER_NAME, SHIM_NAME]) {
+        cmds.add(`bun ${dir}/${name}.ts`);
+        cmds.add(`bun ${dir}/${name}.js`);
+    }
+    return cmds;
+};
+
 /** A configured hook row, narrowed to the fields migration needs. */
 export interface ConfiguredHookRow {
     readonly provider: string;
@@ -75,25 +87,33 @@ export interface ConfiguredHookRow {
 }
 
 /**
- * Pure: which existing entries to remove when migrating to the dispatcher. ONLY
- * ax-owned rows (an `axId` marker) whose marker-stripped command is a legacy
- * per-guard command for THIS dir, on a target provider + scope. A user's own
- * hand-written hook (no axId) is never touched, even if its command collides.
+ * Pure: which existing entries to remove when (re)pointing the dispatcher. ONLY
+ * ax-owned rows (an `axId` marker), on a target provider + scope, whose
+ * marker-stripped command is either a legacy per-guard command OR a
+ * dispatcher-family command (dispatch / dispatch-shim) for THIS dir - EXCEPT the
+ * `keepCommand` being installed now. So a fresh guard->dispatcher migration AND
+ * a dispatch<->shim switch both clean up, while re-running the same install is a
+ * no-op. A user's own hand-written hook (no axId) is never touched.
  */
 export const planLegacyRemoval = (
     existing: ReadonlyArray<ConfiguredHookRow>,
     dir: string,
     providers: ReadonlyArray<string>,
     scope: string,
+    keepCommand?: string,
 ): ConfiguredHookRow[] => {
-    const legacy = legacyGuardCommands(dir);
+    const removable = new Set<string>([
+        ...legacyGuardCommands(dir),
+        ...dispatcherFamilyCommands(dir),
+    ]);
+    if (keepCommand) removable.delete(keepCommand);
     return existing.filter(
         (h) =>
             h.axId !== undefined &&
             h.axId !== null &&
             providers.includes(h.provider) &&
             h.scope === scope &&
-            legacy.has(stripAxMarker(h.command)),
+            removable.has(stripAxMarker(h.command)),
     );
 };
 
@@ -112,6 +132,21 @@ export const resolveDispatcherPath = (
         const tsPath = pathSvc.join(dir, `${DISPATCHER_NAME}.ts`);
         if (yield* fs.exists(tsPath)) return tsPath;
         const jsPath = pathSvc.join(dir, `${DISPATCHER_NAME}.js`);
+        if (yield* fs.exists(jsPath)) return jsPath;
+        return null;
+    });
+
+/** The scaffolded daemon shim in `dir`: prefer `dispatch-shim.ts`, else `.js`,
+ *  else null. */
+export const resolveShimPath = (
+    dir: string,
+): Effect.Effect<string | null, PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+        const tsPath = pathSvc.join(dir, `${SHIM_NAME}.ts`);
+        if (yield* fs.exists(tsPath)) return tsPath;
+        const jsPath = pathSvc.join(dir, `${SHIM_NAME}.js`);
         if (yield* fs.exists(jsPath)) return jsPath;
         return null;
     });
@@ -167,9 +202,16 @@ export const installDispatcher = (
             entries.push({ ...entry, writtenPath });
         }
 
-        // Migration: drop ax-owned legacy per-guard entries (the dispatcher now
-        // covers them; leaving them would double-fire each guard).
-        const toRemove = planLegacyRemoval(existing as ReadonlyArray<ConfiguredHookRow>, dir, providers, scope);
+        // Migration: drop ax-owned legacy per-guard entries AND the other
+        // dispatcher-family command (so a dispatch<->shim switch doesn't
+        // double-fire); never the one just installed.
+        const toRemove = planLegacyRemoval(
+            existing as ReadonlyArray<ConfiguredHookRow>,
+            dir,
+            providers,
+            scope,
+            `bun ${dispatchPath}`,
+        );
         const removed: ConfiguredHookRow[] = [];
         for (const h of toRemove) {
             yield* removeHook({ provider: h.provider, scope, file: h.file, id: h.id, repoRoot: opts.repoRoot });

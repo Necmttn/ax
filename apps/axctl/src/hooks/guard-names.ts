@@ -37,3 +37,16 @@ export const DISPATCHER_NAME = "dispatch";
 
 export const dispatcherScaffoldContent = (): string =>
     `import { runDispatchMain } from "@ax/hooks-sdk/dispatch";\n\nif (import.meta.main) void runDispatchMain();\n`;
+
+/**
+ * The daemon-first shim (`ax hooks install --all --daemon`). POSTs the event to
+ * the running `ax serve` `/hooks/eval` (warm) and applies its outcome; falls
+ * back to the sibling dispatch bundle when the daemon is down. Effect-free on
+ * the fast path. `dispatchExt` is the sibling dispatcher's extension - `ts` for
+ * the source scaffold, `js` for the embedded binary bundle - so the runtime
+ * fallback import resolves the right file next to the shim.
+ */
+export const SHIM_NAME = "dispatch-shim";
+
+export const shimScaffoldContent = (dispatchExt: "ts" | "js"): string =>
+    `import { runShim } from "@ax/hooks-sdk/shim-core";\n\nif (import.meta.main) void runShim({ fallbackUrl: new URL("./${DISPATCHER_NAME}.${dispatchExt}", import.meta.url) });\n`;

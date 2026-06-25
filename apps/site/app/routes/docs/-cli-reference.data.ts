@@ -537,6 +537,7 @@ correction-loop     2 sessions  flaky integration test`,
         flags: [
           { flag: "--providers=claude,codex", desc: "(install) fan-out targets" },
           { flag: "--all", desc: "(install) register the dispatcher (all guards, one spawn) + migrate legacy entries" },
+          { flag: "--daemon", desc: "(install --all) install the warm daemon shim instead (POST /hooks/eval, falls back to the bundle)" },
           { flag: "--dir=~/.ax/hooks", desc: "(install --all) workspace holding the dispatcher" },
           { flag: "--days=N", desc: "(backtest) replay window (default 30)" },
           { flag: "--scope=global|project|local", desc: "(install/add) where the hook lives" },
