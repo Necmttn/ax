@@ -392,10 +392,19 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   read `readEnv(event, NAME) = event.env?.[NAME] ?? process.env[NAME]` for
   bypass flags (`ALLOW_MAIN_WRITE`/`ALLOW_BRANCH_CHECKOUT`/
   `ALLOW_DIRTY_MAIN_MUTATION`) + `AX_SPEND_MODE` - additive, so the spawned path
-  is unchanged. The endpoint is INERT until the shim ships: stage 3b adds the
-  effect-free bun shim (POST daemon-first, lazy-import the bundle on fallback) +
-  an opt-in install that swaps `bun dispatch.js` for the shim. Verified via
-  `handleDashboardRequest` (no live serve needed).
+  is unchanged.
+- **Daemon shim** (`ax hooks install --all --daemon`, OPT-IN; default stays the
+  direct dispatcher): an EFFECT-FREE bun shim (`@ax/hooks-sdk/shim-core`
+  `runShim`, scaffolded `dispatch-shim.{ts,js}` via `SHIM_NAME`) that forwards
+  `_ax_env` and POSTs to `/hooks/eval` (fast path, no effect parse), and on a
+  daemon-down/timeout/non-2xx LAZY-imports the sibling dispatch bundle
+  (`runDispatchFromStdin`) so guards still fire offline. The install swaps the
+  dispatcher command for the shim and removes the other dispatcher-family entry
+  (`dispatcherFamilyCommands` + `keepCommand` in `planLegacyRemoval`) so a
+  dispatch<->shim switch never double-fires. Pure bits (`withForwardedEnv`,
+  `planLegacyRemoval`) unit-tested; the full round-trip is **live-verified**
+  against a source-booted `ax serve` (daemon up -> warm verdict + forwarded
+  bypass honored; daemon killed -> fallback still blocks).
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -

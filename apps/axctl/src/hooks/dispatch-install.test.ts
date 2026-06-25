@@ -73,14 +73,38 @@ describe("planLegacyRemoval", () => {
         expect(out).toEqual([]);
     });
 
-    test("never removes the dispatcher entry itself", () => {
+    test("never removes the command being installed (keepCommand)", () => {
+        const keep = `bun ${DIR}/dispatch.ts`;
+        const out = planLegacyRemoval(
+            [row({ command: keep, id: "d1" })],
+            DIR,
+            ["claude"],
+            "global",
+            keep,
+        );
+        expect(out).toEqual([]);
+    });
+
+    test("dispatch->shim switch removes the old dispatcher entry", () => {
         const out = planLegacyRemoval(
             [row({ command: `bun ${DIR}/dispatch.ts`, id: "d1" })],
             DIR,
             ["claude"],
             "global",
+            `bun ${DIR}/dispatch-shim.ts`, // installing the shim now
         );
-        expect(out).toEqual([]);
+        expect(out.map((h) => h.id)).toEqual(["d1"]);
+    });
+
+    test("shim->dispatch switch removes the old shim entry", () => {
+        const out = planLegacyRemoval(
+            [row({ command: `bun ${DIR}/dispatch-shim.js # ax:s1`, id: "s1" })],
+            DIR,
+            ["claude"],
+            "global",
+            `bun ${DIR}/dispatch.js`, // installing the dispatcher now
+        );
+        expect(out.map((h) => h.id)).toEqual(["s1"]);
     });
 
     test("skips other providers and other scopes", () => {

@@ -92,14 +92,16 @@ export const dispatchInstallPlan = (
  * the whole guard set in one spawn. Reads stdin, runs the guards against the
  * agent's own env + live git, emits the merged outcome, exits.
  */
-export const runDispatchMain = async (
+/**
+ * Run the dispatcher against an ALREADY-READ stdin string, emit the merged
+ * outcome, exit. This is the daemon shim's fallback entry: when the daemon is
+ * down the shim has already consumed stdin, so it hands the text here rather
+ * than re-reading it. Pulls effect/GitEnvLive (the slow path) on purpose.
+ */
+export const runDispatchFromStdin = async (
+  stdinText: string,
   guards: ReadonlyArray<HookDefinition> = ALL_GUARDS,
 ): Promise<void> => {
-  if (process.stdin.isTTY) {
-    process.stderr.write("ax hook dispatcher expects JSON on stdin (see @ax/hooks-sdk)\n");
-    process.exit(0);
-  }
-  const stdinText = await Bun.stdin.text();
   const outcome = await Effect.runPromise(
     dispatchEvent(stdinText, process.env as Record<string, string | undefined>, guards).pipe(
       Effect.provide(GitEnvLive),
@@ -108,6 +110,17 @@ export const runDispatchMain = async (
   if (outcome.stdout) process.stdout.write(outcome.stdout);
   if (outcome.stderr) process.stderr.write(outcome.stderr);
   process.exit(outcome.exitCode);
+};
+
+export const runDispatchMain = async (
+  guards: ReadonlyArray<HookDefinition> = ALL_GUARDS,
+): Promise<void> => {
+  if (process.stdin.isTTY) {
+    process.stderr.write("ax hook dispatcher expects JSON on stdin (see @ax/hooks-sdk)\n");
+    process.exit(0);
+  }
+  const stdinText = await Bun.stdin.text();
+  await runDispatchFromStdin(stdinText, guards);
 };
 
 if (import.meta.main) void runDispatchMain();

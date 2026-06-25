@@ -25,6 +25,8 @@ import {
     starterHookContent,
     DISPATCHER_NAME,
     dispatcherScaffoldContent,
+    SHIM_NAME,
+    shimScaffoldContent,
 } from "../apps/axctl/src/hooks/guard-names.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -80,6 +82,9 @@ export function writeManifest(): void {
     // The single dispatcher (one spawn multiplexes all guards).
     bundle(DISPATCHER_NAME, dispatcherScaffoldContent());
     bundles.push(DISPATCHER_NAME);
+    // The daemon-first shim - effect-free, falls back to the embedded dispatch.js.
+    bundle(SHIM_NAME, shimScaffoldContent("js"));
+    bundles.push(SHIM_NAME);
 
     // Import specifiers are relative to the GEN file's directory.
     const genDir = join(REPO_ROOT, "apps/axctl/src/hooks");

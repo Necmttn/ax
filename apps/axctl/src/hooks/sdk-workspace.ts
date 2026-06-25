@@ -7,6 +7,8 @@ import {
     starterHookContent,
     DISPATCHER_NAME,
     dispatcherScaffoldContent,
+    SHIM_NAME,
+    shimScaffoldContent,
 } from "./guard-names.ts";
 
 // ---------------------------------------------------------------------------
@@ -171,6 +173,14 @@ export const scaffoldWorkspace = (
         if (!(yield* fs.exists(dispatchPath))) {
             yield* writeFileAtomic(dispatchPath, dispatcherScaffoldContent(), { backup: false });
             written.push(dispatchPath);
+        }
+
+        // 3c. The daemon-first shim (opt-in via `--daemon`); falls back to the
+        // sibling dispatch.ts. Source scaffold -> .ts sibling.
+        const shimPath = pathSvc.join(opts.dir, `${SHIM_NAME}.ts`);
+        if (!(yield* fs.exists(shimPath))) {
+            yield* writeFileAtomic(shimPath, shimScaffoldContent("ts"), { backup: false });
+            written.push(shimPath);
         }
 
         // 4. bun install
