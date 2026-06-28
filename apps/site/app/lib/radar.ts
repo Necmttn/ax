@@ -25,6 +25,9 @@ export const RADAR_AXIS_KEYS = [
 
 export type RadarAxisKey = (typeof RADAR_AXIS_KEYS)[number];
 
+export const COMPARE_LOGIN_LIMIT = 4;
+const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+
 /**
  * The un-normalised number behind one axis, pre-formatted for the "raw
  * values" reference table so the UI never re-derives. `value` is the
@@ -67,6 +70,33 @@ export const RADAR_AXES_META: readonly AxisMeta[] = [
     { key: "BREADTH", label: "BREADTH", note: "distinct skills × repos" },
     { key: "ENDURANCE", label: "ENDURE", note: "hours in the loop" },
 ];
+
+/* ---------- compare query helpers ---------- */
+
+export function parseCompareLogins(
+    raw: unknown,
+    options: { readonly exclude?: string; readonly limit?: number } = {},
+): readonly string[] {
+    if (typeof raw !== "string") return [];
+
+    const limit = Math.max(0, Math.floor(options.limit ?? COMPARE_LOGIN_LIMIT));
+    const exclude = options.exclude?.toLowerCase();
+    const seen = new Set<string>();
+    const out: string[] = [];
+
+    for (const chunk of raw.split(",")) {
+        const login = chunk.trim().replace(/^@/, "");
+        const key = login.toLowerCase();
+        if (!LOGIN_RE.test(login)) continue;
+        if (exclude && key === exclude) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(login);
+        if (out.length >= limit) break;
+    }
+
+    return out;
+}
 
 /* ---------- scaling helpers ---------- */
 
@@ -379,6 +409,39 @@ export function leadTally(a: RadarAxes, b: RadarAxes): LeadTally {
         else if (bv !== null && (av === null || bv > av)) bLeads++;
     }
     return { aLeads, bLeads, total: RADAR_AXIS_KEYS.length };
+}
+
+export type RawValueLeaders = Readonly<Record<RadarAxisKey, readonly number[]>>;
+
+/**
+ * Single strict raw-value leader per axis across any number of profiles.
+ * Nulls never lead, and ties deliberately produce no leader so the table does
+ * not imply a winner where the comparable values are equal.
+ */
+export function rawValueLeaders(series: readonly RadarAxes[]): RawValueLeaders {
+    const leaders = {} as Record<RadarAxisKey, readonly number[]>;
+
+    for (const key of RADAR_AXIS_KEYS) {
+        let best = Number.NEGATIVE_INFINITY;
+        let bestIndex = -1;
+        let bestCount = 0;
+
+        series.forEach((axes, index) => {
+            const value = axes.raws[key].value;
+            if (value === null) return;
+            if (value > best) {
+                best = value;
+                bestIndex = index;
+                bestCount = 1;
+                return;
+            }
+            if (value === best) bestCount++;
+        });
+
+        leaders[key] = bestIndex >= 0 && bestCount === 1 ? [bestIndex] : [];
+    }
+
+    return leaders;
 }
 
 /** the two axes that defined the sign - handy for the compare delta block */

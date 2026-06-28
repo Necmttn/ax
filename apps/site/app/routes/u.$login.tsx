@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { fetchProfile, type ProfileV1 } from "@ax/lib/shared/community";
-import { ProfileDossier, UnclaimedDossier, LOGIN_RE, type VsState } from "~/components/profile-dossier";
+import { ProfileDossier, UnclaimedDossier, type VsPeerState, type VsState } from "~/components/profile-dossier";
+import { parseCompareLogins } from "~/lib/radar";
 
 export const Route = createFileRoute("/u/$login")({
     validateSearch: (search: Record<string, unknown>) => ({
-        vs: typeof search.vs === "string" && LOGIN_RE.test(search.vs) ? search.vs : undefined,
+        vs: parseCompareLogins(search.vs).join(",") || undefined,
     }),
     head: ({ params }) => ({
         meta: [
@@ -58,26 +59,44 @@ function ProfilePage() {
 
     useEffect(() => {
         let alive = true;
-        if (!vs || vs.toLowerCase() === login.toLowerCase()) {
-            // self-compare is allowed (proves the overlay path); only skip the
-            // empty case so we don't double-render the same series silently.
-            if (!vs) { setVsState({ kind: "none" }); return; }
+        const compareLogins = parseCompareLogins(vs, { exclude: login });
+        if (compareLogins.length === 0) {
+            setVsState({ kind: "none" });
+            return () => { alive = false; };
         }
-        setVsState({ kind: "loading", login: vs });
-        fetchProfile(vs)
-            .then((profile) => {
-                if (!alive) return;
-                if (profile.github.toLowerCase() !== vs.toLowerCase()) {
-                    setVsState({ kind: "error", login: vs });
-                    return;
+
+        const updatePeer = (next: VsPeerState) => {
+            if (!alive) return;
+            setVsState((current) => current.kind === "multi"
+                ? {
+                    kind: "multi",
+                    peers: current.peers.map((peer) =>
+                        peer.login.toLowerCase() === next.login.toLowerCase() ? next : peer,
+                    ),
                 }
-                setVsState({ kind: "ready", login: vs, profile });
-            })
-            .catch((e: unknown) => {
-                if (!alive) return;
-                const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
-                setVsState(notFound ? { kind: "not-found", login: vs } : { kind: "error", login: vs });
-            });
+                : current);
+        };
+
+        setVsState({
+            kind: "multi",
+            peers: compareLogins.map((peerLogin) => ({ kind: "loading", login: peerLogin })),
+        });
+
+        for (const peerLogin of compareLogins) {
+            fetchProfile(peerLogin)
+                .then((profile) => {
+                    if (profile.github.toLowerCase() !== peerLogin.toLowerCase()) {
+                        updatePeer({ kind: "error", login: peerLogin });
+                        return;
+                    }
+                    updatePeer({ kind: "ready", login: peerLogin, profile });
+                })
+                .catch((e: unknown) => {
+                    const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
+                    updatePeer(notFound ? { kind: "not-found", login: peerLogin } : { kind: "error", login: peerLogin });
+                });
+        }
+
         return () => { alive = false; };
     }, [vs, login]);
 

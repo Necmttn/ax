@@ -1,6 +1,6 @@
 // apps/site/app/components/profile-dossier.tsx
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Fragment, useState, type FormEvent } from "react";
+import { Fragment, useState, type CSSProperties, type FormEvent } from "react";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import { WrappedDeck, type InsightCard, type VizSpec } from "~/components/wrapped-deck";
 import { RadarChart, type RadarSeries } from "~/components/radar-chart";
@@ -8,8 +8,10 @@ import {
     archetypeFor,
     dominantPair,
     leadTally,
+    parseCompareLogins,
     profileToAxes,
     RADAR_AXES_META,
+    rawValueLeaders,
     type RadarAxes,
 } from "~/lib/radar";
 import { duelPath, duelXIntent } from "~/lib/challenge";
@@ -31,23 +33,30 @@ import {
     type DayColumn,
 } from "~/lib/window-chart";
 
-// mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
-export const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
 // series colours: primary profile = ax green, comparison = ax blue.
 // Exported so the bespoke duel layout (profile-duel.tsx) tints A green / B blue
 // with the exact same tokens the radar series + overlay use.
 export const SELF_COLOR = "var(--green)";
 export const VS_COLOR = "#2567a8";
+export const COMPARE_COLORS = [
+    SELF_COLOR,
+    VS_COLOR,
+    "#9c4f88",
+    "#a96722",
+    "#577a38",
+] as const;
 
-// comparison-profile load state, kept separate from the primary dossier so a
-// missing/invalid `?vs=` peer degrades to a quiet inline note, never an error
-// page for the profile the visitor actually came to see.
-export type VsState =
-    | { kind: "none" }
+// Comparison-profile load state, kept separate from the primary dossier so a
+// missing/invalid peer degrades to a quiet inline note, never an error page for
+// the profile the visitor actually came to see.
+export type VsPeerState =
     | { kind: "loading"; login: string }
     | { kind: "not-found"; login: string }
     | { kind: "error"; login: string }
     | { kind: "ready"; login: string; profile: ProfileV1 };
+export type VsState =
+    | { kind: "none" }
+    | { kind: "multi"; peers: readonly VsPeerState[] };
 
 /* ---------- formatting (one helper set, everything humanized) ---------- */
 
@@ -521,30 +530,50 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
 
     const selfAxes = profileToAxes(profile);
     const selfArch = archetypeFor(selfAxes, profile);
+    const peers = vs.kind === "multi" ? vs.peers : [];
+    const readyPeers = peers.filter((peer): peer is Extract<VsPeerState, { kind: "ready" }> => peer.kind === "ready");
+    const compareEntries: RawTableProfile[] = [
+        { login: profile.github, profile, axes: selfAxes, color: SELF_COLOR },
+        ...readyPeers.map((peer, index) => {
+            const axes = profileToAxes(peer.profile);
+            return {
+                login: peer.profile.github,
+                profile: peer.profile,
+                axes,
+                color: COMPARE_COLORS[(index + 1) % COMPARE_COLORS.length]!,
+            };
+        }),
+    ];
+    const hasCompare = compareEntries.length > 1;
 
-    const vsReady = vs.kind === "ready" ? vs : null;
-    const vsAxes = vsReady ? profileToAxes(vsReady.profile) : null;
-    const vsArch = vsReady && vsAxes ? archetypeFor(vsAxes, vsReady.profile) : null;
-
-    const tally = vsReady && vsAxes ? leadTally(selfAxes, vsAxes) : null;
+    const singleCompare = hasCompare && peers.length === 1 ? compareEntries[1] : undefined;
+    const tally = singleCompare ? leadTally(selfAxes, singleCompare.axes) : null;
     const origin = typeof window !== "undefined" ? window.location.origin : "https://ax.necmttn.com";
-    const duelUrl = vsReady ? `${origin}${duelPath(profile.github, vsReady.login)}` : "";
-    const copyDuel = () => {
-        if (!duelUrl) return;
-        void navigator.clipboard?.writeText(duelUrl).then(() => {
+    const peerLogins = peers.map((peer) => peer.login);
+    const shareUrl = singleCompare
+        ? `${origin}${duelPath(profile.github, singleCompare.login)}`
+        : peerLogins.length > 0
+            ? `${origin}/u/${profile.github}?vs=${peerLogins.join(",")}`
+            : "";
+    const copyShare = () => {
+        if (!shareUrl) return;
+        void navigator.clipboard?.writeText(shareUrl).then(() => {
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
         }).catch(() => {});
     };
 
-    const series: RadarSeries[] = [{ login: profile.github, axes: selfAxes, color: SELF_COLOR }];
-    if (vsReady && vsAxes) series.push({ login: vsReady.login, axes: vsAxes, color: VS_COLOR });
+    const series: RadarSeries[] = compareEntries.map((entry) => ({
+        login: entry.login,
+        axes: entry.axes,
+        color: entry.color,
+    }));
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
-        const target = draft.trim().replace(/^@/, "");
-        if (!LOGIN_RE.test(target)) return;
-        void navigate({ search: { vs: target } });
+        const targets = parseCompareLogins(draft, { exclude: profile.github });
+        if (targets.length === 0) return;
+        void navigate({ search: { vs: targets.join(",") } });
         setDraft("");
     };
     const clearCompare = () => void navigate({ search: { vs: undefined } });
@@ -554,12 +583,12 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
             <SectionIntro eyebrow="the sign" title="The sign" note="six axes, one archetype" />
             <p className="pf-sign-method">
                 Axes are log-anchored to fixed scales (not min-max), so shapes compare
-                across any two profiles.
+                across profiles.
             </p>
             <div className="pf-sign">
                 <div className="pf-sign-chart">
                     <RadarChart series={series} size={420} />
-                    {selfAxes.partial && (
+                    {compareEntries.some((entry) => entry.axes.partial) && (
                         <p className="pf-sign-partial">
                             some axes read 0 - they need a newer ax version to populate.
                         </p>
@@ -568,39 +597,58 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
                 </div>
 
                 <div className="pf-sign-read">
-                    {vsArch && vsReady ? (
-                        <p className="pf-sign-versus">
-                            <Avatar login={profile.github} size={22} ring={SELF_COLOR} className="pv2-avatar--inline" />
-                            <span style={{ color: SELF_COLOR }}>@{profile.github}</span> is {selfArch.sign}
-                            {" · "}
-                            <Avatar login={vsReady.login} size={22} ring={VS_COLOR} className="pv2-avatar--inline" />
-                            <span style={{ color: VS_COLOR }}>@{vsReady.login}</span> is {vsArch.sign}
-                        </p>
+                    {hasCompare ? (
+                        <>
+                            <span className="pf-sign-kicker">team shape</span>
+                            <div className="pf-sign-head">
+                                <span className="pf-sign-glyph" aria-hidden="true">✦</span>
+                                <h3 className="pf-sign-name">The team's shape</h3>
+                            </div>
+                            <p className="pf-sign-blurb">
+                                Where these polygons stack, the team shares an instinct.
+                                Where they split, the work has a ridge.
+                            </p>
+                            <div className="pf-sign-archetypes" aria-label="member archetypes">
+                                {compareEntries.map((entry) => {
+                                    const arch = archetypeFor(entry.axes, entry.profile);
+                                    return (
+                                        <div className="pf-sign-arch-row" key={entry.login}>
+                                            <Avatar login={entry.login} size={24} ring={entry.color} className="pv2-avatar--inline" linked />
+                                            <span className="pf-sign-arch-handle" style={{ color: entry.color }}>@{entry.login}</span>
+                                            <span className="pf-sign-arch-sign">
+                                                <span aria-hidden="true">{arch.symbol}</span> {arch.sign}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     ) : (
-                        <span className="pf-sign-kicker">your agent sign</span>
+                        <>
+                            <span className="pf-sign-kicker">your agent sign</span>
+                            <div className="pf-sign-head">
+                                <span className="pf-sign-glyph" aria-hidden="true">{selfArch.symbol}</span>
+                                <h3 className="pf-sign-name">{selfArch.sign}</h3>
+                            </div>
+                            <p className="pf-sign-blurb">{selfArch.blurb}</p>
+                        </>
                     )}
-
-                    <div className="pf-sign-head">
-                        <span className="pf-sign-glyph" aria-hidden="true">{selfArch.symbol}</span>
-                        <h3 className="pf-sign-name">{selfArch.sign}</h3>
-                    </div>
-                    <p className="pf-sign-blurb">{selfArch.blurb}</p>
 
                     {/* compare mode: the raw-values table below carries the
                         per-axis comparison - one table, not two summaries */}
-                    {!(vsReady && vsAxes) && <ScoreList axes={selfAxes} />}
+                    {!hasCompare && <ScoreList axes={selfAxes} />}
 
                     {/* compare control */}
                     <div className="pf-sign-compare">
-                        {vsReady ? (
+                        {peers.length > 0 ? (
                             <div className="pf-share-row">
-                                <button type="button" className="pf-share-btn" onClick={copyDuel}>
-                                    {copied ? "copied ✓" : "copy duel link"}
+                                <button type="button" className="pf-share-btn" onClick={copyShare}>
+                                    {copied ? "copied ✓" : singleCompare ? "copy duel link" : "copy compare link"}
                                 </button>
-                                {tally && (
+                                {tally && singleCompare && (
                                     <a
                                         className="pf-share-btn"
-                                        href={duelXIntent({ a: profile.github, b: vsReady.login, aLeads: tally.aLeads, total: tally.total, origin })}
+                                        href={duelXIntent({ a: profile.github, b: singleCompare.login, aLeads: tally.aLeads, total: tally.total, origin })}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                     >
@@ -611,33 +659,27 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
                             </div>
                         ) : (
                             <form className="pf-sign-form" onSubmit={submit}>
-                                <span className="pf-sign-form-label">Think you out-ship @{profile.github}?</span>
+                                <span className="pf-sign-form-label">Build a team shape</span>
                                 <input
                                     className="pf-sign-input"
                                     type="text"
                                     value={draft}
                                     onChange={(e) => setDraft(e.currentTarget.value)}
-                                    placeholder="github handle"
-                                    aria-label="github handle to challenge"
+                                    placeholder="handles, comma-separated"
+                                    aria-label="github handles to compare"
                                     spellCheck={false}
                                     autoCapitalize="off"
                                     autoCorrect="off"
                                 />
-                                <button type="submit" className="pf-sign-go">challenge →</button>
+                                <button type="submit" className="pf-sign-go">compare →</button>
                             </form>
                         )}
-                        {vs.kind === "loading" && <span className="pf-sign-msg">pulling @{vs.login}…</span>}
-                        {vs.kind === "not-found" && <UnclaimedChallenger login={vs.login} />}
-                        {vs.kind === "error" && <span className="pf-sign-msg">couldn't load @{vs.login}.</span>}
+                        {peers.length > 0 && <ComparePeerStatuses peers={peers} />}
                     </div>
                 </div>
             </div>
 
-            <RawTable
-                self={selfAxes}
-                selfLogin={profile.github}
-                vs={vsReady && vsAxes ? { axes: vsAxes, login: vsReady.login } : undefined}
-            />
+            <RawTable profiles={compareEntries} />
         </section>
     );
 }
@@ -680,54 +722,57 @@ function ScoreList({ axes }: { axes: RadarAxes }) {
 
 /**
  * "Raw values" reference table - the un-normalised numbers behind the chart,
- * straight off RadarAxes.raws (never re-derived here). In compare mode each
- * row gets two value columns and the per-metric leader is marked with a small
- * green dot; ties and unmeasurable rows get no dot.
+ * straight off RadarAxes.raws (never re-derived here). In compare mode, each
+ * profile gets its own value column and a strict per-metric leader is marked
+ * with a small dot; ties and unmeasurable rows get no dot.
  */
 export function RawTable({
-    self, selfLogin, vs,
+    profiles,
 }: {
-    self: RadarAxes;
-    selfLogin: string;
-    vs?: { axes: RadarAxes; login: string };
+    profiles: readonly RawTableProfile[];
 }) {
+    const leaderByAxis = rawValueLeaders(profiles.map((entry) => entry.axes));
+    const compareMode = profiles.length > 1;
+
     return (
         <div className="pf-rawvals">
             <div className="pf-rawvals-head">
                 <span className="pf-rawvals-kicker">raw values</span>
                 <span className="pf-rawvals-note">un-normalised numbers behind the chart</span>
             </div>
-            <table className="pf-rawvals-table">
+            <table
+                className={compareMode ? "pf-rawvals-table pf-rawvals-table--compare" : "pf-rawvals-table"}
+                style={compareMode ? ({ "--raw-profile-count": profiles.length } as CSSProperties) : undefined}
+            >
                 <thead>
                     <tr>
                         <th scope="col">metric</th>
-                        <th scope="col" className="pf-rawvals-col">
-                            {vs ? (
-                                <><Avatar login={selfLogin} size={18} ring={SELF_COLOR} className="pv2-avatar--inline" linked /><span style={{ color: SELF_COLOR }}>@{selfLogin}</span></>
-                            ) : "value"}
-                        </th>
-                        {vs && (
-                            <th scope="col" className="pf-rawvals-col">
-                                <Avatar login={vs.login} size={18} ring={VS_COLOR} className="pv2-avatar--inline" linked /><span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                        {profiles.map((entry, index) => (
+                            <th scope="col" className="pf-rawvals-col" key={entry.login}>
+                                {compareMode ? (
+                                    <>
+                                        <Avatar login={entry.login} size={18} ring={entry.color} className="pv2-avatar--inline" linked />
+                                        <span style={{ color: entry.color }}>@{entry.login}</span>
+                                    </>
+                                ) : (
+                                    index === 0 ? "value" : `@${entry.login}`
+                                )}
                             </th>
-                        )}
+                        ))}
                     </tr>
                 </thead>
                 <tbody>
                     {RADAR_AXES_META.map((m) => {
-                        const a = self.raws[m.key];
-                        const b = vs?.axes.raws[m.key];
-                        // leader: strictly greater comparable numeric; null never leads
-                        const aLeads = vs !== undefined && a.value !== null && (b?.value === null || b === undefined || a.value > b.value);
-                        const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
+                        const leaderIndexes = leaderByAxis[m.key];
+                        const rawValues = profiles.map((entry) => entry.axes.raws[m.key]);
                         // magnitude split-bar: each side normalised to that row's
                         // pair-max so a blowout reads visually distinct from a near-tie.
-                        const av = a.value;
-                        const bv = b?.value ?? null;
-                        const pairMax = Math.max(av ?? 0, bv ?? 0, 0);
+                        const av = rawValues[0]?.value ?? null;
+                        const bv = rawValues[1]?.value ?? null;
+                        const pairMax = profiles.length === 2 ? Math.max(av ?? 0, bv ?? 0, 0) : 0;
                         const aPct = pairMax > 0 && av !== null ? Math.min(100, (av / pairMax) * 100) : 0;
                         const bPct = pairMax > 0 && bv !== null ? Math.min(100, (bv / pairMax) * 100) : 0;
-                        const ratio = av !== null && bv !== null && av > 0 && bv > 0
+                        const ratio = profiles.length === 2 && av !== null && bv !== null && av > 0 && bv > 0
                             ? Math.max(av, bv) / Math.min(av, bv)
                             : null;
                         const ratioChip = ratio !== null && ratio >= 1.05
@@ -735,29 +780,29 @@ export function RawTable({
                             : null;
                         return (
                             <Fragment key={m.key}>
-                                <tr className={vs ? "pf-rawvals-row pf-rawvals-row--pair" : "pf-rawvals-row"}>
-                                    <th scope="row" rowSpan={vs ? 2 : 1}>{m.label}</th>
-                                    <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
-                                        {a.label}
-                                        {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
-                                    </td>
-                                    {vs && b && (
-                                        <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
-                                            {b.label}
-                                            {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
-                                        </td>
-                                    )}
+                                <tr className={profiles.length === 2 ? "pf-rawvals-row pf-rawvals-row--pair" : "pf-rawvals-row"}>
+                                    <th scope="row" rowSpan={profiles.length === 2 ? 2 : 1}>{m.label}</th>
+                                    {profiles.map((entry, index) => {
+                                        const raw = rawValues[index]!;
+                                        const leads = leaderIndexes.includes(index);
+                                        return (
+                                            <td className={leads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"} key={entry.login}>
+                                                {raw.label}
+                                                {leads && <span className="pf-rawvals-dot" style={{ background: entry.color }} aria-label="leads" />}
+                                            </td>
+                                        );
+                                    })}
                                 </tr>
-                                {vs && (
+                                {profiles.length === 2 && (
                                     <tr className="pf-rawvals-barrow">
-                                        <td colSpan={2}>
+                                        <td colSpan={profiles.length}>
                                             <div className="pf-rawvals-split" aria-hidden="true">
                                                 <span className="pf-rawvals-split-a">
-                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--a" style={{ width: `${aPct}%` }} />
+                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--a" style={{ width: `${aPct}%`, background: profiles[0]!.color }} />
                                                 </span>
                                                 <span className="pf-rawvals-split-mid">{ratioChip}</span>
                                                 <span className="pf-rawvals-split-b">
-                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--b" style={{ width: `${bPct}%` }} />
+                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--b" style={{ width: `${bPct}%`, background: profiles[1]!.color }} />
                                                 </span>
                                             </div>
                                         </td>
@@ -768,6 +813,29 @@ export function RawTable({
                     })}
                 </tbody>
             </table>
+        </div>
+    );
+}
+
+export interface RawTableProfile {
+    readonly login: string;
+    readonly profile: ProfileV1;
+    readonly axes: RadarAxes;
+    readonly color: string;
+}
+
+function ComparePeerStatuses({ peers }: { peers: readonly VsPeerState[] }) {
+    const pending = peers.filter((peer) => peer.kind !== "ready");
+    if (pending.length === 0) return null;
+    return (
+        <div className="pf-sign-peer-status" aria-label="compare profile load status">
+            {pending.map((peer) => (
+                <span className="pf-sign-peer-pill" key={peer.login}>
+                    {peer.kind === "loading" && <>pulling @{peer.login}...</>}
+                    {peer.kind === "not-found" && <>@{peer.login} has not published yet</>}
+                    {peer.kind === "error" && <>couldn't load @{peer.login}</>}
+                </span>
+            ))}
         </div>
     );
 }
@@ -1120,21 +1188,6 @@ export function groupSkills(skills: readonly ProfileSkill[]): SkillGroup[] {
 }
 
 /* ---------- not-found doubles as the join CTA ---------- */
-
-/** Shown inside SignSection when the challenger is unregistered: a compact dare
- *  echoing the dossier's stamp + command motifs. */
-function UnclaimedChallenger({ login }: { login: string }) {
-    return (
-        <div className="pf-challenge-unclaimed">
-            <span className="pf-challenge-stamp" aria-hidden="true">unanswered</span>
-            <p className="pf-challenge-line">
-                challenge issued · <strong>@{login}</strong> hasn't published a dossier yet.
-            </p>
-            <code className="pf-empty-cmd">ax profile publish</code>
-            <span className="pf-challenge-sub">one command answers the challenge - their transcripts never leave their machine.</span>
-        </div>
-    );
-}
 
 export function UnclaimedDossier({ login }: { login: string }) {
     return (

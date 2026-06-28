@@ -44,3 +44,23 @@ describe("dossier renders guardrail receipts", () => {
         expect(src).toContain("resolved or never fired");
     });
 });
+
+describe("dossier supports multi-profile radar compare", () => {
+    test("the sign section builds a profile list and renders every member archetype", () => {
+        expect(src).toContain("compareEntries");
+        expect(src).toContain("pf-sign-archetypes");
+        expect(src).toContain("archetypeFor(entry.axes, entry.profile)");
+    });
+
+    test("the raw-values table accepts N profiles and uses strict raw-value leaders", () => {
+        expect(src).toContain("rawValueLeaders");
+        expect(src).toMatch(/profiles:\s*readonly/);
+        expect(src).toContain("leaderIndexes");
+    });
+
+    test("compare load failures are rendered per peer instead of replacing the whole comparison", () => {
+        expect(src).toContain("vs.peers");
+        expect(src).toContain("pf-sign-peer-status");
+        expect(src).toContain("couldn't load");
+    });
+});
