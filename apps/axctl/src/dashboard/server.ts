@@ -243,7 +243,10 @@ export async function serveDashboard(args: string[]): Promise<void> {
         }
 
         // 60s idle timeout - recall queries currently full-scan turn excerpts
-        // (no full-text index yet) and can take 5-15s on a year-old graph.
+        // (no full-text index yet) and can take 5-15s on a year-old graph. JSON
+        // handlers also carry a per-request DB deadline (default 45s,
+        // AX_SERVE_QUERY_TIMEOUT_MS, in router.ts) so a wedged daemon returns a
+        // fast 504 instead of hanging the request forever.
         server = Bun.serve({
             port,
             // loopback by default (always-on daemon; browser studio connects locally);
