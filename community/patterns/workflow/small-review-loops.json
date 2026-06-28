@@ -1,0 +1,9 @@
+{
+  "category": "workflow",
+  "name": "small-review-loops",
+  "summary": "Review the diff in small increments before expanding scope.",
+  "evidence": {
+    "sessions": 4,
+    "confidence": 0.8
+  }
+}
