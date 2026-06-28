@@ -58,6 +58,28 @@ export interface SupervisedProcessConfig {
         readonly url: URL;
         readonly timeout: Duration.Duration;
     };
+    /**
+     * Optional liveness watchdog. The startup readiness probe only fires once;
+     * a child that comes up and later WEDGES (process alive, not answering -
+     * the recurring SurrealDB failure) never exits, so the exit->restart path
+     * never triggers and the daemon stays dead-but-running forever.
+     *
+     * When set, the supervisor runs `probe` every `interval` once the child is
+     * ready, each capped at `timeout`. On `failureThreshold` CONSECUTIVE failed
+     * or timed-out probes it classifies the child as wedged and SIGKILLs the
+     * pid, which resolves its exitCode and feeds the existing exit->restart
+     * backoff (LaunchAgent / SupervisedProcess respawn). One success resets the
+     * counter. Keyed on probe timeouts, NOT CPU - a wedged daemon can sit at any
+     * CPU level. The probe is supplied by the caller (so this module stays free
+     * of surreal/ax-serve specifics) and must be fully provided (no env): e.g.
+     * `HEAD /health` AND a tiny `RETURN 1` SQL round-trip, both with deadlines.
+     */
+    readonly liveness?: {
+        readonly probe: Effect.Effect<void, unknown>;
+        readonly interval: Duration.Duration;
+        readonly timeout: Duration.Duration;
+        readonly failureThreshold: number;
+    };
 }
 
 export interface SupervisedProcessSnapshot {
@@ -248,7 +270,59 @@ interface RunChildOptions {
         streamName: SupervisedProcessOutputStream,
         chunk: Uint8Array,
     ) => Effect.Effect<void>;
+    /**
+     * Reports each liveness watchdog outcome: a failed/timed-out probe
+     * (`wedged: false` until the threshold, `wedged: true` on the kill) or a
+     * recovery (`consecutive: 0`). No-op when no liveness config is set.
+     */
+    readonly onLivenessEvent: (info: {
+        readonly consecutive: number;
+        readonly wedged: boolean;
+    }) => Effect.Effect<void>;
 }
+
+/**
+ * Periodic liveness watchdog: probe every `interval` (each capped at
+ * `timeout`); on `failureThreshold` CONSECUTIVE failures, SIGKILL the child so
+ * its exitCode resolves and the supervisor's exit->restart path reaps the
+ * wedged daemon. A single success resets the counter. Returns when it has
+ * killed the child (or is interrupted by the run scope closing on stop/restart).
+ */
+const runLivenessWatchdog = (
+    liveness: NonNullable<SupervisedProcessConfig["liveness"]>,
+    handle: ChildProcessSpawner.ChildProcessHandle,
+    onEvent: RunChildOptions["onLivenessEvent"],
+): Effect.Effect<void> =>
+    Effect.gen(function* () {
+        const failures = yield* Ref.make(0);
+        const loop: Effect.Effect<void> = Effect.suspend(() =>
+            Effect.gen(function* () {
+                yield* Effect.sleep(liveness.interval);
+                // Any probe error OR a per-probe timeout counts as a failure.
+                const failed = yield* liveness.probe.pipe(
+                    Effect.timeout(liveness.timeout),
+                    Effect.as(false),
+                    Effect.catch(() => Effect.succeed(true)),
+                );
+                if (!failed) {
+                    yield* Ref.set(failures, 0);
+                    yield* onEvent({ consecutive: 0, wedged: false });
+                    return yield* loop;
+                }
+                const n = yield* Ref.updateAndGet(failures, (x) => x + 1);
+                const wedged = n >= liveness.failureThreshold;
+                yield* onEvent({ consecutive: n, wedged });
+                if (!wedged) return yield* loop;
+                // Wedged: force-kill so the exit->restart path reaps it. SIGKILL
+                // (not SIGTERM) because a wedged process may ignore graceful
+                // signals - the whole point is that it stopped responding.
+                yield* handle
+                    .kill({ killSignal: "SIGKILL" })
+                    .pipe(Effect.ignore);
+            }),
+        );
+        yield* loop;
+    });
 
 const runChildProcess = Effect.fn("supervisedProcess.runChildProcess")(
     function* (
@@ -291,6 +365,18 @@ const runChildProcess = Effect.fn("supervisedProcess.runChildProcess")(
             config.readiness.timeout,
         ).pipe(
             Effect.tap(() => options.onReady()),
+            // Once ready, keep probing for liveness so a wedged-but-alive child
+            // gets reaped (it would otherwise never exit). Runs in the same run
+            // scope, so stop/restart interrupts it.
+            Effect.flatMap(() =>
+                config.liveness
+                    ? runLivenessWatchdog(
+                          config.liveness,
+                          handle,
+                          options.onLivenessEvent,
+                      )
+                    : Effect.void,
+            ),
             Effect.catch((error) => options.onReadinessFailure(error)),
             Effect.forkScoped,
         );
@@ -502,6 +588,17 @@ export const makeSupervisedProcess = Effect.fn("makeSupervisedProcess")(
                             ),
                         onOutput: (streamName, chunk) =>
                             backendOutputLog.writeOutputChunk(streamName, chunk),
+                        onLivenessEvent: ({ consecutive, wedged }) =>
+                            consecutive === 0
+                                ? Effect.void // healthy probe: stay quiet
+                                : wedged
+                                  ? logError(
+                                        "liveness probe wedged; SIGKILL to force restart",
+                                        { consecutiveFailures: consecutive },
+                                    )
+                                  : logWarning("liveness probe failed", {
+                                        consecutiveFailures: consecutive,
+                                    }),
                     }).pipe(
                         Effect.provideService(
                             ChildProcessSpawner.ChildProcessSpawner,

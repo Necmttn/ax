@@ -292,3 +292,132 @@ test("stop cancels pending restart, sends SIGTERM, no respawn after stop", async
     expect(out.spawnsLater).toBe(1);
     expect(out.snap.ready).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// (d) liveness watchdog: N consecutive failed probes SIGKILL the wedged child
+//     and the exit->restart path respawns it.
+// ---------------------------------------------------------------------------
+
+const LIVENESS = {
+    interval: Duration.seconds(1),
+    timeout: Duration.millis(500),
+    failureThreshold: 3,
+} as const;
+
+test("liveness watchdog SIGKILLs a wedged child after N consecutive failures, then restarts", async () => {
+    const program = Effect.gen(function* () {
+        const stubSpawner = yield* makeStubSpawner;
+        const stubHttp = yield* makeStubHttpClient;
+        const healthy = yield* Ref.make(true);
+        // Caller-supplied probe: ok while healthy, fails (a wedge) otherwise.
+        const probe = Ref.get(healthy).pipe(
+            Effect.flatMap((h) =>
+                h ? Effect.void : Effect.fail(new Error("wedged")),
+            ),
+        );
+        const config: SupervisedProcessConfig = {
+            ...testConfig,
+            liveness: { probe, ...LIVENESS },
+        };
+
+        return yield* Effect.scoped(
+            Effect.gen(function* () {
+                const proc = yield* makeSupervisedProcess(config);
+                yield* proc.start;
+                yield* TestClock.adjust(Duration.millis(200)); // ready, watchdog armed
+                const spawnsReady = yield* stubSpawner.controller.spawnCount;
+
+                // Wedge it: every subsequent probe fails.
+                yield* Ref.set(healthy, false);
+                // 3 intervals -> 3 consecutive failures -> SIGKILL on the 3rd.
+                yield* TestClock.adjust(Duration.seconds(3));
+                yield* TestClock.adjust(Duration.millis(1)); // observe exit
+                const killsAfterWedge =
+                    yield* stubSpawner.controller.killSignals;
+                const snapAfterWedge = yield* proc.snapshot;
+
+                // Recover before the respawn so the new child stays up.
+                yield* Ref.set(healthy, true);
+                yield* TestClock.adjust(INITIAL_RESTART_DELAY); // backoff
+                yield* TestClock.adjust(Duration.millis(200)); // re-ready
+                const spawnsAfterRestart =
+                    yield* stubSpawner.controller.spawnCount;
+
+                yield* proc.stop({ timeout: Duration.seconds(1) });
+                return {
+                    spawnsReady,
+                    killsAfterWedge,
+                    snapAfterWedge,
+                    spawnsAfterRestart,
+                };
+            }),
+        ).pipe(
+            Effect.provide(stubSpawner.layer),
+            Effect.provide(stubHttp.layer),
+            Effect.provide(backendOutputLogNoopLayer),
+        );
+    });
+
+    const out = await Effect.runPromise(
+        program.pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(out.spawnsReady).toBe(1);
+    // The wedge must be reaped with SIGKILL (not just the SIGTERM of scope close).
+    expect(out.killsAfterWedge).toContain("SIGKILL");
+    expect(out.snapAfterWedge.restartAttempt).toBeGreaterThanOrEqual(1);
+    // exit->restart respawned the child.
+    expect(out.spawnsAfterRestart).toBe(2);
+});
+
+test("liveness watchdog: a recovered probe resets the counter (no kill)", async () => {
+    const program = Effect.gen(function* () {
+        const stubSpawner = yield* makeStubSpawner;
+        const stubHttp = yield* makeStubHttpClient;
+        const healthy = yield* Ref.make(true);
+        const probe = Ref.get(healthy).pipe(
+            Effect.flatMap((h) =>
+                h ? Effect.void : Effect.fail(new Error("blip")),
+            ),
+        );
+        const config: SupervisedProcessConfig = {
+            ...testConfig,
+            liveness: { probe, ...LIVENESS },
+        };
+
+        return yield* Effect.scoped(
+            Effect.gen(function* () {
+                const proc = yield* makeSupervisedProcess(config);
+                yield* proc.start;
+                yield* TestClock.adjust(Duration.millis(200)); // ready
+
+                // Two failures (below the threshold of 3)...
+                yield* Ref.set(healthy, false);
+                yield* TestClock.adjust(Duration.seconds(2));
+                // ...then recover. The counter resets, so the next failures
+                // start from zero and never reach the threshold here.
+                yield* Ref.set(healthy, true);
+                yield* TestClock.adjust(Duration.seconds(5));
+
+                const kills = yield* stubSpawner.controller.killSignals;
+                const spawns = yield* stubSpawner.controller.spawnCount;
+                const snap = yield* proc.snapshot;
+                yield* proc.stop({ timeout: Duration.seconds(1) });
+                return { kills, spawns, snap };
+            }),
+        ).pipe(
+            Effect.provide(stubSpawner.layer),
+            Effect.provide(stubHttp.layer),
+            Effect.provide(backendOutputLogNoopLayer),
+        );
+    });
+
+    const out = await Effect.runPromise(
+        program.pipe(Effect.provide(TestClock.layer())),
+    );
+
+    // No SIGKILL: failures never hit 3 in a row.
+    expect(out.kills).not.toContain("SIGKILL");
+    expect(out.spawns).toBe(1); // never restarted
+    expect(out.snap.ready).toBe(true);
+});
