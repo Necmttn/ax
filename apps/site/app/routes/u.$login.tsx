@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
-import { fetchProfile, type ProfileV1 } from "~/lib/community";
+import { fetchProfile, type ProfileV1 } from "@ax/lib/shared/community";
 import { ProfileDossier, UnclaimedDossier, LOGIN_RE, type VsState } from "~/components/profile-dossier";
 
 export const Route = createFileRoute("/u/$login")({

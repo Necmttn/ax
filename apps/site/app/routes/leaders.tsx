@@ -11,7 +11,7 @@ import {
     trendingSkills,
     type Leaderboard,
     type SkillStats,
-} from "~/lib/community";
+} from "@ax/lib/shared/community";
 
 export const Route = createFileRoute("/leaders")({
     head: () => ({

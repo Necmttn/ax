@@ -9,7 +9,7 @@ import {
     trendingPatterns,
     type PatternStats,
     type PatternStatsRow,
-} from "~/lib/community";
+} from "@ax/lib/shared/community";
 
 export const Route = createFileRoute("/patterns")({
     head: () => ({

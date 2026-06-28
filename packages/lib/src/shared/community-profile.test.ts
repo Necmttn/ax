@@ -1,4 +1,3 @@
-// apps/site/app/lib/community.test.ts
 import { describe, expect, test } from "bun:test";
 import {
     formatUsd,

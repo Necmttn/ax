@@ -10,7 +10,7 @@ import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { ProfileDossier, UnclaimedDossier, type VsState } from "~/components/profile-dossier";
 import { DuelDossier } from "~/components/profile-duel";
-import { fetchProfile, type ProfileV1 } from "~/lib/community";
+import { fetchProfile, type ProfileV1 } from "@ax/lib/shared/community";
 import { compareDecision, buildDuelOgImageUrl } from "~/lib/challenge";
 
 export const Route = createFileRoute("/u/$login_/vs/$other")({

@@ -10,8 +10,14 @@ const REPO_RAW = "https://raw.githubusercontent.com/Necmttn/ax/main";
 // Compiled outputs are served by the alchemy-provisioned community-compile
 // Worker (apps/community-worker): nightly cron + GitHub push webhook recompile
 // the moment a builder registers. Read-only, CORS-open, edge-cached 5m.
-const BOARD_API = "https://ax-community.necmttn.com";
+export const BOARD_API = "https://ax-community.necmttn.com";
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
+
+/** Known registered logins (community/users/*.json). Seeds the Studio MEMBERS
+ * roster so it is not gated on the sparse nightly-compiled leaderboard. */
+export const SEED_LOGINS = [
+    "Necmttn", "janniks", "jannik-stacks", "mitchnick", "supnim", "dariia-smyrnova",
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -305,6 +311,53 @@ export function validateProfileV1(value: unknown): ProfileV1 {
     return value as unknown as ProfileV1;
 }
 
+// --- studio member projection ---------------------------------------------------
+
+export interface MemberModel {
+    readonly name: string;
+    readonly share: number;
+    readonly cost_usd?: number;
+}
+
+/** Trimmed ProfileV1 shape consumed by the Studio Team Metrics MEMBERS tab. */
+export interface MemberProfile {
+    readonly github: string;
+    readonly generated_at: string;
+    readonly window_days: number;
+    readonly sessions: number;
+    readonly active_days: number;
+    readonly streak_days: number;
+    readonly tokens_total: number;
+    readonly cost_usd: number | null;
+    readonly models: ReadonlyArray<MemberModel>;
+    readonly harnesses: ReadonlyArray<string>;
+    readonly skills_top: ReadonlyArray<{ readonly name: string; readonly runs: number }>;
+}
+
+export function validateMemberProfile(value: unknown): MemberProfile {
+    const profile = validateProfileV1(value);
+    return {
+        github: profile.github,
+        generated_at: profile.generated_at,
+        window_days: profile.window_days,
+        sessions: profile.stats.sessions,
+        active_days: profile.stats.active_days,
+        streak_days: profile.stats.streak_days,
+        tokens_total: profile.stats.tokens.total,
+        cost_usd: profile.stats.cost_usd ?? null,
+        models: profile.stats.models.map((m) => ({
+            name: m.name,
+            share: m.share,
+            ...(m.cost_usd !== undefined ? { cost_usd: m.cost_usd } : {}),
+        })),
+        harnesses: profile.stats.harnesses,
+        skills_top: [...profile.rig.skills]
+            .sort((a, b) => b.runs - a.runs)
+            .slice(0, 5)
+            .map((s) => ({ name: s.name, runs: s.runs })),
+    };
+}
+
 // --- registration --------------------------------------------------------------
 
 export interface Registration {
@@ -535,6 +588,21 @@ async function fetchJson(url: string): Promise<unknown> {
 export async function fetchProfile(login: string): Promise<ProfileV1> {
     const reg = validateRegistration(await fetchJson(registrationRawUrl(login)));
     return validateProfileV1(await fetchJson(profileGistRawUrl(reg.github, reg.gist_id)));
+}
+
+/** registration -> gist -> validated trimmed profile. */
+export async function fetchMember(login: string): Promise<MemberProfile> {
+    const reg = validateRegistration(await fetchJson(registrationRawUrl(login)));
+    return validateMemberProfile(await fetchJson(profileGistRawUrl(reg.github, reg.gist_id)));
+}
+
+/** Fetch seed members in parallel; drop unresolved/invalid profiles. */
+export async function fetchMembers(logins: ReadonlyArray<string> = SEED_LOGINS): Promise<MemberProfile[]> {
+    const settled = await Promise.allSettled(logins.map((login) => fetchMember(login)));
+    return settled
+        .filter((result): result is PromiseFulfilledResult<MemberProfile> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .sort((a, b) => b.sessions - a.sessions);
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {
