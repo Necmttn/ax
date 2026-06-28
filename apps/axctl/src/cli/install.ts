@@ -61,6 +61,7 @@ const WATCH_LABEL = "com.necmttn.ax-watch";
 const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
 const QUOTA_REFRESH_LABEL = "com.necmttn.ax-quota-refresh";
 export const PROFILE_PUBLISH_IF_STALE_HOURS = 2;
+export const PROFILE_WIDGET_IF_STALE_HOURS = 2;
 const DB_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
@@ -180,7 +181,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=${PROFILE_PUBLISH_IF_STALE_HOURS} >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
+    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=${PROFILE_PUBLISH_IF_STALE_HOURS} >>${LOG_DIR}/watcher.log 2>&amp;1 || true; ${binPath} profile widget --if-stale=${PROFILE_WIDGET_IF_STALE_HOURS} >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
   </array>
   <key>WatchPaths</key>
   <array>
@@ -228,6 +229,33 @@ export function watcherProfilePublishDoctorCheck(plistText: string): DoctorCheck
         name: "watcher-profile-publish",
         ok: false,
         detail: `profile publish uses --if-stale=${actual}; expected --if-stale=${expected}; run 'axctl install' to refresh the watcher plist`,
+    };
+}
+
+export function watcherProfileWidgetDoctorCheck(plistText: string): DoctorCheck {
+    const expected = PROFILE_WIDGET_IF_STALE_HOURS;
+    const match = /profile widget --if-stale=(\d+)/.exec(plistText);
+    if (!match) {
+        return {
+            name: "watcher-profile-widget",
+            ok: false,
+            detail: `watcher plist is missing profile widget --if-stale=${expected}; run 'axctl install' to refresh the watcher plist`,
+        };
+    }
+
+    const actual = Number.parseInt(match[1] ?? "", 10);
+    if (actual === expected) {
+        return {
+            name: "watcher-profile-widget",
+            ok: true,
+            detail: `profile widget freshness gate: ${expected}h`,
+        };
+    }
+
+    return {
+        name: "watcher-profile-widget",
+        ok: false,
+        detail: `profile widget uses --if-stale=${actual}; expected --if-stale=${expected}; run 'axctl install' to refresh the watcher plist`,
     };
 }
 
@@ -1047,6 +1075,7 @@ export function collectDoctorReport(): Effect.Effect<
         ];
         if (watcherPlistText !== null) {
             checks.push(watcherProfilePublishDoctorCheck(watcherPlistText));
+            checks.push(watcherProfileWidgetDoctorCheck(watcherPlistText));
         }
         if (missingBuckets !== null) {
             checks.push({
