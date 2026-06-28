@@ -319,8 +319,8 @@ files are generated - never hand-edit.
 Site: `/u/<login>` renders a registered user's gist profile live;
 `/leaders` renders compiled boards + trending skills (empty-state until the
 first nightly compile). Both client-fetch from raw.githubusercontent / gist
-raw; validation in `apps/site/app/lib/community.ts` (manual - the site does
-not depend on effect).
+raw; validation in `@ax/lib/shared/community` (manual - no Effect imports, so
+the site can consume it without bundling Effect).
 
 ### Thinking analytics
 

@@ -7,7 +7,7 @@ import {
     type RadarAxes,
     type RadarAxisKey,
 } from "./radar";
-import type { ProfileInsights, ProfileV1 } from "./community";
+import type { ProfileInsights, ProfileV1 } from "@ax/lib/shared/community";
 
 /* ---------- fixtures ---------- */
 

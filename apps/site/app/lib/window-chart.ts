@@ -7,7 +7,7 @@
  * Everything here is fed untrusted gist data; callers still render the result
  * as text only.
  */
-import type { ProfileDailyRow, ProfileModel, ProfileSkill, WorkflowArc } from "./community";
+import type { ProfileDailyRow, ProfileModel, ProfileSkill, WorkflowArc } from "@ax/lib/shared/community";
 
 /**
  * Stable model -> colour assignment. The top model (by window share) is always

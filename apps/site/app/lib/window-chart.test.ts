@@ -9,7 +9,7 @@ import {
     OTHER_COLOR,
     OTHER_NAME,
 } from "./window-chart";
-import type { ProfileDailyRow, ProfileModel, ProfileSkill, WorkflowArc } from "./community";
+import type { ProfileDailyRow, ProfileModel, ProfileSkill, WorkflowArc } from "@ax/lib/shared/community";
 
 describe("buildModelColors", () => {
     test("top model is green, rest follow the ramp", () => {

@@ -9,7 +9,7 @@
  *
  * Replaces the nightly `community-nightly.yml` GitHub Action (kept as a manual
  * fallback). The site reads the board cross-origin from the Worker's custom
- * domain (see apps/site/app/lib/community.ts).
+ * domain (see @ax/lib/shared/community).
  *
  * Deploy:  bun alchemy deploy        (from repo root)
  * Destroy: bun alchemy destroy

@@ -25,7 +25,7 @@ import {
     type RadarAxisKey,
 } from "~/lib/radar";
 import { duelPath, duelXIntent } from "~/lib/challenge";
-import { type ProfileV1 } from "~/lib/community";
+import { type ProfileV1 } from "@ax/lib/shared/community";
 import { buildModelColors, sortSkillsByLeverage } from "~/lib/window-chart";
 import {
     Avatar,

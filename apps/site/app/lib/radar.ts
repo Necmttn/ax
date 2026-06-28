@@ -12,7 +12,7 @@
  * reimplemented here as small pure helpers.
  */
 
-import type { ProfileV1 } from "./community";
+import type { ProfileV1 } from "@ax/lib/shared/community";
 
 export const RADAR_AXIS_KEYS = [
     "DEPTH",

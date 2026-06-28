@@ -2,7 +2,7 @@
 //
 // Browser-side adoption stats for the unlisted /status page. Mirrors the
 // zero-consent signals from scripts/adoption.ts, but fetched live & client-side
-// (like app/lib/community.ts) so the page is always current with no backend.
+// (like @ax/lib/shared/community) so the page is always current with no backend.
 //
 // Sources (all CORS-enabled, unauthenticated):
 //   - api.github.com/repos/<repo>            stars, forks, watchers

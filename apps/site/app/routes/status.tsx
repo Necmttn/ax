@@ -7,7 +7,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
-import { formatCompact } from "~/lib/community";
+import { formatCompact } from "@ax/lib/shared/community";
 import { fetchAdoption, type AdoptionStats } from "~/lib/adoption";
 
 export const Route = createFileRoute("/status")({

@@ -16,7 +16,7 @@ import { api } from "../api.ts";
 import type { WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import type { SessionListRow } from "@ax/lib/shared/api-contract";
 import { fmtCount } from "@ax/lib/shared/formatters";
-import { fetchMembers, type MemberProfile } from "../community.ts";
+import { fetchMembers, type MemberProfile } from "@ax/lib/shared/community";
 import { BarChart } from "./viz.tsx";
 
 // ---- range model ----------------------------------------------------------

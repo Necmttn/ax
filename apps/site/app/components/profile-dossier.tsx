@@ -19,7 +19,7 @@ import {
     type ProfileHighlights,
     type ProfileInsights,
     type ProfileSkill,
-} from "~/lib/community";
+} from "@ax/lib/shared/community";
 import {
     buildModelColors,
     buildDayColumns,
