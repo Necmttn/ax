@@ -395,6 +395,58 @@ describe("fetchSessionChurnSummary", () => {
         expect(seenSql[0]).not.toContain("session_metrics");
     });
 
+    test("secondary scans are bounded to sessions with failed commands or blocking hooks", async () => {
+        const seenSql: string[] = [];
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            seenSql,
+            base: [
+                { session: "session:`cmd-hot`", source: "codex" },
+                { session: "session:`hook-hot`", source: "claude" },
+                { session: "session:`quiet`", source: "codex" },
+            ],
+            health: [
+                { session: "session:`cmd-hot`", task_label: "command failure" },
+                { session: "session:`hook-hot`", task_label: "hook failure" },
+                { session: "session:`quiet`", task_label: "quiet work" },
+            ],
+            produced: [
+                { session: "session:`cmd-hot`", commit: "commit:`c1`" },
+                { session: "session:`quiet`", commit: "commit:`c2`" },
+            ],
+            touched: [
+                { commit: "commit:`c1`", file: "file:`f1`", additions: 8, deletions: 1 },
+                { commit: "commit:`c2`", file: "file:`f2`", additions: 99, deletions: 9 },
+            ],
+            edits: [
+                { session: "session:`cmd-hot`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`hook-hot`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`quiet`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+            ],
+            outcomes: [
+                { session: "session:`cmd-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+            ],
+            hooks: [
+                { session: "session:`hook-hot`", ts: "2026-06-11T00:02:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
+            ],
+        }))));
+
+        expect(summary.hotSessions.map((row) => row.session)).toEqual(["cmd-hot", "hook-hot"]);
+        expect(summary.hotSessions.find((row) => row.session === "quiet")).toBeUndefined();
+
+        const candidateSql = seenSql.find((sql) => sql.includes("FROM command_outcome") && sql.includes('kind = "expected_feedback"'))!;
+        expect(candidateSql).toContain("quiet");
+        const healthSql = seenSql.find((sql) => sql.includes("FROM session_health"))!;
+        const producedSql = seenSql.find((sql) => sql.includes("FROM produced"))!;
+        const editSql = seenSql.find((sql) => sql.includes("FROM tool_call") && sql.includes("input_json"))!;
+        expect(healthSql).not.toContain("quiet");
+        expect(producedSql).not.toContain("quiet");
+        expect(editSql).not.toContain("quiet");
+    });
+
     test("limit only caps hot sessions after ranking, not the base session scan", async () => {
         const seenSql: string[] = [];
         const summary = await Effect.runPromise(fetchSessionChurnSummary({
@@ -568,7 +620,9 @@ describe("fetchSessionChurnSummary", () => {
             ],
         }))));
 
-        const outcomeSql = seenSql.find((s) => s.includes("FROM command_outcome"))!;
+        const outcomeSql = seenSql.find((s) =>
+            s.includes("FROM command_outcome") && !s.includes('kind = "expected_feedback"')
+        )!;
         expect(outcomeSql).not.toContain("tool_call.command_text");
         expect(outcomeSql).not.toContain('kind = "expected_feedback"');
         expect(summary.hotSessions[0]).toMatchObject({

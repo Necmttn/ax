@@ -297,12 +297,22 @@ ${where};`))?.[0] ?? [];
             return computeSessionChurn([], new Map(), new Map(), options);
         }
 
+        const candidateSessionIds = yield* fetchChurnCandidateSessionIds(sessionIds);
+        if (candidateSessionIds.length === 0) {
+            return computeSessionChurn([], new Map(), new Map(), options);
+        }
+
+        const candidateSessions = new Set(candidateSessionIds);
+        const candidateSourceBySession = new Map(
+            [...sourceBySession].filter(([session]) => candidateSessions.has(session)),
+        );
+
         const [health, landed, edits, commandEvents, hookEvents] = yield* Effect.all([
-            fetchSessionHealthMap(sessionIds),
-            fetchLandedLocBySession(sessionIds),
-            fetchEditEvents(sessionIds, sourceBySession),
-            fetchCommandOutcomeEvents(sessionIds, sourceBySession),
-            fetchHookEvents(sessionIds, sourceBySession),
+            fetchSessionHealthMap(candidateSessionIds),
+            fetchLandedLocBySession(candidateSessionIds),
+            fetchEditEvents(candidateSessionIds, candidateSourceBySession),
+            fetchCommandOutcomeEvents(candidateSessionIds, candidateSourceBySession),
+            fetchHookEvents(candidateSessionIds, candidateSourceBySession),
         ], { concurrency: 5 });
 
         const summary = computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed.bySession, health, {
@@ -320,6 +330,55 @@ ${where};`))?.[0] ?? [];
             }),
         );
         return { ...summary, hotSessions };
+    });
+
+const fetchChurnCandidateSessionIds = (
+    sessionIds: readonly string[],
+): Effect.Effect<string[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (sessionIds.length === 0) return [];
+        const db = yield* SurrealClient;
+        const chunks = chunked(sessionIds, IN_CHUNK);
+
+        const [commandResults, hookResults] = yield* Effect.all([
+            Effect.all(
+                chunks.map((ids) =>
+                    db.query<[Array<Record<string, unknown>>]>(
+                        // De-dupe in JS instead of GROUP BY session; grouping
+                        // non-key fields is the slow path on large SurrealDB tables.
+                        `SELECT type::string(session) AS session`
+                        + ` FROM command_outcome`
+                        + ` WHERE session IN [${sessionRefList(ids)}]`
+                        + ` AND (kind = "expected_feedback" OR status = "error");`,
+                    ),
+                ),
+                { concurrency: 4 },
+            ),
+            Effect.all(
+                chunks.map((ids) =>
+                    db.query<[Array<Record<string, unknown>>]>(
+                        `SELECT type::string(session) AS session`
+                        + ` FROM hook_command_invocation`
+                        + ` WHERE session IN [${sessionRefList(ids)}]`
+                        + ` AND (provider_status = "blocking_error"`
+                        + ` OR effect = "blocked"`
+                        + ` OR (exit_code IS NOT NONE AND exit_code != 0));`,
+                    ),
+                ),
+                { concurrency: 4 },
+            ),
+        ], { concurrency: 2 });
+
+        const candidates = new Set<string>();
+        const addRows = (rows: readonly Record<string, unknown>[]) => {
+            for (const row of rows) {
+                const session = cleanSessionId(String(row.session ?? ""));
+                if (session.length > 0) candidates.add(session);
+            }
+        };
+        for (const batch of commandResults) addRows(batch?.[0] ?? []);
+        for (const batch of hookResults) addRows(batch?.[0] ?? []);
+        return sessionIds.filter((session) => candidates.has(session));
     });
 
 export const fetchLandedLocBySession = (
@@ -426,7 +485,7 @@ const fetchEditEvents = (
             if (!isEditTool(call)) continue;
             const session = cleanSessionId(String(row.session ?? ""));
             const tsMs = msOrNull(row.ts);
-            if (session.length === 0 || tsMs === null) continue;
+            if (session.length === 0 || !sourceBySession.has(session) || tsMs === null) continue;
             const inputJson = strOrNull(row.input_json);
             const delta = isApplyPatchCall(call)
                 ? applyPatchDelta(inputJson)
@@ -473,6 +532,7 @@ const fetchCommandOutcomeEvents = (
         const events: ChurnEvent[] = [];
         const pending: PendingOutcome[] = [];
         const pushEvent = (session: string, tsMs: number, eventKind: PendingOutcome["eventKind"], check: string) => {
+            if (!sourceBySession.has(session)) return;
             events.push({
                 session,
                 source: sourceBySession.get(session) ?? null,
@@ -494,7 +554,7 @@ const fetchCommandOutcomeEvents = (
                 : status === "ok"
                     ? "verification_pass" as const
                     : null;
-            if (eventKind === null || session.length === 0 || tsMs === null) continue;
+            if (eventKind === null || session.length === 0 || !sourceBySession.has(session) || tsMs === null) continue;
 
             const norm = strOrNull(row.command_norm);
             const check = checkFamilyFromCommand(norm);
@@ -557,7 +617,7 @@ const fetchHookEvents = (
             // Classify by the hook's command only - hook_name keywords (e.g.
             // "bun-test-blocking") must not register as verification events.
             const check = normalizedCheckFrom(row.command);
-            if (session.length === 0 || tsMs === null || check === null) continue;
+            if (session.length === 0 || !sourceBySession.has(session) || tsMs === null || check === null) continue;
             const providerStatus = strOrNull(row.provider_status);
             const effect = strOrNull(row.effect);
             const exitCode = exitCodeOf(row.exit_code);
