@@ -21,6 +21,7 @@ import { memoryCommand, axMemoryRuntime } from "./commands/ax-memory.ts";
 import { quotaCommand, quotaRuntime } from "./commands/quota.ts";
 import { dojoCommand, dojoRuntime } from "./commands/dojo.ts";
 import { profileCommand, axProfileRuntime } from "./commands/profile.ts";
+import { contributeCommand, contributeRuntime } from "./commands/contribute.ts";
 import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispatches.ts";
 import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
 import { directivesRootCommand, axDirectivesRuntime } from "./commands/ax-directives.ts";
@@ -93,6 +94,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...quotaRuntime,
     ...dojoRuntime,
     ...axProfileRuntime,
+    ...contributeRuntime,
     ...axDispatchesRuntime,
     ...axRoutingRuntime,
     ...axDirectivesRuntime,
@@ -142,6 +144,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     quotaCommand,
     dojoCommand,
     profileCommand,
+    contributeCommand,
     dispatchesRootCommand,
     routingRootCommand,
     directivesRootCommand,

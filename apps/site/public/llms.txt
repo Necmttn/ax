@@ -54,6 +54,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax profile publish` - share it: consent-gated public gist (updated in place by the watcher) + one-time community registration PR; `ax profile unpublish` reverses it
 - `ax profile widget` - consent-gated GitHub profile README block: installs/replaces only `<!--START_SECTION:ax-->...<!--END_SECTION:ax-->`, embeds the `/og-profile/<login>` card, and refreshes from the watcher after first consent
 - `ax profile interview` - emit a brief; an agent interviews you (draft-then-confirm) for the user-authored layer of your profile: secret-weapon setup, per-skill summaries, philosophy, wins. `ax profile interview submit` validates the JSON into ~/.ax/profile-highlights.json; `ax profile publish` folds it into your gist
+- `ax contribute pattern [--pattern=<index|category/name|name>|--fresh]` - promote one of your profile taste patterns, or author one through structured prompts, into a human-reviewed `community/patterns/<category>/<name>.json` PR
 - `ax wrapped generate / publish` - agent-authored Wrapped recap cards: generate emits a mining brief, publish replaces the card deck the dashboard landing serves
 
 ### Self-improvement loop

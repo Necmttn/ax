@@ -1,6 +1,6 @@
 # ax community
 
-Profiles, leaderboards, and (soon) shared patterns/skills/hooks for ax users.
+Profiles, leaderboards, and shared patterns/skills/hooks for ax users.
 Spec: docs/superpowers/specs/2026-06-12-ax-profiles-design.md
 
 ## users/
@@ -13,6 +13,18 @@ Registration is opened automatically by `ax profile publish` (fork + PR).
 PRs touching only your own `users/<login>.json` are schema-checked and
 auto-merged by CI; the profile data itself lives in your gist and updates
 without further PRs.
+
+## patterns/
+
+One file per shared taste pattern:
+`patterns/<category>/<name>.json`
+
+The file is exactly one `ProfileV1.taste.patterns[]` entry. `ax contribute
+pattern` opens the fork PR: by default it shows a picker over your local
+profile taste patterns; `--fresh` asks for structured fields and validates the
+same schema before opening a PR. Pattern PRs are schema-checked by CI but stay
+human-reviewed; filename collisions fail validation so contributors engage the
+existing pattern instead of duplicating it.
 
 ## Compiled outputs (nightly)
 

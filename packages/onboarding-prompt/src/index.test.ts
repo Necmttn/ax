@@ -32,6 +32,7 @@ describe("onboarding prompt - canonical content", () => {
         // The privacy guard must explicitly fence off outbound profile commands.
         expect(AGENT_ONBOARDING_PROMPT).toContain("Do NOT run `ax profile publish`");
         expect(AGENT_ONBOARDING_PROMPT).toContain("or `ax profile widget`");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("or `ax contribute pattern`");
     });
 
     test("body carries the value-tour and parallel-insight steps", () => {

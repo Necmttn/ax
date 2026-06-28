@@ -28,6 +28,7 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "quota",
     "dojo",
     "profile",
+    "contribute",
     "dispatches",
     "routing",
     "directives",

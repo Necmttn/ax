@@ -4,8 +4,9 @@
 #   - "Allow auto-merge" is enabled on the repo.
 # To keep `validate` safe as a required check it must report on EVERY PR -
 # path-filtered required checks wedge unrelated PRs in "expected" forever.
-# So this workflow runs on all PRs and passes trivially when no
-# community/users files are touched.
+# So this workflow runs on all PRs and passes trivially when no community data
+# files are touched. It also validates community/patterns/ contributions under
+# the same required `validate` context, but those PRs stay human-reviewed.
 #
 # The ruleset requires a SECOND check, `verify` (the code CI gate in ci.yml,
 # on `pull_request`). That never runs on a first-time contributor's fork PR
@@ -35,10 +36,11 @@ jobs:
       - name: Classify changed files
         id: scope
         # Modes:
-        #   none  - no community/users files touched -> trivially pass
-        #   clean - ONLY community/users/<login>.json files -> validate + auto-merge
-        #   mixed - community/users files alongside anything else (or
-        #           non-conforming filenames) -> human review comment
+        #   none           - no community data files touched -> trivially pass
+        #   users-clean    - ONLY community/users/<login>.json files -> validate + auto-merge
+        #   patterns-clean - ONLY community/patterns/<category>/<name>.json files -> validate, human-reviewed
+        #   mixed          - community data files alongside anything else (or
+        #                    non-conforming filenames) -> human review comment
         # gh pr diff is API-based: the checkouts below are fetch-depth:1 so a
         # local base...head diff would fail with "fatal: bad object".
         # Filename filter is strict-lowercase (grep -E; plain grep treats `+`
@@ -50,17 +52,24 @@ jobs:
           set -euo pipefail
           changed=$(gh pr diff ${{ github.event.pull_request.number }} --name-only --repo ${{ github.repository }})
           echo "$changed"
-          community=$(echo "$changed" | grep -E '^community/users/' || true)
+          users=$(echo "$changed" | grep -E '^community/users/' || true)
+          patterns=$(echo "$changed" | grep -E '^community/patterns/' || true)
+          community=$(echo "$changed" | grep -E '^community/(users|patterns)/' || true)
           if [ -z "$community" ]; then
             echo "mode=none" >> "$GITHUB_OUTPUT"
-            echo "no community/users files - passing trivially"
-          elif echo "$changed" | grep -Ev '^community/users/[a-z0-9-]+\.json$' | grep -q .; then
-            echo "mode=mixed" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=clean" >> "$GITHUB_OUTPUT"
+            echo "no community data files - passing trivially"
+          elif [ -n "$users" ] && [ -z "$patterns" ] && ! echo "$changed" | grep -Ev '^community/users/[a-z0-9-]+\.json$' | grep -q .; then
+            echo "mode=users-clean" >> "$GITHUB_OUTPUT"
             echo "files<<EOF" >> "$GITHUB_OUTPUT"
             echo "$changed" | sed 's|^|pr-head/|' >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
+          elif [ -n "$patterns" ] && [ -z "$users" ] && ! echo "$changed" | grep -Ev '^community/patterns/[a-z0-9-]+/[a-z0-9-]+\.json$' | grep -q .; then
+            echo "mode=patterns-clean" >> "$GITHUB_OUTPUT"
+            echo "files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$changed" | sed 's|^|pr-head/|' >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=mixed" >> "$GITHUB_OUTPUT"
           fi
 
       # pull_request_target runs with base-repo secrets; check out the PR
@@ -68,27 +77,34 @@ jobs:
       # and run OUR validator from the base ref. The pr-head/ checkout is
       # DATA-ONLY: nothing inside it is executed, installed, or sourced.
       - uses: actions/checkout@v4
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean' || steps.scope.outputs.mode == 'patterns-clean'
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - uses: actions/checkout@v4
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean' || steps.scope.outputs.mode == 'patterns-clean'
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-head
 
       - uses: oven-sh/setup-bun@v2
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean' || steps.scope.outputs.mode == 'patterns-clean'
         with:
           bun-version: "1.3.10"
 
       - name: Validate registrations
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean'
         run: |
           bun install --frozen-lockfile
           echo "${{ steps.scope.outputs.files }}" | xargs bun scripts/validate-community-users.ts \
             --author="${{ github.event.pull_request.user.login }}"
+
+      - name: Validate community patterns
+        if: steps.scope.outputs.mode == 'patterns-clean'
+        run: |
+          bun install --frozen-lockfile
+          echo "${{ steps.scope.outputs.files }}" | xargs bun scripts/validate-community-patterns.ts \
+            --base=. --head=pr-head
 
       # Validation passed (a failed validator fails the job before here), and a
       # `clean` PR is community/users/<login>.json files ONLY - no code - so the
@@ -97,7 +113,7 @@ jobs:
       # later push that adds code re-classifies to `mixed`, this step is skipped,
       # and real `verify` is required again (no TOCTOU bypass).
       - name: Satisfy the verify gate for data-only registrations
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -107,7 +123,7 @@ jobs:
             -f description="data-only community registration - code CI not applicable"
 
       - name: Auto-merge
-        if: steps.scope.outputs.mode == 'clean'
+        if: steps.scope.outputs.mode == 'users-clean'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --repo ${{ github.repository }}
@@ -118,4 +134,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
-            --body "This PR touches community/users/ alongside other files (or non-conforming filenames), so it needs normal human review (no auto-merge)."
+            --body "This PR touches community/users/ or community/patterns/ alongside other files (or non-conforming filenames), so it needs normal human review (no auto-merge)."
