@@ -17,14 +17,24 @@
  * Tables used (read-only): skill { name, scope, bytes, description,
  *   content_hash, dir_path }.
  */
+import { homedir } from "node:os";
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { surrealValue } from "@ax/lib/shared/surql";
+import { guidanceConfigAuthorityHashesForScan } from "../ingest/claude-config.ts";
 import { normalizeLastUsed, UNUSED_RECENT_SQL, UNUSED_SUMMARY_SQL } from "./unused-skills.ts";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 
 const WINDOW_DAYS = 30;
 const CHARS_PER_TOKEN = 4;
 const toTokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
+
+// Measured startup sources come from disk/DB metadata. These constants cover
+// context that the harness injects but does not expose as text; the API marks
+// their rows `estimated` so the studio does not present them as exact counts.
+export const HARNESS_BASE_PROMPT_TOKENS = 4_200;
+export const MCP_TOOL_DEFINITION_TOKENS_PER_SERVER = 650;
 
 /** Other-harness tool catalogs (codex/cursor/opencode/pi) and similar - not
  *  part of a Claude Code session's context, tracked separately. */
@@ -80,11 +90,36 @@ export interface SourceBudgetRow {
     readonly reclaimable_index_tokens: number;  // always-loaded tokens from this source's dead weight
 }
 
+export type StartupBudgetCategory = "skills" | "claude_md" | "harness_base" | "mcp_tools";
+
+export interface StartupBudgetSourceRow {
+    readonly source: string;
+    readonly category: StartupBudgetCategory;
+    readonly scope: string | null;
+    readonly entries: number;
+    readonly chars: number;
+    readonly tokens: number;
+    readonly estimated: boolean;
+    readonly note: string;
+}
+
+export interface GuidanceConfigBudgetRow {
+    readonly kind: string;
+    readonly scope: string;
+    readonly safe_path: string;
+    readonly authority_hash: string;
+    readonly bytes: number;
+    readonly token_estimate: number;
+    readonly mcp_server_names_json: string | null;
+}
+
 export interface ContextBudgetResult {
     /** Distinct skills (deduped by content_hash), heaviest body first. */
     readonly skills: ReadonlyArray<SkillBudgetRow>;
     /** Per-source rollup, heaviest index first. */
     readonly sources: ReadonlyArray<SourceBudgetRow>;
+    /** Full turn-zero startup footprint slices; skills are one row here. */
+    readonly startupSources: ReadonlyArray<StartupBudgetSourceRow>;
     /** content-type distribution of tool outputs (token-weighted). */
     readonly contentTypes: ContentTypeBreakdown;
     readonly totals: {
@@ -100,6 +135,11 @@ export interface ContextBudgetResult {
         readonly reclaimable_index_tokens: number;
         readonly reclaimable_skills: number;
         readonly verbose_skills: number;
+        /** Full turn-zero startup estimate across skills + config + harness/MCP estimates. */
+        readonly startup_chars: number;
+        readonly startup_tokens: number;
+        readonly measured_startup_tokens: number;
+        readonly estimated_startup_tokens: number;
         /** Recency window (days) used to judge "unused". */
         readonly window_days: number;
     };
@@ -109,6 +149,132 @@ const BUDGET_SQL = `
 SELECT id, name, scope, bytes, string::len(description ?? "") AS desc_len, content_hash, dir_path
 FROM skill;
 `;
+
+const CONFIG_BUDGET_SQL = (authorityHashes: readonly string[]) => `
+SELECT kind, scope, safe_path, authority_hash, bytes, token_estimate, mcp_server_names_json
+FROM guidance_config_artifact
+WHERE provider = "claude"
+AND authority_hash IN ${surrealValue(authorityHashes)};
+`;
+
+const isClaudeMdBudgetRow = (row: GuidanceConfigBudgetRow): boolean =>
+    (row.kind === "memory" || row.kind === "guidance_doc") &&
+    row.safe_path.endsWith("/CLAUDE.md");
+
+const claudeMdSource = (scope: string): string => {
+    if (scope === "user") return "CLAUDE.md · global";
+    if (scope === "project") return "CLAUDE.md · project";
+    return `CLAUDE.md · ${scope}`;
+};
+
+const parseJsonStringArray = (raw: string | null): string[] => {
+    if (raw === null) return [];
+    const parsed = safeJsonParse<unknown>(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+};
+
+export const buildStartupBudgetSources = (
+    input: {
+        readonly skillIndexChars: number;
+        readonly skillIndexTokens: number;
+        readonly skillCount: number;
+        readonly guidanceRows: ReadonlyArray<GuidanceConfigBudgetRow>;
+        readonly authorityHashes?: ReadonlySet<string> | undefined;
+    },
+): {
+    readonly sources: ReadonlyArray<StartupBudgetSourceRow>;
+    readonly totals: Pick<
+        ContextBudgetResult["totals"],
+        "startup_chars" | "startup_tokens" | "measured_startup_tokens" | "estimated_startup_tokens"
+    >;
+} => {
+    const sources: StartupBudgetSourceRow[] = [];
+    const guidanceRows = input.authorityHashes === undefined
+        ? input.guidanceRows
+        : input.guidanceRows.filter((row) => input.authorityHashes?.has(row.authority_hash) ?? false);
+    if (input.skillIndexTokens > 0 || input.skillCount > 0) {
+        sources.push({
+            source: "Skills index",
+            category: "skills",
+            scope: "claude",
+            entries: input.skillCount,
+            chars: input.skillIndexChars,
+            tokens: input.skillIndexTokens,
+            estimated: false,
+            note: "Skill names and descriptions loaded before the first turn.",
+        });
+    }
+
+    const claudeMd = new Map<string, StartupBudgetSourceRow>();
+    for (const row of guidanceRows.filter(isClaudeMdBudgetRow)) {
+        const source = claudeMdSource(row.scope);
+        const prev = claudeMd.get(source);
+        const bytes = Number(row.bytes ?? 0);
+        const tokens = Number(row.token_estimate ?? toTokens(bytes));
+        claudeMd.set(source, {
+            source,
+            category: "claude_md",
+            scope: row.scope,
+            entries: (prev?.entries ?? 0) + 1,
+            chars: (prev?.chars ?? 0) + bytes,
+            tokens: (prev?.tokens ?? 0) + tokens,
+            estimated: false,
+            note: row.scope === "user"
+                ? "Global Claude memory file loaded into Claude Code sessions."
+                : "Project CLAUDE.md loaded into sessions for this checkout.",
+        });
+    }
+    sources.push(...claudeMd.values());
+
+    sources.push({
+        source: "Harness base prompt",
+        category: "harness_base",
+        scope: "claude/codex",
+        entries: 1,
+        chars: HARNESS_BASE_PROMPT_TOKENS * CHARS_PER_TOKEN,
+        tokens: HARNESS_BASE_PROMPT_TOKENS,
+        estimated: true,
+        note: "Best-effort constant for the built-in Claude Code/Codex base instructions.",
+    });
+
+    const mcpServers = new Set<string>();
+    for (const row of guidanceRows) {
+        for (const name of parseJsonStringArray(row.mcp_server_names_json)) mcpServers.add(name);
+    }
+    if (mcpServers.size > 0) {
+        const tokens = mcpServers.size * MCP_TOOL_DEFINITION_TOKENS_PER_SERVER;
+        sources.push({
+            source: "MCP tool definitions",
+            category: "mcp_tools",
+            scope: "claude",
+            entries: mcpServers.size,
+            chars: tokens * CHARS_PER_TOKEN,
+            tokens,
+            estimated: true,
+            note: "Estimated schemas injected for configured MCP servers; raw schemas are not stored.",
+        });
+    }
+
+    const startup_chars = sources.reduce((n, s) => n + s.chars, 0);
+    const startup_tokens = sources.reduce((n, s) => n + s.tokens, 0);
+    const measured_startup_tokens = sources
+        .filter((s) => !s.estimated)
+        .reduce((n, s) => n + s.tokens, 0);
+    const estimated_startup_tokens = sources
+        .filter((s) => s.estimated)
+        .reduce((n, s) => n + s.tokens, 0);
+
+    return {
+        sources,
+        totals: {
+            startup_chars,
+            startup_tokens,
+            measured_startup_tokens,
+            estimated_startup_tokens,
+        },
+    };
+};
 
 /** Prefer a non-namespaced / non-project scope as the canonical home of a
  *  deduped skill (user/plugin/command over the project mirror). */
@@ -121,15 +287,21 @@ const idStr = (v: unknown) => String(v ?? "");
 export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
     function* () {
         const db = yield* SurrealClient;
+        const authorityHashes = guidanceConfigAuthorityHashesForScan({
+            home: process.env.HOME ?? homedir(),
+            projectRoot: process.cwd(),
+        });
         // budget rows + bulk usage (per skill id) over the invoked edge table,
         // computed deref-free - see unused-skills.ts for the perf rationale.
-        const [rawRes, summaryRes, recentRes, contentTypes] = yield* Effect.all([
+        const [rawRes, summaryRes, recentRes, configRes, contentTypes] = yield* Effect.all([
             db.query<[Array<Record<string, unknown>>]>(BUDGET_SQL),
             db.query<[Array<Record<string, unknown>>]>(UNUSED_SUMMARY_SQL),
             db.query<[Array<Record<string, unknown>>]>(UNUSED_RECENT_SQL(WINDOW_DAYS)),
+            db.query<[Array<GuidanceConfigBudgetRow>]>(CONFIG_BUDGET_SQL(authorityHashes)),
             fetchContentTypeBreakdown(),
         ], { concurrency: 4 });
         const raw = rawRes?.[0] ?? [];
+        const guidanceRows = configRes?.[0] ?? [];
 
         const usageById = new Map<string, { uses: number; last: string | null }>();
         for (const r of summaryRes?.[0] ?? []) {
@@ -208,6 +380,14 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
         const sources = [...srcMap.values()].sort((a, b) => b.index_chars - a.index_chars);
 
         const cc = skills.filter((s) => !s.is_tool);
+        const startup = buildStartupBudgetSources({
+            skillIndexChars: cc.reduce((n, s) => n + s.index_chars, 0),
+            skillIndexTokens: toTokens(cc.reduce((n, s) => n + s.index_chars, 0)),
+            skillCount: cc.length,
+            guidanceRows,
+            authorityHashes: new Set(authorityHashes),
+        });
+
         const totals = {
             skills: skills.length,
             index_chars: skills.reduce((n, s) => n + s.index_chars, 0),
@@ -219,10 +399,11 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
             reclaimable_index_tokens: cc.filter((s) => s.dead_weight).reduce((n, s) => n + s.index_tokens, 0),
             reclaimable_skills: cc.filter((s) => s.dead_weight).length,
             verbose_skills: cc.filter((s) => s.verbose).length,
+            ...startup.totals,
             window_days: WINDOW_DAYS,
         };
 
-        return { skills, sources, totals, contentTypes } satisfies ContextBudgetResult;
+        return { skills, sources, startupSources: startup.sources, totals, contentTypes } satisfies ContextBudgetResult;
     },
 );
 
@@ -231,6 +412,7 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
 // ---------------------------------------------------------------------------
 
 export interface SkillDriftRow {
+    readonly kind: "skill" | "claude_md";
     readonly name: string;
     readonly scope: string;
     readonly change: string;        // 'added' | 'changed'
@@ -253,28 +435,80 @@ ORDER BY ts DESC
 LIMIT ${Math.max(1, Math.trunc(limit))};
 `;
 
+const GUIDANCE_DRIFT_SQL = (limit: number) => `
+SELECT source_path, scope, change, content_hash, prev_hash, bytes, prev_bytes, observed_at
+FROM guidance_revision
+WHERE string::ends_with(source_path, "CLAUDE.md")
+AND change IS NOT NONE
+ORDER BY observed_at DESC
+LIMIT ${Math.max(1, Math.trunc(limit))};
+`;
+
+const isoTimestamp = (value: unknown): string =>
+    value instanceof Date ? value.toISOString() : String(value ?? "");
+
+const guidanceDriftName = (scope: string): string => {
+    if (scope === "user") return "CLAUDE.md · global";
+    if (scope === "project") return "CLAUDE.md · project";
+    return `CLAUDE.md · ${scope}`;
+};
+
+export const buildContextDriftRows = (
+    input: {
+        readonly skillRows: ReadonlyArray<Record<string, unknown>>;
+        readonly guidanceRows: ReadonlyArray<Record<string, unknown>>;
+        readonly limit: number;
+    },
+): SkillDriftRow[] => {
+    const skillChanges: SkillDriftRow[] = input.skillRows.map((row) => {
+        const bytes = Number(row.bytes ?? 0);
+        const prev_bytes = Number(row.prev_bytes ?? 0);
+        const change = String(row.change ?? "changed");
+        const byte_delta = change === "added" ? 0 : bytes - prev_bytes;
+        return {
+            kind: "skill",
+            name: String(row.name ?? "(unnamed)"),
+            scope: String(row.scope ?? ""),
+            change,
+            ts: isoTimestamp(row.ts),
+            bytes,
+            prev_bytes,
+            byte_delta,
+            token_delta: Math.round(byte_delta / CHARS_PER_TOKEN),
+        };
+    });
+    const guidanceChanges: SkillDriftRow[] = input.guidanceRows.map((row) => {
+        const bytes = Number(row.bytes ?? 0);
+        const prev_bytes = Number(row.prev_bytes ?? 0);
+        const change = String(row.change ?? "changed");
+        const byte_delta = change === "added" ? 0 : bytes - prev_bytes;
+        const scope = String(row.scope ?? "");
+        return {
+            kind: "claude_md",
+            name: guidanceDriftName(scope),
+            scope,
+            change,
+            ts: isoTimestamp(row.observed_at),
+            bytes,
+            prev_bytes,
+            byte_delta,
+            token_delta: Math.round(byte_delta / CHARS_PER_TOKEN),
+        };
+    });
+    return [...skillChanges, ...guidanceChanges]
+        .sort((a, b) => (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0))
+        .slice(0, Math.max(1, Math.trunc(input.limit)));
+};
+
 export const fetchSkillDrift = Effect.fn("queries.fetchSkillDrift")(
     function* (opts: { readonly limit: number }) {
         const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(DRIFT_SQL(opts.limit))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const [skillRows, guidanceRows] = yield* Effect.all([
+            db.query<[Array<Record<string, unknown>>]>(DRIFT_SQL(opts.limit)).pipe(Effect.map((r) => r?.[0] ?? [])),
+            db.query<[Array<Record<string, unknown>>]>(GUIDANCE_DRIFT_SQL(opts.limit)).pipe(Effect.map((r) => r?.[0] ?? [])),
+        ], { concurrency: 2 });
 
-        const changes: SkillDriftRow[] = rows.map((row) => {
-            const bytes = Number(row.bytes ?? 0);
-            const prev_bytes = Number(row.prev_bytes ?? 0);
-            const byte_delta = row.change === "added" ? 0 : bytes - prev_bytes;
-            const ts = row.ts instanceof Date ? row.ts.toISOString() : String(row.ts ?? "");
-            return {
-                name: String(row.name ?? "(unnamed)"),
-                scope: String(row.scope ?? ""),
-                change: String(row.change ?? "changed"),
-                ts,
-                bytes,
-                prev_bytes,
-                byte_delta,
-                token_delta: Math.round(byte_delta / CHARS_PER_TOKEN),
-            };
-        });
+        const changes = buildContextDriftRows({ skillRows, guidanceRows, limit: opts.limit });
 
         return { changes, total: changes.length } satisfies SkillDriftResult;
     },

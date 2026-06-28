@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
+    buildClaudeMdGuidanceRevisionStatements,
     buildGuidanceConfigPersistenceStatements,
     buildGuidanceConfigStatements,
     claudeConfigStage,
@@ -392,6 +393,87 @@ describe("buildGuidanceConfigStatements", () => {
         expect(serialized).not.toContain("env-secret");
         expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
         expect(serialized).not.toContain("/Users/alice");
+    });
+});
+
+describe("buildClaudeMdGuidanceRevisionStatements", () => {
+    test("emits baseline and changed CLAUDE.md revisions without raw body text", () => {
+        const globalClaude = parseClaudeConfigArtifact({
+            kind: "memory",
+            scope: "user",
+            path: "/Users/alice/.claude/CLAUDE.md",
+            home: "/Users/alice",
+            text: "# private global memory",
+        });
+        const projectClaude = parseClaudeConfigArtifact({
+            kind: "guidance_doc",
+            scope: "project",
+            path: "/repo/CLAUDE.md",
+            projectRoot: "/repo",
+            text: "# private project rules",
+        });
+        const agentsMd = parseClaudeConfigArtifact({
+            kind: "guidance_doc",
+            scope: "project",
+            path: "/repo/AGENTS.md",
+            projectRoot: "/repo",
+            text: "# project agents",
+        });
+
+        const statements = buildClaudeMdGuidanceRevisionStatements(
+            [globalClaude, projectClaude, agentsMd],
+            new Map([
+                [
+                    projectClaude.pathHash,
+                    {
+                        content_hash: "old-project-hash",
+                        bytes: 12,
+                    },
+                ],
+            ]),
+            new Set(),
+        );
+
+        expect(statements).toHaveLength(2);
+        expect(statements[0]).toContain("UPSERT guidance_revision:");
+        expect(statements[0]).toContain('source_path: "~/.claude/CLAUDE.md"');
+        expect(statements[0]).toContain('change: "added"');
+        expect(statements[1]).toContain('source_path: "$PROJECT/CLAUDE.md"');
+        expect(statements[1]).toContain('change: "changed"');
+        expect(statements[1]).toContain('prev_hash: "old-project-hash"');
+        expect(statements[1]).toContain("prev_bytes: 12");
+
+        const serialized = statements.join("\n");
+        expect(serialized).not.toContain("private global memory");
+        expect(serialized).not.toContain("private project rules");
+        expect(serialized).not.toContain("project agents");
+        expect(serialized).not.toContain("AGENTS.md");
+    });
+
+    test("skips unchanged CLAUDE.md revisions that already have a baseline row", () => {
+        const globalClaude = parseClaudeConfigArtifact({
+            kind: "memory",
+            scope: "user",
+            path: "/Users/alice/.claude/CLAUDE.md",
+            home: "/Users/alice",
+            text: "# private global memory",
+        });
+
+        const statements = buildClaudeMdGuidanceRevisionStatements(
+            [globalClaude],
+            new Map([
+                [
+                    globalClaude.pathHash,
+                    {
+                        content_hash: globalClaude.contentHash,
+                        bytes: globalClaude.bytes,
+                    },
+                ],
+            ]),
+            new Set([`${globalClaude.safePath}\0${globalClaude.contentHash}`]),
+        );
+
+        expect(statements).toEqual([]);
     });
 });
 

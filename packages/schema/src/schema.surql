@@ -818,6 +818,10 @@ DEFINE FIELD source            ON guidance_revision TYPE option<record<guidance_
 DEFINE FIELD source_path       ON guidance_revision TYPE string;
 DEFINE FIELD scope             ON guidance_revision TYPE string;
 DEFINE FIELD content_hash      ON guidance_revision TYPE string;
+DEFINE FIELD prev_hash         ON guidance_revision TYPE option<string>;
+DEFINE FIELD bytes             ON guidance_revision TYPE option<int>;
+DEFINE FIELD prev_bytes        ON guidance_revision TYPE option<int>;
+DEFINE FIELD change            ON guidance_revision TYPE option<string>;
 DEFINE FIELD evidence_strength ON guidance_revision TYPE string;
 DEFINE FIELD commit_evidence   ON guidance_revision TYPE option<string>;
 DEFINE FIELD file_evidence     ON guidance_revision TYPE option<string>;
