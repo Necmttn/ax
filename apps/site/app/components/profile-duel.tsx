@@ -271,9 +271,10 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                     </p>
                 </div>
                 <RawTable
-                    self={aAxes}
-                    selfLogin={a.github}
-                    vs={{ axes: bAxes, login: b.github }}
+                    profiles={[
+                        { login: a.github, profile: a, axes: aAxes, color: SELF_COLOR },
+                        { login: b.github, profile: b, axes: bAxes, color: VS_COLOR },
+                    ]}
                 />
             </section>
 

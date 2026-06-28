@@ -8,7 +8,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
-import { ProfileDossier, UnclaimedDossier, type VsState } from "~/components/profile-dossier";
+import { ProfileDossier, UnclaimedDossier, type VsPeerState, type VsState } from "~/components/profile-dossier";
 import { DuelDossier } from "~/components/profile-duel";
 import { fetchProfile, type ProfileV1 } from "@ax/lib/shared/community";
 import { compareDecision, buildDuelOgImageUrl } from "~/lib/challenge";
@@ -40,7 +40,7 @@ type State =
 function DuelPage() {
     const { login, other } = Route.useParams();
     const [state, setState] = useState<State>({ kind: "loading" });
-    const [vsState, setVsState] = useState<VsState>({ kind: "none" });
+    const [vsState, setVsState] = useState<VsPeerState | null>(null);
 
     useEffect(() => {
         let alive = true;
@@ -82,6 +82,8 @@ function DuelPage() {
         return () => { alive = false; };
     }, [other]);
 
+    const fallbackVs: VsState = vsState ? { kind: "multi", peers: [vsState] } : { kind: "none" };
+
     return (
         <>
             <SiteHeader />
@@ -93,10 +95,10 @@ function DuelPage() {
                     // Both profiles resolved -> the bespoke head-to-head layout.
                     // If the peer is still loading / unregistered / errored, fall
                     // back to the single dossier with the overlay (preserves the
-                    // challenge form + UnclaimedChallenger dare - no regression).
-                    vsState.kind === "ready"
+                    // compare controls + per-peer failure state - no regression).
+                    vsState?.kind === "ready"
                         ? <DuelDossier a={state.profile} b={vsState.profile} />
-                        : <ProfileDossier profile={state.profile} vs={vsState} />
+                        : <ProfileDossier profile={state.profile} vs={fallbackVs} />
                 )}
             </main>
             <SiteFooter />

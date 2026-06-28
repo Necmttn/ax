@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test";
 import {
     archetypeFor,
     dominantPair,
+    parseCompareLogins,
     profileToAxes,
     RADAR_AXIS_KEYS,
+    rawValueLeaders,
     type RadarAxes,
     type RadarAxisKey,
 } from "./radar";
@@ -279,6 +281,57 @@ describe("leadTally", () => {
         const t = leadTally(a, b);
         expect(t.aLeads).toBe(1); // axis0: 5 > null
         expect(t.bLeads).toBe(1); // axis1: 7 > null
+    });
+});
+
+/* ---------- multi-profile compare helpers ---------- */
+
+describe("parseCompareLogins", () => {
+    it("accepts comma-separated logins, strips @, dedupes case-insensitively, and caps the list", () => {
+        expect(parseCompareLogins(" @Alpha, beta,alpha,Gamma,delta,epsilon ")).toEqual([
+            "Alpha",
+            "beta",
+            "Gamma",
+            "delta",
+        ]);
+    });
+
+    it("drops invalid entries and the primary login without poisoning valid peers", () => {
+        expect(parseCompareLogins("self,bad handle!,ok,,@Other,-bad,bad-,bad--handle", { exclude: "SELF" })).toEqual(["ok", "Other"]);
+    });
+
+    it("returns an empty list for non-string or empty input", () => {
+        expect(parseCompareLogins(undefined)).toEqual([]);
+        expect(parseCompareLogins(["a"])).toEqual([]);
+        expect(parseCompareLogins(" , , ")).toEqual([]);
+    });
+});
+
+describe("rawValueLeaders", () => {
+    it("picks the single strict leader for each axis across N profiles", () => {
+        const leaders = rawValueLeaders([
+            axesWith([10, 5, 8, 3, 9, 1]),
+            axesWith([2, 7, 12, 4, 1, 0]),
+            axesWith([3, 6, 11, 9, 20, null]),
+        ]);
+
+        expect(leaders.DEPTH).toEqual([0]);
+        expect(leaders.SCALE).toEqual([1]);
+        expect(leaders.RIGOR).toEqual([1]);
+        expect(leaders.DELEGATION).toEqual([2]);
+        expect(leaders.BREADTH).toEqual([2]);
+        expect(leaders.ENDURANCE).toEqual([0]);
+    });
+
+    it("does not mark a leader for ties or all-null values", () => {
+        const leaders = rawValueLeaders([
+            axesWith([10, null, null, null, null, null]),
+            axesWith([10, null, null, null, null, null]),
+            axesWith([2, null, null, null, null, null]),
+        ]);
+
+        expect(leaders.DEPTH).toEqual([]);
+        expect(leaders.SCALE).toEqual([]);
     });
 });
 

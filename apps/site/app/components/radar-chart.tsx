@@ -1,11 +1,12 @@
 // apps/site/app/components/radar-chart.tsx
 //
 // Dependency-free SVG spider/radar chart for the agent-sign dossier section.
-// Renders 1 or 2 series over the six fixed RADAR axes. Pure geometry, no JS
+// Renders 1+ series over the six fixed RADAR axes. Pure geometry, no JS
 // interactivity beyond <title> tooltips on the vertices (so SSR == client).
 //
 // Untrusted strings (login) render as text only - never as markup.
 
+import type { CSSProperties } from "react";
 import { RADAR_AXES_META, type RadarAxes } from "~/lib/radar";
 
 export interface RadarSeries {
@@ -31,6 +32,10 @@ function point(cx: number, cy: number, radius: number, i: number, value: number)
 }
 
 const fmt = (n: number): string => (Math.round(n * 10) / 10).toString();
+
+function seriesStyle(color: string, fillOpacity: number): CSSProperties {
+    return { color, "--radar-fill-opacity": fillOpacity } as CSSProperties;
+}
 
 export function RadarChart({
     series,
@@ -102,12 +107,13 @@ export function RadarChart({
 
                 {/* series polygons (drawn back-to-front: first series on top) */}
                 {[...series].reverse().map((serie) => {
+                    const fillOpacity = series.length >= 4 ? 0.08 : series.length === 3 ? 0.11 : 0.16;
                     const pts = RADAR_AXES_META.map((meta, i) =>
                         point(cx, cy, radius, i, serie.axes.scores[meta.key]),
                     );
                     const poly = pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
                     return (
-                        <g key={serie.login} style={{ color: serie.color }}>
+                        <g key={serie.login} style={seriesStyle(serie.color, fillOpacity)}>
                             <polygon className="pf-radar-area" points={poly} />
                             {pts.map(([x, y], i) => (
                                 <circle key={RADAR_AXES_META[i]!.key} className="pf-radar-dot" cx={x} cy={y} r={3.4}>
