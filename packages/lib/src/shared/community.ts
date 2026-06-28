@@ -512,6 +512,14 @@ export interface PatternStats {
     readonly dropped: readonly PatternStatsDrop[];
 }
 
+export interface StateReport {
+    readonly year: number;
+    readonly users: number;
+    readonly harness_mix: Record<string, number>;
+    readonly skill_adoption: Record<string, number>;
+    readonly model_share: Record<string, number>;
+}
+
 // --- formatting (shared) --------------------------------------------------------
 
 /**
@@ -732,6 +740,32 @@ export function trendingPatterns(
         .slice(0, limit);
 }
 
+function validateDistribution(value: unknown, name: string): Record<string, number> {
+    if (!isRecord(value)) throw new Error(`invalid ${name}`);
+    const out: Record<string, number> = {};
+    for (const [key, raw] of Object.entries(value)) {
+        const count = num(raw, "state report distribution value");
+        if (count < 0) throw new Error("invalid state report distribution value");
+        out[str(key, "state report distribution key")] = count;
+    }
+    return out;
+}
+
+export function validateStateReport(value: unknown): StateReport {
+    if (!isRecord(value)) throw new Error("invalid state report");
+    const year = num(value.year, "state report year");
+    const users = num(value.users, "state report users");
+    if (!Number.isInteger(year) || year < 2000 || year > 9999) throw new Error("invalid state report year");
+    if (!Number.isInteger(users) || users < 0) throw new Error("invalid state report users");
+    return {
+        year,
+        users,
+        harness_mix: validateDistribution(value.harness_mix, "state report harness_mix"),
+        skill_adoption: validateDistribution(value.skill_adoption, "state report skill_adoption"),
+        model_share: validateDistribution(value.model_share, "state report model_share"),
+    };
+}
+
 // --- urls + fetchers --------------------------------------------------------------
 
 export function registrationRawUrl(login: string): string {
@@ -747,6 +781,14 @@ export function profileGistRawUrl(owner: string, gistId: string): string {
 export const leaderboardUrl = `${BOARD_API}/leaders`;
 export const skillStatsUrl = `${BOARD_API}/skills`;
 export const patternStatsUrl = `${BOARD_API}/patterns`;
+export function stateReportUrl(year: number): string {
+    if (!Number.isInteger(year) || year < 2000 || year > 9999) throw new Error("invalid state report year");
+    return `${BOARD_API}/state/${year}`;
+}
+export function stateReportRawUrl(year: number): string {
+    if (!Number.isInteger(year) || year < 2000 || year > 9999) throw new Error("invalid state report year");
+    return `${REPO_RAW}/community/state/${year}.json`;
+}
 
 async function fetchJson(url: string): Promise<unknown> {
     const res = await fetch(url);
@@ -789,6 +831,14 @@ export async function fetchSkillStats(): Promise<SkillStats> {
 
 export async function fetchPatternStats(): Promise<PatternStats> {
     return validatePatternStats(await fetchJson(patternStatsUrl));
+}
+
+export async function fetchStateReport(year: number): Promise<StateReport> {
+    try {
+        return validateStateReport(await fetchJson(stateReportUrl(year)));
+    } catch {
+        return validateStateReport(await fetchJson(stateReportRawUrl(year)));
+    }
 }
 
 export async function fetchSkillAdoption(
