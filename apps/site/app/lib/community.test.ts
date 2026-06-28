@@ -5,8 +5,10 @@ import {
     formatUsdCompact,
     profileGistRawUrl,
     registrationRawUrl,
+    trendingPatterns,
     trendingSkills,
     validateLeaderboard,
+    validatePatternStats,
     validateProfileV1,
     validateRegistration,
 } from "./community";
@@ -338,6 +340,56 @@ describe("trendingSkills", () => {
     });
     test("minUsers override + limit", () => {
         expect(trendingSkills(stats, { minUsers: 1, limit: 2 })).toHaveLength(2);
+    });
+});
+
+describe("validatePatternStats + trendingPatterns", () => {
+    const stats = {
+        compiled_at: "2026-06-12T03:00:00Z",
+        patterns: {
+            "failure-mode/edit-loop-thrash": {
+                category: "failure-mode",
+                name: "edit-loop-thrash",
+                users: 2,
+                sessions: 9,
+                recovered_by: {
+                    "problem-solving-strategy/full-file-reread": { users: 1, sessions: 5 },
+                },
+            },
+            "workflow/small-review-loops": {
+                category: "workflow",
+                name: "small-review-loops",
+                users: 3,
+                sessions: 7,
+            },
+        },
+        dropped: [{ login: "alice", index: 2, reason: "invalid-pattern" }],
+    };
+
+    test("validates pattern adoption and recovery joins", () => {
+        const out = validatePatternStats(stats);
+        expect(out.patterns["failure-mode/edit-loop-thrash"]!.users).toBe(2);
+        expect(out.patterns["failure-mode/edit-loop-thrash"]!.recovered_by).toEqual({
+            "problem-solving-strategy/full-file-reread": { users: 1, sessions: 5 },
+        });
+        expect(out.dropped[0]).toEqual({ login: "alice", index: 2, reason: "invalid-pattern" });
+    });
+
+    test("rejects malformed recovery rows", () => {
+        expect(() => validatePatternStats({
+            ...stats,
+            patterns: {
+                "failure-mode/edit-loop-thrash": {
+                    ...stats.patterns["failure-mode/edit-loop-thrash"],
+                    recovered_by: { "workflow/x": { users: "lots", sessions: 1 } },
+                },
+            },
+        })).toThrow();
+    });
+
+    test("sorts by users desc, then sessions desc", () => {
+        const out = trendingPatterns(validatePatternStats(stats)).map(([key]) => key);
+        expect(out).toEqual(["workflow/small-review-loops", "failure-mode/edit-loop-thrash"]);
     });
 });
 

@@ -18,6 +18,7 @@ const profile = (login: string, over: Record<string, unknown> = {}) => ({
         routing_table: true,
         ...((over.rig as object) ?? {}),
     },
+    ...(over.taste === undefined ? {} : { taste: over.taste }),
 });
 
 const fetcher = (gists: Record<string, unknown>): GistFetcher => async (gistId) =>
@@ -153,6 +154,93 @@ describe("compileCommunity", () => {
         expect(out.state.users).toBe(2);
         expect(out.state.harness_mix.claude).toBe(2);
         expect(out.state.skill_adoption["tdd"]).toBe(2);
+    });
+
+    test("pattern stats aggregate adoption and cross-user recovered-by joins", async () => {
+        const out = await compileCommunity(users, fetcher({
+            g1: profile("alice", {
+                taste: {
+                    patterns: [{
+                        category: "failure-mode",
+                        name: "edit-loop-thrash",
+                        summary: "keeps patching without rereading",
+                        evidence: { sessions: 3, confidence: 0.8 },
+                        links: [{ rel: "recovered-by", ref: "problem-solving-strategy/full-file-reread" }],
+                    }],
+                },
+            }),
+            g2: profile("bob", {
+                taste: {
+                    patterns: [{
+                        category: "problem-solving-strategy",
+                        name: "full-file-reread",
+                        summary: "rereads the full file before another patch",
+                        evidence: { sessions: 5, confidence: 0.9 },
+                    }],
+                },
+            }),
+        }), { now: "2026-06-12T03:00:00Z" });
+
+        expect(out.patternStats.patterns["failure-mode/edit-loop-thrash"]).toEqual({
+            category: "failure-mode",
+            name: "edit-loop-thrash",
+            users: 1,
+            sessions: 3,
+            recovered_by: {
+                "problem-solving-strategy/full-file-reread": { users: 1, sessions: 5 },
+            },
+        });
+        expect(out.patternStats.patterns["problem-solving-strategy/full-file-reread"]).toEqual({
+            category: "problem-solving-strategy",
+            name: "full-file-reread",
+            users: 1,
+            sessions: 5,
+        });
+        expect(out.patternStats.dropped).toEqual([]);
+    });
+
+    test("invalid and duplicate taste patterns are dropped with reasons", async () => {
+        const out = await compileCommunity(
+            [{ github: "alice", gist_id: "g1", joined: "2026-06-01" }],
+            fetcher({
+                g1: profile("alice", {
+                    taste: {
+                        patterns: [
+                            {
+                                category: "workflow",
+                                name: "small-review-loops",
+                                summary: "reviews in small increments",
+                                evidence: { sessions: 4, confidence: 0.7 },
+                            },
+                            {
+                                category: "workflow",
+                                name: "small-review-loops",
+                                summary: "duplicate row",
+                                evidence: { sessions: 9, confidence: 0.9 },
+                            },
+                            {
+                                category: "workflow",
+                                name: "missing-summary",
+                                evidence: { sessions: 1, confidence: 0.5 },
+                            },
+                        ],
+                    },
+                }),
+            }),
+            { now: "2026-06-12T03:00:00Z" },
+        );
+
+        expect(out.patternStats.patterns["workflow/small-review-loops"]).toEqual({
+            category: "workflow",
+            name: "small-review-loops",
+            users: 1,
+            sessions: 4,
+        });
+        expect(out.patternStats.patterns["workflow/missing-summary"]).toBeUndefined();
+        expect(out.patternStats.dropped).toEqual([
+            { login: "alice", index: 1, key: "workflow/small-review-loops", reason: "duplicate-pattern" },
+            { login: "alice", index: 2, reason: "invalid-pattern" },
+        ]);
     });
 
     test("output is deterministic for identical input", async () => {

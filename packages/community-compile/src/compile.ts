@@ -9,12 +9,20 @@
  *   leaderboard - boards: tokens, sessions, streak, cost
  *   skillStats  - { "<source>:<name>": { users, runs } }
  *   hookStats   - { "<hook>": { users } }
+ *   patternStats - { patterns: { "<category>/<name>": { users, sessions, recovered_by? } }, dropped }
  *   state       - anonymized distributions
  *
  * The fetcher is injectable so callers choose transport (raw CDN + ETag cache
  * under Bun, plain fetch in the Worker) and tests stay pure.
  */
-import { validateProfile, type CompiledProfile } from "./validate.ts";
+import {
+    patternKey,
+    validateProfile,
+    validateTastePatterns,
+    type CompiledProfile,
+    type CompiledTastePattern,
+    type PatternDropReason,
+} from "./validate.ts";
 
 export type { CompiledProfile } from "./validate.ts";
 
@@ -47,6 +55,7 @@ export interface CompiledOutput {
     };
     readonly skillStats: Record<string, { users: number; runs: number; source: string }>;
     readonly hookStats: Record<string, { users: number }>;
+    readonly patternStats: PatternStats;
     readonly state: {
         readonly year: number;
         readonly users: number;
@@ -55,6 +64,28 @@ export interface CompiledOutput {
         readonly model_share: Record<string, number>;
     };
     readonly dropped: Array<{ login: string; reason: "fetch-failed" | "invalid-profile" | "absurd-values" | "github-mismatch" }>;
+}
+
+export interface PatternStats {
+    readonly compiled_at: string;
+    readonly patterns: Record<string, PatternStatsRow>;
+    readonly dropped: PatternStatsDrop[];
+}
+
+export interface PatternStatsRow {
+    readonly category: string;
+    readonly name: string;
+    readonly users: number;
+    readonly sessions: number;
+    readonly recovered_by?: Record<string, { users: number; sessions: number }>;
+}
+
+export interface PatternStatsDrop {
+    readonly login: string;
+    readonly reason: PatternDropReason | "unresolved-recovery";
+    readonly index?: number;
+    readonly key?: string;
+    readonly ref?: string;
 }
 
 const MAX_TOKENS = 100e9;
@@ -110,6 +141,36 @@ function representativeSource(name: string, sources: ReadonlySet<string>): strin
 const sortedRecord = <V>(entries: Array<[string, V]>): Record<string, V> =>
     Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 
+interface PatternAggregate {
+    readonly category: string;
+    readonly name: string;
+    readonly users: Map<string, number>;
+    readonly recoveryRefs: Array<{ login: string; ref: string }>;
+}
+
+function ensurePatternAggregate(
+    agg: Map<string, PatternAggregate>,
+    key: string,
+    pattern: CompiledTastePattern,
+): PatternAggregate {
+    const cur = agg.get(key);
+    if (cur !== undefined) return cur;
+    const created: PatternAggregate = {
+        category: pattern.category,
+        name: pattern.name,
+        users: new Map(),
+        recoveryRefs: [],
+    };
+    agg.set(key, created);
+    return created;
+}
+
+function sumSessions(users: ReadonlyMap<string, number>): number {
+    let total = 0;
+    for (const sessions of users.values()) total += sessions;
+    return total;
+}
+
 export async function compileCommunity(
     users: ReadonlyArray<RegisteredUser>,
     fetchGist: GistFetcher,
@@ -117,6 +178,8 @@ export async function compileCommunity(
 ): Promise<CompiledOutput> {
     const profiles: Array<{ login: string; p: CompiledProfile }> = [];
     const dropped: CompiledOutput["dropped"] = [];
+    const patternDrops: PatternStatsDrop[] = [];
+    const patternAgg = new Map<string, PatternAggregate>();
 
     for (const user of [...users].sort((a, b) => a.github.localeCompare(b.github))) {
         const fetched = await fetchGist(user.gist_id, user.github);
@@ -142,6 +205,26 @@ export async function compileCommunity(
             continue;
         }
         profiles.push({ login: user.github, p });
+
+        const taste = validateTastePatterns(fetched.profile);
+        for (const d of taste.dropped) {
+            patternDrops.push({
+                login: user.github,
+                reason: d.reason,
+                ...(d.index === undefined ? {} : { index: d.index }),
+                ...(d.key === undefined ? {} : { key: d.key }),
+            });
+        }
+        for (const pattern of taste.patterns) {
+            const key = patternKey(pattern.category, pattern.name);
+            const cur = ensurePatternAggregate(patternAgg, key, pattern);
+            cur.users.set(user.github, (cur.users.get(user.github) ?? 0) + pattern.evidence.sessions);
+            for (const link of pattern.links ?? []) {
+                if (pattern.category === "failure-mode" && link.rel === "recovered-by") {
+                    cur.recoveryRefs.push({ login: user.github, ref: link.ref.trim() });
+                }
+            }
+        }
     }
 
     const board = (value: (p: CompiledProfile) => number | undefined): BoardRow[] =>
@@ -184,6 +267,42 @@ export async function compileCommunity(
         }
     }
 
+    const patternEntries: Array<[string, PatternStatsRow]> = [];
+    for (const [key, pattern] of patternAgg.entries()) {
+        const recoveredBy = new Map<string, Map<string, number>>();
+        for (const link of pattern.recoveryRefs) {
+            const target = patternAgg.get(link.ref);
+            if (target === undefined) {
+                patternDrops.push({ login: link.login, reason: "unresolved-recovery", key, ref: link.ref });
+                continue;
+            }
+            for (const [targetLogin, sessions] of target.users.entries()) {
+                if (targetLogin === link.login) continue;
+                const users = recoveredBy.get(link.ref) ?? new Map<string, number>();
+                users.set(targetLogin, Math.max(users.get(targetLogin) ?? 0, sessions));
+                recoveredBy.set(link.ref, users);
+            }
+        }
+
+        const recoveryEntries = [...recoveredBy.entries()]
+            .filter(([, targetUsers]) => targetUsers.size > 0)
+            .map(([targetKey, targetUsers]) => [
+                targetKey,
+                { users: targetUsers.size, sessions: sumSessions(targetUsers) },
+            ] as [string, { users: number; sessions: number }]);
+
+        patternEntries.push([
+            key,
+            {
+                category: pattern.category,
+                name: pattern.name,
+                users: pattern.users.size,
+                sessions: sumSessions(pattern.users),
+                ...(recoveryEntries.length === 0 ? {} : { recovered_by: sortedRecord(recoveryEntries) }),
+            },
+        ]);
+    }
+
     return {
         leaderboard: {
             compiled_at: opts.now,
@@ -199,6 +318,17 @@ export async function compileCommunity(
             [...skillAgg.entries()].map(([id, v]) => [id, { users: v.users, runs: v.runs, source: representativeSource(id, v.sources) }]),
         ),
         hookStats: sortedRecord([...hookAgg.entries()]),
+        patternStats: {
+            compiled_at: opts.now,
+            patterns: sortedRecord(patternEntries),
+            dropped: patternDrops.sort((a, b) =>
+                a.login.localeCompare(b.login)
+                || (a.index ?? -1) - (b.index ?? -1)
+                || (a.key ?? "").localeCompare(b.key ?? "")
+                || (a.ref ?? "").localeCompare(b.ref ?? "")
+                || a.reason.localeCompare(b.reason),
+            ),
+        },
         state: {
             year: Number(opts.now.slice(0, 4)),
             users: profiles.length,

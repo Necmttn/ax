@@ -30,6 +30,9 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Compile community outputs
+        # Writes leaderboard, skill/hook stats, pattern-stats, state, and the
+        # local ETag cache. The publish step stages community/ but excludes the
+        # cache, so new generated JSON artifacts ride along automatically.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun scripts/compile-community.ts

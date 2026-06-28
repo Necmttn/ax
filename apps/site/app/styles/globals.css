@@ -11918,13 +11918,13 @@ footer.site-footer { padding: 48px 32px 56px; }
      mono numerals, hairline rules, paper/ink. No SaaS chrome.
    ============================================================ */
 
-.profile-page, .leaders-page, .status-page {
+.profile-page, .leaders-page, .patterns-page, .status-page {
     max-width: var(--shell-max);
     margin: 0 auto;
     padding: 32px var(--shell-pad) 96px;
 }
 @media (max-width: 640px) {
-    .profile-page, .leaders-page, .status-page { padding-left: 20px; padding-right: 20px; }
+    .profile-page, .leaders-page, .patterns-page, .status-page { padding-left: 20px; padding-right: 20px; }
 }
 
 /* ----- status: live adoption receipt (unlisted) ----- */
@@ -12066,6 +12066,73 @@ footer.site-footer { padding: 48px 32px 56px; }
 .lf-foot a, .lf-prov a { color: var(--blue); border-bottom: 1px solid transparent; }
 .lf-foot a:hover, .lf-prov a:hover { border-bottom-color: var(--blue); }
 .lf-prov { font-family: var(--mono); font-size: 0.74rem; margin: 0; }
+
+/* ----- patterns: community taste + recovery mesh ----- */
+.pt-head h1 { margin: 0 0 8px; }
+.pt-head .muted { max-width: 68ch; margin: 0 0 10px; }
+.pt-meta { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin: 0 0 4px; }
+.pt-meta strong { color: var(--ink); }
+
+.pt-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 22px 0 0;
+    font-family: var(--mono);
+    font-size: 0.86rem;
+}
+.pt-table thead th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--line);
+    padding: 0 12px 8px;
+    text-align: left;
+}
+.pt-table tbody td {
+    padding: 13px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+.pt-table tbody tr:hover { background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.pt-table tbody tr[data-lead="true"] td { background: color-mix(in srgb, var(--green) 9%, transparent); }
+.pt-rank { width: 1%; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pt-table tbody tr[data-lead="true"] .pt-rank { color: var(--green); font-weight: 700; }
+.pt-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pt-name-cell { min-width: 220px; }
+.pt-cat {
+    display: block;
+    color: var(--green);
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+.pt-name {
+    display: block;
+    margin-top: 3px;
+    color: var(--ink);
+    font-size: 0.98rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.pt-recoveries { min-width: 260px; }
+.pt-none { color: var(--muted); }
+.pt-recovery-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.pt-recovery-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 12px;
+}
+.pt-recovery-name { color: var(--ink); overflow-wrap: anywhere; }
+.pt-recovery-count { color: var(--muted); font-size: 0.76rem; white-space: nowrap; }
+@media (max-width: 760px) {
+    .pt-table { display: block; overflow-x: auto; }
+    .pt-recoveries { min-width: 220px; }
+    .pt-recovery-list li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .pt-recovery-count { white-space: normal; }
+}
 
 /* ----- states ----- */
 .pf-loading {

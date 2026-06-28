@@ -366,6 +366,32 @@ export function validateLeaderboard(value: unknown): Leaderboard {
 // plugin beats "local"); optional so older compiled payloads still validate.
 export type SkillStats = Record<string, { readonly users: number; readonly runs: number; readonly source?: string }>;
 
+// --- pattern stats --------------------------------------------------------------
+
+export type PatternRecoveryStats = Record<string, { readonly users: number; readonly sessions: number }>;
+
+export interface PatternStatsRow {
+    readonly category: string;
+    readonly name: string;
+    readonly users: number;
+    readonly sessions: number;
+    readonly recovered_by?: PatternRecoveryStats;
+}
+
+export interface PatternStatsDrop {
+    readonly login: string;
+    readonly reason: string;
+    readonly index?: number;
+    readonly key?: string;
+    readonly ref?: string;
+}
+
+export interface PatternStats {
+    readonly compiled_at: string;
+    readonly patterns: Record<string, PatternStatsRow>;
+    readonly dropped: readonly PatternStatsDrop[];
+}
+
 // --- formatting (shared) --------------------------------------------------------
 
 /**
@@ -419,6 +445,66 @@ export function validateSkillStats(value: unknown): SkillStats {
     return out;
 }
 
+export function validatePatternStats(value: unknown): PatternStats {
+    if (!isRecord(value) || !isRecord(value.patterns)) throw new Error("invalid pattern stats");
+    const patterns: Record<string, PatternStatsRow> = {};
+    for (const [key, row] of Object.entries(value.patterns)) {
+        if (!isRecord(row)) throw new Error(`invalid pattern row ${key}`);
+        const recoveredRaw = row.recovered_by;
+        let recovered_by: PatternRecoveryStats | undefined;
+        if (recoveredRaw !== undefined) {
+            if (!isRecord(recoveredRaw)) throw new Error(`invalid pattern recoveries ${key}`);
+            recovered_by = {};
+            for (const [target, recovery] of Object.entries(recoveredRaw)) {
+                if (!isRecord(recovery)) throw new Error(`invalid pattern recovery ${target}`);
+                recovered_by[target] = {
+                    users: num(recovery.users, "pattern.recovery.users"),
+                    sessions: num(recovery.sessions, "pattern.recovery.sessions"),
+                };
+            }
+        }
+        patterns[key] = {
+            category: str(row.category, "pattern.category"),
+            name: str(row.name, "pattern.name"),
+            users: num(row.users, "pattern.users"),
+            sessions: num(row.sessions, "pattern.sessions"),
+            ...(recovered_by === undefined ? {} : { recovered_by }),
+        };
+    }
+
+    const droppedRaw = value.dropped;
+    const dropped: PatternStatsDrop[] = [];
+    if (droppedRaw !== undefined) {
+        if (!Array.isArray(droppedRaw)) throw new Error("invalid pattern dropped");
+        for (const drop of droppedRaw) {
+            if (!isRecord(drop)) throw new Error("invalid pattern dropped row");
+            dropped.push({
+                login: str(drop.login, "pattern.drop.login"),
+                reason: str(drop.reason, "pattern.drop.reason"),
+                ...(drop.index === undefined ? {} : { index: num(drop.index, "pattern.drop.index") }),
+                ...(drop.key === undefined ? {} : { key: str(drop.key, "pattern.drop.key") }),
+                ...(drop.ref === undefined ? {} : { ref: str(drop.ref, "pattern.drop.ref") }),
+            });
+        }
+    }
+
+    return {
+        compiled_at: typeof value.compiled_at === "string" ? value.compiled_at : "",
+        patterns,
+        dropped,
+    };
+}
+
+export function trendingPatterns(
+    stats: PatternStats,
+    opts: { readonly limit?: number } = {},
+): ReadonlyArray<readonly [string, PatternStatsRow]> {
+    const limit = opts.limit ?? 100;
+    return Object.entries(stats.patterns)
+        .sort(([ak, a], [bk, b]) => b.users - a.users || b.sessions - a.sessions || ak.localeCompare(bk))
+        .slice(0, limit);
+}
+
 // --- urls + fetchers --------------------------------------------------------------
 
 export function registrationRawUrl(login: string): string {
@@ -433,6 +519,7 @@ export function profileGistRawUrl(owner: string, gistId: string): string {
 
 export const leaderboardUrl = `${BOARD_API}/leaders`;
 export const skillStatsUrl = `${BOARD_API}/skills`;
+export const patternStatsUrl = `${BOARD_API}/patterns`;
 
 async function fetchJson(url: string): Promise<unknown> {
     const res = await fetch(url);
@@ -456,4 +543,8 @@ export async function fetchLeaderboard(): Promise<Leaderboard> {
 
 export async function fetchSkillStats(): Promise<SkillStats> {
     return validateSkillStats(await fetchJson(skillStatsUrl));
+}
+
+export async function fetchPatternStats(): Promise<PatternStats> {
+    return validatePatternStats(await fetchJson(patternStatsUrl));
 }

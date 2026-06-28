@@ -55,6 +55,7 @@ export function SiteHeader() {
             <span className="nav-menu-label">Community</span>
             <Link to="/showcases">Showcases</Link>
             <Link to="/leaders">Leaders</Link>
+            <Link to="/patterns">Patterns</Link>
           </div>
         </div>
 
