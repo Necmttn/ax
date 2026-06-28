@@ -121,6 +121,7 @@
   "@ax/hooks-sdk" = copyPathToStore ./packages/hooks-sdk;
   "@ax/lib" = copyPathToStore ./packages/lib;
   "@ax/onboarding-prompt" = copyPathToStore ./packages/onboarding-prompt;
+  "@ax/recap-deck" = copyPathToStore ./packages/recap-deck;
   "@ax/schema" = copyPathToStore ./packages/schema;
   "@ax/site" = copyPathToStore ./apps/site;
   "@ax/studio" = copyPathToStore ./apps/studio;

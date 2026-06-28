@@ -50,7 +50,9 @@ function MetricBar({
       const fill = Math.max(0, Math.min(1, (p - lo) / (hi - lo)));
       if (barRef.current) barRef.current.style.transform = `scaleX(${fill})`;
       if (numRef.current && parsed) {
-        const [, sign, digits, suffix] = parsed;
+        const sign = parsed[1] ?? "";
+        const digits = parsed[2] ?? "0";
+        const suffix = parsed[3] ?? "";
         const value = Math.round(Number.parseInt(digits, 10) * fill);
         numRef.current.textContent = `${sign}${value}${suffix}`;
       }

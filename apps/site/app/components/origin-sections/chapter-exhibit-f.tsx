@@ -7,6 +7,7 @@ export function ChapterExhibitF() {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const rootEl = root;
 
     const svg          = root.querySelector<SVGSVGElement>("[data-enforce-svg]");
     const dotLayer     = root.querySelector<SVGGElement>("[data-dot-layer]");
@@ -34,12 +35,12 @@ export function ChapterExhibitF() {
       "Edit{src/foo.ts}", "Read{schema.surql}", "Bash{npm i}", "Bash{git status}",
       "Edit{README.md}", "Bash{bun test}", "Read{package.json}", "Glob{**/*.ts}",
       "Bash{tsc --noEmit}", "Edit{src/lib/db.ts}",
-    ];
+    ] as const;
     const DANGER_CALLS = [
       "Bash{git checkout main}", "Bash{git push --force main}", "Edit{flake.nix}",
       "Bash{git reset --hard origin/main}", "Bash{rm -rf .references}",
       "Bash{git commit --amend} on main",
-    ];
+    ] as const;
 
     type DotKind = "safe" | "danger";
     type DotState = "idle" | "flying" | "blocked" | "fading";
@@ -109,6 +110,9 @@ export function ChapterExhibitF() {
 
     function rand(min: number, max: number) { return min + Math.random() * (max - min); }
     function liveCount() { return dots.filter((d) => d.live).length; }
+    function pickCall(calls: readonly string[], index = (Math.random() * calls.length) | 0) {
+      return calls[index % calls.length] ?? calls[0] ?? "";
+    }
 
     function spawn() {
       const d = dots.find((d) => !d.live);
@@ -116,8 +120,8 @@ export function ChapterExhibitF() {
       const isDanger = Math.random() < 0.18;
       d.kind  = isDanger ? "danger" : "safe";
       d.label = isDanger
-        ? DANGER_CALLS[(Math.random() * DANGER_CALLS.length) | 0]
-        : SAFE_CALLS[(Math.random() * SAFE_CALLS.length) | 0];
+        ? pickCall(DANGER_CALLS)
+        : pickCall(SAFE_CALLS);
       d.x = -10;
       d.y = rand(LANE_TOP + 8, LANE_BOT - 8);
       d.vx = rand(0.55, 0.95);
@@ -140,7 +144,7 @@ export function ChapterExhibitF() {
     function setMode(next: "prose" | "hook") {
       if (mode === next) return;
       mode = next;
-      root.setAttribute("data-mode", mode);
+      rootEl.setAttribute("data-mode", mode);
       pills.forEach((p) => {
         const isActive = p.dataset.mode === mode;
         p.setAttribute("aria-pressed", isActive ? "true" : "false");
@@ -168,7 +172,7 @@ export function ChapterExhibitF() {
       if (!tip) return;
       tip.innerHTML = html;
       tip.hidden = false;
-      const hostRect = root.getBoundingClientRect();
+      const hostRect = rootEl.getBoundingClientRect();
       let x = clientX - hostRect.left + 14;
       let y = clientY - hostRect.top + 14;
       if (x + 220 > hostRect.width)  x = clientX - hostRect.left - 240;
@@ -282,9 +286,10 @@ export function ChapterExhibitF() {
       setMode("hook");
       samples.forEach((s, i) => {
         const d = dots[i];
+        if (!d) return;
         d.live = true;
         d.kind  = (s.k === "danger" || s.k === "blocked") ? "danger" : "safe";
-        d.label = d.kind === "danger" ? DANGER_CALLS[i % DANGER_CALLS.length] : SAFE_CALLS[i % SAFE_CALLS.length];
+        d.label = d.kind === "danger" ? pickCall(DANGER_CALLS, i) : pickCall(SAFE_CALLS, i);
         d.r     = d.kind === "danger" ? 7 : 4.5;
         d.x = s.x; d.y = s.y;
         d.core.setAttribute("r", String(d.r));

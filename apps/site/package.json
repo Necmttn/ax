@@ -10,7 +10,8 @@
     "dev": "vite dev",
     "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/stage-studio.ts && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "codegen": "bun scripts/sync-generated.ts",
+    "typecheck": "bun run codegen && tsc --noEmit",
     "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main && bun run verify:functions",
     "deploy:check": "bun run build && echo 'dist/client/ ready for: wrangler pages deploy dist/client --project-name=ax'",
     "verify:functions": "sleep 3 && curl -s -o /dev/null -w '%{content_type}' 'https://ax.necmttn.com/og/Necmttn/a6d4c2215bbe0998c93b38ad11db2ccb' | grep -q image/png && echo 'functions OK on production' || (echo 'PRODUCTION IS MISSING THE PAGES FUNCTIONS (/og, /s meta)' && exit 1)"
@@ -41,6 +42,7 @@
     "@cloudflare/vite-plugin": "^1.29.0",
     "@tailwindcss/vite": "^4.2.0",
     "@tanstack/router-devtools": "^1.166.0",
+    "@tanstack/router-generator": "1.167.10",
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
