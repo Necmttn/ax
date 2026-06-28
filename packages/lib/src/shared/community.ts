@@ -450,7 +450,41 @@ export function validateLeaderboard(value: unknown): Leaderboard {
 // Keyed by canonical skill identity (bare name, source prefix stripped at
 // compile time). `source` is the best-known install source for display (a real
 // plugin beats "local"); optional so older compiled payloads still validate.
-export type SkillStats = Record<string, { readonly users: number; readonly runs: number; readonly source?: string }>;
+export interface SkillStatsEntry {
+    readonly users: number;
+    readonly runs: number;
+    readonly source?: string;
+}
+export type SkillStats = Record<string, SkillStatsEntry>;
+
+export interface SkillRouteKey {
+    readonly key: string;
+    readonly source: string;
+    readonly name: string;
+    readonly identity: string;
+}
+
+export interface SkillAdoptionUser {
+    readonly login: string;
+    readonly runs: number;
+    readonly source: string;
+    readonly name: string;
+}
+
+export interface SkillAdoption {
+    readonly key: string;
+    readonly source: string;
+    readonly name: string;
+    readonly identity: string;
+    readonly stats: SkillStatsEntry;
+    readonly users: readonly SkillAdoptionUser[];
+    readonly rosterCount: number;
+    readonly fetchedProfiles: number;
+    readonly truncated: boolean;
+}
+
+const SKILL_ROUTE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}:[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SKILL_STAT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 
 // --- pattern stats --------------------------------------------------------------
 
@@ -509,7 +543,7 @@ export const formatUsdCompact = (n: number): string =>
 export function trendingSkills(
     stats: SkillStats,
     opts: { readonly minUsers?: number; readonly limit?: number } = {},
-): ReadonlyArray<readonly [string, { readonly users: number; readonly runs: number; readonly source?: string }]> {
+): ReadonlyArray<readonly [string, SkillStatsEntry]> {
     const minUsers = opts.minUsers ?? 2;
     const limit = opts.limit ?? 50;
     return Object.entries(stats)
@@ -520,15 +554,122 @@ export function trendingSkills(
 
 export function validateSkillStats(value: unknown): SkillStats {
     if (!isRecord(value)) throw new Error("invalid skill stats");
-    const out: Record<string, { users: number; runs: number; source?: string }> = {};
+    const out: Record<string, SkillStatsEntry> = {};
     for (const [k, v] of Object.entries(value)) {
         if (!isRecord(v)) continue;
+        const source = typeof v.source === "string" && v.source !== "" ? v.source : undefined;
+        if (!isSafeSkillStatKey(k, source)) continue;
         if (typeof v.users === "number" && Number.isFinite(v.users)
             && typeof v.runs === "number" && Number.isFinite(v.runs)) {
-            out[k] = { users: v.users, runs: v.runs, ...(typeof v.source === "string" ? { source: v.source } : {}) };
+            out[k] = { users: v.users, runs: v.runs, ...(source === undefined ? {} : { source }) };
         }
     }
     return out;
+}
+
+function invalidSkillKey(): Error {
+    return new Error("invalid skill key");
+}
+
+function safeDecodeRouteKey(raw: string): string {
+    if (!raw.includes("%")) return raw;
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        throw invalidSkillKey();
+    }
+}
+
+function skillIdentity(source: string, name: string): string {
+    return name.startsWith(`${source}:`) ? name.slice(source.length + 1) : name;
+}
+
+export function validateSkillRouteKey(raw: string): SkillRouteKey {
+    const key = safeDecodeRouteKey(raw).trim();
+    if (!SKILL_ROUTE_KEY_RE.test(key)) throw invalidSkillKey();
+    const sep = key.indexOf(":");
+    const source = key.slice(0, sep);
+    const name = key.slice(sep + 1);
+    return { key, source, name, identity: skillIdentity(source, name) };
+}
+
+/**
+ * Public route key for a row from skill-stats.json. Current compiled rows are
+ * keyed by canonical identity and carry `source`; older community-data rows
+ * were already keyed as `source:name`. The route stays `source:name` either
+ * way so links are stable and auditable.
+ */
+export function skillRouteKey(name: string, stats: SkillStatsEntry): string {
+    if (stats.source !== undefined && stats.source !== "") {
+        return validateSkillRouteKey(name.startsWith(`${stats.source}:`)
+            ? name
+            : `${stats.source}:${name}`).key;
+    }
+    if (name.includes(":")) return validateSkillRouteKey(name).key;
+    return validateSkillRouteKey(`local:${name}`).key;
+}
+
+function isSafeSkillStatKey(name: string, source: string | undefined): boolean {
+    if (!SKILL_STAT_NAME_RE.test(name)) return false;
+    try {
+        skillRouteKey(name, { users: 0, runs: 0, ...(source === undefined ? {} : { source }) });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function notFoundError(): Error & { notFound: true } {
+    return Object.assign(new Error("not found"), { notFound: true as const });
+}
+
+function skillStatCandidates(key: SkillRouteKey): string[] {
+    return [...new Set([
+        key.key,
+        key.identity,
+        key.name,
+        `${key.source}:${key.source}:${key.identity}`,
+    ])];
+}
+
+function resolveSkillStat(stats: SkillStats, key: SkillRouteKey): SkillStatsEntry | null {
+    for (const candidate of skillStatCandidates(key)) {
+        const row = stats[candidate];
+        if (row !== undefined) return row;
+    }
+    return null;
+}
+
+function leaderboardLogins(lb: Leaderboard): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (login: string) => {
+        const k = login.toLowerCase();
+        if (seen.has(k)) return;
+        seen.add(k);
+        out.push(login);
+    };
+    for (const row of lb.boards.tokens) add(row.login);
+    for (const row of lb.boards.sessions) add(row.login);
+    for (const row of lb.boards.streak) add(row.login);
+    for (const row of lb.boards.cost) add(row.login);
+    return out;
+}
+
+function profileSkillIdentity(skill: ProfileSkill): string {
+    return skillIdentity(skill.source, skill.name);
+}
+
+function skillUserFromProfile(login: string, profile: ProfileV1, identity: string): SkillAdoptionUser | null {
+    let runs = 0;
+    let first: ProfileSkill | undefined;
+    for (const skill of profile.rig.skills) {
+        if (profileSkillIdentity(skill) !== identity) continue;
+        runs += skill.runs;
+        first ??= skill;
+    }
+    if (first === undefined || runs <= 0) return null;
+    return { login, runs, source: first.source, name: first.name };
 }
 
 export function validatePatternStats(value: unknown): PatternStats {
@@ -648,4 +789,50 @@ export async function fetchSkillStats(): Promise<SkillStats> {
 
 export async function fetchPatternStats(): Promise<PatternStats> {
     return validatePatternStats(await fetchJson(patternStatsUrl));
+}
+
+export async function fetchSkillAdoption(
+    rawKey: string,
+    opts: { readonly maxProfiles?: number } = {},
+): Promise<SkillAdoption> {
+    const key = validateSkillRouteKey(rawKey);
+    const stats = await fetchSkillStats();
+    const row = resolveSkillStat(stats, key);
+    if (row === null) throw notFoundError();
+
+    let roster: string[];
+    try {
+        roster = leaderboardLogins(await fetchLeaderboard());
+    } catch {
+        roster = [...SEED_LOGINS];
+    }
+    if (roster.length === 0) roster = [...SEED_LOGINS];
+
+    const maxProfiles = Math.max(0, opts.maxProfiles ?? 24);
+    const capped = roster.slice(0, maxProfiles);
+    const settled = await Promise.allSettled(
+        capped.map(async (login) => ({ login, profile: await fetchProfile(login) })),
+    );
+
+    const users: SkillAdoptionUser[] = [];
+    for (const result of settled) {
+        if (result.status !== "fulfilled") continue;
+        const { login, profile } = result.value;
+        if (profile.github.toLowerCase() !== login.toLowerCase()) continue;
+        const user = skillUserFromProfile(login, profile, key.identity);
+        if (user !== null) users.push(user);
+    }
+    users.sort((a, b) => b.runs - a.runs || a.login.localeCompare(b.login));
+
+    return {
+        key: key.key,
+        source: row.source ?? key.source,
+        name: key.identity,
+        identity: key.identity,
+        stats: row,
+        users,
+        rosterCount: roster.length,
+        fetchedProfiles: capped.length,
+        truncated: roster.length > capped.length,
+    };
 }

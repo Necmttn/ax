@@ -11918,13 +11918,13 @@ footer.site-footer { padding: 48px 32px 56px; }
      mono numerals, hairline rules, paper/ink. No SaaS chrome.
    ============================================================ */
 
-.profile-page, .leaders-page, .patterns-page, .status-page {
+.profile-page, .leaders-page, .patterns-page, .status-page, .skill-page {
     max-width: var(--shell-max);
     margin: 0 auto;
     padding: 32px var(--shell-pad) 96px;
 }
 @media (max-width: 640px) {
-    .profile-page, .leaders-page, .patterns-page, .status-page { padding-left: 20px; padding-right: 20px; }
+    .profile-page, .leaders-page, .patterns-page, .status-page, .skill-page { padding-left: 20px; padding-right: 20px; }
 }
 
 /* ----- status: live adoption receipt (unlisted) ----- */
@@ -12023,7 +12023,8 @@ footer.site-footer { padding: 48px 32px 56px; }
     border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.86rem;
 }
 .lb-skill-rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.lb-skill-name { color: var(--ink); display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lb-skill-name { color: var(--ink); display: flex; align-items: center; gap: 8px; min-width: 0; text-decoration: none; }
+.lb-skill-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .lb-skill-src {
     font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
     color: var(--muted); background: var(--panel); border: 1px solid var(--line);
@@ -12066,6 +12067,217 @@ footer.site-footer { padding: 48px 32px 56px; }
 .lf-foot a, .lf-prov a { color: var(--blue); border-bottom: 1px solid transparent; }
 .lf-foot a:hover, .lf-prov a:hover { border-bottom-color: var(--blue); }
 .lf-prov { font-family: var(--mono); font-size: 0.74rem; margin: 0; }
+
+/* ----- skill dossier: adoption page for one community skill ----- */
+.sk-head {
+    border-bottom: 2px solid var(--ink);
+    padding: 0 0 24px;
+}
+.sk-back {
+    display: inline-flex;
+    margin-bottom: 18px;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    text-decoration: none;
+}
+.sk-back::before { content: "<-"; margin-right: 8px; }
+.sk-back:hover { color: var(--ink); }
+.sk-eyebrow {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+}
+.sk-head h1,
+.sk-empty h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 5.25rem;
+    line-height: 0.95;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+.sk-source {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 12px;
+    transform: translateY(-0.28em);
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    line-height: 1.1;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 4px;
+    padding: 3px 7px;
+}
+.sk-headline {
+    margin: 18px 0 0;
+    font-family: var(--mono);
+    font-size: 1rem;
+    color: var(--muted);
+}
+.sk-headline strong {
+    color: var(--ink);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.sk-meta {
+    margin: 8px 0 0;
+    max-width: 70ch;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+.sk-users { margin: 36px 0 0; }
+.sk-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+.sk-section-head h2 {
+    margin: 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+}
+.sk-section-head span {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--muted);
+    text-align: right;
+}
+.sk-user-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.sk-user {
+    display: grid;
+    grid-template-columns: 1.6rem minmax(170px, 1fr) minmax(80px, auto) minmax(130px, 0.45fr);
+    align-items: center;
+    gap: 14px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 0.88rem;
+}
+.sk-user-rank {
+    color: var(--muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.sk-user-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    color: var(--ink);
+    text-decoration: none;
+}
+.sk-user-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sk-user-link:hover span {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.sk-user-source {
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sk-user-runs {
+    position: relative;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    min-height: 24px;
+    font-variant-numeric: tabular-nums;
+}
+.sk-user-runs span:last-child {
+    position: relative;
+    z-index: 1;
+    color: var(--ink);
+}
+.sk-bar {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 70%;
+    background: color-mix(in srgb, var(--green) 18%, transparent);
+    border-radius: 3px;
+}
+.sk-empty {
+    max-width: 620px;
+    padding: 36px 0 0;
+}
+.sk-empty .muted {
+    margin: 14px 0 22px;
+}
+.sk-empty-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid var(--ink);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.sk-empty-link:hover {
+    background: var(--ink);
+    color: var(--page);
+}
+@media (max-width: 720px) {
+    .sk-head h1,
+    .sk-empty h1 {
+        font-size: 2.65rem;
+        line-height: 1;
+    }
+    .sk-source {
+        margin-right: 8px;
+        transform: translateY(-0.18em);
+        font-size: 0.72rem;
+    }
+    .sk-section-head { display: grid; gap: 4px; }
+    .sk-section-head span { text-align: left; }
+    .sk-user {
+        grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+        gap: 10px;
+    }
+    .sk-user-source { display: none; }
+    .sk-user-runs {
+        grid-column: 2 / -1;
+        justify-content: flex-start;
+    }
+    .sk-bar {
+        left: 0;
+        right: auto;
+    }
+}
+@media (max-width: 400px) {
+    .sk-head h1,
+    .sk-empty h1 {
+        font-size: 2.25rem;
+    }
+}
 
 /* ----- patterns: community taste + recovery mesh ----- */
 .pt-head h1 { margin: 0 0 8px; }
