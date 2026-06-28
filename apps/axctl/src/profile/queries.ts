@@ -12,6 +12,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
+import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
@@ -761,5 +762,62 @@ export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
                 s: String(r.s),
                 e: String(r.e),
             })) satisfies WindowedSessionRow[];
+    },
+);
+
+// --- guardrail receipts -----------------------------------------------------
+
+const GUARDRAIL_HOOK_EVIDENCE_SQL = (d: number) => `
+SELECT
+    hook_name,
+    count() AS fires,
+    math::sum(IF effect = "blocked" OR provider_status = "blocking_error" THEN 1 ELSE 0 END) AS blocked,
+    math::sum(IF effect IN ["notified", "injected_context", "modified_input"] THEN 1 ELSE 0 END) AS warned
+FROM hook_command_invocation
+WHERE ts > time::now() - ${win(d)}
+  AND hook_name IS NOT NONE
+GROUP BY hook_name
+ORDER BY fires DESC
+LIMIT 1000;`;
+
+export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookEvidence")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* timedQuery(
+            "guardrailHookEvidence",
+            db.query<[Array<Record<string, unknown>>]>(GUARDRAIL_HOOK_EVIDENCE_SQL(opts.windowDays))
+                .pipe(Effect.map((r) => r?.[0] ?? [])),
+        );
+        return rows.map((r) => ({
+            hook_name: String(r.hook_name ?? ""),
+            fires: Number(r.fires ?? 0),
+            blocked: Number(r.blocked ?? 0),
+            warned: Number(r.warned ?? 0),
+        })).filter((r) => r.hook_name.length > 0) satisfies GuardrailHookEvidenceRow[];
+    },
+);
+
+const GUARDRAIL_VERDICTS_SQL = (d: number) => `
+SELECT
+    user_verdict AS verdict,
+    count() AS count
+FROM checkpoint
+WHERE observed_at > time::now() - ${win(d)}
+  AND user_verdict IS NOT NONE
+GROUP BY verdict
+ORDER BY count DESC;`;
+
+export const fetchGuardrailVerdicts = Effect.fn("profile.fetchGuardrailVerdicts")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* timedQuery(
+            "guardrailVerdicts",
+            db.query<[Array<Record<string, unknown>>]>(GUARDRAIL_VERDICTS_SQL(opts.windowDays))
+                .pipe(Effect.map((r) => r?.[0] ?? [])),
+        );
+        return rows.map((r) => ({
+            verdict: String(r.verdict ?? ""),
+            count: Number(r.count ?? 0),
+        })).filter((r) => r.verdict.length > 0) satisfies GuardrailVerdictRow[];
     },
 );

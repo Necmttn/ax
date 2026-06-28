@@ -31,3 +31,16 @@ describe("dossier renders highlights inside the Taste section", () => {
         expect(src).toContain("pf-toggle");             // disclosure chevron
     });
 });
+
+describe("dossier renders guardrail receipts", () => {
+    test("Guardrails block reads guardrail_receipts and renders per-hook receipts", () => {
+        expect(src).toContain("guardrail_receipts");
+        expect(src).toContain("HookReceiptLine");
+        expect(src).toContain("pf-hook-receipt");
+        expect(src).toContain("still earning");
+    });
+
+    test("no_longer_needed verdicts are labeled without claiming the cause", () => {
+        expect(src).toContain("resolved or never fired");
+    });
+});

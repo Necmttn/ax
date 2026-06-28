@@ -13,7 +13,7 @@ import { buildProfile } from "./render.ts";
 // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
 // 22 windowedInvocations  23 windowedSessions
 // 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
-// 27 contentTypeBreakdown
+// 27 contentTypeBreakdown  28 guardrailHookEvidence  29 guardrailVerdicts
 const mockResults = [
     [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
     [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
@@ -98,13 +98,27 @@ const mockResults = [
         { ct: "content_type:code", calls: 10, bytes: 800 },
         { ct: "content_type:text", calls: 5, bytes: 200 },
     ]],
+    // 28: guardrailHookEvidence
+    [[
+        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
+        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
+        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
+    ]],
+    // 29: guardrailVerdicts
+    [[
+        { verdict: "adopted", count: 4 },
+        { verdict: "regressed", count: 1 },
+        { verdict: "ignored", count: 1 },
+        { verdict: "no_longer_needed", count: 1 },
+        { verdict: "partial", count: 2 },
+    ]],
 ];
 
 const env = {
     github: "necmttn",
     generatedAt: "2026-06-12T19:00:00Z",
     today: "2026-06-12",
-    hookFiles: ["enforce-worktree.ts"],
+    hookFiles: ["enforce-worktree.ts", "route-dispatch.ts"],
     hasRoutingTable: true,
     rulesMarkdown: "- rule one\n- rule two",
     highlights: null,
@@ -180,6 +194,18 @@ describe("buildProfile", () => {
         expect(p.insights!.repos_count).toBe(12);
         expect(p.insights!.verification_calls).toBe(900); // "bun test" matches
         expect(p.insights!.context_calls).toBe(2000); // "Read" matches
+        expect(p.guardrail_receipts).toEqual({
+            hooks: [
+                { name: "enforce-worktree", fires: 412, blocked: 9, warned: 0 },
+                { name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
+            ],
+            verdicts: {
+                worked: 4,
+                did_not_work: 2,
+                no_longer_needed: 1,
+                partial: 2,
+            },
+        });
     });
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {

@@ -426,6 +426,52 @@ describe("validateProfileV1 highlights", () => {
     });
 });
 
+describe("validateProfileV1 guardrail receipts", () => {
+    const base = {
+        v: 1, github: "octocat", generated_at: "2026-06-17T00:00:00Z", window_days: 30,
+        stats: { sessions: 1, active_days: 1, streak_days: 1, tokens: { prompt: 1, completion: 1, total: 2 }, models: [], harnesses: [] },
+        rig: { skills: [], hooks: ["enforce-worktree"], routing_table: false },
+    };
+
+    test("accepts hook receipt counts and verdict tallies", () => {
+        const p = validateProfileV1({
+            ...base,
+            guardrail_receipts: {
+                hooks: [
+                    { name: "enforce-worktree", fires: 412, blocked: 9, warned: 3 },
+                ],
+                verdicts: {
+                    worked: 5,
+                    did_not_work: 2,
+                    no_longer_needed: 1,
+                },
+            },
+        });
+        expect(p.guardrail_receipts?.hooks[0]?.blocked).toBe(9);
+        expect(p.guardrail_receipts?.verdicts.worked).toBe(5);
+    });
+
+    test("profile without guardrail receipts still validates", () => {
+        expect(validateProfileV1(base).guardrail_receipts).toBeUndefined();
+    });
+
+    test("rejects non-number receipt counts", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            guardrail_receipts: {
+                hooks: [
+                    { name: "enforce-worktree", fires: "many", blocked: 9, warned: 3 },
+                ],
+                verdicts: {
+                    worked: 5,
+                    did_not_work: 2,
+                    no_longer_needed: 1,
+                },
+            },
+        })).toThrow();
+    });
+});
+
 describe("urls", () => {
     test("registration + gist raw urls", () => {
         expect(registrationRawUrl("Necmttn")).toBe(

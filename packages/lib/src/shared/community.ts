@@ -95,6 +95,22 @@ export interface WorkflowArc {
 export interface ProfileWorkflow {
     readonly arcs: readonly WorkflowArc[];
 }
+export interface ProfileGuardrailHookReceipt {
+    readonly name: string;
+    readonly fires: number;
+    readonly blocked: number;
+    readonly warned: number;
+}
+export interface ProfileGuardrailVerdicts {
+    readonly worked: number;
+    readonly did_not_work: number;
+    readonly no_longer_needed: number;
+    readonly partial?: number;
+}
+export interface ProfileGuardrailReceipts {
+    readonly hooks: readonly ProfileGuardrailHookReceipt[];
+    readonly verdicts: ProfileGuardrailVerdicts;
+}
 export interface ProfileToolRun {
     readonly name: string;
     readonly runs: number;
@@ -143,6 +159,7 @@ export interface ProfileV1 {
     readonly activity?: { readonly daily: readonly ProfileDailyRow[] };
     readonly insights?: ProfileInsights;
     readonly workflow?: ProfileWorkflow;
+    readonly guardrail_receipts?: ProfileGuardrailReceipts;
     readonly highlights?: ProfileHighlights;
 }
 
@@ -286,6 +303,22 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             for (const step of arc.steps) str(step, "workflow.arc.step");
             num(arc.count, "workflow.arc.count");
         }
+    }
+    if (value.guardrail_receipts !== undefined) {
+        const gr = value.guardrail_receipts;
+        if (!isRecord(gr)) throw new Error("invalid guardrail_receipts");
+        validateRows(gr.hooks, "guardrail_receipts.hooks", (h) => {
+            str(h.name, "guardrail_receipts.hook.name");
+            num(h.fires, "guardrail_receipts.hook.fires");
+            num(h.blocked, "guardrail_receipts.hook.blocked");
+            num(h.warned, "guardrail_receipts.hook.warned");
+        });
+        if (!Array.isArray(gr.hooks)) throw new Error("invalid guardrail_receipts.hooks");
+        if (!isRecord(gr.verdicts)) throw new Error("invalid guardrail_receipts.verdicts");
+        num(gr.verdicts.worked, "guardrail_receipts.verdicts.worked");
+        num(gr.verdicts.did_not_work, "guardrail_receipts.verdicts.did_not_work");
+        num(gr.verdicts.no_longer_needed, "guardrail_receipts.verdicts.no_longer_needed");
+        optNum(gr.verdicts.partial, "guardrail_receipts.verdicts.partial");
     }
     if (value.highlights !== undefined) {
         const h = value.highlights;

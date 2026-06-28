@@ -130,6 +130,33 @@ const money = (n: number): string => {
     return `$${n.toFixed(0)}`;
 };
 
+type HookReceipt = NonNullable<ProfileV1["guardrail_receipts"]>["hooks"][number];
+type GuardrailVerdicts = NonNullable<ProfileV1["guardrail_receipts"]>["verdicts"];
+
+const hookReceiptStatus = (r: HookReceipt): string => {
+    if (r.fires === 0) return "no recent fires";
+    return r.blocked + r.warned > 0 ? "still earning" : "watching";
+};
+
+const formatHookReceipt = (r: HookReceipt): string => {
+    const parts = [`fired ${integer(r.fires)}x`];
+    if (r.blocked > 0) parts.push(`blocked ${integer(r.blocked)}`);
+    if (r.warned > 0) parts.push(`warned ${integer(r.warned)}`);
+    if (r.blocked === 0 && r.warned === 0) parts.push("no blocks/warnings");
+    parts.push(hookReceiptStatus(r));
+    return parts.join(" · ");
+};
+
+const formatGuardrailVerdicts = (v: GuardrailVerdicts): string => {
+    const parts = [
+        `${integer(v.worked)} worked`,
+        `${integer(v.did_not_work)} didn't`,
+    ];
+    if ((v.partial ?? 0) > 0) parts.push(`${integer(v.partial ?? 0)} partial`);
+    parts.push(`${integer(v.no_longer_needed)} no longer needed (resolved or never fired)`);
+    return parts.join(" · ");
+};
+
 export function formatProfile(p: ProfileV1): string {
     const lines: string[] = [];
     lines.push(`ax profile - @${p.github}  (last ${p.window_days}d)`);
@@ -158,6 +185,14 @@ export function formatProfile(p: ProfileV1): string {
     if (p.workflow && p.workflow.arcs.length > 0) {
         const topArc = p.workflow.arcs[0]!;
         lines.push(`workflow: ${topArc.steps.join(" → ")} (${topArc.count}x)`);
+    }
+    if (p.guardrail_receipts) {
+        lines.push("guardrails:");
+        const hookWidth = Math.max(20, ...p.guardrail_receipts.hooks.map((h) => h.name.length));
+        for (const h of p.guardrail_receipts.hooks) {
+            lines.push(`  ${h.name.padEnd(hookWidth)} ${formatHookReceipt(h)}`);
+        }
+        lines.push(`  verdicts: ${formatGuardrailVerdicts(p.guardrail_receipts.verdicts)}`);
     }
     for (const s of topSkills) {
         const downstream = s.downstream_share !== undefined

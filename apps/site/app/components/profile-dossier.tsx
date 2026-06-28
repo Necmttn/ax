@@ -16,6 +16,8 @@ import { duelPath, duelXIntent } from "~/lib/challenge";
 import {
     type ProfileV1,
     type ProfileDailyRow,
+    type ProfileGuardrailHookReceipt,
+    type ProfileGuardrailVerdicts,
     type ProfileHighlights,
     type ProfileInsights,
     type ProfileSkill,
@@ -84,6 +86,30 @@ const fmtDay = (iso: string): string => {
     return month ? `${month} ${Number(m[3])}` : iso;
 };
 export const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : 0);
+
+function hookReceiptStatus(r: ProfileGuardrailHookReceipt): string {
+    if (r.fires === 0) return "no recent fires";
+    return r.blocked + r.warned > 0 ? "still earning" : "watching";
+}
+
+function hookReceiptText(r: ProfileGuardrailHookReceipt): string {
+    const parts = [`fired ${fmtInt(r.fires)}×`];
+    if (r.blocked > 0) parts.push(`blocked ${fmtInt(r.blocked)}`);
+    if (r.warned > 0) parts.push(`warned ${fmtInt(r.warned)}`);
+    if (r.blocked === 0 && r.warned === 0) parts.push("no blocks/warnings");
+    parts.push(hookReceiptStatus(r));
+    return parts.join(" · ");
+}
+
+function verdictSummaryText(v: ProfileGuardrailVerdicts): string {
+    const parts = [
+        `${fmtInt(v.worked)} worked`,
+        `${fmtInt(v.did_not_work)} didn't`,
+    ];
+    if ((v.partial ?? 0) > 0) parts.push(`${fmtInt(v.partial ?? 0)} partial`);
+    parts.push(`${fmtInt(v.no_longer_needed)} no longer needed (resolved or never fired)`);
+    return parts.join(" · ");
+}
 
 /** Only http/https links are rendered as anchors; anything else renders as text. */
 function safeHttpUrl(raw: string): string | null {
@@ -236,6 +262,7 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
     const { colorOf } = buildModelColors(models);
     const arcs = p.workflow ? buildDisplayArcs(p.workflow.arcs, 5) : [];
     const lede = archetypeFor(profileToAxes(p), p).blurb;
+    const hookReceipts = new Map((p.guardrail_receipts?.hooks ?? []).map((r) => [r.name, r]));
 
     return (
         <article className="profile-v2-doc">
@@ -357,7 +384,9 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                         </div>
                         {p.rig.hooks.length > 0 && (
                             <div className="pf-hook-list">
-                                {p.rig.hooks.map((h) => <span className="pf-hook" key={h}>{h}</span>)}
+                                {p.rig.hooks.map((h) => (
+                                    <HookReceiptLine key={h} name={h} receipt={hookReceipts.get(h)} />
+                                ))}
                             </div>
                         )}
                         <div className="pf-guard-row">
@@ -372,6 +401,12 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                                 {p.rig.rules ? fmtInt(p.rig.rules.count) : "-"}
                             </span>
                         </div>
+                        {p.guardrail_receipts && (
+                            <div className="pf-guard-verdicts">
+                                <span>verdicts</span>
+                                <span>{verdictSummaryText(p.guardrail_receipts.verdicts)}</span>
+                            </div>
+                        )}
                     </aside>
                 </div>
             </section>
@@ -441,6 +476,17 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                 <span>publish yours → <code>ax profile publish</code></span>
             </footer>
         </article>
+    );
+}
+
+function HookReceiptLine({ name, receipt }: { name: string; receipt?: ProfileGuardrailHookReceipt }) {
+    return (
+        <div className="pf-hook-receipt">
+            <span className="pf-hook" title={name}>{name}</span>
+            <span className={receipt ? "pf-hook-receipt-text" : "pf-hook-receipt-text pf-hook-receipt-text--empty"}>
+                {receipt ? hookReceiptText(receipt) : "no recent receipt"}
+            </span>
+        </div>
     );
 }
 
