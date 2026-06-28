@@ -29,8 +29,9 @@ describe("onboarding prompt - canonical content", () => {
     test("body opens with the local-only PRIVACY preamble (read first)", () => {
         expect(AGENT_ONBOARDING_PROMPT).toContain("PRIVACY (read first");
         expect(AGENT_ONBOARDING_PROMPT).toContain("no outbound call at ingest");
-        // The privacy guard must explicitly fence off the one command that leaves the box.
+        // The privacy guard must explicitly fence off outbound profile commands.
         expect(AGENT_ONBOARDING_PROMPT).toContain("Do NOT run `ax profile publish`");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("or `ax profile widget`");
     });
 
     test("body carries the value-tour and parallel-insight steps", () => {

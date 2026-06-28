@@ -582,17 +582,17 @@ enforce-worktree  -  14 days
     eyebrow: "$ publish your profile",
     title: "Profile & community",
     blurb:
-      "Render your local profile and, with explicit consent, publish it to a public gist that joins the community boards.",
+      "Render your local profile and, with explicit consent, publish it to a public gist or GitHub profile README widget.",
     commands: [
       {
         name: "profile",
-        sub: ["show", "publish", "unpublish"],
-        job: "Render, publish, or unpublish your ax profile (stats + rig + taste).",
-        signature: "ax profile show [--window=N] | publish [--yes] | unpublish | interview [submit]",
+        sub: ["show", "publish", "widget", "unpublish"],
+        job: "Render, publish, widgetize, or unpublish your ax profile (stats + rig + taste).",
+        signature: "ax profile show [--window=N] | publish [--yes] | widget [--window=N] [--yes] | unpublish | interview [submit]",
         flags: [
           { flag: "--window=N", desc: "days of history to summarize (default 30)" },
           { flag: "--no-cost", desc: "omit cost figures (sticky across republishes)" },
-          { flag: "--yes", desc: "(publish) skip the first-run consent prompt" },
+          { flag: "--yes", desc: "(publish/widget) skip the first-run consent prompt" },
         ],
         receipt: `$ ax profile show --window=30
 ax profile - @octocat  (last 30d)
@@ -601,7 +601,8 @@ ax profile - @octocat  (last 30d)
 18 active days  ·  6-day streak  ·  harnesses: claude-code, codex`,
         detail: [
           "ax profile publish creates a public gist once and PATCHes it in place; the first run shows the exact JSON, asks for consent, then opens a community registration PR.",
-          "--if-stale=<hours> is the watcher path: a no-op until first consent, then it republishes when stale.",
+          "ax profile widget creates or updates `username/username` README.md with a marker-delimited block; re-runs replace only the ax markers.",
+          "--if-stale=<hours> is the watcher path: a no-op until first consent, then it republishes/refreshes when stale.",
           "ax profile unpublish deletes the gist and local publish state (and resets the sticky --no-cost).",
           "ax profile interview emits a brief; an agent interviews you (draft-then-confirm) and pipes the result to `ax profile interview submit`, which validates it into ~/.ax/profile-highlights.json. The next `ax profile publish` folds these user-authored highlights into your gist.",
         ],
