@@ -60,9 +60,19 @@ export default {
         if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
         if (request.method === "GET") {
+            const stateYear = stateYearFromPath(url.pathname);
+            if (stateYear !== null) {
+                const body = await env.BOARD.get("state");
+                if (body === null) return json({ error: "not compiled yet" }, 503);
+                if (!stateBodyMatchesYear(body, stateYear)) return json({ error: "not found" }, 404);
+                return new Response(body, {
+                    headers: { "content-type": "application/json", "cache-control": "public, max-age=300", ...CORS },
+                });
+            }
+
             const key = (KV_KEYS as Record<string, string>)[url.pathname];
             if (key === undefined) {
-                return json({ ok: true, endpoints: Object.keys(KV_KEYS) });
+                return json({ ok: true, endpoints: [...Object.keys(KV_KEYS), "/state/{year}"] });
             }
             const body = await env.BOARD.get(key);
             if (body === null) return json({ error: "not compiled yet" }, 503);
@@ -147,6 +157,20 @@ function touchesRegistrations(payload: PushPayload): boolean {
 }
 
 const encoder = new TextEncoder();
+
+function stateYearFromPath(pathname: string): number | null {
+    const match = /^\/state\/(\d{4})$/.exec(pathname);
+    return match ? Number(match[1]) : null;
+}
+
+function stateBodyMatchesYear(body: string, year: number): boolean {
+    try {
+        const parsed = JSON.parse(body) as { year?: unknown };
+        return parsed.year === year;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Verify GitHub's `x-hub-signature-256` HMAC over the raw body. Constant-time

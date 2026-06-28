@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+    fetchStateReport,
     fetchSkillAdoption,
     fetchMember,
     fetchMembers,
     profileGistRawUrl,
     registrationRawUrl,
     skillRouteKey,
+    stateReportRawUrl,
+    stateReportUrl,
+    validateStateReport,
     validateSkillStats,
     validateSkillRouteKey,
     validateMemberProfile,
@@ -237,5 +241,85 @@ describe("skill adoption fetchers", () => {
         }) as typeof fetch;
 
         await expect(fetchSkillAdoption("superpowers:missing")).rejects.toMatchObject({ notFound: true });
+    });
+});
+
+describe("community state report fetcher", () => {
+    test("validates the compiled state report shape", () => {
+        expect(validateStateReport({
+            year: 2026,
+            users: 25,
+            harness_mix: { claude: 20, codex: 8 },
+            model_share: { "claude-sonnet": 18, "gpt-5": 7 },
+            skill_adoption: { tdd: 17, "agent-browser": 3 },
+        })).toEqual({
+            year: 2026,
+            users: 25,
+            harness_mix: { claude: 20, codex: 8 },
+            model_share: { "claude-sonnet": 18, "gpt-5": 7 },
+            skill_adoption: { tdd: 17, "agent-browser": 3 },
+        });
+    });
+
+    test("rejects malformed state report distributions", () => {
+        expect(() => validateStateReport({
+            year: 2026,
+            users: 25,
+            harness_mix: { claude: "many" },
+            model_share: {},
+            skill_adoption: {},
+        })).toThrow("invalid state report distribution value");
+    });
+
+    test("fetchStateReport reads the validated year endpoint", async () => {
+        const seen: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = String(input);
+            seen.push(url);
+            if (url === stateReportUrl(2026)) {
+                return new Response(JSON.stringify({
+                    year: 2026,
+                    users: 31,
+                    harness_mix: { claude: 22 },
+                    model_share: { "claude-sonnet": 19 },
+                    skill_adoption: { tdd: 14 },
+                }));
+            }
+            return new Response("missing", { status: 404 });
+        }) as typeof fetch;
+
+        await expect(fetchStateReport(2026)).resolves.toMatchObject({
+            year: 2026,
+            users: 31,
+            skill_adoption: { tdd: 14 },
+        });
+        expect(seen).toEqual([stateReportUrl(2026)]);
+    });
+
+    test("fetchStateReport falls back to the checked-in state file when the worker route is not deployed yet", async () => {
+        const seen: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = String(input);
+            seen.push(url);
+            if (url === stateReportUrl(2026)) {
+                return new Response(JSON.stringify({ ok: true, endpoints: ["/state"] }));
+            }
+            if (url === stateReportRawUrl(2026)) {
+                return new Response(JSON.stringify({
+                    year: 2026,
+                    users: 1,
+                    harness_mix: { claude: 1 },
+                    model_share: { "claude-sonnet": 1 },
+                    skill_adoption: { tdd: 1 },
+                }));
+            }
+            return new Response("missing", { status: 404 });
+        }) as typeof fetch;
+
+        await expect(fetchStateReport(2026)).resolves.toMatchObject({
+            users: 1,
+            harness_mix: { claude: 1 },
+        });
+        expect(seen).toEqual([stateReportUrl(2026), stateReportRawUrl(2026)]);
     });
 });
