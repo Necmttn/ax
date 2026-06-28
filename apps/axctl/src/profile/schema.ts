@@ -110,6 +110,26 @@ const Workflow = Schema.Struct({
     arcs: Schema.Array(WorkflowArc),
 });
 
+const GuardrailHookReceipt = Schema.Struct({
+    name: Schema.String,
+    fires: Schema.Number,
+    blocked: Schema.Number,
+    warned: Schema.Number,
+});
+
+const GuardrailVerdicts = Schema.Struct({
+    worked: Schema.Number,
+    did_not_work: Schema.Number,
+    no_longer_needed: Schema.Number,
+    partial: Schema.optional(Schema.Number),
+});
+
+const GuardrailReceipts = Schema.Struct({
+    hooks: Schema.Array(GuardrailHookReceipt),
+    verdicts: GuardrailVerdicts,
+});
+export type GuardrailReceipts = typeof GuardrailReceipts.Type;
+
 export const Highlights = Schema.Struct({
     authored_at: Schema.String,
     setup: Schema.optional(Schema.Array(Schema.Struct({
@@ -191,6 +211,7 @@ export const ProfileV1 = Schema.Struct({
     activity: Schema.optional(Activity),
     insights: Schema.optional(Insights),
     workflow: Schema.optional(Workflow),
+    guardrail_receipts: Schema.optional(GuardrailReceipts),
     highlights: Schema.optional(Highlights),
 });
 export type ProfileV1 = typeof ProfileV1.Type;

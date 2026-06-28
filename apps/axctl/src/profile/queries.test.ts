@@ -5,6 +5,8 @@ import {
     fetchCommitCount,
     fetchDailyActivity,
     fetchDailyActivityFull,
+    fetchGuardrailHookEvidence,
+    fetchGuardrailVerdicts,
     fetchHarnesses,
     fetchPeakHour,
     fetchSessionDurations,
@@ -322,5 +324,43 @@ describe("fetchWindowedInvocations", () => {
         const db = makeMockDb([[[]]]);
         const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 7 }));
         expect(r).toHaveLength(0);
+    });
+});
+
+describe("fetchGuardrailHookEvidence", () => {
+    test("returns per-hook fire/block/warn counts from hook evidence", async () => {
+        const db = makeMockDb([[[
+            { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
+            { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
+        ]]]);
+        const rows = await runWithMock(db, fetchGuardrailHookEvidence({ windowDays: 14 }));
+        expect(rows).toEqual([
+            { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
+            { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
+        ]);
+        expect(db.captured[0]).toContain("FROM hook_command_invocation");
+        expect(db.captured[0]).toContain("time::now() - 14d");
+        expect(db.captured[0]).toContain("GROUP BY hook_name");
+        expect(db.captured[0]).toContain('effect = "blocked"');
+        expect(db.captured[0]).toContain('"injected_context"');
+    });
+});
+
+describe("fetchGuardrailVerdicts", () => {
+    test("returns locked verdict counts from windowed checkpoint rows", async () => {
+        const db = makeMockDb([[[
+            { verdict: "adopted", count: 4 },
+            { verdict: "ignored", count: 2 },
+            { verdict: "no_longer_needed", count: 1 },
+        ]]]);
+        const rows = await runWithMock(db, fetchGuardrailVerdicts({ windowDays: 30 }));
+        expect(rows).toEqual([
+            { verdict: "adopted", count: 4 },
+            { verdict: "ignored", count: 2 },
+            { verdict: "no_longer_needed", count: 1 },
+        ]);
+        expect(db.captured[0]).toContain("FROM checkpoint");
+        expect(db.captured[0]).toContain("user_verdict IS NOT NONE");
+        expect(db.captured[0]).toContain("time::now() - 30d");
     });
 });

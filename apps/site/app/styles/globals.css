@@ -12555,7 +12555,13 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 .pf-guard-on { color: var(--green); }
 .pf-guard-off { color: var(--muted); }
-.pf-hook-list { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 10px; }
+.pf-hook-list { display: flex; flex-direction: column; gap: 7px; padding-bottom: 10px; }
+.pf-hook-receipt {
+    display: grid;
+    grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr);
+    gap: 8px;
+    align-items: start;
+}
 .pf-hook {
     font-family: var(--mono);
     font-size: 11px;
@@ -12564,6 +12570,25 @@ footer.site-footer { padding: 48px 32px 56px; }
     padding: 2px 8px;
     overflow-wrap: anywhere;
 }
+.pf-hook-receipt-text {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+.pf-hook-receipt-text--empty { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+.pf-guard-verdicts {
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+    margin-top: 2px;
+    display: grid;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+.pf-guard-verdicts span:first-child { color: var(--muted); }
 
 /* ----- 05 taste patterns ----- */
 .pf-taste {

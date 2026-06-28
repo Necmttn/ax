@@ -17,6 +17,8 @@ import {
     fetchDailyModels,
     fetchDailyToolCalls,
     fetchDeepSessionCount,
+    fetchGuardrailHookEvidence,
+    fetchGuardrailVerdicts,
     fetchHarnesses,
     fetchPeakHour,
     fetchSessionDurations,
@@ -29,6 +31,7 @@ import {
     fetchWindowedSessions,
     fetchWrappedCounts,
 } from "./queries.ts";
+import { deriveGuardrailReceipts } from "./guardrails.ts";
 import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
@@ -67,6 +70,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 22 windowedInvocations  23 windowedSessions
         // 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
         // 27 contentTypeBreakdown
+        // 28 guardrailHookEvidence  29 guardrailVerdicts
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -92,6 +96,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const deep = yield* fetchDeepSessionCount({ windowDays });
         // 27 content-type breakdown (appended last; keeps mock order in render.test.ts aligned)
         const contentTypes = yield* fetchContentTypeBreakdown();
+        const guardrailHookEvidence = yield* fetchGuardrailHookEvidence({ windowDays });
+        const guardrailVerdicts = yield* fetchGuardrailVerdicts({ windowDays });
 
         const streak = computeStreak(daily, env.today);
 
@@ -158,6 +164,11 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
 
         // Derive downstream shares (pure compute over windowed invocations + sessions)
         const shareMap = computeDownstreamShares(windowedInvocations, windowedSessions);
+        const guardrailReceipts = deriveGuardrailReceipts({
+            hookFiles: env.hookFiles,
+            hookEvidence: guardrailHookEvidence,
+            verdicts: guardrailVerdicts,
+        });
 
         // decodeProfile throws on invariant breach -> Effect defect (die),
         // intentionally unrecoverable: a malformed profile is a bug here.
@@ -191,6 +202,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
             ...(enrichedDaily.length > 0 ? { activity: { daily: enrichedDaily } } : {}),
             ...(insights !== null ? { insights } : {}),
             ...(workflowArcs.length > 0 ? { workflow: { arcs: workflowArcs } } : {}),
+            ...(guardrailReceipts !== null ? { guardrail_receipts: guardrailReceipts } : {}),
             ...(env.highlights !== null ? { highlights: env.highlights } : {}),
         });
         return profile;

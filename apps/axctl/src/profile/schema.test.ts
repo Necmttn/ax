@@ -392,6 +392,57 @@ describe("new enriched daily fields (optional)", () => {
     });
 });
 
+describe("guardrail receipts schema", () => {
+    const base = {
+        v: 1, github: "x", generated_at: "2026-06-13T00:00:00Z", window_days: 30,
+        stats: {
+            sessions: 1, active_days: 1, streak_days: 1,
+            tokens: { prompt: 0, completion: 0, total: 0 },
+            models: [], harnesses: [],
+        },
+        rig: { skills: [], hooks: ["enforce-worktree"], routing_table: false },
+    };
+
+    test("accepts optional hook receipt counts and verdict tallies", () => {
+        const p = decodeProfile({
+            ...base,
+            guardrail_receipts: {
+                hooks: [
+                    { name: "enforce-worktree", fires: 412, blocked: 9, warned: 3 },
+                    { name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
+                ],
+                verdicts: {
+                    worked: 4,
+                    did_not_work: 2,
+                    no_longer_needed: 1,
+                },
+            },
+        });
+        expect(p.guardrail_receipts!.hooks[0]).toEqual({
+            name: "enforce-worktree",
+            fires: 412,
+            blocked: 9,
+            warned: 3,
+        });
+        expect(p.guardrail_receipts!.verdicts.no_longer_needed).toBe(1);
+    });
+
+    test("omits guardrail receipts for old gists", () => {
+        const p = decodeProfile(base);
+        expect(p.guardrail_receipts).toBeUndefined();
+    });
+
+    test("rejects non-count receipt fields", () => {
+        expect(() => decodeProfile({
+            ...base,
+            guardrail_receipts: {
+                hooks: [{ name: "enforce-worktree", fires: "lots", blocked: 9, warned: 0 }],
+                verdicts: { worked: 1, did_not_work: 0, no_longer_needed: 0 },
+            },
+        })).toThrow();
+    });
+});
+
 describe("Highlights schema", () => {
     test("Highlights decodes a full block", () => {
         const decode = Schema.decodeUnknownSync(Highlights);
