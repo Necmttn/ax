@@ -2,6 +2,7 @@
  * `ax profile show` - render the local profile (ProfileV1) from the graph.
  * `ax profile publish` - publish ProfileV1 to a public gist (create once, PATCH in place);
  *   first run shows the exact JSON, asks for consent, then opens a community registration PR.
+ * `ax profile widget` - install/update the GitHub profile README widget.
  * `ax profile unpublish` - delete the published gist and local publish state.
  */
 import { Effect, Schema } from "effect";
@@ -27,6 +28,14 @@ import {
     loadPublishState,
     savePublishState,
 } from "../../profile/publish-state.ts";
+import {
+    defaultWidgetStatePath,
+    installOrUpdateProfileWidget,
+    loadWidgetState,
+    renderProfileWidget,
+    saveWidgetState,
+    shouldSkipWidgetRefresh,
+} from "../../profile/widget.ts";
 import { renderProfileInterviewBrief } from "../../profile/interview-brief.ts";
 import {
     decodeHighlightsFile,
@@ -430,6 +439,91 @@ const profilePublishCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax profile widget [--window=N] [--if-stale=H] [--yes]
+// ---------------------------------------------------------------------------
+
+const cmdProfileWidget = (input: {
+    readonly window: number;
+    readonly ifStaleHours: number | null;
+    readonly yes: boolean;
+}) =>
+    Effect.gen(function* () {
+        const statePath = defaultWidgetStatePath();
+        const state = yield* Effect.promise(() => loadWidgetState(statePath));
+        const nowIso = new Date().toISOString();
+
+        if (input.ifStaleHours !== null && shouldSkipWidgetRefresh(state, input.ifStaleHours, nowIso)) {
+            return;
+        }
+
+        const windowDays = input.ifStaleHours !== null && state !== null
+            ? state.window_days
+            : input.window;
+        const env = yield* gatherEnv();
+        const profile = yield* buildProfile({
+            windowDays,
+            includeCost: false,
+            env,
+        });
+        const block = renderProfileWidget(profile);
+
+        if (state === null) {
+            console.log(block);
+            console.log(
+                "\nThis exact block will be committed to your public GitHub profile README\n" +
+                `(${profile.github}/${profile.github}). Future watcher refreshes update only the text\n` +
+                "between the ax markers until you delete ~/.ax/profile-widget.json.",
+            );
+            if (!input.yes) {
+                const ans = (globalThis.prompt?.("Install widget? [y/N]") ?? "").trim().toLowerCase();
+                if (ans !== "y" && ans !== "yes") {
+                    console.log("Aborted. Nothing was committed.");
+                    return;
+                }
+            }
+        }
+
+        const result = yield* installOrUpdateProfileWidget({ profile });
+        yield* Effect.promise(() =>
+            saveWidgetState(statePath, {
+                v: 1,
+                owner: profile.github,
+                consented_at: state?.consented_at ?? nowIso,
+                updated_at: nowIso,
+                window_days: windowDays,
+            }),
+        );
+
+        if (input.ifStaleHours === null) {
+            console.log(`${result.status}: ${result.url}`);
+        }
+    }).pipe(Effect.provide(GitHubEnvLive));
+
+const profileWidgetCommand = Command.make(
+    "widget",
+    {
+        window: Flag.integer("window").pipe(Flag.withDefault(30)),
+        ifStale: Flag.integer("if-stale").pipe(Flag.optional),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ window, ifStale, yes }) => {
+        if (!Number.isInteger(window) || window <= 0) {
+            fail(`ax profile widget: --window must be a positive integer (got "${window}")`);
+        }
+        const ifStaleHours = optionValue(ifStale) ?? null;
+        if (ifStaleHours !== null && (!Number.isInteger(ifStaleHours) || ifStaleHours <= 0)) {
+            fail(`ax profile widget: --if-stale must be positive hours (got "${ifStaleHours}")`);
+        }
+        return cmdProfileWidget({ window, ifStaleHours, yes });
+    },
+).pipe(
+    Command.withDescription(
+        "Install or refresh a marker-delimited ax block in your GitHub profile README. " +
+        "First run asks for consent. --window=N  --if-stale=<hours>  --yes",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax profile unpublish
 // ---------------------------------------------------------------------------
 
@@ -549,7 +643,13 @@ export const profileCommand = Command.make("profile").pipe(
     Command.withDescription(
         "Your ax profile: stats, rig, and taste rendered from the local graph",
     ),
-    Command.withSubcommands([profileShowCommand, profilePublishCommand, profileUnpublishCommand, profileInterviewCommand]),
+    Command.withSubcommands([
+        profileShowCommand,
+        profilePublishCommand,
+        profileWidgetCommand,
+        profileUnpublishCommand,
+        profileInterviewCommand,
+    ]),
 );
 
 // `interview submit` only validates JSON + writes ~/.ax/profile-highlights.json,
@@ -562,6 +662,7 @@ export const axProfileRuntime: RuntimeManifest = {
         subcommands: {
             show: "db",
             publish: "db",
+            widget: "db",
             unpublish: "db",
             interview: (args) => (args[2] === "submit" ? "none" : "db"),
         },

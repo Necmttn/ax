@@ -295,6 +295,12 @@ runs `--if-stale=2` after ingest - silent no-op until first consent.
 gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
 in plan 4.
+`ax profile widget [--window=N] [--if-stale=H] [--yes]` - consent-gated GitHub
+profile README widget. First run previews the exact marker-delimited block and
+commits it to `username/username` via `gh`; re-runs replace only
+`<!--START_SECTION:ax-->...<!--END_SECTION:ax-->`. The watcher runs
+`--if-stale=2` after ingest and silently no-ops until first consent. State:
+`~/.ax/profile-widget.json`.
 
 `ax profile interview [--force]` - emit `.ax/tasks/profile-interview-<date>.md`, a
 brief for an agent to interview you (draft-then-confirm, grounded in your rig) for
