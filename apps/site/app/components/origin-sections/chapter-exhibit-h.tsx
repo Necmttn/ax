@@ -7,6 +7,7 @@ export function ChapterExhibitH() {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const rootEl = root;
 
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -94,11 +95,12 @@ export function ChapterExhibitH() {
       vibesBody!.appendChild(el);
       requestAnimationFrame(() => { el.classList.add("is-shown"); });
       if (vibesCount) vibesCount.textContent = String(vKept);
-      if (vKept >= 15) root.setAttribute("data-lane-vibes-overflow", "1");
+      if (vKept >= 15) rootEl.setAttribute("data-lane-vibes-overflow", "1");
     }
 
     function addAxRow(i: number) {
       const row = AX_ROWS[i % AX_ROWS.length];
+      if (!row) return;
       const accepted = row.verdict === "kept" || row.verdict === "self-resolved";
       if (accepted) aKept++; else aDropped++;
 
@@ -139,8 +141,8 @@ export function ChapterExhibitH() {
       if (vibesCount) vibesCount.textContent = "0";
       if (axKept)     axKept.textContent = "0";
       if (axDropped)  axDropped.textContent = "0";
-      root.removeAttribute("data-lane-vibes-overflow");
-      root.removeAttribute("data-playing");
+      rootEl.removeAttribute("data-lane-vibes-overflow");
+      rootEl.removeAttribute("data-playing");
       setPillState("idle", "auto · idle");
     }
 
@@ -152,7 +154,7 @@ export function ChapterExhibitH() {
     async function runAutoplay() {
       if (userTookOver || reduce) return;
       autoPlaying = true;
-      root.setAttribute("data-playing", "1");
+      rootEl.setAttribute("data-playing", "1");
       setPillState("playing", "auto · playing");
 
       const wait = (ms: number) => new Promise<void>((resolve) => {
@@ -170,7 +172,7 @@ export function ChapterExhibitH() {
       }
 
       autoPlaying = false;
-      root.removeAttribute("data-playing");
+      rootEl.removeAttribute("data-playing");
       setPillState("done", "auto · done");
     }
 
@@ -179,7 +181,7 @@ export function ChapterExhibitH() {
       userTookOver = true;
       autoPlaying  = false;
       clearPending();
-      root.removeAttribute("data-playing");
+      rootEl.removeAttribute("data-playing");
       setPillState("manual", "manual");
     }
 
@@ -208,13 +210,13 @@ export function ChapterExhibitH() {
     }, true);
 
     if (reduce) {
-      root.setAttribute("data-static", "1");
+      rootEl.setAttribute("data-static", "1");
       setPillState("reduce", "motion paused");
       run20();
       const cap = document.createElement("div");
       cap.className = "static-caption";
       cap.textContent = "motion paused - end state of 20 iterations";
-      root.querySelector("[data-race-counter]")?.appendChild(cap);
+      rootEl.querySelector("[data-race-counter]")?.appendChild(cap);
     } else {
       setPillState("idle", "auto · idle");
       // Pre-seed a few iterations so both lanes show content on first paint

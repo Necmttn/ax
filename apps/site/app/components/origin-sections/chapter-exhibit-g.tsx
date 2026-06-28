@@ -7,6 +7,7 @@ export function ChapterExhibitG() {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const rootEl = root;
 
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -57,7 +58,7 @@ export function ChapterExhibitG() {
 
     function countSurvived(k: number) {
       let n = 0;
-      root.querySelectorAll<HTMLElement>("[data-drop]").forEach((rule) => {
+      rootEl.querySelectorAll<HTMLElement>("[data-drop]").forEach((rule) => {
         const drop = parseInt(rule.getAttribute("data-drop") ?? "999", 10);
         if (k < drop) n++;
       });
@@ -76,7 +77,7 @@ export function ChapterExhibitG() {
       track!.setAttribute("aria-valuenow", String(Math.round(k)));
 
       // update each rule
-      root.querySelectorAll<HTMLElement>("[data-pressure-rule]").forEach((ruleEl) => {
+      rootEl.querySelectorAll<HTMLElement>("[data-pressure-rule]").forEach((ruleEl) => {
         const drop     = parseInt(ruleEl.getAttribute("data-drop") ?? "999", 10);
         const kind     = ruleEl.getAttribute("data-kind") ?? "prose";
         const statusEl = ruleEl.querySelector<HTMLElement>("[data-pressure-status]");
@@ -106,7 +107,7 @@ export function ChapterExhibitG() {
       });
 
       const survived  = countSurvived(k);
-      const total     = root.querySelectorAll("[data-drop]").length;
+      const total     = rootEl.querySelectorAll("[data-drop]").length;
       if (survivedEl) {
         survivedEl.textContent = String(survived);
         survivedEl.classList.toggle("is-max", survived === total);
@@ -235,13 +236,13 @@ export function ChapterExhibitG() {
 
     // Boot
     if (reduce) {
-      root.setAttribute("data-static", "1");
+      rootEl.setAttribute("data-static", "1");
       setPillState("reduce", "motion paused");
       setPosition(MAX);
       const cap = document.createElement("div");
       cap.className = "static-caption";
       cap.textContent = "motion paused - full context window shown";
-      root.querySelector("[data-pressure-wrap]")?.appendChild(cap);
+      rootEl.querySelector("[data-pressure-wrap]")?.appendChild(cap);
     } else {
       setPosition(MIN);
       setPillState("idle", "auto · idle");

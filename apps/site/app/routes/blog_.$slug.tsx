@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { MDXContent } from "@content-collections/mdx/react";
-import { allBlogs } from "content-collections";
+import { allBlogs, type Blog } from "content-collections";
 import { mdxComponents } from "~/components/mdx-components";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { SiteHeader } from "~/components/landing-sections/site-header";
@@ -28,14 +28,19 @@ function fmtDate(iso: string): string {
   return `${months[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
 }
 
+type BlogLoaderData = { post: Blog };
+
+function loadBlogPost({ params }: { params: { slug: string } }): BlogLoaderData {
+  const post = allBlogs.find((p) => p.slug === params.slug);
+  if (!post) throw notFound();
+  return { post };
+}
+
 export const Route = createFileRoute("/blog_/$slug")({
-  // NOTE: like every dynamic content-collections route in this app
-  // (docs/adr.$slug, changelog_.$version), the strict site typecheck does not
-  // thread loaderData's type into `head` - it reads as `never`. Accepted,
-  // pre-existing repo-wide pattern; the build/runtime are correct. Matching the
-  // adr-style optional-chain shape here for consistency.
+  // This TanStack version does not thread loaderData's type into `head`, so
+  // keep the cast at this boundary and share the named loader type elsewhere.
   head: ({ loaderData }) => {
-    const post = loaderData?.post;
+    const post = (loaderData as BlogLoaderData | undefined)?.post;
     if (!post) return { meta: [{ title: "Blog - ax" }] };
     const og = ogImageUrl(post.slug, post.title, post.date);
     return {
@@ -55,16 +60,12 @@ export const Route = createFileRoute("/blog_/$slug")({
       ],
     };
   },
-  loader: ({ params }) => {
-    const post = allBlogs.find((p) => p.slug === params.slug);
-    if (!post) throw notFound();
-    return { post };
-  },
+  loader: loadBlogPost,
   component: BlogPost,
 });
 
 function BlogPost() {
-  const { post } = Route.useLoaderData();
+  const { post } = Route.useLoaderData() as BlogLoaderData;
   // The markdown body carries its own H1, so we render only a date eyebrow
   // above it - no second, competing headline.
   return (

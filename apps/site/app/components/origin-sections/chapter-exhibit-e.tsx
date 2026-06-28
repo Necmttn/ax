@@ -11,6 +11,7 @@ export function ChapterExhibitE() {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const rootEl = root;
 
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -204,11 +205,11 @@ export function ChapterExhibitE() {
 
       const evEl = document.createElement("div");
       evEl.className = "exp-evidence";
-      [7, 30, 90].forEach((cp) => {
+      ([7, 30, 90] as const).forEach((cp) => {
         const tick = document.createElement("div");
         tick.className = "ev-tick";
         tick.setAttribute("data-cp", String(cp));
-        tick.innerHTML = (item.ticks as Record<number, string>)[cp];
+        tick.innerHTML = item.ticks[cp];
         evEl.appendChild(tick);
       });
       lane.appendChild(evEl);
@@ -279,14 +280,14 @@ export function ChapterExhibitE() {
     function refreshEmpties() {
       let pending = 0;
       SEED.forEach((s) => { if (state[s.id] === "pending") pending++; });
-      const countEl = root.querySelector("[data-count-retros]");
+      const countEl = rootEl.querySelector("[data-count-retros]");
       if (countEl) countEl.textContent = `${pending} / week`;
 
-      const emptyProp = root.querySelector('[data-empty="proposals"]');
+      const emptyProp = rootEl.querySelector<HTMLElement>('[data-empty="proposals"]');
       if (emptyProp) emptyProp.style.display = propBody!.querySelector(".proposal-card") ? "none" : "";
-      const emptyExp = root.querySelector('[data-empty="experiments"]');
+      const emptyExp = rootEl.querySelector<HTMLElement>('[data-empty="experiments"]');
       if (emptyExp) emptyExp.style.display = expBody!.querySelector(".exp-lane") ? "none" : "";
-      const emptyVerd = root.querySelector('[data-empty="verdicts"]');
+      const emptyVerd = rootEl.querySelector<HTMLElement>('[data-empty="verdicts"]');
       if (emptyVerd) emptyVerd.style.display = verdBody!.querySelector(".verdict-slot") ? "none" : "";
     }
 
@@ -398,8 +399,13 @@ export function ChapterExhibitE() {
       clearEl(expBody!);
       clearEl(verdBody!);
 
-      [["proposals", "drag a retro here"], ["experiments", "start an experiment"], ["verdicts", "resolve at +30 sessions"]].forEach(([col, text]) => {
-        const bodyEl = root.querySelector<HTMLElement>(`[data-drop="${col}"]`);
+      const emptyStates = [
+        ["proposals", "drag a retro here"],
+        ["experiments", "start an experiment"],
+        ["verdicts", "resolve at +30 sessions"],
+      ] as const;
+      emptyStates.forEach(([col, text]) => {
+        const bodyEl = rootEl.querySelector<HTMLElement>(`[data-drop="${col}"]`);
         const em = document.createElement("div");
         em.className = "col-empty";
         em.setAttribute("data-empty", col);
@@ -418,7 +424,7 @@ export function ChapterExhibitE() {
     }
 
     function staticEnd() {
-      root.setAttribute("data-static", "1");
+      rootEl.setAttribute("data-static", "1");
       clearEl(retroBody!);
       clearEl(propBody!);
       clearEl(expBody!);
@@ -533,7 +539,8 @@ export function ChapterExhibitE() {
 
       for (let i = 0; i < SEED.length; i++) {
         if (userTookOver) return;
-        await playItem(SEED[i], i === SEED.length - 1);
+        const item = SEED[i];
+        if (item) await playItem(item, i === SEED.length - 1);
       }
 
       if (userTookOver) return;

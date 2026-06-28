@@ -6,6 +6,7 @@ const MAX_DOTS = 120;
 const OPEN_MS = 320;
 const CLOSE_MS = 520;
 const GREENS = ["#39d353", "#26a641", "#006d32", "#0e4429", "#39d353", "#26a641", "#006d32", "#0e4429"];
+const FALLBACK_GREEN = "#39d353";
 
 interface Dot {
   x: number;
@@ -80,7 +81,8 @@ export function PipelineFlow({
       for (let i = 0; i < STAGES.length; i++) {
         const center = (i + 0.5) / STAGES.length;
         const bell = Math.exp(-0.5 * ((x - center) / sigma) ** 2);
-        const min = minH + (maxH - minH) * s.transitions[i];
+        const transition = s.transitions[i] ?? 0;
+        const min = minH + (maxH - minH) * transition;
         result -= (maxH - min) * bell;
       }
       return Math.max(minH, result);
@@ -109,9 +111,10 @@ export function PipelineFlow({
         const target = progress >= threshold ? 1 : 0;
         const duration = target === 1 ? OPEN_MS : CLOSE_MS;
         const maxStep = dt / duration;
-        const delta = target - s.transitions[i];
+        const current = s.transitions[i] ?? 0;
+        const delta = target - current;
         s.transitions[i] =
-          Math.abs(delta) <= maxStep ? target : s.transitions[i] + Math.sign(delta) * maxStep;
+          Math.abs(delta) <= maxStep ? target : current + Math.sign(delta) * maxStep;
 
         const label = labelsRef.current[i];
         if (label) {
@@ -135,12 +138,13 @@ export function PipelineFlow({
 
       const bottlenecks: { center: number; closedness: number }[] = [];
       for (let i = 0; i < STAGES.length; i++) {
-        const closedness = 1 - s.transitions[i];
+        const closedness = 1 - (s.transitions[i] ?? 0);
         if (closedness > 0.1) bottlenecks.push({ center: (i + 0.5) / STAGES.length, closedness });
       }
 
       for (let dotIndex = 0; dotIndex < dots.length; dotIndex++) {
         const dot = dots[dotIndex];
+        if (!dot) continue;
         let dotSpeed = speed(dot.x);
         for (const bottleneck of bottlenecks) {
           const zone = 0.18;
@@ -199,12 +203,13 @@ export function PipelineFlow({
       ctx.setLineDash([]);
 
       for (let i = 0; i < STAGES.length; i++) {
-        if (s.transitions[i] < 0.9) {
+        const transition = s.transitions[i] ?? 0;
+        if (transition < 0.9) {
           const bx = ((i + 0.5) / STAGES.length) * w;
           ctx.setLineDash([2, 4]);
           ctx.strokeStyle = isDark
-            ? `rgba(255,120,80,${0.3 * (1 - s.transitions[i])})`
-            : `rgba(191,74,48,${0.3 * (1 - s.transitions[i])})`;
+            ? `rgba(255,120,80,${0.3 * (1 - transition)})`
+            : `rgba(191,74,48,${0.3 * (1 - transition)})`;
           ctx.beginPath();
           ctx.moveTo(bx, cy - 0.44 * ps);
           ctx.lineTo(bx, cy + 0.44 * ps);
@@ -217,7 +222,7 @@ export function PipelineFlow({
       ctx.shadowColor = "#39d35380";
       ctx.shadowBlur = 5;
       for (const dot of s.dots) {
-        ctx.fillStyle = GREENS[dot.colorIdx] ?? GREENS[0];
+        ctx.fillStyle = GREENS[dot.colorIdx] ?? FALLBACK_GREEN;
         ctx.fillRect(dot.x * w - SQ / 2, cy + (dot.y - 0.5) * ps * 0.6 - SQ / 2, SQ, SQ);
       }
       ctx.restore();

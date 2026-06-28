@@ -1,35 +1,52 @@
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
-import { allChangelogs, allReleaseAnnouncements } from "content-collections";
+import {
+  allChangelogs,
+  allReleaseAnnouncements,
+  type ReleaseAnnouncement,
+} from "content-collections";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { MarkdownInline, MarkdownLite } from "~/components/release-markdown";
 
+type ReleaseLoaderData = {
+  release: ReleaseAnnouncement;
+  generatedEntry: string | null;
+  generatedSections: GeneratedSection[];
+};
+
+function loadRelease({ params }: { params: { version: string } }): ReleaseLoaderData {
+  const normalized = params.version.replace(/^v/, "");
+  const release = allReleaseAnnouncements.find((item) => item.version === normalized);
+  if (!release) throw notFound();
+  const changelog = allChangelogs[0]?.content ?? "";
+  const generatedEntry = extractGeneratedEntry(changelog, normalized);
+  return {
+    release,
+    generatedEntry,
+    generatedSections: parseGeneratedSections(generatedEntry),
+  };
+}
+
 export const Route = createFileRoute("/changelog_/$version")({
-  head: ({ loaderData }) => ({
-    meta: loaderData ? [
-      { title: `${loaderData.release.title} - ax v${loaderData.release.version}` },
-      { name: "description", content: loaderData.release.summary },
-    ] : [
-      { title: "Release not found - ax" },
-    ],
-  }),
-  loader: ({ params }) => {
-    const normalized = params.version.replace(/^v/, "");
-    const release = allReleaseAnnouncements.find((item) => item.version === normalized);
-    if (!release) throw notFound();
-    const changelog = allChangelogs[0]?.content ?? "";
-    const generatedEntry = extractGeneratedEntry(changelog, normalized);
+  head: ({ loaderData }) => {
+    const data = loaderData as ReleaseLoaderData | undefined;
     return {
-      release,
-      generatedEntry,
-      generatedSections: parseGeneratedSections(generatedEntry),
+      meta: data
+        ? [
+            { title: `${data.release.title} - ax v${data.release.version}` },
+            { name: "description", content: data.release.summary },
+          ]
+        : [
+            { title: "Release not found - ax" },
+          ],
     };
   },
+  loader: loadRelease,
   component: ReleasePage,
 });
 
 function ReleasePage() {
-  const { release, generatedEntry, generatedSections } = Route.useLoaderData();
+  const { release, generatedEntry, generatedSections } = Route.useLoaderData() as ReleaseLoaderData;
   const itemCount = generatedSections.reduce((sum, section) => sum + section.items.length, 0);
 
   return (

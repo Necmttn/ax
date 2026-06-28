@@ -11,5 +11,5 @@
       "content-collections": ["./.content-collections/generated"]
     }
   },
-  "include": ["app", "vite.config.ts", "content-collections.ts"]
+  "include": ["app", "scripts", "vite.config.ts", "content-collections.ts"]
 }

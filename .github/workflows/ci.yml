@@ -29,6 +29,8 @@ jobs:
 
       - run: bun run typecheck
 
+      - run: bun run --cwd apps/site typecheck
+
       - run: bun run check:cli-reference
 
       - run: bun run check:no-node-fs

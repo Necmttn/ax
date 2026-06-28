@@ -11,9 +11,9 @@ export function ChapterExhibitA() {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
     // ── Rail drag (vertical re-injection dial) ──────────────────────────────
-    const LEVELS: Record<string, number> = { off: 400, light: 290, full: 118 };
     const LEVEL_ORDER = ["off", "light", "full"] as const;
     type Level = typeof LEVEL_ORDER[number];
+    const LEVELS: Record<Level, number> = { off: 400, light: 290, full: 118 };
 
     const fig          = root;
     const handleEl     = root.querySelector<SVGRectElement>("[data-cs-handle]");
@@ -235,8 +235,14 @@ export function ChapterExhibitA() {
       if (reduce) return;
       takeover();
       const idx = LEVEL_ORDER.indexOf(currentLevel);
-      if (ev.key === "ArrowUp"   && idx < 2) setLevel(LEVEL_ORDER[idx + 1]);
-      if (ev.key === "ArrowDown" && idx > 0) setLevel(LEVEL_ORDER[idx - 1]);
+      if (ev.key === "ArrowUp" && idx < 2) {
+        const next = LEVEL_ORDER[idx + 1];
+        if (next) setLevel(next);
+      }
+      if (ev.key === "ArrowDown" && idx > 0) {
+        const previous = LEVEL_ORDER[idx - 1];
+        if (previous) setLevel(previous);
+      }
       ev.preventDefault();
     });
 
