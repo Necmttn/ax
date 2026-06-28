@@ -27,6 +27,53 @@ export interface CompiledProfile {
     };
 }
 
+export const PATTERN_CATEGORIES = [
+    "design-aesthetic",
+    "problem-solving-strategy",
+    "debugging",
+    "failure-mode",
+    "workflow",
+    "tool-output-mix",
+    "stack-choice",
+] as const;
+export type PatternCategory = (typeof PATTERN_CATEGORIES)[number];
+
+const PATTERN_CATEGORY_SET = new Set<string>(PATTERN_CATEGORIES);
+const PATTERN_LINK_RELS = ["recovered-by", "pairs-with", "conflicts-with"] as const;
+const PATTERN_LINK_REL_SET = new Set<string>(PATTERN_LINK_RELS);
+const PATTERN_TRENDS = ["rising", "stable", "falling", "stale"] as const;
+type PatternTrend = (typeof PATTERN_TRENDS)[number];
+const PATTERN_TREND_SET = new Set<string>(PATTERN_TRENDS);
+
+export interface CompiledPatternLink {
+    readonly rel: (typeof PATTERN_LINK_RELS)[number];
+    readonly ref: string;
+}
+
+export interface CompiledTastePattern {
+    readonly category: PatternCategory;
+    readonly name: string;
+    readonly summary?: string;
+    readonly slot?: string;
+    readonly over?: readonly string[];
+    readonly context?: string;
+    readonly evidence: {
+        readonly sessions: number;
+        readonly confidence: number;
+        readonly last_reinforced?: string;
+        readonly trend?: PatternTrend;
+    };
+    readonly links?: readonly CompiledPatternLink[];
+}
+
+export type PatternDropReason = "invalid-pattern" | "duplicate-pattern";
+
+export interface PatternDrop {
+    readonly index?: number;
+    readonly key?: string;
+    readonly reason: PatternDropReason;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -86,4 +133,106 @@ export function validateProfile(value: unknown): CompiledProfile {
         },
         rig: { skills, hooks: rig.hooks as string[] },
     };
+}
+
+export function patternKey(category: string, name: string): string {
+    return `${category.trim()}/${name.trim()}`;
+}
+
+const finitePatternNumber = (v: unknown, what: string): number => {
+    const n = num(v, what);
+    if (n < 0) throw new Error(`invalid ${what}`);
+    return n;
+};
+
+function validatePatternRow(row: unknown): CompiledTastePattern {
+    if (!isRecord(row) || !isRecord(row.evidence)) throw new Error("invalid pattern");
+    const category = str(row.category, "pattern.category").trim();
+    const name = str(row.name, "pattern.name").trim();
+    if (!PATTERN_CATEGORY_SET.has(category) || name === "" || name.includes("/")) throw new Error("invalid pattern key");
+
+    const trend = row.evidence.trend === undefined ? undefined : str(row.evidence.trend, "pattern.evidence.trend");
+    if (trend !== undefined && !PATTERN_TREND_SET.has(trend)) throw new Error("invalid pattern.evidence.trend");
+    const evidence: CompiledTastePattern["evidence"] = {
+        sessions: finitePatternNumber(row.evidence.sessions, "pattern.evidence.sessions"),
+        confidence: finitePatternNumber(row.evidence.confidence, "pattern.evidence.confidence"),
+        ...(row.evidence.last_reinforced === undefined ? {} : { last_reinforced: str(row.evidence.last_reinforced, "pattern.evidence.last_reinforced") }),
+        ...(trend === undefined ? {} : { trend: trend as PatternTrend }),
+    };
+    if (evidence.confidence > 1) throw new Error("invalid pattern.evidence.confidence");
+
+    if (category === "stack-choice") {
+        const slot = str(row.slot, "pattern.slot").trim();
+        if (slot === "") throw new Error("invalid pattern.slot");
+        const over = row.over === undefined ? undefined : row.over;
+        if (over !== undefined && (!Array.isArray(over) || over.some((v) => typeof v !== "string"))) {
+            throw new Error("invalid pattern.over");
+        }
+        const links = validatePatternLinks(row.links);
+        return {
+            category,
+            slot,
+            name,
+            evidence,
+            ...(over === undefined ? {} : { over: over as string[] }),
+            ...(row.context === undefined ? {} : { context: str(row.context, "pattern.context") }),
+            ...(links === undefined ? {} : { links }),
+        };
+    }
+
+    const summary = str(row.summary, "pattern.summary").trim();
+    if (summary === "") throw new Error("invalid pattern.summary");
+    const links = validatePatternLinks(row.links);
+    return {
+        category: category as Exclude<PatternCategory, "stack-choice">,
+        name,
+        summary,
+        evidence,
+        ...(links === undefined ? {} : { links }),
+    };
+}
+
+function validatePatternLinks(value: unknown): CompiledPatternLink[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) throw new Error("invalid pattern.links");
+    return value.map((link) => {
+        if (!isRecord(link)) throw new Error("invalid pattern.link");
+        const rel = str(link.rel, "pattern.link.rel");
+        const ref = str(link.ref, "pattern.link.ref").trim();
+        if (!PATTERN_LINK_REL_SET.has(rel) || ref === "") throw new Error("invalid pattern.link");
+        return { rel: rel as CompiledPatternLink["rel"], ref };
+    });
+}
+
+/**
+ * Validate optional taste patterns without invalidating the whole profile. The
+ * profile gist is user-controlled community input; one bad taste row should be
+ * reported and skipped, not erase the user's leaderboard row.
+ */
+export function validateTastePatterns(value: unknown): { patterns: CompiledTastePattern[]; dropped: PatternDrop[] } {
+    if (!isRecord(value) || value.taste === undefined) return { patterns: [], dropped: [] };
+    if (!isRecord(value.taste) || !Array.isArray(value.taste.patterns)) {
+        return { patterns: [], dropped: [{ reason: "invalid-pattern" }] };
+    }
+
+    const patterns: CompiledTastePattern[] = [];
+    const dropped: PatternDrop[] = [];
+    const seen = new Set<string>();
+    for (const [index, row] of value.taste.patterns.entries()) {
+        let p: CompiledTastePattern;
+        try {
+            p = validatePatternRow(row);
+        } catch {
+            dropped.push({ index, reason: "invalid-pattern" });
+            continue;
+        }
+        const key = patternKey(p.category, p.name);
+        if (seen.has(key)) {
+            dropped.push({ index, key, reason: "duplicate-pattern" });
+            continue;
+        }
+        seen.add(key);
+        patterns.push(p);
+    }
+    return { patterns, dropped };
 }

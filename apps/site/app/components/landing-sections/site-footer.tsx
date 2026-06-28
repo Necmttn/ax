@@ -19,6 +19,7 @@ export function SiteFooter() {
         <div className="footer-col">
           <div className="footer-col-head">Community</div>
           <Link to="/leaders">Leaders</Link>
+          <Link to="/patterns">Patterns</Link>
           <a href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://discord.gg/E4R88Cvr5R" target="_blank" rel="noopener noreferrer">Discord</a>
         </div>

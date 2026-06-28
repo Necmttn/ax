@@ -7,6 +7,7 @@
  *   community/leaderboard.json   - boards: tokens, sessions, streak, cost
  *   community/skill-stats.json   - { "<source>:<name>": { users, runs } }
  *   community/hook-stats.json    - { "<hook>": { users } }
+ *   community/pattern-stats.json - profile taste pattern adoption + recovery joins
  *   community/state/<year>.json  - anonymized distributions
  *
  * NOTE: the live community compile now runs on the alchemy-provisioned
@@ -85,6 +86,7 @@ if (import.meta.main) {
     await Bun.write("community/leaderboard.json", `${JSON.stringify(out.leaderboard, null, 2)}\n`);
     await Bun.write("community/skill-stats.json", `${JSON.stringify(out.skillStats, null, 2)}\n`);
     await Bun.write("community/hook-stats.json", `${JSON.stringify(out.hookStats, null, 2)}\n`);
+    await Bun.write("community/pattern-stats.json", `${JSON.stringify(out.patternStats, null, 2)}\n`);
     await Bun.write(`community/state/${year}.json`, `${JSON.stringify(out.state, null, 2)}\n`);
     await Bun.write(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
 

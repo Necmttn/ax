@@ -36,6 +36,7 @@ const KV_KEYS = {
     "/leaders": "leaderboard",
     "/skills": "skill-stats",
     "/hooks": "hook-stats",
+    "/patterns": "pattern-stats",
     "/state": "state",
     "/meta": "meta",
 } as const;
@@ -115,6 +116,7 @@ async function recompile(env: Env): Promise<{ users: number; compiled: number; d
         env.BOARD.put("leaderboard", JSON.stringify(out.leaderboard)),
         env.BOARD.put("skill-stats", JSON.stringify(out.skillStats)),
         env.BOARD.put("hook-stats", JSON.stringify(out.hookStats)),
+        env.BOARD.put("pattern-stats", JSON.stringify(out.patternStats)),
         env.BOARD.put("state", JSON.stringify(out.state)),
         env.BOARD.put("meta", JSON.stringify({ compiled_at: now, users: users.length, dropped: out.dropped })),
     ]);
