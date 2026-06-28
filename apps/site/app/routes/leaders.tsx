@@ -8,6 +8,7 @@ import {
     fetchSkillStats,
     formatCompact,
     formatUsdCompact,
+    skillRouteKey,
     trendingSkills,
     type Leaderboard,
     type SkillStats,
@@ -224,10 +225,10 @@ function TrendingSkills({ skills }: { readonly skills: SkillStats }) {
                     return (
                         <li key={name} className="lb-skill">
                             <span className="lb-skill-rank">{i + 1}</span>
-                            <span className="lb-skill-name">
+                            <Link className="lb-skill-name" to="/skills/$key" params={{ key: skillRouteKey(name, s) }}>
                                 {source && <span className="lb-skill-src">{source}</span>}
                                 {name}
-                            </span>
+                            </Link>
                             <span className="lb-skill-users">{s.users} builders</span>
                             <span className="lb-skill-runs">
                                 <span className="lb-bar" style={{ width: `${Math.max(4, (s.runs / maxRuns) * 100)}%` }} aria-hidden />
