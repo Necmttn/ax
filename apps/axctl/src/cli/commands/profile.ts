@@ -85,7 +85,7 @@ const resolveGithubLogin = Effect.gen(function* () {
  * show/publish, where an invalid file surfaces as a HighlightsInvalidError
  * rather than silently dropping the published block.
  */
-const gatherEnv = (loadHighlights = true) =>
+export const gatherEnv = (loadHighlights = true) =>
     Effect.gen(function* () {
         const hookFiles = yield* Effect.tryPromise({
             try: () => Array.fromAsync(new Bun.Glob("*.ts").scan({ cwd: HOOKS_DIR })),

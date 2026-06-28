@@ -582,7 +582,7 @@ enforce-worktree  -  14 days
     eyebrow: "$ publish your profile",
     title: "Profile & community",
     blurb:
-      "Render your local profile and, with explicit consent, publish it to a public gist or GitHub profile README widget.",
+      "Render your local profile and, with explicit consent, publish it to a public gist, GitHub profile README widget, or human-reviewed community pattern PR.",
     commands: [
       {
         name: "profile",
@@ -605,6 +605,35 @@ ax profile - @octocat  (last 30d)
           "--if-stale=<hours> is the watcher path: a no-op until first consent, then it republishes/refreshes when stale.",
           "ax profile unpublish deletes the gist and local publish state (and resets the sticky --no-cost).",
           "ax profile interview emits a brief; an agent interviews you (draft-then-confirm) and pipes the result to `ax profile interview submit`, which validates it into ~/.ax/profile-highlights.json. The next `ax profile publish` folds these user-authored highlights into your gist.",
+        ],
+      },
+      {
+        name: "contribute",
+        sub: ["pattern"],
+        job: "Promote a local taste pattern, or author one through guided fields, into the community pattern registry.",
+        signature: "ax contribute pattern [--pattern=<index|category/name|name>] [--fresh] [--yes]",
+        flags: [
+          { flag: "--pattern=<selector>", desc: "pick a profile taste pattern by 1-based index, category/name, or bare name" },
+          { flag: "--fresh", desc: "author a new pattern through structured prompts instead of opening a blank editor" },
+          { flag: "--category=workflow", desc: "fresh-authoring category; must be one of the closed taste-pattern enum values" },
+          { flag: "--sessions=N", desc: "fresh-authoring evidence count" },
+          { flag: "--confidence=N", desc: "fresh-authoring confidence, 0 through 1" },
+          { flag: "--yes", desc: "skip the final PR confirmation prompt" },
+        ],
+        receipt: `$ ax contribute pattern --pattern=workflow/small-review-loops
+{
+  "category": "workflow",
+  "name": "small-review-loops",
+  "summary": "Review the diff in small increments before expanding scope.",
+  "evidence": { "sessions": 4, "confidence": 0.8 }
+}
+
+pattern PR: https://github.com/Necmttn/ax/pull/999`,
+        detail: [
+          "Default mode builds your local profile and shows a picker over `taste.patterns`; `--pattern` selects non-interactively.",
+          "`--fresh` asks for the schema fields directly and validates them before opening a PR; there is intentionally no blank-editor path.",
+          "The PR writes exactly one `community/patterns/<category>/<name>.json` file on a fork branch based on upstream main, and the PR body carries the Generated with ax attribution.",
+          "CI validates the same taste-pattern schema and fails filename collisions; pattern PRs stay human-reviewed, unlike community registration PRs.",
         ],
       },
     ],

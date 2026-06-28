@@ -63,6 +63,8 @@ axctl profile widget [--window=N] [--if-stale=H] [--yes]
 axctl profile unpublish                     # delete the published gist + local consent
 axctl profile interview [--force]              # emit a brief; an agent interviews you for profile highlights
 axctl profile interview submit [--file=PATH]   # validate highlights JSON (stdin/--file) -> ~/.ax/profile-highlights.json
+axctl contribute pattern [--pattern=<index|category/name|name>|--fresh]
+                                            # open a fork PR for one community/patterns/<category>/<name>.json taste pattern
 axctl pricing [--query <model>]             # inspect imported model pricing rows
 axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
 axctl roles                                 # list role labels with skill counts
@@ -88,8 +90,8 @@ axctl version [--check|--banner]
 
 > `axctl --help` lists the everyday commands plus the read-only insight
 > surfaces (`ingest`, `sessions`, `signals`, `improve`, `retro`, `recall`,
-> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `install`,
-> `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
+> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `contribute`,
+> `install`, `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
 > `report`, `context`, `hook`, `project`, `evidence`, `classifiers`,
 > `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
 > from `--help` but remain fully invokable by name.
