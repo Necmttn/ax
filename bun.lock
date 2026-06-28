@@ -20,6 +20,7 @@
         "yaml": "^2.8.4",
       },
       "devDependencies": {
+        "@ax/community-compile": "workspace:*",
         "@effect/language-service": "^0.85.1",
         "@tanstack/react-router": "^1.169",
         "@tanstack/router-plugin": "^1.167",
