@@ -217,11 +217,21 @@ describe("renderSessionMarkdown - compaction", () => {
                     summary: null,
                 },
                 {
-                    harness: "pi",
+                    harness: "opencode",
                     ts: "2026-05-29T06:05:38.132Z",
                     strategy: "summarize",
                     trigger: "auto",
                     tokens_before: 90000,
+                    kept_count: null,
+                    summary: null,
+                    source_confidence: "derived",
+                },
+                {
+                    harness: "pi",
+                    ts: "2026-05-29T06:06:38.132Z",
+                    strategy: "summarize",
+                    trigger: "auto",
+                    tokens_before: 91000,
                     kept_count: null,
                     summary: "Goal: ship X",
                 },
@@ -231,6 +241,7 @@ describe("renderSessionMarkdown - compaction", () => {
         expect(md).toContain("## Compaction");
         expect(md).toContain("history_replacement");
         expect(md).toContain("83 kept");
+        expect(md).toContain("opencode · summarize · derived");
         expect(md).toContain("Goal: ship X");
     });
 

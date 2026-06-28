@@ -76,6 +76,7 @@ export interface CompactionCtxBase {
 interface CompactionWriteParts {
     readonly trigger: CompactionTrigger | null;
     readonly strategy: CompactionStrategy;
+    readonly sourceConfidence?: CompactionConfidence;
     readonly summary?: string | null;
     readonly tokensBefore?: number | null;
     readonly boundaryRef?: string | null;
@@ -89,8 +90,7 @@ interface CompactionWriteParts {
  * The ONE shared CompactionWrite build path (Parser Toolkit): record key,
  * session/event linkage, and null-defaults are derived here; each provider
  * extractor below only interprets its raw event into {@link CompactionWriteParts}.
- * All provider compactions are explicit signals today, hence the fixed
- * `sourceConfidence`.
+ * Explicit harness markers are the default; derived signals opt in per extractor.
  */
 const makeCompactionWrite = (
     harness: string,
@@ -104,7 +104,7 @@ const makeCompactionWrite = (
     ts: ctx.ts,
     trigger: parts.trigger,
     strategy: parts.strategy,
-    sourceConfidence: "explicit",
+    sourceConfidence: parts.sourceConfidence ?? "explicit",
     summary: parts.summary ?? null,
     tokensBefore: parts.tokensBefore ?? null,
     boundaryRef: parts.boundaryRef ?? null,
@@ -187,4 +187,23 @@ export const extractCursorCompaction = (
         strategy: "encrypted",
         boundaryRef: ctx.boundaryRef ?? null,
         raw: { summarized_composers: ctx.summarizedComposers },
+    });
+
+export interface OpenCodeCompactionCtx extends CompactionCtxBase {
+    readonly tokensBefore: number;
+    readonly boundaryRef: string;
+    readonly raw: unknown;
+}
+
+export const extractOpenCodeCompaction = (
+    ctx: OpenCodeCompactionCtx,
+): CompactionWrite =>
+    makeCompactionWrite("opencode", ctx, {
+        trigger: "auto",
+        strategy: "summarize",
+        sourceConfidence: "derived",
+        summary: null,
+        tokensBefore: ctx.tokensBefore,
+        boundaryRef: ctx.boundaryRef,
+        raw: ctx.raw,
     });

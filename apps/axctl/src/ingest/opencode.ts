@@ -13,11 +13,15 @@ import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
-import { type AgentEventWrite } from "./provider-events.ts";
+import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import {
+    extractOpenCodeCompaction,
+    type CompactionWrite,
+} from "./compaction.ts";
 // OpenCode reads numbers out of SQLite rows (number | bigint | stringly) -
 // the toolkit's coercing probe is this parser's `numberField`.
 import {
@@ -69,6 +73,7 @@ export interface OpenCodeExtract {
     toolCalls: ToolCallWrite[];
     invocations: OpenCodeInvocation[];
     skillRelations: ToolCallSkillRelationWrite[];
+    compactions: CompactionWrite[];
     skipped: number;
     warnings: string[];
 }
@@ -146,6 +151,19 @@ interface ParsedObservedPart {
     readonly data: Record<string, unknown>;
 }
 
+interface OpenCodeStepFinish {
+    readonly row: ObservedPartRow;
+    readonly ts: string;
+    readonly inputContextTokens: number;
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheWriteTokens: number;
+    readonly cacheReadTokens: number;
+    readonly totalTokens: number | null;
+    readonly contextWindow: number | null;
+    readonly rawTokens: Record<string, unknown>;
+}
+
 interface ToolResultFields {
     readonly outputJson: unknown;
     readonly outputExcerpt: string | null;
@@ -155,6 +173,12 @@ interface ToolResultFields {
 }
 
 const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
+const OPENCODE_COMPACTION_PROVIDER_SEQ_OFFSET = 2_000_000_000;
+// OpenCode has no structural compaction marker. Only emit a derived boundary
+// after a high-water step-finish input context sharply resets.
+const OPENCODE_COMPACTION_SATURATION_FLOOR = 20_000;
+const OPENCODE_COMPACTION_RESET_RATIO = 0.35;
+const OPENCODE_COMPACTION_MIN_DROP = 12_000;
 
 function validTimestamp(input: SQLiteValue | undefined, fallback: string): { ts: string; warning: string | null } {
     if (input === null || input === undefined) {
@@ -195,6 +219,7 @@ function emptyExtract(warnings: string[] = [], skipped = 0): OpenCodeExtract {
         toolCalls: [],
         invocations: [],
         skillRelations: [],
+        compactions: [],
         skipped,
         warnings,
     };
@@ -295,6 +320,135 @@ function toolPartTimestamp(row: ObservedPartRow, data: Record<string, unknown>, 
     const state = toolState(data);
     const time = state && isRecord(state.time) ? state.time : null;
     return validTimestamp(time?.start as SQLiteValue | undefined ?? row.time_created, fallback).ts;
+}
+
+function contextWindowFromTokens(tokens: Record<string, unknown>): number | null {
+    return numberField(tokens, "contextWindow") ??
+        numberField(tokens, "context_window") ??
+        numberField(tokens, "modelContextWindow") ??
+        numberField(tokens, "model_context_window");
+}
+
+function stepFinishFromPart(input: ParsedObservedPart, fallbackTs: string): OpenCodeStepFinish | null {
+    if (stringField(input.data, "type") !== "step-finish") return null;
+    const tokens = isRecord(input.data.tokens) ? input.data.tokens : null;
+    if (!tokens) return null;
+
+    const cache = isRecord(tokens.cache) ? tokens.cache : null;
+    const inputTokens = numberField(tokens, "input") ?? 0;
+    const outputTokens = numberField(tokens, "output") ?? 0;
+    const cacheWriteTokens = (cache ? numberField(cache, "write") : null) ??
+        numberField(tokens, "cacheWrite") ??
+        numberField(tokens, "cache_write") ??
+        0;
+    const cacheReadTokens = (cache ? numberField(cache, "read") : null) ??
+        numberField(tokens, "cacheRead") ??
+        numberField(tokens, "cache_read") ??
+        0;
+    const totalTokens = numberField(tokens, "total");
+    const cacheInclusiveInput = inputTokens + cacheWriteTokens + cacheReadTokens;
+    const totalMinusOutput = totalTokens === null ? 0 : Math.max(0, totalTokens - outputTokens);
+    const inputContextTokens = Math.trunc(Math.max(cacheInclusiveInput, totalMinusOutput));
+    if (inputContextTokens <= 0) return null;
+
+    return {
+        row: input.row,
+        ts: validTimestamp(input.row.time_created, fallbackTs).ts,
+        inputContextTokens,
+        inputTokens: Math.trunc(inputTokens),
+        outputTokens: Math.trunc(outputTokens),
+        cacheWriteTokens: Math.trunc(cacheWriteTokens),
+        cacheReadTokens: Math.trunc(cacheReadTokens),
+        totalTokens,
+        contextWindow: contextWindowFromTokens(tokens),
+        rawTokens: tokens,
+    };
+}
+
+function isOpenCodeCompactionReset(previous: OpenCodeStepFinish, current: OpenCodeStepFinish): boolean {
+    const saturationFloor = previous.contextWindow === null
+        ? OPENCODE_COMPACTION_SATURATION_FLOOR
+        : Math.floor(previous.contextWindow * 0.85);
+    const drop = previous.inputContextTokens - current.inputContextTokens;
+    const minDrop = Math.min(
+        OPENCODE_COMPACTION_MIN_DROP,
+        Math.floor(previous.inputContextTokens * (1 - OPENCODE_COMPACTION_RESET_RATIO)),
+    );
+
+    return previous.inputContextTokens >= saturationFloor &&
+        drop >= minDrop &&
+        current.inputContextTokens <= Math.floor(previous.inputContextTokens * OPENCODE_COMPACTION_RESET_RATIO);
+}
+
+function processStepFinishCompactions(input: {
+    stepFinishes: readonly OpenCodeStepFinish[];
+    session: OpenCodeSession;
+    parentProviderEventId: string;
+    providerEvents: AgentEventWrite[];
+    compactions: CompactionWrite[];
+    lastStepFinishBySession: Map<string, OpenCodeStepFinish>;
+    compactionSeqBySession: Map<string, number>;
+}): void {
+    for (const step of input.stepFinishes) {
+        const previous = input.lastStepFinishBySession.get(input.session.id);
+        input.lastStepFinishBySession.set(input.session.id, step);
+        if (!previous || !isOpenCodeCompactionReset(previous, step)) continue;
+
+        const ordinal = (input.compactionSeqBySession.get(input.session.id) ?? 0) + 1;
+        input.compactionSeqBySession.set(input.session.id, ordinal);
+        const seq = OPENCODE_COMPACTION_PROVIDER_SEQ_OFFSET + ordinal;
+        const providerEventId = `step-finish:${step.row.id}`;
+        const raw = {
+            heuristic: "opencode_step_finish_context_reset",
+            source_confidence: "derived",
+            previous_step_part_id: previous.row.id,
+            reset_step_part_id: step.row.id,
+            previous_message_id: previous.row.message_id,
+            reset_message_id: step.row.message_id,
+            previous_input_context_tokens: previous.inputContextTokens,
+            reset_input_context_tokens: step.inputContextTokens,
+            previous_tokens: previous.rawTokens,
+            reset_tokens: step.rawTokens,
+        };
+        const event: AgentEventWrite = {
+            provider: "opencode",
+            providerSessionId: input.session.id,
+            axSessionId: input.session.id,
+            providerEventId,
+            parentProviderEventId: input.parentProviderEventId,
+            parentKind: "message_part",
+            seq,
+            ts: step.ts,
+            type: "compaction",
+            role: null,
+            text: null,
+            textExcerpt: null,
+            raw,
+            labels: {
+                source: "opencode_sqlite",
+                sourceConfidence: "derived",
+                heuristic: "opencode_step_finish_context_reset",
+            },
+            metrics: {
+                strategy: "summarize",
+                sourceConfidence: "derived",
+                tokensBefore: previous.inputContextTokens,
+                tokensAfter: step.inputContextTokens,
+                resetRatio: step.inputContextTokens / previous.inputContextTokens,
+            },
+        };
+        input.providerEvents.push(event);
+        input.compactions.push(extractOpenCodeCompaction({
+            sessionId: input.session.id,
+            providerSessionId: input.session.id,
+            seq,
+            ts: new Date(step.ts),
+            agentEventKey: agentEventRecordKey(event),
+            tokensBefore: previous.inputContextTokens,
+            boundaryRef: step.row.id,
+            raw,
+        }));
+    }
 }
 
 function syntheticRows(db: Database): {
@@ -541,7 +695,10 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
         const toolCalls: MutableToolCallWrite[] = [];
         const invocations: OpenCodeInvocation[] = [];
         const skillRelations: ToolCallSkillRelationWrite[] = [];
+        const compactions: CompactionWrite[] = [];
         const seqBySession = new Map<string, number>();
+        const lastStepFinishBySession = new Map<string, OpenCodeStepFinish>();
+        const compactionSeqBySession = new Map<string, number>();
 
         if (isSynthetic) {
             const { sessions: sessionRows, messages: messageRows } = syntheticRows(db);
@@ -675,6 +832,9 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                     if (text !== null) texts.push(text);
                 }
                 const toolParts = parsedParts.filter((part) => toolNameFromPartData(part.data) !== null);
+                const stepFinishes = parsedParts
+                    .map((part) => stepFinishFromPart(part, session.ended_at))
+                    .filter((step): step is OpenCodeStepFinish => step !== null);
                 const role = stringField(messageData, "role") ?? "unknown";
                 const model = nestedStringField(messageData, "model", "modelID") ??
                     stringField(messageData, "modelID") ??
@@ -730,6 +890,15 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                         providerEvents,
                     })
                 );
+                processStepFinishCompactions({
+                    stepFinishes,
+                    session,
+                    parentProviderEventId: row.id,
+                    providerEvents,
+                    compactions,
+                    lastStepFinishBySession,
+                    compactionSeqBySession,
+                });
             }
         }
 
@@ -740,6 +909,7 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
             toolCalls,
             invocations,
             skillRelations,
+            compactions,
             skipped,
             warnings,
         };
@@ -776,6 +946,7 @@ const sliceOpenCodeExtractForSession = (
         toolCalls,
         invocations: extract.invocations.filter((invocation) => invocation.session === sessionId),
         skillRelations: extract.skillRelations.filter((relation) => toolCallKeys.has(relation.toolCallKey)),
+        compactions: extract.compactions.filter((compaction) => compaction.sessionId === sessionId),
         skipped: 0,
         warnings: [],
     };
@@ -858,7 +1029,7 @@ const buildOpenCodeBatchStatements = (
         })),
         toolCallSkillRelations: extract.skillRelations,
         planSnapshots: [],
-        compactions: [],
+        compactions: extract.compactions,
     });
 
 export const __testBuildOpenCodeBatchStatements = buildOpenCodeBatchStatements;
