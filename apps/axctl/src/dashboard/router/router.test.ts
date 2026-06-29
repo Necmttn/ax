@@ -196,3 +196,69 @@ describe("dispatch", () => {
         expect(await res?.text()).toBe("bytes");
     });
 });
+
+describe("request deadline (AX_SERVE_QUERY_TIMEOUT_MS)", () => {
+    const slowTable = (ms: number): ReadonlyArray<AnyRoute> => [
+        jsonRoute({
+            method: "GET",
+            path: "/api/slow",
+            decode: () => decodeOk(undefined),
+            // A handler that outlives any tight deadline (mirrors a wedged db.query).
+            handler: () => Effect.sleep(`${ms} millis`).pipe(Effect.as({ ok: true })),
+        }),
+    ];
+
+    test("a handler that outruns the deadline returns 504, not a hang", async () => {
+        const prev = process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+        process.env.AX_SERVE_QUERY_TIMEOUT_MS = "20"; // 20ms deadline
+        try {
+            const res = await dispatch(
+                slowTable(5_000), // handler would take 5s
+                get("/api/slow"),
+                new URL("http://h/api/slow"),
+                testRunner,
+            );
+            expect(res?.status).toBe(504);
+            const body = (await res?.json()) as { error?: string };
+            expect(String(body?.error)).toContain("server query deadline");
+        } finally {
+            if (prev === undefined) delete process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+            else process.env.AX_SERVE_QUERY_TIMEOUT_MS = prev;
+        }
+    });
+
+    test("a fast handler completes normally under the deadline", async () => {
+        const prev = process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+        process.env.AX_SERVE_QUERY_TIMEOUT_MS = "5000";
+        try {
+            const res = await dispatch(
+                slowTable(1), // ~immediate
+                get("/api/slow"),
+                new URL("http://h/api/slow"),
+                testRunner,
+            );
+            expect(res?.status).toBe(200);
+            expect(await res?.json()).toEqual({ ok: true });
+        } finally {
+            if (prev === undefined) delete process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+            else process.env.AX_SERVE_QUERY_TIMEOUT_MS = prev;
+        }
+    });
+
+    test("AX_SERVE_QUERY_TIMEOUT_MS=0 disables the deadline (unbounded)", async () => {
+        const prev = process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+        process.env.AX_SERVE_QUERY_TIMEOUT_MS = "0";
+        try {
+            const res = await dispatch(
+                slowTable(30), // would 504 under a tight deadline; here it must complete
+                get("/api/slow"),
+                new URL("http://h/api/slow"),
+                testRunner,
+            );
+            expect(res?.status).toBe(200);
+        } finally {
+            if (prev === undefined) delete process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+            else process.env.AX_SERVE_QUERY_TIMEOUT_MS = prev;
+        }
+    });
+});

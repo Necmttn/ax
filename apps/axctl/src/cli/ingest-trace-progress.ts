@@ -1,7 +1,14 @@
 import { Effect, Layer } from "effect";
 import { TraceTransportTag, type TraceTransport } from "@ax/lib/live-traces/Sink";
 import { createProgressReporter, type ProgressMode, type ProgressReporter, type ProgressSink, type ProgressStage } from "./progress.ts";
-import { initTuiProgress, type TuiProgressHandle } from "./progress-tui.tsx";
+// Type-only import: `progress-tui.tsx` pulls in OpenTUI + React (incl. react's
+// jsx-dev-runtime). A *static* value import here would drag that whole subtree
+// into the module graph of every consumer of this file - notably `ax serve`,
+// which imports this module via `cli/index.ts` but never renders a TUI. The
+// packaged daemon stages react with only the prod jsx-runtime, so the dev
+// runtime isn't resolvable and the serve child crashed (#616). Keep the type
+// erased and load `initTuiProgress` lazily, only when the TUI path actually runs.
+import type { TuiProgressHandle } from "./progress-tui.tsx";
 
 /**
  * Parse a stage-count annotation SpanEvent (emitted by the ingest runner) into a
@@ -190,11 +197,16 @@ export const tuiTraceTransportLayer = (
                                 case "TraceStart": {
                                     if (state.started) break;
                                     state.started = true;
-                                    void initTuiProgress({
-                                        command: "ingest",
-                                        runId: event.traceId.replace(/^ingest:/, ""),
-                                        stages,
-                                    })
+                                    // Lazy import keeps OpenTUI/React (and react's
+                                    // jsx-dev-runtime) out of the serve module graph (#616).
+                                    void import("./progress-tui.tsx")
+                                        .then(({ initTuiProgress }) =>
+                                            initTuiProgress({
+                                                command: "ingest",
+                                                runId: event.traceId.replace(/^ingest:/, ""),
+                                                stages,
+                                            })
+                                        )
                                         .then((handle) => {
                                             // Scope already closed while we were initializing:
                                             // tear the fresh renderer straight back down.

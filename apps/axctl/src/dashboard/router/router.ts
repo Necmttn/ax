@@ -16,7 +16,8 @@
  * lifetime; router/route unit tests pass a stub so they never build AppLayer
  * (and therefore never touch SurrealDB).
  */
-import type { Effect, Layer } from "effect";
+import { Effect } from "effect";
+import type { Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
@@ -153,6 +154,39 @@ export const errorMessage = (err: unknown): string => {
     return String(err);
 };
 
+// ----------------------------------------------------------- request deadline
+//
+// Per-request DB deadline. `acquire` (db.ts) already caps the initial connect at
+// 5s, but once connected a daemon that wedges (alive but not answering - the
+// recurring SurrealDB failure on this box) makes `db.query()` hang FOREVER, so
+// JSON handlers pile up behind a dead websocket and the whole dashboard appears
+// frozen (this is what made /api/wrapped hang). A whole-request timeout bounds
+// each JSON handler's lifetime: the fiber is interrupted, the client gets a fast
+// 504, and handlers stop accumulating. (The orphaned WS promise can't be force-
+// cancelled, but the request no longer blocks - the daemon-side watchdog is what
+// reaps the wedged surreal.)
+//
+// Scope is deliberately JSON routes only: rawRoutes (SSE /api/events, the
+// ingest stream) own their own long-lived lifecycle and must NOT be clamped.
+// Default 45s sits above legit slow reads (recall full-scans 5-15s today) and
+// below Bun's 60s idleTimeout. AX_SERVE_QUERY_TIMEOUT_MS overrides; `0` disables
+// (e.g. tests, or a deployment that wants the old unbounded behavior).
+export const SERVE_REQUEST_TIMEOUT_DEFAULT_MS = 45_000;
+
+/** Read the request deadline per call so serve env / tests can vary it. */
+const serveRequestTimeoutMs = (): number => {
+    const raw = process.env.AX_SERVE_QUERY_TIMEOUT_MS;
+    if (raw === undefined || raw === "") return SERVE_REQUEST_TIMEOUT_DEFAULT_MS;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : SERVE_REQUEST_TIMEOUT_DEFAULT_MS;
+};
+
+/** Sentinel raised when a JSON handler outruns the request deadline -> HTTP 504. */
+export class ServeRequestTimeout {
+    readonly _tag = "ServeRequestTimeout";
+    constructor(readonly ms: number) {}
+}
+
 export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
     methods: toMethods(def.method),
     pattern: compilePattern(def.path),
@@ -161,10 +195,31 @@ export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
     run: async (input, runner) => {
         const decoded = def.decode(input);
         if (!decoded.ok) return jsonResponse(decoded.body, decoded.status);
+        const timeoutMs = serveRequestTimeoutMs();
+        const handler = def.handler(decoded.value);
+        // Bound the handler so a wedged daemon can't hang the request forever.
+        const effect = timeoutMs > 0
+            ? handler.pipe(
+                Effect.timeoutOrElse({
+                    duration: `${timeoutMs} millis`,
+                    orElse: () => Effect.fail(new ServeRequestTimeout(timeoutMs)),
+                }),
+            )
+            : handler;
         try {
-            const value = await runner(def.handler(decoded.value));
+            const value = await runner(effect);
             return def.respond ? def.respond(value) : jsonResponse(value);
         } catch (err) {
+            if (err instanceof ServeRequestTimeout) {
+                return jsonResponse(
+                    {
+                        error:
+                            `request exceeded the ${err.ms}ms server query deadline; the SurrealDB daemon may be wedged ` +
+                            `(check 'ax serve status' and restart the db)`,
+                    },
+                    504,
+                );
+            }
             return jsonResponse(
                 { error: errorMessage(err) },
                 def.errorStatus?.(err) ?? 500,
