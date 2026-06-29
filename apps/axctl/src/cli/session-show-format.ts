@@ -200,10 +200,13 @@ function renderCompaction(payload: SessionShowPayload): string[] {
     if (compactions.length === 0) return [];
     const lines: string[] = [`## Compaction (${compactions.length})`, ""];
     for (const c of compactions) {
+        const confidence = c.source_confidence && c.source_confidence !== "explicit"
+            ? ` · ${c.source_confidence}`
+            : "";
         const toks = c.tokens_before !== null ? ` · ${c.tokens_before} tok before` : "";
         const kept = c.kept_count !== null ? ` · ${c.kept_count} kept` : "";
         const sum = c.summary ? ` - ${c.summary.split("\n")[0]!.slice(0, 80)}` : "";
-        lines.push(`- ${fmtTs(c.ts)} · ${c.harness} · ${c.strategy}${toks}${kept}${sum}`);
+        lines.push(`- ${fmtTs(c.ts)} · ${c.harness} · ${c.strategy}${confidence}${toks}${kept}${sum}`);
     }
     return lines;
 }

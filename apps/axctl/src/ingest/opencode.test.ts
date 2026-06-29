@@ -264,6 +264,147 @@ describe("OpenCode SQLite extraction", () => {
         });
     });
 
+    test("derives a compaction row from a saturated step-finish context reset", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run(
+                "CREATE TABLE session (id text primary key, directory text, title text, time_created integer, time_updated integer, model text)",
+            );
+            db.run(
+                "CREATE TABLE message (id text primary key, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.run(
+                "CREATE TABLE part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.query(
+                "INSERT INTO session (id, directory, title, time_created, time_updated, model) VALUES (?, ?, ?, ?, ?, ?)",
+            ).run("ses-compact", "/tmp/project", "Compaction schema", 1775546262000, 1775546290000, "gpt-observed");
+            const insertMessage = db.query(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+            );
+            insertMessage.run(
+                "msg-before-reset",
+                "ses-compact",
+                1775546263000,
+                1775546263000,
+                JSON.stringify({ role: "assistant" }),
+            );
+            insertMessage.run(
+                "msg-after-reset",
+                "ses-compact",
+                1775546264000,
+                1775546264000,
+                JSON.stringify({ role: "assistant", parentID: "msg-before-reset" }),
+            );
+            const insertPart = db.query(
+                "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+            );
+            insertPart.run(
+                "prt-step-high",
+                "msg-before-reset",
+                "ses-compact",
+                1775546263001,
+                1775546263001,
+                JSON.stringify({
+                    type: "step-finish",
+                    tokens: {
+                        total: 76148,
+                        input: 1000,
+                        output: 148,
+                        cache: { write: 70000, read: 5000 },
+                    },
+                }),
+            );
+            insertPart.run(
+                "prt-step-reset",
+                "msg-after-reset",
+                "ses-compact",
+                1775546264001,
+                1775546264001,
+                JSON.stringify({
+                    type: "step-finish",
+                    tokens: {
+                        total: 1200,
+                        input: 200,
+                        output: 100,
+                        cache: { write: 800, read: 100 },
+                    },
+                }),
+            );
+
+            const extracted = extractOpenCodeDatabase(dbPath);
+
+            expect(extracted.compactions).toHaveLength(1);
+            expect(extracted.compactions[0]).toMatchObject({
+                harness: "opencode",
+                sessionId: "ses-compact",
+                strategy: "summarize",
+                sourceConfidence: "derived",
+                summary: null,
+                tokensBefore: 76000,
+                boundaryRef: "prt-step-reset",
+            });
+            expect(extracted.providerEvents.some((event) =>
+                event.type === "compaction" &&
+                event.providerEventId === "step-finish:prt-step-reset" &&
+                (event.metrics as { sourceConfidence?: string } | undefined)?.sourceConfidence === "derived"
+            )).toBe(true);
+            const sql = __testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n");
+            expect(sql).toContain("UPSERT compaction:");
+            expect(sql).toContain('source_confidence: "derived"');
+            expect(sql).toContain("tokens_before: 76000");
+        });
+    });
+
+    test("does not derive compactions from monotonic step-finish token growth", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run(
+                "CREATE TABLE session (id text primary key, directory text, title text, time_created integer, time_updated integer, model text)",
+            );
+            db.run(
+                "CREATE TABLE message (id text primary key, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.run(
+                "CREATE TABLE part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.query(
+                "INSERT INTO session (id, directory, title, time_created, time_updated, model) VALUES (?, ?, ?, ?, ?, ?)",
+            ).run("ses-monotonic", "/tmp/project", "Monotonic schema", 1775546262000, 1775546290000, "gpt-observed");
+            const insertMessage = db.query(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+            );
+            const insertPart = db.query(
+                "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+            );
+            for (const [index, tokens] of [20_000, 28_000, 41_000].entries()) {
+                const messageId = `msg-growth-${index + 1}`;
+                insertMessage.run(
+                    messageId,
+                    "ses-monotonic",
+                    1775546263000 + index,
+                    1775546263000 + index,
+                    JSON.stringify({ role: "assistant" }),
+                );
+                insertPart.run(
+                    `prt-growth-${index + 1}`,
+                    messageId,
+                    "ses-monotonic",
+                    1775546263001 + index,
+                    1775546263001 + index,
+                    JSON.stringify({
+                        type: "step-finish",
+                        tokens: { total: tokens + 100, input: 500, output: 100, cache: { write: tokens - 500, read: 0 } },
+                    }),
+                );
+            }
+
+            const extracted = extractOpenCodeDatabase(dbPath);
+
+            expect(extracted.compactions).toHaveLength(0);
+            expect(extracted.providerEvents.some((event) => event.type === "compaction")).toBe(false);
+            expect(__testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n")).not.toContain("UPSERT compaction:");
+        });
+    });
+
     test("extracts observed messages when message.time_updated is absent", async () => {
         await withTempOpenCodeDb((db, dbPath) => {
             db.run(

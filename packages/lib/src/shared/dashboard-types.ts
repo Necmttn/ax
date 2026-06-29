@@ -246,6 +246,7 @@ export interface SessionCompaction {
     readonly harness: string;
     readonly ts: string;
     readonly strategy: string;
+    readonly source_confidence?: string | null;
     readonly trigger: string | null;
     readonly tokens_before: number | null;
     readonly kept_count: number | null;
