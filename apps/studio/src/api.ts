@@ -242,9 +242,20 @@ export interface ContextSourceRow {
     readonly dead_skills: number;
     readonly reclaimable_index_tokens: number;
 }
+export interface ContextStartupSourceRow {
+    readonly source: string;
+    readonly category: "skills" | "claude_md" | "harness_base" | "mcp_tools";
+    readonly scope: string | null;
+    readonly entries: number;
+    readonly chars: number;
+    readonly tokens: number;
+    readonly estimated: boolean;
+    readonly note: string;
+}
 export interface ContextBudgetResult {
     readonly skills: ReadonlyArray<ContextSkillRow>;
     readonly sources: ReadonlyArray<ContextSourceRow>;
+    readonly startupSources: ReadonlyArray<ContextStartupSourceRow>;
     readonly totals: {
         readonly skills: number;
         readonly index_chars: number;
@@ -256,10 +267,15 @@ export interface ContextBudgetResult {
         readonly reclaimable_index_tokens: number;
         readonly reclaimable_skills: number;
         readonly verbose_skills: number;
+        readonly startup_chars: number;
+        readonly startup_tokens: number;
+        readonly measured_startup_tokens: number;
+        readonly estimated_startup_tokens: number;
         readonly window_days: number;
     };
 }
 export interface ContextDriftRow {
+    readonly kind: "skill" | "claude_md";
     readonly name: string;
     readonly scope: string;
     readonly change: string;

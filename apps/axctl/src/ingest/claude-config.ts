@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
@@ -102,6 +102,11 @@ export interface DiscoverClaudeConfigArtifactsOptions {
 export interface IngestClaudeConfigStats {
     readonly discovered: number;
     readonly written: number;
+}
+
+export interface PreviousGuidanceConfigArtifact {
+    readonly content_hash: string | null;
+    readonly bytes: number | null;
 }
 
 const MAX_ARTIFACT_READ_BYTES = 256 * 1024;
@@ -841,8 +846,99 @@ export const guidanceConfigArtifactKey = (
     record: Pick<GuidanceConfigArtifact, "provider" | "pathHash">,
 ): string => `${safeKeyPart(record.provider)}__${record.pathHash}`;
 
+export const guidanceConfigRevisionKey = (
+    record: Pick<GuidanceConfigArtifact, "safePath" | "contentHash"> & { readonly contentHash: string },
+): string => `${safeKeyPart(record.safePath).slice(0, 72)}__${record.contentHash}`;
+
 const intLiteral = (value: number): string =>
     Number.isFinite(value) ? Math.trunc(value).toString(10) : "0";
+
+const isClaudeMdArtifact = (record: GuidanceConfigArtifact): boolean =>
+    (record.kind === "memory" || record.kind === "guidance_doc") &&
+    record.safePath.endsWith("/CLAUDE.md") &&
+    record.contentHash !== null;
+
+const revisionSetKey = (safePath: string, contentHash: string): string =>
+    `${safePath}\0${contentHash}`;
+
+export const buildClaudeMdGuidanceRevisionStatements = (
+    records: readonly GuidanceConfigArtifact[],
+    previousByPathHash: ReadonlyMap<string, PreviousGuidanceConfigArtifact>,
+    existingRevisionKeys: ReadonlySet<string>,
+): string[] => {
+    const statements: string[] = [];
+    for (const record of records) {
+        if (!isClaudeMdArtifact(record) || record.contentHash === null) continue;
+        const previous = previousByPathHash.get(record.pathHash);
+        const prevHash = previous?.content_hash ?? null;
+        const prevBytes = previous?.bytes ?? null;
+        const isUnchanged = prevHash === record.contentHash;
+        if (isUnchanged && existingRevisionKeys.has(revisionSetKey(record.safePath, record.contentHash))) continue;
+        const change = prevHash !== null && !isUnchanged ? "changed" : "added";
+        statements.push(
+            `UPSERT ${recordRef("guidance_revision", guidanceConfigRevisionKey({ safePath: record.safePath, contentHash: record.contentHash }))} MERGE ${surrealObject([
+                ["source", "NONE"],
+                ["source_path", surrealString(record.safePath)],
+                ["scope", surrealString(record.scope)],
+                ["content_hash", surrealString(record.contentHash)],
+                ["prev_hash", surrealOptionString(prevHash)],
+                ["bytes", intLiteral(record.bytes)],
+                ["prev_bytes", prevBytes === null ? "NONE" : intLiteral(prevBytes)],
+                ["change", surrealString(change)],
+                ["evidence_strength", surrealString("observed")],
+                ["commit_evidence", "NONE"],
+                ["file_evidence", "NONE"],
+                ["observed_at", "time::now()"],
+            ])};`,
+        );
+    }
+    return statements;
+};
+
+const claudeMdRecords = (records: readonly GuidanceConfigArtifact[]): GuidanceConfigArtifact[] =>
+    records.filter(isClaudeMdArtifact);
+
+const fetchPreviousArtifacts = (
+    db: SurrealClientShape,
+    records: readonly GuidanceConfigArtifact[],
+): Effect.Effect<Map<string, PreviousGuidanceConfigArtifact>, DbError> =>
+    Effect.gen(function* () {
+        const hashes = uniqueSorted(claudeMdRecords(records).map((record) => record.pathHash));
+        if (hashes.length === 0) return new Map();
+        const res = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT path_hash, content_hash, bytes FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = "claude" AND path_hash IN ${surrealValue(hashes)};`,
+        );
+        const out = new Map<string, PreviousGuidanceConfigArtifact>();
+        for (const row of res?.[0] ?? []) {
+            const pathHash = typeof row.path_hash === "string" ? row.path_hash : null;
+            if (pathHash === null) continue;
+            out.set(pathHash, {
+                content_hash: typeof row.content_hash === "string" ? row.content_hash : null,
+                bytes: typeof row.bytes === "number" ? row.bytes : null,
+            });
+        }
+        return out;
+    });
+
+const fetchExistingRevisionKeys = (
+    db: SurrealClientShape,
+    records: readonly GuidanceConfigArtifact[],
+): Effect.Effect<Set<string>, DbError> =>
+    Effect.gen(function* () {
+        const current = claudeMdRecords(records).filter((record) => record.contentHash !== null);
+        const sourcePaths = uniqueSorted(current.map((record) => record.safePath));
+        const hashes = uniqueSorted(current.map((record) => record.contentHash).filter((hash): hash is string => hash !== null));
+        if (sourcePaths.length === 0 || hashes.length === 0) return new Set();
+        const res = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT source_path, content_hash FROM guidance_revision WHERE source_path IN ${surrealValue(sourcePaths)} AND content_hash IN ${surrealValue(hashes)};`,
+        );
+        const out = new Set<string>();
+        for (const row of res?.[0] ?? []) {
+            if (typeof row.source_path !== "string" || typeof row.content_hash !== "string") continue;
+            out.add(revisionSetKey(row.source_path, row.content_hash));
+        }
+        return out;
+    });
 
 export const buildGuidanceConfigStatements = (
     records: readonly GuidanceConfigArtifact[],
@@ -913,13 +1009,17 @@ export const ingestClaudeConfigArtifacts = (): Effect.Effect<
             home: cfg.paths.home,
             projectRoot: process.cwd(),
         });
+        const [previousArtifacts, existingRevisionKeys] = yield* Effect.all([
+            fetchPreviousArtifacts(db, records),
+            fetchExistingRevisionKeys(db, records),
+        ], { concurrency: 2 });
         const statements = buildGuidanceConfigPersistenceStatements(
             records,
             guidanceConfigAuthorityHashesForScan({
                 home: cfg.paths.home,
                 projectRoot: process.cwd(),
             }),
-        );
+        ).concat(buildClaudeMdGuidanceRevisionStatements(records, previousArtifacts, existingRevisionKeys));
         yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeConfig" });
         return {
             discovered: records.length,

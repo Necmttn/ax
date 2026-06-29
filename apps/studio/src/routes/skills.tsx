@@ -6,6 +6,7 @@ import type {
     ContextDriftRow,
     ContextSkillRow,
     ContextSourceRow,
+    ContextStartupSourceRow,
 } from "../api.ts";
 import { fmtCount } from "@ax/lib/shared/formatters";
 
@@ -61,7 +62,7 @@ const RECLAIM_TRIM = 6;
 
 /** Stable hue per source name (so colour survives sort/filter and matches the
  *  legend even when the row order changes). */
-function buildHueMap(sources: ReadonlyArray<ContextSourceRow>): Map<string, string> {
+function buildHueMap(sources: ReadonlyArray<{ readonly source: string }>): Map<string, string> {
     const map = new Map<string, string>();
     sources.forEach((s, i) => {
         map.set(s.source, SOURCE_HUES[i % SOURCE_HUES.length]);
@@ -104,12 +105,17 @@ export function SkillsRoute() {
         () => (data ? data.sources.filter((s) => s.is_tool) : []),
         [data],
     );
+    const startupSources = data?.startupSources ?? [];
     const hueMap = useMemo(() => buildHueMap(ccSources), [ccSources]);
+    const startupHueMap = useMemo(() => buildHueMap(startupSources), [startupSources]);
 
-    // The always-loaded tax: sum of session-source index tokens. This is the
-    // headline. cc_index_tokens from totals is the authoritative figure.
+    // The full turn-zero footprint is the headline. The skill index remains the
+    // detailed drilldown below because reclaim/trim actions operate on skills.
     const indexTotal = data?.totals.cc_index_tokens ?? 0;
     const bodyTotal = data?.totals.cc_body_tokens ?? 0;
+    const startupTotal = data?.totals.startup_tokens ?? indexTotal;
+    const measuredStartup = data?.totals.measured_startup_tokens ?? indexTotal;
+    const estimatedStartup = data?.totals.estimated_startup_tokens ?? 0;
     const windowDays = data?.totals.window_days ?? 30;
     const reclaimTokens = data?.totals.reclaimable_index_tokens ?? 0;
     const reclaimSkills = data?.totals.reclaimable_skills ?? 0;
@@ -239,10 +245,15 @@ export function SkillsRoute() {
                     </div>
                     {data ? (
                         <div className="inst-hero ctx-hero">
-                            <span className="rdx-doto n">{fmtTokens(indexTotal)}</span>
-                            <span className="l">tokens loaded into every session before you type</span>
+                            <span className="rdx-doto n">{fmtTokens(startupTotal)}</span>
+                            <span className="l">turn-zero tokens before you type</span>
                             <span className="ctx-hero-sub">
-                                + <b>{fmtTokens(bodyTotal)}</b> on demand, only when a skill runs
+                                <b>{fmtTokens(measuredStartup)}</b> measured ·{" "}
+                                <b>{fmtTokens(estimatedStartup)}</b> estimated
+                            </span>
+                            <span className="ctx-hero-sub">
+                                skills add <b>{fmtTokens(indexTotal)}</b> always ·{" "}
+                                <b>{fmtTokens(bodyTotal)}</b> on demand
                             </span>
                         </div>
                     ) : null}
@@ -254,6 +265,13 @@ export function SkillsRoute() {
 
             {data ? (
                 <>
+                    <StartupFootprintPanel
+                        rows={startupSources}
+                        totalTokens={startupTotal}
+                        estimatedTokens={estimatedStartup}
+                        hueMap={startupHueMap}
+                    />
+
                     {/* --- RECLAIM: the CTA. Opportunity-framed, heaviest first --- */}
                     {reclaimTokens > 0 ? (
                         <ReclaimPanel
@@ -271,7 +289,7 @@ export function SkillsRoute() {
                     {/* --- WHERE THE BUDGET GOES: always-loaded index by source --- */}
                     <section className="ctx-breakdown">
                         <div className="ctx-breakdown-head">
-                            <h3>Where the always-loaded budget goes</h3>
+                            <h3>Where the skill index budget goes</h3>
                             <span className="ctx-breakdown-note">
                                 {fmtTokens(indexSum)} index tokens · every session, turn zero
                             </span>
@@ -486,6 +504,71 @@ function CopyAction({
         >
             {copied ? "copied ✓" : label}
         </button>
+    );
+}
+
+function StartupFootprintPanel({
+    rows,
+    totalTokens,
+    estimatedTokens,
+    hueMap,
+}: {
+    readonly rows: ReadonlyArray<ContextStartupSourceRow>;
+    readonly totalTokens: number;
+    readonly estimatedTokens: number;
+    readonly hueMap: Map<string, string>;
+}) {
+    if (rows.length === 0) return null;
+    return (
+        <section className="ctx-breakdown ctx-startup">
+            <div className="ctx-breakdown-head">
+                <h3>Full startup footprint</h3>
+                <span className="ctx-breakdown-note">
+                    {fmtTokens(totalTokens)} turn-zero tokens
+                    {estimatedTokens > 0 ? ` · ${fmtTokens(estimatedTokens)} estimated` : ""}
+                </span>
+            </div>
+            <div className="ctx-stack" aria-hidden="true">
+                {rows
+                    .filter((row) => row.tokens > 0)
+                    .map((row) => (
+                        <span
+                            key={row.source}
+                            className="ctx-stack-seg"
+                            style={{
+                                flexGrow: row.tokens,
+                                background: hueMap.get(row.source),
+                            }}
+                            title={`${row.source} - ${fmtTokens(row.tokens)} tokens`}
+                        />
+                    ))}
+            </div>
+            <ul className="ctx-startup-list">
+                {rows.map((row) => (
+                    <li key={row.source} className="ctx-startup-row">
+                        <span className="ctx-source-name">
+                            <i
+                                className="ctx-swatch"
+                                style={{ background: hueMap.get(row.source) ?? "var(--dim)" }}
+                                aria-hidden="true"
+                            />
+                            {row.source}
+                        </span>
+                        <span className="ctx-startup-note">{row.note}</span>
+                        <span className="ctx-startup-entries">
+                            {fmtCount(row.entries)} {row.entries === 1 ? "entry" : "entries"}
+                        </span>
+                        <span className="ctx-source-index">
+                            {fmtTokens(row.tokens)}
+                            <small>startup</small>
+                        </span>
+                        <span className={`ctx-est-tag${row.estimated ? " is-est" : ""}`}>
+                            {row.estimated ? "est" : "measured"}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </section>
     );
 }
 
@@ -781,11 +864,11 @@ function DriftPanel({ rows }: { rows: ReadonlyArray<ContextDriftRow> }) {
         <section className="ctx-drift">
             <div className="ctx-breakdown-head">
                 <span className="inst-kicker">$ drift</span>
-                <span className="ctx-breakdown-note">skills changed since baseline - tracked from first ingest</span>
+                <span className="ctx-breakdown-note">skills and CLAUDE.md changed since baseline</span>
             </div>
             {items.length === 0 ? (
                 <p className="ctx-foot">
-                    No drift yet. When you - or an agent - edit a skill, the change lands here with its token delta.
+                    No drift yet. When you - or an agent - edit a skill or CLAUDE.md, the change lands here with its token delta.
                 </p>
             ) : (
                 <ul className="ctx-drift-list">

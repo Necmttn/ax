@@ -3589,6 +3589,49 @@ td.skill-cell .description {
     gap: 9px;
     min-width: 0;
 }
+.rdx .ctx-startup { margin-top: 4px; }
+.rdx .ctx-startup-list { list-style: none; margin: 0; padding: 0; }
+.rdx .ctx-startup-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.05fr) minmax(180px, 1.7fr) 82px 92px 74px;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 8px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+.rdx .ctx-startup-row:last-child { border-bottom: 0; }
+.rdx .ctx-startup-note {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--sec);
+}
+.rdx .ctx-startup-entries {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    text-align: right;
+    white-space: nowrap;
+}
+.rdx .ctx-est-tag {
+    justify-self: end;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: var(--green);
+    border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
+    border-radius: 4px;
+    padding: 2px 6px;
+}
+.rdx .ctx-est-tag.is-est {
+    color: var(--sec);
+    border-color: var(--border-hi);
+}
 .rdx .ctx-swatch {
     width: 9px;
     height: 9px;
@@ -4021,6 +4064,17 @@ td.skill-cell .description {
     .rdx .ctx-source-skills { grid-row: 1; }
     .rdx .ctx-source-index { grid-column: 1; align-items: flex-start; flex-direction: row; gap: 6px; align-items: baseline; }
     .rdx .ctx-source-action { grid-column: 2; }
+    .rdx .ctx-startup-row {
+        grid-template-columns: 1fr auto;
+        gap: 4px 12px;
+    }
+    .rdx .ctx-startup-note {
+        grid-column: 1 / -1;
+        white-space: normal;
+    }
+    .rdx .ctx-startup-entries { grid-column: 1; text-align: left; }
+    .rdx .ctx-startup-row .ctx-source-index { grid-column: 2; grid-row: 1; }
+    .rdx .ctx-est-tag { grid-column: 2; grid-row: 3; }
     .rdx .ctx-reclaim-row {
         grid-template-columns: 1fr auto;
         gap: 3px 12px;
