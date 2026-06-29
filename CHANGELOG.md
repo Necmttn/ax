@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.36.0](https://github.com/Necmttn/ax/compare/v0.35.0...v0.36.0) (2026-06-29)
+
+
+### Features
+
+* add community pattern contributions ([#629](https://github.com/Necmttn/ax/issues/629)) ([bc8715e](https://github.com/Necmttn/ax/commit/bc8715ecefa0998b2ccf6e322283046332fbfa4d))
+* **advice:** link route-dispatch advice to dispatch outcomes ([#595](https://github.com/Necmttn/ax/issues/595)) ([386b782](https://github.com/Necmttn/ax/commit/386b7821b38f922508d6897fd89d4f2ce03c3082))
+* compile community pattern stats ([#622](https://github.com/Necmttn/ax/issues/622)) ([1354fc0](https://github.com/Necmttn/ax/commit/1354fc050f2d2b6f3456f51721d25d2cf4b2a713))
+* **hooks:** daemon /hooks/eval fast-path + guard env-forwarding (B, stage 3a) ([#612](https://github.com/Necmttn/ax/issues/612)) ([28934ca](https://github.com/Necmttn/ax/commit/28934ca3153ea67306b07bf350df75df5c5f3d11))
+* **hooks:** daemon-first shim + opt-in --daemon install (B, stage 3b) ([#613](https://github.com/Necmttn/ax/issues/613)) ([3f7bb19](https://github.com/Necmttn/ax/commit/3f7bb19c7aee3bfa8720928e0912960d4faf986a))
+* **hooks:** dispatcher core - multiplex all guards in one process ([#605](https://github.com/Necmttn/ax/issues/605)) ([0672a18](https://github.com/Necmttn/ax/commit/0672a18f9d9c88c9ff0169e7ae460088825fcb02))
+* **hooks:** flip `install --all` to the dispatcher + migrate legacy (B, stage 2b) ([#607](https://github.com/Necmttn/ax/issues/607)) ([a0f98af](https://github.com/Necmttn/ax/commit/a0f98aff16af3b780cf1f3a63799001f1d14ee9a))
+* **hooks:** one-shot `ax hooks install --all` + repo-free install nudge ([#603](https://github.com/Necmttn/ax/issues/603)) ([a6cabbe](https://github.com/Necmttn/ax/commit/a6cabbe5403a29ac1fd3c477d2fe3dba32e127cf))
+* **hooks:** scaffold + embed the single dispatcher (B, stage 2) ([#606](https://github.com/Necmttn/ax/issues/606)) ([70a72d7](https://github.com/Necmttn/ax/commit/70a72d71b93335f520a97bf66a7e848042348d20))
+* **ingest:** derive opencode compactions ([#634](https://github.com/Necmttn/ax/issues/634)) ([9ad4fd2](https://github.com/Necmttn/ax/commit/9ad4fd2b0e9d8fefe6e4f9c50252843fd79dea42))
+* **mcp:** expose sessions_churn as a read-only MCP tool ([#311](https://github.com/Necmttn/ax/issues/311)) ([#596](https://github.com/Necmttn/ax/issues/596)) ([01a6dde](https://github.com/Necmttn/ax/commit/01a6dde454e1f12c7b2e229dea31236c6dbc48d9))
+* n-gram-lift directive miner ([#587](https://github.com/Necmttn/ax/issues/587)) ([#592](https://github.com/Necmttn/ax/issues/592)) ([bbb5482](https://github.com/Necmttn/ax/commit/bbb54826538044582a14b783fa64b0617233ce3c))
+* **otel:** `ax otel` — OTLP receiver coverage + freshness view ([#609](https://github.com/Necmttn/ax/issues/609)) ([dc4267b](https://github.com/Necmttn/ax/commit/dc4267b7e85ef5e2e31d070247dd14cd20ba3681))
+* profile widget ([#626](https://github.com/Necmttn/ax/issues/626)) ([2899ef3](https://github.com/Necmttn/ax/commit/2899ef3d047b9692d1d568cab3c02568af7d31da))
+* show full context startup budget ([#635](https://github.com/Necmttn/ax/issues/635)) ([b8353cb](https://github.com/Necmttn/ax/commit/b8353cbf51ad97ace447dce773fdc311ed444391))
+* **site:** add state report page ([#632](https://github.com/Necmttn/ax/issues/632)) ([69d6d70](https://github.com/Necmttn/ax/commit/69d6d70903943aff4376e3d564d72134ff4968a7))
+* **site:** browse community patterns ([#631](https://github.com/Necmttn/ax/issues/631)) ([9b6e26a](https://github.com/Necmttn/ax/commit/9b6e26a41d540daf812f9caf11d04ca6c16a501d))
+* **studio:** expose session deeplinks in session outputs ([#563](https://github.com/Necmttn/ax/issues/563)) ([#584](https://github.com/Necmttn/ax/issues/584)) ([2b867ba](https://github.com/Necmttn/ax/commit/2b867ba21f3f80ea44e60cbc5829c6dfccf38a90))
+* support team radar compare ([#633](https://github.com/Necmttn/ax/issues/633)) ([b3b2061](https://github.com/Necmttn/ax/commit/b3b2061b4da5189d744bb1622977675a0afb0cc3))
+* workflow mining — codify recurring skill arcs ([#588](https://github.com/Necmttn/ax/issues/588)) ([#598](https://github.com/Necmttn/ax/issues/598)) ([4cb5211](https://github.com/Necmttn/ax/commit/4cb5211ecec4939e8b8290ca2dbddd9eb394b659))
+
+
+### Bug Fixes
+
+* **ingest:** additive schema self-heal at ingest start ([#283](https://github.com/Necmttn/ax/issues/283)) ([#601](https://github.com/Necmttn/ax/issues/601)) ([6d53e32](https://github.com/Necmttn/ax/commit/6d53e32f2a37ff35dea2d2b09a69d9303120da4f))
+* **ingest:** auto-sweep stranded ingest_run rows at ingest start ([#282](https://github.com/Necmttn/ax/issues/282)) ([#597](https://github.com/Necmttn/ax/issues/597)) ([ef40bae](https://github.com/Necmttn/ax/commit/ef40bae3ed2fbf7c7a3912d8c920d890c3bab177))
+* **ingest:** clear-then-derive friction/diagnostic events on full re-derive ([#549](https://github.com/Necmttn/ax/issues/549)) ([#602](https://github.com/Necmttn/ax/issues/602)) ([847bb6a](https://github.com/Necmttn/ax/commit/847bb6a00a2f3cfbcb1533f4c2a627cfce893bd4))
+* **otel:** correlate telemetry_of by uuid match, session-grain + incremental ([#611](https://github.com/Necmttn/ax/issues/611)) ([7b45cbd](https://github.com/Necmttn/ax/commit/7b45cbda5f10c23194714ea7834d4a69f0803d56))
+* **routability:** carry judgment from prose turns onto the edits behind them ([#591](https://github.com/Necmttn/ax/issues/591)) ([4bb7243](https://github.com/Necmttn/ax/commit/4bb72432d2288e687f5ef4a1c17acc5ab4f918b0))
+* **site:** routing copy says advise, not auto-route ([#594](https://github.com/Necmttn/ax/issues/594)) ([30c5406](https://github.com/Necmttn/ax/commit/30c54068f289087465cb8d0b24f66b63132e7ad1))
+
+
+### Performance
+
+* bound session churn scans to failure candidates ([#620](https://github.com/Necmttn/ax/issues/620)) ([ad519d2](https://github.com/Necmttn/ax/commit/ad519d247f4a58a39128016e4d2cb0ef5d6fba39))
+
 ## [0.35.0](https://github.com/Necmttn/ax/compare/v0.34.2...v0.35.0) (2026-06-19)
 
 
