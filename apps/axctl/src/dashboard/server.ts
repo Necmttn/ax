@@ -1,5 +1,12 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
-import { Layer } from "effect";
+import { DEFAULT_DB_HOST, DEFAULT_DB_PORT } from "@ax/lib/runtime-state";
+import { Duration, Effect, Exit, Layer, Scope } from "effect";
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import * as BunHttpClient from "@effect/platform-bun/BunHttpClient";
+import { makeManagedDb, parseDurationString, resolveManagedSurrealPath } from "./managed-db.ts";
+import { runIngestLoop } from "./serve-ingest-loop.ts";
+import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import {
     isContractRequest,
     makeContractWebHandler,
@@ -20,11 +27,29 @@ import {
 import { defaultRuntimeFactory, makeServeRuntime } from "./serve-runtime.ts";
 import { serveStudioAsset } from "./studio-assets.ts";
 
-export function parseDashboardServeArgs(args: string[]): { port: number } {
-    const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-    const port = raw === undefined ? DEFAULT_DASHBOARD_PORT : Number(raw);
-    if (!Number.isInteger(port) || port <= 0) throw new Error(`--port must be a positive integer (got ${raw})`);
-    return { port };
+export interface DashboardServeArgs {
+    readonly port: number;
+    readonly managedDb: boolean;
+    readonly ingestEvery: Duration.Duration | null;
+}
+
+export function parseDashboardServeArgs(args: string[]): DashboardServeArgs {
+    const rawPort = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
+    const port = rawPort === undefined ? DEFAULT_DASHBOARD_PORT : Number(rawPort);
+    if (!Number.isInteger(port) || port <= 0) throw new Error(`--port must be a positive integer (got ${rawPort})`);
+
+    const managedDb = args.includes("--managed-db");
+
+    const rawEvery = args.find((a) => a.startsWith("--ingest-every="))?.split("=")[1];
+    let ingestEvery: Duration.Duration | null = null;
+    if (rawEvery !== undefined) {
+        ingestEvery = parseDurationString(rawEvery);
+        if (ingestEvery === null) {
+            throw new Error(`--ingest-every: unrecognised duration '${rawEvery}' (use e.g. '2m', '30s', '1h')`);
+        }
+    }
+
+    return { port, managedDb, ingestEvery };
 }
 
 /**
@@ -179,8 +204,19 @@ export async function handleDashboardRequestWithCors(
     return response;
 }
 
+/**
+ * Layer providing ChildProcessSpawner + HttpClient for `--managed-db`.
+ * Built once at module level so it's not rebuilt per invocation.
+ */
+const managedDbLayer = Layer.mergeAll(
+    BunChildProcessSpawner.layer.pipe(
+        Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+    ),
+    BunHttpClient.layer,
+);
+
 export async function serveDashboard(args: string[]): Promise<void> {
-    const { port } = parseDashboardServeArgs(args);
+    const { port, managedDb, ingestEvery } = parseDashboardServeArgs(args);
 
     // Pre-flight: ask whoever already holds the port to identify itself,
     // BEFORE any sidecar/runtime noise. The common failure here is "I forgot
@@ -201,6 +237,37 @@ export async function serveDashboard(args: string[]): Promise<void> {
         console.error(formatServePortBusy(port));
         process.exitCode = 1;
         return;
+    }
+
+    // --managed-db: spawn and supervise the bundled surreal binary.
+    // Must happen BEFORE the serve runtime warmup so the DB is ready when
+    // SurrealClient tries to connect.
+    let managedDbScope: Scope.Closeable | null = null;
+    if (managedDb) {
+        const dbHost = DEFAULT_DB_HOST;
+        const dbPort = DEFAULT_DB_PORT;
+        const dataDir =
+            process.env.AX_DATA_DIR ??
+            `${process.env.HOME ?? "~"}/.local/share/ax`;
+        const surrealPath = resolveManagedSurrealPath(process.execPath);
+
+        try {
+            managedDbScope = await Effect.runPromise(Scope.make("sequential"));
+            await Effect.runPromise(
+                makeManagedDb({ surrealPath, host: dbHost, port: dbPort, dataDir }).pipe(
+                    Effect.provide(managedDbLayer),
+                    Effect.provideService(Scope.Scope, managedDbScope),
+                ),
+            );
+        } catch (err) {
+            if (managedDbScope) {
+                await Effect.runPromise(Scope.close(managedDbScope, Exit.void)).catch(() => undefined);
+                managedDbScope = null;
+            }
+            console.error(`[ax] --managed-db: failed to start surreal: ${err instanceof Error ? err.message : String(err)}`);
+            process.exitCode = 1;
+            return;
+        }
     }
 
     // Start the Durable Streams sidecar ONCE, before we accept requests, so
@@ -285,6 +352,16 @@ export async function serveDashboard(args: string[]): Promise<void> {
     const { prewarmDashboardCaches } = await import("./prewarm.ts");
     void handle.runner(prewarmDashboardCaches()).catch(() => undefined);
 
+    // --ingest-every: fork a background ingest loop via Effect.runFork.
+    // runIngestLoop has no R requirements (it closes over IngestRuntimeLayer),
+    // so it can be forked without going through handle.runner. The fiber is
+    // NOT attached to any scope intentionally - it runs until the process exits
+    // or is interrupted by the signal handler below (which kills the process).
+    if (ingestEvery !== null) {
+        Effect.runFork(runIngestLoop({ every: ingestEvery }, IngestRuntimeLayer));
+        console.log(`[ax] ingest loop started (every ${Duration.toSeconds(ingestEvery)}s)`);
+    }
+
     // Tear down the sidecar + runtime on shutdown. Bun's serve never resolves,
     // so the process exits via a signal; close the open run streams and dispose
     // the runtime (which interrupts any in-flight ingest daemon) first.
@@ -300,6 +377,11 @@ export async function serveDashboard(args: string[]): Promise<void> {
         if (stream) await stream.stop().catch(() => undefined);
         await contract.dispose().catch(() => undefined);
         await handle.dispose().catch(() => undefined);
+        // Close the managed-db scope AFTER the serve runtime disposes so
+        // in-flight ingest runs finish before surreal shuts down.
+        if (managedDbScope) {
+            await Effect.runPromise(Scope.close(managedDbScope, Exit.void)).catch(() => undefined);
+        }
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onSigterm);
         process.kill(process.pid, signal);

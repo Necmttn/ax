@@ -6,6 +6,7 @@ import {
     formatDaemonStatus,
     formatDoctorReport,
     parseDaemonCommand,
+    probeDbQueryPure,
     resolveDaemonHostPort,
     staleRunningIngestRuns,
     watcherProfilePublishDoctorCheck,
@@ -119,6 +120,7 @@ describe("cli install operations", () => {
             dataDir: "/tmp/ax",
             logDir: "/tmp/ax/logs",
             dbListening: true,
+            dbQueryOk: true,
             endpoint: {
                 host: "127.0.0.1",
                 port: 8521,
@@ -157,6 +159,7 @@ describe("cli install operations", () => {
             dataDir: "/tmp/ax",
             logDir: "/tmp/ax/logs",
             dbListening: true,
+            dbQueryOk: true,
             endpoint: {
                 host: "127.0.0.1",
                 port: 8521,
@@ -178,6 +181,7 @@ describe("cli install operations", () => {
             dataDir: "/tmp/ax",
             logDir: "/tmp/ax/logs",
             dbListening: true,
+            dbQueryOk: true,
             endpoint: {
                 host: "127.0.0.1",
                 port: 8521,
@@ -194,6 +198,33 @@ describe("cli install operations", () => {
         const text = formatDaemonStatus(status);
         expect(text).toContain("model: IDE");
         expect(text).not.toContain("conflict: port");
+    });
+
+    // --- TDD: wedge detector (Step 1 - written failing before formatter branch exists) ---
+    test("wedged db: port listening but query timed out → shows 'wedged' and restart hint", () => {
+        const status: DaemonStatus = {
+            platform: "darwin",
+            macosLaunchd: true,
+            dataDir: "/tmp/ax",
+            logDir: "/tmp/ax/logs",
+            dbListening: true,
+            dbQueryOk: false,
+            endpoint: {
+                host: "127.0.0.1",
+                port: 8521,
+                url: "ws://127.0.0.1:8521",
+                listening: true,
+                conflict: null,
+                runtimeStatePath: "/tmp/ax/runtime.json",
+            },
+            ideModel: false,
+            agents: [],
+        };
+        const text = formatDaemonStatus(status);
+        expect(text).toContain("wedged");
+        expect(text).toContain("ax daemon restart");
+        // Must NOT claim it's healthy
+        expect(text).not.toMatch(/database: listening on 127\.0\.0\.1:8521\s*$/m);
     });
 
     test("formats doctor checks", () => {
@@ -260,6 +291,19 @@ describe("cli install operations", () => {
             ok: true,
             detail: "profile widget freshness gate: 2h",
         });
+    });
+});
+
+describe("probeDbQueryPure (wedge probe: fail-closed on dead port)", () => {
+    // This test exercises the fail-closed contract on a guaranteed-dead port (1)
+    // WITHOUT touching the live db on :8521. The 1.5s timeout must not hang.
+    test("returns false quickly for a port nobody listens on", async () => {
+        const start = Date.now();
+        const result = await probeDbQueryPure("127.0.0.1", 1); // port 1 = unreachable
+        const elapsed = Date.now() - start;
+        expect(result).toBe(false);
+        // Must resolve within 3s (well under the 1.5s probe timeout + connection refuse)
+        expect(elapsed).toBeLessThan(3000);
     });
 });
 

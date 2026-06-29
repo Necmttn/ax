@@ -66,6 +66,20 @@ module.exports = {
     { from: "resources/studio", to: "studio" },
     { from: "build/icons", to: "icons" },
   ],
+  // extraFiles: placed at Contents/<to> (mac) / <to> (win/linux). Used for the
+  // LaunchAgent plist so SMAppService can find it at the required location:
+  // Contents/Library/LaunchAgents/com.necmttn.ax-studio.helper.plist
+  //
+  // electron-builder auto-signs every Mach-O it finds under the bundle when
+  // hardenedRuntime=true + a real Developer ID cert is present. The plist is
+  // not a Mach-O (no signing needed); the bun binary it references is already
+  // signed as part of extraResources (resources/bin/<arch>/bun).
+  extraFiles: [
+    {
+      from: "build/LaunchAgents/com.necmttn.ax-studio.helper.plist",
+      to: "Library/LaunchAgents/com.necmttn.ax-studio.helper.plist",
+    },
+  ],
   mac: {
     // arm64-first. A split arm64/x64 build produces two clobbering
     // `latest-mac.yml` feed manifests; until a merge step exists, the update

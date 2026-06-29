@@ -24,8 +24,29 @@ const serveStopCommand = Command.make("stop", {}, () =>
 
 export const serveCommand = Command.make(
     "serve",
-    { port: Flag.integer("port").pipe(Flag.withDefault(DEFAULT_DASHBOARD_PORT)) },
-    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
+    {
+        port: Flag.integer("port").pipe(Flag.withDefault(DEFAULT_DASHBOARD_PORT)),
+        managedDb: Flag.boolean("managed-db").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription(
+                "Spawn and supervise the bundled surreal binary as a child process before serving. " +
+                "Resolves surreal as a sibling of the bun execPath (used by the macOS background helper).",
+            ),
+        ),
+        ingestEvery: Flag.string("ingest-every").pipe(
+            Flag.optional,
+            Flag.withDescription(
+                "Run the ingest pipeline on this interval (e.g. '2m', '30s'). " +
+                "Requires a running DB. Off by default.",
+            ),
+        ),
+    },
+    ({ port, managedDb, ingestEvery }) => {
+        const args: string[] = [`--port=${port}`];
+        if (managedDb) args.push("--managed-db");
+        if (ingestEvery._tag === "Some") args.push(`--ingest-every=${ingestEvery.value}`);
+        return Effect.promise(() => serveDashboard(args));
+    },
 ).pipe(
     Command.withDescription("Serve the live web dashboard locally (status/stop manage a running daemon)"),
     Command.withSubcommands([serveStatusCommand, serveStopCommand]),

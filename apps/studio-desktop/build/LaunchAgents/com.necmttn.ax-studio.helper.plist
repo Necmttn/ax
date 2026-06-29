@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Label MUST match the plist filename (without .plist) and the serviceName
+        passed to app.setLoginItemSettings({ type: 'agentService', serviceName: '...' }).
+    -->
+    <key>Label</key>
+    <string>com.necmttn.ax-studio.helper</string>
+
+    <!--
+        BundleProgram: path relative to the .app bundle root.
+        launchd resolves it from wherever the .app lives at runtime
+        (e.g. /Applications or ~/Applications), so no hardcoded paths.
+
+        Form A (decided by spikes 1 + 1b): the bundled bun Mach-O is the
+        executable; ProgramArguments passes the ax-src TypeScript serve entry.
+        This avoids a separate compiled helper binary and keeps live-ingest
+        (lmdb, which can't bundle in --compile mode).
+
+        NOTE - arm64 hardcoded: the desktop build currently ships arm64-only
+        (electron-builder.config.cjs target arch: ["arm64"]). When x64 / universal
+        builds are added, either generate per-arch plists at build time, or replace
+        "arm64" with a build-time substitution token. See fetch-binaries.ts for the
+        per-arch binary layout under resources/bin/<arch>/.
+    -->
+    <key>BundleProgram</key>
+    <string>Contents/Resources/bin/arm64/bun</string>
+
+    <!--
+        ProgramArguments: argv[0] (bun path, bundle-root-relative) + the ax-src
+        serve entry + Task-2 flags.
+
+        NOTE - cwd for this agent is NOT guaranteed to be the bundle root
+        (launchd default cwd is /). The bundle-relative ProgramArguments paths
+        are UNVERIFIED with SMAppService register() - this is validated in Task 8's
+        signed-build smoke. If `ax serve` fails to start at runtime, switch
+        BundleProgram to the shell-wrapper fallback documented in
+        docs/superpowers/notes/2026-06-24-agentservice-contract.md §4 (a launcher
+        that resolves paths relative to its own $0).
+
+        - Contents/Resources/bin/arm64/bun      → argv[0] (the program name)
+        - Contents/Resources/ax-src/...         → the TypeScript serve entry
+        - serve                                 → ax CLI subcommand
+        - --managed-db                          → spawn + supervise bundled surreal
+                                                  (resolves surreal as sibling of
+                                                  process.execPath per managed-db.ts)
+        - --port=1738                           → ax serve port (AX_SERVE_PORT)
+        - --ingest-every=2m                     → fork an ingest loop every 2 minutes
+
+        Validated by spike 1b: bundled bun 1.3.13 + staged ax-src with node_modules
+        → /api/version responds live_ingest=true.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>Contents/Resources/bin/arm64/bun</string>
+        <string>Contents/Resources/ax-src/apps/axctl/src/cli/index.ts</string>
+        <string>serve</string>
+        <string>--managed-db</string>
+        <string>--port=1738</string>
+        <string>--ingest-every=2m</string>
+    </array>
+
+    <!--
+        KeepAlive: restart the agent if it exits for any reason (crash recovery).
+        Together with RunAtLoad this ensures the backend is always up.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!--
+        RunAtLoad: start the agent immediately on registration and at every login.
+        This means the ax data plane is available before the user opens ax studio.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+        ProcessType=Background: no GUI, no WindowServer session needed.
+        Suppresses Activity Monitor from showing the process as a foreground app.
+    -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!--
+        Associates this agent with the host app in System Settings → Login Items.
+        macOS shows "ax studio" (the app name) rather than the raw binary name,
+        and the user can toggle/remove it there. This is what makes Option A
+        (SMAppService) preferable to raw LaunchAgents that showed as
+        "bash - unidentified developer".
+    -->
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.necmttn.ax-studio</string>
+    </array>
+
+    <!--
+        EnvironmentVariables: inject AX_DB_* so ax serve connects to the managed
+        surreal on the correct address. Expanded by launchd BEFORE exec; no shell
+        expansion. These mirror the defaults in @ax/lib db.ts envConfig() and
+        AxBackendManager.makeAxServeConfig().
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AX_DB_URL</key>
+        <string>ws://127.0.0.1:8521</string>
+        <key>AX_DB_NS</key>
+        <string>ax</string>
+        <key>AX_DB_DB</key>
+        <string>main</string>
+    </dict>
+
+    <!--
+        ThrottleInterval: minimum seconds between restarts (matches the CLI daemon
+        dbPlist in install.ts). Prevents rapid-restart amplification if the helper
+        crashes immediately on boot (e.g. missing node_modules, port conflict).
+    -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!--
+        SoftResourceLimits.NumberOfFiles: RocksDB opens one FD per .sst file
+        plus WAL/MANIFEST/OPTIONS. A 100MB+ store easily exceeds macOS launchd's
+        default 256 soft cap, causing "Too many open files" errors during ingest.
+        Mirrors install.ts SoftResourceLimits (line ~147-150).
+        Well under macOS kern.maxfilesperproc (~245k).
+    -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
+
+    <!--
+        CRITICAL: StandardOutPath / StandardErrorPath are intentionally OMITTED.
+        macOS 14.4+ rejects SMAppService jobs that set them on sandboxed / signed
+        apps: register() returns SMAppServiceErrorDomain code 22, and status()
+        returns .notFound instead of .enabled. The helper writes structured logs
+        to ~/.local/share/ax/logs/ via ax serve's own logging (Effect's Log layer).
+
+        DO NOT ADD StandardOutPath OR StandardErrorPath HERE.
+    -->
+</dict>
+</plist>

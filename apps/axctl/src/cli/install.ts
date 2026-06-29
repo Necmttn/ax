@@ -634,6 +634,14 @@ export interface DaemonStatus {
     readonly dataDir: string;
     readonly logDir: string;
     readonly dbListening: boolean;
+    /**
+     * Result of a real `SELECT 1` round-trip against the DB endpoint.
+     * - `true`  → port listening AND query answered (healthy)
+     * - `false` → port listening BUT query timed out / errored (wedged - the
+     *             production incident: socket accepts but queries hang forever)
+     * - `null`  → port not listening (probe skipped)
+     */
+    readonly dbQueryOk: boolean | null;
     readonly endpoint: DaemonEndpoint;
     readonly agents: readonly AgentRuntimeStatus[];
     /**
@@ -832,12 +840,18 @@ function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.Fi
     return Effect.gen(function* () {
         const ideModel = yield* detectIdeModel();
         const endpoint = yield* collectDaemonEndpoint(ideModel);
+        // Probe a real query round-trip ONLY when the socket is open, with a
+        // hard timeout so a wedged db can't hang this command.
+        const dbQueryOk: boolean | null = endpoint.listening
+            ? yield* Effect.promise(() => probeDbQueryPure(endpoint.host, endpoint.port))
+            : null;
         return {
             platform: process.platform,
             macosLaunchd: isMacos(),
             dataDir: DATA_DIR,
             logDir: LOG_DIR,
             dbListening: endpoint.listening,
+            dbQueryOk,
             endpoint,
             ideModel,
             agents: [
@@ -855,9 +869,11 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     if (json) return prettyPrint(status);
     const ep = status.endpoint;
     const endpointDesc = `${ep.host}:${ep.port}`;
-    const dbLine = status.dbListening
-        ? `listening on ${endpointDesc}`
-        : `not listening on ${endpointDesc}`;
+    const dbLine = !status.dbListening
+        ? `not listening on ${endpointDesc}`
+        : status.dbQueryOk === false
+            ? `listening on ${endpointDesc} but NOT answering queries (wedged) - restart with \`ax daemon restart\``
+            : `listening on ${endpointDesc}`;
     const lines = [
         "axctl daemon",
         `  platform: ${status.platform}${status.macosLaunchd ? "" : " (launchd unavailable)"}`,
@@ -882,6 +898,38 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
         lines.push(`  ${agent.label}: ${runtime}; plist=${agent.plistExists ? "present" : "absent"}`);
     }
     return lines.join("\n");
+}
+
+/**
+ * Execute a real `SELECT 1` round-trip against SurrealDB's HTTP `/sql`
+ * endpoint to detect a WEDGED database - one whose socket is open but whose
+ * query engine is hung and never replies (the production incident: status
+ * reported "listening" the whole time the db was stuck).
+ *
+ * Fail-CLOSED: any error or timeout → `false`. Hard 1.5s timeout so this
+ * NEVER hangs `ax daemon status` even when the db is fully wedged.
+ *
+ * Exported as `probeDbQueryPure` for unit tests (verifies the dead-port
+ * fail-closed path without touching the live :8521 db).
+ */
+export async function probeDbQueryPure(host: string, port: number): Promise<boolean> {
+    try {
+        const db = readDbEnvConfig();
+        const res = await fetch(`http://${host}:${port}/sql`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
+            },
+            body: "SELECT 1;",
+            signal: AbortSignal.timeout(1500),
+        });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -1014,7 +1062,7 @@ export function collectDoctorReport(): Effect.Effect<
         const watcherPlistText = yield* fs
             .readFileString(WATCH_PLIST)
             .pipe(orAbsent<string | null>(null));
-        const dbReachable = daemon.dbListening && daemon.endpoint.conflict === null;
+        const dbReachable = daemon.dbListening && daemon.dbQueryOk !== false && daemon.endpoint.conflict === null;
         const missingBuckets = dbReachable
             ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
             : null;
