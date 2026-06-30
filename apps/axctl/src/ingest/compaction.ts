@@ -119,10 +119,13 @@ export type PiCompactionCtx = CompactionCtxBase;
 export const extractPiCompaction = (
     entry: Record<string, unknown>,
     ctx: PiCompactionCtx,
+    // Pi forks (omp) share this extractor; the harness label keeps their
+    // compaction rows + record keys provider-distinct (#636).
+    harness: string = "pi",
 ): CompactionWrite | null => {
     if (entry.type !== "compaction") return null;
     const details = isRecord(entry.details) ? entry.details : null;
-    return makeCompactionWrite("pi", ctx, {
+    return makeCompactionWrite(harness, ctx, {
         trigger: entry.fromHook === true ? "hook" : "auto",
         strategy: "summarize",
         summary: typeof entry.summary === "string" ? entry.summary : null,

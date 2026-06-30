@@ -12,7 +12,7 @@ import { extractPiCompaction, type CompactionWrite } from "./compaction.ts";
 import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
+import { agentEventRecordKey, type AgentEventWrite, type AgentProviderName } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -43,6 +43,65 @@ import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
+
+/**
+ * Pi and its forks (oh-my-pi / `omp`) write byte-identical JSONL transcripts,
+ * so the extractor, builders, ingest loop, and stage are all shared - only a
+ * handful of provider-identity strings + the sessions dir differ. This
+ * descriptor carries those, letting us instantiate one parser per fork
+ * (`PI_PROVIDER`, `OMP_PROVIDER`) without copy-pasting ~500 lines. Add a new
+ * fork by adding its name to `AgentProviderName`, the two provider-keyed
+ * signal-availability maps, and a descriptor here.
+ */
+export interface PiLikeProvider {
+    /** Provider name = source label = stage key (all the same string). */
+    readonly provider: AgentProviderName;
+    /** Human label for the `agent_provider` row, e.g. "Pi" / "Omp". */
+    readonly displayName: string;
+    /** `<source>_jsonl` label stamped on raw payloads + event labels. */
+    readonly jsonlLabel: string;
+    /** sourceKind for the JSONL work-unit skip-unchanged watermark. */
+    readonly sourceKind: string;
+    /** Synthetic provider-tool skill prefix, e.g. `pi` -> `pi:exec_command`. */
+    readonly skillPrefix: string;
+    /** Skill scope tag on synthetic invocations, e.g. `pi-tool`. */
+    readonly skillScope: string;
+    /** Force-rederive env var, e.g. `AX_REDERIVE_PI`. */
+    readonly forceEnv: string;
+    /** `tokenSourceDetail` for token-usage labels. */
+    readonly tokenSourceDetail: string;
+    /** Config key for the sessions dir (`piDir` / `ompDir`). */
+    readonly dirKey: "piDir" | "ompDir";
+}
+
+export const PI_PROVIDER: PiLikeProvider = {
+    provider: "pi",
+    displayName: "Pi",
+    jsonlLabel: "pi_jsonl",
+    sourceKind: "pi_session",
+    skillPrefix: "pi",
+    skillScope: "pi-tool",
+    forceEnv: "AX_REDERIVE_PI",
+    tokenSourceDetail: "pi_usage_fields",
+    dirKey: "piDir",
+};
+
+/**
+ * oh-my-pi (`omp.sh`) - a Pi fork with an identical transcript format under
+ * `~/.omp/agent/sessions`. First-class so its sessions keep `omp` identity
+ * instead of being laundered through `pi` (#636).
+ */
+export const OMP_PROVIDER: PiLikeProvider = {
+    provider: "omp",
+    displayName: "Omp",
+    jsonlLabel: "omp_jsonl",
+    sourceKind: "omp_session",
+    skillPrefix: "omp",
+    skillScope: "omp-tool",
+    forceEnv: "AX_REDERIVE_OMP",
+    tokenSourceDetail: "omp_usage_fields",
+    dirKey: "ompDir",
+};
 
 interface PiSession {
     id: string;
@@ -236,7 +295,7 @@ function sourceTimestamp(
     return { ts: fallback, warning: null };
 }
 
-function createPiExtractor(filePath: string) {
+function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER) {
     let session: PiSession | null = null;
     let seq = 0;
     let skipped = 0;
@@ -256,7 +315,7 @@ function createPiExtractor(filePath: string) {
         currentSession: PiSession,
     ): void => {
         providerEvents.push({
-            provider: "pi",
+            provider: desc.provider,
             providerSessionId: currentSession.id,
             axSessionId: currentSession.id,
             ...event,
@@ -281,7 +340,7 @@ function createPiExtractor(filePath: string) {
             callId,
         });
         const call: MutableToolCallWrite = makeToolCallWrite({
-            provider: "pi",
+            provider: desc.provider,
             toolName,
             sessionId: currentSession.id,
             seq,
@@ -307,7 +366,7 @@ function createPiExtractor(filePath: string) {
             textExcerpt: toolName,
             raw: block,
             labels: {
-                source: "pi_jsonl",
+                source: desc.jsonlLabel,
                 toolName,
                 toolKind: call.toolKind,
             },
@@ -323,7 +382,7 @@ function createPiExtractor(filePath: string) {
         }
 
         // Synthetic provider-tool skill name - branded at the true source.
-        const skillName = SkillName.make(`pi:${toolName}`);
+        const skillName = SkillName.make(`${desc.skillPrefix}:${toolName}`);
         invocations.push({
             session: currentSession.id,
             seq,
@@ -335,11 +394,11 @@ function createPiExtractor(filePath: string) {
             toolCallKey,
             skillName,
             ts,
-            reason: "Pi tool call",
+            reason: `${desc.displayName} tool call`,
             labels: {
-                provider: "pi",
+                provider: desc.provider,
                 toolName,
-                source: "pi_jsonl",
+                source: desc.jsonlLabel,
             },
             metrics: { turnSeq: seq },
         });
@@ -426,7 +485,7 @@ function createPiExtractor(filePath: string) {
                 ? classifyTurnIntent({
                     role: piTurnRole(role),
                     messageKind,
-                    source: "pi",
+                    source: desc.provider,
                     text,
                 })
                 : null;
@@ -451,7 +510,7 @@ function createPiExtractor(filePath: string) {
                     intent_kind: intentKind ?? classifyTurnIntent({
                         role: piTurnRole(role),
                         messageKind,
-                        source: "pi",
+                        source: desc.provider,
                         text,
                     }),
                     text,
@@ -473,7 +532,7 @@ function createPiExtractor(filePath: string) {
                 textExcerpt,
                 raw: entry,
                 labels: {
-                    source: "pi_jsonl",
+                    source: desc.jsonlLabel,
                     messageKind,
                     intentKind,
                     customType: stringField(entry, "customType"),
@@ -496,7 +555,7 @@ function createPiExtractor(filePath: string) {
                 // seq). Reproduce that exact key here to link the compaction row; do
                 // NOT push a second provider event.
                 const eventKey = agentEventRecordKey({
-                    provider: "pi",
+                    provider: desc.provider,
                     providerSessionId: session.id,
                     providerEventId,
                     seq,
@@ -507,7 +566,7 @@ function createPiExtractor(filePath: string) {
                     seq,
                     ts: new Date(ts),
                     agentEventKey: eventKey,
-                });
+                }, desc.provider);
                 if (write) compactions.push(write);
             }
 
@@ -545,15 +604,18 @@ function createPiExtractor(filePath: string) {
     };
 }
 
-export function __testExtractPiJsonlLines(lines: Iterable<string>): PiExtract | null {
-    const extractor = createPiExtractor("pi-test.jsonl");
+export function __testExtractPiJsonlLines(
+    lines: Iterable<string>,
+    desc: PiLikeProvider = PI_PROVIDER,
+): PiExtract | null {
+    const extractor = createPiExtractor(`${desc.provider}-test.jsonl`, desc);
     for (const line of lines) {
         extractor.processLine(line);
     }
     return extractor.finish();
 }
 
-const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
+const buildPiTokenUsageStatements = (extract: PiExtract, desc: PiLikeProvider): string[] => {
     if (!Object.values(extract.usage).some((value) => value > 0)) return [];
     const estimatedTokens = extract.usage.totalTokens > 0
         ? extract.usage.totalTokens
@@ -561,7 +623,7 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     return [
         buildSessionTokenUsageStatement({
             sessionId: extract.session.id,
-            source: "pi",
+            source: desc.provider,
             model: extract.session.model,
             promptTokens: extract.usage.input || null,
             completionTokens: extract.usage.output || null,
@@ -571,11 +633,13 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
             contextWindow: null,
             labels: surrealJsonTextOption({
                 ...tokenQualityLabels({
-                    source: "pi_jsonl",
+                    source: desc.jsonlLabel,
                     tokenSourceQuality: "explicit",
-                    tokenSourceDetail: "pi_usage_fields",
+                    tokenSourceDetail: desc.tokenSourceDetail,
                     model: extract.session.model,
-                    modelSourceDetail: extract.session.model ? "pi_session.model" : "missing_pi_session_model",
+                    modelSourceDetail: extract.session.model
+                        ? `${desc.provider}_session.model`
+                        : `missing_${desc.provider}_session_model`,
                 }),
             }),
             metrics: surrealJsonTextOption({ usage: extract.usage }),
@@ -584,32 +648,32 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     ];
 };
 
-const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => ({
+const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider): NormalizedTranscriptBatch => ({
     providers: [{
-        name: "pi",
-        displayName: "Pi",
+        name: desc.provider,
+        displayName: desc.displayName,
         version: extract.session.version === null ? null : String(extract.session.version),
         capabilities: {
             transcripts: true,
             providerGraph: true,
-            planSignals: providerPlanSignalAvailability.pi,
-            delegationSignals: providerDelegationSignalAvailability.pi,
+            planSignals: providerPlanSignalAvailability[desc.provider],
+            delegationSignals: providerDelegationSignalAvailability[desc.provider],
         },
     }],
     sessions: [{
         id: extract.session.id,
-        provider: "pi",
+        provider: desc.provider,
         providerSessionId: extract.session.id,
         cwd: extract.session.cwd,
         project: extract.session.cwd,
         model: extract.session.model,
         sourcePath: extract.sourcePath,
         raw: {
-            source: "pi_jsonl",
+            source: desc.jsonlLabel,
             sourcePath: extract.sourcePath,
             version: extract.session.version,
         },
-        labels: { source: "pi" },
+        labels: { source: desc.provider },
         metrics: {
             turns: extract.turns.length,
             toolCalls: extract.toolCalls.length,
@@ -632,7 +696,7 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
         hasToolUse: turn.has_tool_use,
         hasError: turn.has_error,
         agentEvent: {
-            provider: "pi",
+            provider: desc.provider,
             providerSessionId: turn.session,
             providerEventId: turn.providerEventId,
             seq: turn.providerEventSeq,
@@ -649,17 +713,17 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
         ts: invocation.ts,
         skillName: invocation.skill,
         args: invocation.args,
-        skillScope: "pi-tool",
-        skillContentHash: "pi",
+        skillScope: desc.skillScope,
+        skillContentHash: desc.provider,
     })),
     toolCallSkillRelations: extract.skillRelations,
     planSnapshots: [],
     compactions: extract.compactions,
 });
 
-const buildPiBatchStatements = (extract: PiExtract): string[] => [
-    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract)),
-    ...buildPiTokenUsageStatements(extract),
+const buildPiBatchStatements = (extract: PiExtract, desc: PiLikeProvider = PI_PROVIDER): string[] => [
+    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract, desc)),
+    ...buildPiTokenUsageStatements(extract, desc),
 ];
 
 export const __testBuildPiBatchStatements = buildPiBatchStatements;
@@ -668,13 +732,18 @@ interface PiIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestPi = Effect.fn("pi.ingest")(
+/**
+ * One ingest loop shared by Pi and every Pi fork (omp); the {@link PiLikeProvider}
+ * descriptor supplies the sessions dir, source label, watermark kind, and
+ * force-rederive env. See {@link ingestPi} / {@link ingestOmp}.
+ */
+const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.ingest`)(
     function* (opts: Partial<PiIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFilesLenient(cfg.paths.piDir, cutoff);
+        const files = yield* walkJsonlFilesLenient(cfg.paths[desc.dirKey], cutoff);
         let fileCount = 0;
         let sessionCount = 0;
         let eventCount = 0;
@@ -690,16 +759,16 @@ export const ingestPi = Effect.fn("pi.ingest")(
         // completed files, like claude/codex.
         const result = yield* runJsonlProviderFiles({
             candidates: files,
-            sourceKind: "pi_session",
-            forceEnv: "AX_REDERIVE_PI",
-            source: "pi",
+            sourceKind: desc.sourceKind,
+            forceEnv: desc.forceEnv,
+            source: desc.provider,
             processFile: (file) => Effect.gen(function* () {
                 // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
                 // rejection became an unrecoverable defect. `readFileString`
                 // surfaces a typed PlatformError that the isolation seam
                 // records + skips like any other per-file failure.
                 const text = yield* fs.readFileString(file.path);
-                const extractor = createPiExtractor(file.path);
+                const extractor = createPiExtractor(file.path, desc);
                 for (const line of text.split(/\r?\n/)) {
                     extractor.processLine(line);
                 }
@@ -719,12 +788,12 @@ export const ingestPi = Effect.fn("pi.ingest")(
                     project: extracted.session.cwd ?? undefined,
                     cwd: extracted.session.cwd ?? undefined,
                     model: extracted.session.model ?? undefined,
-                    source: "pi",
+                    source: desc.provider,
                     started_at: new Date(extracted.session.started_at),
                     ended_at: new Date(extracted.session.ended_at),
                     raw_file: extracted.sourcePath ?? undefined,
                 });
-                yield* executeStatements(buildPiBatchStatements(extracted), { chunkSize: 500, label: "pi" });
+                yield* executeStatements(buildPiBatchStatements(extracted, desc), { chunkSize: 500, label: desc.provider });
                 fileCount += 1;
                 sessionCount += 1;
                 eventCount += extracted.providerEvents.length;
@@ -747,6 +816,9 @@ export const ingestPi = Effect.fn("pi.ingest")(
     },
 );
 
+export const ingestPi = makePiLikeIngest(PI_PROVIDER);
+export const ingestOmp = makePiLikeIngest(OMP_PROVIDER);
+
 export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageStats")({
     filesIngested: Schema.Number,
     sessionsIngested: Schema.Number,
@@ -759,8 +831,16 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
     failedFiles: Schema.Number,
 }) {}
 
-export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
-    meta: StageMeta.make({ key: "pi", deps: ["skills", "commands"], tags: ["ingest"] }),
+/**
+ * Build the ingest stage for a Pi-family provider. `piStage` + `ompStage`
+ * (#636) are instances; both share `PiStageStats` since the stat shape is
+ * provider-agnostic.
+ */
+const makePiLikeStage = (
+    desc: PiLikeProvider,
+    ingest: ReturnType<typeof makePiLikeIngest>,
+): StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> => ({
+    meta: StageMeta.make({ key: desc.provider, deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext) {
@@ -769,9 +849,9 @@ export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSyst
         // The directory walk recovers every PlatformError internally, and a
         // per-file `readFileString` fault is now recorded + skipped by the
         // per-file isolation seam (#261, see file-isolation.ts), so no
-        // PlatformError escapes `ingestPi`. Only connection loss and failure
+        // PlatformError escapes the ingest. Only connection loss and failure
         // storms abort the stage, as a DbError.
-        const result = yield* ingestPi({ sinceDays });
+        const result = yield* ingest({ sinceDays });
         return PiStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
@@ -786,4 +866,7 @@ export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSyst
             failedFiles: result.failedFiles,
         });
     }),
-};
+});
+
+export const piStage = makePiLikeStage(PI_PROVIDER, ingestPi);
+export const ompStage = makePiLikeStage(OMP_PROVIDER, ingestOmp);

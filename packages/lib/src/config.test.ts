@@ -21,6 +21,7 @@ describe("AxConfig", () => {
         expect(snap.knobs.claudeConcurrency).toBe(8);
         expect(snap.paths.transcriptsDir).toBe("/tmp/home/.claude/projects");
         expect(snap.paths.piDir).toBe("/tmp/home/.pi/agent/sessions");
+        expect(snap.paths.ompDir).toBe("/tmp/home/.omp/agent/sessions");
         expect(snap.paths.opencodeDir).toBe("/tmp/home/.local/share/opencode");
         expect(snap.paths.cursorUserDir).toBe("/tmp/home/Library/Application Support/Cursor/User");
     });
@@ -29,10 +30,12 @@ describe("AxConfig", () => {
         const snap = await run(envSnapshot({
             HOME: "/tmp/home",
             AX_PI_DIR: "/tmp/pi-sessions",
+            AX_OMP_DIR: "/tmp/omp-sessions",
             AX_OPENCODE_DIR: "/tmp/opencode",
             AX_CURSOR_USER_DIR: "/tmp/cursor-user",
         }));
         expect(snap.paths.piDir).toBe("/tmp/pi-sessions");
+        expect(snap.paths.ompDir).toBe("/tmp/omp-sessions");
         expect(snap.paths.opencodeDir).toBe("/tmp/opencode");
         expect(snap.paths.cursorUserDir).toBe("/tmp/cursor-user");
     });
@@ -44,6 +47,7 @@ describe("AxConfig", () => {
         expect(snap.knobs.claudeConcurrency).toBe(4);
         expect(snap.knobs.codexConcurrency).toBe(1);
         expect(snap.paths.piDir).toBe("/tmp/home/.pi/agent/sessions");
+        expect(snap.paths.ompDir).toBe("/tmp/home/.omp/agent/sessions");
         expect(snap.paths.opencodeDir).toBe("/tmp/home/.local/share/opencode");
         expect(snap.paths.cursorUserDir).toBe("/tmp/home/Library/Application Support/Cursor/User");
     });

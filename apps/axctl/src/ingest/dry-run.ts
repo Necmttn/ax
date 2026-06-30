@@ -187,7 +187,9 @@ const dbSessionCounts = (): Effect.Effect<SessionTally, never, SurrealClient> =>
             // keep the comparison apples-to-apples.
             if (row.source === "claude" || row.source === "claude-subagent") claude += n;
             else if (row.source === "codex" || row.source === "codex-subagent") codex += n;
-            else if (row.source === "pi") pi += n;
+            // omp (oh-my-pi) shares Pi's JSONL format + ETA bucket; folded into
+            // `pi` so on-disk vs in-graph stays consistent for the estimate (#636).
+            else if (row.source === "pi" || row.source === "omp") pi += n;
             // opencode/cursor (and unknown sources) are ignored: their on-disk
             // session counts aren't known either, so they never drive the ETA.
         }
@@ -233,7 +235,10 @@ export const estimateIngest = (
 
         const claude = yield* countJsonl(cfg.paths.transcriptsDir, cutoff);
         const codex = yield* countJsonl(cfg.paths.codexDir, cutoff);
-        const pi = yield* countJsonl(cfg.paths.piDir, cutoff);
+        // omp (oh-my-pi) shares Pi's JSONL format; fold its on-disk count into
+        // the `pi` ETA bucket to match the in-graph tally above (#636).
+        const pi = (yield* countJsonl(cfg.paths.piDir, cutoff)) +
+            (yield* countJsonl(cfg.paths.ompDir, cutoff));
         const opencodeStore = yield* pathExists(path.join(cfg.paths.opencodeDir, "opencode.db"));
         const cursorStore = yield* pathExists(cfg.paths.cursorUserDir);
         const sessionsTotal = claude + codex + pi;

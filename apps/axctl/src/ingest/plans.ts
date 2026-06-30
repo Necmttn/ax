@@ -418,6 +418,13 @@ export const providerPlanSignalAvailability: Readonly<Record<AgentProviderName, 
         toolNames: [],
         evidence: "Current Pi JSONL fixtures expose message, custom, and generic toolCall blocks; no raw plan snapshot payload equivalent is present.",
     },
+    omp: {
+        provider: "omp",
+        status: "unavailable",
+        planSources: [],
+        toolNames: [],
+        evidence: "Omp (oh-my-pi) shares Pi's JSONL format; no raw plan snapshot payload is present (same as Pi).",
+    },
     opencode: {
         provider: "opencode",
         status: "unavailable",

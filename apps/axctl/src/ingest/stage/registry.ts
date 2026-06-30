@@ -8,7 +8,7 @@ import { claudeConfigStage } from "../claude-config.ts";
 import { pricingStage } from "../model-pricing.ts";
 import { claudeStage } from "../transcripts.ts";
 import { codexStage } from "../codex.ts";
-import { piStage } from "../pi.ts";
+import { piStage, ompStage } from "../pi.ts";
 import { opencodeStage } from "../opencode.ts";
 import { cursorStage } from "../cursor.ts";
 import { subagentsStage } from "../derive-claude-subagents.ts";
@@ -65,7 +65,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, ompStage, opencodeStage, cursorStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

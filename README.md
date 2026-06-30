@@ -109,6 +109,7 @@ flowchart LR
   cc["~/.claude/projects/<br/>Claude transcripts"]
   cx["~/.codex/sessions/<br/>Codex transcripts"]
   pi["~/.pi/agent/sessions/<br/>Pi transcripts"]
+  omp["~/.omp/agent/sessions/<br/>oh-my-pi (omp) transcripts"]
   oc["OpenCode + Cursor<br/>SQLite stores"]
   sk["installed skills<br/>(.claude, .agents, plugins)"]
   g[("local git history")]
@@ -117,6 +118,7 @@ flowchart LR
   cc --> ingest
   cx --> ingest
   pi --> ingest
+  omp --> ingest
   oc --> ingest
   sk --> ingest
   g  --> ingest

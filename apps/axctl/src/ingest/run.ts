@@ -31,6 +31,7 @@ const STAGE_EVENT_NAMES: Record<string, StageEventName> = {
     claude: { source: "claude", stage: "transcripts" },
     codex: { source: "codex", stage: "sessions" },
     pi: { source: "pi", stage: "sessions" },
+    omp: { source: "omp", stage: "sessions" },
     opencode: { source: "opencode", stage: "sessions" },
     cursor: { source: "cursor", stage: "sessions" },
     subagents: { source: "claude", stage: "subagents" },

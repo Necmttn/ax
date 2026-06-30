@@ -40,9 +40,10 @@ describe("StageRegistry", () => {
 
     it("registers local agent provider ingest stages after codex", () => {
         const keys = ALL_STAGES.map((stage) => stage.meta.key);
-        expect(keys.slice(keys.indexOf("codex"), keys.indexOf("codex") + 4)).toEqual([
+        expect(keys.slice(keys.indexOf("codex"), keys.indexOf("codex") + 5)).toEqual([
             "codex",
             "pi",
+            "omp",
             "opencode",
             "cursor",
         ]);
