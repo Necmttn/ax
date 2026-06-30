@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildLineage,
     buildRunEvidenceEvents,
     buildRunEvidenceRefs,
+    pickEarliestPerSession,
     RUN_EVIDENCE_DERIVED_KINDS,
     runEvidenceStage,
     type RunEvidenceSourceRows,
@@ -20,7 +22,11 @@ const empty: RunEvidenceSourceRows = {
     planSnapshots: [],
     fileEvidence: [],
     edited: [],
+    objectives: [],
+    policyDecisions: [],
+    repoStates: [],
     turnEditCalls: new Map(),
+    lineage: new Map(),
     sessionProvider,
 };
 
@@ -194,14 +200,125 @@ describe("buildRunEvidenceRefs - edited (write) refs via turn->event bridge", ()
     });
 });
 
+describe("buildRunEvidenceEvents - slice 6 kinds", () => {
+    test("objective: task user turn -> objective/derived, hot-links the turn", () => {
+        const [e] = buildRunEvidenceEvents({
+            ...empty,
+            objectives: [{ id: "tu1", session: "sess-claude", ts: "2026-06-21T10:00:00.000Z", seq: 1, textExcerpt: "Add omp support" }],
+        });
+        expect(e.kind).toBe("objective");
+        expect(e.backing).toBe("derived");
+        expect(e.sourceTable).toBe("turn");
+        expect(e.turnKey).toBe("tu1");
+        expect(e.summary).toBe("Add omp support");
+    });
+
+    test("policy_decision: hook effect -> policy_backed, no excerpts in attrs", () => {
+        const [e] = buildRunEvidenceEvents({
+            ...empty,
+            policyDecisions: [{ id: "h1", session: "sess-claude", toolCall: "tc1", ts: "2026-06-21T10:01:00.000Z", hookName: "enforce-worktree", effect: "blocked", providerStatus: "blocking_error" }],
+        });
+        expect(e.kind).toBe("policy_decision");
+        expect(e.backing).toBe("policy_backed");
+        expect(e.hookInvocationKey).toBe("h1");
+        expect(e.toolCallKey).toBe("tc1");
+        expect(e.summary).toBe("enforce-worktree: blocked");
+        expect(e.attrs).toEqual({ effect: "blocked", hook_name: "enforce-worktree", provider_status: "blocking_error" });
+    });
+
+    test("repo_state: checkout -> derived, summary has repo@branch·sha7, no dirty", () => {
+        const [e] = buildRunEvidenceEvents({
+            ...empty,
+            repoStates: [{ session: "sess-claude", checkout: "co1", ts: "2026-06-21T10:00:00.000Z", branch: "feat/x", headSha: "a1b2c3d4e5", repository: "Necmttn/ax" }],
+        });
+        expect(e.kind).toBe("repo_state");
+        expect(e.backing).toBe("derived");
+        expect(e.checkoutKey).toBe("co1");
+        expect(e.summary).toBe("Necmttn/ax @ feat/x · a1b2c3d");
+        expect(e.summary).not.toContain("dirty");
+    });
+
+    test("derived_summary: compaction summary -> distinct event (compaction_summary table)", () => {
+        const events = buildRunEvidenceEvents({
+            ...empty,
+            compactions: [{ id: "cmp1", session: "sess-claude", ts: "2026-06-21T10:30:00.000Z", strategy: "summarize", summary: "Goal: ship X" }],
+        });
+        // boundary + derived_summary off the same compaction, distinct source_tables.
+        const boundary = events.find((e) => e.kind === "boundary");
+        const summary = events.find((e) => e.kind === "derived_summary");
+        expect(boundary?.sourceTable).toBe("compaction");
+        expect(summary?.sourceTable).toBe("compaction_summary");
+        expect(summary?.summary).toBe("Goal: ship X");
+        // distinct keys (different source_table) so no collision.
+        expect(runEvidenceEventRecordKey({ sessionId: "sess-claude", sourceTable: "compaction", sourceId: "cmp1" }))
+            .not.toBe(runEvidenceEventRecordKey({ sessionId: "sess-claude", sourceTable: "compaction_summary", sourceId: "cmp1" }));
+    });
+
+    test("compaction with no summary emits boundary only", () => {
+        const events = buildRunEvidenceEvents({
+            ...empty,
+            compactions: [{ id: "cmp2", session: "sess-claude", ts: "2026-06-21T10:30:00.000Z", strategy: "summarize" }],
+        });
+        expect(events.filter((e) => e.kind === "derived_summary")).toHaveLength(0);
+        expect(events.filter((e) => e.kind === "boundary")).toHaveLength(1);
+    });
+
+    test("lineage from spawned stamps parent + root on a subagent's events", () => {
+        const [e] = buildRunEvidenceEvents({
+            ...empty,
+            toolCalls: [{ id: "tc1", session: "child", ts: "2026-06-21T10:00:00.000Z", name: "Read" }],
+            sessionProvider: new Map([["child", "claude"]]),
+            lineage: new Map([["child", { parent: "mid", root: "top" }]]),
+        });
+        expect(e.parentSessionId).toBe("mid");
+        expect(e.rootSessionId).toBe("top");
+    });
+});
+
+describe("pickEarliestPerSession", () => {
+    test("keeps the lowest-seq turn per session", () => {
+        const picked = pickEarliestPerSession([
+            { id: "b", session: "s1", ts: "t", seq: 5, textExcerpt: "later" },
+            { id: "a", session: "s1", ts: "t", seq: 1, textExcerpt: "first" },
+            { id: "c", session: "s2", ts: "t", seq: 2, textExcerpt: "other" },
+        ]);
+        expect(picked.find((r) => r.session === "s1")?.id).toBe("a");
+        expect(picked).toHaveLength(2);
+    });
+});
+
+describe("buildLineage", () => {
+    test("walks parent links to the root; top-level sessions absent", () => {
+        const lin = buildLineage([
+            { parent: "top", child: "mid" },
+            { parent: "mid", child: "leaf" },
+        ]);
+        expect(lin.get("leaf")).toEqual({ parent: "mid", root: "top" });
+        expect(lin.get("mid")).toEqual({ parent: "top", root: "top" });
+        expect(lin.has("top")).toBe(false);
+    });
+
+    test("cycle is guarded (no infinite loop)", () => {
+        const lin = buildLineage([
+            { parent: "a", child: "b" },
+            { parent: "b", child: "a" },
+        ]);
+        expect(lin.get("a")?.parent).toBe("b");
+        expect(lin.get("b")?.parent).toBe("a");
+    });
+});
+
 describe("runEvidenceStage wiring", () => {
     test("declares the canonical key/deps/tags", () => {
         expect(runEvidenceStage.meta.key).toBe("run-evidence");
-        expect(runEvidenceStage.meta.deps).toEqual(["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes"]);
+        expect(runEvidenceStage.meta.deps).toEqual(["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes", "git", "spawned"]);
         expect(runEvidenceStage.meta.tags).toEqual(["derive"]);
     });
 
-    test("covered-kinds capability set is the four structural sources", () => {
-        expect(RUN_EVIDENCE_DERIVED_KINDS).toEqual(["tool_observation", "verification", "boundary", "task_state"]);
+    test("covered-kinds capability set is the eight derived kinds", () => {
+        expect(RUN_EVIDENCE_DERIVED_KINDS).toEqual([
+            "tool_observation", "verification", "boundary", "task_state",
+            "objective", "policy_decision", "repo_state", "derived_summary",
+        ]);
     });
 });

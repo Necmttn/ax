@@ -170,20 +170,25 @@ zero until their files are re-ingested (the command prints a hint).
 
 `ax runs evidence <session> [--json]` is the reviewer-facing read surface for the
 run-evidence ledger (#578). The ledger normalizes the graph's `tool_call`,
-`command_outcome`, `compaction`, and `plan_snapshot` rows into one queryable
-record of what a run actually did. The command shows, for one session:
+`command_outcome`, `compaction`, `plan_snapshot`, first-`task` user turn,
+`hook_command_invocation`, and `session.checkout` rows into one queryable record
+of what a run actually did. The command shows, for one session:
 
-- **by kind** - `tool_observation`, `verification`, `boundary`, `task_state`.
+- **objective** + **repo** headline lines (the run's goal and where it ran).
+- **by kind** - `tool_observation`, `verification` (genuine checks only),
+  `boundary`, `task_state`, `objective`, `policy_decision`, `repo_state`,
+  `derived_summary`.
 - **by backing** - the model-claim-vs-evidence lens: `tool_backed` /
-  `verifier_backed` / `derived` are structurally grounded; `model_claim` is
-  shown even at 0 so the "claims aren't mined yet" gap is explicit.
+  `verifier_backed` / `policy_backed` / `derived` are structurally grounded;
+  `model_claim` is shown even at 0 so the "claims aren't mined yet" gap is explicit.
+- **refs** - file refs (read/searched/edited; paths hashed) off each event.
 - a latest-N **timeline** of events, newest first.
 
-`<session>` is a bare uuid or a `session:`-prefixed id; `--json` carries the same
-data plus a `{next}` Studio deeplink. Also exposed as the `runs_evidence` MCP
-tool. Covered kinds are honest - `objective` / `claim` / `policy_decision` /
-`artifact_ref` / `repo_state` / `derived_summary` and `run_evidence_ref` rows are
-not yet derived.
+Every event also carries its parent/root session ancestry (from `spawned`), so
+the ledger supports run->child->tool->evidence traversal. `<session>` is a bare
+uuid or a `session:`-prefixed id; `--json` carries the same data plus a `{next}`
+Studio deeplink. Also exposed as the `runs_evidence` MCP tool. Only `claim` (too
+noisy) and `artifact_ref` remain not-yet-derived.
 
 ## Digest (push-value)
 

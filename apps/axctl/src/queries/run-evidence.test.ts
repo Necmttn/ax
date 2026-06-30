@@ -8,6 +8,8 @@ import {
 const populated: RunEvidenceResult = {
     session_id: "abc-123",
     generated_at: "2026-06-30T00:00:00.000Z",
+    objective: "Add omp harness support",
+    repo: "Necmttn/ax @ feat/636 · a1b2c3d",
     total: 53,
     by_kind: [
         { key: "tool_observation", count: 42 },
@@ -40,6 +42,15 @@ describe("renderRunEvidence", () => {
     test("headline shows session + total", () => {
         const out = renderRunEvidence(populated);
         expect(out).toContain("run evidence: session abc-123  [53 events]");
+    });
+
+    test("objective + repo headline lines render when present, omitted when null", () => {
+        const out = renderRunEvidence(populated);
+        expect(out).toContain("objective:   Add omp harness support");
+        expect(out).toContain("repo:        Necmttn/ax @ feat/636 · a1b2c3d");
+        const bare = renderRunEvidence({ ...populated, objective: null, repo: null });
+        expect(bare).not.toContain("objective:");
+        expect(bare).not.toContain("repo:");
     });
 
     test("non-zero kinds/backings are listed; zeros are dropped from the inline summary", () => {

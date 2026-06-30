@@ -54,6 +54,10 @@ export const RUN_EVIDENCE_DERIVED_KINDS = [
     "verification",
     "boundary",
     "task_state",
+    "objective",
+    "policy_decision",
+    "repo_state",
+    "derived_summary",
 ] as const satisfies readonly RunEvidenceKind[];
 
 // ---------------------------------------------------------------------------
@@ -86,6 +90,39 @@ interface CompactionRow {
     readonly trigger?: string | null;
     readonly strategy?: string | null;
     readonly tokensBefore?: number | null;
+    /** present-only -> a `derived_summary` event is also emitted off this row. */
+    readonly summary?: string | null;
+}
+
+/** Earliest `task` user turn per session -> the run's objective. */
+interface ObjectiveRow {
+    readonly id: string;
+    readonly session: string | null;
+    readonly ts: string;
+    readonly seq?: number | null;
+    readonly textExcerpt?: string | null;
+}
+
+/** A `hook_command_invocation` row with a non-trivial `effect`. */
+interface PolicyDecisionRow {
+    readonly id: string;
+    readonly session: string | null;
+    readonly toolCall?: string | null;
+    readonly ts: string;
+    readonly hookName?: string | null;
+    readonly effect?: string | null;
+    readonly providerStatus?: string | null;
+}
+
+/** A session's checkout -> its repo identity (branch/head). dirty is NOT read
+ *  (the git ingest writes it always-false, #578 review). */
+interface RepoStateRow {
+    readonly session: string | null;
+    readonly checkout: string | null;
+    readonly ts: string;
+    readonly branch?: string | null;
+    readonly headSha?: string | null;
+    readonly repository?: string | null;
 }
 
 interface PlanSnapshotRow {
@@ -131,6 +168,12 @@ interface EditedRow {
     readonly tool?: string | null;
 }
 
+/** Parent + root ancestor for a session (from the `spawned` edge). */
+export interface SessionLineage {
+    readonly parent: string | null;
+    readonly root: string | null;
+}
+
 /** All source rows for one derivation pass + the session->provider lookup. */
 export interface RunEvidenceSourceRows {
     readonly toolCalls: readonly ToolCallRow[];
@@ -139,8 +182,13 @@ export interface RunEvidenceSourceRows {
     readonly planSnapshots: readonly PlanSnapshotRow[];
     readonly fileEvidence: readonly FileEvidenceRow[];
     readonly edited: readonly EditedRow[];
+    readonly objectives: readonly ObjectiveRow[];
+    readonly policyDecisions: readonly PolicyDecisionRow[];
+    readonly repoStates: readonly RepoStateRow[];
     /** turn key -> edit tool_call keys in that turn (for the `edited` bridge). */
     readonly turnEditCalls: ReadonlyMap<string, readonly string[]>;
+    /** session key -> parent/root ancestor (from `spawned`); stamped on events. */
+    readonly lineage: ReadonlyMap<string, SessionLineage>;
     readonly sessionProvider: ReadonlyMap<string, string>;
 }
 
@@ -246,17 +294,111 @@ const toTaskState = (row: PlanSnapshotRow, provider: string): RunEvidenceEventWr
     };
 };
 
-/** Map all source rows into evidence events (pure; null rows dropped). */
+// The run's stated goal: the earliest `task` user turn (selection, not NLP).
+const toObjective = (row: ObjectiveRow, provider: string): RunEvidenceEventWrite | null => {
+    if (!row.session) return null;
+    return {
+        sessionId: row.session,
+        ts: row.ts,
+        provider,
+        kind: "objective",
+        backing: "derived",
+        sourceTable: "turn",
+        sourceId: row.id,
+        turnKey: row.id,
+        summary: row.textExcerpt ?? null,
+    };
+};
+
+// A hook decision (block / inject / modify / notify). The verdict is policy.
+const toPolicyDecision = (row: PolicyDecisionRow, provider: string): RunEvidenceEventWrite | null => {
+    if (!row.session) return null;
+    return {
+        sessionId: row.session,
+        ts: row.ts,
+        provider,
+        kind: "policy_decision",
+        backing: "policy_backed",
+        sourceTable: "hook_command_invocation",
+        sourceId: row.id,
+        hookInvocationKey: row.id,
+        toolCallKey: row.toolCall ?? null,
+        summary: `${row.hookName ?? "hook"}: ${row.effect ?? "?"}`,
+        // Effect/status only - stdout/stderr/content excerpts stay on the hook
+        // row (privacy; do not duplicate them into the ledger, #578 review).
+        attrs: dropUndefined({
+            effect: row.effect ?? undefined,
+            hook_name: row.hookName ?? undefined,
+            provider_status: row.providerStatus ?? undefined,
+        }),
+    };
+};
+
+// The repo a run worked in (from session.checkout). dirty is NOT reported - the
+// git ingest writes checkout.dirty always-false (#578 review).
+const toRepoState = (row: RepoStateRow, provider: string): RunEvidenceEventWrite | null => {
+    if (!row.session || !row.checkout) return null;
+    const sha7 = row.headSha ? row.headSha.slice(0, 7) : null;
+    const summary = `${row.repository ?? "repo"}${row.branch ? ` @ ${row.branch}` : ""}${sha7 ? ` · ${sha7}` : ""}`;
+    return {
+        sessionId: row.session,
+        ts: row.ts,
+        provider,
+        kind: "repo_state",
+        backing: "derived",
+        sourceTable: "checkout",
+        sourceId: row.checkout,
+        checkoutKey: row.checkout,
+        summary,
+        attrs: dropUndefined({
+            repository: row.repository ?? undefined,
+            branch: row.branch ?? undefined,
+            head_sha: row.headSha ?? undefined,
+        }),
+    };
+};
+
+// A compaction's summary TEXT, as a distinct event from the boundary marker.
+// Keyed by source_table "compaction_summary" so it does not collide with the
+// boundary event off the same compaction row (#578 review - cleaner than a
+// `#summary` source_id suffix).
+const toDerivedSummary = (row: CompactionRow, provider: string): RunEvidenceEventWrite | null => {
+    if (!row.session || !row.summary) return null;
+    return {
+        sessionId: row.session,
+        ts: row.ts,
+        provider,
+        kind: "derived_summary",
+        backing: "derived",
+        sourceTable: "compaction_summary",
+        sourceId: row.id,
+        compactionKey: row.id,
+        summary: row.summary,
+    };
+};
+
+/** Map all source rows into evidence events (pure; null rows dropped). Each
+ *  event is then stamped with its session's parent/root ancestry (from
+ *  `spawned`) so the ledger supports run->child->tool->evidence traversal. */
 export const buildRunEvidenceEvents = (rows: RunEvidenceSourceRows): RunEvidenceEventWrite[] => {
     const events: RunEvidenceEventWrite[] = [];
     const push = (e: RunEvidenceEventWrite | null) => {
         if (e) events.push(e);
     };
-    for (const r of rows.toolCalls) push(toToolObservation(r, r.session ? providerOf(rows, r.session) : "unknown"));
-    for (const r of rows.commandOutcomes) push(toVerification(r, r.session ? providerOf(rows, r.session) : "unknown"));
-    for (const r of rows.compactions) push(toBoundary(r, r.session ? providerOf(rows, r.session) : "unknown"));
-    for (const r of rows.planSnapshots) push(toTaskState(r, r.session ? providerOf(rows, r.session) : "unknown"));
-    return events;
+    const p = (s: string | null) => (s ? providerOf(rows, s) : "unknown");
+    for (const r of rows.toolCalls) push(toToolObservation(r, p(r.session)));
+    for (const r of rows.commandOutcomes) push(toVerification(r, p(r.session)));
+    for (const r of rows.compactions) push(toBoundary(r, p(r.session)));
+    for (const r of rows.compactions) push(toDerivedSummary(r, p(r.session)));
+    for (const r of rows.planSnapshots) push(toTaskState(r, p(r.session)));
+    for (const r of rows.objectives) push(toObjective(r, p(r.session)));
+    for (const r of rows.policyDecisions) push(toPolicyDecision(r, p(r.session)));
+    for (const r of rows.repoStates) push(toRepoState(r, p(r.session)));
+    // Stamp parent/root ancestry (from `spawned`) onto every event.
+    return events.map((e) => {
+        const lin = rows.lineage.get(e.sessionId);
+        return lin ? { ...e, parentSessionId: lin.parent, rootSessionId: lin.root } : e;
+    });
 };
 
 /**
@@ -327,6 +469,43 @@ export const buildRunEvidenceRefs = (rows: RunEvidenceSourceRows): RunEvidenceRe
     return refs;
 };
 
+/** Keep the earliest (min seq) objective turn per session. */
+export const pickEarliestPerSession = (rows: readonly ObjectiveRow[]): ObjectiveRow[] => {
+    const best = new Map<string, ObjectiveRow>();
+    for (const r of rows) {
+        if (!r.session) continue;
+        const cur = best.get(r.session);
+        if (!cur || (r.seq ?? Infinity) < (cur.seq ?? Infinity)) best.set(r.session, r);
+    }
+    return [...best.values()];
+};
+
+/**
+ * Build per-session parent + root lineage from `spawned` (parent->child) edges.
+ * `root` walks parent links to the top-level ancestor; top-level sessions get
+ * `{parent: null, root: null}` (they ARE the root). Cycle-guarded.
+ */
+export const buildLineage = (
+    edges: readonly { readonly parent?: string | null; readonly child?: string | null }[],
+): Map<string, SessionLineage> => {
+    const parentOf = new Map<string, string>();
+    for (const e of edges) {
+        if (e.parent && e.child && e.parent !== e.child) parentOf.set(e.child, e.parent);
+    }
+    const lineage = new Map<string, SessionLineage>();
+    for (const child of parentOf.keys()) {
+        const parent = parentOf.get(child) ?? null;
+        let root = parent;
+        const seen = new Set<string>([child]);
+        while (root && parentOf.has(root) && !seen.has(root)) {
+            seen.add(root);
+            root = parentOf.get(root)!;
+        }
+        lineage.set(child, { parent, root });
+    }
+    return lineage;
+};
+
 // ---------------------------------------------------------------------------
 // Stage (thin DB layer: fetch deref-free, map pure, write idempotent).
 // ---------------------------------------------------------------------------
@@ -345,7 +524,7 @@ const commandOutcomeSql = (since: number | undefined): string =>
 
 const compactionSql = (since: number | undefined): string =>
     `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts,
-            trigger, strategy, tokens_before AS tokensBefore
+            trigger, strategy, tokens_before AS tokensBefore, summary
      FROM compaction WHERE session != NONE ${sinceAndClause(since)};`;
 
 const planSnapshotSql = (since: number | undefined): string =>
@@ -372,6 +551,31 @@ const editToolCallSql = (since: number | undefined): string => {
     return `SELECT record::id(id) AS toolCall, record::id(turn) AS turn
             FROM tool_call WHERE turn != NONE AND string::lowercase(name) IN [${names}] ${sinceAndClause(since)};`;
 };
+
+// Objective: the run's stated goal. `task`-kind user turns only (real prompts,
+// not context/control wrappers); earliest-per-session is picked in JS by seq.
+const objectiveSql = (since: number | undefined): string =>
+    `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts,
+            seq, text_excerpt AS textExcerpt
+     FROM turn WHERE session != NONE AND role = "user" AND message_kind = "task" ${sinceAndClause(since)};`;
+
+// Policy decisions: hook invocations whose effect is a real intervention.
+const policyDecisionSql = (since: number | undefined): string =>
+    `SELECT record::id(id) AS id, record::id(session) AS session, record::id(tool_call) AS toolCall,
+            type::string(ts) AS ts, hook_name AS hookName, effect, provider_status AS providerStatus
+     FROM hook_command_invocation
+     WHERE session != NONE AND effect IN ["blocked", "injected_context", "modified_input", "notified"] ${sinceAndClause(since)};`;
+
+// Repo state: each session's checkout (single-hop derefs for repo identity).
+// NOTE: dirty is intentionally not read - the git ingest writes it always-false.
+const repoStateSql = (since: number | undefined): string =>
+    `SELECT record::id(id) AS session, record::id(checkout) AS checkout,
+            type::string(started_at) AS ts, checkout.branch AS branch,
+            checkout.head_sha AS headSha, record::id(checkout.repository) AS repository
+     FROM session WHERE checkout != NONE ${sinceAndClause(since).replace("ts >", "started_at >")};`;
+
+// spawned is RELATION FROM parent_session TO child_session - parent/root lineage.
+const SPAWNED_SQL = `SELECT record::id(in) AS parent, record::id(out) AS child FROM spawned;`;
 
 export interface DeriveRunEvidenceStats {
     readonly written: number;
@@ -400,6 +604,10 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
         const [searches] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("searched_file", "search", sinceDays));
         const [edited] = yield* db.query<[Array<EditedRow>]>(editedSql(sinceDays));
         const [editCalls] = yield* db.query<[Array<{ turn?: string | null; toolCall?: string | null }>]>(editToolCallSql(sinceDays));
+        const [objectiveTurns] = yield* db.query<[Array<ObjectiveRow>]>(objectiveSql(sinceDays));
+        const [policyDecisions] = yield* db.query<[Array<PolicyDecisionRow>]>(policyDecisionSql(sinceDays));
+        const [repoStates] = yield* db.query<[Array<RepoStateRow>]>(repoStateSql(sinceDays));
+        const [spawnEdges] = yield* db.query<[Array<{ parent?: string | null; child?: string | null }>]>(SPAWNED_SQL);
 
         // turn -> edit tool_call keys (the edited bridge anchors only when a turn
         // has exactly one edit tool_call).
@@ -411,6 +619,12 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
             else turnEditCalls.set(c.turn, [c.toolCall]);
         }
 
+        // Earliest `task` user turn per session = the objective (min seq).
+        const objectives = pickEarliestPerSession(objectiveTurns ?? []);
+
+        // Lineage from `spawned` (parent->child): parent map + walked-up root.
+        const lineage = buildLineage(spawnEdges ?? []);
+
         const rows: RunEvidenceSourceRows = {
             toolCalls: toolCalls ?? [],
             commandOutcomes: commandOutcomes ?? [],
@@ -418,7 +632,11 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
             planSnapshots: planSnapshots ?? [],
             fileEvidence: [...(reads ?? []), ...(searches ?? [])],
             edited: edited ?? [],
+            objectives,
+            policyDecisions: policyDecisions ?? [],
+            repoStates: repoStates ?? [],
             turnEditCalls,
+            lineage,
             sessionProvider,
         };
         const events = buildRunEvidenceEvents(rows);
@@ -442,7 +660,7 @@ export class RunEvidenceStats extends BaseStageStats.extend<RunEvidenceStats>("R
 export const runEvidenceStage: StageDef<RunEvidenceStats, SurrealClient> = {
     meta: StageMeta.make({
         key: "run-evidence",
-        deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes"],
+        deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes", "git", "spawned"],
         tags: ["derive"],
     }),
     run: (ctx: IngestContext) =>

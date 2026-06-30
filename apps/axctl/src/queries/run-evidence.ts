@@ -31,6 +31,10 @@ export const RUN_EVIDENCE_COVERED_KINDS = [
     "verification",
     "boundary",
     "task_state",
+    "objective",
+    "policy_decision",
+    "repo_state",
+    "derived_summary",
 ] as const;
 
 /** Default timeline cap (latest N events). */
@@ -52,6 +56,10 @@ export interface RunEvidenceTimelineRow {
 export interface RunEvidenceResult {
     readonly session_id: string;
     readonly generated_at: string;
+    /** The run's stated goal (latest `objective` event summary), or null. */
+    readonly objective: string | null;
+    /** The run's repo identity (latest `repo_state` event summary), or null. */
+    readonly repo: string | null;
     readonly total: number;
     /** All kinds in the taxonomy, count-desc then taxonomy order; zeros kept. */
     readonly by_kind: ReadonlyArray<RunEvidenceCount>;
@@ -114,6 +122,13 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
         const [refGroups] = yield* db.query<[Array<{ ref_kind?: string | null; n?: number | null }>]>(
             `SELECT ref_kind, count() AS n FROM run_evidence_ref WHERE session = ${sessionRef} GROUP BY ref_kind;`,
         );
+        // Headline kinds: the run's objective + repo identity (latest of each).
+        const [heads] = yield* db.query<[Array<{ kind?: string | null; summary?: string | null }>]>(
+            `SELECT kind, summary FROM run_evidence_event
+             WHERE session = ${sessionRef} AND kind IN ["objective", "repo_state"] ORDER BY ts DESC;`,
+        );
+        const headOf = (kind: string): string | null =>
+            (heads ?? []).find((h) => h.kind === kind)?.summary ?? null;
 
         const rows = groups ?? [];
         const total = rows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
@@ -131,6 +146,8 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
         return {
             session_id: bareId,
             generated_at: new Date().toISOString(),
+            objective: headOf("objective"),
+            repo: headOf("repo_state"),
             total,
             by_kind: byKind,
             by_backing: byBacking,
@@ -163,6 +180,10 @@ export const renderRunEvidence = (result: RunEvidenceResult): string => {
         return out.join("\n");
     }
 
+    // Headline answers (#578): what was the goal, and where did it run.
+    if (result.objective) out.push(`  objective:   ${result.objective}`);
+    if (result.repo) out.push(`  repo:        ${result.repo}`);
+
     out.push(`  by kind:     ${nonZero(result.by_kind)}`);
     // backing is the claim-vs-evidence lens; show model_claim explicitly even at 0.
     const claim = result.by_backing.find((b) => b.key === "model_claim")?.count ?? 0;
@@ -182,6 +203,6 @@ export const renderRunEvidence = (result: RunEvidenceResult): string => {
 
     out.push("");
     out.push(`  covered kinds: ${result.covered_kinds.join(", ")}`);
-    out.push("  (objective / claim / policy_decision / artifact_ref / repo_state / derived_summary: not yet derived)");
+    out.push("  (claim / artifact_ref: not yet derived)");
     return out.join("\n");
 };
