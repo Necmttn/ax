@@ -698,6 +698,11 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
             success: Schema.Unknown,
             error: [NotFoundError, InternalError],
         }),
+        HttpApiEndpoint.get("sessionEvidence", "/api/sessions/:id/evidence", {
+            params: { id: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.get("sessionDetail", "/api/sessions/:id", {
             params: { id: Schema.String },
             success: Schema.Unknown,

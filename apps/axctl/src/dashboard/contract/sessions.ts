@@ -16,6 +16,7 @@ import { fetchSessionCanvas, fetchSessionOrchestration } from "../session-canvas
 import { fetchSessionCompare } from "../session-compare.ts";
 import { fetchSessionInsights } from "../session-insights.ts";
 import { fetchSessionInspect } from "../session-inspect.ts";
+import { fetchRunEvidence } from "../../queries/run-evidence.ts";
 import { fetchSessionSummary } from "../session-summary.ts";
 import { fetchSessionChildren, fetchSessionsList } from "../sessions-list.ts";
 import { internal, orInternal } from "./common.ts";
@@ -72,6 +73,8 @@ export const SessionsGroupLive = HttpApiBuilder.group(AxApi, "sessions", (handle
                 Effect.provide(SessionTimelineServiceLayer),
                 Effect.mapError(notFoundOrInternal),
             ))
+        .handle("sessionEvidence", ({ params }) =>
+            orInternal(fetchRunEvidence({ sessionId: params.id })))
         .handle("sessionDetail", ({ params }) =>
             // The Enriched Session facade is the single home for assembling a
             // session read model. This route fetches strictly LESS than the CLI:

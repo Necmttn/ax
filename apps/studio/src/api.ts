@@ -8,6 +8,7 @@ import type {
     NextActionsPayload,
     ProjectPagePayload,
     RecallResponse,
+    RunEvidencePayload,
     SkillGraphPayload,
     SessionCanvasPayload,
     SessionOrchestration,
@@ -449,6 +450,11 @@ export const api = {
                     ...(params.turnLimit != null ? { turn_limit: params.turnLimit } : {}),
                 },
             }),
+        ),
+    sessionEvidence: (sessionId: string): Promise<RunEvidencePayload> =>
+        viaContractUnknown(
+            `/api/sessions/${encodeURIComponent(sessionId)}/evidence`,
+            (c) => c.sessions.sessionEvidence({ params: { id: sessionId } }),
         ),
     sessionTimeline: (sessionId: string): Promise<SessionTimelinePayload> =>
         viaContractUnknown(

@@ -973,3 +973,40 @@ export interface ImproveActionResponse {
     readonly task_path?: string;
     readonly message?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Run evidence ledger (#578) - the `ax runs evidence` / Studio panel payload.
+// Mirrors `RunEvidenceResult` in apps/axctl/src/queries/run-evidence.ts (the
+// endpoint's contract success is `Schema.Unknown`, so this is the asserted shape
+// at the studio seam). Snake_case matches the query's JSON output.
+// ---------------------------------------------------------------------------
+
+export interface RunEvidenceCount {
+    readonly key: string;
+    readonly count: number;
+}
+
+export interface RunEvidenceTimelineRow {
+    readonly ts: string;
+    readonly kind: string;
+    readonly backing: string;
+    readonly source_table: string;
+    readonly summary: string | null;
+}
+
+export interface RunEvidencePayload {
+    readonly session_id: string;
+    readonly generated_at: string;
+    /** the run's stated goal (latest `objective` event), or null */
+    readonly objective: string | null;
+    /** the run's repo identity (latest `repo_state` event), or null */
+    readonly repo: string | null;
+    readonly total: number;
+    readonly by_kind: ReadonlyArray<RunEvidenceCount>;
+    readonly by_backing: ReadonlyArray<RunEvidenceCount>;
+    readonly timeline: ReadonlyArray<RunEvidenceTimelineRow>;
+    readonly ref_total: number;
+    readonly by_ref_kind: ReadonlyArray<RunEvidenceCount>;
+    readonly covered_kinds: ReadonlyArray<string>;
+    readonly timeline_limit: number;
+}
