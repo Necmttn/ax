@@ -49,7 +49,19 @@ describe("buildRunEvidenceEvents - source -> (kind, backing) mapping", () => {
         expect(e.provider).toBe("codex");
         expect(e.commandOutcomeKey).toBe("co1");
         expect(e.toolCallKey).toBe("tc9");
-        expect(e.summary).toBe("success: ok");
+        // summary + attrs are keyed on the check FAMILY (test), not the raw kind.
+        expect(e.summary).toBe("test: ok");
+        expect((e.attrs as { family?: string }).family).toBe("test");
+    });
+
+    test("non-check command_outcome (a plain success) is NOT a verification (#578 review)", () => {
+        // A successful Read/ls produces a command_outcome kind=success; it must
+        // not become verifier_backed evidence.
+        const events = buildRunEvidenceEvents({
+            ...empty,
+            commandOutcomes: [{ id: "co2", session: "sess-claude", ts: "2026-06-21T10:02:00.000Z", kind: "success", status: "ok", commandNorm: "ls -la" }],
+        });
+        expect(events).toHaveLength(0);
     });
 
     test("compaction -> boundary / derived (NOT tool_backed)", () => {
@@ -97,7 +109,7 @@ describe("buildRunEvidenceEvents - invariants", () => {
         const events = buildRunEvidenceEvents({
             ...empty,
             toolCalls: [{ id: "tc1", session: "sess-claude", ts: "2026-06-21T10:00:00.000Z", name: "Bash" }],
-            commandOutcomes: [{ id: "co1", session: "sess-claude", ts: "2026-06-21T10:01:00.000Z", status: "error" }],
+            commandOutcomes: [{ id: "co1", session: "sess-claude", ts: "2026-06-21T10:01:00.000Z", status: "error", commandNorm: "bun test" }],
             compactions: [{ id: "cmp1", session: "sess-claude", ts: "2026-06-21T10:02:00.000Z" }],
             planSnapshots: [{ id: "ps1", session: "sess-claude", ts: "2026-06-21T10:03:00.000Z" }],
         });

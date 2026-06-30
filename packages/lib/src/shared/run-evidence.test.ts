@@ -95,8 +95,9 @@ describe("buildRunEvidenceEventStatement", () => {
         expect(sql).toContain("root_session: NONE");
         expect(sql).toContain("parent_session: NONE");
         expect(sql).toContain("summary: NONE");
-        // No hot ref provided -> the field is omitted, not NONE-spammed.
-        expect(sql).not.toContain("tool_call:");
+        // Hot refs are ALWAYS emitted (NONE when absent) so a MERGE re-derive
+        // clears a ref that disappeared between runs - no stale links.
+        expect(sql).toContain("tool_call: NONE");
 
         const withRefs = buildRunEvidenceEventStatement({
             ...baseEvent,

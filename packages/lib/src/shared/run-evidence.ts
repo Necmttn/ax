@@ -223,7 +223,11 @@ const optHotRef = (
     table: string,
     key: string | null | undefined,
 ): void => {
-    if (key !== null && key !== undefined) fields.push([name, recordRef(table, key)]);
+    // Always emit the field (NONE when absent) so a MERGE re-derive CLEARS a hot
+    // ref that disappeared between runs, instead of leaving a stale link. (CONTENT
+    // would also clear, but would re-fire the observed_at DEFAULT every run; MERGE
+    // + explicit NONE keeps observed_at default-once.)
+    fields.push([name, surrealOptionRecord(table, key)]);
 };
 
 /** Build the `UPSERT run_evidence_event:... MERGE {...}` statement. */

@@ -31,6 +31,7 @@ import type { DbError } from "@ax/lib/errors";
 import { stableDigest } from "@ax/lib/ids";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
 import { executeStatementsWith } from "@ax/lib/shared/surreal";
+import { checkFamilyFromCommand } from "./check-family.ts";
 import {
     buildRunEvidenceStatements,
     runEvidenceEventRecordKey,
@@ -181,6 +182,13 @@ const toToolObservation = (row: ToolCallRow, provider: string): RunEvidenceEvent
 
 const toVerification = (row: CommandOutcomeRow, provider: string): RunEvidenceEventWrite | null => {
     if (!row.session) return null;
+    // command_outcome is written for EVERY tool_call - `classifyCommandOutcome`
+    // returns "success" for any non-error row - so without this filter a plain
+    // `Read`/`ls` succeeding would become verifier_backed evidence, violating the
+    // no-promotion rule. A `verification` is ONLY a genuine check (test / build /
+    // lint / typecheck), identified by the command's check family (#578 review).
+    const family = checkFamilyFromCommand(row.commandNorm ?? null);
+    if (family === null) return null;
     return {
         sessionId: row.session,
         ts: row.ts,
@@ -191,11 +199,11 @@ const toVerification = (row: CommandOutcomeRow, provider: string): RunEvidenceEv
         sourceId: row.id,
         commandOutcomeKey: row.id,
         toolCallKey: row.toolCall ?? null,
-        summary: `${row.kind ?? "outcome"}: ${row.status ?? "?"}`,
+        summary: `${family}: ${row.status ?? "?"}`,
         attrs: dropUndefined({
+            family,
             kind: row.kind ?? undefined,
             status: row.status ?? undefined,
-            command_norm: row.commandNorm ?? undefined,
         }),
     };
 };
