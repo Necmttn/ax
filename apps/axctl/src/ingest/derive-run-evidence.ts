@@ -29,6 +29,7 @@ import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { stableDigest } from "@ax/lib/ids";
+import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
 import { executeStatementsWith } from "@ax/lib/shared/surreal";
 import {
     buildRunEvidenceStatements,
@@ -96,8 +97,6 @@ interface PlanSnapshotRow {
 /**
  * A `read_file` / `searched_file` edge row (both are RELATION FROM tool_call TO
  * file, so they anchor cleanly to the tool_call's tool_observation event).
- * `edited` is RELATION FROM turn TO file - turn-grain, no matching event - so it
- * is intentionally NOT a ref source here (deferred; needs a turn->event bridge).
  */
 interface FileEvidenceRow {
     /** tool_call key (edge `in`). */
@@ -112,6 +111,25 @@ interface FileEvidenceRow {
     readonly access: string;
 }
 
+/**
+ * An `edited` edge row (RELATION FROM turn TO file). Turn-grain, so it is bridged
+ * to the turn's edit tool_call (and thus its tool_observation event) only when
+ * that turn has EXACTLY ONE edit tool_call - ambiguous multi-edit turns are
+ * skipped rather than mis-attributed (#578 slice 5).
+ */
+interface EditedRow {
+    /** turn key (edge `in`). */
+    readonly turn: string | null;
+    /** file key (edge `out`). */
+    readonly file: string | null;
+    /** session of the turn (single-hop deref `in.session`). */
+    readonly session: string | null;
+    readonly ts: string;
+    readonly pathSeen?: string | null;
+    /** the edit tool that fired (Edit|Write|NotebookEdit). */
+    readonly tool?: string | null;
+}
+
 /** All source rows for one derivation pass + the session->provider lookup. */
 export interface RunEvidenceSourceRows {
     readonly toolCalls: readonly ToolCallRow[];
@@ -119,6 +137,9 @@ export interface RunEvidenceSourceRows {
     readonly compactions: readonly CompactionRow[];
     readonly planSnapshots: readonly PlanSnapshotRow[];
     readonly fileEvidence: readonly FileEvidenceRow[];
+    readonly edited: readonly EditedRow[];
+    /** turn key -> edit tool_call keys in that turn (for the `edited` bridge). */
+    readonly turnEditCalls: ReadonlyMap<string, readonly string[]>;
     readonly sessionProvider: ReadonlyMap<string, string>;
 }
 
@@ -254,11 +275,45 @@ const toFileRef = (row: FileEvidenceRow): RunEvidenceRefWrite | null => {
     };
 };
 
-/** Map file-evidence edges into run_evidence_ref rows (pure; null rows dropped). */
+/**
+ * An `edited` edge -> a write `run_evidence_ref`, bridged turn->event: anchored
+ * to the turn's edit tool_call when that turn has EXACTLY ONE (unambiguous).
+ * Ambiguous multi-edit turns are dropped rather than mis-attributed.
+ */
+const toEditedRef = (
+    row: EditedRow,
+    turnEditCalls: ReadonlyMap<string, readonly string[]>,
+): RunEvidenceRefWrite | null => {
+    if (!row.session || !row.turn || !row.file) return null;
+    const cands = turnEditCalls.get(row.turn) ?? [];
+    if (cands.length !== 1) return null;
+    const toolCall = cands[0]!;
+    return {
+        eventKey: runEvidenceEventRecordKey({
+            sessionId: row.session,
+            sourceTable: "tool_call",
+            sourceId: toolCall,
+        }),
+        sessionId: row.session,
+        ts: row.ts,
+        refKind: "file",
+        targetTable: "file",
+        targetId: row.file,
+        pathHash: row.pathSeen ? stableDigest(row.pathSeen) : null,
+        privacyLevel: "ref_only",
+        attrs: dropUndefined({ access: "write", tool: row.tool ?? undefined }),
+    };
+};
+
+/** Map file-evidence + edited edges into run_evidence_ref rows (pure; null rows dropped). */
 export const buildRunEvidenceRefs = (rows: RunEvidenceSourceRows): RunEvidenceRefWrite[] => {
     const refs: RunEvidenceRefWrite[] = [];
     for (const r of rows.fileEvidence) {
         const ref = toFileRef(r);
+        if (ref) refs.push(ref);
+    }
+    for (const r of rows.edited) {
+        const ref = toEditedRef(r, rows.turnEditCalls);
         if (ref) refs.push(ref);
     }
     return refs;
@@ -290,12 +345,25 @@ const planSnapshotSql = (since: number | undefined): string =>
      FROM plan_snapshot WHERE session != NONE ${sinceAndClause(since)};`;
 
 // read_file / searched_file are RELATION FROM tool_call TO file; `in.session` is
-// a single-hop deref to anchor the ref's session. `edited` (turn->file) is
-// intentionally excluded (turn grain, no tool_observation event to attach to).
+// a single-hop deref to anchor the ref's session.
 const fileEvidenceSql = (edge: "read_file" | "searched_file", access: string, since: number | undefined): string =>
     `SELECT record::id(in) AS toolCall, record::id(out) AS file, record::id(in.session) AS session,
             type::string(ts) AS ts, path_seen AS pathSeen, '${access}' AS access
      FROM ${edge} WHERE ts != NONE ${sinceAndClause(since)};`;
+
+// `edited` is RELATION FROM turn TO file; bridged to the turn's edit tool_call.
+const editedSql = (since: number | undefined): string =>
+    `SELECT record::id(in) AS turn, record::id(out) AS file, record::id(in.session) AS session,
+            type::string(ts) AS ts, path_seen AS pathSeen, tool
+     FROM edited WHERE ts != NONE ${sinceAndClause(since)};`;
+
+// Edit tool_calls with their turn, for the edited bridge. Filtered to edit tool
+// names (lowercased) so the JS turn-map only holds edit candidates.
+const editToolCallSql = (since: number | undefined): string => {
+    const names = [...EDIT_TOOL_NAMES].map((n) => `"${n}"`).join(", ");
+    return `SELECT record::id(id) AS toolCall, record::id(turn) AS turn
+            FROM tool_call WHERE turn != NONE AND string::lowercase(name) IN [${names}] ${sinceAndClause(since)};`;
+};
 
 export interface DeriveRunEvidenceStats {
     readonly written: number;
@@ -322,6 +390,18 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
         const [planSnapshots] = yield* db.query<[Array<PlanSnapshotRow>]>(planSnapshotSql(sinceDays));
         const [reads] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("read_file", "read", sinceDays));
         const [searches] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("searched_file", "search", sinceDays));
+        const [edited] = yield* db.query<[Array<EditedRow>]>(editedSql(sinceDays));
+        const [editCalls] = yield* db.query<[Array<{ turn?: string | null; toolCall?: string | null }>]>(editToolCallSql(sinceDays));
+
+        // turn -> edit tool_call keys (the edited bridge anchors only when a turn
+        // has exactly one edit tool_call).
+        const turnEditCalls = new Map<string, string[]>();
+        for (const c of editCalls ?? []) {
+            if (!c.turn || !c.toolCall) continue;
+            const list = turnEditCalls.get(c.turn);
+            if (list) list.push(c.toolCall);
+            else turnEditCalls.set(c.turn, [c.toolCall]);
+        }
 
         const rows: RunEvidenceSourceRows = {
             toolCalls: toolCalls ?? [],
@@ -329,6 +409,8 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
             compactions: compactions ?? [],
             planSnapshots: planSnapshots ?? [],
             fileEvidence: [...(reads ?? []), ...(searches ?? [])],
+            edited: edited ?? [],
+            turnEditCalls,
             sessionProvider,
         };
         const events = buildRunEvidenceEvents(rows);

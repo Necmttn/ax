@@ -30,6 +30,8 @@ const populated: RunEvidenceResult = {
         { ts: "2026-06-21T10:06:00.000Z", kind: "verification", backing: "verifier_backed", source_table: "command_outcome", summary: "success: ok" },
         { ts: "2026-06-21T10:05:00.000Z", kind: "tool_observation", backing: "tool_backed", source_table: "tool_call", summary: "Bash" },
     ],
+    ref_total: 17,
+    by_ref_kind: [{ key: "file", count: 17 }],
     covered_kinds: [...RUN_EVIDENCE_COVERED_KINDS],
     timeline_limit: 50,
 };
@@ -66,6 +68,16 @@ describe("renderRunEvidence", () => {
         const out = renderRunEvidence(populated);
         expect(out).toContain("covered kinds: tool_observation, verification, boundary, task_state");
         expect(out).toContain("not yet derived");
+    });
+
+    test("refs line shows total + by ref_kind when present", () => {
+        const out = renderRunEvidence(populated);
+        expect(out).toContain("refs:        17 (file 17)");
+    });
+
+    test("refs line is omitted when there are no refs", () => {
+        const out = renderRunEvidence({ ...populated, ref_total: 0, by_ref_kind: [] });
+        expect(out).not.toContain("refs:");
     });
 
     test("empty session prints a helpful no-evidence message", () => {

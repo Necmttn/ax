@@ -58,6 +58,10 @@ export interface RunEvidenceResult {
     /** All backing classes, taxonomy order; zeros kept (the claim-vs-backed lens). */
     readonly by_backing: ReadonlyArray<RunEvidenceCount>;
     readonly timeline: ReadonlyArray<RunEvidenceTimelineRow>;
+    /** Total `run_evidence_ref` rows for this session. */
+    readonly ref_total: number;
+    /** Ref counts by ref_kind (count-desc); empty when no refs. */
+    readonly by_ref_kind: ReadonlyArray<RunEvidenceCount>;
     /** Honest capability surface: which kinds are derived today. */
     readonly covered_kinds: ReadonlyArray<string>;
     readonly timeline_limit: number;
@@ -107,12 +111,22 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
             `SELECT type::string(ts) AS ts, kind, backing, source_table, summary
              FROM run_evidence_event WHERE session = ${sessionRef} ORDER BY ts DESC LIMIT ${limit};`,
         );
+        const [refGroups] = yield* db.query<[Array<{ ref_kind?: string | null; n?: number | null }>]>(
+            `SELECT ref_kind, count() AS n FROM run_evidence_ref WHERE session = ${sessionRef} GROUP BY ref_kind;`,
+        );
 
         const rows = groups ?? [];
         const total = rows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
         const byKind = tallyByTaxonomy(rows, "kind", RUN_EVIDENCE_KINDS)
             .sort((a, b) => b.count - a.count);
         const byBacking = tallyByTaxonomy(rows, "backing", RUN_EVIDENCE_BACKINGS);
+
+        const refRows = refGroups ?? [];
+        const refTotal = refRows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
+        const byRefKind = refRows
+            .filter((r): r is { ref_kind: string; n: number } => typeof r.ref_kind === "string")
+            .map((r) => ({ key: r.ref_kind, count: typeof r.n === "number" ? r.n : 0 }))
+            .sort((a, b) => b.count - a.count);
 
         return {
             session_id: bareId,
@@ -121,6 +135,8 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
             by_kind: byKind,
             by_backing: byBacking,
             timeline: timeline ?? [],
+            ref_total: refTotal,
+            by_ref_kind: byRefKind,
             covered_kinds: [...RUN_EVIDENCE_COVERED_KINDS],
             timeline_limit: limit,
         } satisfies RunEvidenceResult;
@@ -154,6 +170,9 @@ export const renderRunEvidence = (result: RunEvidenceResult): string => {
     if (claim === 0) {
         out.push("               (model_claim 0 - unverified model claims are not mined yet)");
     }
+    if (result.ref_total > 0) {
+        out.push(`  refs:        ${result.ref_total} (${nonZero(result.by_ref_kind)})`);
+    }
 
     out.push("");
     out.push(`  timeline (latest ${Math.min(result.timeline.length, result.timeline_limit)}):`);
@@ -163,6 +182,6 @@ export const renderRunEvidence = (result: RunEvidenceResult): string => {
 
     out.push("");
     out.push(`  covered kinds: ${result.covered_kinds.join(", ")}`);
-    out.push("  (objective / claim / policy_decision / artifact_ref / repo_state / derived_summary + refs: not yet derived)");
+    out.push("  (objective / claim / policy_decision / artifact_ref / repo_state / derived_summary: not yet derived)");
     return out.join("\n");
 };
