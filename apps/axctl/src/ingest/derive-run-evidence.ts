@@ -18,18 +18,24 @@
  * @inputs `session` (id, source), `tool_call`, `command_outcome`, `compaction`,
  *   `plan_snapshot` rows (deref-free projections).
  * @outputs `run_evidence_event` rows (idempotent UPSERT, keyed by
- *   session+source_table+source_id so re-runs overwrite in place).
+ *   session+source_table+source_id) + `run_evidence_ref` file refs off each
+ *   tool_observation event, from `read_file`/`searched_file` edges (path HASHED,
+ *   privacy `ref_only`). `edited` (turn->file) is deferred - it has no
+ *   tool_observation event to anchor to.
  * @order after the provider stages + outcomes (which writes command_outcome).
  */
 
 import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { stableDigest } from "@ax/lib/ids";
 import { executeStatementsWith } from "@ax/lib/shared/surreal";
 import {
     buildRunEvidenceStatements,
+    runEvidenceEventRecordKey,
     type RunEvidenceEventWrite,
     type RunEvidenceKind,
+    type RunEvidenceRefWrite,
 } from "@ax/lib/shared/run-evidence";
 import {
     BaseStageStats,
@@ -87,12 +93,32 @@ interface PlanSnapshotRow {
     readonly summary?: string | null;
 }
 
+/**
+ * A `read_file` / `searched_file` edge row (both are RELATION FROM tool_call TO
+ * file, so they anchor cleanly to the tool_call's tool_observation event).
+ * `edited` is RELATION FROM turn TO file - turn-grain, no matching event - so it
+ * is intentionally NOT a ref source here (deferred; needs a turn->event bridge).
+ */
+interface FileEvidenceRow {
+    /** tool_call key (edge `in`). */
+    readonly toolCall: string | null;
+    /** file key (edge `out`). */
+    readonly file: string | null;
+    /** session of the tool_call (single-hop deref `in.session`). */
+    readonly session: string | null;
+    readonly ts: string;
+    readonly pathSeen?: string | null;
+    /** "read" | "search" - which access edge produced this ref. */
+    readonly access: string;
+}
+
 /** All source rows for one derivation pass + the session->provider lookup. */
 export interface RunEvidenceSourceRows {
     readonly toolCalls: readonly ToolCallRow[];
     readonly commandOutcomes: readonly CommandOutcomeRow[];
     readonly compactions: readonly CompactionRow[];
     readonly planSnapshots: readonly PlanSnapshotRow[];
+    readonly fileEvidence: readonly FileEvidenceRow[];
     readonly sessionProvider: ReadonlyMap<string, string>;
 }
 
@@ -204,6 +230,40 @@ export const buildRunEvidenceEvents = (rows: RunEvidenceSourceRows): RunEvidence
     return events;
 };
 
+/**
+ * A file-evidence edge -> a `run_evidence_ref` off the tool_call's
+ * tool_observation event. The path is HASHED, never stored raw (privacy:
+ * `ref_only` + path_hash); the structural pointer is `file:<id>`.
+ */
+const toFileRef = (row: FileEvidenceRow): RunEvidenceRefWrite | null => {
+    if (!row.session || !row.toolCall || !row.file) return null;
+    return {
+        eventKey: runEvidenceEventRecordKey({
+            sessionId: row.session,
+            sourceTable: "tool_call",
+            sourceId: row.toolCall,
+        }),
+        sessionId: row.session,
+        ts: row.ts,
+        refKind: "file",
+        targetTable: "file",
+        targetId: row.file,
+        pathHash: row.pathSeen ? stableDigest(row.pathSeen) : null,
+        privacyLevel: "ref_only",
+        attrs: { access: row.access },
+    };
+};
+
+/** Map file-evidence edges into run_evidence_ref rows (pure; null rows dropped). */
+export const buildRunEvidenceRefs = (rows: RunEvidenceSourceRows): RunEvidenceRefWrite[] => {
+    const refs: RunEvidenceRefWrite[] = [];
+    for (const r of rows.fileEvidence) {
+        const ref = toFileRef(r);
+        if (ref) refs.push(ref);
+    }
+    return refs;
+};
+
 // ---------------------------------------------------------------------------
 // Stage (thin DB layer: fetch deref-free, map pure, write idempotent).
 // ---------------------------------------------------------------------------
@@ -229,8 +289,17 @@ const planSnapshotSql = (since: number | undefined): string =>
     `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts, summary
      FROM plan_snapshot WHERE session != NONE ${sinceAndClause(since)};`;
 
+// read_file / searched_file are RELATION FROM tool_call TO file; `in.session` is
+// a single-hop deref to anchor the ref's session. `edited` (turn->file) is
+// intentionally excluded (turn grain, no tool_observation event to attach to).
+const fileEvidenceSql = (edge: "read_file" | "searched_file", access: string, since: number | undefined): string =>
+    `SELECT record::id(in) AS toolCall, record::id(out) AS file, record::id(in.session) AS session,
+            type::string(ts) AS ts, path_seen AS pathSeen, '${access}' AS access
+     FROM ${edge} WHERE ts != NONE ${sinceAndClause(since)};`;
+
 export interface DeriveRunEvidenceStats {
     readonly written: number;
+    readonly refsWritten: number;
 }
 
 export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
@@ -251,22 +320,28 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
         const [commandOutcomes] = yield* db.query<[Array<CommandOutcomeRow>]>(commandOutcomeSql(sinceDays));
         const [compactions] = yield* db.query<[Array<CompactionRow>]>(compactionSql(sinceDays));
         const [planSnapshots] = yield* db.query<[Array<PlanSnapshotRow>]>(planSnapshotSql(sinceDays));
+        const [reads] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("read_file", "read", sinceDays));
+        const [searches] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("searched_file", "search", sinceDays));
 
-        const events = buildRunEvidenceEvents({
+        const rows: RunEvidenceSourceRows = {
             toolCalls: toolCalls ?? [],
             commandOutcomes: commandOutcomes ?? [],
             compactions: compactions ?? [],
             planSnapshots: planSnapshots ?? [],
+            fileEvidence: [...(reads ?? []), ...(searches ?? [])],
             sessionProvider,
-        });
+        };
+        const events = buildRunEvidenceEvents(rows);
+        const refs = buildRunEvidenceRefs(rows);
 
-        const stmts = buildRunEvidenceStatements({ events, refs: [] });
+        const stmts = buildRunEvidenceStatements({ events, refs });
         yield* executeStatementsWith(db, stmts, { chunkSize: 250, label: "runEvidence" });
-        return { written: events.length } satisfies DeriveRunEvidenceStats;
+        return { written: events.length, refsWritten: refs.length } satisfies DeriveRunEvidenceStats;
     });
 
 export class RunEvidenceStats extends BaseStageStats.extend<RunEvidenceStats>("RunEvidenceStats")({
     written: Schema.Number,
+    refsWritten: Schema.Number,
 }) {}
 
 /**
@@ -286,8 +361,9 @@ export const runEvidenceStage: StageDef<RunEvidenceStats, SurrealClient> = {
             const result = yield* deriveRunEvidence(sinceDaysFromCtx(ctx));
             return RunEvidenceStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.written} run-evidence events`,
+                summary: `derived ${result.written} run-evidence events, ${result.refsWritten} refs`,
                 written: result.written,
+                refsWritten: result.refsWritten,
             });
         }),
 };

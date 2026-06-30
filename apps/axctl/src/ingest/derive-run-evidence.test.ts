@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildRunEvidenceEvents,
+    buildRunEvidenceRefs,
     RUN_EVIDENCE_DERIVED_KINDS,
     runEvidenceStage,
     type RunEvidenceSourceRows,
 } from "./derive-run-evidence.ts";
+import { runEvidenceEventRecordKey } from "@ax/lib/shared/run-evidence";
 
 const sessionProvider = new Map<string, string>([
     ["sess-claude", "claude"],
@@ -16,6 +18,7 @@ const empty: RunEvidenceSourceRows = {
     commandOutcomes: [],
     compactions: [],
     planSnapshots: [],
+    fileEvidence: [],
     sessionProvider,
 };
 
@@ -97,6 +100,49 @@ describe("buildRunEvidenceEvents - invariants", () => {
             planSnapshots: [{ id: "ps1", session: "sess-claude", ts: "2026-06-21T10:03:00.000Z" }],
         });
         expect(events.map((e) => e.backing).sort()).toEqual(["derived", "tool_backed", "tool_backed", "verifier_backed"]);
+    });
+});
+
+describe("buildRunEvidenceRefs - file refs off tool_observation events", () => {
+    test("read/search edge -> file ref anchored to the tool_call's event, path hashed", () => {
+        const [ref] = buildRunEvidenceRefs({
+            ...empty,
+            fileEvidence: [{ toolCall: "tc1", file: "repo__src_a_ts", session: "sess-claude", ts: "2026-06-21T10:05:00.000Z", pathSeen: "/repo/src/a.ts", access: "read" }],
+        });
+        expect(ref.refKind).toBe("file");
+        expect(ref.targetTable).toBe("file");
+        expect(ref.targetId).toBe("repo__src_a_ts");
+        expect(ref.privacyLevel).toBe("ref_only");
+        // path is hashed, never stored raw.
+        expect(ref.pathHash).toBeTruthy();
+        expect(ref.pathHash).not.toContain("/repo/");
+        // anchored to the tool_call's tool_observation event.
+        expect(ref.eventKey).toBe(runEvidenceEventRecordKey({ sessionId: "sess-claude", sourceTable: "tool_call", sourceId: "tc1" }));
+        expect(ref.attrs).toEqual({ access: "read" });
+    });
+
+    test("edges with no session / tool_call / file are dropped", () => {
+        const refs = buildRunEvidenceRefs({
+            ...empty,
+            fileEvidence: [
+                { toolCall: "tc1", file: "f1", session: null, ts: "t", access: "read" },
+                { toolCall: null, file: "f1", session: "s", ts: "t", access: "read" },
+                { toolCall: "tc1", file: null, session: "s", ts: "t", access: "search" },
+            ],
+        });
+        expect(refs).toHaveLength(0);
+    });
+
+    test("ref event key matches the event key for the same tool_call (ref links a real event)", () => {
+        const rows: RunEvidenceSourceRows = {
+            ...empty,
+            toolCalls: [{ id: "tc1", session: "sess-claude", ts: "2026-06-21T10:05:00.000Z", name: "Read" }],
+            fileEvidence: [{ toolCall: "tc1", file: "f1", session: "sess-claude", ts: "2026-06-21T10:05:00.000Z", access: "read" }],
+        };
+        const [event] = buildRunEvidenceEvents(rows);
+        const [ref] = buildRunEvidenceRefs(rows);
+        const eventKey = runEvidenceEventRecordKey({ sessionId: event.sessionId, sourceTable: event.sourceTable, sourceId: event.sourceId });
+        expect(ref.eventKey).toBe(eventKey);
     });
 });
 
