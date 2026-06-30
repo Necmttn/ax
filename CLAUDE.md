@@ -195,6 +195,29 @@ purpose - the prompts/responses/tool I/O another tool would scrape from OTLP
 request bodies are already in `turn.text` / `tool_call.input_json|output_json`
 from transcript parsing, so capturing bodies would only duplicate + re-leak them.
 
+### Run evidence ledger (#578)
+
+A metadata-only overlay on the normalized graph that answers, for a run:
+objective, durable task state, tool-backed observations, verifier results, and
+what was lost at compaction/resume boundaries - and distinguishes a model CLAIM
+from tool-BACKED evidence. Two SCHEMAFULL tables (`run_evidence_event`,
+`run_evidence_ref`); the shared contract + deterministic builders live in
+`@ax/lib/shared/run-evidence` (closed-set enums `kind`/`backing`/`ref_kind`/
+`privacy_level`; rows REBUILDABLE - key = session+source_table+source_id, so
+re-derive overwrites). Refs default to `ref_only` (no raw payloads); `backing`
+is verifier-DERIVED from the source, never a producer trust label - no promotion.
+
+The `run-evidence` ingest derive-stage (`apps/axctl/src/ingest/derive-run-evidence.ts`,
+incremental by the since-window, idempotent UPSERTs) normalizes four unambiguous
+structural sources: `tool_call`->tool_observation/tool_backed,
+`command_outcome`->verification/verifier_backed, `compaction`->boundary/derived,
+`plan_snapshot`->task_state/tool_backed. Read surface:
+`ax runs evidence <session> [--json]` (`apps/axctl/src/queries/run-evidence.ts`) -
+counts by kind + by backing (model_claim shown even at 0) + a latest-N timeline,
+with a Studio session deeplink. MCP: `runs_evidence`. NLP/git-derived kinds
+(objective/claim/policy_decision/artifact_ref/repo_state/derived_summary) + ref
+population are deferred (see `RUN_EVIDENCE_DERIVED_KINDS`). Spec/threads on #578.
+
 ## Workflow extraction commands
 
 ### Scoped ingest
@@ -372,11 +395,11 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 22 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 23 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `otel`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
+`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.

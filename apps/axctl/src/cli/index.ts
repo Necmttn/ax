@@ -17,6 +17,7 @@ import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
 import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./commands/costs.ts";
 import { costCommand, axCostRuntime } from "./commands/ax-cost.ts";
 import { otelCommand, axOtelRuntime } from "./commands/ax-otel.ts";
+import { runsCommand, axRunsRuntime } from "./commands/runs.ts";
 import { memoryCommand, axMemoryRuntime } from "./commands/ax-memory.ts";
 import { quotaCommand, quotaRuntime } from "./commands/quota.ts";
 import { dojoCommand, dojoRuntime } from "./commands/dojo.ts";
@@ -90,6 +91,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...costsRuntime,
     ...axCostRuntime,
     ...axOtelRuntime,
+    ...axRunsRuntime,
     ...axMemoryRuntime,
     ...quotaRuntime,
     ...dojoRuntime,
@@ -140,6 +142,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     setupCommand,
     costCommand,
     otelCommand,
+    runsCommand,
     memoryCommand,
     quotaCommand,
     dojoCommand,

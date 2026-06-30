@@ -31,6 +31,7 @@ const EXPECTED_TOOLS = [
     "cost_images",
     "cost_routability",
     "otel",
+    "runs_evidence",
     "dispatches",
     "dispatches_advice",
     "dojo_agenda",
