@@ -233,6 +233,7 @@ describe("effect cli", () => {
             "proposals",
             "reaction-events",
             "retro-proposals",
+            "run-evidence",
             "session-health",
             "signals",
             "spawned",
