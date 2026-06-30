@@ -2120,3 +2120,73 @@ DEFINE TABLE telemetry_of TYPE RELATION SCHEMAFULL;
 DEFINE FIELD linked_at ON telemetry_of TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS telemetry_of_in  ON telemetry_of FIELDS in;
 DEFINE INDEX IF NOT EXISTS telemetry_of_out ON telemetry_of FIELDS out;
+
+-- ---------------------------------------------------------------------------
+-- Run evidence ledger (#578) - a metadata-only overlay on the normalized graph.
+-- It does NOT re-parse harnesses; it normalizes facts already in `turn`,
+-- `tool_call`, `agent_event`, `plan_snapshot`, `compaction`, `command_outcome`,
+-- and hook tables into a single queryable, reviewer-facing ledger that answers,
+-- for a run: objective, durable task state, tool-backed observations, verifier
+-- results, policy decisions, and what was lost at compaction/resume boundaries.
+--
+-- Two invariants:
+--   1. Refs + hashes by default, never raw private payloads (privacy_level).
+--   2. `backing` is verifier-DERIVED from available joins, not a producer trust
+--      label - repeated claims never become observations, policy permission is
+--      not proof of execution. No automatic promotion.
+-- Rows are rebuildable: the key is derived from (session, source_table,
+-- source_id) so re-deriving overwrites in place (idempotent UPSERT).
+-- ---------------------------------------------------------------------------
+DEFINE TABLE IF NOT EXISTS run_evidence_event SCHEMAFULL;
+DEFINE FIELD session         ON run_evidence_event TYPE record<session>;
+DEFINE FIELD root_session    ON run_evidence_event TYPE option<record<session>>;
+DEFINE FIELD parent_session  ON run_evidence_event TYPE option<record<session>>;
+DEFINE FIELD ts              ON run_evidence_event TYPE datetime DEFAULT time::now();
+DEFINE FIELD provider        ON run_evidence_event TYPE string;
+-- objective|task_state|tool_observation|verification|policy_decision|boundary|artifact_ref|repo_state|claim|derived_summary
+DEFINE FIELD kind            ON run_evidence_event TYPE string;
+-- model_claim|tool_backed|verifier_backed|policy_backed|derived|unknown
+DEFINE FIELD backing         ON run_evidence_event TYPE string;
+-- Optional hot refs into the normalized graph (kept as links for traversal).
+DEFINE FIELD turn            ON run_evidence_event TYPE option<record<turn>>;
+DEFINE FIELD tool_call       ON run_evidence_event TYPE option<record<tool_call>>;
+DEFINE FIELD agent_event     ON run_evidence_event TYPE option<record<agent_event>>;
+DEFINE FIELD compaction      ON run_evidence_event TYPE option<record<compaction>>;
+DEFINE FIELD plan_snapshot   ON run_evidence_event TYPE option<record<plan_snapshot>>;
+DEFINE FIELD command_outcome ON run_evidence_event TYPE option<record<command_outcome>>;
+DEFINE FIELD hook_invocation ON run_evidence_event TYPE option<record<hook_command_invocation>>;
+DEFINE FIELD artifact        ON run_evidence_event TYPE option<record<artifact>>;
+DEFINE FIELD file            ON run_evidence_event TYPE option<record<file>>;
+DEFINE FIELD checkout        ON run_evidence_event TYPE option<record<checkout>>;
+DEFINE FIELD commit          ON run_evidence_event TYPE option<record<commit>>;
+-- Provenance back to the source row this evidence was normalized from.
+DEFINE FIELD source_table    ON run_evidence_event TYPE string;
+DEFINE FIELD source_id       ON run_evidence_event TYPE string;
+DEFINE FIELD summary         ON run_evidence_event TYPE option<string>;
+DEFINE FIELD content_hash    ON run_evidence_event TYPE option<string>;
+DEFINE FIELD input_hash      ON run_evidence_event TYPE option<string>;
+DEFINE FIELD output_hash     ON run_evidence_event TYPE option<string>;
+DEFINE FIELD attrs           ON run_evidence_event TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD observed_at     ON run_evidence_event TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS run_evidence_event_session  ON run_evidence_event FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS run_evidence_event_kind     ON run_evidence_event FIELDS session, kind;
+DEFINE INDEX IF NOT EXISTS run_evidence_event_source   ON run_evidence_event FIELDS source_table, source_id;
+DEFINE INDEX IF NOT EXISTS run_evidence_event_observed ON run_evidence_event FIELDS observed_at;
+
+DEFINE TABLE IF NOT EXISTS run_evidence_ref SCHEMAFULL;
+DEFINE FIELD event         ON run_evidence_ref TYPE record<run_evidence_event>;
+DEFINE FIELD session       ON run_evidence_ref TYPE record<session>;
+DEFINE FIELD ts            ON run_evidence_ref TYPE datetime DEFAULT time::now();
+-- record|file|sidecar|url|command|commit|external_event
+DEFINE FIELD ref_kind      ON run_evidence_ref TYPE string;
+DEFINE FIELD target_table  ON run_evidence_ref TYPE option<string>;
+DEFINE FIELD target_id     ON run_evidence_ref TYPE option<string>;
+DEFINE FIELD path_hash     ON run_evidence_ref TYPE option<string>;
+DEFINE FIELD uri_hash      ON run_evidence_ref TYPE option<string>;
+DEFINE FIELD content_hash  ON run_evidence_ref TYPE option<string>;
+-- ref_only|hashed|summary|raw  (default ref_only - structural refs, no payload)
+DEFINE FIELD privacy_level ON run_evidence_ref TYPE string;
+DEFINE FIELD attrs         ON run_evidence_ref TYPE option<string>;  -- JSON-encoded
+DEFINE INDEX IF NOT EXISTS run_evidence_ref_event   ON run_evidence_ref FIELDS event;
+DEFINE INDEX IF NOT EXISTS run_evidence_ref_session ON run_evidence_ref FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS run_evidence_ref_target  ON run_evidence_ref FIELDS target_table, target_id;

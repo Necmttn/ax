@@ -327,3 +327,38 @@ describe("proposal.origin NONE-coerce guard (#472)", () => {
         expect(schema).toContain("UPDATE proposal SET origin = 'mined' WHERE origin = NONE;");
     });
 });
+
+describe("run evidence ledger schema (#578)", () => {
+    test("both tables are defined exactly once", () => {
+        for (const table of ["run_evidence_event", "run_evidence_ref"]) {
+            const matches = schema.match(new RegExp(`DEFINE TABLE IF NOT EXISTS ${table} SCHEMAFULL`, "g"));
+            expect(matches).not.toBeNull();
+            expect(matches!.length).toBe(1);
+        }
+    });
+
+    test("event row anchors to a session and records source provenance", () => {
+        expect(schema).toContain("DEFINE FIELD session         ON run_evidence_event TYPE record<session>");
+        expect(schema).toContain("DEFINE FIELD source_table    ON run_evidence_event TYPE string");
+        expect(schema).toContain("DEFINE FIELD source_id       ON run_evidence_event TYPE string");
+        expect(schema).toContain("DEFINE FIELD backing         ON run_evidence_event TYPE string");
+    });
+
+    test("ref row links to its event + session and carries privacy_level", () => {
+        expect(schema).toContain("DEFINE FIELD event         ON run_evidence_ref TYPE record<run_evidence_event>");
+        expect(schema).toContain("DEFINE FIELD session       ON run_evidence_ref TYPE record<session>");
+        expect(schema).toContain("DEFINE FIELD privacy_level ON run_evidence_ref TYPE string");
+    });
+
+    test("query-prefix indexes are present", () => {
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS run_evidence_event_session  ON run_evidence_event FIELDS session, ts",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS run_evidence_event_source   ON run_evidence_event FIELDS source_table, source_id",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS run_evidence_ref_event   ON run_evidence_ref FIELDS event",
+        );
+    });
+});

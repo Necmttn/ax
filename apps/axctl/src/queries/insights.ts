@@ -180,6 +180,8 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "telemetry_of", stage: "active", note: "Edge: session -> otel telemetry row (drawn at ingest)." },
     { table: "content_type", stage: "active", note: "Closed content-type taxonomy for tool outputs." },
     { table: "has_content", stage: "active", note: "tool_call -> content_type edge; denormalizes session + bytes." },
+    { table: "run_evidence_event", stage: "active", note: "Run evidence ledger (#578): normalized claim/observation/verification/boundary events over the graph; backing distinguishes model claim vs tool-backed." },
+    { table: "run_evidence_ref", stage: "active", note: "Run evidence ledger (#578): structural refs/hashes off an evidence event; privacy_level keeps payloads out by default." },
 ] as const;
 
 export function isInsightView(value: string): value is InsightView {
