@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Re
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, RunEvidenceCount, RunEvidencePayload, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
 import { FilterBar } from "./inspector-filter-bar.tsx";
@@ -1683,6 +1683,55 @@ function TurnImpl({
  *  own props change (not on every parent hover/scroll/hash update). */
 export const Turn = memo(TurnImpl);
 
+const nonZeroCounts = (cs: ReadonlyArray<RunEvidenceCount>): string =>
+    cs.filter((c) => c.count > 0).map((c) => `${c.key} ${c.count}`).join(" · ");
+
+/**
+ * Run-evidence ledger header (#578): the run's objective + repo identity, then
+ * the kind/backing breakdown. Renders nothing until the ledger has events for
+ * this session (it derives at ingest). Fail-soft: a query error just hides it.
+ */
+export function RunEvidencePanel({ sessionId }: { readonly sessionId: string }) {
+    const q = useQuery({
+        queryKey: ["run-evidence", sessionId],
+        queryFn: () => api.sessionEvidence(sessionId),
+    });
+    const ev: RunEvidencePayload | undefined = q.data;
+    if (!ev || ev.total === 0) return null;
+    const claim = ev.by_backing.find((b) => b.key === "model_claim")?.count ?? 0;
+    return (
+        <div
+            style={{
+                padding: "10px var(--strip-x) 12px",
+                borderBottom: "1px solid var(--line)",
+                display: "grid",
+                gap: 5,
+                fontFamily: "ui-monospace, monospace",
+                fontSize: 12,
+            }}
+        >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong style={{ color: "var(--ink)", fontSize: 13 }}>run evidence</strong>
+                <span style={{ color: "var(--muted)" }}>
+                    {ev.total} event{ev.total === 1 ? "" : "s"}
+                    {ev.ref_total > 0 ? ` · ${ev.ref_total} ref${ev.ref_total === 1 ? "" : "s"}` : ""}
+                </span>
+            </div>
+            {ev.objective ? (
+                <div><span style={{ color: "var(--muted)" }}>objective </span><span style={{ color: "var(--ink)" }}>{ev.objective}</span></div>
+            ) : null}
+            {ev.repo ? (
+                <div><span style={{ color: "var(--muted)" }}>repo </span><span style={{ color: "var(--ink)" }}>{ev.repo}</span></div>
+            ) : null}
+            <div style={{ color: "var(--muted)" }}>kind: {nonZeroCounts(ev.by_kind)}</div>
+            <div style={{ color: "var(--muted)" }}>
+                backing: {nonZeroCounts(ev.by_backing)}
+                {claim === 0 ? <span style={{ opacity: 0.7 }}>  (model_claim 0)</span> : null}
+            </div>
+        </div>
+    );
+}
+
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });
     return <SessionInspectView sessionId={sessionId} />;
@@ -1848,6 +1897,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                     <code>{shortSessionId(decoded)}…</code>
                 </span>
             </header>
+            <RunEvidencePanel sessionId={decoded} />
             {view === "timeline" ? <SessionTimelineView sessionId={decoded} /> : null}
             {view === "transcript" && query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {view === "transcript" && query.isLoading && !data ? <div className="loading">Loading…</div> : null}
