@@ -208,15 +208,21 @@ re-derive overwrites). Refs default to `ref_only` (no raw payloads); `backing`
 is verifier-DERIVED from the source, never a producer trust label - no promotion.
 
 The `run-evidence` ingest derive-stage (`apps/axctl/src/ingest/derive-run-evidence.ts`,
-incremental by the since-window, idempotent UPSERTs) normalizes four unambiguous
-structural sources: `tool_call`->tool_observation/tool_backed,
-`command_outcome`->verification/verifier_backed, `compaction`->boundary/derived,
-`plan_snapshot`->task_state/tool_backed. Read surface:
+incremental by the since-window, idempotent UPSERTs) normalizes EIGHT structural
+sources (`RUN_EVIDENCE_DERIVED_KINDS`): `tool_call`->tool_observation/tool_backed,
+`command_outcome`->verification/verifier_backed (ONLY genuine checks via
+`checkFamilyFromCommand` - not every success), `compaction`->boundary/derived (+
+its summary text ->derived_summary, keyed `compaction_summary`),
+`plan_snapshot`->task_state, earliest `task` user turn ->objective,
+`hook_command_invocation` (real effects only) ->policy_decision/policy_backed,
+`session.checkout` ->repo_state (no `dirty` - git ingest writes it always-false).
+Also writes `run_evidence_ref` file refs from read/searched_file edges + `edited`
+(turn->event bridge), paths HASHED. Every event is stamped with parent/root
+ancestry from the `spawned` edge (run->child traversal). Read surface:
 `ax runs evidence <session> [--json]` (`apps/axctl/src/queries/run-evidence.ts`) -
-counts by kind + by backing (model_claim shown even at 0) + a latest-N timeline,
-with a Studio session deeplink. MCP: `runs_evidence`. NLP/git-derived kinds
-(objective/claim/policy_decision/artifact_ref/repo_state/derived_summary) + ref
-population are deferred (see `RUN_EVIDENCE_DERIVED_KINDS`). Spec/threads on #578.
+objective + repo headline lines, counts by kind + by backing (model_claim shown
+even at 0), ref counts, latest-N timeline, Studio deeplink. MCP: `runs_evidence`.
+Only `claim` (too noisy) + `artifact_ref` remain deferred. Spec/threads on #578.
 
 ## Workflow extraction commands
 
