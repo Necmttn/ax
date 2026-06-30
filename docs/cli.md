@@ -166,6 +166,25 @@ answers "is harness telemetry flowing, and is it reaching my sessions?":
 Fields populate at ingest; sessions ingested before the fields existed read as
 zero until their files are re-ingested (the command prints a hint).
 
+## Run evidence ledger
+
+`ax runs evidence <session> [--json]` is the reviewer-facing read surface for the
+run-evidence ledger (#578). The ledger normalizes the graph's `tool_call`,
+`command_outcome`, `compaction`, and `plan_snapshot` rows into one queryable
+record of what a run actually did. The command shows, for one session:
+
+- **by kind** - `tool_observation`, `verification`, `boundary`, `task_state`.
+- **by backing** - the model-claim-vs-evidence lens: `tool_backed` /
+  `verifier_backed` / `derived` are structurally grounded; `model_claim` is
+  shown even at 0 so the "claims aren't mined yet" gap is explicit.
+- a latest-N **timeline** of events, newest first.
+
+`<session>` is a bare uuid or a `session:`-prefixed id; `--json` carries the same
+data plus a `{next}` Studio deeplink. Also exposed as the `runs_evidence` MCP
+tool. Covered kinds are honest - `objective` / `claim` / `policy_decision` /
+`artifact_ref` / `repo_state` / `derived_summary` and `run_evidence_ref` rows are
+not yet derived.
+
 ## Digest (push-value)
 
 `ax digest [--json] [--refresh]` renders your local digest board - the ranked

@@ -172,6 +172,26 @@ cost [14d]: otlp $2542.99 (claude cost metric)   ·   transcript $20674.40 (all 
         ],
       },
       {
+        name: "runs",
+        sub: ["evidence"],
+        job: "Run evidence ledger (#578): for one session, how much evidence exists and how much is tool/verifier-backed vs an unverified model claim.",
+        signature: "ax runs evidence <session> [--json]",
+        flags: [
+          { flag: "<session>", desc: "bare uuid or session:<uuid>" },
+          { flag: "--json", desc: "emit the result plus a {next} Studio deeplink" },
+        ],
+        receipt: `$ ax runs evidence 9f3c…
+run evidence: session 9f3c…  [53 events]
+  by kind:     tool_observation 42 · verification 8 · task_state 2 · boundary 1
+  by backing:  tool_backed 44 · verifier_backed 8 · derived 1
+               (model_claim 0 - unverified model claims are not mined yet)`,
+        detail: [
+          "Normalizes the graph's tool_call / command_outcome / compaction / plan_snapshot rows into a queryable ledger of what a run actually did.",
+          "backing is the model-claim-vs-evidence lens: tool_backed / verifier_backed / derived are structurally grounded; model_claim is shown even at 0 so the gap is explicit.",
+          "Covered kinds: tool_observation, verification, boundary, task_state. objective/claim/policy_decision/artifact_ref/repo_state/derived_summary + refs are not yet derived.",
+        ],
+      },
+      {
         name: "memory",
         sub: ["ops"],
         job: "Claude memory-file activity: writes/edits the agent made to its ~/.claude/.../memory/*.md files.",

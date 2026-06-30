@@ -73,6 +73,7 @@ import {
 } from "../nav/next-links.ts";
 import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
 import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollup.ts";
+import { fetchRunEvidence } from "../queries/run-evidence.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
@@ -699,6 +700,18 @@ const otelTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const runsEvidenceTool: AxMcpTool = defineMcpTool({
+    name: "runs_evidence",
+    description:
+        "Run evidence ledger for one session (#578): event counts by kind (tool_observation/verification/boundary/task_state) and by `backing` - the model-claim-vs-tool-backed lens - plus a latest-N timeline. Use to see, for a run, how much of the evidence is tool/verifier-backed vs an unverified claim. Takes a bare or session:-prefixed id.",
+    inputSchema: {
+        sessionId: z.string().describe("Session id (bare uuid or session:<uuid>)."),
+    },
+    run: async (args, rt) => {
+        return await rt.runPromise(fetchRunEvidence({ sessionId: args.sessionId }));
+    },
+});
+
 const costRoutabilityTool: AxMcpTool = defineMcpTool({
     name: "cost_routability",
     description:
@@ -878,6 +891,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costImagesTool,
     costRoutabilityTool,
     otelTool,
+    runsEvidenceTool,
     dispatchesTool,
     dispatchesAdviceTool,
     dojoAgendaTool,
