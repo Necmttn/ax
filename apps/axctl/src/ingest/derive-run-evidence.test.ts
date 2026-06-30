@@ -19,6 +19,8 @@ const empty: RunEvidenceSourceRows = {
     compactions: [],
     planSnapshots: [],
     fileEvidence: [],
+    edited: [],
+    turnEditCalls: new Map(),
     sessionProvider,
 };
 
@@ -143,6 +145,40 @@ describe("buildRunEvidenceRefs - file refs off tool_observation events", () => {
         const [ref] = buildRunEvidenceRefs(rows);
         const eventKey = runEvidenceEventRecordKey({ sessionId: event.sessionId, sourceTable: event.sourceTable, sourceId: event.sourceId });
         expect(ref.eventKey).toBe(eventKey);
+    });
+});
+
+describe("buildRunEvidenceRefs - edited (write) refs via turn->event bridge", () => {
+    test("edge anchors to the turn's single edit tool_call; access=write, tool carried", () => {
+        const [ref] = buildRunEvidenceRefs({
+            ...empty,
+            edited: [{ turn: "turn1", file: "repo__a_ts", session: "sess-claude", ts: "2026-06-21T10:07:00.000Z", pathSeen: "/repo/a.ts", tool: "Write" }],
+            turnEditCalls: new Map([["turn1", ["tcWrite"]]]),
+        });
+        expect(ref.refKind).toBe("file");
+        expect(ref.targetId).toBe("repo__a_ts");
+        expect(ref.eventKey).toBe(runEvidenceEventRecordKey({ sessionId: "sess-claude", sourceTable: "tool_call", sourceId: "tcWrite" }));
+        expect(ref.pathHash).toBeTruthy();
+        expect(ref.pathHash).not.toContain("/repo/");
+        expect(ref.attrs).toEqual({ access: "write", tool: "Write" });
+    });
+
+    test("ambiguous turn (>1 edit tool_call) is skipped, not mis-attributed", () => {
+        const refs = buildRunEvidenceRefs({
+            ...empty,
+            edited: [{ turn: "turn1", file: "f1", session: "s", ts: "t", tool: "Edit" }],
+            turnEditCalls: new Map([["turn1", ["tcA", "tcB"]]]),
+        });
+        expect(refs).toHaveLength(0);
+    });
+
+    test("turn with no matching edit tool_call is skipped", () => {
+        const refs = buildRunEvidenceRefs({
+            ...empty,
+            edited: [{ turn: "turnX", file: "f1", session: "s", ts: "t", tool: "Edit" }],
+            turnEditCalls: new Map(),
+        });
+        expect(refs).toHaveLength(0);
     });
 });
 
