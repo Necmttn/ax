@@ -20,7 +20,7 @@ import { identityPart, stableDigest } from "./record-keys.ts";
  * identity shared across Claude surfaces and segment embedded SDK runs with
  * `labels.entrypoint = "sdk"` plus optional SDK metadata instead.
  */
-export type AgentProviderName = "claude" | "codex" | "pi" | "opencode" | "cursor" | "otel";
+export type AgentProviderName = "claude" | "codex" | "pi" | "omp" | "opencode" | "cursor" | "otel";
 
 type JsonInput = unknown;
 type TimestampInput = Date | string;

@@ -205,7 +205,7 @@ export class TurnContentBlocksStageStats extends BaseStageStats.extend<TurnConte
 export const turnContentBlocksStage: StageDef<TurnContentBlocksStageStats, SurrealClient> = {
     meta: StageMeta.make({
         key: "turn-content-blocks",
-        deps: ["claude", "codex", "pi", "opencode", "cursor"],
+        deps: ["claude", "codex", "pi", "omp", "opencode", "cursor"],
         tags: ["derive"],
     }),
     run: (ctx: IngestContext) =>

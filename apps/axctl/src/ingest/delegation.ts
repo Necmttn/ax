@@ -61,6 +61,13 @@ export const providerDelegationSignalAvailability: Readonly<Record<AgentProvider
         sharedRecords: ["spawned"],
         evidence: "Current Pi JSONL fixtures expose generic toolCall blocks but no child-session id or delegation relation payload.",
     },
+    omp: {
+        provider: "omp",
+        status: "unavailable",
+        rawSignals: [],
+        sharedRecords: ["spawned"],
+        evidence: "Omp (oh-my-pi) shares Pi's JSONL format; no child-session id or delegation relation payload is present (same as Pi).",
+    },
     opencode: {
         provider: "opencode",
         status: "unavailable",

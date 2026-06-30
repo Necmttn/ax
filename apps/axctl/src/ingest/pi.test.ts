@@ -8,6 +8,9 @@ import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testBuildPiBatchStatements,
     __testExtractPiJsonlLines,
+    OMP_PROVIDER,
+    ompStage,
+    piStage,
     textFromPiContent,
 } from "./pi.ts";
 
@@ -634,5 +637,62 @@ describe("pi compaction", () => {
             seq: 1,
         });
         expect(c.agentEventKey).toBe(eventKey);
+    });
+});
+
+describe("omp (oh-my-pi) provider parity", () => {
+    // omp is a Pi fork with an identical transcript format, so the SAME
+    // extractor/builders run under the OMP descriptor - only the provider
+    // identity differs (#636).
+    const lines = [
+        JSON.stringify({
+            type: "session",
+            version: 1,
+            id: "omp-session",
+            timestamp: "2026-06-30T06:00:00.000Z",
+            cwd: "/tmp/omp",
+        }),
+        JSON.stringify({
+            type: "message",
+            id: "assistant-1",
+            parentId: null,
+            timestamp: "2026-06-30T06:00:01.000Z",
+            message: {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "Run a search." },
+                    { type: "toolCall", id: "call-1", name: "exec_command", input: { command: "rg foo" } },
+                ],
+                model: "gpt-5.5",
+                usage: { input: 10, output: 5, totalTokens: 15 },
+            },
+        }),
+    ];
+
+    test("stage keys are provider-distinct", () => {
+        expect(piStage.meta.key).toBe("pi");
+        expect(ompStage.meta.key).toBe("omp");
+    });
+
+    test("extractor + builders stamp omp identity, not pi", () => {
+        const extracted = __testExtractPiJsonlLines(lines, OMP_PROVIDER);
+        expect(extracted).not.toBeNull();
+        // Synthetic provider-tool skill is omp:<tool>, not pi:<tool>.
+        expect(extracted!.invocations[0]?.skill).toBe(sn("omp:exec_command"));
+        // Provider events carry the omp provider.
+        expect(extracted!.providerEvents.every((e) => e.provider === "omp")).toBe(true);
+
+        const sql = __testBuildPiBatchStatements(extracted!, OMP_PROVIDER).join("\n");
+        expect(sql).toContain('provider: "omp"');
+        expect(sql).toContain('source: "omp"');
+        expect(sql).toContain('scope: "omp-tool"');
+        expect(sql).not.toContain('provider: "pi"');
+        expect(sql).not.toContain('"pi-tool"');
+    });
+
+    test("default descriptor still ingests as pi (back-compat)", () => {
+        const extracted = __testExtractPiJsonlLines(lines);
+        expect(extracted!.invocations[0]?.skill).toBe(sn("pi:exec_command"));
+        expect(extracted!.providerEvents.every((e) => e.provider === "pi")).toBe(true);
     });
 });

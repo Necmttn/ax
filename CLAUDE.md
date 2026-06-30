@@ -4,7 +4,7 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## What this is
 
-`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 5 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
+`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 6 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), oh-my-pi/omp (`~/.omp/agent/sessions/`, a Pi fork sharing Pi's JSONL format - one parameterized parser, distinct `omp` identity; `AX_OMP_DIR` override), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
 ## Attribution on shareable artifacts
 

@@ -26,7 +26,7 @@ const fmtDuration = (start: string | null, end: string | null): string => {
     return `${(ms / 3_600_000).toFixed(1)}h`;
 };
 
-export const SOURCE_FILTERS = ["all", "claude", "codex", "pi", "opencode", "cursor"] as const;
+export const SOURCE_FILTERS = ["all", "claude", "codex", "pi", "omp", "opencode", "cursor"] as const;
 type SourceFilter = typeof SOURCE_FILTERS[number];
 
 /** One stable instrument hue per source - carried only by the swatch dot in
@@ -36,6 +36,7 @@ export const SOURCE_HUES: Record<string, string> = {
     claude: "var(--green)",
     codex: "var(--blue)",
     pi: "var(--gold)",
+    omp: "color-mix(in srgb, var(--gold) 60%, var(--violet))",
     opencode: "var(--violet)",
     cursor: "color-mix(in srgb, var(--blue) 55%, var(--green))",
     "claude-subagent": "var(--dim)",

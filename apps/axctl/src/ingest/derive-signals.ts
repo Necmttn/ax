@@ -326,7 +326,7 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
 }) {}
 
 export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
-    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "pi", "opencode", "cursor", "subagents", "spawned", "git"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "subagents", "spawned", "git"], tags: ["derive"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext) {

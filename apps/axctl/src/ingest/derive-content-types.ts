@@ -206,7 +206,7 @@ export class ContentTypeStats extends BaseStageStats.extend<ContentTypeStats>(
 export const contentTypesStage: StageDef<ContentTypeStats, SurrealClient> = {
     meta: StageMeta.make({
         key: "content-types",
-        deps: ["claude", "codex", "pi", "cursor"],
+        deps: ["claude", "codex", "pi", "omp", "cursor"],
         tags: ["derive"],
     }),
     run: (ctx: IngestContext) =>

@@ -27,6 +27,7 @@ export interface AxConfigShape {
         readonly commandDirs: ReadonlyArray<string>;
         readonly codexDir: string;
         readonly piDir: string;
+        readonly ompDir: string;
         readonly opencodeDir: string;
         readonly cursorUserDir: string;
         readonly dataDir: string;
@@ -143,6 +144,12 @@ const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem>
                 piDir: yield* stringOr(
                     "AX_PI_DIR",
                     posixPath.join(home, ".pi", "agent", "sessions"),
+                ),
+                // oh-my-pi (omp) - a Pi fork with an identical transcript format
+                // under ~/.omp/agent/sessions (#636).
+                ompDir: yield* stringOr(
+                    "AX_OMP_DIR",
+                    posixPath.join(home, ".omp", "agent", "sessions"),
                 ),
                 opencodeDir: yield* stringOr(
                     "AX_OPENCODE_DIR",

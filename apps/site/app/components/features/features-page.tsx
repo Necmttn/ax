@@ -72,6 +72,10 @@ export function FeaturesPage() {
               <span className="path">~/.pi/agent/sessions/*.jsonl</span>
             </div>
             <div className="src-tile">
+              <span className="label">Omp (oh-my-pi)</span>
+              <span className="path">~/.omp/agent/sessions/*.jsonl</span>
+            </div>
+            <div className="src-tile">
               <span className="label">OpenCode + Cursor</span>
               <span className="path">local SQLite stores</span>
             </div>

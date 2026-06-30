@@ -17,12 +17,15 @@ const SOURCES: Source[] = [
   { key: "claude", name: "Claude Code", path: "~/.claude/projects", kind: "jsonl transcripts" },
   { key: "codex", name: "Codex", path: "~/.codex/sessions", kind: "jsonl sessions" },
   { key: "pi", name: "Pi", path: "~/.pi/agent/sessions", kind: "jsonl sessions" },
+  { key: "omp", name: "Omp", path: "~/.omp/agent/sessions", kind: "jsonl sessions" },
   { key: "opencode", name: "OpenCode", path: "opencode store", kind: "sqlite store" },
   { key: "cursor", name: "Cursor", path: "cursor store", kind: "sqlite store" },
 ];
 
 function iconFor(key: string) {
-  return PROVIDERS.find((p) => p.key === key)?.svg ?? null;
+  // omp (oh-my-pi) is a Pi fork - it has no logo of its own, so it borrows Pi's.
+  const iconKey = key === "omp" ? "pi" : key;
+  return PROVIDERS.find((p) => p.key === iconKey)?.svg ?? null;
 }
 
 export function ActWatch() {
@@ -32,7 +35,7 @@ export function ActWatch() {
         <header className="how-act-head">
           <p className="how-eyebrow">$ 01 · watch</p>
           <h2 className="how-headline">
-            Five harnesses. One local graph.
+            Six harnesses. One local graph.
           </h2>
           <p className="how-dek">
             ax reads the transcripts your coding agents already write to disk
@@ -42,7 +45,7 @@ export function ActWatch() {
           </p>
         </header>
 
-        <div className="how-watch-fig" aria-label="five harness sources feeding one local graph">
+        <div className="how-watch-fig" aria-label="six harness sources feeding one local graph">
           <ul className="how-watch-sources" role="list">
             {SOURCES.map((s) => (
               <li key={s.key} className={`how-src how-src--${s.key}`}>
