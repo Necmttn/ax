@@ -115,6 +115,44 @@ URLs - the one deviation from the public community-rails fetch path.
   share, tool-failure rate); workflow arcs + origin split.
 - Cold-start UX: "N of M devs contributing" activation panel.
 
+### Slice 5 - billing & paywall (per-seat, Stripe)
+Pricing decided 2026-07-01: **per-seat / dev per month**.
+
+**Billing state is NOT company telemetry** - an org→subscription record is standard SaaS
+metadata, not customer IP. The zero-data guarantee (no *telemetry* at rest) holds; a
+billing store leak only exposes who-pays-what, a far lower stake than the multi-tenant
+telemetry DB that gated the old slices 4-7. Better Auth is still not needed - Stripe
+Customer + GitHub OAuth cover identity.
+
+**Chokepoint = the auth broker (Slice 3).** It is the one component only ax runs, and
+every dashboard viewer must pass through it. Gate token issuance on entitlement:
+
+```
+viewer → GitHub OAuth → auth Worker
+                          1. resolve viewer's GitHub org id
+                          2. lookup entitlement[org_id]  (KV, billing-only)
+                          3. active sub → mint dashboard token
+                             none       → 402 → Stripe Checkout
+```
+
+**Stripe pieces (self-serve, minimal surface):**
+- **Checkout** (hosted) - signup → subscription. No PCI, no card handling.
+- **Customer Portal** (hosted) - upgrade/cancel/card update; zero UI to build.
+- **Webhooks** - `checkout.session.completed`, `customer.subscription.updated|deleted`
+  → upsert entitlement.
+- **Entitlement store** - tiny KV (or D1): `github_org_id → { status, plan, seats,
+  current_period_end }`. Billing metadata only; **never telemetry**.
+- **Enforcement** - auth Worker reads entitlement before minting a dashboard token.
+
+**Seat counting without a seat DB:** seats = count of distinct `.ax-team/*.json` files in
+the customer repo, read **ephemerally** via the viewer/App token (never stored). Sync that
+count to Stripe as the licensed subscription **quantity** (periodic reconcile job or on
+push). v1 enforcement = soft (report + surface over-cap in dashboard); hard cap (deny push
+/ deny token above quantity) is a fast follow.
+
+- Tests: entitlement lookup gating (active/none/past_due), webhook idempotency, seat-count
+  from repo file set, no-telemetry-in-billing-store invariant.
+
 ## 6. Encrypted-R2 fallback (documented, not built)
 For teams without a git-centric flow: dev envelope-encrypts the snapshot with a team key,
 uploads ciphertext to R2; the dashboard fetches + decrypts in-browser. ax stores only
@@ -124,8 +162,12 @@ seam** (`GitBackend` v1, `R2Backend` stub) so R2 drops in without reworking Slic
 
 ## 7. Decisions (locked)
 - Storage v1 = git-native SPA; encrypted-R2 = seam only.
-- Backend stores zero company data; GitHub repo membership = tenancy.
+- Backend stores zero company *telemetry*; GitHub repo membership = tenancy.
 - Push is repo-scoped, never whole-machine.
+- Pricing = **per-seat / dev per month** (Stripe); billing metadata (org→subscription) is
+  the only ax-held state and is explicitly not telemetry.
+- Paywall enforced at the auth broker (only ax-run component); Stripe Checkout + Portal +
+  webhooks; entitlement keyed by GitHub org id.
 
 ## 8. Open questions
 1. **OAuth mechanism** - plain GitHub OAuth app (PKCE + tiny exchange Worker) vs GitHub App
@@ -139,6 +181,12 @@ seam** (`GitBackend` v1, `R2Backend` stub) so R2 drops in without reworking Slic
    *anonymized aggregates* for large teams (still zero raw data)?
 5. **Better Auth** - fully removed, or keep the org plugin only as a human-friendly org
    roster UI that stores no telemetry?
+6. **Seat enforcement** - soft (report over-cap) vs hard cap (deny token/push above paid
+   quantity) for v1? Recommend soft first.
+7. **Seat definition** - pushing devs (`.ax-team/*.json` count) vs dashboard viewers?
+   Pushers is cleaner to count and is the value-generating population.
+8. **Entitlement store** - KV (simplest, billing-only) vs D1 (if we want invoicing/audit
+   history)?
 
 ## 9. Not building v1 (deferred behind price signal)
 Named per-dev breakdowns, Top Shippers / effectiveness scoring, action-card worklist,
