@@ -15,7 +15,7 @@ export const Route = createFileRoute("/design-partners")({
       {
         name: "description",
         content:
-          "See how AI is working across your team without shipping your code. Telemetry stays in a private git repo you own; the dashboard runs in your browser.",
+          "See how AI is working across your team without your data leaving your cloud. Telemetry stays in a git repo you own; the dashboard runs in your browser.",
       },
     ],
   }),
@@ -377,7 +377,7 @@ function DesignPartners() {
             across your team.
           </h1>
           <p className="hero-human">
-            Without shipping your code to anyone.
+            Without your data ever leaving your cloud.
           </p>
           <p className="lede">
             Rivals make you choose between visibility and warehousing your code
