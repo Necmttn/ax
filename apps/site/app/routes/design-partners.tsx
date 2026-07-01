@@ -466,6 +466,12 @@ function DesignPartners() {
             per-seat surface (<code>ax studio</code>) already renders these
             numbers for one dev today.
           </p>
+
+          <div className="cta-row">
+            <a className="cta-secondary" href="/studio/team?demo">
+              Prefer to click around? Open the live demo →
+            </a>
+          </div>
         </section>
 
         {/* ============= sample payload ============= */}
