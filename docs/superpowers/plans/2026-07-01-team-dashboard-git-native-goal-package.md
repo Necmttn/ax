@@ -86,16 +86,39 @@ URLs - the one deviation from the public community-rails fetch path.
 - **Tenancy = GitHub ACL.** A viewer only ever reads repos they already have access to; ax
   grants nothing.
 
+### Per-project opt-in (dev control) - first-class
+A dev typically has client repos AND personal projects on one machine. Personal work must
+never reach a team dashboard. The control:
+
+- **Default-deny.** A fresh machine pushes nothing. There is no whole-machine enroll.
+- **Per-repo binding.** `ax team join <org>` is run *inside* a repo and binds only that
+  repo → that org. A personal repo is simply never joined, so it never pushes.
+- **Binding is machine-local + private:** `~/.ax/team-bindings.json`
+  (`repo_key → { org, share }`), NOT committed to the repo - it is the dev's private choice,
+  invisible to teammates and absent from git history.
+- **Identity pinned fail-closed** (`chooseIdentity`): a fork/rename of a personal repo
+  cannot collide with a bound client repo's `repo_key`.
+- **Multi-client isolation:** many repos → many orgs; each repo pushes only to its bound
+  org; unbound repos push to nothing.
+- **Watcher honors bindings:** post-ingest auto-push fires only for bound repos.
+- **Per-field control:** `share=anon` and the sticky `no_cost` flag let a dev contribute
+  adoption while withholding identity/spend. First push shows a consent screen with the
+  exact repo + fields.
+- `ax team status` lists what is bound and pushing; `ax team leave` unbinds and stops.
+
 ## 5. Slices (each ships independently)
 
-### Slice 1 - repo-scoped push
+### Slice 1 - repo-scoped push + per-repo binding
+- `ax team join <org>` / `status` / `leave`: bind the current repo -> org in machine-local
+  `~/.ax/team-bindings.json` (`repo_key -> { org, share }`). Default-deny; unbound repos never
+  push. Consent screen shows the exact repo + fields at join.
 - `TeamProfileV1` query: repo-scoped, redacted, daily-collapsed aggregate.
-- `ax team push`: builds the snapshot, upserts `.ax-team/<login>.json` to the company repo
-  through the re-pointed `GitHubEnv` seam.
-- Consent screen: exact repo + fields shown; `~/.ax/team-push.json` records consent + repo
-  + `no_cost` stickiness (mirror `profile publish`).
-- Tests: repo-scope isolation (fork/rename/worktree), redaction/scrub, anon login strip,
-  idempotent upsert (contents-API sha handling).
+- `ax team push`: for each bound repo, builds the snapshot and upserts `.ax-team/<login>.json`
+  to that org's repo through the re-pointed `GitHubEnv` seam. Refuses to push an unbound repo.
+- State mirrors `profile publish` (`no_cost` sticky, `share=anon` strips login).
+- Tests: default-deny (nothing pushes unbound), repo-scope isolation (fork/rename/worktree
+  cannot cross bindings), multi-org isolation, redaction/scrub, anon login strip, idempotent
+  upsert (contents-API sha handling).
 
 ### Slice 2 - client aggregation
 - Fork `community-compile` + `shared/community` validation for `TeamProfileV1`.
