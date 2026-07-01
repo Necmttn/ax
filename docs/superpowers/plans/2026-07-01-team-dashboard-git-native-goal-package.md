@@ -214,3 +214,66 @@ seam** (`GitBackend` v1, `R2Backend` stub) so R2 drops in without reworking Slic
 ## 9. Not building v1 (deferred behind price signal)
 Named per-dev breakdowns, Top Shippers / effectiveness scoring, action-card worklist,
 Team Retro, the encrypted-R2 backend.
+
+## 10. Appendix A - Stripe setup (per-seat)
+
+### Objects to create (Stripe dashboard or API, test mode first)
+- **1 Product:** "ax for teams".
+- **1 Price:** recurring `month`, `usage_type=licensed`, `billing_scheme=per_unit`,
+  currency USD, unit = one seat. (Licensed-quantity, not metered - we set the quantity from
+  the seat count; Stripe bills quantity x unit price. Simpler + prorates cleanly on
+  quantity change.)
+- **Customer Portal config:** allow cancel + payment-method update; optionally allow plan
+  quantity self-edit off (we drive quantity from seat count).
+
+### Data model (billing-only KV, keyed by GitHub org id)
+```
+entitlement[github_org_id] = {
+  stripe_customer_id, stripe_subscription_id,
+  status,            // active | trialing | past_due | canceled
+  plan,              // price id / tier label
+  seats,             // last-synced licensed quantity
+  current_period_end // unix; grace logic
+}
+```
+No telemetry. If we later want invoice/audit history, promote this to D1 (open Q8) - still
+billing-only.
+
+### Flows
+- **Signup:** admin hits `/billing/checkout` → server creates a Checkout Session
+  (`mode=subscription`, the Price, `client_reference_id=github_org_id`) → redirect to
+  Stripe. On success, webhook writes the entitlement.
+- **Manage:** `/billing/portal` → Billing Portal Session for the org's customer.
+- **Webhooks** (`/billing/webhook`, verify signature): handle
+  `checkout.session.completed` (map `client_reference_id` → org, store customer/sub),
+  `customer.subscription.updated` + `customer.subscription.deleted` (sync status / seats /
+  period_end). Idempotent by Stripe event id.
+
+### Seat sync (no seat DB)
+- Seats = count of distinct `.ax-team/*.json` in the org's team repo, read ephemerally via
+  the App/viewer token. A periodic reconcile (cron Worker or on-push) calls
+  `subscriptions.update(sub, { items: [{ id, quantity }] }, { proration_behavior })` when
+  the count changes.
+- v1 enforcement = **soft**: never block; surface over-cap ("paying for N, using M") in the
+  dashboard + a Stripe usage note. Hard cap (deny token/push above quantity) is a fast
+  follow (open Q6).
+
+### Enforcement point (the paywall)
+The auth broker (Slice 3), before minting a dashboard token:
+```
+org = resolveViewerOrg(githubToken)
+ent = entitlement[org.id]
+if !ent || ent.status not in {active, trialing}      -> 402, redirect /billing/checkout
+if ent.current_period_end < now - GRACE              -> 402 (past_due grace elapsed)
+else                                                  -> mint short-lived dashboard token
+```
+GitHub OAuth + Stripe Customer cover identity; **no Better Auth** (open Q5).
+
+### Secrets (Worker env, never in the browser)
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID`, GitHub OAuth
+`client_id`/`client_secret`. The broker holds these and persists no company data.
+
+### Rollout
+Test-mode keys + Stripe CLI (`stripe listen --forward-to`) for local webhook dev → verify
+the checkout→webhook→entitlement→token loop end-to-end → swap to live keys behind the
+locked CF origin (Slice 3).
