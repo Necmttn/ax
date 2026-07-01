@@ -379,6 +379,146 @@ function mockDays(): WrappedUsageDay[] {
 }
 const MOCK_DAYS: WrappedUsageDay[] = mockDays();
 
+// ===========================================================================
+// DEMO org dataset - the clean, fully-visible `?demo` board. Tells the
+// DEV-ADOPTION story from the /design-partners pitch: a git-native team
+// rollup for AI coding agents. Framing is adoption + routable spend + skill
+// diffusion, NOT the exec business-functions view (which stays on the locked
+// teaser). All numbers echo the pitch's RollupMock so the two never contradict.
+// Fabricated + deterministic; no live queries, renders daemon-up or down.
+// ===========================================================================
+const DEMO_ORG = {
+    label: "acme",
+    seats: 8,
+    activeThisWeek: 8,
+    activePct: 0.82, // team active-days
+    activePctPrev: 0.61, // 8 weeks ago (matches pitch "up from 61%")
+    spendUsd: 2140, // total agent spend / mo
+    routableUsd: 605, // routine sub-tasks on the expensive default
+    workflowsReady: 3, // above the cohort floor (seen on 5+ seats)
+};
+
+/** Model spend for the month - opus is the expensive default; the routable
+ *  slice ($605) is routine work that belongs on cheaper tiers. Sums to $2,140. */
+const DEMO_CHANNELS = [
+    { model: "claude-opus-4-8", cost_usd: 1205 },
+    { model: "claude-sonnet-4-6", cost_usd: 520 },
+    { model: "claude-haiku-4-5", cost_usd: 210 },
+    { model: "gpt-5.4", cost_usd: 205 },
+];
+
+/** A repo in the acme org. `joined` = opted in via `ax team join` (drives the
+ *  status dot); a not-joined repo pushes nothing, so it reads as dashes. */
+function demoProject(
+    name: string, joined: boolean, sessions: number, cost: number,
+    added: number, removed: number, model: string,
+): RosterEntity {
+    return {
+        id: name, label: name, online: joined,
+        spark: joined ? levelize([2, 3, 3, 4, 5, 5, 6]) : [0, 0, 0, 0, 0, 0, 0],
+        model: joined ? model : null, sessions, tokens: 0, cost,
+        metrics: [
+            { label: "opt-in", value: joined ? "joined" : "not joined", n: joined ? 1 : 0 },
+            { label: "sessions", value: joined ? fmtCount(sessions) : "-", n: sessions },
+            { label: "cost / mo", value: joined ? fmtUsd(cost) : "-", n: cost },
+            { label: "top model", value: joined ? shortModel(model) : "-", n: 0 },
+            { label: "lines +", value: joined ? fmtCount(added) : "-", n: added },
+            { label: "lines -", value: joined ? fmtCount(removed) : "-", n: removed },
+        ],
+    };
+}
+
+// joined repos sum to the $2,140/mo org total; acme-infra is opted out.
+const DEMO_PROJECTS: RosterEntity[] = [
+    demoProject("acme-web", true, 312, 940, 41_200, 9_800, "claude-opus-4-8"),
+    demoProject("acme-api", true, 268, 720, 33_100, 7_400, "claude-sonnet-4-6"),
+    demoProject("acme-mobile", true, 141, 310, 18_600, 4_100, "claude-sonnet-4-6"),
+    demoProject("acme-billing", true, 96, 170, 9_200, 2_300, "claude-haiku-4-5"),
+    demoProject("acme-infra", false, 0, 0, 0, 0, "claude-sonnet-4-6"),
+];
+
+/** An anonymized seat (eng-01…eng-08). No names, no per-person spend, no
+ *  ranking metric - just adoption signals. Reinforces k-anonymity. */
+interface DemoSeat { id: string; activeDays: number; sessions: number; harnesses: string[]; model: string; skills: number }
+const DEMO_SEATS: DemoSeat[] = [
+    { id: "eng-01", activeDays: 26, sessions: 41, harnesses: ["claude", "codex"], model: "claude-opus-4-8", skills: 9 },
+    { id: "eng-02", activeDays: 24, sessions: 38, harnesses: ["claude"], model: "claude-sonnet-4-6", skills: 8 },
+    { id: "eng-03", activeDays: 23, sessions: 34, harnesses: ["claude", "cursor"], model: "claude-opus-4-8", skills: 7 },
+    { id: "eng-04", activeDays: 21, sessions: 30, harnesses: ["claude", "codex"], model: "claude-sonnet-4-6", skills: 7 },
+    { id: "eng-05", activeDays: 19, sessions: 27, harnesses: ["claude"], model: "claude-sonnet-4-6", skills: 6 },
+    { id: "eng-06", activeDays: 18, sessions: 24, harnesses: ["claude", "cursor"], model: "claude-haiku-4-5", skills: 5 },
+    { id: "eng-07", activeDays: 15, sessions: 19, harnesses: ["claude"], model: "claude-sonnet-4-6", skills: 5 },
+    { id: "eng-08", activeDays: 12, sessions: 14, harnesses: ["codex"], model: "gpt-5.4", skills: 4 },
+];
+const DEMO_MEMBERS: RosterEntity[] = DEMO_SEATS.map((s) => ({
+    id: s.id, label: s.id, online: s.activeDays >= 7, spark: [],
+    mid: (
+        <span className="v-tm-chips">
+            {s.harnesses.map((h) => <span key={h} className="v-tm-chip">{h}</span>)}
+        </span>
+    ),
+    model: s.model, sessions: s.sessions, tokens: 0, cost: 0,
+    metrics: [
+        { label: "active days", value: `${s.activeDays} / 30`, n: s.activeDays },
+        { label: "sessions", value: fmtCount(s.sessions), n: s.sessions },
+        { label: "harnesses", value: String(s.harnesses.length), n: s.harnesses.length },
+        { label: "skills adopted", value: String(s.skills), n: s.skills },
+        { label: "top model", value: shortModel(s.model), n: 0 },
+    ],
+}));
+
+const DEMO_HARNESSES: RosterEntity[] = [
+    { id: "claude", label: "claude", online: true, spark: levelize([5, 6, 6, 7, 6, 7, 7]), model: "claude-opus-4-8", sessions: 612, tokens: 0, cost: 1610,
+        metrics: [{ label: "sessions", value: "612", n: 612 }, { label: "cost / mo", value: fmtUsd(1610), n: 1610 }, { label: "seats", value: "7", n: 7 }, { label: "active (7d)", value: "yes", n: 1 }] },
+    { id: "codex", label: "codex", online: true, spark: levelize([2, 3, 2, 3, 4, 3, 4]), model: "gpt-5.4", sessions: 138, tokens: 0, cost: 205,
+        metrics: [{ label: "sessions", value: "138", n: 138 }, { label: "cost / mo", value: fmtUsd(205), n: 205 }, { label: "seats", value: "3", n: 3 }, { label: "active (7d)", value: "yes", n: 1 }] },
+    { id: "cursor", label: "cursor", online: true, spark: levelize([1, 2, 1, 2, 2, 1, 2]), model: "claude-sonnet-4-6", sessions: 67, tokens: 0, cost: 325,
+        metrics: [{ label: "sessions", value: "67", n: 67 }, { label: "cost / mo", value: fmtUsd(325), n: 325 }, { label: "seats", value: "2", n: 2 }, { label: "active (7d)", value: "yes", n: 1 }] },
+];
+
+/** Skills spreading across seats - the diffusion story. Seat counts match the
+ *  pitch's "Skills spreading" list (effect-kit 6, ship-checklist 5, ...). */
+const DEMO_SKILLS: { name: string; seats: number; runs: number }[] = [
+    { name: "effect-kit", seats: 6, runs: 214 },
+    { name: "ship-checklist", seats: 5, runs: 168 },
+    { name: "ax-extract-workflow", seats: 5, runs: 132 },
+    { name: "design-taste-frontend", seats: 4, runs: 88 },
+    { name: "cta-design", seats: 3, runs: 54 },
+];
+
+/** Workflows (ordered skill arcs) that recur on 5+ seats - "ready to spread". */
+const DEMO_WORKFLOWS: { arc: string; seats: number }[] = [
+    { arc: "plan → implement → ship-checklist", seats: 6 },
+    { arc: "recall → extract-workflow → improve", seats: 5 },
+    { arc: "gather → design-taste → review", seats: 5 },
+];
+
+/** Deterministic ~9-week daily series with a gently RISING adoption ramp
+ *  (seats coming online) - the "adoption, last N days" trend from the pitch. */
+function demoDays(): WrappedUsageDay[] {
+    const out: WrappedUsageDay[] = [];
+    const today = new Date();
+    const N = 63;
+    for (let i = N - 1; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        const dow = d.getDay();
+        const weekday = dow >= 1 && dow <= 5 ? 1 : 0.3; // quiet weekends
+        const t = (N - 1 - i) / (N - 1); // 0 → 1 over the window
+        const ramp = 0.42 + 0.58 * t; // adoption climbs
+        const wobble = 0.92 + 0.08 * Math.sin((N - i) / 3.1);
+        const sessions = Math.round((12 + 30 * ramp) * weekday * wobble);
+        out.push({
+            date: d.toISOString().slice(0, 10),
+            sessions,
+            turns: sessions * (26 + Math.round(12 * ramp)),
+            tokens: sessions * 4_100_000,
+        });
+    }
+    return out;
+}
+const DEMO_DAYS: WrappedUsageDay[] = demoDays();
+
 // ---- range toggle group ---------------------------------------------------
 function Toggle<T extends number>({
     label, values, value, onChange, suffix,
@@ -452,20 +592,104 @@ function HeroStrip() {
     );
 }
 
+// ---- demo hero (dev-adoption tiles) ---------------------------------------
+/** Four adoption tiles for the `?demo` board - active seats, active-days,
+ *  routable spend, workflows ready to spread. Replaces the exec HeroStrip. */
+function DemoHero() {
+    const routablePct = Math.round((DEMO_ORG.routableUsd / DEMO_ORG.spendUsd) * 100);
+    const activeDelta = Math.round((DEMO_ORG.activePct - DEMO_ORG.activePctPrev) * 100);
+    return (
+        <div className="v-tm-hero v-tm-hero--demo">
+            <section className="rdx-card v-tm-herotile">
+                <div className="rdx-label">devs active · this week</div>
+                <div className="rdx-num v-tm-herostat">{DEMO_ORG.activeThisWeek}<small> / {DEMO_ORG.seats}</small></div>
+                <div className="v-tm-trend"><span className="rdx-led accent" /> across 4 joined repos</div>
+            </section>
+            <section className="rdx-card v-tm-herotile">
+                <div className="rdx-label">team active-days</div>
+                <div className="rdx-num v-tm-herostat">{Math.round(DEMO_ORG.activePct * 100)}<small>%</small></div>
+                <div className="v-tm-trend up"><span className="arr">▲</span> +{activeDelta}% from {Math.round(DEMO_ORG.activePctPrev * 100)}% · 8 weeks ago</div>
+            </section>
+            <section className="rdx-card v-tm-herotile">
+                <div className="rdx-label">routable spend · / mo</div>
+                <div className="rdx-num v-tm-herostat">{fmtUsd(DEMO_ORG.routableUsd)}</div>
+                <div className="v-tm-trend"><span className="rdx-led accent" /> {routablePct}% of {fmtUsd(DEMO_ORG.spendUsd)} on the pricey default</div>
+            </section>
+            <section className="rdx-card v-tm-herotile">
+                <div className="rdx-label">workflows ready to spread</div>
+                <div className="rdx-num v-tm-herostat">{DEMO_ORG.workflowsReady}</div>
+                <div className="v-tm-trend"><span className="rdx-led accent" /> settled arcs seen on 5+ seats</div>
+            </section>
+        </div>
+    );
+}
+
+/** Skills-spreading + workflows-ready cards - the diffusion story (demo only).
+ *  Reuses the model-channels list styling (.v-mc-split / .v-mc-split-row). */
+function DemoAdoptionRow() {
+    const maxSeats = Math.max(...DEMO_SKILLS.map((s) => s.seats), 1);
+    return (
+        <div className="v-tm-grid">
+            <section className="rdx-card v-mc-split">
+                <div className="v-mc-meta rdx-label">
+                    <span style={{ color: "var(--pri)" }}>SKILLS SPREADING · seats using</span>
+                    <span>{DEMO_SKILLS.length} skills</span>
+                </div>
+                <div className="nf-list">
+                    {DEMO_SKILLS.map((s) => (
+                        <div className="v-mc-split-row" key={s.name}>
+                            <span style={{ color: "var(--pri)" }}>
+                                <span className="nf-swatch" style={{ background: "var(--accent)" }} />{s.name}
+                            </span>
+                            <span>{s.seats} seats · {fmtCount(s.runs)} runs</span>
+                            <span className="segwrap">
+                                <span className="v-tm-bar"><span style={{ width: `${Math.max(6, (s.seats / maxSeats) * 100)}%`, background: "var(--accent)" }} /></span>
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </section>
+
+            <section className="rdx-card v-mc-split">
+                <div className="v-mc-meta rdx-label">
+                    <span style={{ color: "var(--pri)" }}>WORKFLOWS READY TO SPREAD</span>
+                    <span>{DEMO_WORKFLOWS.length} above floor</span>
+                </div>
+                <div className="nf-list">
+                    {DEMO_WORKFLOWS.map((w) => (
+                        <div className="v-mc-split-row" key={w.arc}>
+                            <span style={{ color: "var(--pri)" }}>{w.arc}</span>
+                            <span>{w.seats} seats</span>
+                        </div>
+                    ))}
+                    <p className="rdx-label" style={{ margin: "10px 2px 2px", lineHeight: 1.5, textTransform: "none", letterSpacing: 0 }}>
+                        The workflows your team settles into, seen on 5+ seats - ready to package and share.
+                    </p>
+                </div>
+            </section>
+        </div>
+    );
+}
+
 // ---- tabbed, selectable roster --------------------------------------------
 function RosterCard({
-    tab, onTab, entities, loading, selected, onToggle, midHead, orgMode = false,
+    tab, onTab, entities, loading, selected, onToggle, midHead, orgMode = false, demo = false,
 }: {
     tab: RosterTab; onTab: (t: RosterTab) => void;
     entities: RosterEntity[]; loading: boolean;
     selected: ReadonlySet<string>; onToggle: (id: string) => void;
-    midHead: string; orgMode?: boolean;
+    midHead: string; orgMode?: boolean; demo?: boolean;
 }) {
     // orgMode (the paid teaser) frames the members tab as company FUNCTIONS.
     const tabLabel = (t: RosterTab) => (orgMode && t === "members" ? "functions" : TABS.find((x) => x.id === t)?.label ?? t);
-    const noun = tab === "members" ? (orgMode ? "function" : "member") : tab === "projects" ? "project" : "harness";
-    // Members/functions are the org roster - lead with token consumption.
-    const tokenLed = tab === "members";
+    const noun = tab === "members" ? (orgMode ? "function" : demo ? "seat" : "member") : tab === "projects" ? "project" : "harness";
+    // Members/functions are the org roster - lead with token consumption. In the
+    // demo, seats lead with sessions (no per-person spend → no ranking).
+    const tokenLed = tab === "members" && !demo;
+    // Demo seats are anonymized + unranked - say so where a leaderboard is implied.
+    const headNote = demo && tab === "members"
+        ? "aggregate view · no per-person ranking"
+        : selected.size >= 1 ? `${selected.size} selected` : "click rows · compare 2+";
     return (
         <section className="rdx-card v-team-roster">
             <div className="v-tm-roster-head">
@@ -476,7 +700,7 @@ function RosterCard({
                         </button>
                     ))}
                 </div>
-                <span className="rdx-label">{selected.size >= 1 ? `${selected.size} selected` : "click rows · compare 2+"}</span>
+                <span className="rdx-label">{headNote}</span>
             </div>
             <div className="nf-list">
                 {orgMode
@@ -615,11 +839,14 @@ function ComparePanel({ entities, onClear }: { entities: RosterEntity[]; onClear
     );
 }
 
-function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<WrappedUsageDay>; teaser?: boolean }) {
+function Board({ days: liveDays, teaser = false, demo = false }: { days: ReadonlyArray<WrappedUsageDay>; teaser?: boolean; demo?: boolean }) {
     const [daily, setDaily] = useState<DailyRange>(30);
     const [weeks, setWeeks] = useState<WeeklyRange>(8);
 
-    const days = teaser ? MOCK_DAYS : liveDays;
+    // Both the teaser and the demo run on fabricated, self-contained data (no
+    // live queries) - the difference is framing, not the data source.
+    const mock = teaser || demo;
+    const days = demo ? DEMO_DAYS : teaser ? MOCK_DAYS : liveDays;
     const dWin = useMemo(() => days.slice(-daily), [days, daily]);
     const wAll = useMemo(() => weekly(days), [days]);
     const wWin = useMemo(
@@ -645,11 +872,11 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
     // roster + channels. In teaser mode everything is mock (no live queries) so
     // the paywall background never leaks real numbers and never depends on the
     // daemon being up.
-    const sessQ = useQuery({ queryKey: ["sessions", "roster"], queryFn: () => api.sessions({ limit: 500 }), enabled: !teaser });
+    const sessQ = useQuery({ queryKey: ["sessions", "roster"], queryFn: () => api.sessions({ limit: 500 }), enabled: !mock });
     const sessions = sessQ.data?.sessions ?? [];
-    const costQ = useQuery({ queryKey: ["cost", "models"], queryFn: () => api.costModels(), enabled: !teaser });
-    const channels = teaser ? MOCK_CHANNELS : (costQ.data?.rows ?? []).filter((r) => r.cost_usd > 0).slice(0, 8);
-    const costTotal = teaser ? MOCK_COST_TOTAL : (costQ.data?.total_cost_usd || channels.reduce((s, r) => s + r.cost_usd, 0) || 1);
+    const costQ = useQuery({ queryKey: ["cost", "models"], queryFn: () => api.costModels(), enabled: !mock });
+    const channels = demo ? DEMO_CHANNELS : teaser ? MOCK_CHANNELS : (costQ.data?.rows ?? []).filter((r) => r.cost_usd > 0).slice(0, 8);
+    const costTotal = demo ? DEMO_ORG.spendUsd : teaser ? MOCK_COST_TOTAL : (costQ.data?.total_cost_usd || channels.reduce((s, r) => s + r.cost_usd, 0) || 1);
 
     // tabbed roster (projects | members | harnesses) + side-by-side compare.
     // Teaser opens on members (the company org roster, ranked by tokens).
@@ -662,12 +889,12 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
         return next;
     });
     // Members are public gists - only fetch when that tab is opened (live only).
-    const memQ = useQuery({ queryKey: ["members"], queryFn: () => fetchMembers(), enabled: !teaser && tab === "members", staleTime: 300_000 });
-    const projects = useMemo(() => teaser ? MOCK_PROJECTS : buildProjects(sessions), [teaser, sessions]);
-    const harnesses = useMemo(() => teaser ? MOCK_HARNESSES : harnessEntities(buildRoster(sessions)), [teaser, sessions]);
-    const members = useMemo(() => teaser ? MOCK_MEMBERS : memberEntities(memQ.data ?? []), [teaser, memQ.data]);
+    const memQ = useQuery({ queryKey: ["members"], queryFn: () => fetchMembers(), enabled: !mock && tab === "members", staleTime: 300_000 });
+    const projects = useMemo(() => demo ? DEMO_PROJECTS : teaser ? MOCK_PROJECTS : buildProjects(sessions), [demo, teaser, sessions]);
+    const harnesses = useMemo(() => demo ? DEMO_HARNESSES : teaser ? MOCK_HARNESSES : harnessEntities(buildRoster(sessions)), [demo, teaser, sessions]);
+    const members = useMemo(() => demo ? DEMO_MEMBERS : teaser ? MOCK_MEMBERS : memberEntities(memQ.data ?? []), [demo, teaser, memQ.data]);
     const entities = tab === "projects" ? projects : tab === "members" ? members : harnesses;
-    const rosterLoading = teaser ? false : tab === "members" ? memQ.isLoading : sessQ.isLoading;
+    const rosterLoading = mock ? false : tab === "members" ? memQ.isLoading : sessQ.isLoading;
     const midHead = tab === "members" ? (teaser ? "headcount" : "harnesses") : "last 7d";
     const selectedEntities = entities.filter((e) => selected.has(e.id));
 
@@ -683,8 +910,11 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
         <>
             <header className="v-tm-mast">
                 <div className="v-team-org">
-                    <span className="name"><b>ax</b> team metrics</span>
-                    <span className="ring">local graph</span>
+                    <span className="name">
+                        {demo ? <><b>{DEMO_ORG.label}</b> team adoption</> : <><b>ax</b> team metrics</>}
+                    </span>
+                    <span className="ring">{demo ? "team rollup" : "local graph"}</span>
+                    {demo && <span className="v-tm-demo-badge">demo · sample data</span>}
                 </div>
                 <div className="v-tm-ranges">
                     <Toggle label="daily" values={DAILY} value={daily} onChange={(v) => setDaily(v)} suffix="d" />
@@ -692,12 +922,15 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
                 </div>
             </header>
             <p className="rdx-label v-tm-sub">
-                {teaser
-                    ? "Return on every agent dollar - what each team ships, what it costs per task, and who's actually adopting."
-                    : "Where your agent spend goes and which skills & workflows get adopted. Compare projects, harnesses, or community members side-by-side - pick 2+ rows."}
+                {demo
+                    ? "How AI adoption is spreading across the team - active seats, routable spend, and the skills & workflows that land. Every number is a team-level aggregate; no per-person ranking."
+                    : teaser
+                        ? "Return on every agent dollar - what each team ships, what it costs per task, and who's actually adopting."
+                        : "Where your agent spend goes and which skills & workflows get adopted. Compare projects, harnesses, or community members side-by-side - pick 2+ rows."}
             </p>
 
             {teaser && <HeroStrip />}
+            {demo && <DemoHero />}
 
             <div className="v-tm-charts">
                 <ChartCard title="SESSIONS / DAY" range={`last ${daily}d`} total={fmtCount(sum(sessionsD))}
@@ -712,12 +945,12 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
 
             <div className="v-tm-grid">
                 <RosterCard tab={tab} onTab={switchTab} entities={entities} loading={rosterLoading}
-                    selected={selected} onToggle={toggleSel} midHead={midHead} orgMode={teaser} />
+                    selected={selected} onToggle={toggleSel} midHead={midHead} orgMode={teaser} demo={demo} />
 
                 <section className="rdx-card v-mc-split">
                     <div className="v-mc-meta rdx-label">
-                        <span style={{ color: "var(--pri)" }}>MODEL CHANNELS · 365d</span>
-                        <span>~{fmtUsd(costTotal)} total</span>
+                        <span style={{ color: "var(--pri)" }}>{demo ? "MODEL SPEND · this month" : "MODEL CHANNELS · 365d"}</span>
+                        <span>{demo ? `${fmtUsd(costTotal)}/mo · ${fmtUsd(DEMO_ORG.routableUsd)} routable` : `~${fmtUsd(costTotal)} total`}</span>
                     </div>
                     <div className="nf-list">
                         {channels.length === 0 ? (
@@ -740,6 +973,8 @@ function Board({ days: liveDays, teaser = false }: { days: ReadonlyArray<Wrapped
                     </div>
                 </section>
             </div>
+
+            {demo && <DemoAdoptionRow />}
 
             <ComparePanel entities={selectedEntities} onClear={() => setSelected(new Set())} />
         </>
@@ -811,8 +1046,23 @@ function isUnlocked(): boolean {
 function isForcedLock(): boolean {
     return typeof window !== "undefined" && new URLSearchParams(window.location.search).has("paywall");
 }
+// `?demo` renders the clean, fully-visible, seeded dev-adoption board - no blur,
+// no paywall, no live queries. It's the public "click around" surface linked
+// from /design-partners, distinct from the locked sales teaser and the live
+// (DEV/`?unlock`) board.
+function isDemo(): boolean {
+    return typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo");
+}
 
 export function TeamMetricsRoute() {
+    // Demo wins over everything: it's the shareable, self-contained board.
+    if (isDemo()) {
+        return (
+            <div className="v-tm">
+                <Board days={DEMO_DAYS} demo />
+            </div>
+        );
+    }
     const locked = isForcedLock() || !isUnlocked();
     // Locked: the blurred teaser is a self-contained mock org board - no live
     // queries, so it always renders fully (daemon up or down) and never leaks

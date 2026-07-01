@@ -853,6 +853,16 @@
 
 /* ---- hero scoreboard strip (teaser): 3 outcome tiles + a "so what" line ---- */
 .v-tm-hero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+/* demo board: 4 dev-adoption tiles */
+.v-tm-hero--demo { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1080px) { .v-tm-hero--demo { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .v-tm-hero--demo { grid-template-columns: 1fr; } }
+/* honest "sample data" badge on the demo masthead */
+.v-tm-demo-badge {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius: 6px; padding: 2px 8px; white-space: nowrap;
+}
 .v-tm-hero-cap { grid-column: 1 / -1; margin: 2px 0 0; line-height: 1.5; color: var(--sec); text-transform: none; letter-spacing: 0; font-size: 12.5px; }
 .v-tm-hero-cap b { color: var(--pri); font-weight: 600; }
 @media (max-width: 720px) { .v-tm-hero { grid-template-columns: 1fr; } }
