@@ -371,7 +371,7 @@ function DesignPartners() {
         <section className="hero">
           <HeroLogoField />
           <span className="eyebrow">ax for teams &middot; founding cohort</span>
-          <span className="reg-badge">Founding cohort &middot; 3 of 5 spots open</span>
+          <span className="reg-badge">Founding cohort &middot; 4 of 5 spots open</span>
           <h1>
             Know if <em>AI</em> is working<br />
             across your team.
@@ -636,14 +636,14 @@ function DesignPartners() {
           </div>
 
           <div className="dp-scarcity">
-            <div className="dp-scarcity__meter" role="img" aria-label="2 of 5 founding seats claimed">
+            <div className="dp-scarcity__meter" role="img" aria-label="1 of 5 founding seats claimed">
               <span className="dp-seat is-filled"></span>
-              <span className="dp-seat is-filled"></span>
+              <span className="dp-seat"></span>
               <span className="dp-seat"></span>
               <span className="dp-seat"></span>
               <span className="dp-seat"></span>
             </div>
-            <p className="dp-scarcity__count">2 claimed &middot; 3 open</p>
+            <p className="dp-scarcity__count">1 claimed &middot; 4 open</p>
             <ul className="dp-scarcity__list">
               <li>
                 <b>$12/seat locked.</b> Founding price holds as the product grows.
