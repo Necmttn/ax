@@ -317,9 +317,12 @@ function Teams() {
               ax is AGPL-3.0 and runs entirely on each laptop. There is one real
               export today &mdash; <code>ax profile publish</code> &mdash; and it
               shows you the precise JSON in a consent prompt before the first byte
-              moves. The team aggregation layer is built to the same contract: a
-              local consent gate, ax-shaped aggregates only. Below is the design
-              contract we&rsquo;re building to.
+              moves. The team layer keeps that contract and goes further: your
+              team&rsquo;s aggregates live in <b>your own private git repo</b>, not
+              our database. The dashboard reads them in the browser with each
+              viewer&rsquo;s own GitHub login &mdash; repo access is the only key.
+              We store <b>zero company data</b>: a breach of ours has nothing of
+              yours to leak.
             </p>
           </div>
           <div className="pitch-lanes">
@@ -343,9 +346,60 @@ function Teams() {
             </div>
           </div>
           <p className="demo-caption">
+            <b>Per-project, opt-in, default-deny.</b> Nothing is collected until a
+            dev runs <code>ax team join</code> inside a specific repo. Personal
+            projects and other clients&rsquo; code are <em>never sent</em> &mdash;
+            not filtered out, never uploaded. Each dev&rsquo;s choice is private and
+            per-repo; a fork or rename can&rsquo;t leak the wrong one.
+          </p>
+          <p className="demo-caption">
             Verifiable today: <code>ax profile publish</code> prints the full
             payload and waits for your yes. Source is AGPL-3.0 &mdash; read the
             line, don&rsquo;t trust it.
+          </p>
+        </section>
+
+        {/* ============= pricing ============= */}
+        <section className="pitch-section" id="pricing">
+          <div className="pitch-head">
+            <span className="eyebrow">design-partner pricing</span>
+            <h2>
+              <em>$12</em> per developer, per month.
+            </h2>
+            <p>
+              Simple per-seat, self-serve, cancel anytime &mdash; a seat is a dev
+              who pushes to the team. It rides as an add-on to the $20&ndash;40 per
+              dev you already spend on agents, and pays for itself the moment it
+              redirects one routine sub-task off the expensive default. Founder
+              pricing is locked for design partners.
+            </p>
+          </div>
+          <div className="ministats">
+            <div className="mini">
+              <div className="mini-label">Per seat</div>
+              <div className="mini-value"><span className="unit">$</span>12<span className="unit">/mo</span></div>
+              <div className="mini-sub">a seat = a dev who <b>pushes</b></div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">10-dev team</div>
+              <div className="mini-value"><span className="unit">$</span>120<span className="unit">/mo</span></div>
+              <div className="mini-sub">less than one redirected task</div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">50-dev team</div>
+              <div className="mini-value"><span className="unit">$</span>600<span className="unit">/mo</span></div>
+              <div className="mini-sub">scales per seat, prorated</div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">Cancel</div>
+              <div className="mini-value">anytime</div>
+              <div className="mini-sub">self-serve, via Stripe</div>
+            </div>
+          </div>
+          <p className="demo-caption">
+            You&rsquo;re paying for the dashboard and the enablement &mdash; never
+            for a place to warehouse your code insights. Those stay in <b>your</b>
+            git repo; we store none of it.
           </p>
         </section>
 

@@ -304,6 +304,61 @@ function Registry() {
               </ul>
             </div>
           </div>
+          <p className="demo-caption">
+            <b>The registry is your git repo.</b> Blessed skills live in a folder
+            you own and version &mdash; ax adds governed sync and trust-gating on
+            top, and stores <b>zero company data</b> of its own. A breach of ours
+            has nothing of yours to leak.
+          </p>
+          <p className="demo-caption">
+            <b>Per-repo, opt-in, default-deny.</b> A skill lands on a laptop only
+            after <code>ax team sync</code> &mdash; and anything executable only
+            after an explicit <code>ax team trust</code> review. Never silently,
+            never machine-wide; personal projects are untouched.
+          </p>
+        </section>
+
+        {/* ============= pricing ============= */}
+        <section className="pitch-section" id="pricing">
+          <div className="pitch-head">
+            <span className="eyebrow">design-partner pricing</span>
+            <h2>
+              <em>$12</em> per developer, per month.
+            </h2>
+            <p>
+              Simple per-seat, self-serve, cancel anytime &mdash; a seat is a dev
+              on the team. Governed skill sync, trust-gating and the upstream-fix
+              loop, priced as an add-on to the agent stack you already run. Founder
+              pricing is locked for design partners.
+            </p>
+          </div>
+          <div className="ministats">
+            <div className="mini">
+              <div className="mini-label">Per seat</div>
+              <div className="mini-value"><span className="unit">$</span>12<span className="unit">/mo</span></div>
+              <div className="mini-sub">a seat = a dev on the team</div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">10-dev team</div>
+              <div className="mini-value"><span className="unit">$</span>120<span className="unit">/mo</span></div>
+              <div className="mini-sub">one blessed skill pays for it</div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">50-dev team</div>
+              <div className="mini-value"><span className="unit">$</span>600<span className="unit">/mo</span></div>
+              <div className="mini-sub">scales per seat, prorated</div>
+            </div>
+            <div className="mini">
+              <div className="mini-label">Cancel</div>
+              <div className="mini-value">anytime</div>
+              <div className="mini-sub">self-serve, via Stripe</div>
+            </div>
+          </div>
+          <p className="demo-caption">
+            You&rsquo;re paying for governed distribution and the fix loop &mdash;
+            never for a place to warehouse your code. Your skills and telemetry
+            stay in <b>your</b> git repo; we store none of it.
+          </p>
         </section>
 
         {/* ============= closing CTA ============= */}
