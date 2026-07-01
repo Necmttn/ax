@@ -326,6 +326,9 @@ function Registry() {
             <Link to="/teams" className="cta-secondary">
               See the manager angle
             </Link>
+            <Link to="/design-partners" className="cta-secondary">
+              Read the full pitch
+            </Link>
           </div>
         </section>
 

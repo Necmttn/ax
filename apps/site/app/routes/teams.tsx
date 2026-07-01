@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { MetricsBars } from "~/components/pitch/MetricsBars";
 import { PipelineFlow } from "~/components/pitch/PipelineFlow";
@@ -366,6 +366,9 @@ function Teams() {
             <a className="cta-secondary" href="#privacy">
               How the privacy line works
             </a>
+            <Link to="/design-partners" className="cta-secondary">
+              Read the full pitch
+            </Link>
           </div>
         </section>
 
