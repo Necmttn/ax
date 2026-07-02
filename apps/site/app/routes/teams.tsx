@@ -921,7 +921,7 @@ function Teams() {
             <p className="dp-scarcity__count">1 claimed &middot; 4 open</p>
             <ul className="dp-scarcity__list">
               <li>
-                <b>$12/seat locked.</b> Founding price holds as the product grows.
+                <b>$20/seat locked.</b> Founding price holds as the product grows.
               </li>
               <li>
                 <b>Direct founder line.</b> Onboarding by hand, weekly call.
@@ -943,12 +943,12 @@ function Teams() {
           <div className="pitch-head">
             <span className="eyebrow">founding pricing</span>
             <h2>
-              <em>$12</em> per developer, per month.
+              <em>$20</em> per developer, per month.
             </h2>
             <p>
-              Per-seat, self-serve, cancel anytime. A seat is a dev who pushes. It
-              rides as an add-on to the $20 to $40 per dev you already spend on
-              agents, and pays for itself the moment it redirects one routine
+              Per-seat, self-serve, cancel anytime. A seat is a dev who pushes.
+              It rides as a small add-on to the agent subscriptions you already
+              pay for, and pays for itself the moment it redirects one routine
               sub-task off the expensive default.
             </p>
           </div>
@@ -956,21 +956,21 @@ function Teams() {
             <div className="mini">
               <div className="mini-label">Per seat</div>
               <div className="mini-value">
-                <span className="unit">$</span>12<span className="unit">/mo</span>
+                <span className="unit">$</span>20<span className="unit">/mo</span>
               </div>
               <div className="mini-sub">a seat = a dev who <b>pushes</b></div>
             </div>
             <div className="mini">
               <div className="mini-label">10-dev team</div>
               <div className="mini-value">
-                <span className="unit">$</span>120<span className="unit">/mo</span>
+                <span className="unit">$</span>200<span className="unit">/mo</span>
               </div>
               <div className="mini-sub">less than one redirected task</div>
             </div>
             <div className="mini">
               <div className="mini-label">50-dev team</div>
               <div className="mini-value">
-                <span className="unit">$</span>600<span className="unit">/mo</span>
+                <span className="unit">$</span>1,000<span className="unit">/mo</span>
               </div>
               <div className="mini-sub">scales per seat, prorated</div>
             </div>
