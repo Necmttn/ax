@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.37.0](https://github.com/Necmttn/ax/compare/v0.36.0...v0.37.0) (2026-07-02)
+
+
+### Features
+
+* **cli:** ax runs evidence &lt;session&gt; + runs_evidence MCP ([#578](https://github.com/Necmttn/ax/issues/578), slice 3) ([#643](https://github.com/Necmttn/ax/issues/643)) ([a704f6f](https://github.com/Necmttn/ax/commit/a704f6f3575958d4f7308a30aa8539bd2b7fbcf5))
+* edited (write) refs via turn-&gt;event bridge + ref counts in read surface ([#578](https://github.com/Necmttn/ax/issues/578), slice 5) ([#645](https://github.com/Necmttn/ax/issues/645)) ([82625ec](https://github.com/Necmttn/ax/commit/82625ec710e83071bf76381c07f6f91e43d42f66))
+* ForesightJS predictive prefetch for studio + site ([#661](https://github.com/Necmttn/ax/issues/661)) ([#662](https://github.com/Necmttn/ax/issues/662)) ([2f7fe72](https://github.com/Necmttn/ax/commit/2f7fe7242c7a072a5238c087edc5e036e8d85ae3))
+* **ingest:** derive-run-evidence stage populates the ledger ([#578](https://github.com/Necmttn/ax/issues/578), slice 2) ([#642](https://github.com/Necmttn/ax/issues/642)) ([2444edc](https://github.com/Necmttn/ax/commit/2444edc2a79be7896af4592d0ed3259ef3741ca1))
+* **ingest:** first-class omp (oh-my-pi) harness support ([#636](https://github.com/Necmttn/ax/issues/636)) ([#637](https://github.com/Necmttn/ax/issues/637)) ([2eb0564](https://github.com/Necmttn/ax/commit/2eb056412acf6365a1ff8cfff1c8d5e2360c0b30))
+* **ingest:** populate run_evidence_ref with file refs ([#578](https://github.com/Necmttn/ax/issues/578), slice 4) ([#644](https://github.com/Necmttn/ax/issues/644)) ([0391fd2](https://github.com/Necmttn/ax/commit/0391fd2a71b431aaffd6626fe82b50036bb09ce2))
+* **ledger:** objective/policy_decision/repo_state/derived_summary + lineage + read headers ([#578](https://github.com/Necmttn/ax/issues/578), slice 6) ([#647](https://github.com/Necmttn/ax/issues/647)) ([1cbf57c](https://github.com/Necmttn/ax/commit/1cbf57cb03310669a4c4ff055e5e125511da6052))
+* **schema:** run evidence ledger contract + tables ([#578](https://github.com/Necmttn/ax/issues/578), first slice) ([#641](https://github.com/Necmttn/ax/issues/641)) ([18c540d](https://github.com/Necmttn/ax/commit/18c540d614ba5e581444b1b8fa5e3623002fe850))
+* **site:** /design-partners shareable pitch page ([#651](https://github.com/Necmttn/ax/issues/651)) ([#652](https://github.com/Necmttn/ax/issues/652)) ([f0f393d](https://github.com/Necmttn/ax/commit/f0f393d266df45c1efe158a1f20a7970880c59c0))
+* **site:** consolidate 3 pitch pages into one /teams ([#656](https://github.com/Necmttn/ax/issues/656)) ([#657](https://github.com/Necmttn/ax/issues/657)) ([82fa069](https://github.com/Necmttn/ax/commit/82fa0694fde6988018e6c07c19b82d328090f57b))
+* **site:** rebuild /design-partners — visuals + cohort scarcity + honest claim ([#653](https://github.com/Necmttn/ax/issues/653)) ([#654](https://github.com/Necmttn/ax/issues/654)) ([767c280](https://github.com/Necmttn/ax/commit/767c28033b8ebd30f642d6e017e26c1aa65210fc))
+* **studio:** full-app demo mock data + toggleable labeled sidebar ([#659](https://github.com/Necmttn/ax/issues/659)) ([#660](https://github.com/Necmttn/ax/issues/660)) ([3542ee0](https://github.com/Necmttn/ax/commit/3542ee0042b9c18c74fdd5312ab68c6b692f3f3a))
+* **studio:** run-evidence panel in the session inspector ([#578](https://github.com/Necmttn/ax/issues/578), slice 7) ([#648](https://github.com/Necmttn/ax/issues/648)) ([bd31444](https://github.com/Necmttn/ax/commit/bd3144434fe5ccac6bed41e9dd1cf91798ef3dd3))
+
+
+### Bug Fixes
+
+* **foresight:** include hash in link ledger keys, drop dead ForesightLinkProps export ([#663](https://github.com/Necmttn/ax/issues/663)) ([42cf522](https://github.com/Necmttn/ax/commit/42cf5225ac5b442b50ceba4aa59341269f7a87d5))
+* **foresight:** stop emitting devtools chunk in prod dists via injected loader ([#667](https://github.com/Necmttn/ax/issues/667)) ([8722250](https://github.com/Necmttn/ax/commit/8722250c946c1ace29292cbe73e988c61eb9513c))
+* **ledger:** verification = real checks only + clear stale hot refs ([#578](https://github.com/Necmttn/ax/issues/578), Codex review) ([#646](https://github.com/Necmttn/ax/issues/646)) ([2fbb452](https://github.com/Necmttn/ax/commit/2fbb4521d74a26a1cee00943cb2aa898a04a0fee))
+* **site:** answer the what-works question on the teams page ([#668](https://github.com/Necmttn/ax/issues/668)) ([61c0c25](https://github.com/Necmttn/ax/commit/61c0c25b553804054a96d17f12d43e548c8b8cf1))
+
 ## [0.36.0](https://github.com/Necmttn/ax/compare/v0.35.0...v0.36.0) (2026-06-29)
 
 
