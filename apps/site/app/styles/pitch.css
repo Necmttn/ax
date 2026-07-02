@@ -344,21 +344,29 @@
 
 /* honest above-the-fold status line ---------------------------------------- */
 .landing-v2 .dp-status {
-  max-width: 62ch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 11px;
   letter-spacing: 0.01em;
   color: var(--muted);
-  text-align: center;
 }
-.landing-v2 .dp-status b {
+.landing-v2 .dp-status__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.landing-v2 .dp-status__chip b {
   color: var(--ink);
   font-weight: 600;
-}
-.landing-v2 .dp-status__sep {
-  margin: 0 8px;
-  color: var(--soft);
 }
 
 /* full-bleed alternating section band (breaks the card-grid rhythm) --------- */
@@ -559,6 +567,95 @@
   border-radius: 4px;
   padding: 2px 7px;
 }
+/* the whole mock is the demo affordance ------------------------------------ */
+.landing-v2 .dp-rollup-link {
+  position: relative;
+  display: block;
+  max-width: 920px;
+  margin: 0 auto;
+  border-radius: 12px;
+  text-decoration: none;
+  outline: none;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.landing-v2 .dp-rollup-link:hover {
+  transform: translateY(-3px);
+}
+.landing-v2 .dp-rollup-link:hover .browser,
+.landing-v2 .dp-rollup-link:focus-visible .browser {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+}
+.landing-v2 .dp-rollup-link:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 4px;
+}
+.landing-v2 .dp-rollup-cta {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #16150f;
+  background: var(--amber);
+  border-radius: 999px;
+  padding: 6px 13px;
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.55);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+  pointer-events: none;
+}
+.landing-v2 .dp-rollup-link:hover .dp-rollup-cta {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* live demo iframe embed --------------------------------------------------- */
+/* Renders the studio at a desktop-logical width, scaled to fit via a JS-set
+   --dp-scale, inside a fixed-ratio overflow-hidden frame. The iframe is
+   pointer-events:none so the wrapping link owns clicks (no scroll-trap). */
+.landing-v2 .dp-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1440 / 900;
+  overflow: hidden;
+  background: #0e0e0c;
+}
+.landing-v2 .dp-embed__frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  border: 0;
+  transform-origin: top left;
+  transform: scale(var(--dp-scale, 0.5));
+  pointer-events: none;
+}
+.landing-v2 .dp-live-tag {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 2;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  border-radius: 4px;
+  padding: 2px 7px;
+  background: rgba(14, 14, 12, 0.6);
+  pointer-events: none;
+}
+
 .landing-v2 .dp-rollup__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
