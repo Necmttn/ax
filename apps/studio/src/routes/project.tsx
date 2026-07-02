@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ForesightLink } from "../foresight-link.ts";
+import { ForesightLink } from "@ax/foresight";
 import { api } from "../api.ts";
 import { fmtCount, fmtLastUsed, fmtTs } from "@ax/lib/shared/formatters";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";

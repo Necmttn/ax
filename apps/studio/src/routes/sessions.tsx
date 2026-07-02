@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ForesightLink } from "../foresight-link.ts";
+import { ForesightLink } from "@ax/foresight";
 import { api } from "../api.ts";
 import { prefetchSessionInspect } from "../prefetch.ts";
 // BurnSpark kept on disk; not rendered in viz/strip views (story bar replaces it as the visual)
@@ -167,15 +167,15 @@ const Row = memo(function Row({
         void navigate({ to: "/sessions/$sessionId", params: { sessionId: sid } });
     }, [navigate, sid, s.has_raw_file]);
 
-    // Warm the inspect-data query on hover/focus - intent-based prefetch
+    // Warm the inspect-data query on hover/focus - intent-based prefetch.
+    // Routes through the same thunk ForesightLink uses (prefetchSessionInspect)
+    // so the cached entry always carries the paging opts SessionInspectView's
+    // mount query expects - a bare api.sessionInspect(sid) call under the same
+    // queryKey poisons the cache with an unpaged response.
     const queryClient = useQueryClient();
     const onIntent = () => {
         if (!s.has_raw_file) return;
-        void queryClient.prefetchQuery({
-            queryKey: ["session-inspect", sid],
-            queryFn: () => api.sessionInspect(sid),
-            staleTime: 5 * 60_000,
-        });
+        void prefetchSessionInspect(queryClient, sid)();
     };
     // Whole row is a click target (any cell except the interactive controls -
     // checkbox / expand toggle / explicit links - which stopPropagation).

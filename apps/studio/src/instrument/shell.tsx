@@ -4,7 +4,7 @@
  *  persists in localStorage. Default is collapsed for the live daemon and
  *  expanded in the mock/demo build (so walkthroughs read the page names). */
 import { useState, type ReactNode } from "react";
-import { ForesightLink } from "../foresight-link.ts";
+import { ForesightLink } from "@ax/foresight";
 import "./instrument.css";
 
 export const RAIL = [

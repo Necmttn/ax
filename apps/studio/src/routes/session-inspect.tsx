@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ForesightLink } from "../foresight-link.ts";
+import { ForesightLink } from "@ax/foresight";
 import { api } from "../api.ts";
 import { PAGE_SIZE, prefetchSessionInspect } from "../prefetch.ts";
 import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, RunEvidenceCount, RunEvidencePayload, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
