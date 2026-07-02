@@ -1,7 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { ForesightLink } from "@ax/foresight";
 import { api } from "../api.ts";
+import { PAGE_SIZE, prefetchSessionInspect } from "../prefetch.ts";
 import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, RunEvidenceCount, RunEvidencePayload, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
@@ -1313,16 +1315,10 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
     if (m?.fork_context != null) chips.push({ label: "fork", value: m.fork_context ? "yes" : "no" });
     const metrics = subagentMetricChips(child);
 
-    // Prefetch the spawned child's inspect data on hover/focus only -
-    // mass-prefetching all 52 spawn markers at once would stampede the API.
+    // Prefetch is driven by ForesightLink's predicted-element trajectory
+    // model, not hover/focus on the whole marker - mass-prefetching all 52
+    // spawn markers at once would stampede the API.
     const queryClient = useQueryClient();
-    const onIntent = () => {
-        void queryClient.prefetchQuery({
-            queryKey: ["session-inspect", childBare],
-            queryFn: () => api.sessionInspect(childBare),
-            staleTime: 5 * 60_000,
-        });
-    };
 
     const [expanded, setExpanded] = useState(false);
     const brief = m?.brief ?? null;
@@ -1330,21 +1326,22 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
     const briefIsLong = !!brief && brief.length > briefClippedLen;
 
     return (
-        <div onMouseEnter={onIntent} onFocus={onIntent} style={{
+        <div style={{
             margin: "4px 0", padding: "7px 10px", background: "color-mix(in srgb, var(--rose) 8%, var(--panel))",
             border: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderLeft: "4px solid var(--rose)", borderRadius: 3, fontSize: 11,
             fontFamily: "ui-monospace, monospace", color: "var(--rose)",
         }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700 }}>↳ child session spawned</span>
-                <Link
+                <ForesightLink
                     to="/sessions/$sessionId/inspect"
                     params={{ sessionId: childBare }}
                     preload="intent"
+                    prefetchData={prefetchSessionInspect(queryClient, childBare)}
                     style={{ color: "var(--rose)", fontWeight: 600 }}
                 >
                     {child.nickname ? `"${child.nickname}"` : `${childBare.slice(0, 12)}…`}
-                </Link>
+                </ForesightLink>
                 {child.nickname ? <span style={{ opacity: 0.6 }}>{childBare.slice(0, 10)}…</span> : null}
                 {child.tool ? <span style={{ opacity: 0.6 }}>via {child.tool}</span> : null}
                 {m ? <span style={{ background: "color-mix(in srgb, var(--rose) 25%, var(--panel))", color: "color-mix(in srgb, var(--rose) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>{m.provider}</span> : null}
@@ -1743,7 +1740,6 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
 
     // Server-side pagination. Initial fetch pulls metadata + first PAGE_SIZE
     // turns (small payload). Subsequent pages append to the in-memory copy.
-    const PAGE_SIZE = 100;
     const baseKey = ["session-inspect", decoded] as const;
     const query = useQuery({
         queryKey: baseKey,

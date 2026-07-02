@@ -1,5 +1,6 @@
 // apps/site/app/routes/leaders.tsx
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ForesightLink } from "@ax/foresight";
 import { useEffect, useMemo, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
@@ -13,6 +14,7 @@ import {
     type Leaderboard,
     type SkillStats,
 } from "@ax/lib/shared/community";
+import { prefetchProfile } from "../profile-cache.ts";
 
 export const Route = createFileRoute("/leaders")({
     head: () => ({
@@ -154,7 +156,12 @@ function LeadersPage() {
                                     <tr key={row.login} data-lead={i === 0}>
                                         <td className="lb-rank">{i + 1}</td>
                                         <td className="lb-who">
-                                            <Link to="/u/$login" params={{ login: row.login }} search={{ vs: undefined }}>
+                                            <ForesightLink
+                                                to="/u/$login"
+                                                params={{ login: row.login }}
+                                                search={{ vs: undefined }}
+                                                prefetchData={() => prefetchProfile(row.login)}
+                                            >
                                                 <img
                                                     className="lb-avatar"
                                                     src={`https://github.com/${row.login}.png?size=48`}
@@ -164,7 +171,7 @@ function LeadersPage() {
                                                     loading="lazy"
                                                 />
                                                 <span>@{row.login}</span>
-                                            </Link>
+                                            </ForesightLink>
                                         </td>
                                         {METRICS.map((m) => {
                                             const v = row[m.key];

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { ForesightLink } from "@ax/foresight";
 import { api } from "../api.ts";
 import { fmtCount, fmtLastUsed, fmtTs } from "@ax/lib/shared/formatters";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
@@ -98,13 +99,13 @@ export function ProjectRoute() {
                                 {data.top_skills.map((s) => (
                                     <tr key={s.skill}>
                                         <td>
-                                            <Link
+                                            <ForesightLink
                                                 to="/skills"
                                                 search={{ q: s.skill }}
                                                 style={{ textDecoration: "none" }}
                                             >
                                                 <code>{s.skill}</code>
-                                            </Link>
+                                            </ForesightLink>
                                         </td>
                                         <td className="num">
                                             <strong>{fmtCount(s.count)}</strong>
@@ -133,13 +134,13 @@ export function ProjectRoute() {
                                 {data.failures.map((f) => (
                                     <tr key={f.label}>
                                         <td>
-                                            <Link
+                                            <ForesightLink
                                                 to="/tools"
                                                 search={{ q: f.label }}
                                                 style={{ textDecoration: "none" }}
                                             >
                                                 <code>{f.label}</code>
-                                            </Link>
+                                            </ForesightLink>
                                         </td>
                                         <td className="num">
                                             <strong>{fmtCount(f.failure_count)}</strong>

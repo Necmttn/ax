@@ -4,7 +4,7 @@
  *  persists in localStorage. Default is collapsed for the live daemon and
  *  expanded in the mock/demo build (so walkthroughs read the page names). */
 import { useState, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import { ForesightLink } from "@ax/foresight";
 import "./instrument.css";
 
 export const RAIL = [
@@ -48,12 +48,12 @@ export function InstrumentShell({ children }: { children: ReactNode }) {
                 <nav className="v-mc-rail" aria-label="primary">
                     <div className="logo">ax</div>
                     {RAIL.map((r) => (
-                        <Link key={r.to} to={r.to} title={r.label} aria-label={r.label}
+                        <ForesightLink key={r.to} to={r.to} title={r.label} aria-label={r.label}
                             activeOptions={{ exact: (r as { exact?: boolean }).exact ?? false }}
                             activeProps={{ className: "on" }}>
                             <span className="v-mc-rail-g" aria-hidden="true">{r.g}</span>
                             <span className="v-mc-rail-label">{r.label}</span>
-                        </Link>
+                        </ForesightLink>
                     ))}
                     <button
                         type="button"
