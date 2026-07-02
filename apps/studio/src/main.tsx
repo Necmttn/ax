@@ -20,7 +20,18 @@ const queryClient = new QueryClient({
     },
 });
 
-initForesight({ dev: import.meta.env.DEV, devtools: import.meta.env.DEV });
+if (import.meta.env.DEV) {
+    initForesight({
+        dev: true,
+        devtools: true,
+        devtoolsLoader: async () => {
+            const { initializeForesightDevtools } = await import("@ax/foresight/devtools");
+            initializeForesightDevtools();
+        },
+    });
+} else {
+    initForesight();
+}
 
 const container = document.getElementById("root");
 if (!container) throw new Error("missing #root");
