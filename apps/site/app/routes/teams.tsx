@@ -536,36 +536,66 @@ function Teams() {
             </p>
           </div>
 
-          <div className="pitch-triad">
-            <div className="pitch-fcard">
-              <h3>Which prompts &amp; skills pay off</h3>
-              <p>
-                Skills ranked by real usage and outcome, and the prompt
-                patterns that correlate with landed work &mdash; mined from
-                each dev&rsquo;s own sessions, on their own machine.
-              </p>
+          <div
+            className="pitch-triad"
+            role="img"
+            aria-label="Three per-seat receipts from a dev's local studio: prompts and skills that pay off, where the agent churns, and which sub-tasks overpay"
+          >
+            <div className="dp-card">
+              <span className="dp-card__label">
+                Prompts &amp; skills that pay off
+              </span>
+              <ul className="dp-list">
+                <li>
+                  <span>effect-kit</span>
+                  <span className="dp-list__meta">&times;41 &middot; 92% landed</span>
+                </li>
+                <li>
+                  <span>ship-checklist</span>
+                  <span className="dp-list__meta">&times;28 &middot; 88% landed</span>
+                </li>
+                <li>
+                  <span>&ldquo;plan, then edit&rdquo;</span>
+                  <span className="dp-list__meta">2.1&times; lift</span>
+                </li>
+              </ul>
+              <span className="dp-card__sub">
+                ax skills weighted &middot; ax directives mine
+              </span>
             </div>
-            <div className="pitch-fcard">
-              <h3>Where the agent churns</h3>
-              <p>
-                Edit-repair loops, failed checks, sessions that burned tokens
-                without landing a change &mdash; per repo, so a dev sees
-                exactly where AI wastes their time.
-              </p>
+            <div className="dp-card">
+              <span className="dp-card__label">Where the agent churns</span>
+              <div className="dp-card__row">
+                <span className="dp-card__big">7</span>
+                <span className="dp-card__unit">repair episodes, 30d</span>
+              </div>
+              <div className="dp-bar">
+                <span className="dp-bar__fill" style={{ width: "34%" }}></span>
+              </div>
+              <span className="dp-card__sub">
+                edit-repair loops, failed checks &middot; ax sessions churn
+              </span>
             </div>
-            <div className="pitch-fcard">
-              <h3>What overpays</h3>
-              <p>
-                Routine sub-tasks that ran on the expensive frontier default,
-                priced with what routing them one tier down would save.
-              </p>
+            <div className="dp-card">
+              <span className="dp-card__label">What overpays</span>
+              <div className="dp-card__row">
+                <span className="dp-card__big">$605</span>
+                <span className="dp-card__unit">routable of $2,140</span>
+              </div>
+              <div className="dp-bar">
+                <span className="dp-bar__fill" style={{ width: "28%" }}></span>
+              </div>
+              <span className="dp-card__sub">
+                routine sub-tasks on the frontier default &middot; ax cost
+                routability
+              </span>
             </div>
           </div>
 
           <p className="demo-caption">
-            The team rollup is these answers, aggregated: which skills spread,
-            which workflows stick across seats, how much routable spend is
-            still on the table.
+            Each dev&rsquo;s local studio renders these live today &mdash;
+            numbers here illustrative. The rollup above is the same answers,
+            aggregated across seats.
           </p>
         </section>
 
