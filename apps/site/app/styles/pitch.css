@@ -344,21 +344,29 @@
 
 /* honest above-the-fold status line ---------------------------------------- */
 .landing-v2 .dp-status {
-  max-width: 62ch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 11px;
   letter-spacing: 0.01em;
   color: var(--muted);
-  text-align: center;
 }
-.landing-v2 .dp-status b {
+.landing-v2 .dp-status__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.landing-v2 .dp-status__chip b {
   color: var(--ink);
   font-weight: 600;
-}
-.landing-v2 .dp-status__sep {
-  margin: 0 8px;
-  color: var(--soft);
 }
 
 /* full-bleed alternating section band (breaks the card-grid rhythm) --------- */
@@ -559,6 +567,57 @@
   border-radius: 4px;
   padding: 2px 7px;
 }
+/* the whole mock is the demo affordance ------------------------------------ */
+.landing-v2 .dp-rollup-link {
+  position: relative;
+  display: block;
+  max-width: 920px;
+  margin: 0 auto;
+  border-radius: 12px;
+  text-decoration: none;
+  outline: none;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.landing-v2 .dp-rollup-link:hover {
+  transform: translateY(-3px);
+}
+.landing-v2 .dp-rollup-link:hover .browser,
+.landing-v2 .dp-rollup-link:focus-visible .browser {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+}
+.landing-v2 .dp-rollup-link:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 4px;
+}
+.landing-v2 .dp-rollup-cta {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #16150f;
+  background: var(--amber);
+  border-radius: 999px;
+  padding: 6px 13px;
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.55);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+  pointer-events: none;
+}
+.landing-v2 .dp-rollup-link:hover .dp-rollup-cta {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.6);
+}
+
 .landing-v2 .dp-rollup__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -370,9 +370,12 @@ function Teams() {
 
           <div className="install-wrap">
             <span className="dp-status">
-              <b>Live today:</b> per-seat receipts
-              <span className="dp-status__sep">&middot;</span>
-              <b>With the cohort:</b> the team rollup
+              <span className="dp-status__chip">
+                <b>Live today:</b> per-seat receipts
+              </span>
+              <span className="dp-status__chip">
+                <b>With the cohort:</b> the team rollup
+              </span>
             </span>
             <div className="cta-row">
               <a className="prompt-pill is-solo" href={BOOK_URL}>
@@ -386,7 +389,7 @@ function Teams() {
         </section>
 
         {/* ============= the rollup mock ============= */}
-        <section className="pitch-section dp-alt" id="see-it">
+        <section className="pitch-section" id="see-it">
           <div className="pitch-head">
             <span className="eyebrow">what the team rollup shows</span>
             <h2>
@@ -398,7 +401,16 @@ function Teams() {
             </p>
           </div>
 
-          <RollupMock />
+          <a
+            className="dp-rollup-link"
+            href="/studio/team?demo"
+            aria-label="Open the live team rollup demo"
+          >
+            <RollupMock />
+            <span className="dp-rollup-cta" aria-hidden="true">
+              click to open the live demo &rarr;
+            </span>
+          </a>
 
           <p className="demo-caption">
             Mock of the rollup we are building with founding partners. The live
@@ -564,7 +576,7 @@ function Teams() {
         </section>
 
         {/* ============= sample payload ============= */}
-        <section className="pitch-section" id="payload">
+        <section className="pitch-section dp-alt" id="payload">
           <div className="pitch-head">
             <span className="eyebrow">what actually leaves a laptop</span>
             <h2>
@@ -658,7 +670,7 @@ function Teams() {
         </section>
 
         {/* ============= security FAQ ============= */}
-        <section className="pitch-section dp-alt" id="security">
+        <section className="pitch-section" id="security">
           <div className="pitch-head">
             <span className="eyebrow">security, plainly</span>
             <h2>
@@ -712,7 +724,7 @@ function Teams() {
         </section>
 
         {/* ============= founding cohort (scarcity) ============= */}
-        <section className="pitch-section" id="cohort">
+        <section className="pitch-section dp-alt" id="cohort">
           <div className="pitch-head">
             <span className="eyebrow">the founding cohort</span>
             <h2>
