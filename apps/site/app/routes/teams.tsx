@@ -442,9 +442,6 @@ function LiveDemoEmbed() {
               loading="lazy"
               tabIndex={-1}
             />
-            <span className="dp-live-tag" aria-hidden="true">
-              live demo &middot; sample data
-            </span>
           </div>
         </div>
       ) : (
