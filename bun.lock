@@ -92,6 +92,7 @@
       "name": "@ax/site",
       "version": "0.0.0",
       "dependencies": {
+        "@ax/foresight": "workspace:*",
         "@ax/lib": "workspace:*",
         "@ax/onboarding-prompt": "workspace:*",
         "@ax/recap-deck": "workspace:*",

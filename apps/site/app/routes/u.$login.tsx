@@ -6,6 +6,7 @@ import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { fetchProfile, type ProfileV1 } from "@ax/lib/shared/community";
 import { ProfileDossier, UnclaimedDossier, type VsPeerState, type VsState } from "~/components/profile-dossier";
 import { parseCompareLogins } from "~/lib/radar";
+import { cachedFetchProfile } from "../profile-cache";
 
 export const Route = createFileRoute("/u/$login")({
     validateSearch: (search: Record<string, unknown>) => ({
@@ -35,7 +36,7 @@ function ProfilePage() {
     useEffect(() => {
         let alive = true;
         setState({ kind: "loading" });
-        fetchProfile(login)
+        cachedFetchProfile(login)
             .then((profile) => {
                 if (!alive) return;
                 // Identity binding: the registered login must match the
