@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { FooterCards } from "~/components/landing-v2";
@@ -350,6 +351,112 @@ function RollupMock() {
   );
 }
 
+/* ---- live demo embed: lazily swaps the static mock for the real studio ----
+   SSR/prerender renders <RollupMock /> (SEO + no-JS fallback). On the client,
+   once the section approaches the viewport (and we're on a desktop-width
+   screen), it swaps in a non-interactive, scaled iframe of the live demo. The
+   iframe stays pointer-events:none so the wrapping <a> remains the click target
+   and the landing page never scroll-traps. Mobile keeps the static mock. */
+const DEMO_URL = "/studio/team?demo";
+const LIVE_LOGICAL_WIDTH = 1440;
+
+function LiveDemoEmbed() {
+  const embedRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLAnchorElement>(null);
+  const [showIframe, setShowIframe] = useState(false);
+
+  // Mount the iframe lazily when the section nears the viewport (desktop only).
+  useEffect(() => {
+    const isMobile = window.matchMedia?.("(max-width: 719px)").matches ?? false;
+    if (isMobile) return;
+
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      // No IO support: still upgrade to the live demo on desktop.
+      setShowIframe(true);
+      return;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShowIframe(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // Keep the desktop-logical iframe scaled to fit the container width.
+  useEffect(() => {
+    if (!showIframe) return;
+    const embed = embedRef.current;
+    if (!embed) return;
+
+    const apply = () => {
+      const w = embed.clientWidth;
+      if (w > 0) {
+        embed.style.setProperty("--dp-scale", String(w / LIVE_LOGICAL_WIDTH));
+      }
+    };
+    apply();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(embed);
+    return () => ro.disconnect();
+  }, [showIframe]);
+
+  return (
+    <a
+      ref={rootRef}
+      className="dp-rollup-link"
+      href={DEMO_URL}
+      target="_blank"
+      rel="noopener"
+      aria-label="Open the ax team rollup live demo in a new tab"
+    >
+      {showIframe ? (
+        <div
+          className="browser browser--instrument dp-rollup dp-rollup--live"
+          role="img"
+          aria-label="ax team rollup live demo, running on sample data"
+        >
+          <div className="browser-bar">
+            <div className="browser-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div className="browser-url">ax studio &middot; live demo</div>
+            <div className="browser-spacer"></div>
+          </div>
+          <div className="dp-embed" ref={embedRef}>
+            <iframe
+              className="dp-embed__frame"
+              src={DEMO_URL}
+              title="ax team rollup live demo"
+              loading="lazy"
+              tabIndex={-1}
+            />
+            <span className="dp-live-tag" aria-hidden="true">
+              live demo &middot; sample data
+            </span>
+          </div>
+        </div>
+      ) : (
+        <RollupMock />
+      )}
+      <span className="dp-rollup-cta" aria-hidden="true">
+        open the live demo &rarr;
+      </span>
+    </a>
+  );
+}
+
 function Teams() {
   return (
     <>
@@ -401,21 +508,13 @@ function Teams() {
             </p>
           </div>
 
-          <a
-            className="dp-rollup-link"
-            href="/studio/team?demo"
-            aria-label="Open the live team rollup demo"
-          >
-            <RollupMock />
-            <span className="dp-rollup-cta" aria-hidden="true">
-              click to open the live demo &rarr;
-            </span>
-          </a>
+          <LiveDemoEmbed />
 
           <p className="demo-caption">
-            Mock of the rollup we are building with founding partners. The live
-            per-seat surface (<code>ax studio</code>) already renders these
-            numbers for one dev today.
+            This is the live <code>ax studio</code> team rollup embedded on
+            sample data &mdash; the same dashboard your cohort gets, not a
+            screenshot. The per-seat surface already renders these numbers for
+            one dev today.
           </p>
 
           <div className="cta-row">

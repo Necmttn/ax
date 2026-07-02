@@ -618,6 +618,44 @@
   box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.6);
 }
 
+/* live demo iframe embed --------------------------------------------------- */
+/* Renders the studio at a desktop-logical width, scaled to fit via a JS-set
+   --dp-scale, inside a fixed-ratio overflow-hidden frame. The iframe is
+   pointer-events:none so the wrapping link owns clicks (no scroll-trap). */
+.landing-v2 .dp-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1440 / 900;
+  overflow: hidden;
+  background: #0e0e0c;
+}
+.landing-v2 .dp-embed__frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  border: 0;
+  transform-origin: top left;
+  transform: scale(var(--dp-scale, 0.5));
+  pointer-events: none;
+}
+.landing-v2 .dp-live-tag {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 2;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  border-radius: 4px;
+  padding: 2px 7px;
+  background: rgba(14, 14, 12, 0.6);
+  pointer-events: none;
+}
+
 .landing-v2 .dp-rollup__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
