@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------------
-   pitch.css - scoped extras for the two A/B positioning pages (/teams, /registry).
+   pitch.css - scoped extras for the consolidated /teams page.
    Everything else reuses the existing .landing-v2 system (hero, eyebrow, lede,
    cta-row, prompt-pill, cta-secondary, cards, oss-proof-*). Only the bits the
    homepage didn't already have live here. Scoped under .landing-v2 so the design
@@ -337,7 +337,7 @@
 }
 
 /* ===========================================================================
-   design-partners page (/design-partners) - namespaced .dp-* extras.
+   /teams page - namespaced .dp-* extras.
    Reuses the shared .landing-v2 tokens; the rollup mock rides on the shared
    .browser--instrument dark-token remap so it reads instrument-dark for free.
    ========================================================================= */

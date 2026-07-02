@@ -45,4 +45,9 @@
 # /u/ profile card. MUST precede the /* catch-all (first match wins).
 /@*  /u/:splat  301
 
+# Consolidated /teams page (was /design-partners + /registry). First-match-wins,
+# so these MUST precede the /* SPA catch-all below.
+/design-partners  /teams  301
+/registry  /teams  301
+
 /*  /index.html  200

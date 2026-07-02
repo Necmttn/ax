@@ -35,8 +35,6 @@ export function SiteFooter() {
         <div className="footer-base-links">
           <Link to="/teams">For teams</Link>
           <span aria-hidden="true">·</span>
-          <Link to="/registry">Registry</Link>
-          <span aria-hidden="true">·</span>
           <Link to="/brand">Brand</Link>
         </div>
         <div className="footer-base-meta">
