@@ -501,7 +501,8 @@ function Teams() {
             </h2>
             <p>
               Every number is a team-level aggregate. There is no per-person
-              leaderboard and no way to drill into one dev.
+              leaderboard and no way to drill into one dev &mdash; the
+              what-works detail stays on each seat, below.
             </p>
           </div>
 
@@ -521,8 +522,55 @@ function Teams() {
           </div>
         </section>
 
+        {/* ============= per-seat insight: what works, not just how much ============= */}
+        <section className="pitch-section dp-alt" id="what-works">
+          <div className="pitch-head">
+            <span className="eyebrow">beyond the aggregates</span>
+            <h2>
+              It still tells you <em>what works</em> &mdash; on every seat.
+            </h2>
+            <p>
+              The rollup rides on the same engine every dev already runs
+              locally. The full-detail answers never leave the laptop; the team
+              layer only reports whether the wins spread.
+            </p>
+          </div>
+
+          <div className="pitch-triad">
+            <div className="pitch-fcard">
+              <h3>Which prompts &amp; skills pay off</h3>
+              <p>
+                Skills ranked by real usage and outcome, and the prompt
+                patterns that correlate with landed work &mdash; mined from
+                each dev&rsquo;s own sessions, on their own machine.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <h3>Where the agent churns</h3>
+              <p>
+                Edit-repair loops, failed checks, sessions that burned tokens
+                without landing a change &mdash; per repo, so a dev sees
+                exactly where AI wastes their time.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <h3>What overpays</h3>
+              <p>
+                Routine sub-tasks that ran on the expensive frontier default,
+                priced with what routing them one tier down would save.
+              </p>
+            </div>
+          </div>
+
+          <p className="demo-caption">
+            The team rollup is these answers, aggregated: which skills spread,
+            which workflows stick across seats, how much routable spend is
+            still on the table.
+          </p>
+        </section>
+
         {/* ============= spread what works (skill mesh) ============= */}
-        <section className="pitch-section dp-alt" id="mesh">
+        <section className="pitch-section" id="mesh">
           <div className="pitch-head">
             <span className="eyebrow">spread what works</span>
             <h2>
@@ -629,7 +677,7 @@ function Teams() {
         </section>
 
         {/* ============= zero-data (the differentiator) ============= */}
-        <section className="pitch-section" id="zero-data">
+        <section className="pitch-section dp-alt" id="zero-data">
           <div className="pitch-head">
             <span className="eyebrow">where your data lives</span>
             <h2>
@@ -672,7 +720,7 @@ function Teams() {
         </section>
 
         {/* ============= sample payload ============= */}
-        <section className="pitch-section dp-alt" id="payload">
+        <section className="pitch-section" id="payload">
           <div className="pitch-head">
             <span className="eyebrow">what actually leaves a laptop</span>
             <h2>
@@ -707,7 +755,7 @@ function Teams() {
         </section>
 
         {/* ============= privacy rules (k-anonymity) ============= */}
-        <section className="pitch-section" id="privacy">
+        <section className="pitch-section dp-alt" id="privacy">
           <div className="pitch-head">
             <span className="eyebrow">the privacy rules</span>
             <h2>
@@ -729,7 +777,7 @@ function Teams() {
         </section>
 
         {/* ============= how it works ============= */}
-        <section className="pitch-section dp-alt">
+        <section className="pitch-section">
           <div className="pitch-head">
             <span className="eyebrow">how it works</span>
             <h2>
@@ -766,7 +814,7 @@ function Teams() {
         </section>
 
         {/* ============= security FAQ ============= */}
-        <section className="pitch-section" id="security">
+        <section className="pitch-section dp-alt" id="security">
           <div className="pitch-head">
             <span className="eyebrow">security, plainly</span>
             <h2>
@@ -820,7 +868,7 @@ function Teams() {
         </section>
 
         {/* ============= founding cohort (scarcity) ============= */}
-        <section className="pitch-section dp-alt" id="cohort">
+        <section className="pitch-section" id="cohort">
           <div className="pitch-head">
             <span className="eyebrow">the founding cohort</span>
             <h2>
@@ -861,7 +909,7 @@ function Teams() {
         </section>
 
         {/* ============= pricing ============= */}
-        <section className="pitch-section" id="pricing">
+        <section className="pitch-section dp-alt" id="pricing">
           <div className="pitch-head">
             <span className="eyebrow">founding pricing</span>
             <h2>
