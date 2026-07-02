@@ -22,10 +22,11 @@
     "@tanstack/react-router": "^1.166.0"
   },
   "devDependencies": {
+    "@tanstack/react-router": "^1.170.0",
     "@types/bun": "catalog:",
     "@types/react": "^19.2.0",
+    "happy-dom": "^20.10.6",
     "react": "^19.2.0",
-    "@tanstack/react-router": "^1.170.0",
     "typescript": "catalog:"
   }
 }
