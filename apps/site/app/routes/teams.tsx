@@ -501,7 +501,8 @@ function Teams() {
             </h2>
             <p>
               Every number is a team-level aggregate. There is no per-person
-              leaderboard and no way to drill into one dev.
+              leaderboard and no way to drill into one dev &mdash; the
+              what-works detail stays on each seat, below.
             </p>
           </div>
 
@@ -521,8 +522,85 @@ function Teams() {
           </div>
         </section>
 
+        {/* ============= per-seat insight: what works, not just how much ============= */}
+        <section className="pitch-section dp-alt" id="what-works">
+          <div className="pitch-head">
+            <span className="eyebrow">beyond the aggregates</span>
+            <h2>
+              It still tells you <em>what works</em> &mdash; on every seat.
+            </h2>
+            <p>
+              The rollup rides on the same engine every dev already runs
+              locally. The full-detail answers never leave the laptop; the team
+              layer only reports whether the wins spread.
+            </p>
+          </div>
+
+          <div
+            className="pitch-triad"
+            role="img"
+            aria-label="Three per-seat receipts from a dev's local studio: prompts and skills that pay off, where the agent churns, and which sub-tasks overpay"
+          >
+            <div className="dp-card">
+              <span className="dp-card__label">
+                Prompts &amp; skills that pay off
+              </span>
+              <ul className="dp-list">
+                <li>
+                  <span>effect-kit</span>
+                  <span className="dp-list__meta">&times;41 &middot; 92% landed</span>
+                </li>
+                <li>
+                  <span>ship-checklist</span>
+                  <span className="dp-list__meta">&times;28 &middot; 88% landed</span>
+                </li>
+                <li>
+                  <span>&ldquo;plan, then edit&rdquo;</span>
+                  <span className="dp-list__meta">2.1&times; lift</span>
+                </li>
+              </ul>
+              <span className="dp-card__sub">
+                ax skills weighted &middot; ax directives mine
+              </span>
+            </div>
+            <div className="dp-card">
+              <span className="dp-card__label">Where the agent churns</span>
+              <div className="dp-card__row">
+                <span className="dp-card__big">7</span>
+                <span className="dp-card__unit">repair episodes, 30d</span>
+              </div>
+              <div className="dp-bar">
+                <span className="dp-bar__fill" style={{ width: "34%" }}></span>
+              </div>
+              <span className="dp-card__sub">
+                edit-repair loops, failed checks &middot; ax sessions churn
+              </span>
+            </div>
+            <div className="dp-card">
+              <span className="dp-card__label">What overpays</span>
+              <div className="dp-card__row">
+                <span className="dp-card__big">$605</span>
+                <span className="dp-card__unit">routable of $2,140</span>
+              </div>
+              <div className="dp-bar">
+                <span className="dp-bar__fill" style={{ width: "28%" }}></span>
+              </div>
+              <span className="dp-card__sub">
+                routine sub-tasks on the frontier default &middot; ax cost
+                routability
+              </span>
+            </div>
+          </div>
+
+          <p className="demo-caption">
+            Each dev&rsquo;s local studio renders these live today &mdash;
+            numbers here illustrative. The rollup above is the same answers,
+            aggregated across seats.
+          </p>
+        </section>
+
         {/* ============= spread what works (skill mesh) ============= */}
-        <section className="pitch-section dp-alt" id="mesh">
+        <section className="pitch-section" id="mesh">
           <div className="pitch-head">
             <span className="eyebrow">spread what works</span>
             <h2>
@@ -629,7 +707,7 @@ function Teams() {
         </section>
 
         {/* ============= zero-data (the differentiator) ============= */}
-        <section className="pitch-section" id="zero-data">
+        <section className="pitch-section dp-alt" id="zero-data">
           <div className="pitch-head">
             <span className="eyebrow">where your data lives</span>
             <h2>
@@ -672,7 +750,7 @@ function Teams() {
         </section>
 
         {/* ============= sample payload ============= */}
-        <section className="pitch-section dp-alt" id="payload">
+        <section className="pitch-section" id="payload">
           <div className="pitch-head">
             <span className="eyebrow">what actually leaves a laptop</span>
             <h2>
@@ -707,7 +785,7 @@ function Teams() {
         </section>
 
         {/* ============= privacy rules (k-anonymity) ============= */}
-        <section className="pitch-section" id="privacy">
+        <section className="pitch-section dp-alt" id="privacy">
           <div className="pitch-head">
             <span className="eyebrow">the privacy rules</span>
             <h2>
@@ -729,7 +807,7 @@ function Teams() {
         </section>
 
         {/* ============= how it works ============= */}
-        <section className="pitch-section dp-alt">
+        <section className="pitch-section">
           <div className="pitch-head">
             <span className="eyebrow">how it works</span>
             <h2>
@@ -766,7 +844,7 @@ function Teams() {
         </section>
 
         {/* ============= security FAQ ============= */}
-        <section className="pitch-section" id="security">
+        <section className="pitch-section dp-alt" id="security">
           <div className="pitch-head">
             <span className="eyebrow">security, plainly</span>
             <h2>
@@ -820,7 +898,7 @@ function Teams() {
         </section>
 
         {/* ============= founding cohort (scarcity) ============= */}
-        <section className="pitch-section dp-alt" id="cohort">
+        <section className="pitch-section" id="cohort">
           <div className="pitch-head">
             <span className="eyebrow">the founding cohort</span>
             <h2>
@@ -843,7 +921,7 @@ function Teams() {
             <p className="dp-scarcity__count">1 claimed &middot; 4 open</p>
             <ul className="dp-scarcity__list">
               <li>
-                <b>$12/seat locked.</b> Founding price holds as the product grows.
+                <b>$20/seat locked.</b> Founding price holds as the product grows.
               </li>
               <li>
                 <b>Direct founder line.</b> Onboarding by hand, weekly call.
@@ -861,16 +939,16 @@ function Teams() {
         </section>
 
         {/* ============= pricing ============= */}
-        <section className="pitch-section" id="pricing">
+        <section className="pitch-section dp-alt" id="pricing">
           <div className="pitch-head">
             <span className="eyebrow">founding pricing</span>
             <h2>
-              <em>$12</em> per developer, per month.
+              <em>$20</em> per developer, per month.
             </h2>
             <p>
-              Per-seat, self-serve, cancel anytime. A seat is a dev who pushes. It
-              rides as an add-on to the $20 to $40 per dev you already spend on
-              agents, and pays for itself the moment it redirects one routine
+              Per-seat, self-serve, cancel anytime. A seat is a dev who pushes.
+              It rides as a small add-on to the agent subscriptions you already
+              pay for, and pays for itself the moment it redirects one routine
               sub-task off the expensive default.
             </p>
           </div>
@@ -878,21 +956,21 @@ function Teams() {
             <div className="mini">
               <div className="mini-label">Per seat</div>
               <div className="mini-value">
-                <span className="unit">$</span>12<span className="unit">/mo</span>
+                <span className="unit">$</span>20<span className="unit">/mo</span>
               </div>
               <div className="mini-sub">a seat = a dev who <b>pushes</b></div>
             </div>
             <div className="mini">
               <div className="mini-label">10-dev team</div>
               <div className="mini-value">
-                <span className="unit">$</span>120<span className="unit">/mo</span>
+                <span className="unit">$</span>200<span className="unit">/mo</span>
               </div>
-              <div className="mini-sub">less than one redirected task</div>
+              <div className="mini-sub">a rounding error next to agent spend</div>
             </div>
             <div className="mini">
               <div className="mini-label">50-dev team</div>
               <div className="mini-value">
-                <span className="unit">$</span>600<span className="unit">/mo</span>
+                <span className="unit">$</span>1,000<span className="unit">/mo</span>
               </div>
               <div className="mini-sub">scales per seat, prorated</div>
             </div>
