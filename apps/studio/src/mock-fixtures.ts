@@ -20,6 +20,7 @@ import type {
     SessionInspectPayload,
     SessionInsightsPayload,
     SessionListResponse,
+    SessionListRow,
     SkillDetailPayload,
     SkillGraphPayload,
     SkillSourcePayload,
@@ -31,6 +32,10 @@ import type {
     WorkflowResponse,
     WrappedProfile,
 } from "@ax/lib/shared/dashboard-types";
+import type { UsageRollupSchema } from "@ax/lib/shared/api-contract";
+// Type-only import (erased at runtime, so no import cycle with api.ts, which
+// dynamically imports THIS module): the studio-side shape for /api/cost/models.
+import type { CostModelsResult } from "./api.ts";
 
 const NOW = "2026-05-26T14:08:00.000Z";
 
@@ -251,12 +256,237 @@ const NEXT_ACTIONS: NextActionsPayload = {
 // Empty-but-typed responses for the other endpoints
 // ---------------------------------------------------------------------------
 
-const EMPTY_SESSION_LIST: SessionListResponse = {
-    sessions: [],
-    total: 0,
-    offset: 0,
-    limit: 200,
-} as never;
+// ---------------------------------------------------------------------------
+// Sessions - a believable recent slice for the acme org. Deterministic (fixed
+// timestamps around NOW), so the /sessions route + StoryStrip render without a
+// daemon. has_raw_file:false -> rows show "no transcript" (no session-detail
+// mock surface needed); StoryStrip still fetches insights (mocked empty -> "–").
+// Costs are per-session (a recent list), NOT the monthly org total - so they
+// never contradict the $2,140/mo model spend the /team demo + cost view tell.
+// ---------------------------------------------------------------------------
+
+const M = 60_000;
+
+const sess = (
+    id: string,
+    project: string,
+    source: string,
+    model: string | null,
+    startISO: string,
+    durMs: number,
+    turns: number,
+    cost: number | null,
+    added: number | null,
+    removed: number | null,
+    commits: number | null,
+    reverted: number | null,
+    friction: number | null,
+    signal: "clean" | "friction" | null,
+    children = 0,
+    parent: string | null = null,
+): SessionListRow => ({
+    id: `session:${id}`,
+    project,
+    source,
+    cwd: `/Users/dev/acme/${project}`,
+    model,
+    started_at: startISO,
+    ended_at: new Date(Date.parse(startISO) + durMs).toISOString(),
+    has_raw_file: false,
+    turn_count: turns,
+    parent_session: parent,
+    direct_children_count: children,
+    cost_usd: cost,
+    burn_buckets: null,
+    friction,
+    signal,
+    produced_commits: commits,
+    reverted_commits: reverted,
+    lines_added: added,
+    lines_removed: removed,
+    is_live: false,
+});
+
+const SESSIONS: ReadonlyArray<SessionListRow> = [
+    sess("a1c2e3", "acme-web", "claude", "claude-opus-4-8", "2026-05-26T13:12:00Z", 52 * M, 61, 4.18, 214, 38, 3, 0, 0, "clean", 3),
+    sess("b4d5f6", "acme-api", "claude", "claude-sonnet-4-6", "2026-05-26T11:40:00Z", 38 * M, 44, 1.92, 132, 22, 2, 0, 1, "clean"),
+    sess("c7e8a9", "acme-web", "codex", "gpt-5.4", "2026-05-26T09:05:00Z", 71 * M, 88, 2.34, 96, 44, 1, 1, 2, "friction"),
+    sess("d1f2b3", "acme-mobile", "claude", "claude-sonnet-4-6", "2026-05-25T20:18:00Z", 26 * M, 31, 0.88, 67, 12, 1, 0, 0, "clean"),
+    sess("e4a5c6", "acme-api", "claude", "claude-opus-4-8", "2026-05-25T16:02:00Z", 94 * M, 112, 5.40, 288, 91, 4, 0, 0, "clean", 2),
+    sess("f7b8d9", "acme-billing", "cursor", "claude-haiku-4-5", "2026-05-25T14:22:00Z", 18 * M, 22, 0.31, 41, 9, 1, 0, 0, "clean"),
+    sess("a0c1e2", "acme-web", "claude", "claude-opus-4-8", "2026-05-24T22:41:00Z", 63 * M, 74, 3.11, 173, 52, 2, 1, 1, "friction", 1),
+    sess("b3d4f5", "acme-mobile", "codex", "gpt-5.4", "2026-05-24T18:09:00Z", 44 * M, 53, 1.05, 84, 31, 1, 0, 0, "clean"),
+    sess("c6e7a8", "acme-api", "claude", "claude-sonnet-4-6", "2026-05-24T10:33:00Z", 33 * M, 39, 1.44, 118, 27, 2, 0, 0, "clean"),
+    sess("d9f0b1", "acme-web", "claude", "claude-sonnet-4-6", "2026-05-23T21:15:00Z", 29 * M, 35, 1.02, 92, 18, 1, 0, 0, "clean"),
+    sess("e2a3c4", "acme-billing", "claude", "claude-haiku-4-5", "2026-05-23T15:48:00Z", 21 * M, 26, 0.44, 58, 14, 1, 0, 0, "clean"),
+    sess("f5b6d7", "acme-web", "cursor", "claude-sonnet-4-6", "2026-05-23T11:07:00Z", 47 * M, 57, 1.61, 142, 39, 2, 0, 1, "friction"),
+    sess("a8c9e0", "acme-mobile", "claude", "claude-opus-4-8", "2026-05-22T19:52:00Z", 55 * M, 66, 2.87, 156, 43, 3, 0, 0, "clean", 4),
+    sess("b1d2f3", "acme-api", "codex", "gpt-5.4", "2026-05-22T13:24:00Z", 39 * M, 47, 0.96, 79, 22, 1, 1, 0, "clean"),
+    sess("c4e5a6", "acme-web", "claude", "claude-opus-4-8", "2026-05-21T23:41:00Z", 82 * M, 98, 4.62, 246, 88, 4, 0, 2, "friction"),
+    sess("d7f8b9", "acme-billing", "claude", "claude-sonnet-4-6", "2026-05-21T16:18:00Z", 24 * M, 29, 0.79, 63, 16, 1, 0, 0, "clean"),
+    sess("e0a1c2", "acme-mobile", "claude", "claude-sonnet-4-6", "2026-05-20T20:03:00Z", 31 * M, 38, 1.13, 88, 19, 1, 0, 0, "clean"),
+    sess("f3b4d6", "acme-web", "claude", "claude-haiku-4-5", "2026-05-20T09:47:00Z", 16 * M, 19, 0.28, 34, 7, 1, 0, 0, "clean"),
+];
+
+/** Deterministic subagent children returned for any parent's /children call
+ *  (the sessions route only knows direct_children_count, not the ids). */
+const SESSION_CHILDREN_ROWS = (parentBare: string): ReadonlyArray<SessionListRow> => {
+    const parent = `session:${parentBare}`;
+    const base = Date.parse("2026-05-26T13:20:00Z");
+    return [
+        { ...sess(`${parentBare}-sub1`, "acme-web", "claude-subagent", "claude-sonnet-4-6", new Date(base).toISOString(), 12 * M, 14, 0.42, 38, 6, 1, 0, 0, "clean", 0, parent), project: null },
+        { ...sess(`${parentBare}-sub2`, "acme-web", "claude-subagent", "claude-haiku-4-5", new Date(base + 14 * M).toISOString(), 7 * M, 9, 0.11, 12, 2, 0, 0, 0, "clean", 0, parent), project: null },
+    ];
+};
+
+/** Parse ?offset/&limit/&source off a mock /api/sessions URL and page SESSIONS. */
+function sessionListResponse(path: string): SessionListResponse {
+    const usp = new URLSearchParams(path.split("?")[1] ?? "");
+    const source = usp.get("source");
+    const offset = Number(usp.get("offset") ?? "0") || 0;
+    const limit = Number(usp.get("limit") ?? "200") || 200;
+    const filtered = source && source !== "all"
+        ? SESSIONS.filter((s) => s.source === source)
+        : SESSIONS;
+    return {
+        sessions: filtered.slice(offset, offset + limit),
+        total_count: filtered.length,
+        burn_p90: null,
+        window: { offset, limit },
+    } as unknown as SessionListResponse;
+}
+
+// ---------------------------------------------------------------------------
+// Cost + routing - all echo the acme story: model spend sums to $2,140/mo
+// (opus $1,205 / sonnet $520 / haiku $210 / gpt-5.4 $205), $605 of it routable.
+// These match the /team ?demo board's DEMO_CHANNELS / DEMO_ORG numbers exactly.
+// ---------------------------------------------------------------------------
+
+const COST_MODELS: CostModelsResult = {
+    rows: [
+        { model: "claude-opus-4-8", sessions: 210, cost_usd: 1205 },
+        { model: "claude-sonnet-4-6", sessions: 276, cost_usd: 520 },
+        { model: "claude-haiku-4-5", sessions: 140, cost_usd: 210 },
+        { model: "gpt-5.4", sessions: 60, cost_usd: 205 },
+    ],
+    total_cost_usd: 2140,
+};
+
+// Spend split: model rollup (opus 1205 / sonnet 420+100=520 / haiku 210 /
+// gpt 205) matches COST_MODELS exactly; main = 1625, subagent = 515.
+const COST_SPLIT = {
+    rows: [
+        { origin: "main", model: "claude-opus-4-8", sessions: 210, cost_usd: 1205, share_pct: 56.3 },
+        { origin: "main", model: "claude-sonnet-4-6", sessions: 180, cost_usd: 420, share_pct: 19.6 },
+        { origin: "subagent", model: "claude-sonnet-4-6", sessions: 96, cost_usd: 100, share_pct: 4.7 },
+        { origin: "subagent", model: "claude-haiku-4-5", sessions: 140, cost_usd: 210, share_pct: 9.8 },
+        { origin: "subagent", model: "gpt-5.4", sessions: 60, cost_usd: 205, share_pct: 9.6 },
+    ],
+    totals: { cost_usd: 2140, sessions: 686 },
+};
+
+const COST_CANDIDATE_ROWS = [
+    { ts: "2026-05-26T13:20:00Z", description: "summarize acme-web PR diff for review", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.42, routing_match: { classId: "gather", suggest: "haiku" }, suggested_model: "haiku", est_savings_usd: 0.36 },
+    { ts: "2026-05-25T16:40:00Z", description: "extract error strings from acme-api logs", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.31, routing_match: { classId: "gather", suggest: "haiku" }, suggested_model: "haiku", est_savings_usd: 0.27 },
+    { ts: "2026-05-25T14:05:00Z", description: "rename billing config keys across repo", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.58, routing_match: { classId: "mechanical-impl", suggest: "sonnet" }, suggested_model: "sonnet", est_savings_usd: 0.33 },
+    { ts: "2026-05-24T22:12:00Z", description: "look up TanStack Router migration notes", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.44, routing_match: { classId: "niche-research", suggest: "sonnet" }, suggested_model: "sonnet", est_savings_usd: 0.25 },
+    { ts: "2026-05-24T11:33:00Z", description: "list unused exports in acme-mobile", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.29, routing_match: { classId: "gather", suggest: "haiku" }, suggested_model: "haiku", est_savings_usd: 0.25 },
+    { ts: "2026-05-23T15:58:00Z", description: "scaffold test files for acme-api handlers", agent_type: "general-purpose", dispatch_model: "inherit", child_model: "claude-opus-4-8", child_cost_usd: 0.51, routing_match: { classId: "mechanical-impl", suggest: "sonnet" }, suggested_model: "sonnet", est_savings_usd: 0.29 },
+];
+
+const COST_DISPATCHES = {
+    candidates: COST_CANDIDATE_ROWS,
+    total_est_savings_usd: COST_CANDIDATE_ROWS.reduce((s, c) => s + c.est_savings_usd, 0),
+    top_classes: [
+        { classId: "gather", savings_usd: 0.88 },
+        { classId: "mechanical-impl", savings_usd: 0.62 },
+        { classId: "niche-research", savings_usd: 0.25 },
+    ],
+};
+
+// Routability: routableUsd $605 = the /team demo's routable spend; main = 1625.
+const COST_ROUTABILITY = {
+    mainSpendUsd: 1625,
+    routableUsd: 605,
+    routablePct: 37.2,
+    estSavingsUsd: 178,
+    rows: [
+        { class: "gather", verdict: "routable", runs: 38, turns: 96, mainCostUsd: 245, tier: "haiku", repricedUsd: 149, estSavingsUsd: 96 },
+        { class: "mechanical-impl", verdict: "routable", runs: 24, turns: 71, mainCostUsd: 210, tier: "sonnet", repricedUsd: 158, estSavingsUsd: 52 },
+        { class: "niche-research", verdict: "routable", runs: 14, turns: 43, mainCostUsd: 150, tier: "sonnet", repricedUsd: 120, estSavingsUsd: 30 },
+        { class: "review", verdict: "stays", runs: 31, turns: 128, mainCostUsd: 520, tier: null, repricedUsd: null, estSavingsUsd: null },
+        { class: "design", verdict: "stays", runs: 12, turns: 64, mainCostUsd: 300, tier: null, repricedUsd: null, estSavingsUsd: null },
+        { class: "plan", verdict: "stays", runs: 9, turns: 41, mainCostUsd: 200, tier: null, repricedUsd: null, estSavingsUsd: null },
+    ],
+    days: 30,
+    minRun: 1,
+};
+
+const ROUTING_TABLE = {
+    version: 1,
+    classes: [
+        { id: "gather", pattern: "summarize|extract|list|find|search", flags: "i", suggest: "haiku", reason: "read-only gather work belongs on the cheap tier", origin: "default" },
+        { id: "mechanical-impl", pattern: "rename|move|format|scaffold|codemod", flags: "i", suggest: "sonnet", reason: "mechanical edits with clear acceptance", origin: "default" },
+        { id: "niche-research", pattern: "look up|research|investigate|read the docs", flags: "i", suggest: "sonnet", reason: "bounded research, no judgment call", origin: "default" },
+        { id: "acme-triage", pattern: "triage|classify|label", flags: "i", suggest: "sonnet", reason: "team-added routing class", origin: "user" },
+    ],
+    agentTypes: {},
+};
+
+/** Debounced backtest in the routing tuner - returns a plausible result so the
+ *  cost view is fully interactive in the demo (live-only save stays gated). */
+const ROUTING_BACKTEST = {
+    matched: [
+        { description: "summarize acme-web PR diff for review", childModel: "claude-opus-4-8", costUsd: 0.42, estSavingsUsd: 0.36 },
+        { description: "extract error strings from acme-api logs", childModel: "claude-opus-4-8", costUsd: 0.31, estSavingsUsd: 0.27 },
+        { description: "list unused exports in acme-mobile", childModel: "claude-opus-4-8", costUsd: 0.29, estSavingsUsd: 0.25 },
+    ],
+    excluded: [
+        { description: "review architecture decision for billing", childModel: "claude-opus-4-8", costUsd: 0.61, estSavingsUsd: 0 },
+    ],
+    missed: [
+        { description: "investigate flaky acme-api integration test", childModel: "claude-opus-4-8", costUsd: 0.38, estSavingsUsd: 0.22 },
+    ],
+    estSavingsUsd: 0.88,
+    matchedCount: 3,
+};
+
+// ---------------------------------------------------------------------------
+// Usage - CLI utilization rollup for /usage.
+// ---------------------------------------------------------------------------
+
+const USAGE: UsageRollupSchema = {
+    windowDays: 30,
+    total: 1240,
+    activeDays: 22,
+    topCommands: [
+        { command: "ingest", count: 312, last_used: "2026-05-26T13:40:00Z" },
+        { command: "sessions here", count: 188, last_used: "2026-05-26T12:10:00Z" },
+        { command: "recall", count: 141, last_used: "2026-05-26T09:22:00Z" },
+        { command: "skills weighted", count: 96, last_used: "2026-05-25T18:44:00Z" },
+        { command: "cost routability", count: 74, last_used: "2026-05-25T15:03:00Z" },
+        { command: "dispatches --candidates", count: 58, last_used: "2026-05-24T22:31:00Z" },
+        { command: "otel", count: 41, last_used: "2026-05-24T11:12:00Z" },
+    ],
+    topCommandsByOrigin: {
+        agent: [
+            { command: "ingest", count: 298, last_used: "2026-05-26T13:40:00Z" },
+            { command: "recall", count: 112, last_used: "2026-05-26T09:22:00Z" },
+            { command: "skills weighted", count: 71, last_used: "2026-05-25T18:44:00Z" },
+        ],
+        tty: [
+            { command: "sessions here", count: 154, last_used: "2026-05-26T12:10:00Z" },
+            { command: "cost routability", count: 62, last_used: "2026-05-25T15:03:00Z" },
+            { command: "dispatches --candidates", count: 44, last_used: "2026-05-24T22:31:00Z" },
+        ],
+    },
+    unusedSurface: ["profile widget", "dojo spar-plan", "routing impact", "directives workflows"],
+    originSplit: { agent: 860, tty: 380 },
+    reliability: [
+        { command: "ingest", runs: 312, failures: 4, failureRate: 0.013 },
+        { command: "recall", runs: 141, failures: 2, failureRate: 0.014 },
+    ],
+};
 
 const EMPTY_SESSION_COMPARE = {
     task_label: null,
@@ -394,10 +624,23 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
         return { status: "accepted", message: "(mock) state not persisted in studio preview" } as unknown as T;
     }
 
-    // Empties
+    // Cost + routing + usage (all echo the acme $2,140/mo story)
+    if (path === "/api/cost/models") return COST_MODELS as unknown as T;
+    if (path.startsWith("/api/cost/split")) return COST_SPLIT as unknown as T;
+    if (path.startsWith("/api/cost/dispatches")) return COST_DISPATCHES as unknown as T;
+    if (path.startsWith("/api/cost/routability")) return COST_ROUTABILITY as unknown as T;
+    if (path === "/api/routing/table") return ROUTING_TABLE as unknown as T;
+    if (path === "/api/routing/backtest" && method === "POST") return ROUTING_BACKTEST as unknown as T;
+    if (path.startsWith("/api/usage")) return USAGE as unknown as T;
+
+    // Sessions
     if (path.startsWith("/api/sessions/compare")) return EMPTY_SESSION_COMPARE as unknown as T;
     if (/^\/api\/sessions\/[^/]+\/insights$/.test(path)) return EMPTY_SESSION_INSIGHTS as unknown as T;
-    if (path.startsWith("/api/sessions")) return EMPTY_SESSION_LIST as unknown as T;
+    if (/^\/api\/sessions\/[^/]+\/children$/.test(path)) {
+        const parentBare = decodeURIComponent(path.split("/")[3]).replace(/^session:/, "");
+        return { parent_session: `session:${parentBare}`, children: SESSION_CHILDREN_ROWS(parentBare) } satisfies SessionChildrenResponse as unknown as T;
+    }
+    if (path.startsWith("/api/sessions")) return sessionListResponse(path) as unknown as T;
     if (path === "/api/tool-failures" || path.startsWith("/api/tool-failures/")) return EMPTY_TOOL_FAILURES as unknown as T;
     if (path.startsWith("/api/graph-explorer")) return EMPTY_GRAPH as unknown as T;
     if (path.startsWith("/api/skill-graph")) return EMPTY_SKILL_GRAPH as unknown as T;

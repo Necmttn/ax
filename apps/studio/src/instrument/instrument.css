@@ -174,7 +174,7 @@
 /* ===========================================================================
    VARIANT A - Mission Control (desktop HUD: icon rail + dense bento)
    ========================================================================= */
-.v-mc { display: grid; grid-template-columns: 60px 1fr; min-height: 100dvh; }
+.v-mc { display: grid; grid-template-columns: 60px 1fr; min-height: 100dvh; transition: grid-template-columns 0.18s var(--ease); }
 .v-mc-rail {
     border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center;
     gap: 6px; padding: 16px 0; background: var(--surface);
@@ -186,6 +186,22 @@
     text-decoration: none;
 }
 .v-mc-rail button.on, .v-mc-rail button:hover, .v-mc-rail a.on, .v-mc-rail a:hover { color: var(--display); border-color: var(--border-hi); background: var(--surface2); }
+/* rail glyph is the always-visible cell; the label rides beside it only when expanded */
+.v-mc-rail-g { display: grid; place-items: center; }
+.v-mc-rail-label { display: none; }
+.v-mc-rail-toggle { margin-top: auto; }
+/* expanded rail: widen the grid track + lay each item out as glyph + page name */
+.v-mc.nav-expanded { grid-template-columns: 208px 1fr; }
+.v-mc.nav-expanded .v-mc-rail { align-items: stretch; padding-left: 12px; padding-right: 12px; }
+.v-mc.nav-expanded .v-mc-rail .logo { padding-left: 6px; }
+.v-mc.nav-expanded .v-mc-rail button, .v-mc.nav-expanded .v-mc-rail a {
+    width: 100%; height: 36px; display: flex; align-items: center; justify-content: flex-start; gap: 11px; padding: 0 9px;
+}
+.v-mc.nav-expanded .v-mc-rail-g { width: 20px; flex: none; }
+.v-mc.nav-expanded .v-mc-rail-label {
+    display: inline; font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.02em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize;
+}
 .v-mc-main { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .v-mc-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .v-mc-crumb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--sec); text-transform: uppercase; }
