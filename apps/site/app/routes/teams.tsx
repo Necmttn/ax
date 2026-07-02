@@ -385,49 +385,6 @@ function Teams() {
           </div>
         </section>
 
-        {/* ============= zero-data (the differentiator) ============= */}
-        <section className="pitch-section" id="zero-data">
-          <div className="pitch-head">
-            <span className="eyebrow">where your data lives</span>
-            <h2>
-              The dashboard our servers <em>never see</em>.
-            </h2>
-            <p>
-              ax&rsquo;s servers never receive or store your telemetry,
-              transcripts, source, prompts, or derived rows. The frontend reads
-              your data with the viewer&rsquo;s own GitHub token. The only service
-              we run is a stateless auth broker.
-            </p>
-          </div>
-
-          <ArchitectureDiagram />
-
-          <div className="dp-claims">
-            <div className="dp-claim">
-              <span className="dp-claim__k">the database is your repo</span>
-              <p>
-                Aggregates land in a private repo in your own GitHub org, one
-                redacted file per dev. GitHub repo membership is team access.
-              </p>
-            </div>
-            <div className="dp-claim">
-              <span className="dp-claim__k">the browser does the math</span>
-              <p>
-                The dashboard aggregates client-side using the viewer&rsquo;s own
-                token. If we get breached, there is nothing of yours to leak.
-              </p>
-            </div>
-            <div className="dp-claim">
-              <span className="dp-claim__k">opt-in, default deny</span>
-              <p>
-                Nothing pushes until a dev runs <code>ax team join</code> inside a
-                specific repo. Repo identity is pinned, so a fork or rename
-                can&rsquo;t leak the wrong one.
-              </p>
-            </div>
-          </div>
-        </section>
-
         {/* ============= the rollup mock ============= */}
         <section className="pitch-section dp-alt" id="see-it">
           <div className="pitch-head">
@@ -453,78 +410,6 @@ function Teams() {
             <a className="cta-secondary" href="/studio/team?demo">
               Prefer to click around? Open the live demo &rarr;
             </a>
-          </div>
-        </section>
-
-        {/* ============= sample payload ============= */}
-        <section className="pitch-section" id="payload">
-          <div className="pitch-head">
-            <span className="eyebrow">what actually leaves a laptop</span>
-            <h2>
-              The <em>entire file</em> that ships.
-            </h2>
-            <p>
-              Names, not contents. No transcripts, no code, no prompts, no paths.
-              Daily-collapsed counts, sums and ratios.
-            </p>
-          </div>
-
-          <div className="dp-payload">
-            <div className="dp-payload__bar">
-              <span className="dp-payload__path">.ax-team/necmttn.json</span>
-              <span className="dp-payload__tag">redacted &middot; aggregates only</span>
-            </div>
-            <pre className="dp-payload__body">{`{
-  "login": "necmttn",
-  "window": "2026-06-01/2026-06-30",
-  "sessions": 214,
-  "active_days": 22,
-  "tokens": { "in": 4120000, "out": 385000 },
-  "routable_usd": 605,
-  "spend_usd": 2140,
-  "top_skills": ["effect-kit", "ship-checklist", "ax-extract-workflow"],
-  "churn_episodes": 7
-}`}</pre>
-            <p className="dp-payload__note">
-              This is the whole file that leaves. Names, not contents.
-            </p>
-          </div>
-        </section>
-
-        {/* ============= how it works ============= */}
-        <section className="pitch-section dp-alt">
-          <div className="pitch-head">
-            <span className="eyebrow">how it works</span>
-            <h2>
-              Setup is <em>minutes</em>. It is just git.
-            </h2>
-            <p>
-              No agents on your infra. No transcripts leaving machines.
-            </p>
-          </div>
-          <div className="pitch-triad">
-            <div className="pitch-fcard">
-              <h3>1 &middot; A private repo</h3>
-              <p>
-                Create a private <code>ax-team</code> repo in your GitHub org and
-                add your devs. Repo membership is team membership.
-              </p>
-            </div>
-            <div className="pitch-fcard">
-              <h3>2 &middot; Each dev opts in</h3>
-              <p>
-                Inside a work repo: <code>ax team join &lt;org&gt;</code>. A consent
-                screen shows exactly what is shared. Personal repos are never
-                joined.
-              </p>
-            </div>
-            <div className="pitch-fcard">
-              <h3>3 &middot; Open the dashboard</h3>
-              <p>
-                Log in with GitHub. It reads the repo with your own token and
-                renders. Aggregation happens in your browser.
-              </p>
-            </div>
           </div>
         </section>
 
@@ -635,6 +520,84 @@ function Teams() {
           </p>
         </section>
 
+        {/* ============= zero-data (the differentiator) ============= */}
+        <section className="pitch-section" id="zero-data">
+          <div className="pitch-head">
+            <span className="eyebrow">where your data lives</span>
+            <h2>
+              The dashboard our servers <em>never see</em>.
+            </h2>
+            <p>
+              ax&rsquo;s servers never receive or store your telemetry,
+              transcripts, source, prompts, or derived rows. The frontend reads
+              your data with the viewer&rsquo;s own GitHub token. The only service
+              we run is a stateless auth broker.
+            </p>
+          </div>
+
+          <ArchitectureDiagram />
+
+          <div className="dp-claims">
+            <div className="dp-claim">
+              <span className="dp-claim__k">the database is your repo</span>
+              <p>
+                Aggregates land in a private repo in your own GitHub org, one
+                redacted file per dev. GitHub repo membership is team access.
+              </p>
+            </div>
+            <div className="dp-claim">
+              <span className="dp-claim__k">the browser does the math</span>
+              <p>
+                The dashboard aggregates client-side using the viewer&rsquo;s own
+                token. If we get breached, there is nothing of yours to leak.
+              </p>
+            </div>
+            <div className="dp-claim">
+              <span className="dp-claim__k">opt-in, default deny</span>
+              <p>
+                Nothing pushes until a dev runs <code>ax team join</code> inside a
+                specific repo. Repo identity is pinned, so a fork or rename
+                can&rsquo;t leak the wrong one.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* ============= sample payload ============= */}
+        <section className="pitch-section" id="payload">
+          <div className="pitch-head">
+            <span className="eyebrow">what actually leaves a laptop</span>
+            <h2>
+              The <em>entire file</em> that ships.
+            </h2>
+            <p>
+              Names, not contents. No transcripts, no code, no prompts, no paths.
+              Daily-collapsed counts, sums and ratios.
+            </p>
+          </div>
+
+          <div className="dp-payload">
+            <div className="dp-payload__bar">
+              <span className="dp-payload__path">.ax-team/necmttn.json</span>
+              <span className="dp-payload__tag">redacted &middot; aggregates only</span>
+            </div>
+            <pre className="dp-payload__body">{`{
+  "login": "necmttn",
+  "window": "2026-06-01/2026-06-30",
+  "sessions": 214,
+  "active_days": 22,
+  "tokens": { "in": 4120000, "out": 385000 },
+  "routable_usd": 605,
+  "spend_usd": 2140,
+  "top_skills": ["effect-kit", "ship-checklist", "ax-extract-workflow"],
+  "churn_episodes": 7
+}`}</pre>
+            <p className="dp-payload__note">
+              This is the whole file that leaves. Names, not contents.
+            </p>
+          </div>
+        </section>
+
         {/* ============= privacy rules (k-anonymity) ============= */}
         <section className="pitch-section" id="privacy">
           <div className="pitch-head">
@@ -654,6 +617,43 @@ function Teams() {
               Team cells with fewer than <b>5</b> contributors are hidden. No
               individual drilldown. No per-person leaderboard.
             </p>
+          </div>
+        </section>
+
+        {/* ============= how it works ============= */}
+        <section className="pitch-section dp-alt">
+          <div className="pitch-head">
+            <span className="eyebrow">how it works</span>
+            <h2>
+              Setup is <em>minutes</em>. It is just git.
+            </h2>
+            <p>
+              No agents on your infra. No transcripts leaving machines.
+            </p>
+          </div>
+          <div className="pitch-triad">
+            <div className="pitch-fcard">
+              <h3>1 &middot; A private repo</h3>
+              <p>
+                Create a private <code>ax-team</code> repo in your GitHub org and
+                add your devs. Repo membership is team membership.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <h3>2 &middot; Each dev opts in</h3>
+              <p>
+                Inside a work repo: <code>ax team join &lt;org&gt;</code>. A consent
+                screen shows exactly what is shared. Personal repos are never
+                joined.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <h3>3 &middot; Open the dashboard</h3>
+              <p>
+                Log in with GitHub. It reads the repo with your own token and
+                renders. Aggregation happens in your browser.
+              </p>
+            </div>
           </div>
         </section>
 
