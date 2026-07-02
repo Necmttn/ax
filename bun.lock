@@ -132,6 +132,7 @@
       "name": "@ax/studio",
       "version": "0.15.0",
       "dependencies": {
+        "@ax/foresight": "workspace:*",
         "@ax/lib": "workspace:*",
         "@ax/recap-deck": "workspace:*",
         "@durable-streams/client": "^0.2.6",

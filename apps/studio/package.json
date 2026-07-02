@@ -13,6 +13,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@ax/foresight": "workspace:*",
     "@ax/lib": "workspace:*",
     "@ax/recap-deck": "workspace:*",
     "@durable-streams/client": "^0.2.6",

@@ -1,7 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
+import { ForesightLink } from "../foresight-link.ts";
 import { api } from "../api.ts";
+import { prefetchSessionInspect } from "../prefetch.ts";
 // BurnSpark kept on disk; not rendered in viz/strip views (story bar replaces it as the visual)
 // accordion view retired in favor of inline visuals; components kept for the session detail page
 import { SignalBadge } from "../components/session-insight/SignalBadge.tsx";
@@ -215,16 +217,17 @@ const Row = memo(function Row({
                     </span>
                 ) : null}
                 {s.has_raw_file ? (
-                    <Link
+                    <ForesightLink
                         to="/sessions/$sessionId"
                         params={{ sessionId: sid }}
                         preload="intent"
+                        prefetchData={prefetchSessionInspect(queryClient, sid)}
                         className="sx-id-link"
                         title={`Open ${s.id}`}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <code>{shortSessionId(s.id)}</code>
-                    </Link>
+                    </ForesightLink>
                 ) : (
                     <code title={s.id} style={{ marginLeft: 4, color: "var(--dim)" }}>{shortSessionId(s.id)}</code>
                 )}
@@ -262,15 +265,16 @@ const Row = memo(function Row({
             </td>
             <td style={{ whiteSpace: "nowrap" }}>
                 {s.has_raw_file ? (
-                    <Link
+                    <ForesightLink
                         to="/sessions/$sessionId"
                         params={{ sessionId: sid }}
                         preload="intent"
+                        prefetchData={prefetchSessionInspect(queryClient, sid)}
                         className="sx-open"
                         onClick={(e) => e.stopPropagation()}
                     >
                         open →
-                    </Link>
+                    </ForesightLink>
                 ) : (
                     <span className="sx-notx" title="No raw transcript stored - cannot inspect">no transcript</span>
                 )}
