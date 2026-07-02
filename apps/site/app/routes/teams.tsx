@@ -358,26 +358,21 @@ function Teams() {
         {/* ============= hero ============= */}
         <section className="hero">
           <HeroLogoField />
-          <span className="eyebrow">ax for teams &middot; founding cohort</span>
-          <span className="reg-badge">Founding cohort &middot; 4 of 5 spots open</span>
+          <span className="reg-badge">ax for teams &middot; founding cohort &middot; 4 of 5 spots open</span>
           <h1>
             Know if <em>AI</em> is working<br />
             across your team.
           </h1>
-          <p className="hero-human">
-            Without your data ever leaving your cloud.
-          </p>
           <p className="lede">
-            Rivals make you choose between visibility and warehousing your code
-            in their cloud. ax reads adoption, spend and effectiveness straight
-            from a private git repo you own.
+            Adoption, spend and effectiveness, read straight from a private git
+            repo you own. Your data never touches our cloud.
           </p>
 
           <div className="install-wrap">
             <span className="dp-status">
-              <b>Live today:</b> per-seat receipts + git-native skill mesh
+              <b>Live today:</b> per-seat receipts
               <span className="dp-status__sep">&middot;</span>
-              <b>Building with founding partners:</b> the team rollup
+              <b>With the cohort:</b> the team rollup
             </span>
             <div className="cta-row">
               <a className="prompt-pill is-solo" href={BOOK_URL}>
