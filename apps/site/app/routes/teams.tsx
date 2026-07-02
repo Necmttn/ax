@@ -965,7 +965,7 @@ function Teams() {
               <div className="mini-value">
                 <span className="unit">$</span>200<span className="unit">/mo</span>
               </div>
-              <div className="mini-sub">less than one redirected task</div>
+              <div className="mini-sub">a rounding error next to agent spend</div>
             </div>
             <div className="mini">
               <div className="mini-label">50-dev team</div>
