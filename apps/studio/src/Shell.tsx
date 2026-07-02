@@ -41,21 +41,29 @@ export function Shell({ children }: { children: ReactNode }) {
  *  instrument cards. */
 function InstrumentChrome({ children }: { children: ReactNode }) {
     const live = useIngestEvents();
+    // The marketing site embeds /team?demo in an iframe. The daemon-connect
+    // banner and the live/offline chrome read as "broken" inside a demo, so
+    // demo mode renders the bare instrument shell (same ?demo detection as
+    // team-metrics isDemo()).
+    const isDemo = typeof window !== "undefined"
+        && new URLSearchParams(window.location.search).has("demo");
     return (
         <InstrumentShell>
-            {STUDIO_MOCK ? <StudioBanner /> : null}
-            <div className="rdx-topbar">
-                <span
-                    className={`live-indicator ${live.connected ? "on" : "off"}`}
-                    title={live.lastEventAt
-                        ? `last ingest ${fmtLastUsed(live.lastEventAt)}`
-                        : live.connected ? "connected, no events yet" : "disconnected"}
-                >
-                    <span className="live-dot" />
-                    {live.connected ? "live" : "offline"}
-                </span>
-                <IngestSplash />
-            </div>
+            {STUDIO_MOCK && !isDemo ? <StudioBanner /> : null}
+            {isDemo ? null : (
+                <div className="rdx-topbar">
+                    <span
+                        className={`live-indicator ${live.connected ? "on" : "off"}`}
+                        title={live.lastEventAt
+                            ? `last ingest ${fmtLastUsed(live.lastEventAt)}`
+                            : live.connected ? "connected, no events yet" : "disconnected"}
+                    >
+                        <span className="live-dot" />
+                        {live.connected ? "live" : "offline"}
+                    </span>
+                    <IngestSplash />
+                </div>
+            )}
             {children}
         </InstrumentShell>
     );
