@@ -10,7 +10,7 @@ type ForesightLinkExtraProps = {
     hitSlop?: number | { top: number; left: number; right: number; bottom: number };
     /** ms before the same element may prefetch again. Default 30s. */
     reactivateAfter?: number;
-    /** Override the ledger/devtools key; defaults to to+params+search. */
+    /** Override the ledger/devtools key; defaults to to+params+search+hash. */
     foresightName?: string;
 };
 
@@ -34,8 +34,7 @@ export type ForesightLinkComponent = <
 // Internal props stay loosely typed (ComponentProps<typeof Link>) - the
 // precise per-callsite generics only need to hold at the export boundary,
 // where ForesightLinkImpl is cast to ForesightLinkComponent below.
-export type ForesightLinkProps = ComponentProps<typeof Link> & ForesightLinkExtraProps;
-type InternalLinkProps = ForesightLinkProps;
+type InternalLinkProps = ComponentProps<typeof Link> & ForesightLinkExtraProps;
 
 function stableStringify(value: unknown): string {
     if (value === null || typeof value !== "object") return JSON.stringify(value ?? "");
@@ -47,11 +46,12 @@ function stableStringify(value: unknown): string {
     return `{${body}}`;
 }
 
-function stableKeyFrom(to: unknown, params: unknown, search: unknown): string {
+function stableKeyFrom(to: unknown, params: unknown, search: unknown, hash?: unknown): string {
     const base = typeof to === "string" ? to : stableStringify(to);
     const paramsPart = params ? `:${stableStringify(params)}` : "";
     const searchPart = search ? `:${stableStringify(search)}` : "";
-    return `${base}${paramsPart}${searchPart}`;
+    const hashPart = hash ? `#${typeof hash === "string" ? hash.replace(/^#/, "") : stableStringify(hash)}` : "";
+    return `${base}${paramsPart}${searchPart}${hashPart}`;
 }
 
 function ForesightLinkImpl({
@@ -63,7 +63,7 @@ function ForesightLinkImpl({
     ...linkProps
 }: InternalLinkProps): ReactNode {
     const router = useRouter();
-    const key = foresightName ?? stableKeyFrom(linkProps.to, linkProps.params, linkProps.search);
+    const key = foresightName ?? stableKeyFrom(linkProps.to, linkProps.params, linkProps.search, linkProps.hash);
 
     const { elementRef } = useForesight<HTMLAnchorElement>({
         name: key,

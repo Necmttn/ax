@@ -46,6 +46,16 @@ describe("stableKeyFrom", () => {
         expect(a).not.toBe(b);
     });
 
+    test("hash participates in the key only when present", () => {
+        const withoutHash = stableKeyFrom("/", undefined, undefined, undefined);
+        const install = stableKeyFrom("/", undefined, undefined, "install");
+        const pricing = stableKeyFrom("/", undefined, undefined, "pricing");
+
+        expect(withoutHash).toBe("/");
+        expect(install).not.toBe(withoutHash);
+        expect(pricing).not.toBe(install);
+    });
+
     test("key order-independent for equivalent params/search objects", () => {
         const a = stableKeyFrom("/sessions/compare", undefined, { ids: "1,2", turns: true });
         const b = stableKeyFrom("/sessions/compare", undefined, { turns: true, ids: "1,2" });
