@@ -1,6 +1,6 @@
 {
   "name": "ax",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "ax monorepo root - workspace orchestration for the axctl CLI (apps/axctl), landing site (apps/site), and shared packages (@ax/lib, @ax/schema).",
