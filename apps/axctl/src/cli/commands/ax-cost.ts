@@ -14,6 +14,7 @@ import {
     fetchCostSessions,
     fetchCostSplit,
     type CostModelsResult,
+    type CostSessionsResult,
 } from "../../queries/cost-analytics.ts";
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import { fetchImageContext } from "../../queries/image-context.ts";
@@ -110,6 +111,47 @@ const costModelsCommand = Command.make(
 // ax cost sessions [--days=N] [--model=<name>] [--limit=N] [--json]
 // ---------------------------------------------------------------------------
 
+// Legend spelling out the money/token columns so the numbers are never
+// ambiguous when the wide table wraps (or when a row is copy-pasted without
+// the header). Survives wrap because it is its own line.
+export const COST_SESSIONS_LEGEND =
+    "cols: cost = est. USD · out_tok = output (completion) tokens · cache_tok = cache-hit (read input) tokens";
+
+export function renderCostSessionsTable(result: CostSessionsResult): string {
+    type SessionRow = {
+        session: string;
+        project: string;
+        model: string;
+        started: string;
+        cost: string;
+        out_tok: string;
+        cache_tok: string;
+    };
+
+    const rendered: SessionRow[] = result.rows.map((r) => ({
+        // Strip "session:" prefix and optional SurrealDB backtick wrapping (`uuid`)
+        session: r.session_id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1"),
+        project: r.project ?? "",
+        model: r.model ?? "?",
+        started: r.started_at ?? "",
+        cost: usd(r.cost_usd),
+        out_tok: integer(r.completion_tokens),
+        cache_tok: integer(r.cache_read_tokens),
+    }));
+
+    const cols: Column<SessionRow>[] = [
+        { header: "session", get: (r) => r.session, width: 36 },
+        { header: "project", get: (r) => r.project, width: 24, overflow: "clip" },
+        { header: "model", get: (r) => r.model, width: 28, overflow: "clip" },
+        { header: "started", get: (r) => r.started, width: 19, overflow: "clip" },
+        { header: "cost", get: (r) => r.cost, align: "right", width: 10 },
+        { header: "out_tok", get: (r) => r.out_tok, align: "right", width: 12 },
+        { header: "cache_tok", get: (r) => r.cache_tok, align: "right", width: 14 },
+    ];
+
+    return renderTable({ columns: cols, rows: rendered, gap: " " });
+}
+
 const cmdCostSessions = (input: {
     readonly sinceDays: number;
     readonly limit: number;
@@ -133,38 +175,8 @@ const cmdCostSessions = (input: {
             return;
         }
 
-        type SessionRow = {
-            session: string;
-            project: string;
-            model: string;
-            started: string;
-            cost: string;
-            completion: string;
-            cache_read: string;
-        };
-
-        const rendered: SessionRow[] = result.rows.map((r) => ({
-            // Strip "session:" prefix and optional SurrealDB backtick wrapping (`uuid`)
-            session: r.session_id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1"),
-            project: r.project ?? "",
-            model: r.model ?? "?",
-            started: r.started_at ?? "",
-            cost: usd(r.cost_usd),
-            completion: integer(r.completion_tokens),
-            cache_read: integer(r.cache_read_tokens),
-        }));
-
-        const cols: Column<SessionRow>[] = [
-            { header: "session", get: (r) => r.session, width: 36 },
-            { header: "project", get: (r) => r.project, width: 24, overflow: "clip" },
-            { header: "model", get: (r) => r.model, width: 28, overflow: "clip" },
-            { header: "started", get: (r) => r.started, width: 19, overflow: "clip" },
-            { header: "cost", get: (r) => r.cost, align: "right", width: 10 },
-            { header: "completion", get: (r) => r.completion, align: "right", width: 12 },
-            { header: "cache_read", get: (r) => r.cache_read, align: "right", width: 12 },
-        ];
-
-        console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+        console.log(renderCostSessionsTable(result));
+        console.log(`\n${COST_SESSIONS_LEGEND}`);
     });
 
 const costSessionsCommand = Command.make(
@@ -188,7 +200,7 @@ const costSessionsCommand = Command.make(
     },
 ).pipe(
     Command.withDescription(
-        "Top sessions by estimated cost: id, project, model, started_at, cost, completion tokens, cache-read tokens. " +
+        "Top sessions by estimated cost: session, project, model, started, cost (USD), out_tok (output tokens), cache_tok (cache-hit tokens). " +
         "--days=N (default 14)  --model=<name>  --limit=N (default 20)  --json",
     ),
 );
