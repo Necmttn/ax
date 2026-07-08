@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.1](https://github.com/Necmttn/ax/compare/v0.37.0...v0.37.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **ingest:** detect SurrealDB DateTime by toISOString(), not class name ([#670](https://github.com/Necmttn/ax/issues/670)) ([#672](https://github.com/Necmttn/ax/issues/672)) ([160f849](https://github.com/Necmttn/ax/commit/160f849541f43b6e48c81f0948246b7e7f1d4e69))
+* **ingest:** heartbeat + derive-stage watchdog so a hung stage can't wedge the run ([#671](https://github.com/Necmttn/ax/issues/671)) ([#673](https://github.com/Necmttn/ax/issues/673)) ([35442a1](https://github.com/Necmttn/ax/commit/35442a1b0f35c9420794505319064493aacc8f36))
+
 ## [0.37.0](https://github.com/Necmttn/ax/compare/v0.36.0...v0.37.0) (2026-07-07)
 
 
