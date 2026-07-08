@@ -622,13 +622,29 @@ describe("isoTimestamp", () => {
         expect(isoTimestamp("2024-03-01T00:00:00.000Z")).toBe("2024-03-01T00:00:00.000Z");
     });
 
-    it("handles SurrealDB DateTime objects via constructor name check", () => {
-        const fakeDateTime = {
-            constructor: { name: "DateTime" },
-            toString() { return "2024-06-01T12:00:00.000Z"; },
-        };
-        // Cast to satisfy TS - at runtime this is an object with the right constructor name
-        expect(isoTimestamp(fakeDateTime as unknown as Date)).toBe("2024-06-01T12:00:00.000Z");
+    it("handles a SurrealDB DateTime via its toISOString() method", () => {
+        class DateTime {
+            toISOString() { return "2024-06-01T12:00:00.000Z"; }
+        }
+        expect(isoTimestamp(new DateTime() as unknown as Date)).toBe("2024-06-01T12:00:00.000Z");
+    });
+
+    // #670 regression: `bun build --compile` renames the bundled SDK class
+    // (observed as `DateTime3`), so a `constructor.name === "DateTime"` check
+    // silently fell through to epoch (1970) ONLY in the compiled binary.
+    // Duck-typing on toISOString() is rename-proof.
+    it("handles a DateTime whose class was renamed by the bundler (DateTime3)", () => {
+        class DateTime3 {
+            toISOString() { return "2026-07-08T01:49:50.000Z"; }
+        }
+        const renamed = new DateTime3();
+        expect(renamed.constructor.name).toBe("DateTime3"); // guard the premise
+        expect(isoTimestamp(renamed as unknown as Date)).toBe("2026-07-08T01:49:50.000Z");
+    });
+
+    it("falls through to epoch for an object with no toISOString()", () => {
+        const notADate = { constructor: { name: "DateTime" }, toString() { return "nope"; } };
+        expect(isoTimestamp(notADate as unknown as Date)).toBe(new Date(0).toISOString());
     });
 
     it("returns epoch ISO for null", () => {
@@ -675,8 +691,7 @@ describe("isoTimestamp - warn on epoch fallback", () => {
     it("does NOT warn for a SurrealDB DateTime-like object", () => {
         withWarnSpy((calls) => {
             const fakeDateTime = {
-                constructor: { name: "DateTime" },
-                toString() { return "2024-06-01T12:00:00.000Z"; },
+                toISOString() { return "2024-06-01T12:00:00.000Z"; },
             };
             isoTimestamp(fakeDateTime as unknown as Date);
             expect(calls.length).toBe(0);
