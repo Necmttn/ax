@@ -1,4 +1,4 @@
-import { Deferred, Effect, Option, Semaphore } from "effect";
+import { Deferred, Effect, Fiber, Option, Semaphore } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
@@ -216,8 +216,11 @@ export const runPipeline = <S extends BaseStageStats, R>(
         });
 
         // Heartbeat: every N seconds, name the stages still running so a hang is
-        // visible instead of a silent stall (#671). Never completes on its own;
-        // `Effect.race` interrupts it the moment the pipeline finishes (or fails).
+        // visible instead of a silent stall (#671). It's a background fiber - NOT
+        // raced - because the pipeline's own result (success OR failure) must
+        // propagate unchanged (`Effect.race` resolves on the first success, so a
+        // failing pipeline would hang against the never-succeeding heartbeat). We
+        // fork it and interrupt it once the pipeline settles either way.
         const hb = heartbeatSeconds();
         if (hb <= 0) return yield* pipeline;
 
@@ -229,5 +232,6 @@ export const runPipeline = <S extends BaseStageStats, R>(
                 : Effect.void,
         ).pipe(Effect.delay(`${hb} seconds`), Effect.forever);
 
-        return yield* Effect.race(pipeline, heartbeat);
+        const hbFiber = yield* Effect.forkChild(heartbeat);
+        return yield* pipeline.pipe(Effect.ensuring(Fiber.interrupt(hbFiber)));
     });
