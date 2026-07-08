@@ -524,13 +524,13 @@ export const executeStatements = (
  * The union of input types accepted by `isoTimestamp`.
  * - `Date`            - JS Date object
  * - `string`          - already-formatted ISO string, passed through as-is
- * - SurrealDB DateTime - detected by `constructor.name === "DateTime"`,
- *                        coerced via `String(value)`
+ * - SurrealDB DateTime - any object exposing `toISOString()`; detected
+ *                        structurally (see `isoTimestamp` for why not by name)
  */
 export type TimestampInput =
     | Date
     | string
-    | { readonly constructor: { readonly name: string }; toString(): string };
+    | { toISOString(): string };
 
 /**
  * Sanitize an arbitrary string into a safe SurrealDB record-key segment.
@@ -587,7 +587,12 @@ export const recordKeyPart = (value: unknown, expectedTable?: string): string | 
  * Branch order:
  * 1. `value instanceof Date`  → `value.toISOString()`
  * 2. Non-empty string         → pass through unchanged
- * 3. SurrealDB DateTime object (`constructor.name === "DateTime"`) → `String(value)`
+ * 3. Any object exposing a `toISOString()` method (the SurrealDB DateTime) →
+ *    `value.toISOString()`. We duck-type on the method rather than checking
+ *    `constructor.name === "DateTime"`, because `bun build --compile` renames
+ *    the bundled SDK class (observed as `DateTime3`), so an exact-name check
+ *    silently falls through to epoch ONLY in the compiled binary - the #670
+ *    "1970-01-01" friction-view timestamps that source builds never showed.
  * 4. Anything else (null / undefined / unknown) → epoch `new Date(0).toISOString()`
  *    and emits a `console.warn` so silent epoch timestamps surface as data bugs
  *    (symptom: `ax insights friction` events timestamped `1970-01-01 00:00:00`)
@@ -595,7 +600,13 @@ export const recordKeyPart = (value: unknown, expectedTable?: string): string | 
 export const isoTimestamp = (value: TimestampInput | null | undefined): string => {
     if (value instanceof Date) return value.toISOString();
     if (typeof value === "string" && value.length > 0) return value;
-    if (value && typeof value === "object" && value.constructor.name === "DateTime") return String(value);
+    if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as { toISOString?: unknown }).toISOString === "function"
+    ) {
+        return (value as { toISOString(): string }).toISOString();
+    }
     const typeDesc = (() => {
         try {
             if (value === null) return "null";
