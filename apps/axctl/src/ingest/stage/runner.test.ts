@@ -8,7 +8,7 @@ import {
 } from "@ax/lib/live-traces/Sink";
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { LiveTrace } from "@ax/lib/live-traces/index";
-import { annotateStageProgress, PIPELINE_CONCURRENCY, runPipeline, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
+import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, runPipeline, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 
 const stage = (key: string, deps: string[]): StageDef => ({
@@ -317,5 +317,86 @@ describe("stageFileFailureAnnotator", () => {
         // Outside any span (plain CLI/test context): the hook is a no-op, not a crash.
         const hook = await Effect.runPromise(stageFileFailureAnnotator);
         await Effect.runPromise(hook({ total: 5, failures: [] }));
+    });
+});
+
+describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
+    it("heartbeatSeconds: default 30, honors override, rejects negative/NaN", () => {
+        expect(heartbeatSeconds({})).toBe(30);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "10" })).toBe(10);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "0" })).toBe(0);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "-5" })).toBe(30);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "abc" })).toBe(30);
+    });
+
+    it("deriveStageTimeoutSeconds: default 300, honors override, rejects negative/NaN", () => {
+        expect(deriveStageTimeoutSeconds({})).toBe(300);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "120" })).toBe(120);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "0" })).toBe(0);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "-1" })).toBe(300);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "nope" })).toBe(300);
+    });
+});
+
+describe("derive-stage watchdog (#671)", () => {
+    // Set/restore env vars around an async body (runPipeline reads them at call time).
+    const withEnv = async (vars: Record<string, string>, fn: () => Promise<void>): Promise<void> => {
+        const saved: Record<string, string | undefined> = {};
+        for (const k of Object.keys(vars)) {
+            saved[k] = process.env[k];
+            process.env[k] = vars[k];
+        }
+        try {
+            await fn();
+        } finally {
+            for (const k of Object.keys(vars)) {
+                if (saved[k] === undefined) delete process.env[k];
+                else process.env[k] = saved[k];
+            }
+        }
+    };
+
+    const ctx = () => IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+
+    it("fails a hung derive stage OPEN so the run finishes and downstream still runs", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const ran: string[] = [];
+            const hang: StageDef = {
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                run: () => Effect.never, // never resolves → watchdog must fire
+            };
+            const after: StageDef = {
+                meta: StageMeta.make({ key: "after", deps: ["hang"], tags: ["derive"] }),
+                run: () =>
+                    Effect.sync(() => {
+                        ran.push("after");
+                        return BaseStageStats.make({ durationMs: 0, summary: "after" });
+                    }),
+            };
+            const results = await Effect.runPromise(
+                runPipeline([hang, after], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            // Downstream ran despite the upstream hang, and the pipeline resolved.
+            expect(ran).toEqual(["after"]);
+            const summaries = results.map((r) => r.summary).sort();
+            expect(summaries).toContain("after");
+            expect(summaries).toContain("timed out (watchdog)");
+        });
+    });
+
+    it("does NOT watchdog a non-derive (ingest) stage that runs past the cap", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const slowIngest: StageDef = {
+                meta: StageMeta.make({ key: "slow", deps: [], tags: ["ingest"] }),
+                run: () =>
+                    Effect.sync(() => BaseStageStats.make({ durationMs: 0, summary: "real" })).pipe(
+                        Effect.delay("150 millis"), // 3× the cap, but ingest stages are exempt
+                    ),
+            };
+            const results = await Effect.runPromise(
+                runPipeline([slowIngest], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(results[0]!.summary).toBe("real");
+        });
     });
 });

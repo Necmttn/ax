@@ -10,6 +10,26 @@ import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
  *  × internal fan-out is already heavy. */
 export const PIPELINE_CONCURRENCY = 4;
 
+/** How often the pipeline logs which stages are still running, so a hung or
+ *  slow stage is attributable instead of looking like a silent stall (#671).
+ *  Env override `AX_INGEST_HEARTBEAT_SECONDS`; 0 disables. Exported for tests. */
+export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
+    const raw = Number(env.AX_INGEST_HEARTBEAT_SECONDS);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 30;
+};
+
+/** Hard per-stage cap applied to `derive`-tagged stages ONLY. Derives reshape
+ *  already-ingested rows and should finish fast; one that runs past this cap is
+ *  stuck (e.g. a SurrealDB query that hangs on a given server version, #671) and
+ *  is failed OPEN - a warning plus empty stats - so the rest of the pipeline
+ *  still completes and exits. Heavy ingest/provider stages (claude, codex, git)
+ *  are deliberately exempt: a full backfill legitimately runs for many minutes.
+ *  Env override `AX_STAGE_TIMEOUT_SECONDS`; 0 disables. Exported for tests. */
+export const deriveStageTimeoutSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
+    const raw = Number(env.AX_STAGE_TIMEOUT_SECONDS);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 300;
+};
+
 /** Annotate the active stage span with the numeric fields of its result stats
  *  (every stage's stats extend `BaseStageStats`). Emits `ingest.records` (the
  *  primary/largest count, used for the rows column + speed) plus each field as
@@ -128,25 +148,61 @@ export const runPipeline = <S extends BaseStageStats, R>(
         }
         const sem = yield* Semaphore.make(PIPELINE_CONCURRENCY);
 
+        // Stages currently executing (permit acquired, run not yet resolved). The
+        // heartbeat reads this so a hang is attributable to a specific stage (#671).
+        const inFlight = new Set<string>();
+        const stageTimeoutMs = deriveStageTimeoutSeconds() * 1000;
+
         const runStage = (s: StageDef<S, R>) =>
             Effect.gen(function* () {
                 for (const dep of s.meta.deps) {
                     const d = deferreds.get(dep);
                     if (d) yield* Deferred.await(d);
                 }
-                const stats: S = yield* sem.withPermits(1)(
-                    s.run(ctx).pipe(
-                        // Annotate the stage span with its result counts (inside the
-                        // span, before LiveTrace.step ends it) so progress reporters
-                        // can show rows/speed. Emitted as `attribute:ingest.*`
-                        // SpanEvents; consumers that don't care (e.g. the server bus)
-                        // ignore them.
-                        Effect.tap((stageStats) => annotateStageCounts(stageStats)),
-                        LiveTrace.step(s.meta.key, {
-                            "ingest.stage.tags": s.meta.tags.join(","),
-                        }),
-                    ),
+                const body = s.run(ctx).pipe(
+                    // Annotate the stage span with its result counts (inside the
+                    // span, before LiveTrace.step ends it) so progress reporters
+                    // can show rows/speed. Emitted as `attribute:ingest.*`
+                    // SpanEvents; consumers that don't care (e.g. the server bus)
+                    // ignore them.
+                    Effect.tap((stageStats) => annotateStageCounts(stageStats)),
+                    LiveTrace.step(s.meta.key, {
+                        "ingest.stage.tags": s.meta.tags.join(","),
+                    }),
                 );
+                // Watchdog: cap `derive` stages so one stuck derive can't wedge the
+                // whole run. On timeout, warn + fail OPEN with empty stats - downstream
+                // deps only await this Deferred (they never read its value; they re-query
+                // the DB), and the totals roll-up skips `durationMs` + non-numeric fields,
+                // so an empty BaseStageStats is a safe sentinel. Provider stages are exempt.
+                const guarded =
+                    stageTimeoutMs > 0 && s.meta.tags.includes("derive")
+                        ? body.pipe(
+                              Effect.timeoutOrElse({
+                                  duration: stageTimeoutMs,
+                                  orElse: () =>
+                                      Effect.logWarning(
+                                          `ingest: derive stage '${s.meta.key}' exceeded ${stageTimeoutMs / 1000}s - ` +
+                                              `skipping it (failed open) so the run can finish. ` +
+                                              `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
+                                      ).pipe(
+                                          Effect.as({
+                                              durationMs: stageTimeoutMs,
+                                              summary: "timed out (watchdog)",
+                                          } as unknown as S),
+                                      ),
+                              }),
+                          )
+                        : body;
+                const tracked = Effect.sync(() => {
+                    inFlight.add(s.meta.key);
+                }).pipe(
+                    Effect.andThen(() => guarded),
+                    Effect.ensuring(Effect.sync(() => {
+                        inFlight.delete(s.meta.key);
+                    })),
+                );
+                const stats: S = yield* sem.withPermits(1)(tracked);
                 return stats;
             }).pipe(
                 Effect.tap((stats) => Deferred.succeed(deferreds.get(s.meta.key)!, stats)),
@@ -155,8 +211,23 @@ export const runPipeline = <S extends BaseStageStats, R>(
                 ),
             );
 
-        const results = yield* Effect.forEach(stages, runStage, {
+        const pipeline = Effect.forEach(stages, runStage, {
             concurrency: "unbounded",
         });
-        return results;
+
+        // Heartbeat: every N seconds, name the stages still running so a hang is
+        // visible instead of a silent stall (#671). Never completes on its own;
+        // `Effect.race` interrupts it the moment the pipeline finishes (or fails).
+        const hb = heartbeatSeconds();
+        if (hb <= 0) return yield* pipeline;
+
+        const heartbeat = Effect.suspend(() =>
+            inFlight.size > 0
+                ? Effect.logInfo(
+                      `ingest: still running after ${hb}s - ${[...inFlight].sort().join(", ")}`,
+                  )
+                : Effect.void,
+        ).pipe(Effect.delay(`${hb} seconds`), Effect.forever);
+
+        return yield* Effect.race(pipeline, heartbeat);
     });
