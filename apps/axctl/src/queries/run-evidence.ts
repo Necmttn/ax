@@ -124,7 +124,10 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
         );
         // Headline kinds: the run's objective + repo identity (latest of each).
         const [heads] = yield* db.query<[Array<{ kind?: string | null; summary?: string | null }>]>(
-            `SELECT kind, summary FROM run_evidence_event
+            // `ts` must appear in the projection: SurrealDB rejects ORDER BY on an
+            // idiom that isn't selected ("Missing order idiom `ts`"). Harmless extra
+            // column - the consumer below reads only kind + summary.
+            `SELECT kind, summary, ts FROM run_evidence_event
              WHERE session = ${sessionRef} AND kind IN ["objective", "repo_state"] ORDER BY ts DESC;`,
         );
         const headOf = (kind: string): string | null =>

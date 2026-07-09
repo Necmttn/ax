@@ -517,8 +517,8 @@ const toolCallSql = (since: number | undefined): string =>
             name, has_error AS hasError, command_norm AS commandNorm
      FROM tool_call WHERE session != NONE ${sinceAndClause(since)};`;
 
-const commandOutcomeSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, record::id(tool_call) AS toolCall,
+export const commandOutcomeSql = (since: number | undefined): string =>
+    `SELECT record::id(id) AS id, record::id(session) AS session, (IF tool_call != NONE THEN record::id(tool_call) ELSE NONE END) AS toolCall,
             type::string(ts) AS ts, kind, status, command_norm AS commandNorm
      FROM command_outcome WHERE session != NONE ${sinceAndClause(since)};`;
 
@@ -560,8 +560,8 @@ const objectiveSql = (since: number | undefined): string =>
      FROM turn WHERE session != NONE AND role = "user" AND message_kind = "task" ${sinceAndClause(since)};`;
 
 // Policy decisions: hook invocations whose effect is a real intervention.
-const policyDecisionSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, record::id(tool_call) AS toolCall,
+export const policyDecisionSql = (since: number | undefined): string =>
+    `SELECT record::id(id) AS id, record::id(session) AS session, (IF tool_call != NONE THEN record::id(tool_call) ELSE NONE END) AS toolCall,
             type::string(ts) AS ts, hook_name AS hookName, effect, provider_status AS providerStatus
      FROM hook_command_invocation
      WHERE session != NONE AND effect IN ["blocked", "injected_context", "modified_input", "notified"] ${sinceAndClause(since)};`;
