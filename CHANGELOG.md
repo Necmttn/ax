@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.2](https://github.com/Necmttn/ax/compare/v0.37.1...v0.37.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **run-evidence:** NONE-safe tool_call + selected ORDER BY idiom (unblocks ingest on SurrealDB 3.2.0) ([#676](https://github.com/Necmttn/ax/issues/676)) ([5654fd7](https://github.com/Necmttn/ax/commit/5654fd7cd30fcc1812d684e3b5eb2f8e26c6c2f3))
+
 ## [0.37.1](https://github.com/Necmttn/ax/compare/v0.37.0...v0.37.1) (2026-07-08)
 
 
