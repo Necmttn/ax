@@ -3,12 +3,31 @@ import {
     buildLineage,
     buildRunEvidenceEvents,
     buildRunEvidenceRefs,
+    commandOutcomeSql,
     pickEarliestPerSession,
+    policyDecisionSql,
     RUN_EVIDENCE_DERIVED_KINDS,
     runEvidenceStage,
     type RunEvidenceSourceRows,
 } from "./derive-run-evidence.ts";
 import { runEvidenceEventRecordKey } from "@ax/lib/shared/run-evidence";
+
+// Regression for the crash reproduced on SurrealDB 3.2.0 (and any DB with
+// session-level hooks / hook-less outcomes): `record::id(tool_call)` throws
+// "Expected `record` but found `NONE`" when tool_call is NONE. Both SQLs that
+// project tool_call MUST guard the NONE case instead of calling record::id raw.
+describe("run-evidence SQL is NONE-safe on nullable tool_call", () => {
+    for (const [name, sql] of [
+        ["commandOutcomeSql", commandOutcomeSql(undefined)],
+        ["policyDecisionSql", policyDecisionSql(undefined)],
+    ] as const) {
+        test(`${name} guards record::id(tool_call) against NONE`, () => {
+            // The crashing form was a bare projection `record::id(tool_call) AS toolCall`.
+            expect(sql).not.toContain("record::id(tool_call) AS toolCall");
+            expect(sql).toContain("IF tool_call != NONE THEN record::id(tool_call) ELSE NONE END");
+        });
+    }
+});
 
 const sessionProvider = new Map<string, string>([
     ["sess-claude", "claude"],
