@@ -291,10 +291,10 @@ const routeTree = rootRoute.addChildren([
     narrationDemoRoute,
 ]);
 
-// Studio build serves at /studio/; mount router under that basepath so
-// `/studio/` resolves to the index route. Production `axctl serve` keeps
-// basepath = "" (root mount).
-const STUDIO_BASEPATH = import.meta.env.VITE_STUDIO_MOCK === "true" ? "/studio" : "";
+// The hosted web demo mounts under /studio. Daemon and desktop builds mount at
+// their origin root even though desktop also uses mock mode for endpoint
+// rewriting, so mock fixtures and router location stay independent concerns.
+const STUDIO_BASEPATH = import.meta.env.VITE_STUDIO_BASEPATH;
 
 export const router = createRouter({ routeTree, basepath: STUDIO_BASEPATH });
 

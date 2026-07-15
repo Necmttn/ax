@@ -19,25 +19,26 @@ const STUDIO_VERSION = ((): string => {
  *   daemon  - served by `ax serve` (base `/`, real /api proxy, emits ./dist)
  *   web     - hosted at ax.necmttn.com/studio/ (base `/studio/`, mock fixtures,
  *             emits ./dist-studio; staged into the site by scripts/stage-studio.ts)
- *   desktop - bundled into the desktop shell (relative base `./`, mock fixtures,
+ *   desktop - bundled into the desktop shell (origin-root base `/`, mock fixtures,
  *             emits ./dist-desktop)
  *
  * `vite dev` (daemon target) proxies /api/* to the Bun daemon on :1738.
  */
 type StudioTarget = "daemon" | "web" | "desktop";
 const TARGET = (process.env.STUDIO_TARGET ?? "daemon") as StudioTarget;
-const CONFIG: Record<StudioTarget, { base: string; outDir: string; mock: boolean }> = {
-    daemon: { base: "/", outDir: "dist", mock: false },
-    web: { base: "/studio/", outDir: "dist-studio", mock: true },
-    desktop: { base: "./", outDir: "dist-desktop", mock: true },
+const CONFIG: Record<StudioTarget, { base: string; routerBasepath: string; outDir: string; mock: boolean }> = {
+    daemon: { base: "/", routerBasepath: "", outDir: "dist", mock: false },
+    web: { base: "/studio/", routerBasepath: "/studio", outDir: "dist-studio", mock: true },
+    desktop: { base: "/", routerBasepath: "", outDir: "dist-desktop", mock: true },
 };
-const { base, outDir, mock } = CONFIG[TARGET];
+const { base, routerBasepath, outDir, mock } = CONFIG[TARGET];
 
 export default defineConfig({
     root: __dirname,
     base,
     define: {
         "import.meta.env.VITE_STUDIO_MOCK": JSON.stringify(mock ? "true" : "false"),
+        "import.meta.env.VITE_STUDIO_BASEPATH": JSON.stringify(routerBasepath),
         __STUDIO_VERSION__: JSON.stringify(STUDIO_VERSION),
     },
     plugins: [react()],

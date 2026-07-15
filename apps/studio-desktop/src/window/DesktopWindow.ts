@@ -22,7 +22,11 @@ const DEV_STUDIO_URL = "http://127.0.0.1:1739/?endpoint=http://127.0.0.1:1738";
  * serves the built studio SPA (`dist-desktop`). The `?endpoint=` query points
  * studio at the locally-running daemon.
  */
-const PROD_STUDIO_URL = "ax://studio/index.html?endpoint=http%3A%2F%2F127.0.0.1%3A1738";
+const PROD_STUDIO_URL = "ax://studio/?endpoint=http%3A%2F%2F127.0.0.1%3A1738";
+
+export function studioApplicationUrl(isDev: boolean): string {
+  return isDev ? DEV_STUDIO_URL : PROD_STUDIO_URL;
+}
 
 const WINDOW_WIDTH = 1200;
 const WINDOW_HEIGHT = 800;
@@ -35,7 +39,7 @@ const WINDOW_HEIGHT = 800;
  * exact for both the dev http origin and the prod `ax://studio` origin.
  */
 export function isSameAppOrigin(navigationUrl: string, isDev: boolean): boolean {
-  const applicationUrl = isDev ? DEV_STUDIO_URL : PROD_STUDIO_URL;
+  const applicationUrl = studioApplicationUrl(isDev);
   try {
     const app = new URL(applicationUrl);
     const target = new URL(navigationUrl);
@@ -80,7 +84,7 @@ const make = Effect.gen(function* () {
   const runPromise = Effect.runPromiseWith(context);
 
   const createWindow = Effect.gen(function* () {
-    const applicationUrl = environment.isDevelopment ? DEV_STUDIO_URL : PROD_STUDIO_URL;
+    const applicationUrl = studioApplicationUrl(environment.isDevelopment);
     const window = yield* electronWindow.create({
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
