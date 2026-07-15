@@ -13,6 +13,8 @@
  * The reverse (desktop quits while CLI relies on the spawned pair) is left for a
  * future "who owns the shared daemon" arbitration.
  */
+import * as Net from "node:net";
+
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { HttpClient } from "effect/unstable/http";
@@ -89,22 +91,26 @@ export const probeSurreal: Effect.Effect<boolean, never, HttpClient.HttpClient> 
 );
 
 /**
- * Try to bind a single loopback TCP port via `Bun.listen`; closes immediately.
- * `true` if it was bindable (free), `false` if the bind threw (occupied).
+ * Try to bind a single loopback TCP port, then close immediately. `true` if it
+ * was bindable (free), `false` if the bind failed (occupied).
+ *
+ * Uses Node's `net` because this runs in the Electron MAIN process, which is
+ * Node, NOT Bun - the earlier `Bun.listen` was `undefined` here, so every probe
+ * threw and `portsFree` was permanently `false`, which pinned arbitration to
+ * `conflict`/`spawn-ax-only` and the app could never spawn its own backend
+ * (#614). Total: any error resolves to `false`, never fails.
  */
 const portFree = (port: number): Effect.Effect<boolean> =>
-    Effect.try({
-        try: () => {
-            const server = Bun.listen({
-                hostname: "127.0.0.1",
-                port,
-                socket: { data() {} },
-            });
-            server.stop(true);
-            return true;
-        },
-        catch: () => false,
-    }).pipe(Effect.orElseSucceed(() => false));
+    Effect.callback<boolean>((resume) => {
+        const server = Net.createServer();
+        server.once("error", () => resume(Effect.succeed(false)));
+        server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
+            server.close(() => resume(Effect.succeed(true)));
+        });
+        return Effect.sync(() => {
+            server.close();
+        });
+    });
 
 /**
  * `true` only if BOTH daemon ports are currently bindable. Each port is closed
