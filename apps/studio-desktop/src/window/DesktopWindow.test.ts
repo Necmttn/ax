@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { isSameAppOrigin } from "./DesktopWindow.ts";
+import { isSameAppOrigin, studioApplicationUrl } from "./DesktopWindow.ts";
+
+test("prod: boot URL loads the router root with the daemon endpoint", () => {
+  const url = new URL(studioApplicationUrl(false));
+
+  expect(url.protocol).toBe("ax:");
+  expect(url.host).toBe("studio");
+  expect(url.pathname).toBe("/");
+  expect(url.searchParams.get("endpoint")).toBe("http://127.0.0.1:1738");
+});
 
 // Dev origin = the vite dev server (http://127.0.0.1:1739).
 test("dev: same-origin navigation (with/without query, any path) is allowed", () => {
