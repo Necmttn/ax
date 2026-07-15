@@ -5,6 +5,7 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
+import { agentEventIndexDoctorCheck, readIndexUnhealthyMarker } from "../ingest/agent-event-index-heal.ts";
 import { applyClaudeOtelEnv, applyCodexOtelToml } from "../otel/install-config.ts";
 import { fail } from "./commands/shared.ts";
 import {
@@ -1098,6 +1099,12 @@ export function collectDoctorReport(): Effect.Effect<
                         `without finalizing - the next 'ax ingest' auto-sweeps them, or run 'ax ingest reap' now`,
             });
         }
+        // agent_event ghost-index health (#680): a cheap fs read of the marker
+        // the codex self-heal writes only when an auto-rebuild couldn't clear a
+        // residual duplicate. No query, so it stays fast on a large agent_event.
+        const indexMarker = yield* readIndexUnhealthyMarker(DATA_DIR);
+        checks.push(agentEventIndexDoctorCheck(indexMarker));
+
         const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,

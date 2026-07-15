@@ -407,12 +407,13 @@ const cmdIngestHere = (args: string[]) => {
                 `--stages=${registry
                     .all()
                     .map((s) => s.meta.key)
-                    .filter((key) => !["codex", "pi", "opencode", "cursor"].includes(key))
+                    // codex now has a cwd filter (#680); pi/opencode/cursor don't yet.
+                    .filter((key) => !["pi", "opencode", "cursor"].includes(key))
                     .join(",")}`,
             ];
         if (!hasStagesArg) {
             process.stderr.write(
-                "axctl ingest here: codex, pi, opencode, cursor stages skipped - no cwd filter yet\n",
+                "axctl ingest here: pi, opencode, cursor stages skipped - no cwd filter yet\n",
             );
         }
 
@@ -534,8 +535,9 @@ const ingestHereCommand = Command.make(
         ]),
 ).pipe(Command.withDescription(
     "Ingest only the git repository at $PWD. Restricts the claude stage to the matching " +
-        "~/.claude/projects/<slug>/ transcript dir, restricts git history to this repo path. " +
-        "Codex, Pi, OpenCode, and Cursor are skipped by default (no cwd filter yet). " +
+        "~/.claude/projects/<slug>/ transcript dir, scopes codex sessions to those whose cwd is " +
+        "inside this repo, and restricts git history to this repo path. " +
+        "Pi, OpenCode, and Cursor are skipped by default (no cwd filter yet). " +
         "--stages=<a,b,c> overrides the default set.",
 ));
 

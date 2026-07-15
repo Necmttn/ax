@@ -35,8 +35,17 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
+// One owner for the dedupe rule: the ingest-time heal and this global repair
+// dedupe a session by the SAME pure planner (no copy). Re-export it so existing
+// importers of `planSessionDedup` from this script keep resolving.
+import {
+    AGENT_EVENT_SEQ_INDEX,
+    planSessionDedup,
+} from "../apps/axctl/src/ingest/agent-event-index-heal.ts";
 
-const INDEX_NAME = "agent_event_session_seq";
+export { planSessionDedup };
+
+const INDEX_NAME = AGENT_EVENT_SEQ_INDEX;
 const DRY_RUN = process.argv.includes("--dry-run");
 
 interface DupGroup {
@@ -44,20 +53,6 @@ interface DupGroup {
     readonly seq: number;
     readonly c: number;
 }
-
-/** Excess record ids to delete for one session: keep the first row at each seq,
- *  drop the rest. Pure so it can be reasoned about / unit-tested in isolation. */
-export const planSessionDedup = (
-    rows: ReadonlyArray<{ readonly id: string; readonly seq: number }>,
-): string[] => {
-    const seen = new Set<number>();
-    const drop: string[] = [];
-    for (const row of rows) {
-        if (seen.has(row.seq)) drop.push(row.id);
-        else seen.add(row.seq);
-    }
-    return drop;
-};
 
 const repair = Effect.gen(function* () {
     const db = yield* SurrealClient;
