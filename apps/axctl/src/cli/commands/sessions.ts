@@ -469,9 +469,14 @@ const cmdSessionShow = (input: {
         }
     });
 
-export const sessionTurnsFlag = Flag.choice("turns", ["full"] as const).pipe(
+// Boolean branch FIRST. With the choice branch first, a bare `--turns` fails
+// the choice parse (missing value) and the composition resolves to the boolean
+// branch's ABSENT default (false) instead of true - the advertised bare form
+// silently no-oped (#686, found dogfooding). Boolean-first parses bare
+// `--turns` as true; the inline `--turns=full` form still reaches the choice.
+export const sessionTurnsFlag = Flag.boolean("turns").pipe(
+    Flag.orElse(() => Flag.choice("turns", ["full"] as const)),
     Flag.withMetavar("[=full]"),
-    Flag.orElse(() => Flag.boolean("turns")),
 );
 
 /** Exported for the help-copy test: keeps the advertised flag forms
