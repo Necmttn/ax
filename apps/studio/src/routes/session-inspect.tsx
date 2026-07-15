@@ -1694,7 +1694,7 @@ export function RunEvidencePanel({ sessionId }: { readonly sessionId: string }) 
         queryFn: () => api.sessionEvidence(sessionId),
     });
     const ev: RunEvidencePayload | undefined = q.data;
-    if (!ev || ev.total === 0) return null;
+    if (!ev || !Array.isArray(ev.by_backing) || ev.total === 0) return null;
     const claim = ev.by_backing.find((b) => b.key === "model_claim")?.count ?? 0;
     return (
         <div

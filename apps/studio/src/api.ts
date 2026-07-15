@@ -451,11 +451,20 @@ export const api = {
                 },
             }),
         ),
-    sessionEvidence: (sessionId: string): Promise<RunEvidencePayload> =>
-        viaContractUnknown(
+    sessionEvidence: async (sessionId: string): Promise<RunEvidencePayload> => {
+        const payload = await viaContractUnknown<RunEvidencePayload>(
             `/api/sessions/${encodeURIComponent(sessionId)}/evidence`,
             (c) => c.sessions.sessionEvidence({ params: { id: sessionId } }),
-        ),
+        );
+        // Daemons older than the /evidence route answer via the legacy
+        // /api/sessions/:id+ catch-all with a 200 + session-detail shape.
+        // Reject it here so callers hit their query error path instead of
+        // crashing on `payload.by_backing`.
+        if (!Array.isArray((payload as { by_backing?: unknown }).by_backing)) {
+            throw new ApiError("daemon too old for run evidence - update axctl", 404);
+        }
+        return payload;
+    },
     sessionTimeline: (sessionId: string): Promise<SessionTimelinePayload> =>
         viaContractUnknown(
             `/api/sessions/${encodeURIComponent(sessionId)}/timeline`,

@@ -53,3 +53,9 @@ test("renders nothing when the session has no run-evidence events", () => {
     const html = render("s2", payload({ total: 0 }));
     expect(html).toBe("");
 });
+
+test("renders nothing when backing breakdown is missing", () => {
+    const malformed = { ...payload({ total: 5 }), by_backing: 3 as unknown as never[] };
+    const html = render("s3", malformed as RunEvidencePayload);
+    expect(html).toBe("");
+});

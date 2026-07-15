@@ -105,7 +105,7 @@ const CONTRACT_PATTERNS: ReadonlyArray<{ readonly method: string; readonly patte
     // That is intentional: both route into the contract and FindMyWay gives
     // static paths precedence over :param paths, so compare wins correctly.
     { method: "GET", pattern: /^\/api\/sessions\/[^/]+$/ },
-    { method: "GET", pattern: /^\/api\/sessions\/[^/]+\/(children|insights|inspect|timeline)$/ },
+    { method: "GET", pattern: /^\/api\/sessions\/[^/]+\/(children|evidence|insights|inspect|timeline)$/ },
     { method: "GET", pattern: /^\/api\/skills\/[^/]+\/(detail|source)$/ },
     { method: "POST", pattern: /^\/api\/skills\/[^/]+\/(decide|open)$/ },
     { method: "DELETE", pattern: /^\/api\/skills\/[^/]+\/decide$/ },

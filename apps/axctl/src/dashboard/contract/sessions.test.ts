@@ -48,6 +48,7 @@ describe("isContractRequest - sessions routing", () => {
     test("single-segment session param paths route to the contract", () => {
         expect(isContractRequest("GET", "/api/sessions/abc")).toBe(true);
         expect(isContractRequest("GET", "/api/sessions/abc/inspect")).toBe(true);
+        expect(isContractRequest("GET", "/api/sessions/abc/evidence")).toBe(true);
         expect(isContractRequest("GET", "/api/sessions/abc/children")).toBe(true);
         expect(isContractRequest("GET", "/api/sessions/abc/insights")).toBe(true);
         expect(isContractRequest("GET", "/api/sessions/abc/timeline")).toBe(true);
