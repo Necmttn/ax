@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
-    "build:main": "tsdown",
+    "build:main": "tsdown && bun run scripts/check-preload.ts",
     "build:studio": "bun --filter @ax/studio build:desktop",
     "build": "bun run build:studio && bun run build:main",
     "start": "bun run build && electron .",
