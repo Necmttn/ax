@@ -10,7 +10,7 @@ import { axMcpTools, defineMcpTool } from "./tools.ts";
 const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     recall: ["limit", "q", "sources"],
     sessions_around: ["date", "days", "project"],
-    session_show: ["byRole", "expand", "expandAll", "sessionId"],
+    session_show: ["byRole", "expand", "expandAll", "sessionId", "turns"],
     skills_weighted: ["limit", "windowDays"],
     skills_by_role: ["limit", "role"],
     skills_roles: ["skill"],

@@ -31,6 +31,7 @@ import { bucketNames, renderBucketBackends } from "@ax/schema/render";
 import { envConfig as readDbEnvConfig } from "@ax/lib/db";
 import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
+import { provisionRetroReviewerAgent } from "./managed-agents.ts";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -1443,7 +1444,21 @@ export function cmdSetup(
             else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
         }
 
-        // 2. ingest is NOT run here. A full backfill can take minutes; blocking
+        // 2. Claude Code agent templates. The embedded template keeps compiled
+        // binaries self-contained; the provisioner only refreshes ax-owned
+        // files and never clobbers a user's agent of the same name.
+        if (agents.includes("claude-code")) {
+            const provisioned = yield* provisionRetroReviewerAgent(
+                posixPath.join(HOME, ".claude", "agents"),
+            );
+            if (provisioned.status === "skipped_user_owned") {
+                console.log(`  agents: kept user-authored ${provisioned.path}`);
+            } else {
+                console.log(`  agents: ${provisioned.status} ${provisioned.path}`);
+            }
+        }
+
+        // 3. ingest is NOT run here. A full backfill can take minutes; blocking
         // setup on it makes install feel frozen, and re-running it on every
         // `ax update` is pure waste (the watcher + daily ETL keep the graph
         // fresh). The onboarding brief hands ingest to the agent as a narrated
@@ -1454,11 +1469,11 @@ export function cmdSetup(
         console.log("          ax ingest             # full backfill (watch live in ax serve)");
         console.log("          ...or the daily 04:00 sync fills it overnight.");
 
-        // 3. verify.
+        // 4. verify.
         console.log();
         yield* cmdDoctor([]);
 
-        // 4. hand off to the agent for ingest + the labeling loop (classify -> fill -> lint).
+        // 5. hand off to the agent for ingest + the labeling loop (classify -> fill -> lint).
         console.log();
         console.log(renderAgentOnboarding());
     });

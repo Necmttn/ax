@@ -253,11 +253,32 @@ export interface SessionCompaction {
     readonly summary: string | null;
 }
 
+export interface SessionTurnBase {
+    readonly seq: number;
+    readonly ts: string | null;
+    readonly role: string;
+    readonly message_kind: string | null;
+    readonly intent_kind: string | null;
+    readonly has_error: boolean;
+}
+
+export interface SessionTurnExcerpt extends SessionTurnBase {
+    readonly text_excerpt: string;
+}
+
+export interface SessionTurnFull extends SessionTurnBase {
+    readonly text: string;
+}
+
+export type SessionViewTurn = SessionTurnExcerpt | SessionTurnFull;
+
 export interface SessionViewPayload {
     readonly session: SessionDetailPayload;
     readonly expanded_subagents: ReadonlyArray<SessionDetailPayload>;
     readonly by_role: ReadonlyArray<SessionSkillRoleGroup> | null;
     readonly compactions: ReadonlyArray<SessionCompaction>;
+    /** Normalized cross-harness turns. Omitted when the caller did not request them. */
+    readonly turns?: ReadonlyArray<SessionViewTurn>;
 }
 
 export interface EpisodeShapeAggregate {

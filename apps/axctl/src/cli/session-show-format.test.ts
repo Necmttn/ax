@@ -251,6 +251,31 @@ describe("renderSessionMarkdown - compaction", () => {
     });
 });
 
+describe("renderSessionMarkdown - normalized turns", () => {
+    it("appends a compact role and text list capped near 120 characters", () => {
+        const longText = `${"A".repeat(130)}TAIL`;
+        const out = renderSessionMarkdown({
+            ...MINIMAL_PAYLOAD,
+            turns: [
+                {
+                    seq: 7,
+                    ts: "2026-05-28T14:40:00Z",
+                    role: "assistant",
+                    message_kind: "assistant",
+                    intent_kind: "response",
+                    text: longText,
+                    has_error: false,
+                },
+            ],
+        });
+
+        expect(out).toContain("## Turns (1)");
+        expect(out).toContain("assistant");
+        expect(out).toContain(`${"A".repeat(119)}…`);
+        expect(out).not.toContain("TAIL");
+    });
+});
+
 describe("renderSessionMarkdown - not found", () => {
     it("emits not-found message when overview is null", () => {
         const payload: SessionShowPayload = {
@@ -531,6 +556,26 @@ describe("renderSessionJson", () => {
     it("includes expanded_subagents array", () => {
         const parsed = JSON.parse(renderSessionJson(MINIMAL_PAYLOAD));
         expect(Array.isArray(parsed.expanded_subagents)).toBe(true);
+    });
+
+    it("includes the complete normalized turns array when requested", () => {
+        const turns = [
+            {
+                seq: 1,
+                ts: "2026-05-28T14:32:01Z",
+                role: "user",
+                message_kind: "user",
+                intent_kind: "task",
+                text: "Full normalized turn text",
+                has_error: false,
+            },
+        ] as const;
+        const parsed = JSON.parse(renderSessionJson({
+            ...MINIMAL_PAYLOAD,
+            turns,
+        }));
+
+        expect(parsed.turns).toEqual(turns);
     });
 
     it("includes expanded subagent data when provided", () => {

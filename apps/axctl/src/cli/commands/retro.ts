@@ -150,7 +150,7 @@ interface PendingSessionRow {
     readonly turns: number;
 }
 
-interface PendingSession {
+export interface PendingSession {
     readonly sessionId: string;     // `session:<key>` record id
     readonly key: string;           // bare key (UUID, no prefix)
     readonly project: string | null;
@@ -300,7 +300,7 @@ const cmdRetroPending = (input: {
  * with many turns, corrections, or tool errors → opus. The brief embeds
  * the suggestion as advisory metadata; the dispatcher picks the model.
  */
-const formatRetroBrief = (s: PendingSession, transcriptPath: string | null, suggestedModel: string): string => {
+export const formatRetroBrief = (s: PendingSession, transcriptPath: string | null, suggestedModel: string): string => {
     const fm = [
         "---",
         "kind: retro",
@@ -321,8 +321,10 @@ const formatRetroBrief = (s: PendingSession, transcriptPath: string | null, sugg
 
     const body = `# Retro: ${s.sessionId}
 
-Review the prior session and emit findings. Source of truth is the
-transcript at \`${transcriptPath ?? "(unknown - check raw_file on the session record)"}\`.
+Review the prior session and emit findings. Source of truth is the normalized Turn view:
+\`ax sessions show ${s.sessionId} --turns --json\`.
+
+raw transcript (harness-specific, large): \`${transcriptPath ?? "(unknown - check raw_file on the session record)"}\`
 
 ## What to look for
 

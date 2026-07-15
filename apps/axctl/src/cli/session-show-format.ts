@@ -211,6 +211,22 @@ function renderCompaction(payload: SessionShowPayload): string[] {
     return lines;
 }
 
+function renderTurns(payload: SessionShowPayload): string[] {
+    const turns = payload.turns ?? [];
+    if (turns.length === 0) return [];
+    const lines = [`## Turns (${turns.length})`, ""];
+    for (const turn of turns) {
+        const rawText = "text" in turn ? turn.text : turn.text_excerpt;
+        const compactText = rawText.replace(/\s+/g, " ").trim();
+        const excerpt = compactText.length <= 120
+            ? compactText
+            : `${compactText.slice(0, 119)}…`;
+        const error = turn.has_error ? " !" : "";
+        lines.push(`- ${turn.seq} ${turn.role}${error}  ${excerpt}`);
+    }
+    return lines;
+}
+
 /**
  * Render the session show payload as a markdown-flavoured TTY string.
  * Pure function - no I/O.
@@ -322,6 +338,13 @@ export function renderSessionMarkdown(
 
     lines.push("");
 
+    // ── normalized turns (opt-in) ───────────────────────────────────────────
+    const turnLines = renderTurns(payload);
+    if (turnLines.length > 0) {
+        lines.push(...turnLines);
+        lines.push("");
+    }
+
     // ── compaction section ───────────────────────────────────────────────────
     const compactionLines = renderCompaction(payload);
     if (compactionLines.length > 0) {
@@ -368,6 +391,9 @@ export function renderSessionJson(
             expanded_subagents: payload.expanded_subagents,
             ...(payload.by_role !== null && payload.by_role !== undefined
                 ? { by_role: payload.by_role }
+                : {}),
+            ...(payload.turns !== undefined
+                ? { turns: payload.turns }
                 : {}),
             ...(extras.metrics !== null && extras.metrics !== undefined
                 ? { metrics: extras.metrics }

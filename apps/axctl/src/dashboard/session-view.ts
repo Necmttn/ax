@@ -13,13 +13,18 @@ import type {
     SessionSkillRoleGroup,
     SessionTopSkill,
     SessionViewPayload,
+    SessionViewTurn,
 } from "@ax/lib/shared/dashboard-types";
 import { runQuery } from "@ax/lib/shared/graph-query";
 import {
     sessionSkillRolesQuery,
     type SessionSkillRoleEdge,
 } from "../queries/session-view.ts";
-import { sessionCompactionsQuery } from "../queries/session-detail.ts";
+import {
+    sessionCompactionsQuery,
+    sessionShareTurnsQuery,
+} from "../queries/session-detail.ts";
+import type { ShareTurn } from "../share/artifact.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 
 // Accepts both real UUIDs and our synthetic prefixed ids. Mirrors the
@@ -44,6 +49,38 @@ const fetchSessionCompactions = (
         return rows.filter((c): c is SessionCompaction => c !== null);
     });
 
+export type SessionTurnsMode = "excerpt" | "full";
+
+const toSessionViewTurn = (
+    turn: ShareTurn,
+    mode: SessionTurnsMode,
+): SessionViewTurn => {
+    const common = {
+        seq: turn.seq,
+        ts: turn.ts ?? null,
+        role: turn.role,
+        message_kind: turn.message_kind ?? null,
+        intent_kind: turn.intent_kind ?? null,
+        has_error: turn.has_error ?? false,
+    };
+    return mode === "full"
+        ? { ...common, text: turn.text }
+        : { ...common, text_excerpt: turn.text_excerpt ?? turn.text };
+};
+
+const fetchSessionTurns = (
+    sessionId: string,
+    mode: SessionTurnsMode,
+): Effect.Effect<ReadonlyArray<SessionViewTurn>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const recordRef = sessionRecordRef(sessionId);
+        if (!recordRef) return [] as ReadonlyArray<SessionViewTurn>;
+        const rows = yield* runQuery(sessionShareTurnsQuery, { recordRef });
+        return rows
+            .filter((turn): turn is ShareTurn => turn !== null)
+            .map((turn) => toSessionViewTurn(turn, mode));
+    });
+
 export type { SessionViewPayload } from "@ax/lib/shared/dashboard-types";
 
 export interface FetchSessionViewOptions {
@@ -62,7 +99,46 @@ export interface FetchSessionViewOptions {
      * "(unclassified)" by CLI callers.
      */
     readonly byRole?: boolean;
+    /** Include normalized turns as excerpts or full text. Omitted means no query. */
+    readonly turns?: SessionTurnsMode;
 }
+
+/**
+ * Transport-agnostic input for the Session View shared by CLI and MCP.
+ * Protocol decoders may use a boolean (`--turns`) or the explicit text mode;
+ * this seam owns presence, trimming, and mode semantics.
+ */
+export interface SessionViewQueryArgs {
+    readonly expand?: ReadonlyArray<string> | undefined;
+    readonly expandAll?: boolean | undefined;
+    readonly byRole?: boolean | undefined;
+    readonly turns?: boolean | SessionTurnsMode | undefined;
+}
+
+export type NormalizedSessionViewInput = Omit<
+    FetchSessionViewOptions,
+    "sessionId"
+>;
+
+export const normalizeSessionViewInput = (
+    args: SessionViewQueryArgs,
+): NormalizedSessionViewInput => {
+    const expand = new Set(
+        (args.expand ?? []).map((value) => value.trim()).filter(Boolean),
+    );
+    const turns = args.turns === true
+        ? "excerpt"
+        : args.turns === "excerpt" || args.turns === "full"
+          ? args.turns
+          : undefined;
+
+    return {
+        expand,
+        expandAll: args.expandAll === true,
+        byRole: args.byRole === true,
+        ...(turns === undefined ? {} : { turns }),
+    };
+};
 
 export const selectSessionChildrenToExpand = (
     children: ReadonlyArray<SessionLink>,
@@ -172,10 +248,13 @@ export const fetchSessionView: (
             : Effect.succeed(null);
 
     const compactionsEffect = fetchSessionCompactions(opts.sessionId);
+    const turnsEffect = opts.turns === undefined
+        ? Effect.succeed(null)
+        : fetchSessionTurns(opts.sessionId, opts.turns);
 
-    const [expanded, byRole, compactions] = yield* Effect.all(
-        [expandedEffect, byRoleEffect, compactionsEffect],
-        { concurrency: 3 },
+    const [expanded, byRole, compactions, turns] = yield* Effect.all(
+        [expandedEffect, byRoleEffect, compactionsEffect, turnsEffect],
+        { concurrency: 4 },
     );
 
     return {
@@ -183,5 +262,6 @@ export const fetchSessionView: (
         expanded_subagents: expanded,
         by_role: byRole,
         compactions,
+        ...(turns === null ? {} : { turns }),
     };
 });

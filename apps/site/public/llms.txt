@@ -74,6 +74,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax insights <view>` - 31 read-only graph views
 - `ax signals list | show` - relation-signal catalog (fragility cascades, etc.)
 - `ax sessions metrics`, `ax evidence weekly` - session health and weekly evidence rollups
+- `ax sessions show <id> --turns[=full] --json` - provider-neutral ordered Turn excerpts or full text for one session
 - `ax serve` - local dashboard with live ingest, session browser, and health views
 - `ax tui` - terminal skills browser
 
@@ -87,7 +88,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax doctor` - validate the install (db, watcher, skills)
 
 ### For agents (MCP)
-- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches, dojo_agenda
+- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches, dojo_agenda; `session_show` accepts `turns: "excerpt" | "full"` for normalized Turn content
 
 ## Q&A - "how do I..." mapped to the ax answer
 

@@ -653,10 +653,11 @@ Flags:
 ### `axctl retro brief`
 
 Write a `.ax/tasks/retro/<session-key>.md` task brief for one session.
-The brief is what the `retro-reviewer` subagent consumes. Frontmatter
-includes the transcript pointer, model used, turn count, pending
-reason, and a `suggested_model` heuristic (haiku for ≤5 turns, opus
-for ≥40 turns, sonnet otherwise).
+The brief is what the `retro-reviewer` subagent consumes. Its body names
+`ax sessions show <id> --turns --json` as the provider-neutral source of
+truth; frontmatter retains the raw transcript pointer as a secondary fallback,
+along with model used, turn count, pending reason, and a `suggested_model`
+heuristic (haiku for ≤5 turns, opus for ≥40 turns, sonnet otherwise).
 
 Flags:
 
@@ -777,10 +778,11 @@ axctl sessions near d923fcc
 axctl sessions near HEAD --json
 ```
 
-### `ax sessions show <id> [--expand=<uuid> | --all] [--by-role] [--json]`
+### `ax sessions show <id> [--expand=<uuid> | --all] [--by-role] [--turns[=full]] [--json]`
 
 Display the invoked-skill and tool-call timeline for one session. Subagent
-sessions are collapsed to one-line summaries by default.
+sessions are collapsed to one-line summaries by default. Normalized Turn text
+is opt-in so the default read stays bounded.
 
 Flags:
 
@@ -788,15 +790,18 @@ Flags:
 - `--all` - inline all subagent contents
 - `--by-role` - group the Top Skills section by role instead of a flat list;
   skills without a role appear under "(unclassified)"
+- `--turns` - append ordered cross-harness Turn excerpts; JSON includes
+  `{seq, ts, role, message_kind, intent_kind, text_excerpt, has_error}`
+- `--turns=full` - include full `text` instead of `text_excerpt`
 - `--json` - machine-readable; also the default when stdout is not a TTY
 
 `<id>` accepts a bare UUID, a `claude-subagent-<id>` string, or a full
 `session:⟨...⟩` record id.
 
 ```bash
-axctl sessions show a1b2c3d4-e5f6-...
-axctl sessions show a1b2c3d4 --expand=f9e8d7c6 --by-role
-axctl sessions show a1b2c3d4 --all --json
+ax sessions show a1b2c3d4-e5f6-...
+ax sessions show a1b2c3d4 --expand=f9e8d7c6 --by-role
+ax sessions show a1b2c3d4 --turns=full --json
 ```
 
 ### `ax recall <q> [--sources=turn,commit,skill] [--scope=here|all] [--project=? --skill=? --since=ISO] [--json]`

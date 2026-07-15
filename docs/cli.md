@@ -116,7 +116,7 @@ axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --project /
 axctl costs for --query "checkout bug" --since=7 --here
 axctl costs for --commit 464c80b
 axctl costs for --branch main --limit=20
-axctl sessions show <session-id>
+ax sessions show <session-id> --turns --json
 axctl pricing --query gpt-5.5
 ```
 
@@ -313,8 +313,9 @@ The 17 tools, each mirroring the matching CLI command:
 
 - **recall** - full-text recall across turns / commits / skills (`ax recall`).
 - **sessions_around** - sessions in a date window (`ax sessions around`).
-- **session_show** - one session's detail, with optional subagent expansion
-  and skill-by-role grouping (`ax sessions show`).
+- **session_show** - one session's detail, with optional normalized Turn
+  excerpts/full text, subagent expansion, and skill-by-role grouping
+  (`ax sessions show --turns[=full]`).
 - **skills_weighted** - usage x role-weight skill ranking (`ax skills weighted`).
 - **skills_by_role** - skills tagged with a given role (`ax skills by-role`).
 - **skills_roles** - roles for a given skill (`ax skills roles`).

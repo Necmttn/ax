@@ -5,10 +5,11 @@
  * and we assert the registry/envelope shape directly.
  */
 import { describe, expect, it } from "bun:test";
-import { ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AppLayer } from "@ax/lib/layers";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildServer, wrapToolError, wrapToolResult } from "./server.ts";
 import { axMcpTools } from "./tools.ts";
 
@@ -303,6 +304,69 @@ describe("NavLink next[] wiring", () => {
             rt,
         )) as { next: ReadonlyArray<{ cmd?: string }> };
         expect(result.next.some((l) => l.cmd?.includes("claude --resume"))).toBe(true);
+    });
+
+    it("session_show returns full normalized turns when requested", async () => {
+        const sessionId = "019e2531-b552-7b53-a029-c780adbb6560";
+        let turnQueries = 0;
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            fallback: (sql) => {
+                if (sql.includes("FROM turn")) {
+                    turnQueries += 1;
+                    return [[{
+                        id: "turn:one",
+                        seq: 1,
+                        ts: "2026-05-28T10:00:01Z",
+                        role: "user",
+                        message_kind: "user",
+                        intent_kind: "task",
+                        text: "Full Pi turn text through MCP",
+                        text_excerpt: "Full Pi turn…",
+                        has_error: false,
+                    }]];
+                }
+                if (sql.includes("FROM session:")) {
+                    return [[{
+                        id: `session:⟨${sessionId}⟩`,
+                        project: "test-project",
+                        cwd: "/tmp/test-project",
+                        source: "pi",
+                        started_at: "2026-05-28T10:00:00Z",
+                        ended_at: "2026-05-28T10:10:00Z",
+                    }]];
+                }
+                return [[]];
+            },
+        });
+        const rt = {
+            runPromise: (effect: Effect.Effect<unknown, unknown, never>) =>
+                Effect.runPromise(effect.pipe(Effect.provide(tc.layer))),
+        } as never;
+
+        const withoutTurns = (await byName("session_show").run(
+            { sessionId },
+            rt,
+        )) as Record<string, unknown>;
+
+        expect(turnQueries).toBe(0);
+        expect("turns" in withoutTurns).toBe(false);
+
+        const result = (await byName("session_show").run(
+            { sessionId, turns: "full" },
+            rt,
+        )) as { turns: ReadonlyArray<Record<string, unknown>> | null };
+
+        expect(turnQueries).toBe(1);
+        expect(result.turns?.[0]).toEqual({
+            seq: 1,
+            ts: "2026-05-28T10:00:01Z",
+            role: "user",
+            message_kind: "user",
+            intent_kind: "task",
+            text: "Full Pi turn text through MCP",
+            has_error: false,
+        });
     });
 });
 

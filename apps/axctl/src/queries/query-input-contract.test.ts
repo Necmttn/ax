@@ -37,6 +37,33 @@ import {
     normalizeSkillsByRoleParams,
     SKILLS_BY_ROLE_DEFAULT_LIMIT,
 } from "../dashboard/role-queries.ts";
+import { normalizeSessionViewInput } from "../dashboard/session-view.ts";
+
+// ---------------------------------------------------------------------------
+// session show - shared optional normalized-Turn mode
+// ---------------------------------------------------------------------------
+
+describe("normalizeSessionViewInput", () => {
+    test("normalizes CLI booleans and MCP modes through one shared seam", () => {
+        expect(normalizeSessionViewInput({ turns: true }).turns).toBe("excerpt");
+        expect(normalizeSessionViewInput({ turns: "excerpt" }).turns).toBe("excerpt");
+        expect(normalizeSessionViewInput({ turns: "full" }).turns).toBe("full");
+        expect("turns" in normalizeSessionViewInput({ turns: false })).toBe(false);
+        expect("turns" in normalizeSessionViewInput({})).toBe(false);
+    });
+
+    test("normalizes shared expansion and grouping presence rules", () => {
+        const input = normalizeSessionViewInput({
+            expand: [" child-a ", "", "child-b"],
+            expandAll: true,
+            byRole: true,
+        });
+
+        expect([...input.expand]).toEqual(["child-a", "child-b"]);
+        expect(input.expandAll).toBe(true);
+        expect(input.byRole).toBe(true);
+    });
+});
 
 // ---------------------------------------------------------------------------
 // recommend - DIVERGENT limit default (CLI 5, MCP 10)
