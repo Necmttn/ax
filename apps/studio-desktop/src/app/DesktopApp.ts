@@ -80,15 +80,50 @@ const startup = Effect.gen(function* () {
         yield* Effect.forkDetach(updates.checkForUpdates);
     }
 
-    // 7. IDE daemon-model continuity: register the app to launch at login as ONE
-    //    Developer-ID Login Item (mainAppService), so ingest/serve resume without
-    //    a separate background agent. Prod only (dev isn't in /Applications, and
-    //    SMAppService registration there errors). Fail-soft: never block boot.
+    // 7. IDE daemon-model continuity (prod-only; dev isn't in /Applications so
+    //    SMAppService registration errors there). Fail-soft on both items so a
+    //    registration failure NEVER blocks boot.
+    //
+    //    7a. Register the app itself to launch at login (mainAppService). This
+    //        ensures the Electron shell re-opens after a reboot, which in turn
+    //        re-starts the backend supervisor in spawn mode.
+    //
+    //    7b. Register the background helper LaunchAgent (agentService) so launchd
+    //        keeps surreal + ax serve alive even while the app window is closed.
+    //        The helper and the app login item are INDEPENDENT: both are registered.
+    //        Requires macOS 13+ and the plist bundled at
+    //        Contents/Library/LaunchAgents/com.necmttn.ax-studio.helper.plist.
+    //        On first registration macOS may return "requires-approval" - the user
+    //        must allow it in System Settings → General → Login Items.
     if (!environment.isDevelopment) {
         yield* electronApp.setOpenAtLogin(true).pipe(
             Effect.tap(() => logStartupInfo("registered launch-at-login (mainAppService)")),
             Effect.catchCause((cause) =>
                 logStartupInfo("could not register launch-at-login", {
+                    cause: String(cause),
+                }),
+            ),
+        );
+
+        yield* electronApp.registerBackgroundHelper.pipe(
+            Effect.tap(() =>
+                logStartupInfo("registered background helper (agentService)", {
+                    serviceName: "com.necmttn.ax-studio.helper",
+                }),
+            ),
+            Effect.flatMap(() => electronApp.helperStatus),
+            Effect.tap((status) => {
+                if (status === "requires-approval") {
+                    return logStartupInfo(
+                        "background helper requires user approval: " +
+                            "open System Settings → General → Login Items to allow it",
+                        { status },
+                    );
+                }
+                return logStartupInfo("background helper status", { status });
+            }),
+            Effect.catchCause((cause) =>
+                logStartupInfo("could not register background helper", {
                     cause: String(cause),
                 }),
             ),
