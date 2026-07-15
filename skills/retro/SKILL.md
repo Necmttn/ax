@@ -73,6 +73,10 @@ through the backlog so the experiment loop has signal next time.
    `model: opus` (override per session if `suggested_model` differs and
    the user asked you to economize).
 
+   If the `retro-reviewer` subagent type doesn't resolve (not installed,
+   or the active harness is not Claude Code), read and review the brief INLINE
+   using its required-output instructions instead of abandoning the backlog.
+
 5. Wait for all subagents. Aggregate results: counts of retros emitted,
    proposals recommended, model-fit suggestions. Render as a short
    summary. The user does not approve retro emissions per row - the

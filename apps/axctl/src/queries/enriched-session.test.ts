@@ -33,16 +33,18 @@ const INSIGHTS = { phases: [] } as unknown as SessionInsightsPayload;
 
 interface Calls {
     view: string[];
+    viewTurns: Array<"excerpt" | "full" | undefined>;
     detail: string[];
     metrics: string[];
     insights: string[];
 }
 
 const makeFetchers = (): { fetchers: EnrichedSessionFetchers; calls: Calls } => {
-    const calls: Calls = { view: [], detail: [], metrics: [], insights: [] };
+    const calls: Calls = { view: [], viewTurns: [], detail: [], metrics: [], insights: [] };
     const fetchers: EnrichedSessionFetchers = {
-        fetchView: ((opts: { sessionId: string }) => {
+        fetchView: ((opts: { sessionId: string; turns?: "excerpt" | "full" }) => {
             calls.view.push(opts.sessionId);
+            calls.viewTurns.push(opts.turns);
             return Effect.succeed(VIEW);
         }) as EnrichedSessionFetchers["fetchView"],
         fetchDetail: ((id: string) => {
@@ -86,6 +88,24 @@ describe("fetchEnrichedSession - base selection", () => {
         expect(calls.insights).toEqual([]);
         expect(result.view).toBe(VIEW);
         expect(result.detail).toBeNull();
+    });
+
+    it("forwards full normalized-turn mode to the Session View", async () => {
+        const { fetchers, calls } = makeFetchers();
+        await run(
+            {
+                sessionId: "s1",
+                base: {
+                    kind: "view",
+                    expand: new Set(),
+                    expandAll: false,
+                    turns: "full",
+                },
+            },
+            fetchers,
+        );
+
+        expect(calls.viewTurns).toEqual(["full"]);
     });
 
     it("base=detail runs fetchDetail only, populates .detail", async () => {

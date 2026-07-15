@@ -90,14 +90,121 @@ describe("session view role query", () => {
 });
 
 describe("fetchSessionView", () => {
+    it("includes ordered normalized turns in the requested text mode", async () => {
+        const primaryId = "019e0ad4-0000-0000-0000-000000000001";
+        let turnQueries = 0;
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            fallback: (sql) => {
+                if (sql.includes("FROM turn")) {
+                    turnQueries += 1;
+                    return [[
+                        {
+                            id: "turn:one",
+                            seq: 1,
+                            ts: "2026-05-28T10:00:01Z",
+                            role: "user",
+                            message_kind: "user",
+                            intent_kind: "task",
+                            text: "Please inspect the complete normalized turn.",
+                            text_excerpt: "Please inspect the complete…",
+                            has_error: false,
+                        },
+                        {
+                            id: "turn:two",
+                            seq: 2,
+                            ts: "2026-05-28T10:00:02Z",
+                            role: "assistant",
+                            message_kind: "assistant",
+                            intent_kind: "response",
+                            text: "I inspected the complete normalized turn.",
+                            text_excerpt: "I inspected the complete…",
+                            has_error: true,
+                        },
+                    ]];
+                }
+
+                if (sql.includes("FROM session:")) {
+                    return [[{
+                        id: `session:⟨${primaryId}⟩`,
+                        project: "test-project",
+                        cwd: "/tmp/test-project",
+                        source: "pi",
+                        started_at: "2026-05-28T10:00:00Z",
+                        ended_at: "2026-05-28T10:10:00Z",
+                    }]];
+                }
+
+                return [[]];
+            },
+        });
+
+        const result = await Effect.runPromise(
+            fetchSessionView({
+                sessionId: primaryId,
+                expand: new Set(),
+                expandAll: false,
+                turns: "excerpt",
+            }).pipe(Effect.provide(tc.layer)),
+        );
+
+        expect(turnQueries).toBe(1);
+        expect(result.turns).toEqual([
+            {
+                seq: 1,
+                ts: "2026-05-28T10:00:01Z",
+                role: "user",
+                message_kind: "user",
+                intent_kind: "task",
+                text_excerpt: "Please inspect the complete…",
+                has_error: false,
+            },
+            {
+                seq: 2,
+                ts: "2026-05-28T10:00:02Z",
+                role: "assistant",
+                message_kind: "assistant",
+                intent_kind: "response",
+                text_excerpt: "I inspected the complete…",
+                has_error: true,
+            },
+        ]);
+
+        const fullResult = await Effect.runPromise(
+            fetchSessionView({
+                sessionId: primaryId,
+                expand: new Set(),
+                expandAll: false,
+                turns: "full",
+            }).pipe(Effect.provide(tc.layer)),
+        );
+
+        expect(turnQueries).toBe(2);
+        expect(fullResult.turns?.[0]).toEqual({
+            seq: 1,
+            ts: "2026-05-28T10:00:01Z",
+            role: "user",
+            message_kind: "user",
+            intent_kind: "task",
+            text: "Please inspect the complete normalized turn.",
+            has_error: false,
+        });
+    });
+
     it("owns expansion and by-role grouping for the session show read shape", async () => {
         const primaryId = "019e0ad4-0000-0000-0000-000000000001";
         const childId = "claude-subagent-a41ef01d6ca8d521c";
         const seenRoleBindings: unknown[] = [];
+        let turnQueries = 0;
 
         const tc = makeTestSurrealClient({
             denyWrites: true,
             fallback: (sql, bindings) => {
+                if (sql.includes("FROM turn")) {
+                    turnQueries += 1;
+                    return [[]];
+                }
+
                 if (sql.includes("FROM plays_role")) {
                     seenRoleBindings.push(bindings);
                     return [
@@ -181,5 +288,7 @@ describe("fetchSessionView", () => {
         expect(seenRoleBindings).toEqual([
             { skills: ["plan-skill", "debug-skill", "raw-skill"] },
         ]);
+        expect(turnQueries).toBe(0);
+        expect("turns" in result).toBe(false);
     });
 });

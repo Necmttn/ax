@@ -11,6 +11,7 @@ import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { fetchSessionCompare } from "../../dashboard/session-compare.ts";
+import { normalizeSessionViewInput } from "../../dashboard/session-view.ts";
 import { fetchEnrichedSession } from "../../queries/enriched-session.ts";
 import {
     listSessionsHere,
@@ -381,20 +382,14 @@ const cmdSessionShow = (input: {
     readonly expand: ReadonlyArray<string>;
     readonly all: boolean;
     readonly byRole: boolean;
+    readonly turns: boolean | "full";
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
         // Required Argument.string("id") makes the old missing-id guard unreachable.
         const sessionId = input.id;
 
-        const expandAll = input.all;
-        const byRole = input.byRole;
         const useJson = wantsJsonFlag(input.json);
-
-        // Collect --expand=<uuid> values (repeatable)
-        const expandSet = new Set(
-            input.expand.map((v) => v.trim()).filter((v) => v.length > 0),
-        );
 
         // The Enriched Session facade (`fetchEnrichedSession`) is the single
         // home for assembling a session's read model. The CLI base is the full
@@ -407,9 +402,12 @@ const cmdSessionShow = (input: {
         let resolvedId = sessionId;
         const viewBase = {
             kind: "view",
-            expand: expandSet,
-            expandAll,
-            byRole,
+            ...normalizeSessionViewInput({
+                expand: input.expand,
+                expandAll: input.all,
+                byRole: input.byRole,
+                turns: input.turns,
+            }),
         } as const;
         let enriched = yield* fetchEnrichedSession({
             sessionId,
@@ -471,6 +469,11 @@ const cmdSessionShow = (input: {
         }
     });
 
+export const sessionTurnsFlag = Flag.choice("turns", ["full"] as const).pipe(
+    Flag.withMetavar("[=full]"),
+    Flag.orElse(() => Flag.boolean("turns")),
+);
+
 const sessionShowCommand = Command.make(
     "show",
     {
@@ -478,10 +481,11 @@ const sessionShowCommand = Command.make(
         expand: Flag.string("expand").pipe(Flag.atLeast(0)),
         all: Flag.boolean("all").pipe(Flag.withDefault(false)),
         byRole: Flag.boolean("by-role").pipe(Flag.withDefault(false)),
+        turns: sessionTurnsFlag,
         json: jsonFlag,
     },
-    ({ id, expand, all, byRole, json }) =>
-        cmdSessionShow({ id, expand, all, byRole, json }),
+    ({ id, expand, all, byRole, turns, json }) =>
+        cmdSessionShow({ id, expand, all, byRole, turns, json }),
 ).pipe(
     Command.withDescription(
         "Display a session's timeline (tool calls + subagent spawns) plus a Metrics " +
@@ -489,6 +493,7 @@ const sessionShowCommand = Command.make(
         "commits that fixed them). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
         "--by-role groups the Top skills section by role. " +
+        "--turns includes normalized cross-harness excerpts; --turns=full includes full text. " +
         "Auto markdown on TTY, JSON when piped. --json forces JSON. " +
         "Output ends with a `next:` footer of copy-paste follow-up commands (resume in harness, open parent, expand subagents).",
     ),

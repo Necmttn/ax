@@ -39,6 +39,7 @@ import {
     listSessionsAround,
     normalizeSessionsAroundOpts,
 } from "../dashboard/sessions-query.ts";
+import { normalizeSessionViewInput } from "../dashboard/session-view.ts";
 import { fetchEnrichedSession } from "../queries/enriched-session.ts";
 import { resolveStudioTarget } from "../dashboard/serve-instance.ts";
 import {
@@ -270,7 +271,7 @@ const sessionsAroundTool: AxMcpTool = defineMcpTool({
 const sessionShowTool: AxMcpTool = defineMcpTool({
     name: "session_show",
     description:
-        `Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id. ${NEXT_PROTOCOL_HINT}`,
+        `Show one session in detail: base facts, optional normalized cross-harness turns, expanded subagent children, and skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         sessionId: z
             .string()
@@ -287,10 +288,12 @@ const sessionShowTool: AxMcpTool = defineMcpTool({
             .boolean()
             .optional()
             .describe("Group the session's top skills by their role classifications."),
+        turns: z
+            .enum(["excerpt", "full"])
+            .optional()
+            .describe("Include normalized turns as excerpts or full text. Default: omitted."),
     },
     run: async (args, rt) => {
-        const expand = new Set(args.expand ?? []);
-        const expandAll = args.expandAll === true;
         // Read through the Enriched Session facade (the single home for
         // assembling a session read model). The MCP tool needs the Session View
         // base only - no metrics/insights - so the response shape is the bare
@@ -300,9 +303,12 @@ const sessionShowTool: AxMcpTool = defineMcpTool({
                 sessionId: args.sessionId,
                 base: {
                     kind: "view",
-                    expand,
-                    expandAll,
-                    ...(args.byRole !== undefined ? { byRole: args.byRole } : {}),
+                    ...normalizeSessionViewInput({
+                        expand: args.expand,
+                        expandAll: args.expandAll,
+                        byRole: args.byRole,
+                        turns: args.turns,
+                    }),
                 },
             }),
         );

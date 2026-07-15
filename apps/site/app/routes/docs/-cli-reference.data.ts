@@ -83,6 +83,7 @@ ingest: ok`,
         flags: [
           { flag: "--days=N", desc: "window size (here defaults 14, around defaults ±3)" },
           { flag: "--here", desc: "scope metrics/churn to the current git repo" },
+          { flag: "--turns[=full]", desc: "show normalized Turn excerpts or full text for one session" },
           { flag: "--json", desc: "machine output with a copy-paste `next:` follow-up envelope" },
         ],
         receipt: `$ ax sessions here --days=7
@@ -95,7 +96,7 @@ started_at                source            repo            turns  summary
           "ax sessions here lists pwd-repo sessions (default 14d). Subagent sessions are hidden unless --include-subagents.",
           "ax sessions around <date> takes a YYYY-MM-DD or ISO8601 date and a ±N-day window (--days, default 3); --project filters by slug or absolute path.",
           "ax sessions near <sha> lists sessions overlapping a commit window (predecessor commit ts → this commit ts); falls back to ±3d for orphan commits.",
-          "ax sessions show <id> renders one session's tool-call + subagent timeline plus a durability Metrics block; --expand=<uuid> (repeatable) or --all drills into subagents, --by-role groups top skills.",
+          "ax sessions show <id> renders one session's tool-call + subagent timeline plus a durability Metrics block; --turns adds normalized cross-harness excerpts (--turns=full returns full text), --expand=<uuid> or --all drills into subagents, and --by-role groups top skills.",
           "ax sessions compare <a> <b> [...] lines up 2+ runs on duration/tokens/cost/turns/errors and stars the winner per axis; --turns adds a per-turn appendix.",
           "ax sessions metrics lists graph-derived per-session metrics; --group-by=model|repo|source|week folds into rollups, --skill=<name> compares with/without the skill.",
           "ax sessions churn summarizes verification churn (edit/landed/repair LOC, failed checks, episodes); --since defaults 30d.",
@@ -690,6 +691,7 @@ ax daemon: running (pid 48213)
 ax MCP server ready (stdio) - 17 read-only tools
   recall  sessions_around  session_show  skills_weighted  ...`,
         detail: [
+          "The session_show tool accepts turns: excerpt|full to return ordered normalized Turn content without reading harness-specific raw files.",
           "Exposes 17 read-only tools (recall, sessions_around, session_show, session_metrics, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, signal_show, cost_models, cost_split, cost_routability, dispatches, dojo_agenda).",
           "Mutating ops and git-resolved queries (sessions here/near) are intentionally not exposed.",
         ],

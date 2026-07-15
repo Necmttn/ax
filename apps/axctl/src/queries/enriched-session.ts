@@ -118,6 +118,7 @@ export const fetchEnrichedSession: (
                 expand: opts.base.expand,
                 expandAll: opts.base.expandAll,
                 ...(opts.base.byRole === undefined ? {} : { byRole: opts.base.byRole }),
+                ...(opts.base.turns === undefined ? {} : { turns: opts.base.turns }),
             })
             .pipe(Effect.map((view) => ({ view, detail: null })))
         : fetchers
