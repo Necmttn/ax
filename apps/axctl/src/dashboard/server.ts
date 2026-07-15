@@ -130,6 +130,12 @@ function serveRootLanding(port: string): Response {
 const STUDIO_ORIGINS = new Set([
     "https://ax.necmttn.com",
     "http://ax.necmttn.com",
+    // The desktop app's renderer: studio loaded via the custom `ax://` scheme
+    // (registered standard, host "studio" - see apps/studio-desktop). Chromium
+    // sends `Origin: ax://studio` on its fetches to the loopback daemon; without
+    // this entry every desktop API call dies as an opaque "Failed to fetch"
+    // (#690). Loopback-only daemon, no credentials - echoing the origin is safe.
+    "ax://studio",
 ]);
 
 function isLocalDevOrigin(origin: string): boolean {

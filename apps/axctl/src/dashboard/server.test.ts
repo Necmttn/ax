@@ -33,6 +33,23 @@ describe("studio CORS / Private Network Access", () => {
         expect(res.headers.get("access-control-allow-private-network")).toBeNull();
     });
 
+    test("desktop app origin ax://studio is allowed (preflight + GET)", async () => {
+        const pre = await handleDashboardRequestWithCors(preflight({ origin: "ax://studio" }));
+        expect(pre.status).toBe(204);
+        expect(pre.headers.get("access-control-allow-origin")).toBe("ax://studio");
+
+        const res = await handleDashboardRequestWithCors(
+            new Request("http://127.0.0.1:1738/api/version", { headers: { origin: "ax://studio" } }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers.get("access-control-allow-origin")).toBe("ax://studio");
+    });
+
+    test("other custom-scheme origins stay disallowed", async () => {
+        const res = await handleDashboardRequestWithCors(preflight({ origin: "ax://evil" }));
+        expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    });
+
     test("disallowed origin gets no CORS or PNA headers", async () => {
         const res = await handleDashboardRequestWithCors(preflight({
             origin: "https://evil.example",
