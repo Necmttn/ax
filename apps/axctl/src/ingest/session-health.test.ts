@@ -136,3 +136,45 @@ describe("session health derivation", () => {
         expect(statement).toContain("model: IF model != NONE THEN model ELSE NONE END");
     });
 });
+
+describe("session health NONE-safety (#680)", () => {
+    const origWarn = console.warn;
+
+    test("skips a session with no started_at (no epoch warn, no row)", () => {
+        const warnings: unknown[] = [];
+        console.warn = (...args: unknown[]) => warnings.push(args);
+        try {
+            const rows = __testBuildSessionHealthRows({
+                firstSuperpowersAt: null,
+                // Half-ingested codex session: started_at hasn't landed yet.
+                sessions: [{ id: "session:`half`", source: "codex" }],
+                turns: [{ session: "session:`half`", role: "user", text_excerpt: "hi" }],
+                toolCalls: [],
+                planSnapshots: [],
+                insightMetrics: [],
+            });
+            expect(rows.usages).toHaveLength(0);
+            expect(rows.health).toHaveLength(0);
+            expect(warnings).toHaveLength(0);
+        } finally {
+            console.warn = origWarn;
+        }
+    });
+
+    test("still emits rows for a session WITH started_at alongside a half-ingested one", () => {
+        const rows = __testBuildSessionHealthRows({
+            firstSuperpowersAt: null,
+            sessions: [
+                { id: "session:`ok`", source: "codex", started_at: "2026-05-02T00:00:00.000Z" },
+                { id: "session:`half`", source: "codex" },
+            ],
+            turns: [],
+            toolCalls: [],
+            planSnapshots: [],
+            insightMetrics: [],
+        });
+        expect(rows.usages).toHaveLength(1);
+        expect(rows.health).toHaveLength(1);
+        expect(rows.usages[0].sessionKey).toBe("ok");
+    });
+});

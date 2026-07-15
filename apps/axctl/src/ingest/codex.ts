@@ -63,6 +63,13 @@ import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import {
+    clearIndexUnhealthyMarker,
+    withAgentEventSeqHeal,
+    writeIndexUnhealthyMarker,
+    type AgentEventSeqHealState,
+} from "./agent-event-index-heal.ts";
+import { cwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1349,6 +1356,10 @@ interface CodexIngestOpts {
     /** Absolute wall-clock deadline (ms epoch). Once reached, no NEW file is
      *  started; in-flight files finish. Lets `--dry-run` time-box calibration. */
     deadlineMs: number | undefined;
+    /** Repo roots to scope ingest to (`ingest here`). When set, only codex
+     *  rollout files whose session cwd is inside one of these roots are
+     *  ingested (head-peeked before parse). Undefined = ingest all (#680). */
+    repoRoots: readonly string[] | undefined;
 }
 
 export interface CodexStats {
@@ -1370,8 +1381,34 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
+        const dataDir = cfg.paths.dataDir;
+        // Shared across all files this stage run: the agent_event ghost-index
+        // rebuild fires at most once (#680).
+        const healState: AgentEventSeqHealState = { repaired: false };
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
+        let files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
+        // `ingest here` repo scope (#680): head-peek each rollout's session_meta
+        // cwd (bounded, cheap) and keep only files inside a repo root. Out-of-repo
+        // files are dropped BEFORE the work-unit so they never watermark - a later
+        // global ingest still picks them up. No repoRoots => ingest everything.
+        if (opts.repoRoots && opts.repoRoots.length > 0) {
+            const roots = opts.repoRoots;
+            const scoped: typeof files = [];
+            yield* Effect.forEach(
+                files,
+                (file) =>
+                    Effect.gen(function* () {
+                        const cwd = yield* readCodexSessionCwd(file.path);
+                        if (cwdInRepoScope(cwd, roots)) scoped.push(file);
+                    }),
+                { concurrency: 8, discard: true },
+            );
+            yield* Effect.logDebug("codex ingest here scope", {
+                candidates: files.length,
+                inScope: scoped.length,
+            });
+            files = scoped;
+        }
         // `--dry-run` calibration: cap to a small representative slice so we can
         // time real parse+write throughput without processing everything.
         if (typeof opts.limit === "number" && files.length > opts.limit) {
@@ -1638,14 +1675,33 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     yield* Effect.logDebug("codex ingest progress", counts);
                 }
                 return true;
-            }).pipe(Effect.withSpan("codex.file", {
-                // Basename only: keeps exported-trace attributes small (the full
-                // session path is reconstructable locally if ever needed).
-                attributes: {
-                    "file.name": file.path.slice(file.path.lastIndexOf("/") + 1),
-                    "file.bytes": file.sizeBytes,
-                },
-            })),
+            }).pipe(
+                // Self-heal the agent_event ghost-index collision (#680): on a
+                // duplicate-index DbError, REBUILD once per stage + retry this
+                // file once. A second failure records a doctor marker and rethrows
+                // so per-file isolation skips it (no permanent silent skip loop).
+                (eff) =>
+                    withAgentEventSeqHeal(eff, {
+                        db,
+                        state: healState,
+                        onExhausted: (sessionId) =>
+                            writeIndexUnhealthyMarker(dataDir, sessionId, `codex file ${file.path}`).pipe(
+                                Effect.provideService(FileSystem.FileSystem, fs),
+                            ),
+                        onHealed: () =>
+                            clearIndexUnhealthyMarker(dataDir).pipe(
+                                Effect.provideService(FileSystem.FileSystem, fs),
+                            ),
+                    }),
+                Effect.withSpan("codex.file", {
+                    // Basename only: keeps exported-trace attributes small (the full
+                    // session path is reconstructable locally if ever needed).
+                    attributes: {
+                        "file.name": file.path.slice(file.path.lastIndexOf("/") + 1),
+                        "file.bytes": file.sizeBytes,
+                    },
+                }),
+            ),
         });
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
@@ -1722,7 +1778,14 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
         // unreadable sessions root or a non-NotFound stat/stream error), so
         // it dies as a defect rather than masquerading as a recoverable
         // DbError - mirroring `claudeStage`.
-        const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress, onFileFailures }).pipe(
+        const result = yield* ingestCodex({
+            sinceDays,
+            onProgress: annotateStageProgress,
+            onFileFailures,
+            // `ingest here` scopes codex to the repo(s) at $PWD (#680); a global
+            // ingest leaves repoRoots undefined => all sessions.
+            ...(ctx.repoPaths ? { repoRoots: ctx.repoPaths } : {}),
+        }).pipe(
             Effect.catchTag("PlatformError", (e) => Effect.die(e)),
         );
         return CodexStageStats.make({

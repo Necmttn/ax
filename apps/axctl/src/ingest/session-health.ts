@@ -188,6 +188,11 @@ function buildRows(input: {
     for (const session of input.sessions) {
         const sessionKey = recordKeyPart(session.id, "session");
         if (!sessionKey) continue;
+        // NONE-safe (#680): a half-ingested session (e.g. a codex session whose
+        // started_at hasn't landed yet) has no usable timestamp. Passing it to
+        // isoTimestamp warns and stamps an epoch (1970) row; skip it entirely -
+        // a later ingest recomputes health once the session is complete.
+        if (session.started_at == null) continue;
         const startedAt = isoTimestamp(session.started_at);
         const ts = isoTimestamp(session.ended_at ?? session.started_at);
         const source = session.source ?? "unknown";
