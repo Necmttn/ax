@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.38.0](https://github.com/Necmttn/ax/compare/v0.37.2...v0.38.0) (2026-07-15)
+
+
+### Features
+
+* **sessions:** normalized --turns view + retro-reviewer provisioning ([#678](https://github.com/Necmttn/ax/issues/678)) ([#683](https://github.com/Necmttn/ax/issues/683)) ([cf378ae](https://github.com/Necmttn/ax/commit/cf378ae4216e7ebd9c469e30fa29bdbd35866ced))
+
+
+### Bug Fixes
+
+* **cli:** bare --turns parses as excerpt mode - boolean branch first in sessionTurnsFlag ([#686](https://github.com/Necmttn/ax/issues/686)) ([#687](https://github.com/Necmttn/ax/issues/687)) ([4cabacc](https://github.com/Necmttn/ax/commit/4cabacc3d62a4411d7f402a5f04849765ddc2fba))
+* **dashboard:** route session evidence through contract handler ([#679](https://github.com/Necmttn/ax/issues/679)) ([#681](https://github.com/Necmttn/ax/issues/681)) ([8ca4f01](https://github.com/Necmttn/ax/commit/8ca4f01d7ccc17ab2e765e25d567cac956017b81))
+* **ingest:** self-heal agent_event_session_seq ghost-index + codex cwd filter for ingest here ([#680](https://github.com/Necmttn/ax/issues/680)) ([#685](https://github.com/Necmttn/ax/issues/685)) ([91c29af](https://github.com/Necmttn/ax/commit/91c29afe68d4bbd87425d351224ef41732456110))
+
 ## [0.37.2](https://github.com/Necmttn/ax/compare/v0.37.1...v0.37.2) (2026-07-09)
 
 
