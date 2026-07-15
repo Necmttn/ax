@@ -65,11 +65,11 @@ import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
     clearIndexUnhealthyMarker,
+    makeAgentEventSeqRebuild,
     withAgentEventSeqHeal,
     writeIndexUnhealthyMarker,
-    type AgentEventSeqHealState,
 } from "./agent-event-index-heal.ts";
-import { cwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
+import { canonicalCwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1383,8 +1383,12 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const fs = yield* FileSystem.FileSystem;
         const dataDir = cfg.paths.dataDir;
         // Shared across all files this stage run: the agent_event ghost-index
-        // rebuild fires at most once (#680).
-        const healState: AgentEventSeqHealState = { repaired: false };
+        // rebuild fires at most once, memoized so file concurrency awaits one
+        // in-flight rebuild + a failed rebuild is observable (#680).
+        const agentEventSeqRebuild = yield* makeAgentEventSeqRebuild(db);
+        // Set when a file exhausts the heal ladder this run; gates the
+        // clear-on-clean-completion below so we don't wipe a just-written marker.
+        let indexHealExhausted = false;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         let files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
         // `ingest here` repo scope (#680): head-peek each rollout's session_meta
@@ -1394,15 +1398,25 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         if (opts.repoRoots && opts.repoRoots.length > 0) {
             const roots = opts.repoRoots;
             const scoped: typeof files = [];
+            // NOTE (accepted tradeoff): a head-peek read error maps the cwd to
+            // null -> out-of-scope (best-effort); a later full ingest still
+            // picks the file up. `unreadable` tallies those for a debug log.
+            let unreadable = 0;
             yield* Effect.forEach(
                 files,
                 (file) =>
                     Effect.gen(function* () {
                         const cwd = yield* readCodexSessionCwd(file.path);
-                        if (cwdInRepoScope(cwd, roots)) scoped.push(file);
+                        if (cwd === null) unreadable += 1;
+                        // Canonicalize both sides (realpath) so a symlinked
+                        // in-repo cwd is included and `/repo/../outside` excluded.
+                        if (yield* canonicalCwdInRepoScope(cwd, roots)) scoped.push(file);
                     }),
                 { concurrency: 8, discard: true },
             );
+            if (unreadable > 0) {
+                yield* Effect.logDebug("codex ingest here: unreadable head-peek files", { unreadable });
+            }
             yield* Effect.logDebug("codex ingest here scope", {
                 candidates: files.length,
                 inScope: scoped.length,
@@ -1677,15 +1691,21 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 return true;
             }).pipe(
                 // Self-heal the agent_event ghost-index collision (#680): on a
-                // duplicate-index DbError, REBUILD once per stage + retry this
-                // file once. A second failure records a doctor marker and rethrows
-                // so per-file isolation skips it (no permanent silent skip loop).
+                // duplicate-index DbError, dedupe this session by primary id +
+                // retry; if still blocked, rebuild the index CONCURRENTLY once
+                // per stage + retry; a second failure records a doctor marker and
+                // rethrows so per-file isolation skips it (no silent skip loop).
                 (eff) =>
                     withAgentEventSeqHeal(eff, {
                         db,
-                        state: healState,
+                        rebuild: agentEventSeqRebuild,
                         onExhausted: (sessionId) =>
-                            writeIndexUnhealthyMarker(dataDir, sessionId, `codex file ${file.path}`).pipe(
+                            Effect.sync(() => {
+                                indexHealExhausted = true;
+                            }).pipe(
+                                Effect.andThen(
+                                    writeIndexUnhealthyMarker(dataDir, sessionId, `codex file ${file.path}`),
+                                ),
                                 Effect.provideService(FileSystem.FileSystem, fs),
                             ),
                         onHealed: () =>
@@ -1703,6 +1723,15 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 }),
             ),
         });
+        // F3: clear a stale unhealthy marker on ANY clean stage completion (e.g.
+        // a manual `bun scripts/repair-agent-event-index.ts` followed by a clean
+        // ingest that never re-triggers the heal). Skip the clear only when a
+        // file exhausted the ladder THIS run - that just-written marker stays.
+        if (!indexHealExhausted) {
+            yield* clearIndexUnhealthyMarker(dataDir).pipe(
+                Effect.provideService(FileSystem.FileSystem, fs),
+            );
+        }
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),

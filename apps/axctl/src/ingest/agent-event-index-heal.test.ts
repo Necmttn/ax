@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { DbError } from "@ax/lib/errors";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,14 +11,17 @@ import {
     AGENT_EVENT_SEQ_REPAIR_HINT,
     agentEventIndexDoctorCheck,
     agentEventIndexMarkerPath,
-    buildAgentEventSeqRepairStatements,
+    buildAgentEventSeqRebuildStatement,
+    buildSessionDedupSelect,
     clearIndexUnhealthyMarker,
     extractAgentSessionId,
     isAgentEventSeqDuplicateError,
+    makeAgentEventSeqRebuild,
+    planSessionDedup,
     readIndexUnhealthyMarker,
     withAgentEventSeqHeal,
     writeIndexUnhealthyMarker,
-    type AgentEventSeqHealState,
+    type AgentEventSeqHealHooks,
 } from "./agent-event-index-heal.ts";
 
 // Realistic SurrealDB duplicate-index error message (shape observed across
@@ -29,17 +33,29 @@ const DUP_MSG =
 const dupErr = () => new DbError({ operation: "query", message: DUP_MSG });
 const otherDbErr = () => new DbError({ operation: "query", message: "some unrelated failure" });
 
-// Fake client: captures issued SQL, drives success/failure per attempt.
-function makeDb(issued: string[], fail: () => DbError | null) {
-    return {
-        query: (sql: string) =>
-            Effect.suspend(() => {
-                issued.push(sql);
-                const err = fail();
-                return err ? Effect.fail(err) : Effect.succeed([[]]);
-            }),
-    } as unknown as Parameters<typeof withAgentEventSeqHeal>[1]["db"];
+/** Two duplicate rows at seq 1, so a dedupe drops exactly one by primary id. */
+const DEDUP_ROWS = [[[{ id: "agent_event:a", seq: 1 }, { id: "agent_event:b", seq: 1 }]]];
+
+/** A test client whose SELECT returns duplicate rows, REBUILD + INFO succeed. */
+function healClient(opts: { rebuildFails?: boolean } = {}) {
+    return makeTestSurrealClient({
+        denyWrites: false,
+        routes: [
+            { match: "SELECT id, seq FROM agent_event", rows: DEDUP_ROWS[0] },
+            {
+                match: "REBUILD INDEX",
+                rows: opts.rebuildFails
+                    ? Effect.fail(new DbError({ operation: "query", message: "rebuild boom" }))
+                    : [[]],
+            },
+            // INFO FOR INDEX -> no `building` object => ready immediately.
+            { match: "INFO FOR INDEX", rows: [[{}]] },
+        ],
+        fallback: [[]],
+    });
 }
+
+const rebuildCount = (captured: string[]) => captured.filter((s) => s.includes("REBUILD INDEX")).length;
 
 describe("isAgentEventSeqDuplicateError", () => {
     test("matches a DbError naming the index", () => {
@@ -62,90 +78,159 @@ describe("extractAgentSessionId", () => {
     });
 });
 
-describe("buildAgentEventSeqRepairStatements", () => {
-    test("emits the REBUILD for the seq index (ghost-index fix)", () => {
-        const stmts = buildAgentEventSeqRepairStatements();
-        expect(stmts).toHaveLength(1);
-        expect(stmts[0]).toContain("REBUILD INDEX");
-        expect(stmts[0]).toContain(AGENT_EVENT_SEQ_INDEX);
-        expect(stmts[0]).toContain("ON agent_event");
+describe("pure planners", () => {
+    test("planSessionDedup keeps first per seq, drops the rest", () => {
+        const drop = planSessionDedup([
+            { id: "agent_event:a", seq: 1 },
+            { id: "agent_event:b", seq: 1 },
+            { id: "agent_event:c", seq: 2 },
+        ]);
+        expect(drop).toEqual(["agent_event:b"]);
+    });
+
+    test("buildSessionDedupSelect targets the session by full-table predicate", () => {
+        const sql = buildSessionDedupSelect("codex_019abc-def");
+        expect(sql).toContain("SELECT id, seq FROM agent_event");
+        expect(sql).toContain("agent_session = agent_session:`codex_019abc-def`");
+    });
+
+    test("buildAgentEventSeqRebuildStatement is non-blocking CONCURRENTLY", () => {
+        const sql = buildAgentEventSeqRebuildStatement();
+        expect(sql).toContain(`REBUILD INDEX IF EXISTS ${AGENT_EVENT_SEQ_INDEX} ON agent_event`);
+        expect(sql).toContain("CONCURRENTLY");
     });
 });
 
-describe("withAgentEventSeqHeal", () => {
-    test("on duplicate-index failure: rebuilds once, retries, succeeds", async () => {
-        const issued: string[] = [];
-        const db = makeDb(issued, () => null); // db.query (the REBUILD) succeeds
-        const state: AgentEventSeqHealState = { repaired: false };
+// A file-ingest effect that fails with a dup `failTimes` times, then succeeds.
+function makeWork(failTimes: number) {
+    let attempts = 0;
+    const work = Effect.suspend(() => {
+        attempts += 1;
+        return attempts <= failTimes ? Effect.fail(dupErr()) : Effect.succeed("ok" as const);
+    });
+    return { work, attempts: () => attempts };
+}
 
-        let attempts = 0;
+const runHeal = <A>(
+    work: Effect.Effect<A, DbError>,
+    hooks: Omit<AgentEventSeqHealHooks, "db" | "rebuild">,
+    tc = healClient(),
+) =>
+    Effect.gen(function* () {
+        const rebuild = yield* makeAgentEventSeqRebuild(tc.client);
+        return yield* withAgentEventSeqHeal(work, { db: tc.client, rebuild, ...hooks });
+    });
+
+describe("withAgentEventSeqHeal ladder", () => {
+    test("step 1: dedupe by primary id heals without a rebuild", async () => {
+        const tc = healClient();
+        const { work } = makeWork(1); // fails once, then the dedupe+retry succeeds
+        const dedupes: Array<{ id: string; removed: number }> = [];
         const healed: string[] = [];
-        const work = Effect.suspend(() => {
-            attempts += 1;
-            return attempts === 1 ? Effect.fail(dupErr()) : Effect.succeed("ok");
-        });
 
         const out = await Effect.runPromise(
-            withAgentEventSeqHeal(work, {
-                db,
-                state,
-                onHealed: () => Effect.sync(() => healed.push("healed")),
-            }),
+            runHeal(
+                work,
+                {
+                    onDedupe: (id, removed) => Effect.sync(() => dedupes.push({ id, removed })),
+                    onHealed: () => Effect.sync(() => healed.push("healed")),
+                },
+                tc,
+            ),
         );
 
         expect(out).toBe("ok");
-        expect(attempts).toBe(2); // failed once, retried once
-        expect(state.repaired).toBe(true);
-        expect(issued.some((s) => s.includes("REBUILD INDEX"))).toBe(true);
+        // Deduped this session by PRIMARY id (real observable at the seam).
+        expect(tc.captured.some((s) => s.startsWith("DELETE agent_event:b"))).toBe(true);
+        expect(dedupes).toEqual([{ id: "codex_019abc-def", removed: 1 }]);
+        // Cheapest rung only - no rebuild.
+        expect(rebuildCount(tc.captured)).toBe(0);
         expect(healed).toEqual(["healed"]);
     });
 
-    test("rebuilds at most once across files (state guard)", async () => {
-        const issued: string[] = [];
-        const db = makeDb(issued, () => null);
-        const state: AgentEventSeqHealState = { repaired: true }; // already repaired this stage
+    test("step 2: escalates to a CONCURRENTLY rebuild when dedupe is insufficient", async () => {
+        const tc = healClient();
+        const { work } = makeWork(2); // dedupe retry still collides -> rebuild -> retry ok
+        const rebuilt: string[] = [];
+        const healed: string[] = [];
 
-        let attempts = 0;
-        const work = Effect.suspend(() => {
-            attempts += 1;
-            return attempts === 1 ? Effect.fail(dupErr()) : Effect.succeed("ok");
-        });
+        const out = await Effect.runPromise(
+            runHeal(
+                work,
+                {
+                    onRebuild: () => Effect.sync(() => rebuilt.push("rebuilt")),
+                    onHealed: () => Effect.sync(() => healed.push("healed")),
+                },
+                tc,
+            ),
+        );
 
-        const out = await Effect.runPromise(withAgentEventSeqHeal(work, { db, state }));
         expect(out).toBe("ok");
-        expect(issued.some((s) => s.includes("REBUILD INDEX"))).toBe(false); // no second rebuild
+        expect(tc.captured.some((s) => s.includes("REBUILD INDEX") && s.includes("CONCURRENTLY"))).toBe(true);
+        expect(tc.captured.some((s) => s.includes("INFO FOR INDEX"))).toBe(true); // polled readiness
+        expect(rebuilt).toEqual(["rebuilt"]);
+        expect(healed).toEqual(["healed"]);
     });
 
-    test("second failure after repair: calls onExhausted and rethrows", async () => {
-        const issued: string[] = [];
-        const db = makeDb(issued, () => null);
-        const state: AgentEventSeqHealState = { repaired: false };
+    test("step 3: exhausted after rebuild -> onExhausted + rethrow", async () => {
+        const tc = healClient();
         const exhausted: (string | null)[] = [];
 
-        const work = Effect.fail(dupErr()); // always fails
+        const exit = await Effect.runPromiseExit(
+            runHeal(
+                Effect.fail(dupErr()), // always collides
+                { onExhausted: (id) => Effect.sync(() => exhausted.push(id)) },
+                tc,
+            ),
+        );
+
+        expect(exit._tag).toBe("Failure");
+        expect(exhausted).toEqual(["codex_019abc-def"]);
+        expect(rebuildCount(tc.captured)).toBe(1); // rebuild was tried once
+    });
+
+    test("a FAILED rebuild is observable: routes to onExhausted + rethrow", async () => {
+        const tc = healClient({ rebuildFails: true });
+        const exhausted: (string | null)[] = [];
 
         const exit = await Effect.runPromiseExit(
-            withAgentEventSeqHeal(work, {
-                db,
-                state,
-                onExhausted: (id) => Effect.sync(() => exhausted.push(id)),
-            }),
+            runHeal(
+                makeWork(2).work, // survives dedupe, needs the rebuild
+                { onExhausted: (id) => Effect.sync(() => exhausted.push(id)) },
+                tc,
+            ),
         );
+
         expect(exit._tag).toBe("Failure");
         expect(exhausted).toEqual(["codex_019abc-def"]);
     });
 
-    test("non-matching error passes through untouched (no rebuild)", async () => {
-        const issued: string[] = [];
-        const db = makeDb(issued, () => null);
-        const state: AgentEventSeqHealState = { repaired: false };
-
-        const exit = await Effect.runPromiseExit(
-            withAgentEventSeqHeal(Effect.fail(otherDbErr()), { db, state }),
-        );
+    test("non-matching error passes through untouched (no dedupe, no rebuild)", async () => {
+        const tc = healClient();
+        const exit = await Effect.runPromiseExit(runHeal(Effect.fail(otherDbErr()), {}, tc));
         expect(exit._tag).toBe("Failure");
-        expect(issued).toHaveLength(0); // never attempted a rebuild
-        expect(state.repaired).toBe(false);
+        expect(tc.captured).toHaveLength(0);
+    });
+
+    test("shared memoized rebuild fires at most once across concurrent files", async () => {
+        const tc = healClient();
+        const program = Effect.gen(function* () {
+            const rebuild = yield* makeAgentEventSeqRebuild(tc.client);
+            // Two files, each needs the rebuild (fails twice). They share ONE
+            // in-flight rebuild via Effect.cached.
+            return yield* Effect.all(
+                [
+                    withAgentEventSeqHeal(makeWork(2).work, { db: tc.client, rebuild }),
+                    withAgentEventSeqHeal(makeWork(2).work, { db: tc.client, rebuild }),
+                ],
+                { concurrency: 2 },
+            );
+        });
+
+        const outs = await Effect.runPromise(program);
+        expect(outs).toEqual(["ok", "ok"]);
+        // The whole point: NOT one rebuild per file.
+        expect(rebuildCount(tc.captured)).toBe(1);
     });
 });
 
@@ -169,15 +254,22 @@ describe("unhealthy marker + doctor surface", () => {
         expect(gone).toBeNull();
     });
 
+    test("a missing marker reads as absent/healthy (null)", async () => {
+        const marker = await Effect.runPromise(
+            readIndexUnhealthyMarker(join(dir, "does-not-exist-subdir")).pipe(provideFs()),
+        );
+        expect(marker).toBeNull();
+    });
+
     test("doctor check warns when a marker is present, ok when absent", () => {
         const warn = agentEventIndexDoctorCheck({ session_id: "s", message: DUP_MSG, at: "now" });
         expect(warn.ok).toBe(false);
-        expect(warn.detail).toContain("REBUILD INDEX");
+        expect(warn.detail).toContain("repair-agent-event-index.ts");
         expect(agentEventIndexDoctorCheck(null).ok).toBe(true);
     });
 
-    test("repair hint names the manual REBUILD", () => {
-        expect(AGENT_EVENT_SEQ_REPAIR_HINT).toContain("REBUILD INDEX");
+    test("repair hint names the global repair script", () => {
+        expect(AGENT_EVENT_SEQ_REPAIR_HINT).toContain("repair-agent-event-index.ts");
     });
 });
 

@@ -14,12 +14,21 @@
  * commits (per-file isolation swallows the DbError), so the SAME file fails
  * identically every run until the index is rebuilt.
  *
- * `REBUILD INDEX` rebuilds the index from live table data, discarding ghost
- * entries - the one repair that actually clears the condition. We run it at
- * most ONCE per stage (guarded by a shared `state.repaired`) and retry the
- * failing file once; a second failure falls back to the existing skip-and-retry
- * behavior after recording an unhealthy marker that `ax doctor` surfaces with
- * the manual remediation.
+ * The heal is a small ladder, cheapest rung first (see {@link withAgentEventSeqHeal}):
+ *   1. **Dedupe THIS session by primary id** ({@link planSessionDedup}, the same
+ *      pure planner the global repair script uses). Targeted, lock-free, cheap -
+ *      it clears real duplicate rows. Retry the file once.
+ *   2. **Rebuild the index** if the retry still collides (a true ghost with no
+ *      backing row to dedupe). `REBUILD INDEX ... CONCURRENTLY` returns
+ *      immediately and builds in the background (a plain rebuild locks the whole
+ *      table, which on a millions-row `agent_event` wedges the daemon - the same
+ *      hazard the otel indexes avoid). We poll `INFO FOR INDEX` readiness with a
+ *      bounded budget, fire the rebuild AT MOST ONCE per stage via a shared
+ *      memoized Effect (`Effect.cached`: concurrent files await one in-flight
+ *      rebuild, and a failed rebuild is cached + observable, never re-run).
+ *      Retry the file once more.
+ *   3. **Doctor marker + rethrow** if it STILL collides. `ax doctor` surfaces the
+ *      marker pointing at the global `bun scripts/repair-agent-event-index.ts`.
  *
  * The pure planners + the wrapper are unit-tested with a fake client (no live
  * SurrealDB). Kept small + composable on purpose (#675 is adjacent).
@@ -28,6 +37,7 @@
 import { Effect, FileSystem } from "effect";
 import type { SurrealClientShape } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 
 export const AGENT_EVENT_SEQ_INDEX = "agent_event_session_seq";
@@ -47,81 +57,220 @@ export const extractAgentSessionId = (message: string): string | null => {
     return m ? m[1] : null;
 };
 
+/** Normalize an `agent_session` id to the bare key (no `agent_session:` prefix,
+ *  no backtick / angle-bracket wrappers) for safe interpolation into a ref. */
+const agentSessionKey = (id: string): string =>
+    id
+        .replace(/^agent_session:/, "")
+        .replace(/^`|`$/g, "")
+        .replace(/^⟨|⟩$/g, "");
+
+// --- Ladder step 1: per-session dedupe by primary id --------------------------
+
 /**
- * One-shot ghost-index repair. `REBUILD INDEX` drops index entries with no
- * backing row (a clear-by-primary-id can't). `IF EXISTS` so a fresh DB without
- * the index no-ops instead of erroring. This is the deliberate choice over
- * `DELETE ... by primary id`: that path is what already runs before insert and
- * still leaves ghosts. Runs on a possibly-large table and briefly locks it, so
- * it fires at most once per stage (see {@link withAgentEventSeqHeal}).
+ * Excess record ids to delete for one session: keep the first row at each seq,
+ * drop the rest. Pure so it can be reasoned about / unit-tested in isolation.
+ * One owner - `scripts/repair-agent-event-index.ts` imports this (the global
+ * repair and the ingest-time heal dedupe by the SAME rule, no copy).
  */
-export const buildAgentEventSeqRepairStatements = (): readonly string[] => [
-    `REBUILD INDEX IF EXISTS ${AGENT_EVENT_SEQ_INDEX} ON agent_event;`,
-];
+export const planSessionDedup = (
+    rows: ReadonlyArray<{ readonly id: string; readonly seq: number }>,
+): string[] => {
+    const seen = new Set<number>();
+    const drop: string[] = [];
+    for (const row of rows) {
+        if (seen.has(row.seq)) drop.push(row.id);
+        else seen.add(row.seq);
+    }
+    return drop;
+};
 
-/** Doctor-actionable manual remediation naming the exact statement. */
-export const AGENT_EVENT_SEQ_REPAIR_HINT =
-    `agent_event ${AGENT_EVENT_SEQ_INDEX} index has residual ghost entries; ` +
-    `run \`REBUILD INDEX ${AGENT_EVENT_SEQ_INDEX} ON agent_event\` against the ax DB to clear them`;
+/** SELECT that enumerates one session's `(id, seq)` rows by the full-table
+ *  predicate (never the corruptible secondary index). */
+export const buildSessionDedupSelect = (sessionId: string): string =>
+    `SELECT id, seq FROM agent_event WHERE agent_session = agent_session:\`${agentSessionKey(sessionId)}\`;`;
 
-/** Shared per-stage guard so the rebuild fires at most once across all files. */
-export interface AgentEventSeqHealState {
-    repaired: boolean;
+/** Dedupe one session's rows by primary id. Returns the count removed. */
+const dedupeSession = (
+    db: SurrealClientShape,
+    sessionId: string,
+): Effect.Effect<number, DbError> =>
+    Effect.gen(function* () {
+        const rows = yield* db
+            .query<[Array<{ id: string; seq: number }>]>(buildSessionDedupSelect(sessionId))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const drop = planSessionDedup(rows.map((row) => ({ id: String(row.id), seq: row.seq })));
+        // Batched to stay under parser limits (mirrors the repair script).
+        for (let i = 0; i < drop.length; i += 200) {
+            const batch = drop.slice(i, i + 200);
+            yield* db.query(batch.map((id) => `DELETE ${id};`).join(""));
+        }
+        return drop.length;
+    });
+
+// --- Ladder step 2: shared, non-blocking index rebuild ------------------------
+
+/**
+ * `REBUILD INDEX ... CONCURRENTLY` (verified supported on SurrealDB 3.2:
+ * https://surrealdb.com/docs/surrealql/statements/rebuild) rebuilds from live
+ * table data - dropping ghost entries - WITHOUT locking the table. `IF EXISTS`
+ * so a fresh DB no-ops. The DEFINE shape stays consistent with
+ * packages/schema/src/schema.surql (UNIQUE, same fields).
+ */
+export const buildAgentEventSeqRebuildStatement = (): string =>
+    `REBUILD INDEX IF EXISTS ${AGENT_EVENT_SEQ_INDEX} ON agent_event CONCURRENTLY;`;
+
+/** ~30s budget (1s interval) to poll a CONCURRENTLY rebuild to readiness. */
+const MAX_INDEX_POLL_ATTEMPTS = 30;
+
+/** `INFO FOR INDEX` reports `{ building: { status } }` while a CONCURRENTLY
+ *  build runs; an empty/absent `building` (or a plain non-concurrent build)
+ *  means ready. An unreadable INFO recovers to "ready" so we never poll
+ *  forever on a probe error. */
+interface IndexBuildInfo {
+    readonly building?: { readonly status?: string } | null;
 }
+
+const isIndexReady = (db: SurrealClientShape): Effect.Effect<boolean> =>
+    db
+        .query<[IndexBuildInfo | null]>(`INFO FOR INDEX ${AGENT_EVENT_SEQ_INDEX} ON agent_event;`)
+        .pipe(
+            Effect.map((r) => {
+                const status = r?.[0]?.building?.status;
+                return !status || status === "ready";
+            }),
+            Effect.orElseSucceed(() => true),
+        );
+
+const waitIndexReady = (
+    db: SurrealClientShape,
+    attempts = MAX_INDEX_POLL_ATTEMPTS,
+): Effect.Effect<void> =>
+    attempts <= 0
+        ? Effect.void
+        : isIndexReady(db).pipe(
+              Effect.flatMap((ready) =>
+                  ready
+                      ? Effect.void
+                      : Effect.sleep("1 second").pipe(
+                            Effect.andThen(waitIndexReady(db, attempts - 1)),
+                        ),
+              ),
+          );
+
+/**
+ * Build the SHARED per-stage rebuild Effect: rebuild CONCURRENTLY then poll to
+ * readiness. Wrapped in {@link Effect.cached} (F2) so ALL files await one
+ * in-flight rebuild - a failed rebuild is cached and observable, and the
+ * rebuild fires at most once even under file concurrency > 1. Yield this once
+ * per stage and hand the inner Effect to every file's {@link withAgentEventSeqHeal}.
+ */
+export const makeAgentEventSeqRebuild = (
+    db: SurrealClientShape,
+): Effect.Effect<Effect.Effect<void, DbError>> =>
+    Effect.cached(
+        Effect.gen(function* () {
+            yield* Effect.logWarning(
+                `rebuilding ${AGENT_EVENT_SEQ_INDEX} CONCURRENTLY (ghost-index heal, once per stage)`,
+            );
+            yield* db.query(buildAgentEventSeqRebuildStatement());
+            yield* waitIndexReady(db);
+        }),
+    );
+
+// --- The heal ladder ----------------------------------------------------------
+
+/** Doctor-actionable manual remediation naming the global repair script. */
+export const AGENT_EVENT_SEQ_REPAIR_HINT =
+    `agent_event ${AGENT_EVENT_SEQ_INDEX} index has residual ghost entries an auto-rebuild couldn't clear; ` +
+    `run \`bun scripts/repair-agent-event-index.ts\` against the ax DB (dedupes by primary id, rebuilds the index)`;
 
 export interface AgentEventSeqHealHooks {
     readonly db: SurrealClientShape;
-    readonly state: AgentEventSeqHealState;
-    /** Called just before the (single) rebuild is issued. */
-    readonly onRepairAttempt?: (sessionId: string | null) => Effect.Effect<void>;
-    /** Called when a retry STILL fails on the same signature (record marker). */
+    /**
+     * SHARED, memoized index rebuild from {@link makeAgentEventSeqRebuild}.
+     * Fires at most once per stage (Effect.cached dedups in-flight + caches a
+     * failure), so file concurrency can't launch overlapping rebuilds.
+     */
+    readonly rebuild: Effect.Effect<void, DbError>;
+    /** Called after step-1 dedupe (removed = rows dropped by primary id). */
+    readonly onDedupe?: (sessionId: string, removed: number) => Effect.Effect<void>;
+    /** Called after the shared rebuild completes (before the second retry). */
+    readonly onRebuild?: () => Effect.Effect<void>;
+    /** Called when the ladder is exhausted (record the doctor marker). */
     readonly onExhausted?: (sessionId: string | null) => Effect.Effect<void>;
-    /** Called when the retry succeeds (clear marker). */
+    /** Called when a retry SUCCEEDS (clear the doctor marker). */
     readonly onHealed?: () => Effect.Effect<void>;
 }
 
 /**
- * Wrap one file's ingest effect. On a duplicate-index {@link DbError}:
- *   1. REBUILD the index once per stage (guarded by `state.repaired`),
- *   2. retry the effect ONCE,
- *   3. on a second matching failure, call `onExhausted` and rethrow so the
- *      caller's per-file isolation skips + retries next run.
- * Non-matching failures pass through untouched (no rebuild, no retry).
+ * Wrap one file's ingest effect. On a duplicate-index {@link DbError}, walk the
+ * dedupe -> rebuild -> marker ladder (see the module doc). Non-matching failures
+ * pass through untouched (no dedupe, no rebuild, no retry).
  */
 export const withAgentEventSeqHeal = <A, E, R>(
     effect: Effect.Effect<A, E, R>,
     hooks: AgentEventSeqHealHooks,
-): Effect.Effect<A, E | DbError, R> =>
-    effect.pipe(
+): Effect.Effect<A, E | DbError, R> => {
+    const withHealClear = (e: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+        e.pipe(Effect.tap(() => (hooks.onHealed ? hooks.onHealed() : Effect.void)));
+
+    const exhausted = (sessionId: string | null, err: DbError): Effect.Effect<never, DbError> =>
+        (hooks.onExhausted ? hooks.onExhausted(sessionId) : Effect.void).pipe(
+            Effect.andThen(
+                Effect.logWarning(
+                    `agent_event index still blocked after heal; ${AGENT_EVENT_SEQ_REPAIR_HINT}`,
+                    { sessionId },
+                ),
+            ),
+            Effect.andThen(Effect.fail(err)),
+        );
+
+    return effect.pipe(
         Effect.catch((err): Effect.Effect<A, E | DbError, R> => {
             if (!isAgentEventSeqDuplicateError(err)) return Effect.fail(err as E);
             const sessionId = extractAgentSessionId((err as DbError).message);
             return Effect.gen(function* () {
-                if (!hooks.state.repaired) {
-                    hooks.state.repaired = true;
-                    if (hooks.onRepairAttempt) yield* hooks.onRepairAttempt(sessionId);
+                // Step 1: dedupe THIS session by primary id (cheap, targeted,
+                // lock-free). A true ghost has no backing row to drop, so it
+                // falls through to the rebuild on the retry below.
+                if (sessionId) {
+                    const removed = yield* dedupeSession(hooks.db, sessionId);
+                    if (hooks.onDedupe) yield* hooks.onDedupe(sessionId, removed);
                     yield* Effect.logWarning(
-                        `agent_event index ${AGENT_EVENT_SEQ_INDEX} duplicate - rebuilding once, then retrying`,
-                        { sessionId },
+                        `agent_event ${AGENT_EVENT_SEQ_INDEX} duplicate - deduped session by primary id, retrying`,
+                        { sessionId, removed },
                     );
-                    yield* hooks.db.query(buildAgentEventSeqRepairStatements().join("\n"));
                 }
-                return yield* effect.pipe(
-                    Effect.tap(() => (hooks.onHealed ? hooks.onHealed() : Effect.void)),
+                // NOTE (accepted tradeoff): a retry re-runs this file's clear +
+                // insert, so stage counters can double-count on the rare heal
+                // path. Stats-only; the DB writes converge (clear is idempotent).
+                return yield* withHealClear(effect).pipe(
                     Effect.catch((err2): Effect.Effect<A, E | DbError, R> => {
                         if (!isAgentEventSeqDuplicateError(err2)) return Effect.fail(err2 as E);
-                        return (hooks.onExhausted ? hooks.onExhausted(sessionId) : Effect.void).pipe(
-                            Effect.andThen(Effect.logWarning(
-                                `agent_event index still blocked after rebuild; ${AGENT_EVENT_SEQ_REPAIR_HINT}`,
-                                { sessionId },
-                            )),
-                            Effect.andThen(Effect.fail(err2 as DbError)),
+                        // Step 2: shared, memoized, non-blocking rebuild (once
+                        // per stage). A failed rebuild is surfaced to doctor.
+                        return hooks.rebuild.pipe(
+                            Effect.catch((rebuildErr: DbError) => exhausted(sessionId, rebuildErr)),
+                            Effect.andThen(hooks.onRebuild ? hooks.onRebuild() : Effect.void),
+                            Effect.andThen(
+                                withHealClear(effect).pipe(
+                                    Effect.catch((err3): Effect.Effect<A, E | DbError, R> => {
+                                        if (!isAgentEventSeqDuplicateError(err3)) {
+                                            return Effect.fail(err3 as E);
+                                        }
+                                        // Step 3: still blocked -> marker + rethrow.
+                                        return exhausted(sessionId, err3 as DbError);
+                                    }),
+                                ),
+                            ),
                         );
                     }),
                 );
             });
         }),
     );
+};
 
 // --- Doctor marker (cheap fs surface, no query) -------------------------------
 
@@ -156,16 +305,35 @@ export const clearIndexUnhealthyMarker = (
         yield* fs.remove(agentEventIndexMarkerPath(dataDir)).pipe(Effect.ignore);
     });
 
+/**
+ * Read the marker. Only a MISSING file reads as "absent/healthy" (null). A
+ * present-but-unreadable file or malformed JSON is NOT silently healthy: it
+ * logs a warning and falls open to null (F3 - fail-open but not blind).
+ */
 export const readIndexUnhealthyMarker = (
     dataDir: string,
 ): Effect.Effect<IndexUnhealthyMarker | null, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const text = yield* fs.readFileString(agentEventIndexMarkerPath(dataDir)).pipe(
-            Effect.orElseSucceed(() => ""),
+        const path = agentEventIndexMarkerPath(dataDir);
+        const text = yield* fs.readFileString(path).pipe(
+            // Missing file -> healthy (null), silently.
+            skipNotFound(null as string | null),
+            // Any other read error -> logged, fall open to null (not blind).
+            Effect.catchTag("PlatformError", (e) =>
+                Effect.logWarning("agent-event-index marker present but unreadable", {
+                    path,
+                    error: String(e),
+                }).pipe(Effect.as(null as string | null)),
+            ),
         );
-        if (!text) return null;
-        return safeJsonParse<IndexUnhealthyMarker>(text) ?? null;
+        if (text === null) return null;
+        const parsed = safeJsonParse<IndexUnhealthyMarker>(text);
+        if (!parsed) {
+            yield* Effect.logWarning("agent-event-index marker malformed - treating as unknown", { path });
+            return null;
+        }
+        return parsed;
     });
 
 /** Pure doctor verdict from the (already-read) marker. */
@@ -180,5 +348,5 @@ export const agentEventIndexDoctorCheck = (
             detail:
                 `codex ingest hit a residual ghost entry in ${AGENT_EVENT_SEQ_INDEX} ` +
                 `(session ${marker.session_id ?? "?"}, at ${marker.at}) that auto-rebuild couldn't clear; ` +
-                `run \`REBUILD INDEX ${AGENT_EVENT_SEQ_INDEX} ON agent_event\` against the ax DB`,
+                `run \`bun scripts/repair-agent-event-index.ts\` against the ax DB`,
         };

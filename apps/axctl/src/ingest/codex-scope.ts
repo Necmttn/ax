@@ -10,6 +10,7 @@
 
 import { Effect, FileSystem, Stream } from "effect";
 import type { PlatformError } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 
 /** How many head lines to scan for the `session_meta` record. It is line 1 in
@@ -22,6 +23,10 @@ const stripTrailingSlash = (p: string): string => p.replace(/\/+$/, "");
 /**
  * Is `cwd` inside one of `repoRoots`? Exact match or a true path-segment
  * descendant (so `/x/ax` does NOT capture the sibling `/x/ax-extra`).
+ *
+ * PURE + LEXICAL: no symlink resolution, no `..` collapsing - kept pure so it
+ * stays unit-testable without a filesystem. {@link canonicalCwdInRepoScope} is
+ * the thin canonicalizing wrapper the scope filter actually uses.
  */
 export const cwdInRepoScope = (cwd: string | null | undefined, repoRoots: readonly string[]): boolean => {
     if (!cwd) return false;
@@ -31,6 +36,27 @@ export const cwdInRepoScope = (cwd: string | null | undefined, repoRoots: readon
         return c === r || c.startsWith(`${r}/`);
     });
 };
+
+/**
+ * Canonicalizing containment check (F4): realpath both `cwd` and every
+ * `repoRoots` entry before the lexical test, so a symlinked in-repo cwd is
+ * INCLUDED and a `/repo/../outside` cwd is EXCLUDED. realpath failures (a
+ * vanished path, permission) fall back to the raw string (best-effort), so this
+ * never rejects a real in-repo file just because a path couldn't be resolved.
+ */
+export const canonicalCwdInRepoScope = (
+    cwd: string | null | undefined,
+    repoRoots: readonly string[],
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        if (!cwd) return false;
+        const fs = yield* FileSystem.FileSystem;
+        const realCwd = yield* fs.realPath(cwd).pipe(orAbsent(cwd));
+        const realRoots = yield* Effect.forEach(repoRoots, (root) =>
+            fs.realPath(root).pipe(orAbsent(root)),
+        );
+        return cwdInRepoScope(realCwd, realRoots);
+    });
 
 /** Extract `cwd` from a codex `session_meta` JSONL line, or null if the line is
  *  not a session_meta / has no cwd / is malformed. Pure. */
