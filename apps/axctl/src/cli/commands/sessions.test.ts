@@ -26,6 +26,8 @@ describe("sessions command helpers", () => {
         ])).toEqual([undefined, "excerpt", "full"]);
     });
 
+    // Cold CLI boot on a CI runner can exceed the default 5s test timeout
+    // (timed out at ~5.9s on GH Actions), so this spawn test gets its own budget.
     test("sessions show help advertises the optional full-text value", () => {
         const help = Bun.spawnSync(
             ["bun", "apps/axctl/src/cli/index.ts", "sessions", "show", "--help"],
@@ -34,7 +36,7 @@ describe("sessions command helpers", () => {
 
         expect(help.exitCode).toBe(0);
         expect(help.stdout.toString()).toContain("--turns [=full]");
-    });
+    }, 30_000);
 
     test("projectRootForHere uses main checkout root for linked worktrees", () => {
         expect(projectRootForHere({
