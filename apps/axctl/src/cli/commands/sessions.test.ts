@@ -20,6 +20,14 @@ describe("sessions command helpers", () => {
             return normalizeSessionViewInput({ turns: parsed }).turns;
         };
 
+        // ["true"] is the lexed shape of a BARE `--turns`: the tokenizer's
+        // consumeFlagValue defaults a boolean flag to implicit "true". NOTE
+        // this seam CANNOT catch #686 - that bug lived in consumeFlagValue
+        // consulting the orElse composition's FIRST branch spec (choice =
+        // non-boolean, so bare `--turns` never got the implicit "true"), which
+        // hand-fed flag records bypass entirely. The composition order in
+        // sessionTurnsFlag (boolean first) is the actual fix; verified against
+        // the real CLI in #686.
         expect(await Promise.all([
             parse(),
             parse(["true"]),
