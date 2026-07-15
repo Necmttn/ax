@@ -474,6 +474,18 @@ export const sessionTurnsFlag = Flag.choice("turns", ["full"] as const).pipe(
     Flag.orElse(() => Flag.boolean("turns")),
 );
 
+/** Exported for the help-copy test: keeps the advertised flag forms
+ *  (`--turns`, `--turns=full`) asserted without spawning the CLI. */
+export const SESSION_SHOW_DESCRIPTION =
+    "Display a session's timeline (tool calls + subagent spawns) plus a Metrics " +
+    "block showing the commits behind durability_ratio (reverted commits + the " +
+    "commits that fixed them). " +
+    "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
+    "--by-role groups the Top skills section by role. " +
+    "--turns includes normalized cross-harness excerpts; --turns=full includes full text. " +
+    "Auto markdown on TTY, JSON when piped. --json forces JSON. " +
+    "Output ends with a `next:` footer of copy-paste follow-up commands (resume in harness, open parent, expand subagents).";
+
 const sessionShowCommand = Command.make(
     "show",
     {
@@ -487,16 +499,7 @@ const sessionShowCommand = Command.make(
     ({ id, expand, all, byRole, turns, json }) =>
         cmdSessionShow({ id, expand, all, byRole, turns, json }),
 ).pipe(
-    Command.withDescription(
-        "Display a session's timeline (tool calls + subagent spawns) plus a Metrics " +
-        "block showing the commits behind durability_ratio (reverted commits + the " +
-        "commits that fixed them). " +
-        "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
-        "--by-role groups the Top skills section by role. " +
-        "--turns includes normalized cross-harness excerpts; --turns=full includes full text. " +
-        "Auto markdown on TTY, JSON when piped. --json forces JSON. " +
-        "Output ends with a `next:` footer of copy-paste follow-up commands (resume in harness, open parent, expand subagents).",
-    ),
+    Command.withDescription(SESSION_SHOW_DESCRIPTION),
 );
 
 // Effect/CLI Command definitions for sessions subcommands
