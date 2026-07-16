@@ -20,7 +20,7 @@
   "dependencies": {
     "@ax/lib": "workspace:*",
     "@ax/schema": "workspace:*",
-    "@effect/platform-node": "4.0.0-beta.78",
+    "@effect/platform-node": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
