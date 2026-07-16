@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     __testBuildCursorBatchStatements,
     __testFindCursorStateDbs,
+    __testIncludeCursorByMtime,
     extractCursorStateDb,
     isAllowedCursorHistoryKey,
 } from "./cursor.ts";
@@ -431,6 +432,15 @@ describe("Cursor state.vscdb extraction", () => {
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
+    });
+
+    test("mtime filtering skips old databases but includes unknown mtimes", () => {
+        const cutoffMs = new Date("2026-05-02T00:00:00.000Z").getTime();
+
+        expect(__testIncludeCursorByMtime(Option.some(new Date("2026-05-01T00:00:00.000Z")), cutoffMs)).toBe(
+            false,
+        );
+        expect(__testIncludeCursorByMtime(Option.none(), cutoffMs)).toBe(true);
     });
 
     test("discovery treats fresh SQLite WAL sidecars as fresh database activity", async () => {
