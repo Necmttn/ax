@@ -62,6 +62,21 @@ const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
  * 4. Stored cost === 0 with real tokens and NO catalog rate: genuinely
  *    unpriced - render UNPRICED rather than a silent $0.
  */
+const EMPTY_PRICING_CATALOG: ReadonlyMap<string, ModelPricing> = new Map();
+
+/**
+ * True when any row carries a stored zero cost with real tokens - the only
+ * shape `resolveRowCost` needs a catalog for. Keeps the catalog DB round-trip
+ * out of the common all-priced path (and out of every positional-mock caller
+ * that never exercises recompute, e.g. buildProfile).
+ */
+const rowsNeedPricing = (rows: ReadonlyArray<Record<string, unknown>>): boolean =>
+    rows.some((row) =>
+        countField(row, "cost_usd") === 0
+        && countField(row, "prompt_tokens") + countField(row, "completion_tokens")
+            + countField(row, "cache_read_tokens") + countField(row, "cache_create_tokens") > 0,
+    );
+
 function resolveRowCost(
     input: {
         readonly model: string;
@@ -145,9 +160,14 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
             COST_MODELS_SQL(opts.sinceDays),
         ).pipe(Effect.map((r) => r?.[0] ?? []));
 
-        const catalog = yield* loadPricingCatalogForModels(
-            rows.map((row) => (row.model == null ? null : String(row.model))),
-        );
+        // Lazy: the catalog round-trip only happens when some row actually
+        // needs pricing resolution (stored zero cost with real tokens) - the
+        // common all-priced window skips the extra query entirely.
+        const catalog = rowsNeedPricing(rows)
+            ? yield* loadPricingCatalogForModels(
+                rows.map((row) => (row.model == null ? null : String(row.model))),
+            )
+            : EMPTY_PRICING_CATALOG;
 
         const parsed: CostModelsRow[] = rows.map((row) => {
             const model = row.model == null ? "(unattributed)" : String(row.model);
@@ -311,10 +331,6 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
             COST_SPLIT_SQL(opts.sinceDays),
         ).pipe(Effect.map((r) => r?.[0] ?? []));
 
-        const catalog = yield* loadPricingCatalogForModels(
-            rows.map((row) => (row.model == null ? null : String(row.model))),
-        );
-
         // Aggregate per (origin × model)
         const cellMap = new Map<string, {
             origin: "main" | "subagent";
@@ -361,9 +377,16 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
             }
         }
 
+        // Lazy catalog load - see fetchCostModels; checked on the aggregated
+        // cells since recompute operates at cell grain.
+        const aggregated = [...cellMap.values()];
+        const catalog = rowsNeedPricing(aggregated)
+            ? yield* loadPricingCatalogForModels(aggregated.map((cell) => cell.model))
+            : EMPTY_PRICING_CATALOG;
+
         // Resolve pricing per cell BEFORE totals/share so a recomputed cell's
         // dollars are reflected everywhere downstream (#696 live-smoke gap).
-        const priced = [...cellMap.values()].map((cell) => {
+        const priced = aggregated.map((cell) => {
             const resolved = resolveRowCost({
                 model: cell.model,
                 promptTokens: cell.prompt_tokens,

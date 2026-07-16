@@ -417,9 +417,10 @@ describe("fetchCostSplit - contentTypes dimension", () => {
             { ct: "content_type:code", calls: 5, bytes: 400 },
             { ct: "content_type:docs", calls: 2, bytes: 200 },
         ];
-        // Query order: split rows, THEN the pricing-catalog lookup
-        // (loadPricingCatalogForModels), THEN content-type breakdown.
-        const db = makeMockDb([[splitRows], [[]], [contentTypeRows]]);
+        // Query order: split rows, then content-type breakdown. The
+        // pricing-catalog lookup is lazy - this all-priced fixture never
+        // triggers it, so no catalog slot in the mock.
+        const db = makeMockDb([[splitRows], [contentTypeRows]]);
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes).toBeDefined();
@@ -438,8 +439,9 @@ describe("fetchCostSplit - contentTypes dimension", () => {
                 cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
             },
         ];
-        // Empty content-type response (and empty pricing-catalog lookup)
-        const db = makeMockDb([[splitRows], [[]], [[]]]);
+        // Empty content-type response; cost_usd > 0 so the lazy
+        // pricing-catalog lookup never fires (extra empty slot unused).
+        const db = makeMockDb([[splitRows], [[]]]);
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes.rows).toHaveLength(0);
