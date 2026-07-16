@@ -18,3 +18,8 @@ PR https://github.com/Necmttn/ax/pull/731 · TeamProfileV1 Schema + repo-scoped 
 ## 2026-07-16T23:38:53+08:00 — wave 1 done
 - MERGED: team-bindings #729. PR (CI pending): team-profile #731.
 - On #731 merge → spawn wave-2 team-push (codex): GitHubEnv contents-API upsert into <org>/ax-team + ax team push.
+
+## 2026-07-16T23:47:55+08:00 — wave 2 spawned
+- MERGED (2/3): team-bindings #729, team-profile #731.
+- building: team-push=w1R:p12 (codex) — ax team push idempotent contents-API upsert into <org>/ax-team.
+- On merge → SLICE 1 COMPLETE (ax team join → push works E2E). Then STOP fleet + surface Slice 3/5 infra to user.
