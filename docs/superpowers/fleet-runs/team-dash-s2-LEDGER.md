@@ -6,3 +6,6 @@
 - Wave 1 (building): team-validate=w1R:p14 (codex — render-safe TeamProfileV1 validator in @ax/lib/shared, Effect-free).
 - Wave 2 (after validate): team-compile (aggregate TeamProfileV1[] → boards) + team-fetch (contents-API browser fetcher) — parallel.
 - After Slice 2: Slice 3/4/5 need user infra (OAuth app, Stripe).
+## team-validate (Slice 2)
+PR https://github.com/Necmttn/ax/pull/734 · validateTeamProfile + TeamProfileV1 in @ax/lib/shared/team-community.ts (Effect-free, render-safe) · typecheck 0, 4 tests
+
