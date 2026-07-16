@@ -142,12 +142,35 @@ function isLocalDevOrigin(origin: string): boolean {
     return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+/**
+ * True when the Host header names the loopback interface (optional :port), or
+ * is absent. A DNS-rebinding page re-points its own domain at 127.0.0.1 and
+ * issues same-origin requests, sailing past CORS; the only value it cannot
+ * forge is the Host header (the browser always sends its own domain). So a
+ * PRESENT, non-loopback Host is rejected; a MISSING Host (curl, unit tests,
+ * non-browser callers) is allowed - a browser can never produce that.
+ */
+export function isAllowedHost(host: string | null): boolean {
+    if (host === null || host === "") return true;
+    const hostname = host.startsWith("[")
+        ? host.slice(0, host.indexOf("]") + 1) // strip :port after ]
+        : host.split(":")[0]!;
+    return LOOPBACK_HOSTS.has(hostname);
+}
+
 function corsHeadersFor(origin: string | null, requestedHeaders?: string | null): Record<string, string> {
     if (!origin) return {};
-    if (!STUDIO_ORIGINS.has(origin) && !isLocalDevOrigin(origin)) return {};
+    const isStudio = STUDIO_ORIGINS.has(origin);
+    if (!isStudio && !isLocalDevOrigin(origin)) return {};
     return {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        // Studio (hosted + desktop) is the only origin trusted with the
+        // state-changing verbs. A bare localhost dev page gets read-only CORS
+        // so it can't POST/DELETE cross-origin; Host validation (server.ts)
+        // is the primary state-change defense regardless of Origin.
+        "Access-Control-Allow-Methods": isStudio ? "GET, POST, DELETE, OPTIONS" : "GET, OPTIONS",
         // Echo whatever the preflight asked for. A browser fails the preflight
         // when ANY requested header is missing from the allow list, and the
         // desktop studio's Effect HttpClient adds tracing headers (traceparent)
@@ -168,6 +191,10 @@ export async function handleDashboardRequestWithCors(
     serve: ServeContext | null = null,
     contract: ContractWebHandler | null = null,
 ): Promise<Response> {
+    if (!isAllowedHost(req.headers.get("host"))) {
+        return new Response("forbidden", { status: 403 });
+    }
+
     const origin = req.headers.get("origin");
     const cors = corsHeadersFor(origin, req.headers.get("access-control-request-headers"));
 
