@@ -30,3 +30,8 @@ PR https://github.com/Necmttn/ax/pull/732 · ax team push idempotent contents-up
 ## 2026-07-16T23:56:39+08:00 — all 3 gated, team-push in CI
 - MERGED: team-bindings #729, team-profile #731. PR (CI pending): team-push #732.
 - On #732 merge → SLICE 1 COMPLETE. wakeup finalizes fleet + surfaces Slice 2/3/5 decision to user.
+
+## 2026-07-17T00:09:44+08:00 — SLICE 1 COMPLETE
+- MERGED all 3: team-bindings #729, team-profile #731, team-push #732.
+- ax team join <org> → ax team push works E2E: bind repo (default-deny) → redacted TeamProfileV1 snapshot → idempotent contents upsert into <org>/ax-team/.ax-team/<login>.json.
+- Fleet deregistered, tab/panes closed. NEXT: Slice 2 (client aggregation, no infra) OR Slice 3/5 need user infra (GitHub OAuth app + CF origin; Stripe).
