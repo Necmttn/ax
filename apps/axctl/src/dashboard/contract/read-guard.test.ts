@@ -37,4 +37,24 @@ describe("isSingleReadStatement", () => {
         expect(isSingleReadStatement("")).toBe(false);
         expect(isSingleReadStatement("   ")).toBe(false);
     });
+
+    test("rejects a stacked write hidden after a line comment terminated by a non-\\n line terminator (SurrealDB lexer parity)", () => {
+        // CR (\r) terminates a SurrealDB single-line comment, same as LF.
+        expect(isSingleReadStatement("SELECT 1 --\r;DELETE FROM session")).toBe(false);
+        // `#` comment + CR terminator.
+        expect(isSingleReadStatement("SELECT 1 #\r;DELETE FROM session")).toBe(false);
+        // Unicode line separator (U+2028) also terminates the comment.
+        expect(isSingleReadStatement("SELECT 1 -- \u2028;DELETE FROM session")).toBe(false);
+        // Unicode paragraph separator (U+2029) and NEL (U+0085) too.
+        expect(isSingleReadStatement("SELECT 1 -- \u2029;DELETE FROM session")).toBe(false);
+        expect(isSingleReadStatement("SELECT 1 -- \u0085;DELETE FROM session")).toBe(false);
+    });
+
+    test("accepts a legitimate single read using a // line comment", () => {
+        expect(isSingleReadStatement("SELECT 1 // note")).toBe(true);
+    });
+
+    test("rejects a stacked write hidden after a // comment terminated by CR", () => {
+        expect(isSingleReadStatement("SELECT 1 //\r;DELETE FROM session")).toBe(false);
+    });
 });

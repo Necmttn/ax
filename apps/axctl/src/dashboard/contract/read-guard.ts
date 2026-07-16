@@ -26,9 +26,28 @@ function stripLiteralsAndComments(sql: string): string {
             }
             continue;
         }
-        // line comment -- ... or # ... to end of line
-        if ((c === "-" && sql[i + 1] === "-") || c === "#") {
-            while (i < n && sql[i] !== "\n") { out += " "; i++; }
+        // line comment -- ..., # ..., or // ... to end of line. SurrealDB's
+        // lexer terminates a single-line comment on any of: LF, CR, and the
+        // Unicode line terminators LS (U+2028), PS (U+2029), NEL (U+0085) -
+        // not just "\n". Match that exactly, or a `;` after one of the wider
+        // terminators is blanked-out-hidden from the scanner above but still
+        // executed by SurrealDB as a real statement separator.
+        if (
+            (c === "-" && sql[i + 1] === "-") ||
+            c === "#" ||
+            (c === "/" && sql[i + 1] === "/")
+        ) {
+            while (
+                i < n &&
+                sql[i] !== "\n" &&
+                sql[i] !== "\r" &&
+                sql[i] !== "\u2028" &&
+                sql[i] !== "\u2029" &&
+                sql[i] !== "\u0085"
+            ) {
+                out += " ";
+                i++;
+            }
             continue;
         }
         // block comment /* ... */
