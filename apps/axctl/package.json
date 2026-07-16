@@ -9,7 +9,8 @@
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "bun ../../scripts/build-axctl.ts src/cli/index.ts dist/axctl",
