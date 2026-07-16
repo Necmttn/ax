@@ -7,6 +7,7 @@ import {
     type Table,
 } from "surrealdb";
 import { Config, ConfigProvider, Context, Effect, Layer, Option, Redacted, Schedule } from "effect";
+import { posixPath } from "@ax/lib/shared/path";
 import { AxConfig, type AxConfigShape } from "./config.ts";
 import { DbError } from "./errors.ts";
 
@@ -260,8 +261,27 @@ interface QueryLogState {
     readonly full: boolean;
 }
 
-const queryLogConfig: Effect.Effect<QueryLogState | undefined> = Effect.gen(
-    function* () {
+/**
+ * Keep shorthand/flag-like values out of the caller's cwd. Explicit paths
+ * retain their existing meaning; bare names are made recognizable and routed
+ * under ax's data directory.
+ */
+export const resolveQueryLogPath = (
+    value: string,
+    dataDir: string,
+    cwd: string,
+): string => {
+    if (value.includes("/")) return value;
+    const resolvedDataDir = posixPath.resolve(cwd, dataDir);
+    return posixPath.join(
+        resolvedDataDir,
+        `db-query-${encodeURIComponent(value)}.querylog`,
+    );
+};
+
+const queryLogConfig = (
+    dataDir: string,
+): Effect.Effect<QueryLogState | undefined> => Effect.gen(function* () {
         const path = Option.getOrUndefined(
             yield* Config.string("AX_DB_QUERY_LOG").pipe(Config.option),
         );
@@ -269,9 +289,11 @@ const queryLogConfig: Effect.Effect<QueryLogState | undefined> = Effect.gen(
         const full = Option.getOrUndefined(
             yield* Config.string("AX_DB_QUERY_LOG_FULL").pipe(Config.option),
         );
-        return { path, full: full === "1" };
-    },
-).pipe(Effect.orDie);
+        return {
+            path: resolveQueryLogPath(path, dataDir, process.cwd()),
+            full: full === "1",
+        };
+    }).pipe(Effect.orDie);
 
 let queryLogSeq = 0;
 let queryLogSink: ReturnType<ReturnType<typeof Bun.file>["writer"]> | null = null;
@@ -394,7 +416,7 @@ export const SurrealClientLive: Layer.Layer<SurrealClient, DbError, AxConfig> =
     Layer.effect(SurrealClient)(
         Effect.gen(function* () {
             const cfg = yield* AxConfig;
-            const queryLog = yield* queryLogConfig;
+            const queryLog = yield* queryLogConfig(cfg.paths.dataDir);
             const db = yield* Effect.acquireRelease(acquire(cfg.db), release);
             return wrap(db, queryLog);
         }),
