@@ -13,7 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 const LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 
-export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-06-10";
+export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-07-16";
 
 export interface ModelPricing {
     readonly provider: string;
@@ -159,6 +159,24 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         fastMultiplier: 2.5,
         pricingSource: MODEL_PRICING_SOURCE,
     },
+    "gpt-5.6-sol": {
+        provider: "openai",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 30,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.6-luna": {
+        provider: "openai",
+        inputPerMillionUsd: 1,
+        outputPerMillionUsd: 6,
+        cacheCreationPerMillionUsd: 1.25,
+        cacheReadPerMillionUsd: 0.1,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
     "gpt-5-mini": {
         provider: "openai",
         inputPerMillionUsd: 0.25,
@@ -259,6 +277,15 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         pricingSource: MODEL_PRICING_SOURCE,
     },
     "claude-sonnet-4": {
+        provider: "anthropic",
+        inputPerMillionUsd: 3,
+        outputPerMillionUsd: 15,
+        cacheCreationPerMillionUsd: 3.75,
+        cacheReadPerMillionUsd: 0.3,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-sonnet-5": {
         provider: "anthropic",
         inputPerMillionUsd: 3,
         outputPerMillionUsd: 15,
@@ -414,6 +441,7 @@ export function pricingForModel(
     if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
+    if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     return null;
 }
 

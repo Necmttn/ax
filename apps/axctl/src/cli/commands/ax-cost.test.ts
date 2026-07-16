@@ -3,10 +3,12 @@ import {
     COST_SESSIONS_LEGEND,
     renderCostModelsTable,
     renderCostSessionsTable,
+    renderCostSplitTable,
 } from "./ax-cost.ts";
 import type {
     CostModelsResult,
     CostSessionsResult,
+    CostSplitResult,
 } from "../../queries/cost-analytics.ts";
 
 describe("renderCostModelsTable", () => {
@@ -22,6 +24,7 @@ describe("renderCostModelsTable", () => {
                     cache_read_tokens: 14_781_735_443,
                     cache_create_tokens: 361_331_748,
                     cost_usd: 10_999.397,
+                    unpriced: false,
                 },
             ],
         };
@@ -33,6 +36,57 @@ describe("renderCostModelsTable", () => {
         expect(out).toContain("$10999.3970");
         expect(out).not.toContain("14,781,735,4 ");
         expect(out).not.toContain("$10999.397\n");
+    });
+
+    test("renders an unknown model as UNPRICED at the rollup seam", () => {
+        const result: CostModelsResult = {
+            total_cost_usd: 0,
+            rows: [{
+                model: "unknown-model",
+                sessions: 1,
+                prompt_tokens: 1_000_000,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0,
+                unpriced: true,
+            }],
+        };
+
+        expect(renderCostModelsTable(result)).toContain("UNPRICED");
+    });
+});
+
+describe("renderCostSplitTable", () => {
+    test("renders an unknown model cell as UNPRICED", () => {
+        const result = {
+            rows: [{
+                origin: "main",
+                model: "unknown-model",
+                sessions: 1,
+                prompt_tokens: 1_000_000,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0,
+                share_pct: 0,
+                unpriced: true,
+            }],
+            totals: {
+                sessions: 1,
+                prompt_tokens: 1_000_000,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0,
+            },
+            contentTypes: {
+                rows: [],
+                totals: { calls: 0, bytes: 0, estTokens: 0 },
+            },
+        } satisfies CostSplitResult;
+
+        expect(renderCostSplitTable(result)).toContain("UNPRICED");
     });
 });
 

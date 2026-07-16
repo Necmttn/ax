@@ -39,6 +39,27 @@ describe("fetchCostModels", () => {
         expect(result.rows[0]!.model).toBe("(unattributed)");
     });
 
+    test("flags unknown model pricing without changing cost_usd's number type", async () => {
+        const dbRows = [
+            { model: "unknown-model", sessions: 1, prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+            { model: "claude-sonnet-5", sessions: 1, prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 3 },
+        ];
+        const db = makeMockDb([[dbRows]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows.find((row) => row.model === "unknown-model")).toMatchObject({
+            cost_usd: 0,
+            unpriced: true,
+        });
+        expect(result.rows.find((row) => row.model === "claude-sonnet-5")).toMatchObject({
+            cost_usd: 3,
+            unpriced: false,
+        });
+        expect(typeof result.rows[0]!.cost_usd).toBe("number");
+    });
+
     test("handles empty result", async () => {
         const db = makeMockDb([[[]]] );
         const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
@@ -197,6 +218,22 @@ describe("fetchCostSplit", () => {
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.rows[0]!.share_pct).toBe(0);
+    });
+
+    test("flags an unknown model cell as unpriced", async () => {
+        const dbRows = [
+            { source: "codex", model: "unknown-model", sessions: 1,
+              prompt_tokens: 100, completion_tokens: 10,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const db = makeMockDb([[dbRows]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({
+            model: "unknown-model",
+            cost_usd: 0,
+            unpriced: true,
+        });
     });
 
     test("SQL groups by source and model", async () => {

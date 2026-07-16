@@ -17,6 +17,7 @@ import { surrealLiteral } from "@ax/lib/json";
 import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 import { originOfSource } from "../ingest/source-origin.ts";
+import { normalizeModelName, pricingForModel } from "../ingest/model-pricing.ts";
 
 // ---------------------------------------------------------------------------
 // Shared constants + SQL-boundary helpers
@@ -35,6 +36,9 @@ export const COST_DEFAULT_WINDOW_DAYS = 14;
  */
 const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
 
+const isUnpricedModel = (model: string): boolean =>
+    pricingForModel(normalizeModelName(model)) === null;
+
 // ---------------------------------------------------------------------------
 // cost models
 // ---------------------------------------------------------------------------
@@ -47,6 +51,7 @@ export interface CostModelsRow {
     readonly cache_read_tokens: number;
     readonly cache_create_tokens: number;
     readonly cost_usd: number;
+    readonly unpriced: boolean;
 }
 
 export interface CostModelsResult {
@@ -88,6 +93,7 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
             cache_read_tokens: countField(row, "cache_read_tokens"),
             cache_create_tokens: countField(row, "cache_create_tokens"),
             cost_usd: countField(row, "cost_usd"),
+            unpriced: isUnpricedModel(row.model == null ? "(unattributed)" : String(row.model)),
         }));
 
         // Sort by cost desc
@@ -180,6 +186,7 @@ export interface CostSplitRow {
     readonly cache_create_tokens: number;
     readonly cost_usd: number;
     readonly share_pct: number;
+    readonly unpriced: boolean;
 }
 
 export interface CostSplitTotals {
@@ -293,6 +300,7 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
         const splitRows: CostSplitRow[] = cells.map((cell) => ({
             ...cell,
             share_pct: totalCost > 0 ? (cell.cost_usd / totalCost) * 100 : 0,
+            unpriced: isUnpricedModel(cell.model),
         }));
 
         const totals: CostSplitTotals = {
