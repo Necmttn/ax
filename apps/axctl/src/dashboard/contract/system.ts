@@ -20,6 +20,7 @@ import { graphHealthSql } from "../../queries/graph-health.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
 import { fetchWorktreesOverview } from "../worktrees-overview.ts";
 import { asJsonValue } from "./common.ts";
+import { isSingleReadStatement } from "./read-guard.ts";
 
 /**
  * Boot-time facts the contract handlers need from `serveDashboard`: the
@@ -56,9 +57,9 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
             Effect.gen(function* () {
                 const sql = payload.sql.trim();
                 if (!sql) return yield* new QueryRejected({ error: "SQL is required" });
-                if (!/^(SELECT|RETURN|INFO)\b/i.test(sql)) {
+                if (!isSingleReadStatement(sql)) {
                     return yield* new QueryRejected({
-                        error: "Only SELECT, RETURN, and INFO queries are allowed",
+                        error: "Only a single SELECT, RETURN, or INFO statement is allowed",
                     });
                 }
                 const started = performance.now();

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
     handleDashboardRequest,
     handleDashboardRequestWithCors,
+    isAllowedHost,
     parseDashboardServeArgs,
 } from "./server.ts";
 import { dashboardApiCapabilities, isGraphExplorerEnabled } from "./capabilities.ts";
@@ -176,5 +177,89 @@ describe("dashboard server", () => {
             new Request("http://127.0.0.1:1738/assets/definitely-not-a-real-hash-xyz.js"),
         );
         expect(res.status).toBe(404);
+    });
+});
+
+describe("Host-header validation (DNS-rebinding defense)", () => {
+    test("isAllowedHost accepts loopback hosts with optional port", () => {
+        expect(isAllowedHost("127.0.0.1")).toBe(true);
+        expect(isAllowedHost("127.0.0.1:1738")).toBe(true);
+        expect(isAllowedHost("localhost")).toBe(true);
+        expect(isAllowedHost("localhost:1738")).toBe(true);
+        expect(isAllowedHost("[::1]")).toBe(true);
+        expect(isAllowedHost("[::1]:1738")).toBe(true);
+        expect(isAllowedHost(null)).toBe(true); // non-browser client omits Host
+    });
+
+    test("isAllowedHost rejects foreign hosts", () => {
+        expect(isAllowedHost("attacker.com")).toBe(false);
+        expect(isAllowedHost("attacker.com:1738")).toBe(false);
+        expect(isAllowedHost("ax.necmttn.com")).toBe(false);
+        expect(isAllowedHost("127.0.0.1.attacker.com")).toBe(false);
+        expect(isAllowedHost("0.0.0.0")).toBe(false);
+    });
+
+    test("a foreign Host header is 403ed before dispatch (reads included)", async () => {
+        const res = await handleDashboardRequestWithCors(
+            new Request("http://127.0.0.1:1738/api/version", { headers: { host: "attacker.com" } }),
+        );
+        expect(res.status).toBe(403);
+    });
+
+    test("a foreign Host on a state-changing route is 403ed", async () => {
+        const res = await handleDashboardRequestWithCors(
+            new Request("http://127.0.0.1:1738/api/query", {
+                method: "POST",
+                headers: { host: "attacker.com", "content-type": "application/json" },
+                body: JSON.stringify({ sql: "SELECT 1" }),
+            }),
+        );
+        expect(res.status).toBe(403);
+    });
+
+    test("a foreign Host is 403ed on OPTIONS preflight too", async () => {
+        const res = await handleDashboardRequestWithCors(
+            new Request("http://127.0.0.1:1738/api/version", {
+                method: "OPTIONS",
+                headers: { host: "attacker.com", origin: "https://ax.necmttn.com" },
+            }),
+        );
+        expect(res.status).toBe(403);
+    });
+
+    test("loopback Host on a normal request still works", async () => {
+        const res = await handleDashboardRequestWithCors(
+            new Request("http://127.0.0.1:1738/api/version", { headers: { host: "127.0.0.1:1738" } }),
+        );
+        expect(res.status).toBe(200);
+    });
+});
+
+describe("CORS write-method narrowing (finding #3)", () => {
+    test("studio origin gets the full method set", async () => {
+        const res = await handleDashboardRequestWithCors(preflight({ origin: "https://ax.necmttn.com" }));
+        expect(res.headers.get("access-control-allow-methods")).toBe("GET, POST, DELETE, OPTIONS");
+    });
+
+    test("desktop ax://studio origin gets the full method set", async () => {
+        const res = await handleDashboardRequestWithCors(preflight({ origin: "ax://studio" }));
+        expect(res.headers.get("access-control-allow-methods")).toBe("GET, POST, DELETE, OPTIONS");
+    });
+
+    test("a bare localhost dev origin gets read-only methods (no POST/DELETE)", async () => {
+        const res = await handleDashboardRequestWithCors(preflight({ origin: "http://localhost:3000" }));
+        const methods = res.headers.get("access-control-allow-methods") ?? "";
+        expect(methods).toBe("GET, OPTIONS");
+        expect(methods).not.toContain("POST");
+        expect(methods).not.toContain("DELETE");
+    });
+
+    test("localhost dev origin still gets a CORS grant + PNA (not fully blocked)", async () => {
+        const res = await handleDashboardRequestWithCors(preflight({
+            origin: "http://127.0.0.1:5173",
+            "access-control-request-private-network": "true",
+        }));
+        expect(res.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:5173");
+        expect(res.headers.get("access-control-allow-private-network")).toBe("true");
     });
 });
