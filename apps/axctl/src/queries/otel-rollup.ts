@@ -141,6 +141,11 @@ const SIGNAL_TABLES: ReadonlyArray<readonly [OtelSignalKind, string]> = [
     ["span", "otel_span"],
 ];
 
+export const buildOtelSessionIdsQuery = (table: string, days: number): string =>
+    `SELECT session_id FROM ${table}`
+    + ` WHERE observed_at > time::now() - ${days}d`
+    + " AND session_id != NONE GROUP BY session_id;";
+
 export const fetchOtelRollup = (
     input: OtelRollupInput,
 ): Effect.Effect<OtelRollupResult, DbError, SurrealClient> =>
@@ -186,7 +191,7 @@ export const fetchOtelRollup = (
         const otelSids = new Set<string>();
         for (const [, table] of SIGNAL_TABLES) {
             const sidRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT session_id FROM ${table} WHERE session_id != NONE GROUP BY session_id;`,
+                buildOtelSessionIdsQuery(table, days),
             ))?.[0] ?? [];
             for (const r of sidRows) {
                 const u = bareUuid(r.session_id);

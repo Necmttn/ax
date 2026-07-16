@@ -142,13 +142,21 @@ function isLocalDevOrigin(origin: string): boolean {
     return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
-function corsHeadersFor(origin: string | null): Record<string, string> {
+function corsHeadersFor(origin: string | null, requestedHeaders?: string | null): Record<string, string> {
     if (!origin) return {};
     if (!STUDIO_ORIGINS.has(origin) && !isLocalDevOrigin(origin)) return {};
     return {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "content-type",
+        // Echo whatever the preflight asked for. A browser fails the preflight
+        // when ANY requested header is missing from the allow list, and the
+        // desktop studio's Effect HttpClient adds tracing headers (traceparent)
+        // beyond content-type - a static list silently killed every desktop
+        // request AFTER a passing-looking 204 (#690). No credentials on this
+        // loopback-only API, so echoing is safe.
+        "Access-Control-Allow-Headers": requestedHeaders && requestedHeaders.length > 0
+            ? requestedHeaders
+            : "content-type",
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
     };
@@ -161,7 +169,7 @@ export async function handleDashboardRequestWithCors(
     contract: ContractWebHandler | null = null,
 ): Promise<Response> {
     const origin = req.headers.get("origin");
-    const cors = corsHeadersFor(origin);
+    const cors = corsHeadersFor(origin, req.headers.get("access-control-request-headers"));
 
     if (req.method === "OPTIONS") {
         // Chrome's Private Network Access: an HTTPS page (the hosted studio at

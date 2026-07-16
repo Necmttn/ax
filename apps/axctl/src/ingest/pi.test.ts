@@ -353,6 +353,59 @@ describe("Pi JSONL extraction", () => {
         ]);
     });
 
+    test("bad session timestamp clamps started_at to the earliest valid body timestamp", () => {
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-bad-header-valid-body",
+                timestamp: "not-a-date",
+                cwd: "/tmp/project",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "user-later",
+                parentId: null,
+                timestamp: "2026-05-29T06:00:03.000Z",
+                message: {
+                    role: "user",
+                    content: [{ type: "text", text: "Later entry first." }],
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-earliest",
+                parentId: "user-later",
+                timestamp: "2026-05-29T06:00:01.000Z",
+                message: {
+                    role: "assistant",
+                    content: [{ type: "text", text: "Earlier entry second." }],
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-latest",
+                parentId: "assistant-earliest",
+                timestamp: "2026-05-29T06:00:05.000Z",
+                message: {
+                    role: "assistant",
+                    content: [{ type: "text", text: "Latest entry last." }],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.session.started_at).toBe("2026-05-29T06:00:01.000Z");
+        expect(extracted.session.started_at).not.toBe("1970-01-01T00:00:00.000Z");
+        expect(extracted.session.ended_at).toBe("2026-05-29T06:00:05.000Z");
+        expect(
+            new Date(extracted.session.ended_at).getTime() -
+                new Date(extracted.session.started_at).getTime(),
+        ).toBe(4_000);
+    });
+
     test("projects assistant toolCall blocks, tool results, synthetic skills, and token usage statements", () => {
         const extracted = __testExtractPiJsonlLines([
             JSON.stringify({

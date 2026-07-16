@@ -948,6 +948,14 @@ const sliceCursorExtractForSession = (
 
 export const __testSliceCursorExtractForSession = sliceCursorExtractForSession;
 
+const includeByMtime = (mtime: Option.Option<Date>, cutoffMs: number): boolean =>
+    Option.match(mtime, {
+        onNone: () => true,
+        onSome: (date) => date.getTime() >= cutoffMs,
+    });
+
+export const __testIncludeCursorByMtime = includeByMtime;
+
 // All fs ops below are discovery PROBES: the OLD code guarded every access with
 // `existsSync`/`readdir`-in-try/catch and treated any miss/fault as "absent,
 // skip". `orAbsent` reproduces that exactly (recovers ANY PlatformError to the
@@ -968,11 +976,11 @@ const includeDbByMtime = (
             // OLD: existsSync guard → skip absent sidecars; stat in try/catch → false.
             const sidecarExists = yield* fs.exists(path).pipe(orAbsent(false));
             if (!sidecarExists) continue;
-            const mtimeMs = yield* fs.stat(path).pipe(
-                Effect.map((st) => Option.getOrElse(st.mtime, () => new Date(0)).getTime()),
-                orAbsent(-1),
+            const included = yield* fs.stat(path).pipe(
+                Effect.map((st) => includeByMtime(st.mtime, cutoffMs)),
+                orAbsent(false),
             );
-            if (mtimeMs >= cutoffMs) return true;
+            if (included) return true;
         }
         return false;
     });

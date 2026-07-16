@@ -12,10 +12,14 @@
       "packages/*"
     ],
     "catalog": {
+      "@effect/language-service": "^0.85.1",
+      "@effect/platform-bun": "4.0.0-beta.78",
+      "@effect/platform-node": "4.0.0-beta.78",
       "effect": "4.0.0-beta.78",
       "typescript": "^5.6.0",
       "@types/bun": "latest",
       "vite": "^8.0.3",
+      "zod": "4.4.3",
       "js.foresight": "4.2.0",
       "js.foresight-devtools": "2.2.0",
       "@foresightjs/react": "0.3.2"
@@ -156,7 +160,7 @@
   },
   "devDependencies": {
     "@ax/community-compile": "workspace:*",
-    "@effect/language-service": "^0.85.1",
+    "@effect/language-service": "catalog:",
     "@tanstack/react-router": "^1.169",
     "@tanstack/router-plugin": "^1.167",
     "@types/bun": "latest",

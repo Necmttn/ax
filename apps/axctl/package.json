@@ -30,7 +30,7 @@
     "@ax/schema": "workspace:*",
     "@durable-streams/client": "^0.2.6",
     "@durable-streams/server": "^0.3.5",
-    "@effect/platform-bun": "4.0.0-beta.78",
+    "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",
@@ -43,10 +43,10 @@
     "smol-toml": "1.6.1",
     "surrealdb": "^2.0.0",
     "yaml": "^2.8.4",
-    "zod": "3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.85.1",
+    "@effect/language-service": "catalog:",
     "@tanstack/react-router": "^1.169",
     "@types/bun": "catalog:",
     "@types/react": "^19.2.0",

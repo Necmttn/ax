@@ -30,7 +30,7 @@ const shared = {
     inputOptions: {
         moduleTypes: { ".surql": "text" },
     },
-} as const;
+} satisfies Partial<import("tsdown").UserConfig>;
 
 export default defineConfig([
     {
