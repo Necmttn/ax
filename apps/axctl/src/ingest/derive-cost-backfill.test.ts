@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { deriveCostBackfill } from "./derive-cost-backfill.ts";
+import { MODEL_PRICING_SOURCE } from "./model-pricing.ts";
 
 interface UsageRowFixture {
     readonly id: string;
@@ -60,7 +61,7 @@ describe("deriveCostBackfill", () => {
         // 1M estimated tokens × claude-opus-4-5 input $5/M (byte-estimate rows
         // price the whole count at the input rate - honest lower bound).
         expect(stmt).toContain("estimated_cost_usd = 5.00000000");
-        expect(stmt).toContain('pricing_source = "estimated:built_in_catalog_2026-06-10"');
+        expect(stmt).toContain(`pricing_source = "estimated:${MODEL_PRICING_SOURCE}"`);
         // Race guard: a concurrently ingest-priced cost wins at write time.
         expect(stmt).toContain("WHERE estimated_cost_usd IS NONE");
     });
