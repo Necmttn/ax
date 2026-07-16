@@ -173,6 +173,34 @@ const fixtureLines = (): string[] => [
 ];
 
 describe("codex normalized-batch parity", () => {
+    it("warns and falls back for missing or malformed timestamps", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                payload: {
+                    id: "codex-invalid-timestamp",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-06-10T08:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "compacted",
+                timestamp: "not-a-timestamp",
+                payload: { message: "", replacement_history: [{ type: "message" }] },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        expect(extracted!.warnings).toHaveLength(2);
+        expect(extracted!.warnings[0]).toContain("missing entry timestamp");
+        expect(extracted!.warnings[1]).toContain("invalid entry timestamp");
+        expect(Number.isFinite(new Date(extracted!.session.started_at).getTime())).toBe(true);
+        expect(extracted!.session.started_at).toBe("2026-06-10T08:00:00.000Z");
+        expect(extracted!.session.ended_at).toBe("2026-06-10T08:00:00.000Z");
+        expect(extracted!.compactions).toHaveLength(1);
+        expect(Number.isFinite(extracted!.compactions[0]!.ts.getTime())).toBe(true);
+    });
+
     it("single-shot extract emits golden statement shapes", () => {
         const extracted = __testExtractCodexJsonlLines(fixtureLines());
         expect(extracted).not.toBeNull();

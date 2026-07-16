@@ -45,6 +45,17 @@ describe("studio CORS / Private Network Access", () => {
         expect(res.headers.get("access-control-allow-origin")).toBe("ax://studio");
     });
 
+    test("preflight echoes the requested headers (traceparent etc), default content-type", async () => {
+        const withHeaders = await handleDashboardRequestWithCors(preflight({
+            origin: "ax://studio",
+            "access-control-request-headers": "content-type,traceparent",
+        }));
+        expect(withHeaders.headers.get("access-control-allow-headers")).toBe("content-type,traceparent");
+
+        const without = await handleDashboardRequestWithCors(preflight({ origin: "ax://studio" }));
+        expect(without.headers.get("access-control-allow-headers")).toBe("content-type");
+    });
+
     test("other custom-scheme origins stay disallowed", async () => {
         const res = await handleDashboardRequestWithCors(preflight({ origin: "ax://evil" }));
         expect(res.headers.get("access-control-allow-origin")).toBeNull();

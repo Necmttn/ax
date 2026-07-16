@@ -1041,6 +1041,14 @@ function failedExtract(dbPath: string, error: unknown): OpenCodeExtract {
     );
 }
 
+const includeByMtime = (mtime: Option.Option<Date>, cutoffMs: number): boolean =>
+    Option.match(mtime, {
+        onNone: () => true,
+        onSome: (date) => date.getTime() >= cutoffMs,
+    });
+
+export const __testIncludeOpenCodeByMtime = includeByMtime;
+
 // Discovery PROBE: the OLD code guarded with `existsSync` and `stat`-in-try/catch,
 // treating any miss/fault as "no candidate". `orAbsent` reproduces that exactly
 // (recovers ANY PlatformError to the fallback), so this reader never fails; R is
@@ -1058,11 +1066,11 @@ const findOpenCodeDbCandidates = (
         if (!exists) return [];
         if (cutoffMs > 0) {
             // OLD: stat in try/catch → [] on fault or when mtime is below cutoff.
-            const mtimeMs = yield* fs.stat(dbPath).pipe(
-                Effect.map((st) => Option.getOrElse(st.mtime, () => new Date(0)).getTime()),
-                orAbsent(-1),
+            const included = yield* fs.stat(dbPath).pipe(
+                Effect.map((st) => includeByMtime(st.mtime, cutoffMs)),
+                orAbsent(false),
             );
-            if (mtimeMs < cutoffMs) return [];
+            if (!included) return [];
         }
         return [dbPath];
     });

@@ -1,6 +1,9 @@
 node_modules/
 data/
 *.log
+# SurrealQL diagnostic logs (AX_DB_QUERY_LOG)
+db-query-*.querylog
+/[0-9]
 .env
 .env.local
 bun.lockb

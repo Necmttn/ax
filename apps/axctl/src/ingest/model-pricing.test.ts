@@ -212,6 +212,32 @@ describe("model pricing", () => {
         });
     });
 
+    it("prices claude-sonnet-5 and its suffixed ids", () => {
+        const catalog = builtInPricingCatalog();
+
+        expect(pricingForModel("claude-sonnet-5", catalog)).toMatchObject({
+            inputPerMillionUsd: 3,
+            outputPerMillionUsd: 15,
+        });
+        expect(pricingForModel("claude-sonnet-5[1m]", catalog)).toMatchObject({
+            inputPerMillionUsd: 3,
+            outputPerMillionUsd: 15,
+        });
+    });
+
+    it("approximates gpt-5.6 variants at the gpt-5.5 tier", () => {
+        const catalog = builtInPricingCatalog();
+
+        expect(pricingForModel("gpt-5.6-sol", catalog)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
+        });
+        expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
+        });
+    });
+
     it("falls back gpt-5 point releases to gpt-5 pricing when no exact row exists", () => {
         const catalog = new Map([["gpt-5", builtInPricingCatalog().get("gpt-5")!]]);
 

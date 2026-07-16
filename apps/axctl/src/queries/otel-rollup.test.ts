@@ -3,6 +3,7 @@ import {
     FLOWING_MS,
     STALE_MS,
     bareUuid,
+    buildOtelSessionIdsQuery,
     coveragePct,
     formatAge,
     healthGlyph,
@@ -80,6 +81,16 @@ describe("bareUuid", () => {
     it("is null for nullish", () => {
         expect(bareUuid(null)).toBeNull();
         expect(bareUuid(undefined)).toBeNull();
+    });
+});
+
+describe("buildOtelSessionIdsQuery", () => {
+    it("windows the session-id scan by observed_at", () => {
+        expect(buildOtelSessionIdsQuery("otel_log_event", 14)).toBe(
+            "SELECT session_id FROM otel_log_event"
+            + " WHERE observed_at > time::now() - 14d"
+            + " AND session_id != NONE GROUP BY session_id;",
+        );
     });
 });
 
