@@ -83,6 +83,65 @@ describe("fetchCostModels", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchCostModels - #696 follow-up: catalog-vs-stored-cost disagreement
+// (reviewer MUST-FIX) + query-time recompute for pre-existing zero-cost rows
+// (reviewer live-smoke gap) + zero-usage rows never flagged (SHOULD-FIX).
+// ---------------------------------------------------------------------------
+
+describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
+    test("never masks a real nonzero stored cost, even for a model absent from the built-in catalog", async () => {
+        // "db-only-model" is priced ONLY via a DB agent_model refresh (litellm/
+        // models.dev), never in BUILTIN_MODEL_PRICING_CATALOG. The old
+        // isUnpricedModel checked only the built-in catalog and would have
+        // flagged this UNPRICED despite a real stored dollar amount.
+        const dbRows = [
+            { model: "db-only-model", sessions: 1, prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 4.25 },
+        ];
+        const db = makeMockDb([[dbRows], [[]]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 4.25, unpriced: false });
+    });
+
+    test("recomputes a stored-zero row from its own token split when the catalog (DB refresh) has a rate", async () => {
+        // Stored cost is 0 (ingested before the model had a rate); the
+        // agent_model DB table now carries a refreshed rate for it. The
+        // query-time resolver must self-heal without waiting for a
+        // derive-cost-backfill re-run.
+        const dbRows = [
+            { model: "custom-model-x", sessions: 1, prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const agentModelRows = [
+            {
+                name: "custom-model-x", provider: "test",
+                input_per_million_usd: 2, output_per_million_usd: 10,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: null,
+                fast_multiplier: 1, context_window: null, pricing_source: "litellm",
+            },
+        ];
+        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        // 1,000,000 prompt tokens * $2/MTok = $2.00
+        expect(result.rows[0]).toMatchObject({ cost_usd: 2, unpriced: false });
+        expect(result.total_cost_usd).toBeCloseTo(2);
+    });
+
+    test("a zero-token row stays $0 and unflagged, even for an unknown model", async () => {
+        const dbRows = [
+            { model: null, sessions: 1, prompt_tokens: 0, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const db = makeMockDb([[dbRows], [[]]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 0, unpriced: false });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // fetchCostSessions
 // ---------------------------------------------------------------------------
 
@@ -244,6 +303,65 @@ describe("fetchCostSplit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchCostSplit - #696 follow-up: same catalog-vs-stored-cost + recompute
+// semantics as fetchCostModels, but must also flow into totals/share_pct.
+// ---------------------------------------------------------------------------
+
+describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
+    test("never masks a real nonzero stored cost cell absent from the built-in catalog", async () => {
+        const dbRows = [
+            { source: "codex", model: "db-only-model", sessions: 1,
+              prompt_tokens: 100, completion_tokens: 10,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 4.25 },
+        ];
+        const db = makeMockDb([[dbRows], [[]], [[]]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 4.25, unpriced: false });
+    });
+
+    test("recomputes a stored-zero cell from its own token split and folds it into totals + share_pct", async () => {
+        const dbRows = [
+            { source: "claude", model: "claude-sonnet-4-8", sessions: 1,
+              prompt_tokens: 0, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0 },
+            { source: "codex", model: "custom-model-x", sessions: 1,
+              prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const agentModelRows = [
+            {
+                name: "custom-model-x", provider: "test",
+                input_per_million_usd: 2, output_per_million_usd: 10,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: null,
+                fast_multiplier: 1, context_window: null, pricing_source: "litellm",
+            },
+        ];
+        const db = makeMockDb([[dbRows], [agentModelRows], [[]]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        const recomputed = result.rows.find((r) => r.model === "custom-model-x")!;
+        expect(recomputed).toMatchObject({ cost_usd: 2, unpriced: false });
+        // totals + share must reflect the recomputed dollar amount, not the
+        // stale stored 0.
+        expect(result.totals.cost_usd).toBeCloseTo(3.0);
+        expect(recomputed.share_pct).toBeCloseTo((2 / 3) * 100);
+    });
+
+    test("a zero-token cell stays $0 and unflagged, even for an unattributed model", async () => {
+        const dbRows = [
+            { source: "claude-subagent", model: null, sessions: 1,
+              prompt_tokens: 0, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const db = makeMockDb([[dbRows], [[]], [[]]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 0, unpriced: false });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // NaN-guard regression tests (F-graph-toolkit: finite guard via countField)
 // Decision: FIX - NaN propagation in cost/token aggregation silently
 // corrupts downstream sums, sorts, and pct calculations. countField's finite
@@ -299,7 +417,9 @@ describe("fetchCostSplit - contentTypes dimension", () => {
             { ct: "content_type:code", calls: 5, bytes: 400 },
             { ct: "content_type:docs", calls: 2, bytes: 200 },
         ];
-        const db = makeMockDb([[splitRows], [contentTypeRows]]);
+        // Query order: split rows, THEN the pricing-catalog lookup
+        // (loadPricingCatalogForModels), THEN content-type breakdown.
+        const db = makeMockDb([[splitRows], [[]], [contentTypeRows]]);
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes).toBeDefined();
@@ -318,8 +438,8 @@ describe("fetchCostSplit - contentTypes dimension", () => {
                 cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
             },
         ];
-        // Empty content-type response
-        const db = makeMockDb([[splitRows], [[]]]);
+        // Empty content-type response (and empty pricing-catalog lookup)
+        const db = makeMockDb([[splitRows], [[]], [[]]]);
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes.rows).toHaveLength(0);
