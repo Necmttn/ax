@@ -20,3 +20,7 @@ PR https://github.com/Necmttn/ax/pull/735 · compileTeam → TeamBoards (adoptio
 ## team-fetch (Slice 2 final)
 PR https://github.com/Necmttn/ax/pull/736 · fetchTeamProfiles contents-API reader, drop-failures, Bearer-auth · typecheck 0, 3 tests, Effect-free
 
+
+## 2026-07-17T00:47:43+08:00 — all 3 gated, wave-2 in CI
+- MERGED: team-validate #734. PRs in CI: team-compile #735, team-fetch #736.
+- On both merge → SLICE 2 COMPLETE. wakeup finalizes + surfaces Slice 3/4/5 infra decision.
