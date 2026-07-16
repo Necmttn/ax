@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/compile.ts",
       "import": "./src/compile.ts"
+    },
+    "./team": {
+      "types": "./src/team-compile.ts",
+      "import": "./src/team-compile.ts"
     }
   },
   "scripts": {
@@ -14,6 +18,7 @@
     "test": "bun test"
   },
   "devDependencies": {
+    "@ax/lib": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:"
   }
