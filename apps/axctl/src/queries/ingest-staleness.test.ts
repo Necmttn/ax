@@ -6,6 +6,7 @@ import {
     fetchLastSuccessfulIngestAt,
     staleIngestThresholdMs,
     warnIfIngestStale,
+    withIngestStalenessPreflight,
 } from "./ingest-staleness.ts";
 
 describe("staleIngestThresholdMs", () => {
@@ -132,5 +133,28 @@ describe("warnIfIngestStale (real seam)", () => {
         const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db.layer)));
         expect(stderr).toBe("");
         expect(stdout).toBe("");
+    });
+
+    test("runs as a preflight before the command body", async () => {
+        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000).toISOString());
+        const originalStderr = process.stderr.write.bind(process.stderr);
+        const events: string[] = [];
+        process.stderr.write = () => {
+            events.push("warning");
+            return true;
+        };
+        try {
+            await Effect.runPromise(
+                withIngestStalenessPreflight(
+                    Effect.sync(() => {
+                        events.push("command");
+                    }),
+                ).pipe(Effect.provide(db.layer)),
+            );
+        } finally {
+            process.stderr.write = originalStderr;
+        }
+
+        expect(events).toEqual(["warning", "command"]);
     });
 });

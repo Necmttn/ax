@@ -730,6 +730,7 @@ export const __testBuildPiBatchStatements = buildPiBatchStatements;
 
 interface PiIngestOpts {
     sinceDays: number | undefined;
+    runId: string | undefined;
 }
 
 /**
@@ -762,6 +763,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
             sourceKind: desc.sourceKind,
             forceEnv: desc.forceEnv,
             source: desc.provider,
+            ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             processFile: (file) => Effect.gen(function* () {
                 // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
                 // rejection became an unrecoverable defect. `readFileString`
@@ -851,7 +853,7 @@ const makePiLikeStage = (
         // per-file isolation seam (#261, see file-isolation.ts), so no
         // PlatformError escapes the ingest. Only connection loss and failure
         // storms abort the stage, as a DbError.
-        const result = yield* ingest({ sinceDays });
+        const result = yield* ingest({ sinceDays, runId: ctx.runId });
         return PiStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +

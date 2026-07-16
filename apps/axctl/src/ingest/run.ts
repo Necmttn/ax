@@ -323,6 +323,7 @@ export const runIngest = (
             cwd: opts.cwd,
             since: sinceDays === undefined ? new Date(0) : new Date(now.getTime() - sinceDays * 86400 * 1000),
             debug: opts.debug ?? opts.args.includes("--debug"),
+            runId,
             ...(opts.repoPaths ? { repoPaths: [...opts.repoPaths] } : {}),
             ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
         });

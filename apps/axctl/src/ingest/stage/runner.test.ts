@@ -325,6 +325,8 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
         expect(heartbeatSeconds({})).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "10" })).toBe(10);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "0" })).toBe(0);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "" })).toBe(30);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "   " })).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "-5" })).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "abc" })).toBe(30);
     });
@@ -333,6 +335,8 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
         expect(deriveStageTimeoutSeconds({})).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "120" })).toBe(120);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "0" })).toBe(0);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "" })).toBe(300);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "   " })).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "-1" })).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "nope" })).toBe(300);
     });

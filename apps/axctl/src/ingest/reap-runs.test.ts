@@ -3,7 +3,11 @@ import { Effect, Layer, Path } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { AxConfigTest } from "@ax/lib/config";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { reapStaleIngestRuns, selectStrandedRunIds } from "./reap-runs.ts";
+import {
+    buildReapIngestRunStatement,
+    reapStaleIngestRuns,
+    selectStrandedRunIds,
+} from "./reap-runs.ts";
 
 describe("selectStrandedRunIds", () => {
     const now = Date.parse("2026-06-16T12:00:00.000Z");
@@ -82,6 +86,9 @@ describe("reapStaleIngestRuns (real seam)", () => {
         expect(updates[0]).toContain("070849df-4eba-4545-bd3d-c8e47d3e751a");
         expect(updates[0]).toContain(`status = "partial"`);
         expect(updates[0]).toContain("reaped");
+        // A run may settle "ok" after the SELECT but before this write. The
+        // predicate makes that race a no-op instead of flipping it partial.
+        expect(updates[0]).toContain("WHERE status = 'running'");
         expect(updates.join()).not.toContain("live");
     });
 
@@ -92,5 +99,15 @@ describe("reapStaleIngestRuns (real seam)", () => {
         expect(result.found).toBe(1);
         expect(result.reaped).toBe(0);
         expect(tc.captured.filter((sql) => sql.startsWith("UPDATE ingest_run:"))).toHaveLength(0);
+    });
+});
+
+describe("buildReapIngestRunStatement", () => {
+    test("only settles a row that is still running", () => {
+        const sql = buildReapIngestRunStatement("race");
+        expect(sql).toContain("UPDATE ingest_run:`race`");
+        expect(sql).toContain(`SET status = "partial"`);
+        expect(sql).toContain("WHERE status = 'running'");
+        expect(sql).toContain("RETURN NONE");
     });
 });

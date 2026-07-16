@@ -79,3 +79,13 @@ export const warnIfIngestStale: Effect.Effect<void, never, SurrealClient> = Effe
     // interruptions are swallowed too - the only way to honor "never fails."
     Effect.ignoreCause,
 );
+
+/**
+ * Run the stale-graph probe before a DB-backed command. This must be a
+ * preflight rather than a finalizer: some legacy handlers call `process.exit`
+ * directly, so no finalizer gets a chance to run on their failure paths.
+ */
+export const withIngestStalenessPreflight = <A, E, R>(
+    command: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | SurrealClient> =>
+    warnIfIngestStale.pipe(Effect.andThen(command));

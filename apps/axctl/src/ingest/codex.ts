@@ -1345,6 +1345,7 @@ const queryCodexStatements = (statements: readonly string[]) =>
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;
+    runId: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
     /** Cumulative skipped-file snapshots from the failure collector (see
      *  file-isolation.ts). The stage wires `stageFileFailureAnnotator` here so
@@ -1455,6 +1456,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             sourceKind: "codex_session",
             forceEnv: "AX_REDERIVE_CODEX",
             source: "codex",
+            ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
             ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
             concurrency,
@@ -1809,6 +1811,7 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
         // DbError - mirroring `claudeStage`.
         const result = yield* ingestCodex({
             sinceDays,
+            runId: ctx.runId,
             onProgress: annotateStageProgress,
             onFileFailures,
             // `ingest here` scopes codex to the repo(s) at $PWD (#680); a global

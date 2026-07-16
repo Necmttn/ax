@@ -1,6 +1,7 @@
 import { Deferred, Effect, Fiber, Option, Semaphore } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { LiveTrace } from "@ax/lib/live-traces/index";
+import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
 import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
 import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
@@ -15,8 +16,7 @@ export const PIPELINE_CONCURRENCY = 4;
  *  slow stage is attributable instead of looking like a silent stall (#671).
  *  Env override `AX_INGEST_HEARTBEAT_SECONDS`; 0 disables. Exported for tests. */
 export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
-    const raw = Number(env.AX_INGEST_HEARTBEAT_SECONDS);
-    return Number.isFinite(raw) && raw >= 0 ? raw : 30;
+    return nonNegativeNumberEnv(env.AX_INGEST_HEARTBEAT_SECONDS, 30);
 };
 
 /** Hard per-stage cap applied to `derive`-tagged stages ONLY. Derives reshape
@@ -27,8 +27,7 @@ export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number =
  *  are deliberately exempt: a full backfill legitimately runs for many minutes.
  *  Env override `AX_STAGE_TIMEOUT_SECONDS`; 0 disables. Exported for tests. */
 export const deriveStageTimeoutSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
-    const raw = Number(env.AX_STAGE_TIMEOUT_SECONDS);
-    return Number.isFinite(raw) && raw >= 0 ? raw : 300;
+    return nonNegativeNumberEnv(env.AX_STAGE_TIMEOUT_SECONDS, 300);
 };
 
 /** Annotate the active stage span with the numeric fields of its result stats

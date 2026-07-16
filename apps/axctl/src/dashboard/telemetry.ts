@@ -46,10 +46,11 @@ export function buildIngestRunFinishStatement(input: {
     return `UPDATE ingest_run:\`${input.runId}\` SET status = ${surrealString(input.status)}, ended_at = time::now(), metrics = ${surrealJson(input.metrics ?? {})} RETURN NONE;`;
 }
 
-/** Heartbeat on the parent run row: stage start/finish bumps
+/** Heartbeat on the parent run row: stage start/finish and long-running
+ *  provider work loops bump
  *  `last_progress_at` so a genuinely-live "running" run is distinguishable
  *  from one stranded by a crash (doctor's stale-run check, issue #269). */
-function ingestRunHeartbeatStatement(runId: string): string {
+export function ingestRunHeartbeatStatement(runId: string): string {
     return `UPDATE ingest_run:\`${runId}\` SET last_progress_at = time::now() RETURN NONE;`;
 }
 

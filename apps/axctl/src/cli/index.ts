@@ -63,7 +63,7 @@ import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usa
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { correlateOrphanOtel } from "../otel/correlate.ts";
-import { warnIfIngestStale } from "../queries/ingest-staleness.ts";
+import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -217,13 +217,13 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  * whose handlers actually touch SurrealDB.
  *
  * Every such command also gets the stale-graph warning (#697): one indexed
- * query, stderr only, after the command's own output so it lands next to the
- * prompt. `ensuring` (not `tap`) so a command that returned empty BECAUSE the
- * graph is stale - the #697 symptom - still explains itself when it fails.
+ * query, stderr only, before the command body. This is deliberately a
+ * pre-flight rather than an `ensuring` finalizer because legacy handlers that
+ * call `process.exit` bypass Effect finalizers; the warning must still cover
+ * those stale-graph symptom paths.
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
-    runCli(args).pipe(
-        Effect.ensuring(warnIfIngestStale),
+    withIngestStalenessPreflight(runCli(args)).pipe(
         Effect.provide(AppLayer),
         Effect.scoped,
     );
