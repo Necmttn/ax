@@ -11,6 +11,7 @@
     "./shared/ingest-staleness": "./src/shared/ingest-staleness.ts",
     "./shared/path": "./src/shared/path.ts",
     "./shared/team-community": "./src/shared/team-community.ts",
+    "./shared/team-fetch": "./src/shared/team-fetch.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
     "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
