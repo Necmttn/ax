@@ -17,3 +17,6 @@ PR https://github.com/Necmttn/ax/pull/734 · validateTeamProfile + TeamProfileV1
 ## team-compile (Slice 2)
 PR https://github.com/Necmttn/ax/pull/735 · compileTeam → TeamBoards (adoption/skill/spend, null-safe) · typecheck 0, 3 tests, Effect-free
 
+## team-fetch (Slice 2 final)
+PR https://github.com/Necmttn/ax/pull/736 · fetchTeamProfiles contents-API reader, drop-failures, Bearer-auth · typecheck 0, 3 tests, Effect-free
+
