@@ -9,3 +9,8 @@
 ## team-validate (Slice 2)
 PR https://github.com/Necmttn/ax/pull/734 · validateTeamProfile + TeamProfileV1 in @ax/lib/shared/team-community.ts (Effect-free, render-safe) · typecheck 0, 4 tests
 
+
+## 2026-07-17T00:40:08+08:00 — wave 2 spawned
+- MERGED: team-validate #734 (validateTeamProfile in @ax/lib/shared).
+- building (2): team-compile=w1R:p15 (aggregate TeamProfileV1[] → boards), team-fetch=w1R:p16 (contents-API browser fetcher, drop-failures). Both codex.
+- On BOTH merge → SLICE 2 COMPLETE. Then surface Slice 3/4/5 infra decision to user.
