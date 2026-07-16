@@ -473,6 +473,16 @@ function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER)
             const timestamp = sourceTimestamp(entry, session.ended_at);
             if (timestamp.warning) warnings.push(timestamp.warning);
             const ts = timestamp.ts;
+            const tsTime = new Date(ts).getTime();
+            if (
+                Number.isFinite(tsTime) &&
+                (
+                    session.started_at === SAFE_FALLBACK_TS ||
+                    tsTime < new Date(session.started_at).getTime()
+                )
+            ) {
+                session.started_at = ts;
+            }
             session.ended_at = ts;
             const providerEventId = head.id ?? null;
             const parentProviderEventId = head.parentId ?? null;
