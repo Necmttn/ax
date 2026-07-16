@@ -26,3 +26,7 @@ PR https://github.com/Necmttn/ax/pull/731 · TeamProfileV1 Schema + repo-scoped 
 ## team-push (Slice 1 final)
 PR https://github.com/Necmttn/ax/pull/732 · ax team push idempotent contents-upsert into <org>/ax-team; unbound-refused; all 7 subcommands · typecheck 0, 12 tests, no-node-fs 0
 
+
+## 2026-07-16T23:56:39+08:00 — all 3 gated, team-push in CI
+- MERGED: team-bindings #729, team-profile #731. PR (CI pending): team-push #732.
+- On #732 merge → SLICE 1 COMPLETE. wakeup finalizes fleet + surfaces Slice 2/3/5 decision to user.
