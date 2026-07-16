@@ -267,6 +267,15 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         fastMultiplier: 1,
         pricingSource: MODEL_PRICING_SOURCE,
     },
+    "claude-sonnet-5": {
+        provider: "anthropic",
+        inputPerMillionUsd: 3,
+        outputPerMillionUsd: 15,
+        cacheCreationPerMillionUsd: 3.75,
+        cacheReadPerMillionUsd: 0.3,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
     "claude-fable-5": {
         provider: "anthropic",
         inputPerMillionUsd: 10,
@@ -409,10 +418,14 @@ export function pricingForModel(
     if (!modelKey) return null;
     const exact = catalog.get(modelKey);
     if (exact) return exact;
+    // gpt-5.6 variants (sol/luna) have no published rates yet - approximate at the gpt-5.5 tier
+    // rather than pricing them $0 (see issue #696). Must precede the generic gpt-5.x rule.
+    if (/^gpt-5\.6(?:-|$)/i.test(modelKey)) return catalog.get("gpt-5.5") ?? catalog.get("gpt-5") ?? null;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
     if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
+    if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
     return null;
 }
