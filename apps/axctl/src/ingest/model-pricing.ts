@@ -436,8 +436,9 @@ export function pricingForModel(
     if (!modelKey) return null;
     const exact = catalog.get(modelKey);
     if (exact) return exact;
-    // gpt-5.6 variants (sol/luna) have no published rates yet - approximate at the gpt-5.5 tier
-    // rather than pricing them $0 (see issue #696). Must precede the generic gpt-5.x rule.
+    // sol/luna carry exact verified rates above (exact match wins); other
+    // gpt-5.6 variants (e.g. terra) approximate at the gpt-5.5 tier rather
+    // than pricing $0 (issue #696). Must precede the generic gpt-5.x rule.
     if (/^gpt-5\.6(?:-|$)/i.test(modelKey)) return catalog.get("gpt-5.5") ?? catalog.get("gpt-5") ?? null;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;

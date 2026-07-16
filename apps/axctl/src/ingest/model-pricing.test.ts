@@ -225,16 +225,18 @@ describe("model pricing", () => {
         });
     });
 
-    it("approximates gpt-5.6 variants at the gpt-5.5 tier", () => {
+    it("approximates gpt-5.6 variants WITHOUT an exact row at the gpt-5.5 tier", () => {
         const catalog = builtInPricingCatalog();
 
-        expect(pricingForModel("gpt-5.6-sol", catalog)).toMatchObject({
+        // sol/luna carry exact verified rates (see the catalog test above);
+        // the tier approximation only covers variants with no entry yet.
+        expect(pricingForModel("gpt-5.6-terra", catalog)).toMatchObject({
             inputPerMillionUsd: 5,
             outputPerMillionUsd: 30,
         });
         expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
-            inputPerMillionUsd: 5,
-            outputPerMillionUsd: 30,
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 6,
         });
     });
 
