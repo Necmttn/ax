@@ -8,3 +8,6 @@
 - Wave 2 (blocked on wave1): team-push (codex — GitHubEnv contents upsert into <org>/ax-team + ax team push).
 - Later slices blocked on user infra: Slice 3 (OAuth app), Slice 5 (Stripe).
 - GATE PATTERN (from ax-improve run): rebase onto origin/main before scope-check; hard scope-check vs chunk IN-list; run real tests; fable fallback→codex if spend limit.
+## team-bindings (Slice 1)
+PR https://github.com/Necmttn/ax/pull/729 · bindings state + join/status/leave nested in teamCommand (all 6 subcommands preserved) · typecheck 0, 16 tests, no-node-fs 0
+
