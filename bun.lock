@@ -21,7 +21,7 @@
       },
       "devDependencies": {
         "@ax/community-compile": "workspace:*",
-        "@effect/language-service": "^0.85.1",
+        "@effect/language-service": "catalog:",
         "@tanstack/react-router": "^1.169",
         "@tanstack/router-plugin": "^1.167",
         "@types/bun": "latest",
@@ -39,7 +39,7 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.36.0",
+      "version": "0.38.0",
       "bin": {
         "axctl": "./bin/axctl",
       },
@@ -51,7 +51,7 @@
         "@ax/schema": "workspace:*",
         "@durable-streams/client": "^0.2.6",
         "@durable-streams/server": "^0.3.5",
-        "@effect/platform-bun": "4.0.0-beta.78",
+        "@effect/platform-bun": "catalog:",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@opentui/core": "^0.2.5",
         "@opentui/react": "^0.2.5",
@@ -67,7 +67,7 @@
         "zod": "3.25.76",
       },
       "devDependencies": {
-        "@effect/language-service": "^0.85.1",
+        "@effect/language-service": "catalog:",
         "@tanstack/react-router": "^1.169",
         "@types/bun": "catalog:",
         "@types/react": "^19.2.0",
@@ -157,11 +157,11 @@
     },
     "apps/studio-desktop": {
       "name": "@ax/studio-desktop",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@ax/lib": "workspace:*",
         "@ax/schema": "workspace:*",
-        "@effect/platform-node": "4.0.0-beta.78",
+        "@effect/platform-node": "catalog:",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -231,7 +231,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@ax/onboarding-prompt": "workspace:*",
-        "@effect/platform-bun": "4.0.0-beta.78",
+        "@effect/platform-bun": "catalog:",
         "effect": "catalog:",
         "surrealdb": "^2.0.0",
       },
@@ -279,6 +279,9 @@
     "@tanstack/start-server-core": "1.169.4",
   },
   "catalog": {
+    "@effect/language-service": "^0.85.1",
+    "@effect/platform-bun": "4.0.0-beta.78",
+    "@effect/platform-node": "4.0.0-beta.78",
     "@foresightjs/react": "0.3.2",
     "@types/bun": "latest",
     "effect": "4.0.0-beta.78",
