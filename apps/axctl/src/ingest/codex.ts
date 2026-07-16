@@ -77,6 +77,7 @@ export const DEFAULT_CODEX_FLUSH_EVERY = 500;
 const DEFAULT_CODEX_CONCURRENCY = 1;
 const DEFAULT_CODEX_PAYLOAD_MAX_BYTES = 1200;
 const CODEX_PROGRESS_LINE_EVERY = 100;
+const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
 
 interface CodexSession {
     id: string;
@@ -92,6 +93,12 @@ interface CodexSession {
     parent_thread_id: string | null;
     started_at: string;
     ended_at: string;
+}
+
+function validIsoTimestamp(input: string | null): string | null {
+    if (input === null || input.trim().length === 0) return null;
+    const date = new Date(input);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 interface CodexTurn {
@@ -424,6 +431,7 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
 export interface CodexExtract {
     session: CodexSession;
     sourcePath: string | null;
+    warnings: string[];
     turns: CodexTurn[];
     turnTokenUsages: CodexTurnTokenUsage[];
     invocations: CodexInvocation[];
@@ -439,6 +447,7 @@ export interface CodexExtract {
 interface MutableCodexExtract {
     session: CodexSession | null;
     sourcePath: string | null;
+    warnings: string[];
     turns: CodexTurn[];
     turnTokenUsages: CodexTurnTokenUsage[];
     invocations: CodexInvocation[];
@@ -465,6 +474,7 @@ function createCodexExtractor(
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
     const compactions: CompactionWrite[] = [];
+    const warnings: string[] = [];
     let lastContextTokens: number | null = null;
     let tokenUsage: CodexTokenUsage | null = null;
     let tokenCountEvents = 0;
@@ -759,6 +769,7 @@ function createCodexExtractor(
         return {
             session,
             sourcePath: filePath,
+            warnings: warnings.splice(0, warnings.length),
             turns: drainedTurns,
             turnTokenUsages: drainedTurnTokenUsages,
             invocations: drainedInvocations,
@@ -788,11 +799,27 @@ function createCodexExtractor(
                 return;
             }
             const type = entry.type ?? null;
-            const ts = entry.timestamp ?? null;
-            if (!ts) return;
             const payload = isRecord(rawEntry.payload) ? rawEntry.payload : null;
+            const rawTimestamp = entry.timestamp ?? null;
+            const entryTimestamp = validIsoTimestamp(rawTimestamp);
+            const entryId = type === "session_meta" && payload
+                ? (stringField(payload, "id") ?? filePath)
+                : `${type ?? "unknown"} in ${filePath}`;
+            if (!entryTimestamp) {
+                warnings.push(
+                    `${rawTimestamp ? "invalid" : "missing"} entry timestamp for ${entryId}` +
+                        (rawTimestamp ? `: ${rawTimestamp}` : ""),
+                );
+            }
 
             if (type === "session_meta" && payload) {
+                const rawPayloadTimestamp = stringField(payload, "timestamp");
+                const payloadTimestamp = validIsoTimestamp(rawPayloadTimestamp);
+                if (rawPayloadTimestamp !== null && !payloadTimestamp) {
+                    warnings.push(`invalid session payload timestamp for ${entryId}: ${rawPayloadTimestamp}`);
+                }
+                const startedAt = payloadTimestamp ?? entryTimestamp ?? SAFE_FALLBACK_TS;
+                const endedAt = entryTimestamp ?? payloadTimestamp ?? startedAt;
                 session = {
                     id: stringField(payload, "id") ?? filePath,
                     cwd: stringField(payload, "cwd"),
@@ -802,12 +829,13 @@ function createCodexExtractor(
                     reasoning_effort: null,
                     thread_source: stringField(payload, "thread_source"),
                     parent_thread_id: stringField(payload, "parent_thread_id"),
-                    started_at: stringField(payload, "timestamp") ?? ts,
-                    ended_at: ts,
+                    started_at: startedAt,
+                    ended_at: endedAt,
                 };
                 return;
             }
             if (!session) return;
+            const ts = entryTimestamp ?? session.ended_at;
             session.ended_at = ts;
 
             if (type === "turn_context" && payload) {
@@ -937,6 +965,7 @@ function createCodexExtractor(
             return {
                 session,
                 sourcePath: remaining.sourcePath,
+                warnings: remaining.warnings,
                 turns: remaining.turns,
                 turnTokenUsages: remaining.turnTokenUsages,
                 invocations: remaining.invocations,
@@ -1542,6 +1571,14 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 let providerEventsCleared = false;
                 const writeBatch = (batch: MutableCodexExtract) =>
                     Effect.gen(function* () {
+                        yield* Effect.forEach(
+                            batch.warnings,
+                            (warning) => Effect.logWarning("codex transcript timestamp fallback", {
+                                file: filePath,
+                                warning,
+                            }),
+                            { discard: true },
+                        );
                         if (!batch.session) return;
                         currentSession = batch.session;
                         if (!sessionUpserted) {
