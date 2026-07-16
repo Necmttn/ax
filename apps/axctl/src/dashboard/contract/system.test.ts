@@ -82,8 +82,23 @@ describe("contract system group", () => {
         const res = await handler(req("POST", "/api/query", { sql: "DELETE FROM session" }));
         expect(res.status).toBe(400);
         await expect(res.json()).resolves.toMatchObject({
-            error: "Only SELECT, RETURN, and INFO queries are allowed",
+            error: "Only a single SELECT, RETURN, or INFO statement is allowed",
         });
+    });
+
+    test("POST /api/query rejects a stacked write after a read (multi-statement)", async () => {
+        const { handler } = make();
+        const res = await handler(req("POST", "/api/query", { sql: "SELECT 1; DELETE FROM session" }));
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({
+            error: expect.stringContaining("single"),
+        });
+    });
+
+    test("POST /api/query still accepts a single read with a trailing semicolon", async () => {
+        const { handler } = make();
+        const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session;" }));
+        expect(res.status).toBe(200);
     });
 
     test("POST /api/query rejects empty SQL with 400", async () => {
