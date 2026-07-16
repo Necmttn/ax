@@ -10,6 +10,7 @@
     "./shared/fs-classify": "./src/shared/fs-classify.ts",
     "./shared/ingest-staleness": "./src/shared/ingest-staleness.ts",
     "./shared/path": "./src/shared/path.ts",
+    "./shared/team-community": "./src/shared/team-community.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
     "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
