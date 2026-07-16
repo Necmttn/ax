@@ -115,3 +115,16 @@
 - MERGED (11): #704 #705 #706 #707 #709 #710 #711 #712 #713 #718 #724.
 - ci-live-db #715: CI verify FAILED at surreal install ("sh: shift: can't shift that many" — bad install-script args). Re-spawned codex (w1R:pT) to swap install-script→release-tarball download. On re-fire: gate→SSH force-push→re-CI→merge.
 - BLOCKED (1): refactor-godfile (fable spend limit).
+
+## 2026-07-16T21:44:09+08:00 — refactor-godfile RESUMED (limit restored, user go)
+- spend limit raised (user). refactor-godfile re-spawned on FABLE: pane w1R:pY, tab w1R:t6 (old t3 died on teardown).
+- worktree off fully-merged origin/main (all 12 PRs present; god-file still 9074 lines).
+- GATE PLAN (user): rebase→scope→characterization suite green SAME count→ /review-all → if LGTM merge.
+
+## 2026-07-16T22:25:05+08:00 — refactor-godfile /review-all done, 1 fix
+- codex adversarial: PURE MOVE CONFIRMED (326/326 decls identical, all 185 exports present, 76/76 tests, 646 assertions = baseline). Plain review cancelled (>15min, huge diff).
+- ONE finding: new type-only circular import types.ts<->helpers.ts. Sent pane w1R:pY back to make types.ts a leaf (move WorkflowCandidateGuidancePendingReviewTaskSummary into types). Then merge.
+
+## 2026-07-16T22:37:00+08:00 — RUN COMPLETE 13/13
+- refactor-godfile #727 MERGED (LGTM: adversarial pure-move confirmed + type-only cycle fixed). god-file 9074→1502 on main.
+- ALL 13 chunks shipped. Fleet deregistered, tab/panes/tandem closed.

@@ -132,3 +132,9 @@ Shipped the vetted /improve audit findings as 12 merged PRs. One chunk (refactor
 - Audit DEPS-01 overreached: hooks-sdk effect pin is LITERAL by design (file: dep from ~/.ax/hooks, catalog: can't resolve). Corrected.
 - ci-live-db passed locally but failed CI (malformed surreal install-script args) — a real bug only the PR's own CI could catch; fixed with a direct release-tarball download.
 - Workflow-touching PRs need SSH push (token lacks 'workflow' scope): git -c 'url.https://github.com/.insteadOf=DISABLED' push ssh://git@github.com/Necmttn/ax.git BR:BR
+## refactor-godfile (DEBT-01)
+PR #727 · 9074→1502 barrel + workflow-candidate-{types,helpers}.ts · /review-all: adversarial confirmed PURE MOVE (326/326 decls, 185 exports, 76/76+646 assertions=baseline); 1 finding (type-only cycle) fixed post-review · typecheck 0, tests 76/76, no-node-fs 0 · CI pending
+
+
+## RUN COMPLETE — 2026-07-16T22:37:00+08:00 — 13/13
+refactor-godfile MERGED #727 (god-file 9074→1502 on main). ALL selected /improve findings shipped. 3 follow-ups open (#708 #714 #717). Fleet torn down, deregistered.
