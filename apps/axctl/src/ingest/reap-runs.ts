@@ -12,26 +12,12 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
-import { buildIngestRunFinishStatement } from "../dashboard/telemetry.ts";
-
-/** Grace beyond the ingest timeout before a still-"running" row is deemed
- *  stranded - mirrors doctor's stale-run probe (cli/install.ts). */
-export const REAP_GRACE_SECONDS = 60;
-
-interface RunningIngestRunRow {
-    readonly id?: unknown;
-    readonly started_at?: unknown;
-    readonly last_progress_at?: unknown;
-}
-
-/** Newest heartbeat (`last_progress_at`, else `started_at`) older than the
- *  budget => stranded. No parseable timestamp => can't prove it's live, reap it.
- *  Same rule as doctor's `staleRunningIngestRuns`. */
-const isStranded = (row: RunningIngestRunRow, nowMs: number, staleAfterMs: number): boolean => {
-    const beat = Date.parse(String(row.last_progress_at ?? row.started_at ?? ""));
-    if (!Number.isFinite(beat)) return true;
-    return nowMs - beat > staleAfterMs;
-};
+import {
+    isStrandedRun,
+    REAP_GRACE_SECONDS,
+    type IngestRunHeartbeatRow,
+} from "@ax/lib/shared/ingest-staleness";
+import { surrealJson } from "@ax/lib/shared/surql";
 
 /** `ingest_run:⟨id⟩` or `ingest_run:\`id\`` (SurrealDB escapes ids with special
  *  chars - e.g. a uuid's dashes - in angle brackets or backticks) -> the bare id
@@ -45,11 +31,11 @@ const bareRunId = (id: unknown): string =>
 
 /** Pure selector: the bare ids of rows that should be reaped. Exported for tests. */
 export function selectStrandedRunIds(
-    rows: readonly RunningIngestRunRow[],
+    rows: readonly IngestRunHeartbeatRow[],
     nowMs: number,
     staleAfterMs: number,
 ): string[] {
-    return rows.filter((row) => isStranded(row, nowMs, staleAfterMs)).map((row) => bareRunId(row.id));
+    return rows.filter((row) => isStrandedRun(row, nowMs, staleAfterMs)).map((row) => bareRunId(row.id));
 }
 
 export interface ReapStaleRunsResult {
@@ -62,6 +48,17 @@ export interface ReapStaleRunsResult {
     readonly dryRun: boolean;
 }
 
+/**
+ * Reap-specific terminal write. The status predicate closes the race between
+ * selecting a stale "running" row and settling it: a live run that finishes
+ * "ok" in that gap must not be overwritten as "partial".
+ */
+export function buildReapIngestRunStatement(runId: string): string {
+    return `UPDATE ingest_run:\`${runId}\` SET status = "partial", ended_at = time::now(), metrics = ${
+        surrealJson({ error: "reaped: stale running past ingest timeout" })
+    } WHERE status = 'running' RETURN NONE;`;
+}
+
 export const reapStaleIngestRuns = (
     opts: { readonly dryRun?: boolean } = {},
 ): Effect.Effect<ReapStaleRunsResult, DbError, SurrealClient | AxConfig> =>
@@ -69,17 +66,13 @@ export const reapStaleIngestRuns = (
         const db = yield* SurrealClient;
         const config = yield* AxConfig;
         const staleAfterMs = (config.knobs.ingestTimeoutSeconds + REAP_GRACE_SECONDS) * 1000;
-        const [rows] = yield* db.query<[RunningIngestRunRow[]]>(
+        const [rows] = yield* db.query<[IngestRunHeartbeatRow[]]>(
             "SELECT id, started_at, last_progress_at FROM ingest_run WHERE status = 'running';",
         );
         const ids = selectStrandedRunIds(rows ?? [], Date.now(), staleAfterMs);
         if (!opts.dryRun) {
             for (const runId of ids) {
-                yield* db.query(buildIngestRunFinishStatement({
-                    runId,
-                    status: "partial",
-                    metrics: { error: "reaped: stale running past ingest timeout" },
-                }));
+                yield* db.query(buildReapIngestRunStatement(runId));
             }
         }
         return {

@@ -63,6 +63,7 @@ import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usa
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { correlateOrphanOtel } from "../otel/correlate.ts";
+import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -214,9 +215,18 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  * Provide AppLayer (SurrealClient + AxConfig + ProcessService) and a
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
+ *
+ * Every such command also gets the stale-graph warning (#697): one indexed
+ * query, stderr only, before the command body. This is deliberately a
+ * pre-flight rather than an `ensuring` finalizer because legacy handlers that
+ * call `process.exit` bypass Effect finalizers; the warning must still cover
+ * those stale-graph symptom paths.
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
-    runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped);
+    withIngestStalenessPreflight(runCli(args)).pipe(
+        Effect.provide(AppLayer),
+        Effect.scoped,
+    );
 
 /**
  * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the

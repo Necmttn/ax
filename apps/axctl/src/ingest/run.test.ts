@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Exit, Fiber, Layer, Schema } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { AxConfigTest } from "@ax/lib/config";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import {
@@ -34,6 +36,13 @@ const traceLayer = () => {
     const sink = TraceSinkLive({ flushIntervalMs: 1 }).pipe(Layer.provide(transportLayer));
     return Layer.mergeAll(sink, LiveTraceLayer.pipe(Layer.provide(sink)));
 };
+
+// AxConfig is part of runIngest's declared R (stage defs are asserted to need
+// it in `wrapStage`), even though runIngest itself no longer computes a
+// deadline from it - deadlines are caller-owned via `RunIngestOptions.deadlineMs`
+// (#697, see run.ts). Provided here so real stage types line up.
+const axConfigLayer = () =>
+    AxConfigTest({ knobs: { ingestTimeoutSeconds: 900 } }).pipe(Layer.provide(BunFileSystem.layer));
 
 describe("stageEventName", () => {
     it("uses canonical event labels for registered stages", () => {
@@ -112,7 +121,7 @@ describe("runIngest", () => {
             cwd: "/tmp/ax",
             now: () => new Date("2026-05-29T00:00:00.000Z"),
             runId: () => "test_run",
-        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer())));
+        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer(), axConfigLayer())));
 
         const result = await Effect.runPromise(program as Effect.Effect<unknown, never, never>);
 
@@ -149,13 +158,53 @@ describe("runIngest", () => {
             cwd: "/tmp/ax",
             now: () => new Date("2026-05-29T00:00:00.000Z"),
             runId: () => "test_run",
-        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer())));
+        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer(), axConfigLayer())));
 
         const result = await Effect.runPromise(
             program as Effect.Effect<unknown, never, never>,
         ) as { totals: Record<string, number> };
 
         expect(result.totals).toEqual({ sessions: 3, failedFiles: 2 });
+    });
+
+    // #697 finding 3: an earlier version computed the derive deadline
+    // unconditionally from `AxConfig.knobs.ingestTimeoutSeconds` inside
+    // runIngest, applying it to every caller - including
+    // dashboard/ingest-workflow.ts, which forks runIngest with NO outer
+    // timeout at all. That silently made the Studio Live tab drop long-running
+    // derive stages against a guillotine that doesn't exist. Ownership now
+    // lives with the caller (RunIngestOptions.deadlineMs); pin that omitting
+    // it means no budget is applied, regardless of what AxConfig says.
+    it("applies no derive deadline when the caller doesn't pass one, even if AxConfig has a short timeout", async () => {
+        const db = fakeDb();
+        // A config an old (buggy) runIngest would have read as "deadline is
+        // ~50ms away, minus a 30s reserve" -> immediately negative -> the
+        // derive stage below would be skipped before it ever ran.
+        const shortTimeoutConfig = AxConfigTest({ knobs: { ingestTimeoutSeconds: 0.05 } }).pipe(
+            Layer.provide(BunFileSystem.layer),
+        );
+        const deriveStage: StageDef = {
+            meta: StageMeta.make({ key: "outcomes", deps: [], tags: ["derive"] }),
+            run: () =>
+                Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: "outcomes ok" })).pipe(
+                    Effect.delay("80 millis"),
+                ),
+        };
+        const registry = StageRegistryLive([deriveStage]);
+        const started = Date.now();
+        const program = runIngest({
+            command: "ingest",
+            args: [],
+            cwd: "/tmp/ax",
+            now: () => new Date("2026-05-29T00:00:00.000Z"),
+            runId: () => "test_run",
+            // deliberately no deadlineMs - mirrors dashboard/ingest-workflow.ts
+        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer(), shortTimeoutConfig)));
+
+        await Effect.runPromise(program as Effect.Effect<unknown, never, never>);
+        // Ran to completion (the 80ms delay was honored) instead of being
+        // skipped/capped by a deadline runIngest has no business inventing.
+        expect(Date.now() - started).toBeGreaterThanOrEqual(75);
     });
 
     it("rejects reset with stage filters before deleting graph rows", async () => {
@@ -167,7 +216,7 @@ describe("runIngest", () => {
             cwd: "/tmp/ax",
             now: () => new Date("2026-05-29T00:00:00.000Z"),
             runId: () => "test_run",
-        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry)));
+        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, axConfigLayer())));
 
         await expect(Effect.runPromise(program as Effect.Effect<unknown, never, never>))
             .rejects.toThrow(/--reset rebuilds the whole skill graph/);

@@ -325,6 +325,8 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
         expect(heartbeatSeconds({})).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "10" })).toBe(10);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "0" })).toBe(0);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "" })).toBe(30);
+        expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "   " })).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "-5" })).toBe(30);
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "abc" })).toBe(30);
     });
@@ -333,6 +335,8 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
         expect(deriveStageTimeoutSeconds({})).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "120" })).toBe(120);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "0" })).toBe(0);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "" })).toBe(300);
+        expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "   " })).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "-1" })).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "nope" })).toBe(300);
     });
@@ -398,5 +402,127 @@ describe("derive-stage watchdog (#671)", () => {
             );
             expect(results[0]!.summary).toBe("real");
         });
+    });
+});
+
+describe("runPipeline derive budget (#697)", () => {
+    const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+
+    const stage = (
+        key: string,
+        tags: ReadonlyArray<"ingest" | "derive">,
+        run: Effect.Effect<BaseStageStats, never, never>,
+    ): StageDef<BaseStageStats, never> => ({
+        meta: StageMeta.make({ key, deps: [], tags }),
+        run: () => run,
+    });
+
+    const instant = (key: string, tags: ReadonlyArray<"ingest" | "derive">) =>
+        stage(key, tags, Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: `${key} ok` })));
+
+    /** A stage that would run far past any test's patience. */
+    const hangs = (key: string, tags: ReadonlyArray<"ingest" | "derive">) =>
+        stage(key, tags, Effect.never as Effect.Effect<BaseStageStats, never, never>);
+
+    it("a derive stage past the deadline is skipped and the pass still completes", async () => {
+        const stats = await Effect.runPromise(
+            runPipeline([instant("claude", ["ingest"]), hangs("derive-metrics", ["derive"])], ctx, {
+                deadlineMs: Date.now() - 1, // budget already blown, as after a backlog
+                reserveMs: 0,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+
+        // The real observable effect: the pipeline RETURNS instead of hanging
+        // until the outer 900s timeout guillotines it (and leaves a cooldown lock).
+        expect(stats).toHaveLength(2);
+        const derive = stats.find((s) => s.summary.includes("skipped"));
+        expect(derive).toBeDefined();
+        expect(stats.some((s) => s.summary === "claude ok")).toBe(true);
+    });
+
+    it("a derive stage is capped by the time left, not its static 300s cap", async () => {
+        const started = Date.now();
+        const stats = await Effect.runPromise(
+            runPipeline([hangs("outcomes", ["derive"])], ctx, {
+                deadlineMs: Date.now() + 150,
+                reserveMs: 0,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+
+        // Bounded by the deadline (150ms), NOT by AX_STAGE_TIMEOUT_SECONDS (300s).
+        // Either summary proves the DEADLINE (not the 300s static cap) bounded
+        // the stage: "timed out" if the budget read still saw time left when
+        // the stage started, "skipped" if CI scheduling slop pushed pipeline
+        // startup past the 150ms deadline before the stage got its permit.
+        expect(Date.now() - started).toBeLessThan(5_000);
+        expect(stats[0]?.summary).toMatch(/timed out|skipped/);
+    });
+
+    it("an ingest-tagged stage is exempt - a real backfill legitimately runs long", async () => {
+        const stats = await Effect.runPromise(
+            runPipeline([instant("skills", ["ingest"])], ctx, {
+                deadlineMs: Date.now() - 1,
+                reserveMs: 0,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+
+        // Provider stages must not be skipped by the derive budget: if the
+        // `!tags.includes("derive")` exemption in runner.ts were dropped, this
+        // stage would be budgeted like any derive, the deadline is already
+        // blown, and it would read the sentinel "skipped (out of budget)"
+        // summary instead of actually running.
+        expect(stats[0]?.summary).toBe("skills ok");
+    });
+
+    it("suspends the budget read until the derive stage actually starts, not when it's built (#697 finding 1)", async () => {
+        // Saturate every pipeline permit with slow no-dep `ingest` stages so
+        // the derive stage below is forced to WAIT for one. If the budget
+        // were read eagerly (at stage-build time, which happens near t=0 for
+        // every dep-free stage regardless of permit availability), the
+        // 150ms-out deadline still looks open and the derive gets a live cap
+        // - it then runs (once a permit frees up ~200ms later) and times out
+        // at the watchdog. If the budget is correctly suspended until the
+        // derive stage actually starts (post-permit, ~200ms in), the deadline
+        // has already passed and it's skipped instead - never even starting
+        // the timed body. The two behaviors are distinguishable both by
+        // summary and by wall-clock (~200ms vs ~350ms).
+        const started = Date.now();
+        const saturators = Array.from({ length: PIPELINE_CONCURRENCY }, (_, i) =>
+            stage(
+                `hold-${i}`,
+                ["ingest"],
+                Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: `hold-${i} ok` })).pipe(
+                    Effect.delay("200 millis"),
+                ),
+            ),
+        );
+        const derive = hangs("derive-metrics", ["derive"]);
+
+        const stats = await Effect.runPromise(
+            runPipeline([...saturators, derive], ctx, {
+                deadlineMs: started + 150,
+                reserveMs: 0,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+
+        const deriveResult = stats.find(
+            (s) => s.summary.includes("skipped") || s.summary.includes("timed out"),
+        );
+        // THE load-bearing assertion. Suspended (correct): the budget is read
+        // once the permit frees, by which time the deadline has passed -> skip.
+        // Eager (broken): the budget is read at build time, when 150ms still
+        // remained -> the body runs and the watchdog times it out instead.
+        expect(deriveResult?.summary).toBe("skipped (out of budget)");
+        // Generous: the summary above is what pins the suspend. This only
+        // guards against the pipeline hanging - a tight bound here just makes
+        // the test flaky on a loaded box.
+        expect(Date.now() - started).toBeLessThan(5_000);
+    });
+
+    it("no deadline: unchanged behaviour (stages run to completion)", async () => {
+        const stats = await Effect.runPromise(
+            runPipeline([instant("claude", ["ingest"]), instant("outcomes", ["derive"])], ctx) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+        expect(stats.map((s) => s.summary).sort()).toEqual(["claude ok", "outcomes ok"]);
     });
 });

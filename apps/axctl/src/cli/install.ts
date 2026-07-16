@@ -32,6 +32,11 @@ import { envConfig as readDbEnvConfig } from "@ax/lib/db";
 import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { provisionRetroReviewerAgent } from "./managed-agents.ts";
+import {
+    isStrandedRun,
+    REAP_GRACE_SECONDS,
+    type IngestRunHeartbeatRow,
+} from "@ax/lib/shared/ingest-staleness";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -923,14 +928,6 @@ async function probeMissingBuckets(endpoint: { host: string; port: number }): Pr
     }
 }
 
-/** A row from `SELECT ... FROM ingest_run WHERE status = 'running'`. */
-export interface RunningIngestRunRow {
-    readonly id?: unknown;
-    readonly command?: unknown;
-    readonly started_at?: unknown;
-    readonly last_progress_at?: unknown;
-}
-
 /**
  * Ingest wall-clock budget (seconds). Doctor runs on the no-DB code path
  * (no AxConfig layer), so mirror the `AX_INGEST_TIMEOUT_SECONDS` knob with
@@ -942,23 +939,17 @@ function ingestTimeoutSecondsFromEnv(): number {
 }
 
 /**
- * Rows whose newest heartbeat (`last_progress_at`, else `started_at`) is older
- * than `staleAfterMs`. A run still in status "running" past the ingest timeout
- * was crashed/killed without finalizing - every clean exit path (ok, error,
- * interrupt, timeout) settles the row, so a stale "running" row is a lie that
- * misleads diagnosis (issue #269). Exported for tests.
+ * Rows whose newest heartbeat is older than `staleAfterMs` - crash residue that
+ * never finalized (issue #269). Thin filter over the shared
+ * {@link isStrandedRun} rule so doctor and the reapers can't drift. Exported
+ * for tests.
  */
 export function staleRunningIngestRuns(
-    rows: readonly RunningIngestRunRow[],
+    rows: readonly IngestRunHeartbeatRow[],
     nowMs: number,
     staleAfterMs: number,
-): RunningIngestRunRow[] {
-    return rows.filter((row) => {
-        const beat = Date.parse(String(row.last_progress_at ?? row.started_at ?? ""));
-        // No parseable timestamp at all: can't prove it's live, flag it.
-        if (!Number.isFinite(beat)) return true;
-        return nowMs - beat > staleAfterMs;
-    });
+): IngestRunHeartbeatRow[] {
+    return rows.filter((row) => isStrandedRun(row, nowMs, staleAfterMs));
 }
 
 /**
@@ -969,7 +960,7 @@ export function staleRunningIngestRuns(
 async function probeStaleIngestRuns(
     endpoint: { host: string; port: number },
     staleAfterMs: number,
-): Promise<RunningIngestRunRow[] | null> {
+): Promise<IngestRunHeartbeatRow[] | null> {
     try {
         const db = readDbEnvConfig();
         const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
@@ -984,7 +975,7 @@ async function probeStaleIngestRuns(
             signal: AbortSignal.timeout(3000),
         });
         if (!res.ok) return null;
-        const out = (await res.json()) as Array<{ result?: RunningIngestRunRow[] }>;
+        const out = (await res.json()) as Array<{ result?: IngestRunHeartbeatRow[] }>;
         const rows = out?.[0]?.result;
         if (!Array.isArray(rows)) return null;
         return staleRunningIngestRuns(rows, Date.now(), staleAfterMs);
@@ -1026,7 +1017,7 @@ export function collectDoctorReport(): Effect.Effect<
         const ingestTimeoutSeconds = ingestTimeoutSecondsFromEnv();
         const staleIngestRuns = dbReachable
             ? yield* Effect.promise(() =>
-                probeStaleIngestRuns(daemon.endpoint, (ingestTimeoutSeconds + 60) * 1000))
+                probeStaleIngestRuns(daemon.endpoint, (ingestTimeoutSeconds + REAP_GRACE_SECONDS) * 1000))
             : null;
         const checks: DoctorCheck[] = [
             {

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { DbError } from "@ax/lib/errors";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import {
+    INGEST_RUN_HEARTBEAT_EVERY_FILES,
+    runJsonlProviderFiles,
+    shouldHeartbeatIngestRun,
+} from "./jsonl-work-unit.ts";
 import type { JsonlFileCandidate } from "./walk-jsonl.ts";
 
 /** A stateful fake of the `ingest_file_state` watermark table: the SELECT
@@ -10,7 +14,7 @@ import type { JsonlFileCandidate } from "./walk-jsonl.ts";
  *  second run sees the marks a first run wrote (the whole point of the skip). */
 function statefulWatermarkLayer() {
     const store = new Map<string, { path: string; mtime_ms: number; size: number }>();
-    const layer = makeTestSurrealClient({
+    const tc = makeTestSurrealClient({
         fallback: (sql) => {
             if (sql.includes("__watermark_migration__")) return [[]];
             if (sql.includes("UPSERT ingest_file_state")) {
@@ -25,8 +29,8 @@ function statefulWatermarkLayer() {
             }
             return [[]];
         },
-    }).layer;
-    return { layer, store };
+    });
+    return { layer: tc.layer, store, tc };
 }
 
 const candidate = (path: string, mtimeMs: number, sizeBytes = 100): JsonlFileCandidate => ({ path, mtimeMs, sizeBytes });
@@ -165,5 +169,44 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
         } finally {
             delete process.env.AX_REDERIVE_TEST;
         }
+    });
+});
+
+describe("JSONL provider ingest_run heartbeat", () => {
+    test("throttles to every 25 successfully completed files", () => {
+        expect(INGEST_RUN_HEARTBEAT_EVERY_FILES).toBe(25);
+        expect(shouldHeartbeatIngestRun(0)).toBe(false);
+        expect(shouldHeartbeatIngestRun(1)).toBe(false);
+        expect(shouldHeartbeatIngestRun(24)).toBe(false);
+        expect(shouldHeartbeatIngestRun(25)).toBe(true);
+        expect(shouldHeartbeatIngestRun(26)).toBe(false);
+        expect(shouldHeartbeatIngestRun(50)).toBe(true);
+    });
+
+    test("emits one best-effort parent run heartbeat after 25 files", async () => {
+        const { layer, tc } = statefulWatermarkLayer();
+        const candidates = Array.from(
+            { length: INGEST_RUN_HEARTBEAT_EVERY_FILES },
+            (_, index) => candidate(`${index}.jsonl`, index + 1),
+        );
+
+        const result = await Effect.runPromise(
+            runJsonlProviderFiles({
+                candidates,
+                sourceKind: "codex_session",
+                forceEnv: "AX_REDERIVE_TEST",
+                source: "codex",
+                runId: "live-run",
+                processFile: () => Effect.succeed(true),
+            }).pipe(Effect.provide(layer)),
+        );
+
+        expect(result.files).toBe(25);
+        const heartbeats = tc.captured.filter((sql) =>
+            sql.includes("UPDATE ingest_run:`live-run` SET last_progress_at = time::now()")
+        );
+        expect(heartbeats).toEqual([
+            "UPDATE ingest_run:`live-run` SET last_progress_at = time::now() RETURN NONE;",
+        ]);
     });
 });

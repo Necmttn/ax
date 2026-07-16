@@ -25,10 +25,18 @@
 
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
-import type { SurrealClient } from "@ax/lib/db";
+import { SurrealClient } from "@ax/lib/db";
 import { fileWatermark } from "@ax/lib/shared/watermark";
+import { ingestRunHeartbeatStatement } from "../dashboard/telemetry.ts";
 import { type FileFailureCollector, type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 import type { JsonlFileCandidate } from "./walk-jsonl.ts";
+
+/** One cheap heartbeat per this many successfully committed provider files. */
+export const INGEST_RUN_HEARTBEAT_EVERY_FILES = 25;
+
+/** Pure throttle decision, exported so the cadence cannot regress silently. */
+export const shouldHeartbeatIngestRun = (completedFiles: number): boolean =>
+    completedFiles > 0 && completedFiles % INGEST_RUN_HEARTBEAT_EVERY_FILES === 0;
 
 /** Live loop state readable by `processFile` at any point: the one counter a
  *  provider can't compute itself (the work-unit owns active-file tracking).
@@ -46,6 +54,8 @@ export interface RunJsonlProviderFilesOptions<E, R, C extends JsonlFileCandidate
     readonly forceEnv: string;
     /** Failure-collector provider label for log lines, e.g. "codex". */
     readonly source: string;
+    /** Parent ingest run to heartbeat. Omitted by standalone provider calls. */
+    readonly runId?: string;
     /** Live-progress publish hook for the skipped-file list (see file-isolation). */
     readonly onFileFailures?: (snapshot: FileFailureSnapshot) => Effect.Effect<void>;
     /** Dry-run calibration deadline: once passed, start no new files. */
@@ -78,6 +88,7 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
     opts: RunJsonlProviderFilesOptions<E, R, C>,
 ): Effect.Effect<JsonlWorkUnitResult, DbError, SurrealClient | R> =>
     Effect.gen(function* () {
+        const db = yield* SurrealClient;
         const wm = yield* fileWatermark({ sourceKind: opts.sourceKind, forceEnv: opts.forceEnv });
         const failures = makeFileFailureCollector({
             source: opts.source,
@@ -113,8 +124,14 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                             // (so it isn't marked done and retries next run).
                             if (!committed) return;
                             files += 1;
+                            const completedFiles = files;
                             // Commit ONLY after writes succeed.
                             yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes);
+                            if (opts.runId !== undefined && shouldHeartbeatIngestRun(completedFiles)) {
+                                // Courtesy signal only: a transient heartbeat
+                                // failure must never fail or roll back ingest.
+                                yield* db.query(ingestRunHeartbeatStatement(opts.runId)).pipe(Effect.ignore);
+                            }
                         }),
                     );
                     activeFiles -= 1;

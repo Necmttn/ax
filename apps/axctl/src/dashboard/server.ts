@@ -329,6 +329,42 @@ export async function serveDashboard(args: string[]): Promise<void> {
     const { prewarmDashboardCaches } = await import("./prewarm.ts");
     void handle.runner(prewarmDashboardCaches()).catch(() => undefined);
 
+    // Sweep ingest_run rows stranded by a crashed ingest, now and every
+    // interval (#697). The ingest-start reaper (#282) can't help when nothing
+    // re-runs ingest - the IDE daemon model has no watcher - so the daemon,
+    // which is always up, owns the recurring sweep. Fire-and-forget on the
+    // server runtime: `handle.dispose()` interrupts it at shutdown.
+    //
+    // Supervised, not a bare `.catch(() => undefined)`: studio.app routinely
+    // starts `ax serve` before `com.necmttn.ax-db` is listening (serve
+    // self-heals from that once a request hits `handle.runner` - see the
+    // warmup handling above), and that same race can hit the layer build for
+    // THIS fork. `runReapLoop`'s internal `catchCause` can't catch a
+    // layer-build failure (it happens before the effect body runs), so an
+    // unsupervised fork would drop the reaper for the daemon's whole life,
+    // silently, on a documented and expected boot race - #697 again, just
+    // moved up a layer. `superviseReapLoop` re-arms on rejection so a later
+    // attempt (once `handle.runner` has healed the runtime) can succeed.
+    const { reapIntervalSeconds, runReapLoop, superviseReapLoop } = await import("./reap-loop.ts");
+    const reapInterval = reapIntervalSeconds();
+    if (reapInterval > 0) {
+        superviseReapLoop({
+            run: () => handle.runner(runReapLoop({ intervalSeconds: reapInterval })),
+            intervalMs: reapInterval * 1000,
+            // `.unref()` so a pending retry timer can never hold the process
+            // open at shutdown - shutdown() calls process.kill() directly,
+            // it doesn't wait on this loop.
+            scheduleRetry: (fn, ms) => {
+                setTimeout(fn, ms).unref();
+            },
+            onError: (err) => {
+                console.warn(
+                    `[ax] ingest_run reap loop failed to start (${err instanceof Error ? err.message : String(err)}); retrying in ${reapInterval}s.`,
+                );
+            },
+        });
+    }
+
     // Tear down the sidecar + runtime on shutdown. Bun's serve never resolves,
     // so the process exits via a signal; close the open run streams and dispose
     // the runtime (which interrupts any in-flight ingest daemon) first.

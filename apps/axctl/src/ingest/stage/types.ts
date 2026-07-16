@@ -16,6 +16,8 @@ export class IngestContext extends Schema.Class<IngestContext>("IngestContext")(
     cwd: Schema.String,
     since: Schema.Date,
     debug: Schema.Boolean,
+    /** Present for orchestrated runs; standalone provider calls omit it. */
+    runId: Schema.optional(Schema.String),
     repoPaths: Schema.optional(Schema.Array(Schema.String)),
     claudeProject: Schema.optional(Schema.String),
 }) {}

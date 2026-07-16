@@ -1667,6 +1667,7 @@ export const writeTokenUsageForSubagents = (extracted: FileExtract) => {
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
+    runId: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
     /** Cumulative skipped-file snapshots from the failure collector (see
      *  file-isolation.ts). The stage wires `stageFileFailureAnnotator` here so
@@ -1826,6 +1827,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             sourceKind: "claude_transcript",
             forceEnv: "AX_REDERIVE_CLAUDE",
             source: "claude",
+            ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
             ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
             concurrency,
@@ -2028,7 +2030,13 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
         // genuine FS failure (e.g. an unreadable transcripts root or a
         // non-NotFound stat/stream error) so it dies as a defect rather
         // than masquerading as a recoverable DbError.
-        const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress, onFileFailures }).pipe(
+        const result = yield* ingestTranscripts({
+            sinceDays,
+            project: ctx.claudeProject,
+            runId: ctx.runId,
+            onProgress: annotateStageProgress,
+            onFileFailures,
+        }).pipe(
             Effect.catchTag("PlatformError", (e) => Effect.die(e)),
         );
         return ClaudeStats.make({

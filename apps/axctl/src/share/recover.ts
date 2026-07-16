@@ -108,6 +108,14 @@ export const ingestShareTranscript = (
             args: [`--stages=${hit.harness}`, `--since=${sinceDays}`],
             cwd: process.cwd(),
             ...(claudeProject ? { claudeProject } : {}),
+            // This run is wrapped in the same `withIngestLock` hard timeout
+            // below, so - like cli/commands/ingest.ts - it genuinely owns a
+            // deadline (#697). The `--stages=<harness>` filter above never
+            // selects a `derive`-tagged stage today, so this is currently a
+            // no-op; passing it anyway keeps the invariant honest ("a caller
+            // wrapped in a real timeout passes one") instead of silently
+            // relying on today's stage selection never changing.
+            ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
         }).pipe(Effect.as<ShareIngestOutcome>({ kind: "ingested" }));
 
         const outcome = yield* withIngestLock(
