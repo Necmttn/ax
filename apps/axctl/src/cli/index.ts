@@ -63,6 +63,7 @@ import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usa
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { correlateOrphanOtel } from "../otel/correlate.ts";
+import { warnIfIngestStale } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -214,9 +215,18 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  * Provide AppLayer (SurrealClient + AxConfig + ProcessService) and a
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
+ *
+ * Every such command also gets the stale-graph warning (#697): one indexed
+ * query, stderr only, after the command's own output so it lands next to the
+ * prompt. `ensuring` (not `tap`) so a command that returned empty BECAUSE the
+ * graph is stale - the #697 symptom - still explains itself when it fails.
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
-    runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped);
+    runCli(args).pipe(
+        Effect.ensuring(warnIfIngestStale),
+        Effect.provide(AppLayer),
+        Effect.scoped,
+    );
 
 /**
  * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the

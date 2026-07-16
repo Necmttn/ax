@@ -256,6 +256,25 @@ export interface RunIngestOptions {
     readonly verbose?: boolean;
     readonly now?: () => Date;
     readonly runId?: () => string;
+    /**
+     * The run's wall-clock deadline (epoch ms). `derive`-tagged stages are
+     * budgeted against it so the pass ends cleanly instead of being
+     * guillotined by an outer timeout (#697) - see `runner.ts`'s
+     * `runPipeline` for the budgeting itself.
+     *
+     * `runIngest` owns no timeout of its own; it only forwards whatever
+     * deadline the CALLER supplies, because only the caller knows whether one
+     * actually exists. `cli/commands/ingest.ts` and `share/recover.ts` both
+     * wrap this run in `withIngestLock`'s hard timeout and pass a deadline
+     * derived from the same `ingestTimeoutSeconds` knob. `dashboard/
+     * ingest-workflow.ts` (the Studio Live tab) forks this run with NO
+     * timeout at all and passes nothing - a derive budget there would guard
+     * against a guillotine that doesn't exist, silently making the Live tab
+     * drop long-running derives for no reason (this was the bug: an earlier
+     * version computed this deadline unconditionally from `AxConfig`, which
+     * applied it to every caller regardless of whether one wrapped the run).
+     */
+    readonly deadlineMs?: number;
 }
 
 export interface RunIngestResult {
@@ -277,6 +296,9 @@ export const runIngest = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const registry = yield* StageRegistry;
+        // Deadline ownership lives with the CALLER (see RunIngestOptions.deadlineMs)
+        // - forward it as-is, or apply none.
+        const deadlineMs = opts.deadlineMs;
         const hasFilter = opts.args.some((a) => a.startsWith("--stages=")) || opts.args.includes("--derive-only");
         if (opts.args.includes("--reset") && hasFilter) {
             throw new Error(`axctl ${opts.command}: --reset rebuilds the whole skill graph and cannot be combined with stage filters`);
@@ -313,7 +335,11 @@ export const runIngest = (
             )
         );
 
-        const stageStats = yield* runPipeline(wrappedStages, ctx).pipe(
+        const stageStats = yield* runPipeline(
+            wrappedStages,
+            ctx,
+            deadlineMs === undefined ? {} : { deadlineMs },
+        ).pipe(
             LiveTrace.withTrace({
                 traceId: `ingest:${runId}`,
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,

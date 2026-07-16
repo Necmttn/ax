@@ -3,6 +3,7 @@ import type { DbError } from "@ax/lib/errors";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
 import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
+import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 
 /** Max stages running their `run` Effect concurrently. Each stage has its own
@@ -134,10 +135,17 @@ export const topoLayers = <S extends BaseStageStats, R>(
 /** Run the given stages with DAG scheduling. Each stage waits for its in-graph
  *  deps via Deferreds; only `PIPELINE_CONCURRENCY` are inside the semaphore at
  *  once. Each stage is wrapped in `LiveTrace.step` so progress flows through
- *  the configured `TraceTransport` (ADR-0007). */
+ *  the configured `TraceTransport` (ADR-0007).
+ *
+ *  `opts.deadlineMs` is the run's wall-clock deadline (epoch ms). Derive stages
+ *  are budgeted against it so the pass ends cleanly instead of being killed by
+ *  the outer ingest timeout (#697); omit it and derives keep only their static
+ *  `AX_STAGE_TIMEOUT_SECONDS` cap. `opts.reserveMs` overrides the finalization
+ *  reserve (env default) - tests pass 0. */
 export const runPipeline = <S extends BaseStageStats, R>(
     stages: ReadonlyArray<StageDef<S, R>>,
     ctx: IngestContext,
+    opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
 ): Effect.Effect<ReadonlyArray<S>, DbError, R> =>
     Effect.gen(function* () {
         topoLayers(stages); // cycle check
@@ -152,6 +160,8 @@ export const runPipeline = <S extends BaseStageStats, R>(
         // heartbeat reads this so a hang is attributable to a specific stage (#671).
         const inFlight = new Set<string>();
         const stageTimeoutMs = deriveStageTimeoutSeconds() * 1000;
+        const deadlineMs = opts.deadlineMs ?? null;
+        const reserveMs = opts.reserveMs ?? deriveReserveMs();
 
         const runStage = (s: StageDef<S, R>) =>
             Effect.gen(function* () {
@@ -170,30 +180,54 @@ export const runPipeline = <S extends BaseStageStats, R>(
                         "ingest.stage.tags": s.meta.tags.join(","),
                     }),
                 );
-                // Watchdog: cap `derive` stages so one stuck derive can't wedge the
-                // whole run. On timeout, warn + fail OPEN with empty stats - downstream
-                // deps only await this Deferred (they never read its value; they re-query
-                // the DB), and the totals roll-up skips `durationMs` + non-numeric fields,
-                // so an empty BaseStageStats is a safe sentinel. Provider stages are exempt.
-                const guarded =
-                    stageTimeoutMs > 0 && s.meta.tags.includes("derive")
-                        ? body.pipe(
-                              Effect.timeoutOrElse({
-                                  duration: stageTimeoutMs,
-                                  orElse: () =>
-                                      Effect.logWarning(
-                                          `ingest: derive stage '${s.meta.key}' exceeded ${stageTimeoutMs / 1000}s - ` +
-                                              `skipping it (failed open) so the run can finish. ` +
-                                              `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
-                                      ).pipe(
-                                          Effect.as({
-                                              durationMs: stageTimeoutMs,
-                                              summary: "timed out (watchdog)",
-                                          } as unknown as S),
-                                      ),
-                              }),
-                          )
-                        : body;
+                // Watchdog: cap `derive` stages so one stuck or backlogged derive
+                // can't wedge the run OR push the pass past its deadline (#671,
+                // #697). Fails OPEN - a warning plus sentinel stats - because
+                // downstream deps only await this Deferred (they never read its
+                // value; they re-query the DB), and the totals roll-up skips
+                // `durationMs` + non-numeric fields, so an empty BaseStageStats is
+                // safe. Heavy provider stages (claude, codex, git) are exempt: a
+                // full backfill legitimately runs for many minutes.
+                // Suspended so `Date.now()` is read at stage START (post-deps,
+                // post-permit) - reading it at build time would hand every stage
+                // the budget the FIRST one had.
+                const guarded = !s.meta.tags.includes("derive")
+                    ? body
+                    : Effect.suspend(() => {
+                        const budget = deriveStageBudget({
+                            staticCapMs: stageTimeoutMs,
+                            deadlineMs,
+                            nowMs: Date.now(),
+                            reserveMs,
+                        });
+                        if (budget._tag === "uncapped") return body;
+                        if (budget._tag === "skip") {
+                            return Effect.logWarning(
+                                `ingest: skipping derive stage '${s.meta.key}' - ${budget.reason}.`,
+                            ).pipe(
+                                Effect.as({
+                                    durationMs: 0,
+                                    summary: "skipped (out of budget)",
+                                } as unknown as S),
+                            );
+                        }
+                        return body.pipe(
+                            Effect.timeoutOrElse({
+                                duration: budget.capMs,
+                                orElse: () =>
+                                    Effect.logWarning(
+                                        `ingest: derive stage '${s.meta.key}' exceeded ${Math.round(budget.capMs / 1000)}s - ` +
+                                            `skipping it (failed open) so the run can finish. ` +
+                                            `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
+                                    ).pipe(
+                                        Effect.as({
+                                            durationMs: budget.capMs,
+                                            summary: "timed out (watchdog)",
+                                        } as unknown as S),
+                                    ),
+                            }),
+                        );
+                    });
                 const tracked = Effect.sync(() => {
                     inFlight.add(s.meta.key);
                 }).pipe(

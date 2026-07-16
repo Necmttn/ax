@@ -315,6 +315,13 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             debug: args.includes("--debug"),
             verbose: args.includes("--verbose"),
             runId: () => runId,
+            // This run IS wrapped in withIngestLock's hard timeout below, so it
+            // genuinely owns a deadline - derive stages are budgeted against it
+            // so the pass finalizes itself instead of being guillotined (#697).
+            // Computed from the same `timeoutSeconds` knob the lock uses; the
+            // lock's own clock starts a hair after this, so the deadline reads
+            // slightly early - the derive reserve absorbs that.
+            ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
         });
 
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
