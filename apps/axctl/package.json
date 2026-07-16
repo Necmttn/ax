@@ -43,7 +43,7 @@
     "smol-toml": "1.6.1",
     "surrealdb": "^2.0.0",
     "yaml": "^2.8.4",
-    "zod": "3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

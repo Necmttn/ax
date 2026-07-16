@@ -64,7 +64,7 @@
         "smol-toml": "1.6.1",
         "surrealdb": "^2.0.0",
         "yaml": "^2.8.4",
-        "zod": "3.25.76",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
@@ -112,7 +112,7 @@
         "remark-gfm": "^4.0.1",
         "shiki": "^4.1.0",
         "workers-og": "^0.0.27",
-        "zod": "^4.1.11",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@cloudflare/vite-plugin": "^1.29.0",
@@ -125,7 +125,7 @@
         "@vitejs/plugin-react": "^6.0.2",
         "tailwindcss": "^4.2.0",
         "typescript": "^5.6.0",
-        "vite": "^8.0.3",
+        "vite": "catalog:",
         "wrangler": "^3.78.0",
       },
     },
@@ -289,6 +289,7 @@
     "js.foresight-devtools": "2.2.0",
     "typescript": "^5.6.0",
     "vite": "^8.0.3",
+    "zod": "4.4.3",
   },
   "packages": {
     "7zip-bin": ["7zip-bin@5.2.0", "", {}, "sha512-ukTPVhqG4jNzMro2qA9HSCSSVJN3aN7tlb+hfqYCt3ER0yWroeA2VR38MNrOHLQ/cVj+DaIMad0kFCtWWowh/A=="],
@@ -2552,8 +2553,6 @@
     "axctl/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "axctl/yaml": ["yaml@2.9.0", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
-
-    "axctl/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "body-parser/iconv-lite": ["iconv-lite@0.7.2", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw=="],
 
