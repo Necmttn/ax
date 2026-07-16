@@ -13,7 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 const LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 
-export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-06-10";
+export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-07-16";
 
 export interface ModelPricing {
     readonly provider: string;
@@ -157,6 +157,24 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         cacheCreationPerMillionUsd: 5,
         cacheReadPerMillionUsd: 0.5,
         fastMultiplier: 2.5,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.6-sol": {
+        provider: "openai",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 30,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.6-luna": {
+        provider: "openai",
+        inputPerMillionUsd: 1,
+        outputPerMillionUsd: 6,
+        cacheCreationPerMillionUsd: 1.25,
+        cacheReadPerMillionUsd: 0.1,
+        fastMultiplier: 1,
         pricingSource: MODEL_PRICING_SOURCE,
     },
     "gpt-5-mini": {
@@ -418,8 +436,9 @@ export function pricingForModel(
     if (!modelKey) return null;
     const exact = catalog.get(modelKey);
     if (exact) return exact;
-    // gpt-5.6 variants (sol/luna) have no published rates yet - approximate at the gpt-5.5 tier
-    // rather than pricing them $0 (see issue #696). Must precede the generic gpt-5.x rule.
+    // sol/luna carry exact verified rates above (exact match wins); other
+    // gpt-5.6 variants (e.g. terra) approximate at the gpt-5.5 tier rather
+    // than pricing $0 (issue #696). Must precede the generic gpt-5.x rule.
     if (/^gpt-5\.6(?:-|$)/i.test(modelKey)) return catalog.get("gpt-5.5") ?? catalog.get("gpt-5") ?? null;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
@@ -427,6 +446,7 @@ export function pricingForModel(
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
+    if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     return null;
 }
 

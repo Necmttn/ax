@@ -17,6 +17,8 @@ import { surrealLiteral } from "@ax/lib/json";
 import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 import { originOfSource } from "../ingest/source-origin.ts";
+import { estimateCost, normalizeModelName, pricingForModel, type ModelPricing } from "../ingest/model-pricing.ts";
+import { loadPricingCatalogForModels } from "../metrics/cost-estimate.ts";
 
 // ---------------------------------------------------------------------------
 // Shared constants + SQL-boundary helpers
@@ -35,6 +37,83 @@ export const COST_DEFAULT_WINDOW_DAYS = 14;
  */
 const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
 
+/**
+ * Resolve a rollup row/cell's displayed cost + `unpriced` flag against a
+ * query-time pricing catalog (issue #696 follow-up).
+ *
+ * `isUnpricedModel` (the prior implementation) checked only the built-in
+ * catalog, but stored `cost_usd` is computed at ingest from the MERGED
+ * catalog (built-in + litellm/models.dev DB refresh, see
+ * `ingest/model-pricing.ts` + `metrics/cost-estimate.ts`). A model priced only
+ * via the DB refresh got real nonzero `cost_usd` yet rendered UNPRICED - the
+ * catalog check and the stored number disagreed. Worse, a model added to the
+ * built-in catalog AFTER older rows were ingested (e.g. claude-sonnet-5,
+ * gpt-5.6-sol/luna - #696) has those older rows stored with a real zero/null
+ * cost forever, since ingest only backfills null-cost rows (never re-prices a
+ * row that already carries a stored cost - `derive-cost-backfill.ts`).
+ *
+ * Resolution order:
+ * 1. A stored cost > 0 is real money - never mask it, never recompute it.
+ * 2. Zero tokens is a genuine zero-usage row (including the "(unattributed)"
+ *    sentinel) - show $0, not UNPRICED.
+ * 3. Stored cost === 0 with real tokens and a catalog rate: recompute from
+ *    the row's own token split at query time (self-healing without an
+ *    ingest re-run).
+ * 4. Stored cost === 0 with real tokens and NO catalog rate: genuinely
+ *    unpriced - render UNPRICED rather than a silent $0.
+ */
+const EMPTY_PRICING_CATALOG: ReadonlyMap<string, ModelPricing> = new Map();
+
+/**
+ * True when any row carries a stored zero cost with real tokens - the only
+ * shape `resolveRowCost` needs a catalog for. Keeps the catalog DB round-trip
+ * out of the common all-priced path (and out of every positional-mock caller
+ * that never exercises recompute, e.g. buildProfile).
+ */
+const rowsNeedPricing = (rows: ReadonlyArray<Record<string, unknown>>): boolean =>
+    rows.some((row) =>
+        countField(row, "cost_usd") === 0
+        && countField(row, "prompt_tokens") + countField(row, "completion_tokens")
+            + countField(row, "cache_read_tokens") + countField(row, "cache_create_tokens") > 0,
+    );
+
+function resolveRowCost(
+    input: {
+        readonly model: string;
+        readonly promptTokens: number;
+        readonly completionTokens: number;
+        readonly cacheReadTokens: number;
+        readonly cacheCreateTokens: number;
+        readonly costUsd: number;
+    },
+    catalog: ReadonlyMap<string, ModelPricing>,
+): { readonly cost_usd: number; readonly unpriced: boolean } {
+    if (input.costUsd > 0) {
+        return { cost_usd: input.costUsd, unpriced: false };
+    }
+    const totalTokens = input.promptTokens + input.completionTokens + input.cacheReadTokens + input.cacheCreateTokens;
+    if (totalTokens === 0) {
+        return { cost_usd: 0, unpriced: false };
+    }
+    const modelKey = normalizeModelName(input.model);
+    const pricing = pricingForModel(modelKey, catalog);
+    if (!pricing) {
+        return { cost_usd: 0, unpriced: true };
+    }
+    const estimate = estimateCost({
+        modelKey,
+        promptTokens: input.promptTokens,
+        completionTokens: input.completionTokens,
+        cacheCreationInputTokens: input.cacheCreateTokens,
+        cacheReadInputTokens: input.cacheReadTokens,
+        estimatedTokens: input.promptTokens,
+        pricingCatalog: catalog,
+    });
+    return estimate.totalUsd === null
+        ? { cost_usd: 0, unpriced: true }
+        : { cost_usd: estimate.totalUsd, unpriced: false };
+}
+
 // ---------------------------------------------------------------------------
 // cost models
 // ---------------------------------------------------------------------------
@@ -47,6 +126,7 @@ export interface CostModelsRow {
     readonly cache_read_tokens: number;
     readonly cache_create_tokens: number;
     readonly cost_usd: number;
+    readonly unpriced: boolean;
 }
 
 export interface CostModelsResult {
@@ -80,15 +160,36 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
             COST_MODELS_SQL(opts.sinceDays),
         ).pipe(Effect.map((r) => r?.[0] ?? []));
 
-        const parsed: CostModelsRow[] = rows.map((row) => ({
-            model: row.model == null ? "(unattributed)" : String(row.model),
-            sessions: countField(row, "sessions"),
-            prompt_tokens: countField(row, "prompt_tokens"),
-            completion_tokens: countField(row, "completion_tokens"),
-            cache_read_tokens: countField(row, "cache_read_tokens"),
-            cache_create_tokens: countField(row, "cache_create_tokens"),
-            cost_usd: countField(row, "cost_usd"),
-        }));
+        // Lazy: the catalog round-trip only happens when some row actually
+        // needs pricing resolution (stored zero cost with real tokens) - the
+        // common all-priced window skips the extra query entirely.
+        const catalog = rowsNeedPricing(rows)
+            ? yield* loadPricingCatalogForModels(
+                rows.map((row) => (row.model == null ? null : String(row.model))),
+            )
+            : EMPTY_PRICING_CATALOG;
+
+        const parsed: CostModelsRow[] = rows.map((row) => {
+            const model = row.model == null ? "(unattributed)" : String(row.model);
+            const resolved = resolveRowCost({
+                model,
+                promptTokens: countField(row, "prompt_tokens"),
+                completionTokens: countField(row, "completion_tokens"),
+                cacheReadTokens: countField(row, "cache_read_tokens"),
+                cacheCreateTokens: countField(row, "cache_create_tokens"),
+                costUsd: countField(row, "cost_usd"),
+            }, catalog);
+            return {
+                model,
+                sessions: countField(row, "sessions"),
+                prompt_tokens: countField(row, "prompt_tokens"),
+                completion_tokens: countField(row, "completion_tokens"),
+                cache_read_tokens: countField(row, "cache_read_tokens"),
+                cache_create_tokens: countField(row, "cache_create_tokens"),
+                cost_usd: resolved.cost_usd,
+                unpriced: resolved.unpriced,
+            };
+        });
 
         // Sort by cost desc
         parsed.sort((a, b) => b.cost_usd - a.cost_usd);
@@ -180,6 +281,7 @@ export interface CostSplitRow {
     readonly cache_create_tokens: number;
     readonly cost_usd: number;
     readonly share_pct: number;
+    readonly unpriced: boolean;
 }
 
 export interface CostSplitTotals {
@@ -241,13 +343,6 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
             cost_usd: number;
         }>();
 
-        let totalCost = 0;
-        let totalSessions = 0;
-        let totalPrompt = 0;
-        let totalCompletion = 0;
-        let totalCacheRead = 0;
-        let totalCacheCreate = 0;
-
         for (const row of rows) {
             const origin = originOfSource(stringFieldOr(row, "source"));
             const model = row.model == null ? "(unattributed)" : String(row.model);
@@ -280,29 +375,44 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
                     cost_usd: cost,
                 });
             }
-
-            totalCost += cost;
-            totalSessions += sessions;
-            totalPrompt += prompt;
-            totalCompletion += completion;
-            totalCacheRead += cacheRead;
-            totalCacheCreate += cacheCreate;
         }
 
-        const cells = [...cellMap.values()].sort((a, b) => b.cost_usd - a.cost_usd);
+        // Lazy catalog load - see fetchCostModels; checked on the aggregated
+        // cells since recompute operates at cell grain.
+        const aggregated = [...cellMap.values()];
+        const catalog = rowsNeedPricing(aggregated)
+            ? yield* loadPricingCatalogForModels(aggregated.map((cell) => cell.model))
+            : EMPTY_PRICING_CATALOG;
+
+        // Resolve pricing per cell BEFORE totals/share so a recomputed cell's
+        // dollars are reflected everywhere downstream (#696 live-smoke gap).
+        const priced = aggregated.map((cell) => {
+            const resolved = resolveRowCost({
+                model: cell.model,
+                promptTokens: cell.prompt_tokens,
+                completionTokens: cell.completion_tokens,
+                cacheReadTokens: cell.cache_read_tokens,
+                cacheCreateTokens: cell.cache_create_tokens,
+                costUsd: cell.cost_usd,
+            }, catalog);
+            return { ...cell, cost_usd: resolved.cost_usd, unpriced: resolved.unpriced };
+        });
+
+        const totalCost = priced.reduce((sum, c) => sum + c.cost_usd, 0);
+        const totals: CostSplitTotals = {
+            sessions: priced.reduce((sum, c) => sum + c.sessions, 0),
+            prompt_tokens: priced.reduce((sum, c) => sum + c.prompt_tokens, 0),
+            completion_tokens: priced.reduce((sum, c) => sum + c.completion_tokens, 0),
+            cache_read_tokens: priced.reduce((sum, c) => sum + c.cache_read_tokens, 0),
+            cache_create_tokens: priced.reduce((sum, c) => sum + c.cache_create_tokens, 0),
+            cost_usd: totalCost,
+        };
+
+        const cells = priced.sort((a, b) => b.cost_usd - a.cost_usd);
         const splitRows: CostSplitRow[] = cells.map((cell) => ({
             ...cell,
             share_pct: totalCost > 0 ? (cell.cost_usd / totalCost) * 100 : 0,
         }));
-
-        const totals: CostSplitTotals = {
-            sessions: totalSessions,
-            prompt_tokens: totalPrompt,
-            completion_tokens: totalCompletion,
-            cache_read_tokens: totalCacheRead,
-            cache_create_tokens: totalCacheCreate,
-            cost_usd: totalCost,
-        };
 
         const contentTypes = yield* fetchContentTypeBreakdown();
 

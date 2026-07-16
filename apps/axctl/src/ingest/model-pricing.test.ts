@@ -108,6 +108,29 @@ describe("model pricing", () => {
         });
     });
 
+    it("prices claude-sonnet-5 and GPT-5.6 Sol/Luna from the built-in catalog", () => {
+        const catalog = builtInPricingCatalog();
+
+        expect(pricingForModel("claude-sonnet-5", catalog)).toMatchObject({
+            inputPerMillionUsd: 3,
+            outputPerMillionUsd: 15,
+            cacheCreationPerMillionUsd: 3.75,
+            cacheReadPerMillionUsd: 0.3,
+        });
+        expect(pricingForModel("gpt-5.6-sol", catalog)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
+            cacheCreationPerMillionUsd: 6.25,
+            cacheReadPerMillionUsd: 0.5,
+        });
+        expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 6,
+            cacheCreationPerMillionUsd: 1.25,
+            cacheReadPerMillionUsd: 0.1,
+        });
+    });
+
     it("does not normalize provider names into model IDs", () => {
         expect(normalizeModelName("openai")).toBeNull();
         expect(normalizeModelName("anthropic")).toBeNull();
@@ -202,16 +225,18 @@ describe("model pricing", () => {
         });
     });
 
-    it("approximates gpt-5.6 variants at the gpt-5.5 tier", () => {
+    it("approximates gpt-5.6 variants WITHOUT an exact row at the gpt-5.5 tier", () => {
         const catalog = builtInPricingCatalog();
 
-        expect(pricingForModel("gpt-5.6-sol", catalog)).toMatchObject({
+        // sol/luna carry exact verified rates (see the catalog test above);
+        // the tier approximation only covers variants with no entry yet.
+        expect(pricingForModel("gpt-5.6-terra", catalog)).toMatchObject({
             inputPerMillionUsd: 5,
             outputPerMillionUsd: 30,
         });
         expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
-            inputPerMillionUsd: 5,
-            outputPerMillionUsd: 30,
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 6,
         });
     });
 

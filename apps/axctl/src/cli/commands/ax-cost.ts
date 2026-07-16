@@ -15,6 +15,7 @@ import {
     fetchCostSplit,
     type CostModelsResult,
     type CostSessionsResult,
+    type CostSplitResult,
 } from "../../queries/cost-analytics.ts";
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import { fetchImageContext } from "../../queries/image-context.ts";
@@ -50,7 +51,7 @@ export function renderCostModelsTable(result: CostModelsResult): string {
         completion: integer(r.completion_tokens),
         cache_read: integer(r.cache_read_tokens),
         cache_create: integer(r.cache_create_tokens),
-        cost: usd(r.cost_usd),
+        cost: r.unpriced ? "UNPRICED" : usd(r.cost_usd),
     }));
 
     const cols: Column<ModelRow>[] = [
@@ -209,6 +210,57 @@ const costSessionsCommand = Command.make(
 // ax cost split [--days=N] [--json]
 // ---------------------------------------------------------------------------
 
+export function renderCostSplitTable(result: CostSplitResult): string {
+    type SplitRow = {
+        origin: string;
+        model: string;
+        sessions: string;
+        prompt: string;
+        completion: string;
+        cost: string;
+        share: string;
+    };
+
+    const rendered: SplitRow[] = result.rows.map((r) => ({
+        origin: r.origin,
+        model: r.model,
+        sessions: integer(r.sessions),
+        prompt: integer(r.prompt_tokens),
+        completion: integer(r.completion_tokens),
+        cost: r.unpriced ? "UNPRICED" : usd(r.cost_usd),
+        share: pct(r.share_pct),
+    }));
+
+    const t = result.totals;
+    const footer: FooterLine[] = [
+        {
+            cells: [
+                "TOTAL",
+                null,
+                integer(t.sessions),
+                integer(t.prompt_tokens),
+                integer(t.completion_tokens),
+                usd(t.cost_usd),
+                "100.0%",
+            ],
+        },
+    ];
+
+    const modelW = Math.max(20, ...result.rows.map((r) => r.model.length));
+
+    const cols: Column<SplitRow>[] = [
+        { header: "origin", get: (r) => r.origin, width: 8 },
+        { header: "model", get: (r) => r.model, min: modelW },
+        { header: "sessions", get: (r) => r.sessions, align: "right", width: 8 },
+        { header: "prompt", get: (r) => r.prompt, align: "right", width: 14 },
+        { header: "completion", get: (r) => r.completion, align: "right", width: 14 },
+        { header: "cost", get: (r) => r.cost, align: "right", width: 10, footerRule: true },
+        { header: "share", get: (r) => r.share, align: "right", width: 7, footerRule: true },
+    ];
+
+    return renderTable({ columns: cols, rows: rendered, gap: " ", footer });
+}
+
 const cmdCostSplit = (input: {
     readonly sinceDays: number;
     readonly json: boolean;
@@ -221,61 +273,13 @@ const cmdCostSplit = (input: {
             return;
         }
 
-        if (result.totals.cost_usd === 0) {
+        if (result.rows.length === 0) {
             console.log("(no cost data in the requested window)");
             return;
         }
 
         printNextLinks(buildCostSplitNext(result));
-
-        type SplitRow = {
-            origin: string;
-            model: string;
-            sessions: string;
-            prompt: string;
-            completion: string;
-            cost: string;
-            share: string;
-        };
-
-        const rendered: SplitRow[] = result.rows.map((r) => ({
-            origin: r.origin,
-            model: r.model,
-            sessions: integer(r.sessions),
-            prompt: integer(r.prompt_tokens),
-            completion: integer(r.completion_tokens),
-            cost: usd(r.cost_usd),
-            share: pct(r.share_pct),
-        }));
-
-        const t = result.totals;
-        const footer: FooterLine[] = [
-            {
-                cells: [
-                    "TOTAL",
-                    null,
-                    integer(t.sessions),
-                    integer(t.prompt_tokens),
-                    integer(t.completion_tokens),
-                    usd(t.cost_usd),
-                    "100.0%",
-                ],
-            },
-        ];
-
-        const modelW = Math.max(20, ...result.rows.map((r) => r.model.length));
-
-        const cols: Column<SplitRow>[] = [
-            { header: "origin", get: (r) => r.origin, width: 8 },
-            { header: "model", get: (r) => r.model, min: modelW },
-            { header: "sessions", get: (r) => r.sessions, align: "right", width: 8 },
-            { header: "prompt", get: (r) => r.prompt, align: "right", width: 14 },
-            { header: "completion", get: (r) => r.completion, align: "right", width: 14 },
-            { header: "cost", get: (r) => r.cost, align: "right", width: 10, footerRule: true },
-            { header: "share", get: (r) => r.share, align: "right", width: 7, footerRule: true },
-        ];
-
-        console.log(renderTable({ columns: cols, rows: rendered, gap: " ", footer }));
+        console.log(renderCostSplitTable(result));
         console.log(`\n(${input.sinceDays} days)`);
     });
 
