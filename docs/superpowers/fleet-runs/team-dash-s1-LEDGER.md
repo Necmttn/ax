@@ -11,3 +11,6 @@
 ## team-bindings (Slice 1)
 PR https://github.com/Necmttn/ax/pull/729 · bindings state + join/status/leave nested in teamCommand (all 6 subcommands preserved) · typecheck 0, 16 tests, no-node-fs 0
 
+## team-profile (Slice 1)
+PR https://github.com/Necmttn/ax/pull/731 · TeamProfileV1 Schema + repo-scoped buildTeamProfile + structural redaction (better than brief's scrub) · typecheck 0, 10 tests, no-node-fs 0
+
