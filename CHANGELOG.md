@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.38.1](https://github.com/Necmttn/ax/compare/v0.38.0...v0.38.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **cost:** price sonnet-5/gpt-5.6 + UNPRICED marker + query-time recompute ([#696](https://github.com/Necmttn/ax/issues/696)) ([#701](https://github.com/Necmttn/ax/issues/701)) ([b3161d9](https://github.com/Necmttn/ax/commit/b3161d9c8937575196fb72f407941f5f1bd3c555))
+* **dashboard:** confine image paths ([#718](https://github.com/Necmttn/ax/issues/718)) ([395c3d8](https://github.com/Necmttn/ax/commit/395c3d8aca6d3488f6091dca9496c6cbce755277))
+* **dashboard:** echo preflight Access-Control-Request-Headers ([#690](https://github.com/Necmttn/ax/issues/690)) ([#693](https://github.com/Necmttn/ax/issues/693)) ([7d0b441](https://github.com/Necmttn/ax/commit/7d0b441295e33c1d63b6191ee6d0904d8040e6a1))
+* **dashboard:** harden the loopback daemon — Host check, CORS narrowing, multi-statement query guard (SECURITY-01/02/03) ([#712](https://github.com/Necmttn/ax/issues/712)) ([432268f](https://github.com/Necmttn/ax/commit/432268fe439864a2da15efb0108cd8fb251e3ee0))
+* **db:** route bare query logs to data dir ([#711](https://github.com/Necmttn/ax/issues/711)) ([b46f4e8](https://github.com/Necmttn/ax/commit/b46f4e87928af122285306e38ce616f7cf09fc31))
+* **ingest:** auto-reap stranded runs + stale-graph warning + derive budgets ([#697](https://github.com/Necmttn/ax/issues/697)) ([#719](https://github.com/Necmttn/ax/issues/719)) ([c5cbfb8](https://github.com/Necmttn/ax/commit/c5cbfb8c36e7143059d6f1d929602851fdea8229))
+* **ingest:** clamp Pi session start timestamps ([#706](https://github.com/Necmttn/ax/issues/706)) ([96108a3](https://github.com/Necmttn/ax/commit/96108a37ccea8ec4ce43e873b4c2a3ff71d648b8))
+* **ingest:** include unknown mtimes with since ([#710](https://github.com/Necmttn/ax/issues/710)) ([5be6bff](https://github.com/Necmttn/ax/commit/5be6bffe0a27f6fb5b0f6b5b854d459c6a3f5b36))
+* **ingest:** validate codex timestamps ([#705](https://github.com/Necmttn/ax/issues/705)) ([2fce82e](https://github.com/Necmttn/ax/commit/2fce82ed6cfc6eeb4c87bb49225dc0b82c246fc9))
+* **pricing:** add claude-sonnet-5 rates; approximate gpt-5.6 variants at gpt-5.5 tier ([#703](https://github.com/Necmttn/ax/issues/703)) ([7eeab46](https://github.com/Necmttn/ax/commit/7eeab466789d759f27f74d8c4593e4a34c1c6130)), closes [#696](https://github.com/Necmttn/ax/issues/696)
+* **studio-desktop:** probe ports with node:net, not Bun.listen ([#615](https://github.com/Necmttn/ax/issues/615)) ([5c0354b](https://github.com/Necmttn/ax/commit/5c0354b58ecb798cd630335791110f7787952c00))
+* **studio-desktop:** self-contained preload bundle + build gate ([#690](https://github.com/Necmttn/ax/issues/690)) ([#691](https://github.com/Necmttn/ax/issues/691)) ([f30b272](https://github.com/Necmttn/ax/commit/f30b272652dec7ab8aac845a07404335c1f96875))
+* **studio-desktop:** tsdown shared config satisfies UserConfig, not as-const ([#690](https://github.com/Necmttn/ax/issues/690)) ([#695](https://github.com/Necmttn/ax/issues/695)) ([aa44e3d](https://github.com/Necmttn/ax/commit/aa44e3dd5df480aad40afec13e811851ecc59c3a))
+
+
+### Performance
+
+* **otel:** window session id scan ([#704](https://github.com/Necmttn/ax/issues/704)) ([57a78b8](https://github.com/Necmttn/ax/commit/57a78b8352a4019f6366145a1f5c73c2c13ab95b))
+
 ## [0.38.0](https://github.com/Necmttn/ax/compare/v0.37.2...v0.38.0) (2026-07-15)
 
 
