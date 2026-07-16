@@ -11,6 +11,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    env:
+      AX_DATA_DIR: /tmp/ax-ci
+      AX_DB_URL: ws://127.0.0.1:8521
     steps:
       - uses: actions/checkout@v4
 
@@ -41,9 +44,60 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Start SurrealDB 3.1.0
+        run: |
+          set -euo pipefail
+          surreal_dir="$RUNNER_TEMP/surrealdb"
+          mkdir -p "$surreal_dir"
+          curl -sSL https://github.com/surrealdb/surrealdb/releases/download/v3.1.0/surreal-v3.1.0.linux-amd64.tgz |
+            tar -xz -C "$surreal_dir"
+          surreal_bin="$surreal_dir/surreal"
+          test "$("$surreal_bin" version | awk '{print $1}')" = "3.1.0"
+          echo "$surreal_dir" >> "$GITHUB_PATH"
+
+          mkdir -p \
+            "$AX_DATA_DIR/buckets/transcripts" \
+            "$AX_DATA_DIR/buckets/codex_artifacts"
+          SURREAL_BUCKET_FOLDER_ALLOWLIST="$AX_DATA_DIR/buckets" \
+            nohup "$surreal_bin" start \
+              --user root \
+              --pass root \
+              --bind 127.0.0.1:8521 \
+              --allow-experimental=files \
+              memory \
+              >"$RUNNER_TEMP/surreal.log" 2>&1 &
+          surreal_pid=$!
+
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8521/health >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$surreal_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/surreal.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/surreal.log"
+          exit 1
+
+      - name: Apply SurrealDB schema
+        run: bun run db:schema
+
       - run: bash -n install.sh
 
       - run: bun test
+
+      - name: Run live-DB e2e suites
+        env:
+          AX_E2E_DB: "1"
+        run: |
+          bun test \
+            apps/axctl/src/hooks/sdk-cli.e2e.test.ts \
+            apps/axctl/src/dashboard/sessions-query.e2e.test.ts \
+            apps/axctl/src/ingest/codex-reingest.e2e.test.ts \
+            apps/axctl/src/ingest/proposal-origin-migration.e2e.test.ts
 
       - run: bun run typecheck
 
