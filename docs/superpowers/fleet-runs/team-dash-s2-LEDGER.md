@@ -14,3 +14,6 @@ PR https://github.com/Necmttn/ax/pull/734 · validateTeamProfile + TeamProfileV1
 - MERGED: team-validate #734 (validateTeamProfile in @ax/lib/shared).
 - building (2): team-compile=w1R:p15 (aggregate TeamProfileV1[] → boards), team-fetch=w1R:p16 (contents-API browser fetcher, drop-failures). Both codex.
 - On BOTH merge → SLICE 2 COMPLETE. Then surface Slice 3/4/5 infra decision to user.
+## team-compile (Slice 2)
+PR https://github.com/Necmttn/ax/pull/735 · compileTeam → TeamBoards (adoption/skill/spend, null-safe) · typecheck 0, 3 tests, Effect-free
+
