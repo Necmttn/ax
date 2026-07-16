@@ -19,6 +19,7 @@
       "typescript": "^5.6.0",
       "@types/bun": "latest",
       "vite": "^8.0.3",
+      "zod": "4.4.3",
       "js.foresight": "4.2.0",
       "js.foresight-devtools": "2.2.0",
       "@foresightjs/react": "0.3.2"

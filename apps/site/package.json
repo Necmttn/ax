@@ -37,7 +37,7 @@
     "remark-gfm": "^4.0.1",
     "shiki": "^4.1.0",
     "workers-og": "^0.0.27",
-    "zod": "^4.1.11"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.29.0",
@@ -50,7 +50,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.6.0",
-    "vite": "^8.0.3",
+    "vite": "catalog:",
     "wrangler": "^3.78.0"
   }
 }
