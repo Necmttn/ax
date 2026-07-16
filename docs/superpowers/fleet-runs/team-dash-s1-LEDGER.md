@@ -23,3 +23,6 @@ PR https://github.com/Necmttn/ax/pull/731 · TeamProfileV1 Schema + repo-scoped 
 - MERGED (2/3): team-bindings #729, team-profile #731.
 - building: team-push=w1R:p12 (codex) — ax team push idempotent contents-API upsert into <org>/ax-team.
 - On merge → SLICE 1 COMPLETE (ax team join → push works E2E). Then STOP fleet + surface Slice 3/5 infra to user.
+## team-push (Slice 1 final)
+PR https://github.com/Necmttn/ax/pull/732 · ax team push idempotent contents-upsert into <org>/ax-team; unbound-refused; all 7 subcommands · typecheck 0, 12 tests, no-node-fs 0
+
