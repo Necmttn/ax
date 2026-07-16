@@ -24,3 +24,8 @@ PR https://github.com/Necmttn/ax/pull/736 · fetchTeamProfiles contents-API read
 ## 2026-07-17T00:47:43+08:00 — all 3 gated, wave-2 in CI
 - MERGED: team-validate #734. PRs in CI: team-compile #735, team-fetch #736.
 - On both merge → SLICE 2 COMPLETE. wakeup finalizes + surfaces Slice 3/4/5 infra decision.
+
+## 2026-07-17T01:00:02+08:00 — SLICE 2 COMPLETE
+- MERGED all 3: team-validate #734, team-compile #735, team-fetch #736.
+- Client-side data path shipped E2E: fetchTeamProfiles (contents-API reader, drop-failures) → validateTeamProfile (render-safe) → compileTeam (adoption/skill/spend boards). All Effect-free/browser-safe.
+- Fleet deregistered. REMAINING: Slice 4 (dashboard wiring — small, once data exists), Slice 3 (auth broker), Slice 5 (billing) — ALL need user infra (GitHub OAuth app + CF origin; Stripe).
