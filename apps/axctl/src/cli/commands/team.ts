@@ -11,6 +11,10 @@
  *     Review + install the team's executable `.ax/hooks/*` (sha256 trust-on-change,
  *     default-branch-only). `--yes` approves installation. `--allow-branch`
  *     bypasses the default-branch guard.
+ *
+ *   ax team push
+ *     Push the current bound Repository's redacted 30-day TeamProfileV1 to
+ *     its organization's private `<org>/ax-team` repository.
  */
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
@@ -49,6 +53,13 @@ import {
     TEAM_SHARE_VALUES,
     defaultTeamBindingsPath,
 } from "../../team/team-bindings-state.ts";
+import {
+    pushCurrentTeamProfile,
+    type TeamRepoUnboundError,
+    type TeamPushIdentityError,
+} from "../../team/team-push.ts";
+import { defaultPublishStatePath } from "../../profile/publish-state.ts";
+import type { GitHubApiError } from "../../profile/github-env.ts";
 import { HookProviderRegistryDefault } from "../../hooks/providers/registry.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -565,10 +576,10 @@ const experimentCommand = Command.make("experiment").pipe(
 );
 
 // ---------------------------------------------------------------------------
-// ax team join/status/leave
+// ax team join/status/leave/push
 // ---------------------------------------------------------------------------
 
-const resolveCurrentTeamRepo = (command: "join" | "leave") =>
+const resolveCurrentTeamRepo = (command: "join" | "leave" | "push") =>
     resolvePwdRepository().pipe(
         Effect.map(teamRepositoryContext),
         Effect.catchTag("NotAGitRepoError", (error) =>
@@ -662,6 +673,51 @@ export const leaveCommand = Command.make("leave", {}, () =>
     }),
 ).pipe(Command.withDescription("Unbind the current git repo from its team org."));
 
+export const pushCommand = Command.make("push", {}, () =>
+    Effect.gen(function* () {
+        const currentRepo = yield* resolveCurrentTeamRepo("push");
+        if (currentRepo === null) return;
+        const result = yield* pushCurrentTeamProfile({
+            repoKey: currentRepo.repoKey,
+            bindingsPath: defaultTeamBindingsPath(),
+            publishStatePath: defaultPublishStatePath(),
+            windowDays: 30,
+            generatedAt: new Date().toISOString(),
+        }).pipe(
+            Effect.catchTags({
+                TeamRepoUnboundError: (error: TeamRepoUnboundError) =>
+                    Effect.sync(() => {
+                        console.error(`[ax team push] ${error.message}`);
+                        return null;
+                    }),
+                TeamPushIdentityError: (error: TeamPushIdentityError) =>
+                    Effect.sync(() => {
+                        console.error(`[ax team push] ${error.message}`);
+                        return null;
+                    }),
+                GitHubApiError: (error: GitHubApiError) =>
+                    Effect.sync(() => {
+                        console.error(`[ax team push] GitHub API failed: ${error.message}`);
+                        return null;
+                    }),
+            }),
+        );
+        if (result === null) return;
+        console.log(
+            `[ax team push] pushed ${result.repoKey} → ${result.org}/ax-team/${result.file}`,
+        );
+        if (result.anonymous) {
+            console.log(
+                "[ax team push] anonymous sharing confirmed: no GitHub login was sent in the filename or snapshot.",
+            );
+        }
+    }),
+).pipe(
+    Command.withDescription(
+        "Push the current bound repository's redacted 30-day snapshot to <org>/ax-team.",
+    ),
+);
+
 // ---------------------------------------------------------------------------
 // ax team (group)
 // ---------------------------------------------------------------------------
@@ -674,6 +730,7 @@ export const teamCommand = Command.make("team").pipe(
         joinCommand,
         statusCommand,
         leaveCommand,
+        pushCommand,
         syncCommand,
         trustCommand,
         experimentCommand,
@@ -692,6 +749,7 @@ export const teamRuntime: RuntimeManifest = {
                 join: "db",
                 status: "db",
                 leave: "db",
+                push: "db",
             },
         },
         hidden: false,

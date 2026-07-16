@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { renderSyncReport, renderTrustReport, renderExperimentList } from "./team.ts";
+import {
+  renderSyncReport,
+  renderTrustReport,
+  renderExperimentList,
+  teamRuntime,
+} from "./team.ts";
+import { resolveRuntime } from "./manifest.ts";
 
 describe("renderSyncReport", () => {
   it("summarizes activated, unchanged, and gated", () => {
@@ -36,4 +42,10 @@ describe("renderExperimentList", () => {
     expect(out).toMatch(/shadow|overrides|committed/i);
   });
   it("empty-state", () => { expect(renderExperimentList([])).toContain("no experiments"); });
+});
+
+describe("team command routing", () => {
+  it("routes team push through the database runtime", () => {
+    expect(resolveRuntime(teamRuntime.team!, ["team", "push"])).toBe("db");
+  });
 });
