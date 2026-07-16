@@ -6,8 +6,11 @@
  * POST /api/ingest is served by the contract router (contract/live.ts);
  * the IngestStreamBus/Durable Streams seam is unchanged (ADR-0007/0008).
  */
-import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../telemetry.ts";
 import { rawRoute, type AnyRoute, type EffectRunner } from "../router.ts";
 
@@ -33,6 +36,58 @@ export function imageContentType(path: string): string | null {
     const dot = path.lastIndexOf(".");
     if (dot < 0) return null;
     return IMAGE_CONTENT_TYPES[path.slice(dot).toLowerCase()] ?? null;
+}
+
+function defaultImageRoots(): ReadonlyArray<string> {
+    const roots = [process.env.TMPDIR ?? "/tmp"];
+    const home = process.env.HOME;
+    if (home) {
+        roots.push(posixPath.join(home, "Library", "Application Support", "CleanShot", "media"));
+    }
+    return roots;
+}
+
+/**
+ * True when a canonical path is an allowed root or one of its descendants.
+ * Inputs are expected to be absolute, canonical paths.
+ */
+export function isPathWithinRoots(resolvedPath: string, roots: readonly string[]): boolean {
+    return roots.some((root) => {
+        const relative = posixPath.relative(root, resolvedPath);
+        return relative === ""
+            || (!relative.startsWith("..") && !posixPath.isAbsolute(relative));
+    });
+}
+
+/**
+ * Canonicalize a requested image and the allowed roots before checking
+ * containment. Missing paths, non-files, unsupported extensions, and paths
+ * outside every root are all rejected as null.
+ */
+export function resolveConfinedImage(
+    rawPath: string,
+    roots: readonly string[],
+): Effect.Effect<string | null, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        if (!posixPath.isAbsolute(rawPath) || !imageContentType(rawPath)) return null;
+
+        const fs = yield* FileSystem.FileSystem;
+        const resolvedPath = yield* fs.realPath(rawPath).pipe(orAbsent<string | null>(null));
+        if (resolvedPath === null || !imageContentType(resolvedPath)) return null;
+
+        const resolvedRoots = yield* Effect.forEach(roots, (root) =>
+            fs.realPath(root).pipe(orAbsent<string | null>(null)),
+        );
+        if (!isPathWithinRoots(
+            resolvedPath,
+            resolvedRoots.filter((root): root is string => root !== null),
+        )) {
+            return null;
+        }
+
+        const info = yield* fs.stat(resolvedPath).pipe(orAbsent<FileSystem.File.Info | null>(null));
+        return info?.type === "File" ? resolvedPath : null;
+    });
 }
 
 export function formatSseEvent(event: string, data: unknown): string {
@@ -66,21 +121,25 @@ LIMIT ${safeLimit};`.trim();
  *
  * Serves a local on-disk image so the SPA can render `[Image: source: ...]`
  * transcript refs (a browser can't load `file://` from an http origin). This
- * is a localhost-only personal dev daemon; the safety line is: the path must
- * resolve to an EXISTING regular file with a known image extension. Anything
- * else - missing file, directory, non-image extension, read error - is a flat
- * 404, so we never follow into or leak non-image files.
+ * is a localhost-only personal dev daemon; the safety line is: the canonical
+ * path must stay inside an allowlisted image root and resolve to an existing
+ * regular file with a known image extension. Anything else - missing file,
+ * directory, non-image extension, boundary escape, read error - is a flat 404.
  */
-async function handleImageRequest(url: URL): Promise<Response> {
+export async function handleImageRequest(
+    url: URL,
+    roots: readonly string[] = defaultImageRoots(),
+): Promise<Response> {
     const raw = url.searchParams.get("path");
     if (!raw) return new Response("not found", { status: 404 });
-    const contentType = imageContentType(raw);
-    if (!contentType) return new Response("not found", { status: 404 });
     try {
-        const file = Bun.file(raw);
-        // `exists()` is false for a missing path; a directory yields size 0 and
-        // a failing read below. Bun.file on a dir does not throw on `exists`.
-        if (!(await file.exists())) return new Response("not found", { status: 404 });
+        const resolvedPath = await Effect.runPromise(
+            resolveConfinedImage(raw, roots).pipe(Effect.provide(BunFileSystem.layer)),
+        );
+        if (resolvedPath === null) return new Response("not found", { status: 404 });
+        const contentType = imageContentType(resolvedPath);
+        if (!contentType) return new Response("not found", { status: 404 });
+        const file = Bun.file(resolvedPath);
         const bytes = await file.arrayBuffer();
         return new Response(bytes, {
             headers: {
