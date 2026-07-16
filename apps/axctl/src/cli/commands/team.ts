@@ -38,7 +38,19 @@ import {
 import { sha256Hex } from "../../team/exec-hash.ts";
 import { isOnDefaultBranch } from "../../team/git-branch.ts";
 import { installTeamHook, isSafeHookName, hookSnapshotPath } from "../../team/install-team-hook.ts";
+import {
+    joinTeamBinding,
+    leaveTeamBinding,
+    statusTeamBindings,
+    teamRepositoryContext,
+} from "../../team/team-bindings-commands.ts";
+import {
+    DEFAULT_TEAM_SHARE,
+    TEAM_SHARE_VALUES,
+    defaultTeamBindingsPath,
+} from "../../team/team-bindings-state.ts";
 import { HookProviderRegistryDefault } from "../../hooks/providers/registry.ts";
+import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 
 // ---------------------------------------------------------------------------
@@ -553,6 +565,104 @@ const experimentCommand = Command.make("experiment").pipe(
 );
 
 // ---------------------------------------------------------------------------
+// ax team join/status/leave
+// ---------------------------------------------------------------------------
+
+const resolveCurrentTeamRepo = (command: "join" | "leave") =>
+    resolvePwdRepository().pipe(
+        Effect.map(teamRepositoryContext),
+        Effect.catchTag("NotAGitRepoError", (error) =>
+            Effect.sync(() => {
+                console.error(
+                    `[ax team ${command}] not inside a git repo (cwd=${error.cwd}).`,
+                );
+                return null;
+            }),
+        ),
+    );
+
+export const joinCommand = Command.make(
+    "join",
+    {
+        org: Argument.string("org"),
+        share: Flag.choice("share", TEAM_SHARE_VALUES).pipe(
+            Flag.withDefault(DEFAULT_TEAM_SHARE),
+        ),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ org, share, yes }) =>
+        Effect.gen(function* () {
+            const currentRepo = yield* resolveCurrentTeamRepo("join");
+            if (currentRepo === null) return;
+            const normalizedOrg = org.trim();
+            if (normalizedOrg.length === 0) {
+                console.error("[ax team join] org must not be empty.");
+                return;
+            }
+            yield* Effect.promise(() =>
+                joinTeamBinding({
+                    org: normalizedOrg,
+                    currentRepo,
+                    statePath: defaultTeamBindingsPath(),
+                    share,
+                    ...(yes
+                        ? { confirmed: true }
+                        : {
+                            confirm: () => {
+                                const answer = (
+                                    globalThis.prompt?.("Bind this repo? [y/N]") ?? ""
+                                )
+                                    .trim()
+                                    .toLowerCase();
+                                return answer === "y" || answer === "yes";
+                            },
+                        }),
+                    write: (line) => console.log(line),
+                }),
+            );
+        }),
+).pipe(
+    Command.withDescription(
+        "Bind the current git repo to a team org. Default share is anonymous. " +
+        "--share=anon|full  --yes",
+    ),
+);
+
+export const statusCommand = Command.make("status", {}, () =>
+    Effect.gen(function* () {
+        const currentRepo = yield* resolvePwdRepository().pipe(
+            Effect.map(teamRepositoryContext),
+            Effect.catchTag("NotAGitRepoError", () => Effect.succeed(null)),
+        );
+        yield* Effect.promise(() =>
+            statusTeamBindings({
+                statePath: defaultTeamBindingsPath(),
+                currentRepo,
+                write: (line) => console.log(line),
+            }),
+        );
+    }),
+).pipe(
+    Command.withDescription(
+        "List machine-local repo bindings and mark the current repo.",
+    ),
+);
+
+export const leaveCommand = Command.make("leave", {}, () =>
+    Effect.gen(function* () {
+        const currentRepo = yield* resolveCurrentTeamRepo("leave");
+        if (currentRepo === null) return;
+        yield* Effect.promise(() =>
+            leaveTeamBinding({
+                currentRepo,
+                statePath: defaultTeamBindingsPath(),
+                write: (line) => console.log(line),
+            }),
+        );
+    }),
+).pipe(Command.withDescription("Unbind the current git repo from its team org."));
+
+// ---------------------------------------------------------------------------
 // ax team (group)
 // ---------------------------------------------------------------------------
 
@@ -560,7 +670,14 @@ export const teamCommand = Command.make("team").pipe(
     Command.withDescription(
         "Team rig management: activate the shared .ax/ skills and agents into your local runtime.",
     ),
-    Command.withSubcommands([syncCommand, trustCommand, experimentCommand]),
+    Command.withSubcommands([
+        joinCommand,
+        statusCommand,
+        leaveCommand,
+        syncCommand,
+        trustCommand,
+        experimentCommand,
+    ]),
 );
 
 export const teamRuntime: RuntimeManifest = {
@@ -572,6 +689,9 @@ export const teamRuntime: RuntimeManifest = {
                 sync: "none",
                 trust: "none",
                 experiment: "none",
+                join: "db",
+                status: "db",
+                leave: "db",
             },
         },
         hidden: false,
