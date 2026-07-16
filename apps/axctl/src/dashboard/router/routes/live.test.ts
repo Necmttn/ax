@@ -1,15 +1,25 @@
 import { describe, expect, test } from "bun:test";
+import { BunFileSystem } from "@effect/platform-bun";
+import { Effect } from "effect";
+import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
     formatSseComment,
     formatSseEvent,
+    handleImageRequest,
     handleEventsRequest,
     imageContentType,
+    isPathWithinRoots,
     liveRoutes,
     recentIngestEventsSql,
+    resolveConfinedImage,
 } from "./live.ts";
 import { matchRoute, type EffectRunner } from "../router.ts";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const runFs = <A>(effect: Effect.Effect<A, unknown, import("effect").FileSystem.FileSystem>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(BunFileSystem.layer)));
 
 /** Drain an SSE response body to text until it ends or `cancel` is called. */
 async function drainStream(res: Response, runMs: number): Promise<string> {
@@ -48,6 +58,92 @@ describe("imageContentType", () => {
         expect(imageContentType("/a/notes.txt")).toBeNull();
         expect(imageContentType("/a/script.sh")).toBeNull();
         expect(imageContentType("noext")).toBeNull();
+    });
+});
+
+describe("confined image paths", () => {
+    test("recognizes only exact roots and true descendants", () => {
+        expect(isPathWithinRoots("/safe/images/shot.png", ["/safe/images"])).toBe(true);
+        expect(isPathWithinRoots("/safe/images", ["/safe/images"])).toBe(true);
+        expect(isPathWithinRoots("/safe/images-extra/shot.png", ["/safe/images"])).toBe(false);
+        expect(isPathWithinRoots("/outside/shot.png", ["/safe/images"])).toBe(false);
+    });
+
+    test("rejects an existing image outside the allowed boundary", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-image-confine-"));
+        const allowed = join(base, "allowed");
+        const outside = join(base, "outside.png");
+        try {
+            await mkdir(allowed);
+            await Bun.write(outside, "outside");
+            await expect(runFs(resolveConfinedImage(outside, [allowed]))).resolves.toBeNull();
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects .. traversal that resolves outside the allowed boundary", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-image-confine-"));
+        const allowed = join(base, "allowed");
+        const nested = join(allowed, "nested");
+        const outside = join(base, "outside.png");
+        try {
+            await mkdir(nested, { recursive: true });
+            await Bun.write(outside, "outside");
+            const traversal = join(nested, "..", "..", "outside.png");
+            await expect(runFs(resolveConfinedImage(traversal, [allowed]))).resolves.toBeNull();
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects a symlink whose target escapes the allowed boundary", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-image-confine-"));
+        const allowed = join(base, "allowed");
+        const outside = join(base, "outside.png");
+        const link = join(allowed, "linked.png");
+        try {
+            await mkdir(allowed);
+            await Bun.write(outside, "outside");
+            await symlink(outside, link);
+            await expect(runFs(resolveConfinedImage(link, [allowed]))).resolves.toBeNull();
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
+    });
+
+    test("serves a legitimate image inside the allowed boundary", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-image-confine-"));
+        const allowed = join(base, "allowed");
+        const image = join(allowed, "shot.png");
+        try {
+            await mkdir(allowed);
+            await Bun.write(image, "image bytes");
+            await expect(runFs(resolveConfinedImage(image, [allowed]))).resolves.toBe(await realpath(image));
+
+            const url = new URL(`http://127.0.0.1:1738/api/image?path=${encodeURIComponent(image)}`);
+            const response = await handleImageRequest(url, [allowed]);
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toBe("image/png");
+            await expect(response.text()).resolves.toBe("image bytes");
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
+    });
+
+    test("GET /api/image returns an actual 404 for an out-of-boundary image", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-image-confine-"));
+        const allowed = join(base, "allowed");
+        const outside = join(base, "outside.png");
+        try {
+            await mkdir(allowed);
+            await Bun.write(outside, "outside");
+            const url = new URL(`http://127.0.0.1:1738/api/image?path=${encodeURIComponent(outside)}`);
+            const response = await handleImageRequest(url, [allowed]);
+            expect(response.status).toBe(404);
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
     });
 });
 
