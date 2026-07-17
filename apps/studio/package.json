@@ -13,6 +13,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@ax/community-compile": "workspace:*",
     "@ax/foresight": "workspace:*",
     "@ax/lib": "workspace:*",
     "@ax/recap-deck": "workspace:*",
