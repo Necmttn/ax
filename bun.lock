@@ -46,6 +46,7 @@
       "dependencies": {
         "@ax-classifier/direction-event": "workspace:*",
         "@ax-classifier/verification-event": "workspace:*",
+        "@ax/community-compile": "workspace:*",
         "@ax/hooks-sdk": "workspace:*",
         "@ax/lib": "workspace:*",
         "@ax/schema": "workspace:*",
