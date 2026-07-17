@@ -50,6 +50,19 @@ const MIGRATION_SENTINEL_KEY = "id-unify-v1";
 export const watermarkRecordKey = (sourceKind: string, path: string): string =>
     stableDigest(`${sourceKind}|${path}`);
 
+/** The single watermark-commit UPSERT as a statement string, so stages that
+ *  batch many sessions' writes into one `executeStatements` call can append
+ *  their watermark commits to the SAME batch (cursor #bug-cursor-ingest)
+ *  instead of paying one round trip per mark. `commit()` executes exactly
+ *  this statement. */
+export const watermarkCommitStatement = (
+    sourceKind: string,
+    path: string,
+    mtimeMs: number,
+    size: number,
+): string =>
+    `UPSERT ${recordLiteral(WATERMARK_TABLE, watermarkRecordKey(sourceKind, path))} CONTENT { path: ${surrealString(path)}, source_kind: ${surrealString(sourceKind)}, mtime_ms: ${Math.trunc(mtimeMs)}, size: ${Math.trunc(size)}, ingested_at: time::now() };`;
+
 export interface FileWatermark {
     /** true ⇒ on-disk (mtime,size) matches the stored mark ⇒ caller should skip. */
     unchanged(path: string, mtimeMs: number, size: number): boolean;
@@ -110,9 +123,7 @@ export const fileWatermark = (
             commit: (path, mtimeMs, size) =>
                 executeStatementsWith(
                     db,
-                    [
-                        `UPSERT ${recordLiteral(WATERMARK_TABLE, watermarkRecordKey(cfg.sourceKind, path))} CONTENT { path: ${surrealString(path)}, source_kind: ${surrealString(cfg.sourceKind)}, mtime_ms: ${Math.trunc(mtimeMs)}, size: ${Math.trunc(size)}, ingested_at: time::now() };`,
-                    ],
+                    [watermarkCommitStatement(cfg.sourceKind, path, mtimeMs, size)],
                     { chunkSize: 1 },
                 ),
         } satisfies FileWatermark;
