@@ -13,3 +13,9 @@ PR https://github.com/Necmttn/ax/pull/737 · normalizeFirstSuperpowersAt sane-ye
 ## bug-cursor-ingest (bug 1)
 PR https://github.com/Necmttn/ax/pull/740 · batch commits + watermark resumability + #261 preserved + oracle-equivalent partition · typecheck 0, 22 tests · (interrupted mid-self-review by network blip; fix was committed+green, orchestrator gated)
 
+
+## 2026-07-17T10:00:10+08:00 — BUG FLEET COMPLETE
+- BUG 1 (cursor timeout/hang): FIXED #740 — batch commits + watermark resumability, #261 preserved, 22 tests.
+- BUG 2 (session-health sentinel): FIXED #737.
+- BUG 3 (schema DDL): already-fixed-on-main; user rebuild off latest clears it.
+- Fleet deregistered. User can drop AX_INGEST_TIMEOUT_SECONDS=7200 workaround once on this build.
