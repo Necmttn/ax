@@ -1,0 +1,6 @@
+# Fleet ledger — team-dash-s4 (Slice 4 local dashboard, no infra)
+- Started 2026-07-17T08:41:08+08:00 | base origin/main | Signals: /tmp/fleet-team-dash-s4.signals | Tab: w1R:tA
+- team-serve=w1R:p1D (codex) — GET /api/team?org= → TeamBoards (server-side gh via GitHubEnv + validateTeamProfile + compileTeam).
+- team-dashboard-ui=w1R:p1C (fable) — wire team-metrics.tsx /team to /api/team, render boards, remove mock.
+- Parallel (UI codes against the TeamBoards contract). On both merge → local team dashboard renders real pushed snapshots.
+- NOTE: team-serve first spawn hit a brew-upgrade-codex terminal hijack; respawned clean (w1R:p1D).
