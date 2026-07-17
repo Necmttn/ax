@@ -10,3 +10,6 @@ PR https://github.com/Necmttn/ax/pull/738 · wired /team → /api/team, mock rem
 ## team-serve (Slice 4)
 PR https://github.com/Necmttn/ax/pull/739 · GET /api/team → TeamBoards (server-side reader + compileTeam, empty-safe) · typecheck 0, tests green
 
+
+## 2026-07-17T09:00:02+08:00 — Slice 4 UI merged
+- MERGED: team-dashboard-ui #738. PR (CI): team-serve #739. On #739 merge → local team dashboard live (/team renders real pushed snapshots).
