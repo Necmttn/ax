@@ -948,6 +948,60 @@ const sliceCursorExtractForSession = (
 
 export const __testSliceCursorExtractForSession = sliceCursorExtractForSession;
 
+/** One-pass partition of a whole-store extract into per-session slices.
+ *  Output per session is IDENTICAL to `sliceCursorExtractForSession(extract,
+ *  id)` (the oracle its equivalence test asserts against); this exists because
+ *  filtering the whole extract once per session is O(sessions × extract) and a
+ *  ~1,800-session store made that quadratic cost real. Order follows
+ *  `extract.sessions`. */
+const partitionCursorExtract = (
+    extract: CursorExtract,
+): { session: CursorSession; slice: CursorExtract }[] => {
+    const bySession = new Map<string, { session: CursorSession; slice: CursorExtract }>();
+    const partitions: { session: CursorSession; slice: CursorExtract }[] = [];
+    for (const session of extract.sessions) {
+        const entry = {
+            session,
+            slice: {
+                sessions: [session],
+                turns: [] as CursorTurn[],
+                invocations: [] as CursorInvocation[],
+                toolCalls: [] as ToolCallWrite[],
+                providerEvents: [] as AgentEventWrite[],
+                skillRelations: [] as ToolCallSkillRelationWrite[],
+                compactions: [] as CompactionWrite[],
+                skipped: 0,
+                warnings: [] as string[],
+            },
+        };
+        bySession.set(session.id, entry);
+        partitions.push(entry);
+    }
+    for (const turn of extract.turns) bySession.get(turn.session)?.slice.turns.push(turn);
+    for (const invocation of extract.invocations) bySession.get(invocation.session)?.slice.invocations.push(invocation);
+    // Skill relations carry no session field; correlate through the same
+    // toolCallRecordKey their tool calls were keyed with (mirrors the oracle).
+    const sessionByToolCallKey = new Map<string, string>();
+    for (const call of extract.toolCalls) {
+        bySession.get(call.sessionId)?.slice.toolCalls.push(call);
+        if (bySession.has(call.sessionId)) {
+            sessionByToolCallKey.set(
+                toolCallRecordKey({ sessionId: call.sessionId, seq: call.seq, callId: call.callId ?? null }),
+                call.sessionId,
+            );
+        }
+    }
+    for (const event of extract.providerEvents) bySession.get(event.providerSessionId)?.slice.providerEvents.push(event);
+    for (const relation of extract.skillRelations) {
+        const sessionId = sessionByToolCallKey.get(relation.toolCallKey);
+        if (sessionId !== undefined) bySession.get(sessionId)?.slice.skillRelations.push(relation);
+    }
+    for (const compaction of extract.compactions) bySession.get(compaction.sessionId)?.slice.compactions.push(compaction);
+    return partitions;
+};
+
+export const __testPartitionCursorExtract = partitionCursorExtract;
+
 const includeByMtime = (mtime: Option.Option<Date>, cutoffMs: number): boolean =>
     Option.match(mtime, {
         onNone: () => true,
