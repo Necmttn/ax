@@ -13,3 +13,7 @@ PR https://github.com/Necmttn/ax/pull/739 · GET /api/team → TeamBoards (serve
 
 ## 2026-07-17T09:00:02+08:00 — Slice 4 UI merged
 - MERGED: team-dashboard-ui #738. PR (CI): team-serve #739. On #739 merge → local team dashboard live (/team renders real pushed snapshots).
+
+## 2026-07-17T09:18:05+08:00 — SLICE 4 COMPLETE
+- MERGED both: team-dashboard-ui #738, team-serve #739. Local team dashboard live: ax serve → /team renders real /api/team aggregate (fetchTeamProfiles+compileTeam server-side). Zero infra. Fleet deregistered.
+- Team-dashboard status: Slices 1,2,4 SHIPPED. Remaining: Slice 3 (auth broker) + Slice 5 (billing) = hosted/multi-user/paywall, need user infra (GitHub OAuth app + CF origin; Stripe).
