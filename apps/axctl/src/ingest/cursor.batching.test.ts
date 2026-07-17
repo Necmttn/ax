@@ -133,10 +133,31 @@ describe("cursor batched writes", () => {
             }
             // Commit amortization: old path = 2+ round trips per session (SDK
             // upsert + >=1 statement chunk) = >=6 query calls for 3 sessions.
-            // New path: 1 watermark SELECT + 1 batched chunk.
+            // New path: 1 watermark SELECT + 1 batched DATA call + 1 batched
+            // MARKS call. The marks call is deliberately SEPARATE from data
+            // (never combined into the same `executeStatements` call): a
+            // SurrealDB `query()` request runs every statement it's given
+            // independently (per-statement status, no transaction), so if a
+            // mark rode in the SAME request as data, a later mark statement
+            // could still commit server-side even when an earlier data
+            // statement in that request failed - a data-loss hazard where a
+            // failed session's watermark lands anyway and the session is
+            // skipped forever on the next run. Splitting into two calls means
+            // the marks call is only reachable once the data call's Effect
+            // has already succeeded.
             const writeCalls = tc.captured.filter((sql) => !sql.includes("FROM ingest_file_state")).length;
-            expect(writeCalls).toBe(1);
+            expect(writeCalls).toBe(2);
             expect(tc.upserts.length).toBe(0); // no per-session SDK upserts anymore
+
+            // Regression guard for the exact data-loss hazard above: the
+            // batched marks call must carry ONLY watermark commits, never any
+            // data statement, so a failed data call can never let a mark
+            // through in the same request.
+            const marksCalls = tc.captured.filter((sql) => sql.includes("UPSERT ingest_file_state"));
+            for (const sql of marksCalls) {
+                expect(sql).not.toContain("UPSERT session:");
+                expect(sql).not.toContain("UPSERT turn");
+            }
         } finally {
             await rm(cursorUserDir, { recursive: true, force: true });
         }
@@ -157,16 +178,16 @@ describe("cursor batched writes", () => {
             const executed = tc.captured.join("");
             expect(executed).toContain("convalpha");
             expect(executed).toContain("convcharlie");
-            // The bad session committed no watermark: no STANDALONE
-            // ingest_file_state UPSERT (the per-session commit issued by the
-            // #261 fallback) names it. `startsWith` (not `includes`) is
-            // deliberate: the failed whole-group attempt's captured SQL also
-            // contains a watermark statement for convbravo (batched with the
-            // other members' - it never committed, but the mock still
-            // records issued SQL even on failure), and that same blob
-            // legitimately embeds convbravo's own data too. Filtering to
-            // calls that ARE a watermark commit (not merely contain one)
-            // isolates the actual per-session commits the fallback made.
+            // The bad session committed no watermark: no ingest_file_state
+            // UPSERT names it. The batch's DATA call fails first (convbravo's
+            // own content matches the route) and the group's marks call -
+            // sequenced strictly after data succeeds - is never reached, so
+            // no mark for ANY group member (bad or good) is attempted in the
+            // failed batch at all; only the #261 per-session fallback's
+            // individual mark commits (for convalpha/convcharlie, which
+            // succeed) show up here. `startsWith` (rather than `includes`)
+            // keeps this precise: it isolates calls that ARE a watermark
+            // commit, not merely ones that mention one.
             const marks = tc.captured.filter((sql) => sql.startsWith("UPSERT ingest_file_state"));
             expect(marks.join("")).not.toContain("convbravo");
         } finally {

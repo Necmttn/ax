@@ -1175,11 +1175,23 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             }
 
             // Greedy statement-budget batches: amortize the per-call commit
-            // cost across sessions. Watermark commits ride the SAME call,
-            // ordered LAST so they only execute after every data chunk of the
-            // batch succeeded (chunks run sequentially; a failure aborts the
-            // rest). On any batch failure, fall back to the per-session
-            // isolate path so one bad session skips only itself (#261).
+            // cost across sessions. Watermark commits ride in a SEPARATE
+            // `executeStatements` call issued AFTER the group's data call -
+            // never combined into the same call. SurrealDB executes every
+            // statement inside one `query()` request independently
+            // (per-statement status, no transaction): if marks rode in the
+            // SAME request as data, a later mark statement could still
+            // commit server-side even though an earlier data statement in
+            // that same request errored, so a failing session's watermark
+            // could land despite its data being lost - and the next run's
+            // `watermark.unchanged()` would then skip it forever with
+            // missing data. Splitting into two sequenced calls means the
+            // marks call is only *reachable* (via `Effect.gen` sequencing)
+            // once the data call's Effect has already succeeded, so a failed
+            // session's mark can never precede - or survive without - its
+            // data. On any batch failure (data OR marks call), fall back to
+            // the per-session isolate path so one bad session skips only
+            // itself (#261).
             let batch: PendingCursorSession[] = [];
             let batchStatements = 0;
 
@@ -1204,12 +1216,18 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
                     const group = batch;
                     batch = [];
                     batchStatements = 0;
-                    const combined = [
-                        ...group.flatMap((p) => [...p.statements]),
-                        ...group.map(markStatement),
-                    ];
+                    const dataStatements = group.flatMap((p) => [...p.statements]);
+                    const markStatements = group.map(markStatement);
+                    // See the batching comment above: marks are a SEPARATE
+                    // call, sequenced strictly after data succeeds, so
+                    // `Effect.result` only observes "Success" once BOTH
+                    // calls landed - a data-only failure never lets a mark
+                    // through.
                     const attempt = yield* Effect.result(
-                        executeStatements(combined, { chunkSize: 500, label: "cursor" }),
+                        Effect.gen(function* () {
+                            yield* executeStatements(dataStatements, { chunkSize: 500, label: "cursor" });
+                            yield* executeStatements(markStatements, { chunkSize: 500, label: "cursor" });
+                        }),
                     );
                     if (attempt._tag === "Success") {
                         for (const p of group) {
@@ -1219,11 +1237,11 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
                         }
                         return;
                     }
-                    // Batch failed: retry each member alone so only the truly
-                    // bad session(s) skip. Statements are idempotent UPSERTs,
-                    // so partially-committed chunks re-apply safely. A
-                    // connection-level DbError rethrows out of isolate and
-                    // aborts the stage, exactly as before.
+                    // Batch failed (data or marks call): retry each member
+                    // alone so only the truly bad session(s) skip. Statements
+                    // are idempotent UPSERTs, so partially-committed chunks
+                    // re-apply safely. A connection-level DbError rethrows
+                    // out of isolate and aborts the stage, exactly as before.
                     yield* Effect.logDebug("cursor ingest: batch failed, falling back to per-session isolation", {
                         sessions: group.length,
                         message: attempt.failure.message,
@@ -1234,7 +1252,7 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
                 });
 
             for (const p of pending) {
-                if (batch.length > 0 && batchStatements + p.statements.length + batch.length + 1 > CURSOR_BATCH_STATEMENT_BUDGET) {
+                if (batch.length > 0 && batchStatements + p.statements.length > CURSOR_BATCH_STATEMENT_BUDGET) {
                     yield* flush();
                 }
                 batch.push(p);
