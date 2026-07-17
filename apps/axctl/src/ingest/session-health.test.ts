@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { __testBuildSessionHealthRows, __testTokenUsageStatement } from "./session-health.ts";
+import {
+    __testBuildSessionHealthRows,
+    __testNormalizeFirstSuperpowersAt,
+    __testTokenUsageStatement,
+    __testWorkflowEpochStatements,
+} from "./session-health.ts";
 
 describe("session health derivation", () => {
     test("uses Claude usage metrics when available", () => {
@@ -176,5 +181,34 @@ describe("session health NONE-safety (#680)", () => {
         expect(rows.usages).toHaveLength(1);
         expect(rows.health).toHaveLength(1);
         expect(rows.usages[0].sessionKey).toBe("ok");
+    });
+});
+
+describe("session health empty superpowers invocations", () => {
+    test("rejects SurrealDB's empty-set max datetime sentinel", () => {
+        const firstSuperpowersAt = __testNormalizeFirstSuperpowersAt("+262142-12-31T23:59:59.999999999Z");
+
+        expect(firstSuperpowersAt).toBeNull();
+        expect(__testNormalizeFirstSuperpowersAt(null)).toBeNull();
+        expect(__testNormalizeFirstSuperpowersAt("2026-07-01T00:00:00.000Z"))
+            .toBe("2026-07-01T00:00:00.000Z");
+
+        const rows = __testBuildSessionHealthRows({
+            firstSuperpowersAt,
+            sessions: [{
+                id: "session:`without-superpowers`",
+                source: "codex",
+                started_at: "2026-07-17T00:00:00.000Z",
+            }],
+            turns: [],
+            toolCalls: [],
+            planSnapshots: [],
+            insightMetrics: [],
+        });
+        expect(rows.usages[0]?.workflowEpoch).toBeNull();
+
+        const statements = __testWorkflowEpochStatements(firstSuperpowersAt);
+        expect(statements[0]).toContain("ends_at: NONE");
+        expect(statements.join("\n")).not.toContain("262142");
     });
 });

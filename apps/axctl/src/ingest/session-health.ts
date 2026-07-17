@@ -339,6 +339,8 @@ function workflowEpochStatements(firstSuperpowersAt: string | null): string[] {
     ];
 }
 
+export const __testWorkflowEpochStatements = workflowEpochStatements;
+
 function tokenUsageStatement(row: SessionTokenUsage): string {
     const existingActualTokenUsage =
         "prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE";
@@ -391,6 +393,20 @@ function sessionHealthStatement(row: SessionHealth): string {
     ])};`;
 }
 
+const FIRST_SUPERPOWERS_MIN_YEAR = 2000;
+const FIRST_SUPERPOWERS_MAX_YEAR = 2100;
+
+function normalizeFirstSuperpowersAt(value: TimestampInput | null | undefined): string | null {
+    if (value === null || value === undefined) return null;
+    const timestamp = isoTimestamp(value);
+    const parsed = Date.parse(timestamp);
+    if (!Number.isFinite(parsed)) return null;
+    const year = new Date(parsed).getUTCFullYear();
+    return year >= FIRST_SUPERPOWERS_MIN_YEAR && year <= FIRST_SUPERPOWERS_MAX_YEAR ? timestamp : null;
+}
+
+export const __testNormalizeFirstSuperpowersAt = normalizeFirstSuperpowersAt;
+
 const fetchFirstSuperpowersAt = (): Effect.Effect<string | null, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -399,8 +415,8 @@ SELECT time::min(ts) AS first_superpowers
 FROM invoked
 WHERE out.name CONTAINS "superpowers:"
 GROUP ALL;`);
-        return isoTimestamp(result?.[0]?.[0]?.first_superpowers);
-    }).pipe(Effect.map((value) => value === new Date(0).toISOString() ? null : value));
+        return normalizeFirstSuperpowersAt(result?.[0]?.[0]?.first_superpowers);
+    });
 
 const sinceWhere = (field: string, sinceDays: number | undefined): string =>
     sinceDays && sinceDays > 0 ? `WHERE ${field} > time::now() - ${sinceDays}d` : "";
