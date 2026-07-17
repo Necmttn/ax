@@ -30,6 +30,7 @@ import type {
     WrappedProfile,
 } from "@ax/lib/shared/dashboard-types";
 import type { UsageRollupSchema } from "@ax/lib/shared/api-contract";
+import type { TeamBoards } from "@ax/community-compile/team";
 
 // Studio mock-mode build flag. When true (set at build time for the public
 // studio bundle), every fetch is either:
@@ -560,6 +561,11 @@ export const api = {
         viaContractUnknown("/api/wrapped", (c) => c.insights.wrapped()),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
         viaContractUnknown("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
+
+    /** Team boards - aggregate of pushed team snapshots (local daemon rollup).
+     *  Contract owned by the `team-serve` route: GET /api/team?org=<org>. */
+    team: (org?: string): Promise<TeamBoards> =>
+        jsonFetch(org ? `/api/team?org=${encodeURIComponent(org)}` : "/api/team"),
 
     costModels: (): Promise<CostModelsResult> =>
         viaContractUnknown("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
