@@ -2,11 +2,14 @@ import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
-import { RecordId, SurrealClient } from "@ax/lib/db";
+import { SurrealClient } from "@ax/lib/db";
+import { stableDigest } from "@ax/lib/ids";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { fileWatermark, watermarkCommitStatement } from "@ax/lib/shared/watermark";
+import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -33,6 +36,10 @@ export interface CursorStats {
     readonly turns: number;
     readonly toolCalls: number;
     readonly skipped: number;
+    /** Sessions skipped because their content digest matched the stored
+     *  per-session watermark (`ingest_file_state`, source_kind
+     *  "cursor_session") - a killed run resumes instead of restarting. */
+    readonly skippedUnchanged: number;
     readonly warnings: number;
     /** Sessions whose write pipeline failed and was skipped (retried next
      *  run). Named `failedFiles` to match the cross-provider stage-stats key
@@ -948,6 +955,95 @@ const sliceCursorExtractForSession = (
 
 export const __testSliceCursorExtractForSession = sliceCursorExtractForSession;
 
+/** One-pass partition of a whole-store extract into per-session slices.
+ *  Output per session is IDENTICAL to `sliceCursorExtractForSession(extract,
+ *  id)` (the oracle its equivalence test asserts against); this exists because
+ *  filtering the whole extract once per session is O(sessions × extract) and a
+ *  ~1,800-session store made that quadratic cost real. Order follows
+ *  `extract.sessions`. */
+const partitionCursorExtract = (
+    extract: CursorExtract,
+): { session: CursorSession; slice: CursorExtract }[] => {
+    const bySession = new Map<string, { session: CursorSession; slice: CursorExtract }>();
+    const partitions: { session: CursorSession; slice: CursorExtract }[] = [];
+    for (const session of extract.sessions) {
+        const entry = {
+            session,
+            slice: {
+                sessions: [session],
+                turns: [] as CursorTurn[],
+                invocations: [] as CursorInvocation[],
+                toolCalls: [] as ToolCallWrite[],
+                providerEvents: [] as AgentEventWrite[],
+                skillRelations: [] as ToolCallSkillRelationWrite[],
+                compactions: [] as CompactionWrite[],
+                skipped: 0,
+                warnings: [] as string[],
+            },
+        };
+        bySession.set(session.id, entry);
+        partitions.push(entry);
+    }
+    for (const turn of extract.turns) bySession.get(turn.session)?.slice.turns.push(turn);
+    for (const invocation of extract.invocations) bySession.get(invocation.session)?.slice.invocations.push(invocation);
+    // Skill relations carry no session field; correlate through the same
+    // toolCallRecordKey their tool calls were keyed with (mirrors the oracle).
+    const sessionByToolCallKey = new Map<string, string>();
+    for (const call of extract.toolCalls) {
+        bySession.get(call.sessionId)?.slice.toolCalls.push(call);
+        if (bySession.has(call.sessionId)) {
+            sessionByToolCallKey.set(
+                toolCallRecordKey({ sessionId: call.sessionId, seq: call.seq, callId: call.callId ?? null }),
+                call.sessionId,
+            );
+        }
+    }
+    for (const event of extract.providerEvents) bySession.get(event.providerSessionId)?.slice.providerEvents.push(event);
+    for (const relation of extract.skillRelations) {
+        const sessionId = sessionByToolCallKey.get(relation.toolCallKey);
+        if (sessionId !== undefined) bySession.get(sessionId)?.slice.skillRelations.push(relation);
+    }
+    for (const compaction of extract.compactions) bySession.get(compaction.sessionId)?.slice.compactions.push(compaction);
+    return partitions;
+};
+
+export const __testPartitionCursorExtract = partitionCursorExtract;
+
+/** The session-record upsert as a statement. Replaces the per-session SDK
+ *  `db.upsert(new RecordId("session", ...))` round trip so it can ride the
+ *  same batched `executeStatements` call as the session's other statements.
+ *  Field set + CONTENT(replace) semantics are identical to the SDK call it
+ *  supersedes. */
+const buildCursorSessionUpsertStatement = (session: CursorSession): string =>
+    `UPSERT ${recordRef("session", session.id)} CONTENT { source: ${surrealString("cursor")}, started_at: ${surrealDate(session.started_at)}, ended_at: ${surrealDate(session.ended_at)}, raw_file: ${surrealString(session.sourcePath)} };`;
+
+export const __testBuildCursorSessionUpsertStatement = buildCursorSessionUpsertStatement;
+
+/** Statement-count budget per batched `executeStatements` call: aligned with
+ *  the write chunkSize so a batch is ~one round trip. The fixed per-call
+ *  commit cost dominated the old per-session path (~540ms/chat on a 1,838-chat
+ *  store - "28 statements cost the same as 236"), so batches amortize it. */
+export const CURSOR_BATCH_STATEMENT_BUDGET = 500;
+
+const CURSOR_WATERMARK_SOURCE_KIND = "cursor_session";
+
+interface PendingCursorSession {
+    /** `<store path>#<session id>` - the #261 isolation locator AND the
+     *  watermark path key. */
+    readonly locator: string;
+    readonly session: CursorSession;
+    /** Session upsert + the session's full normalized-batch statements. */
+    readonly statements: readonly string[];
+    /** Content fingerprint packed into the (mtime_ms,size) watermark slots:
+     *  first 52 bits of the statement digest + statement count. */
+    readonly digestNum: number;
+    readonly turns: number;
+    readonly toolCalls: number;
+}
+
+const cursorSessionFingerprint = (statements: readonly string[]): number =>
+    Number.parseInt(stableDigest(statements.join("\n")).slice(0, 13), 16);
+
 const includeByMtime = (mtime: Option.Option<Date>, cutoffMs: number): boolean =>
     Option.match(mtime, {
         onNone: () => true,
@@ -1023,18 +1119,27 @@ interface CursorIngestOpts {
 export const ingestCursor = Effect.fn("cursor.ingest")(
     function* (opts: Partial<CursorIngestOpts> = {}) {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const dbPaths = yield* findCursorStateDbs(cfg.paths.cursorUserDir, cutoff);
         let sessionCount = 0;
         let turnCount = 0;
         let toolCallCount = 0;
         let skipped = 0;
+        let skippedUnchanged = 0;
         let warnings = 0;
 
         // One collector across all state DBs: a failure storm spanning stores
         // is just as systemic as one inside a single store.
         const failures = makeFileFailureCollector({ source: "cursor", unit: "session" });
+
+        // Per-session skip-unchanged watermark (#resumability): one indexed
+        // read up front; a session whose statement digest matches its stored
+        // mark is skipped entirely, so a killed+resumed run does not restart
+        // the store from zero. AX_REDERIVE_CURSOR=1 forces a full re-derive.
+        const watermark = dbPaths.length > 0
+            ? yield* fileWatermark({ sourceKind: CURSOR_WATERMARK_SOURCE_KIND, forceEnv: "AX_REDERIVE_CURSOR" })
+            : null;
+
         for (const dbPath of dbPaths) {
             const extract = yield* Effect.sync(() =>
                 extractCursorStateDb(dbPath, { cursorUserDir: cfg.paths.cursorUserDir })
@@ -1047,25 +1152,113 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             warnings += extract.warnings.length;
             if (extract.sessions.length === 0) continue;
 
-            for (const session of extract.sessions) {
-                const slice = sliceCursorExtractForSession(extract, session.id);
-                // Per-session failure isolation (#261): one undecodable /
-                // rejected session skips THIS session - the store is re-read
-                // next run - instead of aborting the whole stage (see
-                // file-isolation.ts).
-                yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
-                    yield* db.upsert(new RecordId("session", session.id), {
-                        source: "cursor",
-                        started_at: new Date(session.started_at),
-                        ended_at: new Date(session.ended_at),
-                        raw_file: session.sourcePath,
-                    });
-                    yield* executeStatements(buildCursorBatchStatements(slice, dbPath), { chunkSize: 500, label: "cursor" });
-                    sessionCount += 1;
-                    turnCount += slice.turns.length;
-                    toolCallCount += slice.toolCalls.length;
-                }));
+            const pending: PendingCursorSession[] = [];
+            for (const { session, slice } of partitionCursorExtract(extract)) {
+                const statements = [
+                    buildCursorSessionUpsertStatement(session),
+                    ...buildCursorBatchStatements(slice, dbPath),
+                ];
+                const locator = `${dbPath}#${session.id}`;
+                const digestNum = cursorSessionFingerprint(statements);
+                if (watermark?.unchanged(locator, digestNum, statements.length)) {
+                    skippedUnchanged += 1;
+                    continue;
+                }
+                pending.push({
+                    locator,
+                    session,
+                    statements,
+                    digestNum,
+                    turns: slice.turns.length,
+                    toolCalls: slice.toolCalls.length,
+                });
             }
+
+            // Greedy statement-budget batches: amortize the per-call commit
+            // cost across sessions. Watermark commits ride in a SEPARATE
+            // `executeStatements` call issued AFTER the group's data call -
+            // never combined into the same call. SurrealDB executes every
+            // statement inside one `query()` request independently
+            // (per-statement status, no transaction): if marks rode in the
+            // SAME request as data, a later mark statement could still
+            // commit server-side even though an earlier data statement in
+            // that same request errored, so a failing session's watermark
+            // could land despite its data being lost - and the next run's
+            // `watermark.unchanged()` would then skip it forever with
+            // missing data. Splitting into two sequenced calls means the
+            // marks call is only *reachable* (via `Effect.gen` sequencing)
+            // once the data call's Effect has already succeeded, so a failed
+            // session's mark can never precede - or survive without - its
+            // data. On any batch failure (data OR marks call), fall back to
+            // the per-session isolate path so one bad session skips only
+            // itself (#261).
+            let batch: PendingCursorSession[] = [];
+            let batchStatements = 0;
+
+            const markStatement = (p: PendingCursorSession): string =>
+                watermarkCommitStatement(CURSOR_WATERMARK_SOURCE_KIND, p.locator, p.digestNum, p.statements.length);
+
+            const ingestOne = (p: PendingCursorSession) =>
+                // Per-session failure isolation (#261): one undecodable /
+                // rejected session skips THIS session - retried next run (its
+                // watermark never commits) - instead of aborting the stage.
+                failures.isolate(p.locator, Effect.gen(function* () {
+                    yield* executeStatements(p.statements, { chunkSize: 500, label: "cursor" });
+                    yield* executeStatements([markStatement(p)], { chunkSize: 1, label: "cursor" });
+                    sessionCount += 1;
+                    turnCount += p.turns;
+                    toolCallCount += p.toolCalls;
+                }));
+
+            const flush = () =>
+                Effect.gen(function* () {
+                    if (batch.length === 0) return;
+                    const group = batch;
+                    batch = [];
+                    batchStatements = 0;
+                    const dataStatements = group.flatMap((p) => [...p.statements]);
+                    const markStatements = group.map(markStatement);
+                    // See the batching comment above: marks are a SEPARATE
+                    // call, sequenced strictly after data succeeds, so
+                    // `Effect.result` only observes "Success" once BOTH
+                    // calls landed - a data-only failure never lets a mark
+                    // through.
+                    const attempt = yield* Effect.result(
+                        Effect.gen(function* () {
+                            yield* executeStatements(dataStatements, { chunkSize: 500, label: "cursor" });
+                            yield* executeStatements(markStatements, { chunkSize: 500, label: "cursor" });
+                        }),
+                    );
+                    if (attempt._tag === "Success") {
+                        for (const p of group) {
+                            sessionCount += 1;
+                            turnCount += p.turns;
+                            toolCallCount += p.toolCalls;
+                        }
+                        return;
+                    }
+                    // Batch failed (data or marks call): retry each member
+                    // alone so only the truly bad session(s) skip. Statements
+                    // are idempotent UPSERTs, so partially-committed chunks
+                    // re-apply safely. A connection-level DbError rethrows
+                    // out of isolate and aborts the stage, exactly as before.
+                    yield* Effect.logDebug("cursor ingest: batch failed, falling back to per-session isolation", {
+                        sessions: group.length,
+                        message: attempt.failure.message,
+                    });
+                    for (const p of group) {
+                        yield* ingestOne(p);
+                    }
+                });
+
+            for (const p of pending) {
+                if (batch.length > 0 && batchStatements + p.statements.length > CURSOR_BATCH_STATEMENT_BUDGET) {
+                    yield* flush();
+                }
+                batch.push(p);
+                batchStatements += p.statements.length;
+            }
+            yield* flush();
         }
         yield* failures.report;
 
@@ -1074,6 +1267,7 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             turns: turnCount,
             toolCalls: toolCallCount,
             skipped,
+            skippedUnchanged,
             warnings,
             failedFiles: failures.count(),
         } satisfies CursorStats;
@@ -1085,6 +1279,8 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
     turnsIngested: Schema.Number,
     toolCallsIngested: Schema.Number,
     skipped: Schema.Number,
+    /** Sessions skipped by the per-session content watermark (unchanged). */
+    skippedUnchanged: Schema.Number,
     warnings: Schema.Number,
     /** Sessions whose write pipeline failed and was skipped (retried next
      *  run). Named `failedFiles` to match the cross-provider stage-stats key
@@ -1103,11 +1299,13 @@ export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | 
         return CursorStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
+                (result.skippedUnchanged > 0 ? `, ${result.skippedUnchanged} unchanged session(s) skipped` : "") +
                 (result.failedFiles > 0 ? `, ${result.failedFiles} session(s) failed (retry next run)` : ""),
             sessionsIngested: result.sessions,
             turnsIngested: result.turns,
             toolCallsIngested: result.toolCalls,
             skipped: result.skipped,
+            skippedUnchanged: result.skippedUnchanged,
             warnings: result.warnings,
             failedFiles: result.failedFiles,
         });
