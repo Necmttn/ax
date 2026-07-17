@@ -39,13 +39,14 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.38.0",
+      "version": "0.38.1",
       "bin": {
         "axctl": "./bin/axctl",
       },
       "dependencies": {
         "@ax-classifier/direction-event": "workspace:*",
         "@ax-classifier/verification-event": "workspace:*",
+        "@ax/community-compile": "workspace:*",
         "@ax/hooks-sdk": "workspace:*",
         "@ax/lib": "workspace:*",
         "@ax/schema": "workspace:*",
@@ -190,6 +191,7 @@
       "name": "@ax/community-compile",
       "version": "0.0.0",
       "devDependencies": {
+        "@ax/lib": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
       },

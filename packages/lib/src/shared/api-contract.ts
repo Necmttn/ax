@@ -1064,6 +1064,64 @@ export const RoutingGroup = HttpApiGroup.make("routing")
         }),
     );
 
+// ---------------------------------------------------------------- team
+
+const TeamModelRow = Schema.Struct({
+    model: Schema.String,
+    tokens: Schema.Number,
+    share: Schema.Number,
+    costUsd: Schema.Number,
+    costContributors: Schema.Number,
+});
+
+const TeamSkillRow = Schema.Struct({
+    skill: Schema.String,
+    devs: Schema.Number,
+    runs: Schema.Number,
+    sessions: Schema.Number,
+    medianRuns: Schema.Number,
+});
+
+/** Aggregated, render-safe boards returned by the local team endpoint. */
+export const TeamBoardsResponse = Schema.Struct({
+    coverage: Schema.Struct({
+        contributing: Schema.Number,
+        identified: Schema.Number,
+    }),
+    adoption: Schema.Struct({
+        contributingDevs: Schema.Number,
+        identifiedLogins: Schema.Array(Schema.String),
+        sessions: Schema.Struct({ total: Schema.Number, average: Schema.Number }),
+        activeDays: Schema.Struct({ total: Schema.Number, average: Schema.Number }),
+    }),
+    skillMatrix: Schema.Array(TeamSkillRow),
+    spend: Schema.Struct({
+        tokens: Schema.Struct({
+            prompt: Schema.Number,
+            completion: Schema.Number,
+            total: Schema.Number,
+        }),
+        costUsd: Schema.Number,
+        costContributors: Schema.Number,
+        modelMix: Schema.Array(TeamModelRow),
+    }),
+    efficiency: Schema.Struct({
+        toolCalls: Schema.Number,
+        toolFailures: Schema.Number,
+        verificationCalls: Schema.Number,
+        toolFailureRate: Schema.Number,
+        verificationShare: Schema.Number,
+    }),
+});
+export type TeamBoardsResponse = typeof TeamBoardsResponse.Type;
+
+export const TeamGroup = HttpApiGroup.make("team").add(
+    HttpApiEndpoint.get("teamBoards", "/api/team", {
+        query: { org: Schema.optionalKey(Schema.String) },
+        success: TeamBoardsResponse,
+    }),
+);
+
 /** The Insights Surface Contract. Families join as they migrate (ADR-0013). */
 export const AxApi = HttpApi.make("ax")
     .add(SystemGroup)
@@ -1075,5 +1133,6 @@ export const AxApi = HttpApi.make("ax")
     .add(LiveGroup)
     .add(OtelGroup)
     .add(RoutingGroup)
+    .add(TeamGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");

@@ -28,6 +28,7 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import { AxApi } from "@ax/lib/shared/api-contract";
+import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
 import { errorText } from "./common.ts";
@@ -39,6 +40,7 @@ import { RoutingGroupLive } from "./routing.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
+import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
 
 /** Everything the contract handlers reach for; widens as families join. */
@@ -84,6 +86,8 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/improve/analyze-brief",
     // usage
     "GET /api/usage",
+    // team
+    "GET /api/team",
     // live (SSE /api/events + binary /api/image stay raw legacy routes)
     "POST /api/ingest",
     // otel receiver
@@ -133,6 +137,8 @@ export interface MakeContractWebHandlerOptions {
     readonly memoMap?: Layer.MemoMap;
     /** Test seam: services the handlers need (default: production AppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
+    /** Test seam for server-side GitHub calls (default: daemon `gh` auth). */
+    readonly github?: Layer.Layer<GitHubEnv, unknown>;
 }
 
 export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): ContractWebHandler {
@@ -158,13 +164,16 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             LiveGroupLive,
             OtelGroupLive,
             RoutingGroupLive,
+            TeamGroupLive,
         ]),
         // FileSystem/Path are provided beneath the route builder for build-time
         // needs. The final app layer merges platformLayer back into the output
         // for request-time handler requirements.
         Layer.provide([BunHttpPlatform.layer, platformLayer, Etag.layer]),
     );
-    const appLayer = Layer.mergeAll(routesLayer, platformLayer);
+    const appLayer = Layer.mergeAll(routesLayer, platformLayer).pipe(
+        Layer.provideMerge(opts.github ?? GitHubEnvLive),
+    );
     const build = (): ContractWebHandler =>
         HttpRouter.toWebHandler(appLayer, {
             memoMap: opts.memoMap,
