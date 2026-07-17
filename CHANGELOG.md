@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.39.0](https://github.com/Necmttn/ax/compare/v0.38.1...v0.39.0) (2026-07-17)
+
+
+### Features
+
+* **lib:** fetch team profiles from GitHub ([#736](https://github.com/Necmttn/ax/issues/736)) ([52e8287](https://github.com/Necmttn/ax/commit/52e82871b1f46bbb67208b72337a8a8c3c992917))
+* **lib:** validate team profiles safely ([#734](https://github.com/Necmttn/ax/issues/734)) ([77cf645](https://github.com/Necmttn/ax/commit/77cf6459464330c6bdf8e5980409b813f8d661a7))
+* **studio:** render real team boards on /team ([#738](https://github.com/Necmttn/ax/issues/738)) ([b2faba1](https://github.com/Necmttn/ax/commit/b2faba1910a8c8b3737a7fa3ae688322cd0e8afd))
+* **team:** add profile push command ([#732](https://github.com/Necmttn/ax/issues/732)) ([dc61845](https://github.com/Necmttn/ax/commit/dc61845f653e081ba2f68bb913c8eb85d62f7738))
+* **team:** add repo binding commands ([#729](https://github.com/Necmttn/ax/issues/729)) ([769a2b1](https://github.com/Necmttn/ax/commit/769a2b18dbc491f7a0fe9f6ae9143e107abcf723))
+* **team:** compile profile snapshots into boards ([#735](https://github.com/Necmttn/ax/issues/735)) ([e86f9bd](https://github.com/Necmttn/ax/commit/e86f9bdc0c46d49a4adc7442006fd8aeb695d92e))
+* **team:** serve local team boards ([#739](https://github.com/Necmttn/ax/issues/739)) ([18cf084](https://github.com/Necmttn/ax/commit/18cf0842059ab5a826441fd059519314e95bc839))
+* **team:** TeamProfileV1 + repo-scoped redacted snapshot builder (Slice 1) ([#731](https://github.com/Necmttn/ax/issues/731)) ([7c3f70d](https://github.com/Necmttn/ax/commit/7c3f70dca563c14461a052721bf4c85bac75098b))
+
+
+### Bug Fixes
+
+* **ingest:** cursor stage batches commits + resumes — no longer blows the ingest timeout ([#740](https://github.com/Necmttn/ax/issues/740)) ([87d6f8a](https://github.com/Necmttn/ax/commit/87d6f8a3fe383ddfef4f01db9e0e8a16bf873783))
+* **ingest:** guard empty session health epoch ([#737](https://github.com/Necmttn/ax/issues/737)) ([dd97932](https://github.com/Necmttn/ax/commit/dd979329544393c2ea45e7545d7f19dd3f877a83))
+
 ## [0.38.1](https://github.com/Necmttn/ax/compare/v0.38.0...v0.38.1) (2026-07-16)
 
 
