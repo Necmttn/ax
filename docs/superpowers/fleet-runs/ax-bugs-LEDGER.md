@@ -10,3 +10,6 @@ PR https://github.com/Necmttn/ax/pull/737 · normalizeFirstSuperpowersAt sane-ye
 
 ## 2026-07-17T09:00:02+08:00 — bug 2 merged, bug 1 in progress
 - MERGED: bug-session-health #737 (bug 2). bug-cursor-ingest (bug 1, fable): working — committed oracle-equivalent one-pass partition; Task 3 batched loop in progress via sonnet subagent. fable 5h quota ~8% (watch for stall → codex fallback).
+## bug-cursor-ingest (bug 1)
+PR https://github.com/Necmttn/ax/pull/740 · batch commits + watermark resumability + #261 preserved + oracle-equivalent partition · typecheck 0, 22 tests · (interrupted mid-self-review by network blip; fix was committed+green, orchestrator gated)
+
