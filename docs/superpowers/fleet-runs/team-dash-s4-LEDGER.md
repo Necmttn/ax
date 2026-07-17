@@ -4,3 +4,6 @@
 - team-dashboard-ui=w1R:p1C (fable) — wire team-metrics.tsx /team to /api/team, render boards, remove mock.
 - Parallel (UI codes against the TeamBoards contract). On both merge → local team dashboard renders real pushed snapshots.
 - NOTE: team-serve first spawn hit a brew-upgrade-codex terminal hijack; respawned clean (w1R:p1D).
+## team-dashboard-ui (Slice 4)
+PR https://github.com/Necmttn/ax/pull/738 · wired /team → /api/team, mock removed, team-boards-model + api.team() · typecheck 0, tests green
+
