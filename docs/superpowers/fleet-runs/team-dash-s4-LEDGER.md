@@ -7,3 +7,6 @@
 ## team-dashboard-ui (Slice 4)
 PR https://github.com/Necmttn/ax/pull/738 · wired /team → /api/team, mock removed, team-boards-model + api.team() · typecheck 0, tests green
 
+## team-serve (Slice 4)
+PR https://github.com/Necmttn/ax/pull/739 · GET /api/team → TeamBoards (server-side reader + compileTeam, empty-safe) · typecheck 0, tests green
+
