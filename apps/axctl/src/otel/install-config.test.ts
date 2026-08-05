@@ -108,4 +108,88 @@ describe("install-config", () => {
         expect(next).toContain(`model = "gpt-5"`);
         expect(next).toContain("[otel]");
     });
+
+    // Codex rewrites config.toml itself (project trust, hooks.state, marketplaces)
+    // and when it does it drops comments and normalizes our inline exporter into
+    // an `[otel.exporter.otlp-http]` table. Our marker is gone, so a naive
+    // "marker missing → append" appends a SECOND definition of otel.exporter and
+    // codex dies at boot with `duplicate key`, breaking every codex command.
+    const NORMALIZED = [
+        `model = "gpt-5"`,
+        ``,
+        `[otel.exporter.otlp-http]`,
+        `endpoint = "${ENDPOINT}/v1/logs"`,
+        `protocol = "json"`,
+        ``,
+        `[tui]`,
+        `notifications = true`,
+        ``,
+    ].join("\n");
+
+    // Bun's TOML parser rejects a redefined key the same way codex's loader does
+    // ("Cannot redefine key 'exporter'"), so parsing IS the duplicate-key assertion.
+    const parseToml = (toml: string): Record<string, unknown> =>
+        Bun.TOML.parse(toml) as Record<string, unknown>;
+
+    test("codex toml leaves a codex-normalized exporter table alone (no duplicate key)", () => {
+        const next = applyCodexOtelToml(NORMALIZED, ENDPOINT);
+        expect(next).toBe(NORMALIZED); // already correct - nothing to do
+        parseToml(next); // throws on duplicate key
+    });
+
+    test("codex toml retargets a normalized exporter table in place", () => {
+        const stale = NORMALIZED.replace(`${ENDPOINT}/v1/logs`, "http://127.0.0.1:9999/v1/logs");
+        const next = applyCodexOtelToml(stale, ENDPOINT);
+        const cfg = parseToml(next) as {
+            otel: { exporter: { "otlp-http": { endpoint: string; protocol: string } } };
+            tui: { notifications: boolean };
+        };
+        expect(cfg.otel.exporter["otlp-http"].endpoint).toBe(`${ENDPOINT}/v1/logs`);
+        expect(cfg.otel.exporter["otlp-http"].protocol).toBe("json");
+        expect(cfg.tui.notifications).toBe(true); // later sections survive
+        expect(next).not.toContain("9999");
+        // Exactly one definition of the exporter, however it is spelled.
+        expect(next.match(/\[otel\.exporter|exporter = \{/g)?.length).toBe(1);
+    });
+
+    test("codex toml adds the exporter to an existing [otel] table without clobbering its keys", () => {
+        const existing = `[otel]\nlog_user_prompt = true\nenvironment = "dev"\n`;
+        const next = applyCodexOtelToml(existing, ENDPOINT);
+        const cfg = parseToml(next) as {
+            otel: {
+                log_user_prompt: boolean;
+                environment: string;
+                exporter: { "otlp-http": { endpoint: string } };
+            };
+        };
+        expect(cfg.otel.log_user_prompt).toBe(true); // user's own otel keys kept
+        expect(cfg.otel.environment).toBe("dev");
+        expect(cfg.otel.exporter["otlp-http"].endpoint).toBe(`${ENDPOINT}/v1/logs`);
+    });
+
+    test("codex toml repairs a config already broken by the duplicate", () => {
+        // What a machine hit by the old bug looks like: codex's normalized table
+        // AND an appended ax block. Codex cannot start until one of them goes.
+        const broken = `${NORMALIZED}\n# ax:otel\n[otel]\nexporter = { otlp-http = { endpoint = "${ENDPOINT}/v1/logs", protocol = "json" } }\n`;
+        expect(() => parseToml(broken)).toThrow(); // precondition: genuinely broken
+        const next = applyCodexOtelToml(broken, ENDPOINT);
+        const cfg = parseToml(next) as {
+            otel: { exporter: { "otlp-http": { endpoint: string } } };
+            tui: { notifications: boolean };
+        };
+        expect(cfg.otel.exporter["otlp-http"].endpoint).toBe(`${ENDPOINT}/v1/logs`);
+        expect(cfg.tui.notifications).toBe(true);
+        expect(next).not.toContain("# ax:otel"); // the appended block is what goes
+    });
+
+    test("codex toml applied twice over a codex rewrite stays valid", () => {
+        // Full round trip of the real failure: we write, codex normalizes and
+        // strips the comment, we run install again.
+        const ours = applyCodexOtelToml(`model = "gpt-5"\n`, ENDPOINT);
+        expect(ours).toContain("# ax:otel");
+        const afterCodexRewrite = NORMALIZED; // what codex leaves behind
+        const again = applyCodexOtelToml(afterCodexRewrite, ENDPOINT);
+        parseToml(again);
+        expect(again.match(/\[otel\.exporter|exporter = \{/g)?.length).toBe(1);
+    });
 });

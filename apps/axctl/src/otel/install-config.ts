@@ -60,10 +60,11 @@ const CODEX_MARKER = "# ax:otel";
  *      full `/v1/logs` path - that is where ax's receiver takes Codex telemetry.
  *   3. `protocol` is Codex's own value `"json"` (not OTEL env's `"http/json"`).
  */
-const codexBlock = (endpoint: string): string => {
-    const logsEndpoint = `${endpoint.replace(/\/+$/, "")}/v1/logs`;
-    return `${CODEX_MARKER}\n[otel]\nexporter = { otlp-http = { endpoint = "${logsEndpoint}", protocol = "json" } }\n`;
-};
+const logsEndpoint = (endpoint: string): string => `${endpoint.replace(/\/+$/, "")}/v1/logs`;
+const exporterKeyLine = (endpoint: string): string =>
+    `exporter = { otlp-http = { endpoint = "${logsEndpoint(endpoint)}", protocol = "json" } }`;
+const codexBlock = (endpoint: string): string =>
+    `${CODEX_MARKER}\n[otel]\n${exporterKeyLine(endpoint)}\n`;
 
 // Matches the ax-owned marker + [otel] block until the next [section] header
 // (that is NOT [otel] itself) or end-of-string. The `?=\n\[(?!otel])` lookahead
@@ -71,17 +72,99 @@ const codexBlock = (endpoint: string): string => {
 const CODEX_BLOCK_RE = (): RegExp =>
     new RegExp(`${CODEX_MARKER}[\\s\\S]*?(?=\\n\\[(?!otel])|$)`, "g");
 
-/** Append/replace the ax-owned [otel] block in codex config.toml. */
+const SECTION_HEADER = /^\s*\[\[?([^\][]+)\]\]?\s*$/;
+
+interface Header { name: string; line: number }
+
+const headersOf = (lines: readonly string[]): Header[] => {
+    const out: Header[] = [];
+    lines.forEach((line, i) => {
+        const name = line.match(SECTION_HEADER)?.[1]?.trim();
+        if (name) out.push({ name, line: i });
+    });
+    return out;
+};
+
+/**
+ * Write ax's OTLP exporter into codex config.toml WITHOUT ever defining
+ * `otel.exporter` twice.
+ *
+ * Why this is not a simple append: codex rewrites config.toml itself (project
+ * trust entries, hooks.state, marketplaces) and when it does it drops comments
+ * - our `# ax:otel` marker included - and re-serializes our inline exporter as
+ * an `[otel.exporter.otlp-http]` table. A marker-only check then sees "no ax
+ * block" and appends a second definition, TOML rejects the duplicate key, and
+ * codex dies at startup before the TUI boots, taking every codex command and
+ * every fleet pane with it. So detect the exporter by SHAPE, not by marker, and
+ * update whatever is already there in place.
+ */
 export const applyCodexOtelToml = (toml: string, endpoint: string): string => {
-    const block = codexBlock(endpoint);
-    if (toml.includes(CODEX_MARKER)) {
-        // Check if the existing block matches what we'd write (idempotency).
-        const existingMatch = toml.match(CODEX_BLOCK_RE());
-        if (existingMatch && block.trimEnd() === existingMatch[0].trimEnd()) return toml;
-        // Strip prior ax-owned block, then append fresh.
-        const stripped = toml.replace(CODEX_BLOCK_RE(), "").trimEnd();
-        return (stripped ? `${stripped}\n\n` : "") + block;
+    const lines = toml.split("\n");
+    const headers = headersOf(lines);
+    const ownerOf = (line: number): string | undefined =>
+        headers.reduce<string | undefined>((own, h) => (h.line < line ? h.name : own), undefined);
+
+    // Shape A: an inline `exporter = { ... }` key - ours, or a root-level
+    // `otel.exporter = { ... }` dotted key. Rewrite the one line, keeping any
+    // sibling keys (and the marker comment, if it survived) untouched.
+    const inline = lines.findIndex((line, i) =>
+        /^\s*otel\s*\.\s*exporter\s*=/.test(line) ||
+        (/^\s*exporter\s*=/.test(line) && ownerOf(i) === "otel"));
+    const normalizedTable = headers.some((h) => h.name.startsWith("otel.exporter"));
+
+    // Both shapes present: a config already broken by the old append-on-missing-
+    // marker bug, which codex refuses to load at all. Drop the ax-owned block and
+    // fall through to updating the table codex itself wrote.
+    if (inline >= 0 && normalizedTable && toml.includes(CODEX_MARKER)) {
+        return applyCodexOtelToml(toml.replace(CODEX_BLOCK_RE(), "").trimEnd() + "\n", endpoint);
     }
-    const stripped = toml.trimEnd();
-    return (stripped ? `${stripped}\n\n` : "") + block;
+
+    if (inline >= 0) {
+        const dotted = /^\s*otel\s*\./.test(lines[inline] ?? "");
+        const next = dotted ? `otel.${exporterKeyLine(endpoint)}` : exporterKeyLine(endpoint);
+        if (lines[inline] === next) return toml;
+        lines[inline] = next;
+        return lines.join("\n");
+    }
+
+    // Shape B: codex's normalized `[otel.exporter.<kind>]` table.
+    const tableIdx = headers.findIndex((h) => h.name === "otel.exporter" || h.name.startsWith("otel.exporter."));
+    const table = headers[tableIdx];
+    if (table) {
+        // A deliberately different exporter kind (otlp-grpc, none). Retargeting
+        // it would be wrong and appending would duplicate - leave it alone.
+        if (table.name !== "otel.exporter.otlp-http") return toml;
+        const end = headers[tableIdx + 1]?.line ?? lines.length;
+        const want = { endpoint: `endpoint = "${logsEndpoint(endpoint)}"`, protocol: `protocol = "json"` };
+        const seen = { endpoint: false, protocol: false };
+        let changed = false;
+        for (let i = table.line + 1; i < end; i++) {
+            const key = (["endpoint", "protocol"] as const).find((k) =>
+                new RegExp(`^\\s*${k}\\s*=`).test(lines[i] ?? ""));
+            if (!key) continue;
+            seen[key] = true;
+            if (lines[i] === want[key]) continue;
+            lines[i] = want[key];
+            changed = true;
+        }
+        const missing = (["endpoint", "protocol"] as const).filter((k) => !seen[k]).map((k) => want[k]);
+        if (missing.length > 0) {
+            lines.splice(table.line + 1, 0, ...missing);
+            changed = true;
+        }
+        return changed ? lines.join("\n") : toml;
+    }
+
+    // An `[otel]` table with other keys (log_user_prompt, environment, ...) but
+    // no exporter: add the key to it rather than opening a second [otel].
+    const otelTable = headers.find((h) => h.name === "otel");
+    if (otelTable) {
+        lines.splice(otelTable.line + 1, 0, exporterKeyLine(endpoint));
+        return lines.join("\n");
+    }
+
+    // No otel config at all - append the ax-owned block (dropping any stale
+    // marker whose body we could not recognise).
+    const stripped = (toml.includes(CODEX_MARKER) ? toml.replace(CODEX_BLOCK_RE(), "") : toml).trimEnd();
+    return (stripped ? `${stripped}\n\n` : "") + codexBlock(endpoint);
 };
