@@ -493,6 +493,23 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   duration_ms is absent (provider-reported; run bench for synthetic measure).
 - `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree
   candidate query + structured pass/fail verdict; separate from backtest)
+- **What ax can observe about hook fires (#743).** Claude Code records a fire in
+  only two ways, and ax reads both: a `hook_success` attachment (written ONLY
+  when the hook produced stdout/stderr/content) and, for a BLOCKED call, the
+  tool_result text `PreToolUse:Bash hook error: [<command>]: <msg>` - parsed by
+  `parseHookBlocksFromText` (`apps/axctl/src/ingest/hook-block-text.ts`) into the
+  same `harness_hook_event` + `hook_command_invocation` rows, `source_type =
+  "tool_result_text"`, keyed so an attachment and a text fire collapse into one
+  row. Current CC emits NO `hook_progress` and NO `hook_blocking_error`
+  attachment; the legacy shapes stay parsed for old transcripts. A hook that
+  passes SILENTLY is written nowhere, so an empty `ax hooks summary` is not
+  evidence a hook never ran - both hook tables say so in their empty state
+  (`HOOK_EMPTY_NOTE`). Agent-tool hooks are additionally exempt upstream (CC
+  #39814/#40580); their advice is captured by the advise-tap, not the transcript.
+  Backfilling blocked fires from older transcripts needs
+  `ax ingest --reparse=claude` (watermarked files are skipped otherwise;
+  `apps/axctl/src/ingest/reparse-targets.ts` maps each target to its
+  `AX_REDERIVE_*` switch).
 - Codex: new hook entries written to `~/.codex/hooks.json` when that file
   exists; falls back to `~/.codex/config.toml` otherwise. New/changed entries
   require interactive trust approval in the codex TUI before they fire.

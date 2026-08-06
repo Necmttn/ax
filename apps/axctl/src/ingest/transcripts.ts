@@ -62,6 +62,7 @@ import {
     surrealOptionFloat,
 } from "./token-usage-writers.ts";
 import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
+import { parseHookBlocksFromText } from "./hook-block-text.ts";
 import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
@@ -854,16 +855,60 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
         }
     };
 
+    /**
+     * Recover blocked-hook fires from a tool_result's text (#743).
+     *
+     * Current Claude Code writes no `hook_blocking_error` attachment - a block
+     * survives only as the `PreToolUse:Bash hook error: [<cmd>]: ...` line the
+     * model reads. Without this, guards that are silent-on-pass and blocking
+     * -on-fail leave NO trace in the graph. Keys match the attachment path, so
+     * a transcript that carries both shapes still yields one invocation row.
+     */
+    const processHookBlocksInText = (
+        text: string | null,
+        ts: string,
+        turnCwd: string | null,
+        toolUseId: string | null,
+        entry: Record<string, unknown>,
+    ): void => {
+        for (const fire of parseHookBlocksFromText(text)) {
+            const eventKey = upsertHookEvent({
+                ts,
+                turnCwd,
+                hookEvent: fire.eventName,
+                hookName: fire.hookName,
+                toolUseId,
+                transcriptUuid: stringField(entry, "uuid"),
+                sourceType: "tool_result_text",
+            });
+            if (!eventKey) continue;
+            upsertHookInvocation({
+                eventKey,
+                ts,
+                hookEvent: fire.eventName,
+                hookName: fire.hookName,
+                toolUseId,
+                command: fire.command,
+                providerStatus: "blocking_error",
+                effect: "blocked",
+                blockingError: fire.message.length > 0 ? fire.message : null,
+            });
+        }
+    };
+
     const processToolResult = (
         block: Record<string, unknown>,
         ts: string,
         role: string,
         parentProviderEventId: string | null,
         topLevelToolUseResult: unknown,
+        turnCwd: string | null,
+        entry: Record<string, unknown>,
     ): boolean => {
         const callId = stringField(block, "tool_use_id");
         const hasError = block.is_error === true;
         const text = outputText(block.content ?? null);
+        processHookBlocksInText(text, ts, turnCwd, callId, entry);
         const eventSeq = nextProviderSeq();
         const result: ToolResultFields = {
             outputJson: block.content ?? null,
@@ -1095,7 +1140,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 }
                 if (
                     blockType === "tool_result" &&
-                    processToolResult(block, ts, role, providerEventId, rawEntry.toolUseResult)
+                    processToolResult(block, ts, role, providerEventId, rawEntry.toolUseResult, turnCwd, rawEntry)
                 ) {
                     hasError = true;
                 }

@@ -1584,7 +1584,7 @@ DEFINE FIELD tool_call_id    ON harness_hook_event TYPE option<string>;
 DEFINE FIELD tool_call       ON harness_hook_event TYPE option<record<tool_call>>;
 DEFINE FIELD cwd             ON harness_hook_event TYPE option<string>;
 DEFINE FIELD transcript_uuid ON harness_hook_event TYPE option<string>;
-DEFINE FIELD source_type     ON harness_hook_event TYPE string;                 -- hook_progress | hook_success | hook_blocking_error | hook_additional_context
+DEFINE FIELD source_type     ON harness_hook_event TYPE string;                 -- hook_progress | hook_success | hook_blocking_error | hook_additional_context | tool_result_text (blocks recovered from tool-result text, #743)
 DEFINE INDEX IF NOT EXISTS harness_hook_event_by_ts      ON harness_hook_event FIELDS ts;
 DEFINE INDEX IF NOT EXISTS harness_hook_event_by_session ON harness_hook_event FIELDS session;
 DEFINE INDEX IF NOT EXISTS harness_hook_event_by_name    ON harness_hook_event FIELDS hook_name;

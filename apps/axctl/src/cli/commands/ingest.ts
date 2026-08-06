@@ -18,6 +18,11 @@ import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../../ingest/stage/types.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { estimateIngest, formatDryRun } from "../../ingest/dry-run.ts";
+import {
+    applyReparseSelection,
+    REPARSE_TARGETS,
+    resolveReparseTargets,
+} from "../../ingest/reparse-targets.ts";
 // backfillInvokedPositions - Phase B will register this as invokedPositionsStage.
 import { deriveSignals } from "../../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../../ingest/derive-intents.ts";
@@ -522,30 +527,57 @@ export const insightsOnlyConflicts = (opts: {
     return conflicts;
 };
 
+/**
+ * `--reparse[=<targets>]` - drop the skip-unchanged watermark for those inputs
+ * so ingest reads them again (#743). Needed after any parser change that
+ * recovers evidence from files ax already marked as done; without it the fix
+ * only ever applies to files written after it shipped.
+ *
+ * Sets the stages' existing `AX_REDERIVE_*` switches, so this is a discoverable
+ * name for a mechanism that already worked - not a second code path.
+ */
+const reparseFlag = Flag.string("reparse").pipe(Flag.optional);
+
+const applyReparseFlag = (raw: string | undefined, label: string): void => {
+    const selection = resolveReparseTargets(raw);
+    if (selection.unknown.length > 0) {
+        fail(
+            `${label}: unknown --reparse target${selection.unknown.length > 1 ? "s" : ""} ` +
+                `${selection.unknown.join(", ")} (known: ${REPARSE_TARGETS.join(", ")}, or all)`,
+        );
+    }
+    applyReparseSelection(selection);
+    console.log(`reparse: ignoring the skip-unchanged watermark for ${selection.targets.join(", ")}`);
+};
+
 
 const ingestHereCommand = Command.make(
     "here",
     {
         since: optionalSince,
         stages: Flag.string("stages").pipe(Flag.optional),
+        reparse: reparseFlag,
         progress: progressFlag,
         verbose: verboseFlag,
         debug: debugFlag,
     },
-    ({ since, stages, progress, verbose, debug }) =>
-        cmdIngestHere([
+    ({ since, stages, reparse, progress, verbose, debug }) => {
+        if (Option.isSome(reparse)) applyReparseFlag(optionValue(reparse), "axctl ingest here");
+        return cmdIngestHere([
             ...intArg("since", optionValue(since)),
             ...stringArg("stages", optionValue(stages)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
             ...boolArg("debug", debug),
-        ]),
+        ]);
+    },
 ).pipe(Command.withDescription(
     "Ingest only the git repository at $PWD. Restricts the claude stage to the matching " +
         "~/.claude/projects/<slug>/ transcript dir, scopes codex sessions to those whose cwd is " +
         "inside this repo, and restricts git history to this repo path. " +
         "Pi, OpenCode, and Cursor are skipped by default (no cwd filter yet). " +
-        "--stages=<a,b,c> overrides the default set.",
+        "--stages=<a,b,c> overrides the default set. " +
+        "--reparse=<targets|all> re-reads inputs the skip-unchanged watermark would skip.",
 ));
 
 const ingestReapCommand = Command.make(
@@ -592,11 +624,14 @@ export const ingestCommand = Command.make(
         dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
         json: jsonFlag,
         since: optionalSince,
+        // Re-read inputs whose watermark says "unchanged" (see reparseFlag).
+        reparse: reparseFlag,
         progress: progressFlag,
         verbose: verboseFlag,
         debug: debugFlag,
     },
-    ({ insightsOnly, stages, deriveOnly, reset, dryRun, json, since, progress, verbose, debug }) => {
+    ({ insightsOnly, stages, deriveOnly, reset, dryRun, json, since, reparse, progress, verbose, debug }) => {
+        if (Option.isSome(reparse)) applyReparseFlag(optionValue(reparse), "axctl ingest");
         if (dryRun) {
             // Same runtime layer (IngestRuntimeLayer via withIngest) provides
             // estimateIngest's services (AxConfig/FS/Path/SurrealClient); the cast
@@ -637,7 +672,10 @@ export const ingestCommand = Command.make(
             "Use --dry-run [--json] to estimate how long a full backfill will take (and exit). " +
             "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
             "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
-            "Use --reset to wipe the skill graph first and rebuild it clean.",
+            "Use --reset to wipe the skill graph first and rebuild it clean. " +
+            "Use --reparse=<targets|all> (e.g. --reparse=claude) to ignore the skip-unchanged " +
+            "watermark and re-read inputs ax already ingested - needed to backfill evidence a " +
+            "parser fix newly recovers.",
     ),
     Command.withSubcommands([ingestHereCommand, ingestReapCommand]),
 );

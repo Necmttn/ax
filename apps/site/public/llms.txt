@@ -68,6 +68,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax directives workflows [--emit-brief] [--json]` - mine recurring skill-arc workflows (ordered skill sequences recurring ≥ 3 sessions; fixed 12-week window); --emit-brief writes .ax/tasks/workflows-<date>.md for agent review
 - `ax hooks init / install / backtest / bench / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
 - `ax hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]` - latency ledger: per-fire p50/p95 from real bun spawns, est fires/day from tool_call history, installed-chain budget vs --budget-ms default 250
+- `ax hooks summary|invocations [--since=N] [--command=<substr>] [--json]` - recorded harness hook fires. ax sees a fire only when the harness records one: a hook that printed output, or one that BLOCKED a call (recovered from the tool-result text, #743). Silent passing fires are unobservable, so an empty table is not proof a hook never ran
 - `ax hooks latency [--days=N] [--baseline=M] [--json]` - regression lens: compare recent (default 7d) vs baseline (default 21d) fire latency per hook event (hook_name is event-granular, e.g. PreToolUse:Bash) from hook_command_invocation telemetry; flags hook events where p95 regressed (factor 1.5, min 15ms delta, min 20 samples)
 
 ### Graph insights
@@ -84,6 +85,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax team experiment <start|list|promote|drop> <kind> <name>` - isolate→iterate→promote loop: start copies/scaffolds an artifact into a gitignored .ax.local/ overlay, list shows active experiments, promote moves the overlay artifact into committed .ax/ + git adds it (open a PR after), drop discards the overlay; ax team sync activates the overlay version for you only (annotated as "(experiment)")
 - `ax setup` / `ax install` - first-time install: CLI, local SurrealDB, transcript watcher
 - `ax ingest [here] [--since=Nd]` - ingest transcripts, skills, and git history; `here` scopes to the current repo; the watcher does this automatically on new transcripts
+- `ax ingest [here] --reparse=<targets|all>` - ignore the skip-unchanged watermark and re-read inputs ax already ingested (targets: claude, subagents, codex, pi, omp, cursor, git, closure, pricing, metrics, analysis, content); needed to backfill evidence a parser fix newly recovers
 - `ax roles` - list role labels used for skill classification
 - `ax doctor` - validate the install (db, watcher, skills)
 

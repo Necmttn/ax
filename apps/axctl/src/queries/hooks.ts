@@ -142,7 +142,27 @@ const sessionText = (value: string): string =>
         .replace(/^`/, "")
         .replace(/`$/, "");
 
+/**
+ * What an empty hook table actually means (#743).
+ *
+ * A bare header row reads as "this hook never fired", which is a claim ax
+ * cannot make: the harness records a fire only when the hook produced output
+ * (an outcome attachment) or blocked a call (named in the tool-result text). A
+ * guard that passes silently writes nothing anywhere. Users read the silence as
+ * evidence and scored hook experiments as unused against transcripts that
+ * proved otherwise - so say it out loud instead.
+ */
+export const HOOK_EMPTY_NOTE = [
+    "(no hook invocations recorded)",
+    "ax observes a fire only when the harness writes one: a hook that printed output,",
+    "or one that BLOCKED a call (recovered from the tool-result text). A hook that",
+    "passes silently leaves no trace in the transcript, so an empty table is not proof",
+    "the hook never ran.",
+    "Blocked fires from before ax 0.33 need a re-read: ax ingest --reparse=claude",
+].join("\n");
+
 export function formatHookSummaryRows(rows: readonly HookSummaryRow[]): string {
+    if (rows.length === 0) return HOOK_EMPTY_NOTE;
     const lines = ["count\tstatus\teffect\tavg_ms\tmax_ms\tlast_seen\thook\tcommand"];
     for (const row of rows) {
         lines.push([
@@ -160,6 +180,7 @@ export function formatHookSummaryRows(rows: readonly HookSummaryRow[]): string {
 }
 
 export function formatHookInvocationRows(rows: readonly HookInvocationRow[]): string {
+    if (rows.length === 0) return HOOK_EMPTY_NOTE;
     const lines = ["ts\tsession\tstatus\teffect\tduration_ms\thook\tcommand\tdetail"];
     for (const row of rows) {
         lines.push([
