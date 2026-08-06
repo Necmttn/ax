@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.39.3](https://github.com/Necmttn/ax/compare/v0.39.2...v0.39.3) (2026-08-06)
+
+
+### Bug Fixes
+
+* **pricing:** price claude-opus-5 + every gpt-5.6 tier, expire the pricing cache ([#752](https://github.com/Necmttn/ax/issues/752)) ([bbac6b1](https://github.com/Necmttn/ax/commit/bbac6b1b57567bd1d650073deb4648a007e66303))
+* **pricing:** stop over-billing — fast-tier gating, synthetic-model attribution, flat context tier ([#754](https://github.com/Necmttn/ax/issues/754)) ([4eb47a7](https://github.com/Necmttn/ax/commit/4eb47a7bb2ea31fe68a3e74fecc7294599ec514e))
+
 ## [0.39.2](https://github.com/Necmttn/ax/compare/v0.39.1...v0.39.2) (2026-08-06)
 
 
