@@ -139,6 +139,33 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
 
         expect(result.rows[0]).toMatchObject({ cost_usd: 0, unpriced: false });
     });
+
+    // The recomputed row is a whole rollup GROUP (many sessions summed), never
+    // one request's context. A tiered catalog + >200k prompt tokens proves the
+    // long-context tier stays suppressed at query-time recompute (plan 003 fix
+    // round 1: the `aggregated: true` marking inside `resolveRowCost`).
+    test("never triggers the long-context tier when recomputing a rollup group above 200k tokens", async () => {
+        const dbRows = [
+            { model: "tiered-model", sessions: 1, prompt_tokens: 300_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
+        ];
+        const agentModelRows = [
+            {
+                name: "tiered-model", provider: "test",
+                input_per_million_usd: 1, output_per_million_usd: 10,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: null,
+                input_above_200k_per_million_usd: 2, output_above_200k_per_million_usd: 20,
+                fast_multiplier: 1, context_window: null, pricing_source: "test",
+            },
+        ];
+        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        // Base rate only: 300k @ $1/M = $0.30. The tiered rate ($2/M) would
+        // give $0.60 - if this ever regresses to $0.60, the `aggregated:
+        // true` marking was lost.
+        expect(result.rows[0]).toMatchObject({ cost_usd: 0.3, unpriced: false });
+    });
 });
 
 // ---------------------------------------------------------------------------

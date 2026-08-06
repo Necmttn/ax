@@ -1649,6 +1649,48 @@ describe("claude token usage", () => {
         expect(stmt).toContain('source: "claude"');
     });
 
+    test("never triggers the long-context tier on a session's summed tokens above 200k", () => {
+        // `session_token_usage` is priced from the transcript's SUMMED usage
+        // totals, not one request's context - gpt-5.6-terra carries real
+        // `*Above200k*` built-in rates (see model-pricing.ts), so a single
+        // 300k-token message proves the tier stays suppressed (plan 003 fix
+        // round 1: the `aggregated: true` marking in
+        // `buildClaudeTokenUsageStatements`).
+        const lines = [
+            JSON.stringify({
+                type: "user",
+                uuid: "u1",
+                timestamp: "2026-06-01T10:00:00.000Z",
+                sessionId: "cl-tiered",
+                cwd: "/tmp",
+                message: { role: "user", content: "do a thing" },
+            }),
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a1",
+                timestamp: "2026-06-01T10:00:01.000Z",
+                sessionId: "cl-tiered",
+                message: {
+                    role: "assistant",
+                    model: "gpt-5.6-terra",
+                    content: "ok",
+                    usage: {
+                        input_tokens: 300_000,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
+                },
+            }),
+        ];
+        const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-tiered");
+        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
+        // Base rate only: 300k fresh input @ $2/M = $0.6. The tiered rate
+        // ($4/M) would give $1.2 - if this ever regresses to that, the
+        // `aggregated: true` marking was lost.
+        expect(stmt).toContain("estimated_cost_usd: 0.6");
+    });
+
     test("subagent source override lands on session and turn usage rows", () => {
         const extracted = __testExtractClaudeJsonlLines(
             usageLines("claude-opus-4-8"),

@@ -38,4 +38,36 @@ describe("reprice", () => {
         const cost = reprice(usage, "unknown-model", new Map());
         expect(cost).toBe(5);
     });
+
+    // `usage` is a dispatch's SUMMED token buckets, not one request's context.
+    // A tiered catalog + >200k prompt tokens proves the long-context tier
+    // stays suppressed (plan 003 fix round 1: the `aggregated: true` marking
+    // at the `reprice` call site).
+    it("never triggers the long-context tier on a dispatch's summed tokens above 200k", () => {
+        const catalog = new Map([
+            ["tiered-model", {
+                provider: "test",
+                inputPerMillionUsd: 1,
+                outputPerMillionUsd: 10,
+                cacheReadPerMillionUsd: null,
+                cacheCreationPerMillionUsd: null,
+                inputAbove200kPerMillionUsd: 2,
+                outputAbove200kPerMillionUsd: 20,
+                fastMultiplier: 1,
+                pricingSource: "test",
+            }],
+        ]);
+        const tieredUsage: RepriceUsage = {
+            prompt_tokens: 300_000,
+            completion_tokens: 0,
+            cache_read_tokens: 0,
+            cache_create_tokens: 0,
+            cost_usd: 999,
+        };
+        const cost = reprice(tieredUsage, "tiered-model", catalog);
+        // Base rate only: 300k @ $1/M = $0.30. The tiered rate ($2/M) would
+        // give $0.60 - if this ever regresses to $0.60, the `aggregated:
+        // true` marking was lost.
+        expect(cost).toBeCloseTo(0.3, 6);
+    });
 });

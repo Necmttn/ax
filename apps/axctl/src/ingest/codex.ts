@@ -58,7 +58,7 @@ import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
-import { estimateCost, fastTierEnabled } from "./model-pricing.ts";
+import { estimateCost } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
@@ -1234,7 +1234,6 @@ const buildCodexTokenUsageStatements = (
         cacheCreationInputTokens: null,
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
-        fastTier: fastTierEnabled(),
         // `usage.promptTokens` is `total_token_usage.input_tokens` - cumulative
         // across the whole session at this point, not one request. See plan 003.
         aggregated: true,
@@ -1295,7 +1294,6 @@ const buildCodexTurnTokenUsageStatements = (
                 cacheCreationInputTokens: usage.cacheCreationInputTokens,
                 cacheReadInputTokens: usage.cacheReadInputTokens,
                 estimatedTokens: usage.estimatedTokens,
-                fastTier: fastTierEnabled(),
                 // `first_total` promptTokens is a cumulative sum, not one
                 // request's context - see `isCodexTurnUsageAggregated`.
                 ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),

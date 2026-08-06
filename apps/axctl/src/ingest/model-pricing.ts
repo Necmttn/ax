@@ -559,6 +559,13 @@ export function estimateCost(input: {
             pricingSource: null,
         };
     }
+    // This value now GATES the long-context tier below (`tiered` compares it
+    // against `CONTEXT_TIER_THRESHOLD_TOKENS`). Today the only caller that can
+    // pass a null `promptTokens` (the byte-estimate path) also passes
+    // `aggregated: true`, so the fallback never reaches the gate live - but a
+    // future request-grain caller passing null `promptTokens` would gate on a
+    // prompt+completion TOTAL (`estimatedTokens`), not a pure input-context
+    // count. Keep that caller's `promptTokens` non-null, or mark it aggregated.
     const promptTokens = input.promptTokens ?? input.estimatedTokens;
     const cacheCreationTokens = input.cacheCreationInputTokens ?? 0;
     const cacheReadTokens = input.cacheReadInputTokens ?? 0;
@@ -594,14 +601,6 @@ export function estimateCost(input: {
         pricingSource: pricing.pricingSource,
     };
 }
-
-/**
- * Opt into priority/fast-tier billing (`AX_OPENAI_FAST_TIER=1`). Default is the
- * standard tier - see `estimateCost`'s `fastTier` doc comment.
- */
-export const fastTierEnabled = (
-    env: Record<string, string | undefined> = process.env,
-): boolean => env.AX_OPENAI_FAST_TIER === "1";
 
 export function agentModelStatement(input: {
     readonly modelKey: string;

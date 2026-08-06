@@ -8,7 +8,6 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     builtInPricingCatalog,
     estimateCost,
-    fastTierEnabled,
     isSyntheticModel,
     loadPricingCatalog as loadPricingCatalogEffect,
     mergePricingCatalogs,
@@ -167,12 +166,6 @@ describe("model pricing", () => {
         expect(estimateCost(usage).totalUsd).toBeCloseTo(5, 6);
         // Priority tier is 2.5x - opt-in only.
         expect(estimateCost({ ...usage, fastTier: true }).totalUsd).toBeCloseTo(12.5, 6);
-    });
-
-    it("reads the fast-tier opt-in from the environment", () => {
-        expect(fastTierEnabled({})).toBe(false);
-        expect(fastTierEnabled({ AX_OPENAI_FAST_TIER: "0" })).toBe(false);
-        expect(fastTierEnabled({ AX_OPENAI_FAST_TIER: "1" })).toBe(true);
     });
 
     it("prices claude-opus-5 and its dated variants from the built-in catalog", () => {
