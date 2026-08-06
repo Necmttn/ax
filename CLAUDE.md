@@ -4,7 +4,7 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## What this is
 
-`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 6 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), oh-my-pi/omp (`~/.omp/agent/sessions/`, a Pi fork sharing Pi's JSONL format - one parameterized parser, distinct `omp` identity; `AX_OMP_DIR` override), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
+`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 6 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), oh-my-pi/omp (`~/.omp/agent/sessions/`, a Pi fork sharing Pi's JSONL format - one parameterized parser, distinct `omp` identity; `AX_OMP_DIR` override), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, `$XDG_CONFIG_HOME/opencode/{skill,skills}/`, project `.claude/skills` + `.opencode/{skill,skills}`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
 ## Attribution on shareable artifacts
 
@@ -252,6 +252,22 @@ Only `claim` (too noisy) + `artifact_ref` remain deferred. Spec/threads on #578.
 `ax skills weighted [--window=Nd] [--limit=N]` - usage × role-weight ranking; enters doctor mode when many skills are unclassified.
 `ax skills by-role <role>` - list skills tagged with a given role.
 `ax skills roles <skill>` - list roles for a skill.
+
+**OpenCode skills (#746).** OpenCode discovers skills from the shared
+`~/.claude/skills` + `~/.agents/skills` dirs AND its own config dir
+(`$XDG_CONFIG_HOME/opencode/{skill,skills}/**/SKILL.md`, plus project
+`.opencode/`), so an OpenCode-only user's catalog lived somewhere ax never
+looked - `defaultSkillDirs()` (`packages/lib/src/paths.ts`) now covers it.
+Activation is a tool call: OpenCode's `skill` tool takes `{name}` and loading IS
+the invocation. The parser writes TWO rows for it - the synthetic
+`opencode:skill` tool row (as for every tool) and a real invocation against the
+CATALOG skill, name-resolved via `resolveSkillName` against the on-disk catalog.
+That second row is the one usage views can see: `ax skills weighted` excludes
+skills with `dir_path = "(synthetic)"`, which is why an OpenCode-only user read
+"(no skill invocations found)" despite steady skill use. Catalog rows are
+written create-if-missing (`skillUpsert: "if_missing"` ->
+`INSERT ... ON DUPLICATE KEY UPDATE name = name`); a plain MERGE would stamp a
+real skill with `dir_path = "(opencode)"` and hide it from those same views.
 
 ### Role registry
 

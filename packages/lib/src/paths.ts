@@ -28,6 +28,29 @@ function liveSkillDirList(): string[] {
  */
 export const skillDirsOverridden = (): boolean => liveSkillDirList().length > 0;
 
+/**
+ * OpenCode's own skill folders (#746).
+ *
+ * OpenCode discovers skills from two places: the shared `~/.claude/skills` +
+ * `~/.agents/skills` dirs (already covered above) AND its own config dir, where
+ * it globs `{skill,skills}/**` + `/SKILL.md`. An OpenCode-only user keeps every
+ * skill in the latter, so ax saw an empty catalog - `ax skills weighted` said
+ * "no skill invocations found" and `ax skills stats <name>` said "missing".
+ *
+ * The config dir follows XDG (`$XDG_CONFIG_HOME`, else `~/.config`), matching
+ * how OpenCode itself resolves it, so a non-default XDG home is honored rather
+ * than silently missed.
+ */
+export function opencodeSkillDirs(): { dir: string; scope: string }[] {
+    const configHome = process.env.XDG_CONFIG_HOME?.trim() || posixPath.join(HOME, ".config");
+    const base = posixPath.join(configHome, "opencode");
+    // Both spellings: OpenCode accepts `skill/` and `skills/`.
+    return [
+        { dir: posixPath.join(base, "skills"), scope: "opencode" },
+        { dir: posixPath.join(base, "skill"), scope: "opencode" },
+    ];
+}
+
 export function defaultSkillDirs(): { dir: string; scope: string }[] {
     // Re-read at call time so tests can override AX_SKILLS_DIRS after module load.
     const fromEnv = liveSkillDirList().map((dir) => ({ dir, scope: "user" }));
@@ -35,5 +58,6 @@ export function defaultSkillDirs(): { dir: string; scope: string }[] {
     return [
         { dir: posixPath.join(HOME, ".claude", "skills"), scope: "user" },
         { dir: posixPath.join(HOME, ".agents", "skills"), scope: "agents-shared" },
+        ...opencodeSkillDirs(),
     ];
 }
