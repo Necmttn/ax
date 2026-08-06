@@ -1213,6 +1213,9 @@ const buildCodexTokenUsageStatements = (
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
         fastTier: fastTierEnabled(),
+        // `usage.promptTokens` is `total_token_usage.input_tokens` - cumulative
+        // across the whole session at this point, not one request. See plan 003.
+        aggregated: true,
     });
     return [
         // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage

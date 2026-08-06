@@ -1616,6 +1616,10 @@ export const buildClaudeTokenUsageStatements = (
         cacheCreationInputTokens: usage.cacheCreationInputTokens,
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
+        // `usage` is summed across the whole session's `message.usage`
+        // blocks (see the `ClaudeTokenUsage` doc comment above), not one
+        // request. See plan 003.
+        aggregated: true,
     });
     const sessionId = extracted.session.id;
     const burnBuckets = computeBurnBuckets(

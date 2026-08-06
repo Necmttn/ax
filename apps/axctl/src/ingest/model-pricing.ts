@@ -434,12 +434,22 @@ export function parseModelsDevPricingCatalog(input: unknown): Map<string, ModelP
             const inputPerMillionUsd = numberOrNull(cost.input);
             const outputPerMillionUsd = numberOrNull(cost.output);
             if (inputPerMillionUsd === null && outputPerMillionUsd === null) continue;
+            // models.dev's flat `context_over_200k` block mirrors litellm's
+            // `*_above_200k_tokens` fields - the same flat-switch semantics
+            // `estimateCost` now models. Its `tiers[].tier.size` variant (a
+            // different threshold, e.g. 272k) is intentionally NOT read here -
+            // out of scope for this plan.
+            const tier = asRecord(cost.context_over_200k);
             catalog.set(modelKey, withCacheDefaults({
                 provider: providerName,
                 inputPerMillionUsd,
                 outputPerMillionUsd,
                 cacheCreationPerMillionUsd: numberOrNull(cost.cache_write ?? cost.write),
                 cacheReadPerMillionUsd: numberOrNull(cost.cache_read ?? cost.read),
+                inputAbove200kPerMillionUsd: numberOrNull(tier?.input),
+                outputAbove200kPerMillionUsd: numberOrNull(tier?.output),
+                cacheCreationAbove200kPerMillionUsd: numberOrNull(tier?.cache_write),
+                cacheReadAbove200kPerMillionUsd: numberOrNull(tier?.cache_read),
                 fastMultiplier: 1,
                 contextWindow: intOrNull(limit?.context ?? model?.context_window),
                 pricingSource: "models.dev",
@@ -510,11 +520,11 @@ export function pricingForModel(
     return null;
 }
 
-const componentCost = (tokens: number, basePerMillion: number | null, above200kPerMillion?: number | null): number | null => {
-    if (basePerMillion === null) return null;
-    if (!above200kPerMillion || tokens <= 200_000) return tokens * basePerMillion / 1_000_000;
-    return (200_000 * basePerMillion + (tokens - 200_000) * above200kPerMillion) / 1_000_000;
-};
+/** Long-context threshold: above this input context, the whole request bills at the tier rate. */
+export const CONTEXT_TIER_THRESHOLD_TOKENS = 200_000;
+
+const componentCost = (tokens: number, perMillion: number | null): number | null =>
+    perMillion === null ? null : tokens * perMillion / 1_000_000;
 
 export function estimateCost(input: {
     readonly modelKey: string | null;
@@ -531,6 +541,12 @@ export function estimateCost(input: {
      * transcript, so assuming priority overstated every OpenAI cost.
      */
     readonly fastTier?: boolean;
+    /**
+     * These token counts are a SUM over many requests (a session row, a rollup
+     * group), not one request. Suppresses the long-context tier, which is
+     * per-request and cannot be recovered from a sum. Default false.
+     */
+    readonly aggregated?: boolean;
 }): CostEstimate {
     const pricing = pricingForModel(input.modelKey, input.pricingCatalog);
     if (!pricing) {
@@ -547,12 +563,24 @@ export function estimateCost(input: {
     const cacheCreationTokens = input.cacheCreationInputTokens ?? 0;
     const cacheReadTokens = input.cacheReadInputTokens ?? 0;
     const freshInputTokens = Math.max(0, promptTokens - cacheCreationTokens - cacheReadTokens);
-    const inputUsd = componentCost(freshInputTokens, pricing.inputPerMillionUsd, pricing.inputAbove200kPerMillionUsd);
+    // The long-context surcharge is a property of ONE REQUEST's input context,
+    // and it is flat: above the threshold, every token of that request bills at
+    // the tier rate. Callers that pass SUMMED tokens (a whole session, a rollup
+    // group) cannot answer "was any single request long-context?", so they must
+    // NOT trigger the tier - see `aggregated` on the input type above.
+    const tiered = input.aggregated !== true
+        && promptTokens > CONTEXT_TIER_THRESHOLD_TOKENS
+        && pricing.inputAbove200kPerMillionUsd != null;
+    const inputRate = tiered ? pricing.inputAbove200kPerMillionUsd : pricing.inputPerMillionUsd;
+    const outputRate = tiered ? (pricing.outputAbove200kPerMillionUsd ?? pricing.outputPerMillionUsd) : pricing.outputPerMillionUsd;
+    const cacheCreationRate = tiered ? (pricing.cacheCreationAbove200kPerMillionUsd ?? pricing.cacheCreationPerMillionUsd) : pricing.cacheCreationPerMillionUsd;
+    const cacheReadRate = tiered ? (pricing.cacheReadAbove200kPerMillionUsd ?? pricing.cacheReadPerMillionUsd) : pricing.cacheReadPerMillionUsd;
+    const inputUsd = componentCost(freshInputTokens, inputRate);
     const outputUsd = input.completionTokens === null
         ? null
-        : componentCost(input.completionTokens, pricing.outputPerMillionUsd, pricing.outputAbove200kPerMillionUsd);
-    const cacheCreationUsd = componentCost(cacheCreationTokens, pricing.cacheCreationPerMillionUsd, pricing.cacheCreationAbove200kPerMillionUsd);
-    const cacheReadUsd = componentCost(cacheReadTokens, pricing.cacheReadPerMillionUsd, pricing.cacheReadAbove200kPerMillionUsd);
+        : componentCost(input.completionTokens, outputRate);
+    const cacheCreationUsd = componentCost(cacheCreationTokens, cacheCreationRate);
+    const cacheReadUsd = componentCost(cacheReadTokens, cacheReadRate);
     const tierMultiplier = input.fastTier === true ? pricing.fastMultiplier : 1;
     const totalUsd = [inputUsd, outputUsd, cacheCreationUsd, cacheReadUsd]
         .filter((value): value is number => value !== null)
