@@ -26,12 +26,10 @@ describe("hook table empty state (#743)", () => {
                 count: 3,
                 provider_status: "blocking_error",
                 effect: "blocked",
-                avg_duration_ms: null,
-                max_duration_ms: null,
                 last_seen: "2026-08-05T09:00:00.000Z",
                 hook_name: "PreToolUse:Bash",
                 command: "bun /h/enforce-worktree.ts",
-            } as HookSummaryRow,
+            } satisfies HookSummaryRow,
         ]);
         expect(summary.split("\n")[0]).toStartWith("count\t");
         expect(summary).toContain("PreToolUse:Bash");
@@ -40,15 +38,13 @@ describe("hook table empty state (#743)", () => {
             {
                 ts: "2026-08-05T09:00:00.000Z",
                 session: "session:abc",
+                event_name: "PreToolUse",
                 provider_status: "blocking_error",
                 effect: "blocked",
-                duration_ms: null,
                 hook_name: "PreToolUse:Bash",
                 command: "bun /h/enforce-worktree.ts",
                 blocking_error_excerpt: "BLOCKED: dirty tree",
-                stderr_excerpt: null,
-                stdout_excerpt: null,
-            } as HookInvocationRow,
+            } satisfies HookInvocationRow,
         ]);
         expect(invocations.split("\n")[0]).toStartWith("ts\t");
         expect(invocations).toContain("BLOCKED: dirty tree");
