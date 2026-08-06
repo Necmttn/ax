@@ -1016,6 +1016,12 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             // is not a model, and attribution here is last-write-wins, so one
             // trailing synthetic entry used to relabel the whole session -
             // filing its real spend under a non-model that prices at $0.
+            // This also gates the LOCAL `model`, which flows into each
+            // synthetic entry's own turn_token_usage row (it carries an
+            // all-zero usage block, so a row IS emitted for it) - deliberate:
+            // a zero-token `<synthetic>` leg would otherwise read as a
+            // phantom model switch to per-model leg detection (dispatch
+            // model-drop marking, thinking analytics).
             if (entryModel && !isSyntheticModel(entryModel)) {
                 model = entryModel;
                 if (session) session.model = entryModel;

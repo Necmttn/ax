@@ -1568,12 +1568,20 @@ describe("claude token usage", () => {
         expect(u.model).toBe("claude-opus-4-8");
     });
 
-    test("a trailing <synthetic> entry does not clobber the session's real model", () => {
+    test("a trailing <synthetic> entry does not clobber the session's real model or its own turn row", () => {
         // Claude Code emits assistant entries with model "<synthetic>" for
         // harness-generated messages (no API call). Model attribution is
         // last-write-wins, so a trailing synthetic entry used to overwrite the
         // whole session's model - filing its real spend under a non-model that
         // prices at $0.
+        //
+        // Real synthetic entries carry an all-zero `usage` block (verified
+        // against ~/.claude/projects: 240/240 sampled), so a turn_token_usage
+        // row IS emitted for them - reproduced here rather than omitting
+        // `usage` on the synthetic entry. The guard deliberately relabels that
+        // row's model too (see the comment at the guard site): a phantom
+        // `<synthetic>` leg would otherwise read as a model switch that never
+        // happened to per-model leg detection.
         const lines = [
             JSON.stringify({
                 type: "user",
@@ -1609,11 +1617,21 @@ describe("claude token usage", () => {
                     role: "assistant",
                     model: "<synthetic>",
                     content: "done",
+                    usage: {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
                 },
             }),
         ];
         const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-synth");
         expect(extracted?.session.model).toBe("claude-opus-4-8");
+        // The synthetic entry's own turn row - not just the session - carries
+        // the last real model, not "<synthetic>".
+        expect(extracted?.turnTokenUsages).toHaveLength(2);
+        expect(extracted?.turnTokenUsages[1]?.model).toBe("claude-opus-4-8");
     });
 
     test("prices the session via the built-in catalog", () => {
