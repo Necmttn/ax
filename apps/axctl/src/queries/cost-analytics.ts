@@ -108,6 +108,9 @@ function resolveRowCost(
         cacheReadInputTokens: input.cacheReadTokens,
         estimatedTokens: input.promptTokens,
         pricingCatalog: catalog,
+        // A rollup group (many sessions summed), sometimes even a whole
+        // session row - never one request's context. See plan 003.
+        aggregated: true,
     });
     return estimate.totalUsd === null
         ? { cost_usd: 0, unpriced: true }

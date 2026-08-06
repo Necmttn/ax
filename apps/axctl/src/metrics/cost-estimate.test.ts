@@ -37,6 +37,24 @@ const catalog = new Map<string, ModelPricing>([
     ["claude-haiku-4-5-20251001", haikuPricing],
 ]);
 
+// Carries `*Above200k*` rates so a session-grain call that forgets
+// `aggregated: true` would wrongly trigger the long-context tier (plan 003).
+const tieredPricing: ModelPricing = {
+    provider: "test",
+    inputPerMillionUsd: 1,
+    outputPerMillionUsd: 10,
+    cacheCreationPerMillionUsd: null,
+    cacheReadPerMillionUsd: null,
+    inputAbove200kPerMillionUsd: 2,
+    outputAbove200kPerMillionUsd: 20,
+    fastMultiplier: 1,
+    pricingSource: "test",
+};
+
+const tieredCatalog = new Map<string, ModelPricing>([
+    ["tiered-model", tieredPricing],
+]);
+
 describe("fillEstimatedCost", () => {
     test("keeps a stored cost untouched (estimated=false, source preserved)", () => {
         const out = fillEstimatedCost(
@@ -91,6 +109,27 @@ describe("fillEstimatedCost", () => {
         // built-in claude-opus-4 input = $15/M
         expect(out.estimatedCostUsd).toBeCloseTo(15, 6);
         expect(isEstimatedPricingSource(out.pricingSource)).toBe(true);
+    });
+
+    // `usage` here is a whole `session_token_usage` row - a SUM over many
+    // requests, not one request's context - so the long-context tier must
+    // stay suppressed even when the summed prompt tokens exceed 200k
+    // (plan 003 fix round 1: the `aggregated: true` marking at the
+    // `fillEstimatedCost` call site).
+    test("never triggers the long-context tier on a session's summed tokens above 200k", () => {
+        const out = fillEstimatedCost(
+            usage({
+                model: "tiered-model",
+                prompt_tokens: 300_000,
+                completion_tokens: 0,
+                estimated_tokens: 300_000,
+            }),
+            tieredCatalog,
+        );
+        // Base rate only: 300k fresh input @ $1/M = $0.30. The tiered rate
+        // ($2/M) would give $0.60 - if this ever regresses to $0.60, the
+        // `aggregated: true` marking was lost.
+        expect(out.estimatedCostUsd).toBeCloseTo(0.3, 8);
     });
 });
 

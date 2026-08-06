@@ -46,6 +46,9 @@ export function reprice(
         cacheReadInputTokens: usage.cache_read_tokens,
         estimatedTokens: usage.prompt_tokens + usage.completion_tokens,
         ...(pricingCatalog.size > 0 ? { pricingCatalog } : {}),
+        // `usage` is a dispatch's summed token buckets, not one request's
+        // context - suppress the long-context tier. See plan 003.
+        aggregated: true,
     });
     return cost.totalUsd ?? usage.cost_usd;
 }

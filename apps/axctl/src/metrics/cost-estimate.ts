@@ -82,6 +82,9 @@ export function fillEstimatedCost(
         cacheReadInputTokens: usage.cache_read_input_tokens,
         estimatedTokens: usage.estimated_tokens,
         pricingCatalog: catalog,
+        // `usage` is a `session_token_usage` row - one session's SUMMED
+        // token counts, not one request. See plan 003.
+        aggregated: true,
     });
     if (cost.totalUsd === null) {
         return { estimatedCostUsd: null, pricingSource: usage.pricing_source ?? null, estimated: false };

@@ -78,7 +78,7 @@ import {
     surrealString,
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
-import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { estimateCost, isSyntheticModel, normalizeModelName } from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
@@ -1012,7 +1012,17 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const role = type ?? "unknown";
             const message = entry.message ?? null;
             const entryModel = message?.model ?? entry.model ?? null;
-            if (entryModel) {
+            // `<synthetic>` marks a harness-generated entry with no API call. It
+            // is not a model, and attribution here is last-write-wins, so one
+            // trailing synthetic entry used to relabel the whole session -
+            // filing its real spend under a non-model that prices at $0.
+            // This also gates the LOCAL `model`, which flows into each
+            // synthetic entry's own turn_token_usage row (it carries an
+            // all-zero usage block, so a row IS emitted for it) - deliberate:
+            // a zero-token `<synthetic>` leg would otherwise read as a
+            // phantom model switch to per-model leg detection (dispatch
+            // model-drop marking, thinking analytics).
+            if (entryModel && !isSyntheticModel(entryModel)) {
                 model = entryModel;
                 if (session) session.model = entryModel;
             }
@@ -1606,6 +1616,10 @@ export const buildClaudeTokenUsageStatements = (
         cacheCreationInputTokens: usage.cacheCreationInputTokens,
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
+        // `usage` is summed across the whole session's `message.usage`
+        // blocks (see the `ClaudeTokenUsage` doc comment above), not one
+        // request. See plan 003.
+        aggregated: true,
     });
     const sessionId = extracted.session.id;
     const burnBuckets = computeBurnBuckets(
