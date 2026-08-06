@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,8 @@ import {
     normalizeModelName,
     parseLiteLlmPricingCatalog,
     parseModelsDevPricingCatalog,
+    PRICING_CACHE_TTL_MS,
+    pricingCacheTtlMs,
     pricingForModel,
 } from "./model-pricing.ts";
 import type { PricingCatalogLoadResult } from "./model-pricing.ts";
@@ -108,7 +110,7 @@ describe("model pricing", () => {
         });
     });
 
-    it("prices claude-sonnet-5 and GPT-5.6 Sol/Luna from the built-in catalog", () => {
+    it("prices claude-sonnet-5 and every GPT-5.6 tier from the built-in catalog", () => {
         const catalog = builtInPricingCatalog();
 
         expect(pricingForModel("claude-sonnet-5", catalog)).toMatchObject({
@@ -117,17 +119,65 @@ describe("model pricing", () => {
             cacheCreationPerMillionUsd: 3.75,
             cacheReadPerMillionUsd: 0.3,
         });
+        // Rates below are models.dev verbatim, incl. each tier's >200k rates.
+        // Built-in entries OVERRIDE the remote catalogs, so a wrong number here
+        // silently wins over a correct upstream one (#751).
         expect(pricingForModel("gpt-5.6-sol", catalog)).toMatchObject({
             inputPerMillionUsd: 5,
             outputPerMillionUsd: 30,
             cacheCreationPerMillionUsd: 6.25,
             cacheReadPerMillionUsd: 0.5,
+            inputAbove200kPerMillionUsd: 10,
+            outputAbove200kPerMillionUsd: 45,
+        });
+        expect(pricingForModel("gpt-5.6-terra", catalog)).toMatchObject({
+            inputPerMillionUsd: 2,
+            outputPerMillionUsd: 12,
+            cacheCreationPerMillionUsd: 2.5,
+            cacheReadPerMillionUsd: 0.2,
+            inputAbove200kPerMillionUsd: 4,
+            outputAbove200kPerMillionUsd: 18,
         });
         expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
-            inputPerMillionUsd: 1,
-            outputPerMillionUsd: 6,
-            cacheCreationPerMillionUsd: 1.25,
-            cacheReadPerMillionUsd: 0.1,
+            inputPerMillionUsd: 0.2,
+            outputPerMillionUsd: 1.2,
+            cacheCreationPerMillionUsd: 0.25,
+            cacheReadPerMillionUsd: 0.02,
+            inputAbove200kPerMillionUsd: 0.4,
+            outputAbove200kPerMillionUsd: 1.8,
+        });
+    });
+
+    it("prices claude-opus-5 and its dated variants from the built-in catalog", () => {
+        const catalog = builtInPricingCatalog();
+
+        for (const key of ["claude-opus-5", "claude-opus-5-20260401"]) {
+            expect(pricingForModel(key, catalog)).toMatchObject({
+                provider: "anthropic",
+                inputPerMillionUsd: 5,
+                outputPerMillionUsd: 25,
+                cacheCreationPerMillionUsd: 6.25,
+                cacheReadPerMillionUsd: 0.5,
+            });
+        }
+        // opus-5 must NOT fall through to the opus-4 rule (15/75).
+        expect(pricingForModel("claude-opus-5", catalog)?.outputPerMillionUsd).not.toBe(75);
+    });
+
+    it("routes dated GPT-5.6 tier variants to their own tier, not the gpt-5.5 approximation", () => {
+        const catalog = builtInPricingCatalog();
+
+        expect(pricingForModel("gpt-5.6-terra-2026-07-09", catalog)).toMatchObject({
+            inputPerMillionUsd: 2,
+            outputPerMillionUsd: 12,
+        });
+        expect(pricingForModel("gpt-5.6-luna-2026-07-09", catalog)).toMatchObject({
+            inputPerMillionUsd: 0.2,
+            outputPerMillionUsd: 1.2,
+        });
+        expect(pricingForModel("gpt-5.6-sol-2026-07-09", catalog)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
         });
     });
 
@@ -228,15 +278,15 @@ describe("model pricing", () => {
     it("approximates gpt-5.6 variants WITHOUT an exact row at the gpt-5.5 tier", () => {
         const catalog = builtInPricingCatalog();
 
-        // sol/luna carry exact verified rates (see the catalog test above);
-        // the tier approximation only covers variants with no entry yet.
-        expect(pricingForModel("gpt-5.6-terra", catalog)).toMatchObject({
+        // sol/terra/luna all carry exact verified rates (see the catalog test
+        // above); the tier approximation only covers a variant with no entry.
+        expect(pricingForModel("gpt-5.6-nova", catalog)).toMatchObject({
             inputPerMillionUsd: 5,
             outputPerMillionUsd: 30,
         });
-        expect(pricingForModel("gpt-5.6-luna", catalog)).toMatchObject({
-            inputPerMillionUsd: 1,
-            outputPerMillionUsd: 6,
+        expect(pricingForModel("gpt-5.6", catalog)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
         });
     });
 
@@ -269,6 +319,48 @@ describe("model pricing", () => {
             provider: "cached",
             inputPerMillionUsd: 1,
             outputPerMillionUsd: 2,
+        });
+    });
+
+    it("expires the pricing cache after a week by default, honoring the day override", () => {
+        const day = 24 * 60 * 60 * 1000;
+
+        expect(PRICING_CACHE_TTL_MS).toBe(7 * day);
+        expect(pricingCacheTtlMs({})).toBe(7 * day);
+        expect(pricingCacheTtlMs({ AX_PRICING_MAX_AGE_DAYS: "1" })).toBe(day);
+        // "0" opts OUT of expiry (always trust the cache).
+        expect(pricingCacheTtlMs({ AX_PRICING_MAX_AGE_DAYS: "0" })).toBe(0);
+        // Garbage/negative falls back to the default instead of never expiring.
+        for (const raw of ["", "  ", "nonsense", "-3"]) {
+            expect(pricingCacheTtlMs({ AX_PRICING_MAX_AGE_DAYS: raw })).toBe(7 * day);
+        }
+    });
+
+    it("still uses an EXPIRED cache when the network is unavailable", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-pricing-stale-"));
+        const cache = join(root, "pricing");
+        mkdirSync(cache, { recursive: true });
+        const litellmPath = join(cache, "litellm-model-prices.json");
+        writeFileSync(litellmPath, JSON.stringify({
+            "stale/model": {
+                litellm_provider: "stale",
+                input_cost_per_token: 0.000003,
+                output_cost_per_token: 0.000004,
+            },
+        }));
+        writeFileSync(join(cache, "models-dev-api.json"), JSON.stringify({}));
+        // Age both snapshots well past the TTL.
+        const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        utimesSync(litellmPath, old, old);
+        utimesSync(join(cache, "models-dev-api.json"), old, old);
+
+        const result = await loadPricingCatalog(root, { AX_PRICING_OFFLINE: "1" });
+
+        // Expiry must only trigger a refresh ATTEMPT - never drop pricing.
+        expect(result.litellmSource).toBe("cache");
+        expect(result.catalog.get("stale/model")).toMatchObject({
+            inputPerMillionUsd: 3,
+            outputPerMillionUsd: 4,
         });
     });
 });
