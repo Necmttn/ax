@@ -1568,6 +1568,54 @@ describe("claude token usage", () => {
         expect(u.model).toBe("claude-opus-4-8");
     });
 
+    test("a trailing <synthetic> entry does not clobber the session's real model", () => {
+        // Claude Code emits assistant entries with model "<synthetic>" for
+        // harness-generated messages (no API call). Model attribution is
+        // last-write-wins, so a trailing synthetic entry used to overwrite the
+        // whole session's model - filing its real spend under a non-model that
+        // prices at $0.
+        const lines = [
+            JSON.stringify({
+                type: "user",
+                uuid: "u1",
+                timestamp: "2026-06-01T10:00:00.000Z",
+                sessionId: "cl-synth",
+                cwd: "/tmp",
+                message: { role: "user", content: "do a thing" },
+            }),
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a1",
+                timestamp: "2026-06-01T10:00:01.000Z",
+                sessionId: "cl-synth",
+                message: {
+                    role: "assistant",
+                    model: "claude-opus-4-8",
+                    content: "ok",
+                    usage: {
+                        input_tokens: 100,
+                        output_tokens: 50,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
+                },
+            }),
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a2",
+                timestamp: "2026-06-01T10:00:02.000Z",
+                sessionId: "cl-synth",
+                message: {
+                    role: "assistant",
+                    model: "<synthetic>",
+                    content: "done",
+                },
+            }),
+        ];
+        const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-synth");
+        expect(extracted?.session.model).toBe("claude-opus-4-8");
+    });
+
     test("prices the session via the built-in catalog", () => {
         const extracted = __testExtractClaudeJsonlLines(
             usageLines("claude-opus-4-8"),

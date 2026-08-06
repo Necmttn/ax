@@ -9,6 +9,7 @@ import {
     builtInPricingCatalog,
     estimateCost,
     fastTierEnabled,
+    isSyntheticModel,
     loadPricingCatalog as loadPricingCatalogEffect,
     mergePricingCatalogs,
     normalizeModelName,
@@ -17,6 +18,7 @@ import {
     PRICING_CACHE_TTL_MS,
     pricingCacheTtlMs,
     pricingForModel,
+    SYNTHETIC_MODEL_SENTINEL,
 } from "./model-pricing.ts";
 import type { PricingCatalogLoadResult } from "./model-pricing.ts";
 
@@ -210,6 +212,14 @@ describe("model pricing", () => {
         expect(normalizeModelName("openai")).toBeNull();
         expect(normalizeModelName("anthropic")).toBeNull();
         expect(normalizeModelName("gpt-5.5")).toBe("gpt-5.5");
+    });
+
+    it("treats <synthetic> as a non-model everywhere", () => {
+        expect(isSyntheticModel("<synthetic>")).toBe(true);
+        expect(isSyntheticModel(" <synthetic> ")).toBe(true);
+        expect(isSyntheticModel("claude-opus-5")).toBe(false);
+        expect(isSyntheticModel(null)).toBe(false);
+        expect(normalizeModelName(SYNTHETIC_MODEL_SENTINEL)).toBeNull();
     });
 
     it("uses above-200k tier fields when present", () => {

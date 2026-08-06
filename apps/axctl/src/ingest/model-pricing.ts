@@ -359,9 +359,19 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
     },
 };
 
+/**
+ * Claude Code's placeholder `model` on assistant entries it generated WITHOUT an
+ * API call. It is not a model: it must never win a session's model attribution
+ * and must never be priced.
+ */
+export const SYNTHETIC_MODEL_SENTINEL = "<synthetic>";
+
+export const isSyntheticModel = (model: string | null | undefined): boolean =>
+    model?.trim() === SYNTHETIC_MODEL_SENTINEL;
+
 export function normalizeModelName(model: string | null | undefined): string | null {
     const trimmed = model?.trim();
-    if (!trimmed || trimmed === "<synthetic>") return null;
+    if (!trimmed || isSyntheticModel(trimmed)) return null;
     const key = trimmed.toLowerCase();
     if (key === "openai" || key === "anthropic" || key === "google" || key === "deepseek" || key === "qwen") {
         return null;

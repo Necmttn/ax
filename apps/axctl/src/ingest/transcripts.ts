@@ -78,7 +78,7 @@ import {
     surrealString,
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
-import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { estimateCost, isSyntheticModel, normalizeModelName } from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
@@ -1012,7 +1012,11 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const role = type ?? "unknown";
             const message = entry.message ?? null;
             const entryModel = message?.model ?? entry.model ?? null;
-            if (entryModel) {
+            // `<synthetic>` marks a harness-generated entry with no API call. It
+            // is not a model, and attribution here is last-write-wins, so one
+            // trailing synthetic entry used to relabel the whole session -
+            // filing its real spend under a non-model that prices at $0.
+            if (entryModel && !isSyntheticModel(entryModel)) {
                 model = entryModel;
                 if (session) session.model = entryModel;
             }
