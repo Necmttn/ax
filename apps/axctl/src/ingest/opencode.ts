@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
+import { resolveSkillName } from "@ax/lib/skill-id";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
@@ -84,7 +85,38 @@ interface OpenCodeInvocation {
     ts: string;
     skill: SkillName;
     args: unknown;
+    /**
+     * True when `skill` names a REAL installed skill (the `skill` tool loading
+     * one by name) rather than the synthetic `opencode:<tool>` stand-in. These
+     * must not overwrite the catalog row - see `skillUpsert` on the normalized
+     * write (#746).
+     */
+    catalogSkill?: boolean;
 }
+
+/**
+ * OpenCode's skill-loading tool. Its parameters are `{ name: string }` ("The
+ * name of the skill from available_skills"), and loading a skill IS the
+ * invocation - there is no separate Skill-tool-like event. Verified against
+ * opencode 1.3.17 (`src/tool/skill.ts`).
+ */
+export const OPENCODE_SKILL_TOOL = "skill";
+
+/**
+ * The skill an OpenCode tool call loaded, or null when this call is not a
+ * skill load. Pure so the mapping is testable without a store.
+ */
+export const openCodeLoadedSkillName = (
+    toolName: string,
+    inputJson: unknown,
+): string | null => {
+    if (toolName !== OPENCODE_SKILL_TOOL) return null;
+    if (typeof inputJson !== "object" || inputJson === null) return null;
+    const name = (inputJson as Record<string, unknown>).name;
+    if (typeof name !== "string") return null;
+    const trimmed = name.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
 
 export interface OpenCodeStats {
     readonly sessions: number;
@@ -664,6 +696,38 @@ function processToolPart(input: {
             partOrdinal: input.ordinal,
         },
     });
+
+    // A `skill` tool call loads a REAL skill by name (#746). The synthetic
+    // `opencode:skill` row above records that the tool fired; this records
+    // WHICH skill it loaded, against the catalog row - the only form that
+    // reaches usage views, which exclude synthetic skills by `dir_path`.
+    const loadedSkill = openCodeLoadedSkillName(toolName, inputJson);
+    if (loadedSkill) {
+        const loadedSkillName = SkillName.make(loadedSkill);
+        input.invocations.push({
+            session: input.session.id,
+            seq: input.turnSeq,
+            ts,
+            skill: loadedSkillName,
+            args: inputJson ?? {},
+            catalogSkill: true,
+        });
+        input.skillRelations.push({
+            toolCallKey,
+            skillName: loadedSkillName,
+            ts,
+            reason: OPENCODE_SKILL_LOAD_REASON,
+            labels: {
+                provider: "opencode",
+                toolName,
+                source: "opencode_sqlite",
+            },
+            metrics: {
+                turnSeq: input.turnSeq,
+                partOrdinal: input.ordinal,
+            },
+        });
+    }
 }
 
 export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
@@ -954,6 +1018,37 @@ const sliceOpenCodeExtractForSession = (
 
 export const __testSliceOpenCodeExtractForSession = sliceOpenCodeExtractForSession;
 
+/** Marks the relation written for a `skill` tool load (see below). */
+export const OPENCODE_SKILL_LOAD_REASON = "OpenCode skill tool load";
+
+/**
+ * Map skill-tool loads onto their catalog names (#746).
+ *
+ * Applied ONLY to skill-tool rows. Running `resolveSkillName` over the
+ * synthetic `opencode:<tool>` names would be actively wrong: its bare-name rule
+ * would let `opencode:bash` resolve onto a real skill named `bash`, silently
+ * merging tool telemetry into a skill's usage.
+ */
+export const resolveOpenCodeCatalogSkills = (
+    extract: OpenCodeExtract,
+    catalog: ReadonlySet<string>,
+): OpenCodeExtract => {
+    if (catalog.size === 0) return extract;
+    return {
+        ...extract,
+        invocations: extract.invocations.map((invocation) =>
+            invocation.catalogSkill
+                ? { ...invocation, skill: resolveSkillName(invocation.skill, catalog) ?? invocation.skill }
+                : invocation
+        ),
+        skillRelations: extract.skillRelations.map((relation) =>
+            relation.reason === OPENCODE_SKILL_LOAD_REASON
+                ? { ...relation, skillName: resolveSkillName(relation.skillName, catalog) ?? relation.skillName }
+                : relation
+        ),
+    };
+};
+
 const buildOpenCodeBatchStatements = (
     extract: OpenCodeExtract,
     sourcePath: string,
@@ -1018,15 +1113,32 @@ const buildOpenCodeBatchStatements = (
         // OpenCode emits no tool-file evidence today (pre-toolkit behavior preserved).
         toolFileEvidence: [],
         agentEventParentEdges: [],
-        syntheticSkillInvocations: extract.invocations.map((invocation) => ({
-            sessionId: invocation.session,
-            seq: invocation.seq,
-            ts: invocation.ts,
-            skillName: invocation.skill,
-            args: invocation.args,
-            skillScope: "opencode-tool",
-            skillContentHash: "opencode",
-        })),
+        syntheticSkillInvocations: extract.invocations.map((invocation) =>
+            invocation.catalogSkill
+                ? {
+                    sessionId: invocation.session,
+                    seq: invocation.seq,
+                    ts: invocation.ts,
+                    skillName: invocation.skill,
+                    args: invocation.args,
+                    // Placeholders used ONLY if the skill is not in the catalog
+                    // (e.g. a skill installed after this session ran); an
+                    // existing row keeps its real values.
+                    skillScope: "opencode-skill",
+                    skillDirPath: "(opencode)",
+                    skillContentHash: "opencode",
+                    skillUpsert: "if_missing" as const,
+                }
+                : {
+                    sessionId: invocation.session,
+                    seq: invocation.seq,
+                    ts: invocation.ts,
+                    skillName: invocation.skill,
+                    args: invocation.args,
+                    skillScope: "opencode-tool",
+                    skillContentHash: "opencode",
+                }
+        ),
         toolCallSkillRelations: extract.skillRelations,
         planSnapshots: [],
         compactions: extract.compactions,
@@ -1121,12 +1233,30 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
             };
         }
 
+        // Snapshot the real skill catalog once (the skills stage is a declared
+        // dep, so it is complete). A `skill` tool call records the name the
+        // model typed - bare - while a project- or plugin-scoped skill is
+        // catalogued namespaced; `resolveSkillName` maps the former onto the
+        // latter so the invocation attaches to the real row instead of minting
+        // a ghost (#746). Same treatment the Claude parser gives Skill calls.
+        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
+            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
+        ))?.[0] ?? [];
+        const skillCatalog: ReadonlySet<string> = new Set(
+            catalogRows
+                .map((row) => row.name)
+                .filter((name): name is string => typeof name === "string" && name.length > 0),
+        );
+
         const failures = makeFileFailureCollector({ source: "opencode", unit: "session" });
         let sessionCount = 0;
         let turnCount = 0;
         let toolCallCount = 0;
         for (const session of extract.sessions) {
-            const slice = sliceOpenCodeExtractForSession(extract, session.id);
+            const slice = resolveOpenCodeCatalogSkills(
+                sliceOpenCodeExtractForSession(extract, session.id),
+                skillCatalog,
+            );
             // Per-session failure isolation (#261): one undecodable / rejected
             // session skips THIS session - the store is re-read next run -
             // instead of aborting the whole stage (see file-isolation.ts).

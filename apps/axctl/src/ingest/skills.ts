@@ -194,17 +194,27 @@ const readProjectSkills = (): FsReader =>
         const roots = yield* discoverProjectRoots();
         const out: SkillItem[] = [];
         for (const root of roots) {
-            const skillsDir = path.join(root.path, ".claude", "skills");
-            const items = yield* readSkillDir(skillsDir, `project:${root.name}`);
-            // Re-namespace under the project so two repos with the same bare
-            // skill name (`expo-deployment`) don't collide in the catalog and
-            // the resolver's `:bare` suffix rule attaches invocations correctly.
-            items.forEach((it) => {
-                if (!it.skill.name.includes(":")) {
-                    it.skill.name = `${root.name}:${it.skill.name}`;
-                }
-            });
-            out.push(...items);
+            // `.claude/skills` plus OpenCode's project-local `.opencode/{skill,
+            // skills}` (#746) - same harness-agnostic catalog, so a repo that
+            // ships skills for OpenCode is as visible as one shipping them for
+            // Claude Code.
+            const skillsDirs = [
+                path.join(root.path, ".claude", "skills"),
+                path.join(root.path, ".opencode", "skills"),
+                path.join(root.path, ".opencode", "skill"),
+            ];
+            for (const skillsDir of skillsDirs) {
+                const items = yield* readSkillDir(skillsDir, `project:${root.name}`);
+                // Re-namespace under the project so two repos with the same bare
+                // skill name (`expo-deployment`) don't collide in the catalog and
+                // the resolver's `:bare` suffix rule attaches invocations correctly.
+                items.forEach((it) => {
+                    if (!it.skill.name.includes(":")) {
+                        it.skill.name = `${root.name}:${it.skill.name}`;
+                    }
+                });
+                out.push(...items);
+            }
         }
         return out;
     });

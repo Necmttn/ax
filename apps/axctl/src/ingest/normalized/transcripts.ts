@@ -91,6 +91,20 @@ export interface NormalizedSyntheticSkillInvocationWrite {
     readonly skillScope?: string;
     readonly skillDirPath?: string;
     readonly skillContentHash?: string;
+    /**
+     * How to write the `skill` row this invocation points at.
+     *
+     * `"merge"` (default, and the only pre-#746 behavior) overwrites
+     * scope/dir_path/content_hash - correct for SYNTHETIC provider-tool skills,
+     * which this batch is the sole author of.
+     *
+     * `"if_missing"` creates the row only when absent and leaves an existing
+     * one untouched. Required when the invocation names a REAL catalog skill
+     * (OpenCode's `skill` tool loads one by name): merging would stamp the
+     * on-disk skill with `dir_path = "(opencode)"`, and every view that
+     * excludes synthetic rows would then drop a genuine skill.
+     */
+    readonly skillUpsert?: "merge" | "if_missing";
 }
 
 /**
@@ -190,14 +204,22 @@ export const buildNormalizedSyntheticSkillInvocationStatements = (
         if (!skills.has(invocation.skillName)) skills.set(invocation.skillName, invocation);
     }
 
-    const skillStatements = [...skills.values()].map((invocation) =>
-        `UPSERT ${recordRef("skill", skillRecordKey(invocation.skillName))} MERGE ${surrealObject([
+    const skillStatements = [...skills.values()].map((invocation) => {
+        const ref = recordRef("skill", skillRecordKey(invocation.skillName));
+        const fields: ReadonlyArray<readonly [string, string]> = [
             ["name", surrealString(invocation.skillName)],
             ["scope", surrealString(invocation.skillScope ?? "unknown")],
             ["dir_path", surrealString(invocation.skillDirPath ?? "(synthetic)")],
             ["content_hash", surrealString(invocation.skillContentHash ?? "synthetic")],
-        ])};`
-    );
+        ];
+        if (invocation.skillUpsert === "if_missing") {
+            // Create-if-absent, never clobber: `ON DUPLICATE KEY UPDATE name =
+            // name` is a no-op on an existing row, so a catalog skill keeps its
+            // real scope/dir_path/content_hash (#746).
+            return `INSERT INTO skill ${surrealObject([["id", ref], ...fields])} ON DUPLICATE KEY UPDATE name = name;`;
+        }
+        return `UPSERT ${ref} MERGE ${surrealObject(fields)};`;
+    });
 
     const invocationStatements = invocations.map((invocation) => {
         const turnKey = turnRecordKey(invocation.sessionId, invocation.seq);

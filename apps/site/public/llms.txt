@@ -21,7 +21,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax memory ops [--events] [--days=N]` - Claude memory-file activity: writes/edits the agent made to `~/.claude/.../memory/*.md`, rolled up per memory file (notes vs the MEMORY index) and per session. Recall (the memory context the harness injects into the system prompt) is not tracked - it never lands in the transcript.
 
 ### Skills intelligence
-- `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with
+- `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with. The catalog is scanned from `~/.claude/skills`, `~/.agents/skills`, `$XDG_CONFIG_HOME/opencode/{skill,skills}` (OpenCode's own dir), project `.claude/skills` + `.opencode/{skill,skills}`, and plugin caches; OpenCode `skill` tool calls count as invocations of the skill they load
 - `ax skills classify / tag / lint / by-role / roles` - role-tag skills via review briefs; usage x role-weight ranking
 - `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked)
 
