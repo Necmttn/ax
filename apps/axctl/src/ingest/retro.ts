@@ -178,8 +178,17 @@ export const retroFromSession = (
 // Writer
 // ---------------------------------------------------------------------------
 
+/**
+ * The `retro` record key for a session key. One retro per session (the table is
+ * UNIQUE on session), so callers that need to point AT the retro - e.g. a
+ * proposal citing the review it came from - derive the id here rather than
+ * re-implementing the truncation.
+ */
+export const retroRecordKey = (sessionId: string): string =>
+    safeKeyPart(sessionId).slice(0, 96);
+
 export const buildRetroStatement = (input: RetroInput): string => {
-    const key = safeKeyPart(input.sessionId).slice(0, 96);
+    const key = retroRecordKey(input.sessionId);
     const sessionRef = recordRef("session", input.sessionId);
     const retroRef = recordRef("retro", key);
     const upsert = `UPSERT ${retroRef} MERGE ${surrealObject([

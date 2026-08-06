@@ -393,6 +393,28 @@ The routing-table file is now the source of truth for BOTH the route-dispatch ho
 `ax directives ngrams [--limit=N] [--json]` - the learned per-user lift table (`directive_ngram` rows sorted by lift desc; lift = outcome-rate / base-rate). Populated at ingest; re-run `ax ingest` to refresh. MCP: `directives_list`.
 `ax directives workflows [--emit-brief] [--json]` - mine recurring skill-arc workflows from session history (fixed 12-week window). Finds ordered sequences of skills (length 3–6) that recur across ≥ 3 distinct sessions (gapped, maximal arcs only, top 50 by support). `--emit-brief` writes `.ax/tasks/workflows-<date>.md` for agent review; without it prints a ranked arc table.
 
+### Retro → proposal loop (#742)
+
+A retro's prose is NOT triageable - only rows in `proposal` reach
+`ax improve list`. Two paths write them, and neither reads free text:
+
+1. `derive-retro-proposals` (an `ax ingest` stage, **not** run by
+   `ax derive-signals`) clusters the MACHINE-emitted shapes in `retro.failed`
+   (`<Tool> failed ×<N>`, correction counts, friction kinds) across ≥2 sessions.
+   The `next` field is never mined by anything.
+2. **A reviewer files them explicitly**: `ax retro emit --from-file` accepts
+   `proposals: [<ax improve propose payload>]` (same `ProposeInputSchema`,
+   decoded strictly - a malformed entry fails the emit rather than dropping a
+   finding), writes each through `runPropose`, and RELATEs
+   `proposal->cites_evidence->retro` so triage can trace it back to the review.
+   Emit then runs the derivation inline for that session, and when `failed`/
+   `next` carry findings with nothing filed it says the loop is open.
+
+Careless-reading trap: `derive-signals` reports `proposedSkillEdges` -
+`turn->proposed->skill` edges (a skill a turn NAMED but did not invoke). It was
+called `proposed`, which read as "improve proposals" and made a healthy run look
+like a broken write path.
+
 ## Recommend + apply guidance to your own agent files
 
 `axctl improve recommend / accept / lint / show` ship the v0 grounded-files

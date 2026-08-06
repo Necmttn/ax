@@ -61,6 +61,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Self-improvement loop
 - `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance
 - `ax retro emit / pending / brief` + `ax:retro` skill - guided experiment-loop retrospective: triage proposals, lock verdicts, review hook effectiveness
+- `ax retro emit --from-file=<json>` - the JSON is `{tried, worked?, failed?, next?, proposals?}`; each `proposals` entry is an `ax improve propose` payload, filed through the same writer and linked back to the retro (`cites_evidence`), so a reviewed session's findings reach `ax improve list`. Prose alone is narrative-only - emit says so when `failed`/`next` carry findings but nothing was filed
 - `ax:dojo` skill - surplus-quota overnight training loop: budget-bounded self-improvement (verdicts, briefs, routing, proposals, experiments); install via `npx skills add Necmttn/ax`
 - `ax directives mine [--days=N] [--emit-brief] [--json]` - rank candidate directive turns by n-gram lift; --emit-brief writes .ax/tasks/directives-<date>.md for agent review; accepted proposals land via ax improve accept <id>
 - `ax directives list [--status=open|all] [--json]` - tracked directive proposals (guidance/section=directives), sorted by recurrence

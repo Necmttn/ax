@@ -6,7 +6,10 @@ import { prettyPrint } from "@ax/lib/json";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { recordRef } from "@ax/lib/shared/surql";
-import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
+import { retroFromSession, retroRecordKey, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
+import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
+import { proposalKey, runPropose } from "../../improve/propose.ts";
+import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
 import { cmdRetroReflect } from "../retro-reflect.ts";
 import { cmdRetroMeta } from "../retro-meta.ts";
 import { cmdRetroPlan } from "../retro-plan.ts";
@@ -25,6 +28,26 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * --source=<value> overrides. The Stop hook recipe in docs/HOOKS.md
  * uses this path.
  */
+/**
+ * Run the `retro-proposals` derivation for the retro just written (#742).
+ *
+ * That stage is the ONLY path from a retro's clustered failures to a proposal,
+ * and it runs during `ax ingest` - NOT during `ax derive-signals`, which is
+ * where a reporter reasonably looked and found nothing. Emitting a retro and
+ * then seeing an unchanged proposal queue reads as a broken loop, so emit runs
+ * the derivation itself.
+ *
+ * Best-effort: the retro is already committed, and a derivation failure must
+ * not turn a successful emit into a non-zero exit. It returns the number of
+ * proposals derived so the caller can report it.
+ */
+const runInlineRetroDerive = deriveRetroProposals().pipe(
+    Effect.map((stats) =>
+        stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
+    ),
+    Effect.orElseSucceed(() => 0),
+);
+
 const cmdRetroEmit = (input: {
     readonly session: string | undefined;
     readonly fromFile: string | undefined;
@@ -57,29 +80,78 @@ const cmdRetroEmit = (input: {
                 fail(`ax retro emit: could not read --from-file=${fromFile}: ${e}`);
                 return "";
             }));
-            const parsed = safeJsonParse<{ tried?: string; worked?: string; failed?: string; next?: string }>(raw);
-            if (!parsed) {
+            const rawJson = safeJsonParse<unknown>(raw);
+            if (!rawJson) {
                 fail(`ax retro emit: --from-file is not valid JSON`);
             }
-            if (!parsed.tried) {
-                fail("ax retro emit: payload missing required `tried` field");
-            }
+            const parsed = yield* decodeRetroEmitPayload(rawJson).pipe(
+                Effect.catch((err: unknown) =>
+                    Effect.sync(() => {
+                        // A payload we cannot read must stop the emit: silently
+                        // dropping a reviewer's proposal is the #742 failure.
+                        fail(
+                            `ax retro emit: --from-file payload is invalid: ${String(err)}\n` +
+                                "expected { tried, worked?, failed?, next?, proposals?: [<ax improve propose payload>] }",
+                        );
+                    })
+                ),
+            );
             const sessionKey = sessionRecordId.split(":").slice(1).join(":").replace(/`/g, "");
             yield* upsertRetro({
                 sessionId: sessionKey,
                 source: sourceFlag,
                 payload: {
-                    tried: String(parsed.tried),
+                    tried: parsed.tried,
                     worked: parsed.worked ?? null,
                     failed: parsed.failed ?? null,
                     next: parsed.next ?? null,
                 },
                 raw,
             });
+
+            // The retro -> proposal loop (#742). Proposals filed in the payload
+            // go through the SAME writer as `ax improve propose`, then cite the
+            // retro they came from, so triage can trace a proposal back to the
+            // session review that produced it.
+            const filed: Array<{ status: string; title: string; sig: string }> = [];
+            for (const proposal of parsed.proposals ?? []) {
+                const result = yield* runPropose(proposal);
+                yield* db.query(
+                    `RELATE ${recordRef("proposal", proposalKey(result.sig))}->cites_evidence->${
+                        recordRef("retro", retroRecordKey(sessionKey))
+                    } SET kind = "retro";`,
+                );
+                filed.push({ status: result.status, title: result.title, sig: result.sig });
+            }
+
+            const derived = yield* runInlineRetroDerive;
+
             if (json) {
-                console.log(prettyPrint({ session: sessionRecordId, source: sourceFlag, payload: parsed }));
-            } else {
-                console.log(`retro ${sourceFlag} for ${sessionRecordId}: ${parsed.tried.slice(0, 80)}…`);
+                console.log(prettyPrint({
+                    session: sessionRecordId,
+                    source: sourceFlag,
+                    payload: parsed,
+                    proposals: filed,
+                    derived,
+                }));
+                return;
+            }
+            console.log(`retro ${sourceFlag} for ${sessionRecordId}: ${parsed.tried.slice(0, 80)}…`);
+            for (const p of filed) {
+                console.log(`  proposal ${p.status}: ${p.title}`);
+            }
+            if (derived > 0) console.log(`  ${derived} proposal(s) derived from clustered retro failures`);
+            if (filed.length > 0 || derived > 0) {
+                console.log(`next: ax improve list --status=open`);
+            } else if (hasUnfiledFindings(parsed)) {
+                // Storing a finding is not filing it. Say so, or the reviewer
+                // walks away believing the loop closed (it is what #742 was).
+                console.log(
+                    "note: this retro records findings but files no proposals, so nothing reaches " +
+                        "`ax improve list`.\n" +
+                        "      add a `proposals` array to the payload (same shape as `ax improve propose`) " +
+                        "to make them triageable.",
+                );
             }
             return;
         }
@@ -89,8 +161,14 @@ const cmdRetroEmit = (input: {
             fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
         yield* upsertRetro(retroInput);
+        const derived = yield* runInlineRetroDerive;
         if (json) {
-            console.log(prettyPrint({ session: sessionRecordId, source: retroInput.source, payload: retroInput.payload }));
+            console.log(prettyPrint({
+                session: sessionRecordId,
+                source: retroInput.source,
+                payload: retroInput.payload,
+                derived,
+            }));
             return;
         }
         console.log(`retro ${retroInput.source} for ${sessionRecordId}`);
@@ -98,6 +176,10 @@ const cmdRetroEmit = (input: {
         if (retroInput.payload.worked) console.log(`  worked  ${retroInput.payload.worked}`);
         if (retroInput.payload.failed) console.log(`  failed  ${retroInput.payload.failed}`);
         if (retroInput.payload.next) console.log(`  next    ${retroInput.payload.next}`);
+        if (derived > 0) {
+            console.log(`  ${derived} proposal(s) derived from clustered retro failures`);
+            console.log(`next: ax improve list --status=open`);
+        }
     });
 
 const cmdRetroList = (input: {
@@ -341,13 +423,39 @@ Run these from the repo whose session this was:
 ax retro emit --session=${s.sessionId} --source=manual --from-file=<path-to-json>
 \`\`\`
 
-…where the JSON file contains \`{tried, worked, failed, next}\`. If you
-spot a repeated pattern (≥2 occurrences in this session, or rhymes with
-prior retros), also call:
+…where the JSON file contains \`{tried, worked, failed, next}\`.
 
-\`\`\`bash
-ax improve recommend ...
+## Filing what you found
+
+A retro's prose is NOT triageable on its own - only proposals reach
+\`ax improve list\`. If you spot a repeated pattern (≥2 occurrences in this
+session, or one that rhymes with prior retros), file it in the SAME payload
+under \`proposals\`, each entry shaped exactly like an \`ax improve propose\`
+input:
+
+\`\`\`json
+{
+  "tried": "…", "worked": "…", "failed": "…", "next": "…",
+  "proposals": [
+    {
+      "form": "skill",
+      "title": "Pre-Bash worktree guard",
+      "hypothesis": "Bash failures cluster on writes against main",
+      "confidence": "medium",
+      "payload": {
+        "trigger_pattern": "git write while on main",
+        "suspected_gap": "nothing checks the branch first",
+        "proposed_behavior": "block and point at a worktree"
+      }
+    }
+  ]
+}
 \`\`\`
+
+Forms: \`skill\` · \`subagent\` · \`hook\` · \`guidance\` · \`automation\` (see
+\`ax improve propose --help\`). Each filed proposal is linked back to this
+retro, so triage can trace it to the review. Note that
+\`ax improve recommend\` only RANKS existing proposals - it cannot create one.
 
 When done, update this file's frontmatter \`status: completed\`. The next
 \`ax retro pending\` call will exclude this session because the
