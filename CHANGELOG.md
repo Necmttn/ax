@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.39.2](https://github.com/Necmttn/ax/compare/v0.39.1...v0.39.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* **ingest:** record blocked hook fires from tool-result text ([#747](https://github.com/Necmttn/ax/issues/747)) ([5d1f28a](https://github.com/Necmttn/ax/commit/5d1f28aead9d419a480087fa0a89ce764d3bbfb5))
+* **ingest:** see OpenCode's own skills, and what its skill tool loads ([#749](https://github.com/Necmttn/ax/issues/749)) ([cbcd0b2](https://github.com/Necmttn/ax/commit/cbcd0b2d74f85981667fe3886322f73bd2926e03)), closes [#746](https://github.com/Necmttn/ax/issues/746)
+* **retro:** let emitted retros file improve proposals ([#748](https://github.com/Necmttn/ax/issues/748)) ([af08ee4](https://github.com/Necmttn/ax/commit/af08ee4995d9fd6486e5aaa545f6a53ec46922a4)), closes [#742](https://github.com/Necmttn/ax/issues/742)
+
 ## [0.39.1](https://github.com/Necmttn/ax/compare/v0.39.0...v0.39.1) (2026-08-05)
 
 
