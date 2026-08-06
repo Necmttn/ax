@@ -474,6 +474,106 @@ describe("Codex transcript extraction", () => {
         expect(sql).toContain("estimated_cost_usd:");
     });
 
+    // Plan 003 fix round 1: `codexTurnTokenUsageFromPayload`'s `first_total`
+    // outcome (no previous cumulative snapshot to diff against) returns the
+    // FULL cumulative total_token_usage.input_tokens unchanged - a sum by
+    // construction, not one request's context. It must not trigger the
+    // long-context tier even when that cumulative figure exceeds 200k. The
+    // very next turn's `derived_delta` outcome (a real diff against a
+    // previous snapshot) is genuinely request-grain and MUST still trigger
+    // the tier when its own delta exceeds 200k - same freshInputTokens
+    // (250k) on both turns, verifying the flag - not the token count -
+    // drives the tier decision.
+    test("suppresses the long-context tier on the first_total turn but not on the following derived_delta turn", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-07-01T10:00:00.000Z",
+                payload: {
+                    id: "codex-first-total-tier",
+                    cwd: "/tmp",
+                    model_provider: "openai",
+                    timestamp: "2026-07-01T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "turn_context",
+                timestamp: "2026-07-01T10:00:00.500Z",
+                payload: { model: "gpt-5.6-terra" },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-07-01T10:00:01.000Z",
+                payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "turn 1" }] },
+            }),
+            // First token_count event this session: no last_token_usage, and
+            // no previous total_token_usage to diff against -> `first_total`.
+            // Its cumulative input_tokens (250k) EXCEEDS the 200k threshold -
+            // exactly the resumed/forked-rollout shape the fix targets.
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-07-01T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: { input_tokens: 250_000, output_tokens: 0, total_tokens: 250_000 },
+                    },
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-07-01T10:00:03.000Z",
+                payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "turn 2" }] },
+            }),
+            // Second token_count event: still no last_token_usage, but NOW a
+            // previous snapshot exists -> `derived_delta`. Delta is
+            // 500k - 250k = 250k, the SAME fresh-input magnitude as turn 1.
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-07-01T10:00:04.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: { input_tokens: 500_000, output_tokens: 0, total_tokens: 500_000 },
+                    },
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+        expect(extracted.turnTokenUsages).toHaveLength(2);
+        expect(extracted.turnTokenUsages[0]).toMatchObject({
+            seq: 1,
+            usageQuality: "first_total",
+            promptTokens: 250_000,
+            freshInputTokens: 250_000,
+        });
+        expect(extracted.turnTokenUsages[1]).toMatchObject({
+            seq: 2,
+            usageQuality: "derived_delta",
+            promptTokens: 250_000,
+            freshInputTokens: 250_000,
+        });
+
+        const statements = __testBuildCodexBatchStatements(extracted, 1200);
+        const turn1 = statements.find((s) => s.includes("turn_token_usage") && s.includes("seq: 1,"));
+        const turn2 = statements.find((s) => s.includes("turn_token_usage") && s.includes("seq: 2,"));
+        expect(turn1).toBeDefined();
+        expect(turn2).toBeDefined();
+
+        // gpt-5.6-terra: base input $2/M, tier input $4/M above 200k.
+        // first_total (aggregated, suppressed): 250k @ $2/M = $0.5 flat, base
+        // rate - NOT the $1 the tier would have produced.
+        expect(turn1).toContain("estimated_input_cost_usd: 0.5");
+        expect(turn1).toContain("estimated_cost_usd: 0.5");
+        // derived_delta (request-grain, tier applies): 250k @ $4/M = $1 -
+        // same fresh-input token count as turn 1, different (correct)
+        // dollar value because the grain differs.
+        expect(turn2).toContain("estimated_input_cost_usd: 1");
+        expect(turn2).toContain("estimated_cost_usd: 1");
+    });
+
     test("links adjacent provider events with linear parent edges while preserving tool-result parents", () => {
         const extracted = __testExtractCodexJsonlLines([
             JSON.stringify({

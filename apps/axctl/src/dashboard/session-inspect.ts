@@ -8,7 +8,7 @@
 
 import { Data, Effect, FileSystem, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
-import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
+import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
 import { SurrealClient } from "@ax/lib/db";
@@ -751,6 +751,9 @@ function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetai
         cacheCreationInputTokens: usage.cacheCreationInputTokens,
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
+        // `first_total` promptTokens is a cumulative sum, not one request's
+        // context - see `isCodexTurnUsageAggregated` (plan 003, fix round 1).
+        ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
     });
     return {
         seq: usage.seq,

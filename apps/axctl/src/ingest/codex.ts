@@ -407,10 +407,32 @@ function codexTurnTokenUsageFromPayload(
         usageSource: previousTotalUsage
             ? "codex_token_count.total_token_usage_delta"
             : "codex_token_count.total_token_usage_first",
-        usageQuality: previousTotalUsage ? "derived_delta" : "first_total",
+        usageQuality: previousTotalUsage ? "derived_delta" : CODEX_TURN_USAGE_QUALITY_FIRST_TOTAL,
         raw: usage.totalTokenUsage,
     };
 }
+
+/**
+ * `codexTurnTokenUsageFromPayload` has THREE outcomes, not two - they differ
+ * in grain:
+ *  - `provider_turn` (real per-request `last_token_usage`) and
+ *    `derived_delta` (diff of two consecutive cumulative snapshots) are each
+ *    tied to exactly ONE turn - request-grain, the tier may apply.
+ *  - `first_total` (no previous snapshot to diff against) is different:
+ *    `positiveDelta(current, null)` returns `current` unchanged, so
+ *    `promptTokens` is the FULL cumulative `total_token_usage.input_tokens`
+ *    up to that point - a sum by construction. For a fresh session that's one
+ *    request and harmless; for a resumed/forked rollout whose first
+ *    `token_count` already carries inherited cumulative totals, it can exceed
+ *    200k and falsely trigger the long-context tier. Consumers must pass
+ *    `aggregated: true` to `estimateCost` for this outcome (plan 003, fix
+ *    round 1).
+ */
+export const CODEX_TURN_USAGE_QUALITY_FIRST_TOTAL = "first_total";
+
+/** True when `usage` came from the `first_total` outcome - see the doc comment above. */
+export const isCodexTurnUsageAggregated = (usage: Pick<CodexTurnTokenUsage, "usageQuality">): boolean =>
+    usage.usageQuality === CODEX_TURN_USAGE_QUALITY_FIRST_TOTAL;
 
 const concreteCodexModel = (session: CodexSession): string | null => {
     if (session.model) return session.model;
@@ -1274,6 +1296,9 @@ const buildCodexTurnTokenUsageStatements = (
                 cacheReadInputTokens: usage.cacheReadInputTokens,
                 estimatedTokens: usage.estimatedTokens,
                 fastTier: fastTierEnabled(),
+                // `first_total` promptTokens is a cumulative sum, not one
+                // request's context - see `isCodexTurnUsageAggregated`.
+                ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
             }),
             usageSource: usage.usageSource,
             usageQuality: usage.usageQuality,
