@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { decodeJsonOrNull, encodeJson } from "@ax/lib/decode";
 import { AxConfig } from "@ax/lib/config";
@@ -13,7 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 const LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 
-export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-07-16";
+export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-08-06";
 
 export interface ModelPricing {
     readonly provider: string;
@@ -159,22 +159,52 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         fastMultiplier: 2.5,
         pricingSource: MODEL_PRICING_SOURCE,
     },
+    // The three gpt-5.6 tiers below carry models.dev rates verbatim, including
+    // each one's >200k context tier. Built-in entries WIN over the remote
+    // catalogs (`mergePricingCatalogs(modelsDev, litellm, builtIn)`), so a
+    // wrong built-in silently overrides a correct upstream one - luna used to
+    // sit at 5x its real price that way, and terra had no entry at all and fell
+    // through the generic `gpt-5.6-*` rule to gpt-5.5 rates (~2.5x over). #751.
     "gpt-5.6-sol": {
         provider: "openai",
         inputPerMillionUsd: 5,
         outputPerMillionUsd: 30,
         cacheCreationPerMillionUsd: 6.25,
         cacheReadPerMillionUsd: 0.5,
+        inputAbove200kPerMillionUsd: 10,
+        outputAbove200kPerMillionUsd: 45,
+        cacheCreationAbove200kPerMillionUsd: 12.5,
+        cacheReadAbove200kPerMillionUsd: 1,
         fastMultiplier: 1,
+        contextWindow: 1_050_000,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.6-terra": {
+        provider: "openai",
+        inputPerMillionUsd: 2,
+        outputPerMillionUsd: 12,
+        cacheCreationPerMillionUsd: 2.5,
+        cacheReadPerMillionUsd: 0.2,
+        inputAbove200kPerMillionUsd: 4,
+        outputAbove200kPerMillionUsd: 18,
+        cacheCreationAbove200kPerMillionUsd: 5,
+        cacheReadAbove200kPerMillionUsd: 0.4,
+        fastMultiplier: 1,
+        contextWindow: 1_050_000,
         pricingSource: MODEL_PRICING_SOURCE,
     },
     "gpt-5.6-luna": {
         provider: "openai",
-        inputPerMillionUsd: 1,
-        outputPerMillionUsd: 6,
-        cacheCreationPerMillionUsd: 1.25,
-        cacheReadPerMillionUsd: 0.1,
+        inputPerMillionUsd: 0.2,
+        outputPerMillionUsd: 1.2,
+        cacheCreationPerMillionUsd: 0.25,
+        cacheReadPerMillionUsd: 0.02,
+        inputAbove200kPerMillionUsd: 0.4,
+        outputAbove200kPerMillionUsd: 1.8,
+        cacheCreationAbove200kPerMillionUsd: 0.5,
+        cacheReadAbove200kPerMillionUsd: 0.04,
         fastMultiplier: 1,
+        contextWindow: 1_050_000,
         pricingSource: MODEL_PRICING_SOURCE,
     },
     "gpt-5-mini": {
@@ -274,6 +304,21 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         cacheCreationPerMillionUsd: 18.75,
         cacheReadPerMillionUsd: 1.5,
         fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    // Rates from models.dev (`claude-opus-5`): input 5 / output 25 /
+    // cache_read 0.5 / cache_write 6.25, 1M context. Missing here, opus-5
+    // priced $0 on any machine whose pricing cache predates its release -
+    // and a $0 model gets share 0 in the profile, so it rendered as "other"
+    // instead of as the second-largest model by spend (#751).
+    "claude-opus-5": {
+        provider: "anthropic",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 25,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        contextWindow: 1_000_000,
         pricingSource: MODEL_PRICING_SOURCE,
     },
     "claude-sonnet-4": {
@@ -436,17 +481,22 @@ export function pricingForModel(
     if (!modelKey) return null;
     const exact = catalog.get(modelKey);
     if (exact) return exact;
-    // sol/luna carry exact verified rates above (exact match wins); other
-    // gpt-5.6 variants (e.g. terra) approximate at the gpt-5.5 tier rather
-    // than pricing $0 (issue #696). Must precede the generic gpt-5.x rule.
+    // sol/terra/luna all carry exact models.dev rates above (exact match wins);
+    // these prefix rules catch dated/suffixed variants so they price at their
+    // OWN tier instead of falling through to the gpt-5.5 approximation (#751).
+    // Any remaining gpt-5.6 variant approximates at gpt-5.5 rather than pricing
+    // $0 (issue #696). All of this must precede the generic gpt-5.x rule.
+    if (modelKey.startsWith("gpt-5.6-sol")) return catalog.get("gpt-5.6-sol") ?? null;
+    if (modelKey.startsWith("gpt-5.6-terra")) return catalog.get("gpt-5.6-terra") ?? null;
+    if (modelKey.startsWith("gpt-5.6-luna")) return catalog.get("gpt-5.6-luna") ?? null;
     if (/^gpt-5\.6(?:-|$)/i.test(modelKey)) return catalog.get("gpt-5.5") ?? catalog.get("gpt-5") ?? null;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
     if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
+    if (modelKey.startsWith("claude-opus-5")) return catalog.get("claude-opus-5") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
-    if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     return null;
 }
 
@@ -537,10 +587,61 @@ const readJsonFile = (path: string): Effect.Effect<unknown | null, never, FileSy
         return text === null ? null : decodeJsonOrNull(text);
     });
 
+/**
+ * How long a cached pricing snapshot is trusted before ax tries the network
+ * again (#751).
+ *
+ * The cache used to have NO expiry: whatever was on disk won forever unless
+ * someone set `AX_PRICING_REFRESH=1`. So a machine that fetched the catalog
+ * once priced every model released afterwards at $0 - silently and
+ * indefinitely. That is how `claude-opus-5` came to render as UNPRICED, and
+ * (because profile share is cost-weighted) how it collapsed into the profile's
+ * "other" bucket while being the second-largest model by spend.
+ *
+ * A week is short enough that a new model becomes priced on its own, and long
+ * enough that ordinary ingests almost never pay for the fetch. Staleness is
+ * never fatal: an expired cache that cannot be refreshed is still used.
+ */
+export const PRICING_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Env override in whole days; "0" disables expiry (always trust the cache). */
+export const pricingCacheTtlMs = (env: Record<string, string | undefined>): number => {
+    const raw = env.AX_PRICING_MAX_AGE_DAYS?.trim();
+    if (!raw) return PRICING_CACHE_TTL_MS;
+    const days = Number(raw);
+    if (!Number.isFinite(days) || days < 0) return PRICING_CACHE_TTL_MS;
+    return days * 24 * 60 * 60 * 1000;
+};
+
+/**
+ * Is the cached snapshot younger than `ttlMs`? An unreadable/absent file is
+ * NOT fresh (fall through to the network); a stat fault is treated the same
+ * way, so a filesystem oddity can only cost a fetch, never freeze pricing.
+ */
+const cacheIsFresh = (
+    cachePath: string,
+    ttlMs: number,
+    now: number,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const mtime = yield* fs.stat(cachePath).pipe(
+            Effect.map((info): Date | null => Option.getOrNull(info.mtime)),
+            orAbsent(null as Date | null),
+        );
+        if (mtime === null) return false;
+        return now - mtime.getTime() < ttlMs;
+    });
+
 const fetchJsonWithCache = (
     url: string,
     cachePath: string,
-    opts: { readonly offline: boolean; readonly refresh: boolean },
+    opts: {
+        readonly offline: boolean;
+        readonly refresh: boolean;
+        readonly ttlMs: number;
+        readonly now: number;
+    },
 ): Effect.Effect<
     { json: unknown | null; source: "network" | "cache" | "missing" },
     never,
@@ -550,9 +651,14 @@ const fetchJsonWithCache = (
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
+        // A fresh cache short-circuits; a stale one falls through to the
+        // network and is still the fallback if that fetch fails (below).
         if (!opts.refresh) {
-            const cached = yield* readJsonFile(cachePath);
-            if (cached !== null) return { json: cached, source: "cache" as const };
+            const fresh = opts.ttlMs === 0 || (yield* cacheIsFresh(cachePath, opts.ttlMs, opts.now));
+            if (fresh) {
+                const cached = yield* readJsonFile(cachePath);
+                if (cached !== null) return { json: cached, source: "cache" as const };
+            }
         }
         if (!opts.offline) {
             // OLD: the whole network+write block sat in a try/catch that
@@ -593,9 +699,11 @@ export const loadPricingCatalog = (
         const offline = env.AX_PRICING_OFFLINE === "1";
         const refresh = env.AX_PRICING_REFRESH === "1";
         const cacheDir = path.join(dataDir, "pricing");
+        // One `now` for both fetches so the two caches age together.
+        const fetchOpts = { offline, refresh, ttlMs: pricingCacheTtlMs(env), now: Date.now() };
         const [litellm, modelsDev] = yield* Effect.all([
-            fetchJsonWithCache(LITELLM_PRICING_URL, path.join(cacheDir, "litellm-model-prices.json"), { offline, refresh }),
-            fetchJsonWithCache(MODELS_DEV_API_URL, path.join(cacheDir, "models-dev-api.json"), { offline, refresh }),
+            fetchJsonWithCache(LITELLM_PRICING_URL, path.join(cacheDir, "litellm-model-prices.json"), fetchOpts),
+            fetchJsonWithCache(MODELS_DEV_API_URL, path.join(cacheDir, "models-dev-api.json"), fetchOpts),
         ], { concurrency: "unbounded" });
         const catalog = mergePricingCatalogs(
             parseModelsDevPricingCatalog(modelsDev.json),
