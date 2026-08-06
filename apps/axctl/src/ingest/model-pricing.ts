@@ -514,6 +514,13 @@ export function estimateCost(input: {
     readonly cacheReadInputTokens: number | null;
     readonly estimatedTokens: number;
     readonly pricingCatalog?: ReadonlyMap<string, ModelPricing>;
+    /**
+     * Bill at the provider's priority/fast tier. OFF by default: the harness
+     * default is the standard tier (`service_tier = "default"` in
+     * ~/.codex/config.toml) and no per-session tier signal exists in any
+     * transcript, so assuming priority overstated every OpenAI cost.
+     */
+    readonly fastTier?: boolean;
 }): CostEstimate {
     const pricing = pricingForModel(input.modelKey, input.pricingCatalog);
     if (!pricing) {
@@ -536,9 +543,10 @@ export function estimateCost(input: {
         : componentCost(input.completionTokens, pricing.outputPerMillionUsd, pricing.outputAbove200kPerMillionUsd);
     const cacheCreationUsd = componentCost(cacheCreationTokens, pricing.cacheCreationPerMillionUsd, pricing.cacheCreationAbove200kPerMillionUsd);
     const cacheReadUsd = componentCost(cacheReadTokens, pricing.cacheReadPerMillionUsd, pricing.cacheReadAbove200kPerMillionUsd);
+    const tierMultiplier = input.fastTier === true ? pricing.fastMultiplier : 1;
     const totalUsd = [inputUsd, outputUsd, cacheCreationUsd, cacheReadUsd]
         .filter((value): value is number => value !== null)
-        .reduce((sum, value) => sum + value, 0) * pricing.fastMultiplier;
+        .reduce((sum, value) => sum + value, 0) * tierMultiplier;
     return {
         inputUsd,
         outputUsd,
@@ -548,6 +556,14 @@ export function estimateCost(input: {
         pricingSource: pricing.pricingSource,
     };
 }
+
+/**
+ * Opt into priority/fast-tier billing (`AX_OPENAI_FAST_TIER=1`). Default is the
+ * standard tier - see `estimateCost`'s `fastTier` doc comment.
+ */
+export const fastTierEnabled = (
+    env: Record<string, string | undefined> = process.env,
+): boolean => env.AX_OPENAI_FAST_TIER === "1";
 
 export function agentModelStatement(input: {
     readonly modelKey: string;

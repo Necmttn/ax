@@ -8,6 +8,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     builtInPricingCatalog,
     estimateCost,
+    fastTierEnabled,
     loadPricingCatalog as loadPricingCatalogEffect,
     mergePricingCatalogs,
     normalizeModelName,
@@ -146,6 +147,30 @@ describe("model pricing", () => {
             inputAbove200kPerMillionUsd: 0.4,
             outputAbove200kPerMillionUsd: 1.8,
         });
+    });
+
+    it("bills at base rates by default and at the fast tier only when asked", () => {
+        const catalog = builtInPricingCatalog();
+        const usage = {
+            modelKey: "gpt-5.5",
+            promptTokens: 1_000_000,
+            completionTokens: 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+            estimatedTokens: 1_000_000,
+            pricingCatalog: catalog,
+        };
+
+        // 1M fresh input tokens at $5/M.
+        expect(estimateCost(usage).totalUsd).toBeCloseTo(5, 6);
+        // Priority tier is 2.5x - opt-in only.
+        expect(estimateCost({ ...usage, fastTier: true }).totalUsd).toBeCloseTo(12.5, 6);
+    });
+
+    it("reads the fast-tier opt-in from the environment", () => {
+        expect(fastTierEnabled({})).toBe(false);
+        expect(fastTierEnabled({ AX_OPENAI_FAST_TIER: "0" })).toBe(false);
+        expect(fastTierEnabled({ AX_OPENAI_FAST_TIER: "1" })).toBe(true);
     });
 
     it("prices claude-opus-5 and its dated variants from the built-in catalog", () => {

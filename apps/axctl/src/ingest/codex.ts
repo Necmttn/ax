@@ -58,7 +58,7 @@ import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
-import { estimateCost } from "./model-pricing.ts";
+import { estimateCost, fastTierEnabled } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
@@ -1212,6 +1212,7 @@ const buildCodexTokenUsageStatements = (
         cacheCreationInputTokens: null,
         cacheReadInputTokens: usage.cacheReadInputTokens,
         estimatedTokens: usage.estimatedTokens,
+        fastTier: fastTierEnabled(),
     });
     return [
         // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
@@ -1269,6 +1270,7 @@ const buildCodexTurnTokenUsageStatements = (
                 cacheCreationInputTokens: usage.cacheCreationInputTokens,
                 cacheReadInputTokens: usage.cacheReadInputTokens,
                 estimatedTokens: usage.estimatedTokens,
+                fastTier: fastTierEnabled(),
             }),
             usageSource: usage.usageSource,
             usageQuality: usage.usageQuality,
