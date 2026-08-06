@@ -1362,6 +1362,86 @@ describe("Claude transcript extraction", () => {
             },
         ]);
     });
+
+    // #743: current Claude Code writes NO hook_blocking_error attachment. A
+    // blocked call survives only as the tool_result text, so a guard that is
+    // silent on pass and blocking on fail was invisible in the graph.
+    test("recovers a blocked hook from tool_result text when no attachment exists", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-08-05T07:38:28.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_blocked",
+                                name: "Bash",
+                                input: { command: "git reset --hard" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    uuid: "blocked-result-uuid",
+                    timestamp: "2026-08-05T07:38:28.500Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        role: "user",
+                        content: [
+                            {
+                                type: "tool_result",
+                                tool_use_id: "toolu_blocked",
+                                is_error: true,
+                                content:
+                                    "PreToolUse:Bash hook error: [bun /Users/necmttn/.ax/hooks/enforce-worktree.ts # ax:74da7418]: BLOCKED: history-mutating git op against a DIRTY primary working tree.",
+                            },
+                        ],
+                    },
+                    toolUseResult:
+                        "Error: PreToolUse:Bash hook error: [bun /Users/necmttn/.ax/hooks/enforce-worktree.ts # ax:74da7418]: BLOCKED: history-mutating git op against a DIRTY primary working tree.",
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "claude-hook-text-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.hookEvents.map((e) => ({
+            event_name: e.event_name,
+            hook_name: e.hook_name,
+            tool_call_id: e.tool_call_id,
+            source_type: e.source_type,
+        }))).toEqual([
+            {
+                event_name: "PreToolUse",
+                hook_name: "PreToolUse:Bash",
+                tool_call_id: "toolu_blocked",
+                source_type: "tool_result_text",
+            },
+        ]);
+        expect(extracted.hookCommandInvocations).toHaveLength(1);
+        const invocation = extracted.hookCommandInvocations[0]!;
+        expect(invocation.command).toBe(
+            "bun /Users/necmttn/.ax/hooks/enforce-worktree.ts # ax:74da7418",
+        );
+        expect(invocation.provider_status).toBe("blocking_error");
+        expect(invocation.effect).toBe("blocked");
+        expect(invocation.blocking_error_excerpt).toStartWith("BLOCKED: history-mutating git op");
+        // The blocked call is still linked to the tool_call it stopped.
+        expect(invocation.tool_call_key).toBe(
+            toolCallRecordKey({
+                sessionId: "claude-hook-text-session",
+                seq: 1,
+                callId: "toolu_blocked",
+            }),
+        );
+    });
 });
 
 describe("claude compaction", () => {
