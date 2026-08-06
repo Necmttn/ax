@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/Necmttn/ax/compare/v0.39.0...v0.39.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **otel:** never define codex otel.exporter twice ([#744](https://github.com/Necmttn/ax/issues/744)) ([cc2327e](https://github.com/Necmttn/ax/commit/cc2327e7359dd2017b5c063964cb8c0e11d2ee0e))
+
 ## [0.39.0](https://github.com/Necmttn/ax/compare/v0.38.1...v0.39.0) (2026-07-17)
 
 
