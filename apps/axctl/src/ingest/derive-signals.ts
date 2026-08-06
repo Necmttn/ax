@@ -112,7 +112,14 @@ export interface DeriveStats {
     sessions: number;
     turns: number;
     corrections: number;
-    proposed: number;
+    /**
+     * `turn -> proposed -> skill` EDGES written - a skill the turn named but did
+     * not invoke. NOT improve-loop proposals (#742): this counter reading 376
+     * while `ax improve list` stayed at 0 looked like a broken write path and
+     * cost a reporter a debugging session. Improve proposals come from the
+     * `proposals` / `retro-proposals` stages, never from here.
+     */
+    proposedSkillEdges: number;
     skillPairs: number;
     recoveries: number;
     frictionEvents: number;
@@ -136,7 +143,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
         if (opts.onProgress) yield* opts.onProgress({ sessions: bundles.length });
 
         let corrections = 0;
-        let proposed = 0;
+        let proposedSkillEdges = 0;
         let turnCount = 0;
         let recoveries = 0;
 
@@ -156,7 +163,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
             const p = deriveProposed(bundle, skillNames);
             const r = deriveRecovered(bundle);
             corrections += c.length;
-            proposed += p.length;
+            proposedSkillEdges += p.length;
             recoveries += r.length;
             correctionBatch.push(...c);
             proposedBatch.push(...p);
@@ -169,7 +176,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
                     sessions: index + 1,
                     turns: turnCount,
                     corrections,
-                    proposed,
+                    proposedSkillEdges,
                     recoveries,
                     skillPairs: shouldWriteSkillPairs ? pairsAccum.size : 0,
                 });
@@ -184,7 +191,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 sessions: bundles.length,
                 turns: turnCount,
                 corrections,
-                proposed,
+                proposedSkillEdges,
                 recoveries,
                 skillPairs: pairsList.length,
             });
@@ -202,7 +209,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 sessions: bundles.length,
                 turns: turnCount,
                 corrections,
-                proposed,
+                proposedSkillEdges,
                 recoveries,
                 skillPairs: pairsList.length,
                 frictionEvents: frictionBatch.length,
@@ -275,7 +282,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
             sessions: bundles.length,
             turns: turnCount,
             corrections,
-            proposed,
+            proposedSkillEdges,
             skillPairs: pairsList.length,
             recoveries,
             frictionEvents: frictionBatch.length,
@@ -285,7 +292,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
             sessions: bundles.length,
             turns: turnCount,
             corrections,
-            proposed,
+            proposedSkillEdges,
             skillPairs: pairsList.length,
             recoveries,
             frictionEvents: frictionBatch.length,
@@ -322,7 +329,7 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
     frictionEvents: Schema.Number,
     diagnosticEvents: Schema.Number,
     corrections: Schema.Number,
-    proposed: Schema.Number,
+    proposedSkillEdges: Schema.Number,
 }) {}
 
 export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
@@ -339,7 +346,7 @@ export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
             frictionEvents: result.frictionEvents,
             diagnosticEvents: result.diagnosticEvents,
             corrections: result.corrections,
-            proposed: result.proposed,
+            proposedSkillEdges: result.proposedSkillEdges,
         });
     }),
 };

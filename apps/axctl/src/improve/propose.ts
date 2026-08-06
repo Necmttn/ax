@@ -89,8 +89,13 @@ export interface ProposeResult {
     readonly title: string;
 }
 
-/** Stable record key derived from the sig - same row on re-propose. */
-const proposalKey = (sig: string): string => `agent__${sig}`;
+/**
+ * Stable record key derived from the sig - same row on re-propose. Exported so
+ * callers that must reference the written proposal (e.g. `ax retro emit`
+ * relating a filed proposal back to its retro) address the same record instead
+ * of rebuilding the prefix.
+ */
+export const proposalKey = (sig: string): string => `agent__${sig}`;
 
 const PAYLOAD_TABLE: Record<ProposeInput["form"], string> = {
     skill: "skill_proposal",

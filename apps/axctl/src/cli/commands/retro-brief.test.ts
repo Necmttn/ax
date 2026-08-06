@@ -29,6 +29,32 @@ describe("formatRetroBrief", () => {
         expect(brief).not.toContain("Source of truth is the\ntranscript at");
     });
 
+    // #742: the brief used to tell reviewers to run `ax improve recommend ...`
+    // to file a finding. That command only RANKS existing proposals, so a
+    // reviewer following the brief literally produced nothing triageable.
+    it("points the reviewer at the write-path, not the ranking command", () => {
+        const brief = formatRetroBrief(
+            {
+                sessionId: "session:s1",
+                key: "s1",
+                project: null,
+                source: "claude",
+                model: null,
+                startedAt: null,
+                endedAt: null,
+                lastTurnAt: null,
+                turns: 9,
+                reason: "ended_at",
+            },
+            null,
+            "sonnet",
+        );
+
+        expect(brief).toContain('"proposals"');
+        expect(brief).toContain("only RANKS existing proposals");
+        expect(brief).not.toMatch(/```bash\nax improve recommend/);
+    });
+
     it("teaches the reviewer to prefer normalized turns over raw harness JSONL", async () => {
         const template = await Bun.file(
             new URL("../../../../../agents/retro-reviewer.md", import.meta.url),
