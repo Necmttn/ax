@@ -543,7 +543,7 @@ CREATE INDEX IF NOT EXISTS content_block_hash ON content_block(document, block_h
 CREATE TABLE IF NOT EXISTS content_atom (
     id VARCHAR PRIMARY KEY,
     block VARCHAR NOT NULL,  -- ref -> content_block; was: REFERENCE ON DELETE CASCADE
-    document VARCHAR,  -- ref -> content_document
+    document VARCHAR NOT NULL,  -- ref -> content_document
     source_kind VARCHAR NOT NULL,
     session VARCHAR,  -- ref -> session
     agent_session VARCHAR,  -- ref -> agent_session
@@ -555,9 +555,9 @@ CREATE TABLE IF NOT EXISTS content_atom (
     normalized VARCHAR,
     start_offset BIGINT,
     end_offset BIGINT,
-    confidence DOUBLE DEFAULT 1.0,
+    confidence DOUBLE NOT NULL DEFAULT 1.0,
     raw VARCHAR,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS content_atom_kind_value ON content_atom(kind, normalized);
 CREATE INDEX IF NOT EXISTS content_atom_block ON content_atom(block);
@@ -572,10 +572,10 @@ CREATE TABLE IF NOT EXISTS mentions_file (
     out_id VARCHAR NOT NULL,
     document VARCHAR NOT NULL,  -- ref -> content_document
     block VARCHAR NOT NULL,  -- ref -> content_block
-    confidence DOUBLE DEFAULT 1.0,
+    confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
     workspace VARCHAR,  -- ref -> workspace
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_file_in ON mentions_file(in_id);
 CREATE INDEX IF NOT EXISTS mentions_file_out ON mentions_file(out_id);
@@ -587,10 +587,10 @@ CREATE TABLE IF NOT EXISTS mentions_commit (
     out_id VARCHAR NOT NULL,
     document VARCHAR NOT NULL,  -- ref -> content_document
     block VARCHAR NOT NULL,  -- ref -> content_block
-    confidence DOUBLE DEFAULT 1.0,
+    confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
     workspace VARCHAR,  -- ref -> workspace
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_commit_in ON mentions_commit(in_id);
 CREATE INDEX IF NOT EXISTS mentions_commit_out ON mentions_commit(out_id);
@@ -601,9 +601,9 @@ CREATE TABLE IF NOT EXISTS mentions_artifact (
     out_id VARCHAR NOT NULL,
     document VARCHAR NOT NULL,  -- ref -> content_document
     block VARCHAR NOT NULL,  -- ref -> content_block
-    confidence DOUBLE DEFAULT 1.0,
+    confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_artifact_in ON mentions_artifact(in_id);
 CREATE INDEX IF NOT EXISTS mentions_artifact_out ON mentions_artifact(out_id);
@@ -618,7 +618,7 @@ CREATE TABLE IF NOT EXISTS plan_snapshot (
     items VARCHAR NOT NULL,  -- JSON-encoded
     summary VARCHAR,
     explanation VARCHAR,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS plan_snapshot_plan_ts ON plan_snapshot(plan, ts);
 CREATE INDEX IF NOT EXISTS plan_snapshot_agent_event ON plan_snapshot(agent_event);
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS insight (
     text VARCHAR NOT NULL,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS insight_subject ON insight(subject_type, subject_id);
 
@@ -664,7 +664,7 @@ CREATE TABLE IF NOT EXISTS friction_event (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     raw VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS friction_session_kind ON friction_event(session, kind);
 
@@ -681,7 +681,7 @@ CREATE TABLE IF NOT EXISTS turn_analysis (
     signals VARCHAR,  -- JSON-encoded
     text VARCHAR,
     ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS turn_analysis_turn ON turn_analysis(turn);
 CREATE INDEX IF NOT EXISTS turn_analysis_session_act ON turn_analysis(session, act);
@@ -703,7 +703,7 @@ CREATE TABLE IF NOT EXISTS reaction_event (
     assistant_text VARCHAR,
     context_json VARCHAR,  -- JSON-encoded
     ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS reaction_event_user_turn ON reaction_event(user_turn);
 CREATE INDEX IF NOT EXISTS reaction_event_session_ts ON reaction_event(session, ts);
@@ -718,7 +718,7 @@ CREATE TABLE IF NOT EXISTS classifier_definition (
     input VARCHAR NOT NULL,
     labels VARCHAR NOT NULL,  -- JSON-encoded
     targets VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_definition_key_version ON classifier_definition(classifier_key, version);
 
@@ -753,7 +753,7 @@ CREATE TABLE IF NOT EXISTS classifier_result (
     evidence_json VARCHAR NOT NULL,
     signals VARCHAR,  -- JSON-encoded
     ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS classifier_result_classifier ON classifier_result(classifier_key, classifier_version);
 CREATE INDEX IF NOT EXISTS classifier_result_turn ON classifier_result(turn);
@@ -766,7 +766,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_node (
     label VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_node_graph_id ON classifier_graph_node(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_node_kind ON classifier_graph_node(kind);
@@ -780,7 +780,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_edge (
     evidence_path VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_edge_graph_id ON classifier_graph_edge(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_edge_kind ON classifier_graph_edge(kind);
@@ -798,7 +798,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_fact (
     evidence_edges_json VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_fact_graph_id ON classifier_graph_fact(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_fact_kind ON classifier_graph_fact(kind);
@@ -822,7 +822,7 @@ CREATE TABLE IF NOT EXISTS transcript_label_review (
     reviewer VARCHAR NOT NULL,
     rationale VARCHAR NOT NULL,
     evidence_paths_json VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_review_candidate ON transcript_label_review(candidate_id);
 CREATE INDEX IF NOT EXISTS transcript_label_review_graph_fact ON transcript_label_review(graph_fact_id);
@@ -838,7 +838,7 @@ CREATE TABLE IF NOT EXISTS transcript_label_vector (
     embedding_ref VARCHAR NOT NULL,
     nearest_reviewed_candidate_ids_json VARCHAR NOT NULL,  -- JSON-encoded
     nearest_scores_json VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_vector_candidate ON transcript_label_vector(candidate_id);
 CREATE INDEX IF NOT EXISTS transcript_label_vector_graph_fact ON transcript_label_vector(graph_fact_id);
@@ -868,7 +868,7 @@ CREATE TABLE IF NOT EXISTS diagnostic_event (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     raw VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS diagnostic_session_kind ON diagnostic_event(session, kind);
 
@@ -876,9 +876,9 @@ CREATE TABLE IF NOT EXISTS guidance (
     id VARCHAR PRIMARY KEY,
     slug VARCHAR NOT NULL,
     title VARCHAR,
-    status VARCHAR DEFAULT 'active',
+    status VARCHAR NOT NULL DEFAULT 'active',
     labels VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_slug_uq ON guidance(slug);
@@ -890,8 +890,8 @@ CREATE TABLE IF NOT EXISTS guidance_version (
     version VARCHAR NOT NULL,
     text VARCHAR NOT NULL,
     raw VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status VARCHAR DEFAULT 'proposed',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR NOT NULL DEFAULT 'proposed',
     scope VARCHAR,
     risk VARCHAR,
     evidence VARCHAR,
@@ -909,8 +909,8 @@ CREATE TABLE IF NOT EXISTS guidance_source (
     provider VARCHAR NOT NULL,
     evidence_strength VARCHAR NOT NULL,
     git_root VARCHAR,
-    tracked BOOLEAN DEFAULT FALSE,
-    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    tracked BOOLEAN NOT NULL DEFAULT FALSE,
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_source_path_uq ON guidance_source(path);
 CREATE INDEX IF NOT EXISTS guidance_source_scope ON guidance_source(scope, provider);
@@ -928,7 +928,7 @@ CREATE TABLE IF NOT EXISTS guidance_revision (
     evidence_strength VARCHAR NOT NULL,
     commit_evidence VARCHAR,
     file_evidence VARCHAR,
-    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_revision_source_hash ON guidance_revision(source_path, content_hash);
 CREATE INDEX IF NOT EXISTS guidance_revision_scope ON guidance_revision(scope, observed_at);
@@ -963,7 +963,7 @@ CREATE TABLE IF NOT EXISTS guidance_config_artifact (
     permission_ask_count BIGINT NOT NULL,
     permission_deny_count BIGINT NOT NULL,
     metadata_json VARCHAR,
-    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact(provider, path_hash);
 CREATE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact(provider, kind, scope);
@@ -975,7 +975,7 @@ CREATE TABLE IF NOT EXISTS stack (
     name VARCHAR NOT NULL,
     aliases VARCHAR,  -- JSON-encoded
     labels VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS stack_name_uq ON stack(name);
@@ -991,7 +991,7 @@ CREATE TABLE IF NOT EXISTS command_outcome (
     text VARCHAR,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS command_outcome_kind_ts ON command_outcome(kind, ts);
 CREATE INDEX IF NOT EXISTS command_outcome_session ON command_outcome(session, ts);
@@ -1000,12 +1000,12 @@ CREATE TABLE IF NOT EXISTS user_message_ngram (
     id VARCHAR PRIMARY KEY,
     ngram VARCHAR NOT NULL,
     n BIGINT NOT NULL,
-    count BIGINT DEFAULT 0,
+    count BIGINT NOT NULL DEFAULT 0,
     sessions VARCHAR,  -- JSON-encoded
-    near_correction_count BIGINT DEFAULT 0,
-    near_failed_tool_count BIGINT DEFAULT 0,
-    near_edit_count BIGINT DEFAULT 0,
-    near_verification_count BIGINT DEFAULT 0,
+    near_correction_count BIGINT NOT NULL DEFAULT 0,
+    near_failed_tool_count BIGINT NOT NULL DEFAULT 0,
+    near_edit_count BIGINT NOT NULL DEFAULT 0,
+    near_verification_count BIGINT NOT NULL DEFAULT 0,
     first_seen TIMESTAMP,
     last_seen TIMESTAMP
 );
@@ -1047,7 +1047,7 @@ CREATE TABLE IF NOT EXISTS session_token_usage (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     burn_buckets VARCHAR,  -- JSON-encoded number[]; sessions-list BURN sparkline
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_token_usage_session ON session_token_usage(session);
 CREATE INDEX IF NOT EXISTS session_token_usage_epoch ON session_token_usage(workflow_epoch, source, ts);
@@ -1077,7 +1077,7 @@ CREATE TABLE IF NOT EXISTS turn_token_usage (
     usage_source VARCHAR NOT NULL,
     usage_quality VARCHAR NOT NULL,
     raw VARCHAR,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS turn_token_usage_turn ON turn_token_usage(turn);
 CREATE INDEX IF NOT EXISTS turn_token_usage_session_seq ON turn_token_usage(session, seq);
@@ -1088,27 +1088,27 @@ CREATE TABLE IF NOT EXISTS session_health (
     session VARCHAR NOT NULL,  -- ref -> session
     source VARCHAR NOT NULL,
     workflow_epoch VARCHAR,  -- ref -> workflow_epoch
-    turns BIGINT DEFAULT 0,
-    tool_calls BIGINT DEFAULT 0,
-    tool_errors BIGINT DEFAULT 0,
-    user_corrections BIGINT DEFAULT 0,
-    interruptions BIGINT DEFAULT 0,
-    subagent_dispatches BIGINT DEFAULT 0,
-    plan_snapshots BIGINT DEFAULT 0,
-    estimated_tokens BIGINT DEFAULT 0,
+    turns BIGINT NOT NULL DEFAULT 0,
+    tool_calls BIGINT NOT NULL DEFAULT 0,
+    tool_errors BIGINT NOT NULL DEFAULT 0,
+    user_corrections BIGINT NOT NULL DEFAULT 0,
+    interruptions BIGINT NOT NULL DEFAULT 0,
+    subagent_dispatches BIGINT NOT NULL DEFAULT 0,
+    plan_snapshots BIGINT NOT NULL DEFAULT 0,
+    estimated_tokens BIGINT NOT NULL DEFAULT 0,
     cache_read_ratio DOUBLE,
     cache_creation_ratio DOUBLE,
-    context_pressure VARCHAR DEFAULT 'unknown',
+    context_pressure VARCHAR NOT NULL DEFAULT 'unknown',
     -- Precomputed attention metrics for the graph-explorer endpoint (issue #77).
     -- task_label: first organic-task user turn excerpt; turn counts by role/intent.
     -- Derived from turns once per ingest so the dashboard avoids per-row turn scans.
     task_label VARCHAR,
-    user_turns BIGINT DEFAULT 0,
-    assistant_turns BIGINT DEFAULT 0,
-    correction_turns BIGINT DEFAULT 0,
+    user_turns BIGINT NOT NULL DEFAULT 0,
+    assistant_turns BIGINT NOT NULL DEFAULT 0,
+    correction_turns BIGINT NOT NULL DEFAULT 0,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_health_session ON session_health(session);
 CREATE INDEX IF NOT EXISTS session_health_epoch ON session_health(workflow_epoch, source, ts);
@@ -1117,15 +1117,15 @@ CREATE TABLE IF NOT EXISTS session_metrics (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
     durability_ratio DOUBLE,
-    produced_commits BIGINT DEFAULT 0,
-    reverted_commits BIGINT DEFAULT 0,
+    produced_commits BIGINT NOT NULL DEFAULT 0,
+    reverted_commits BIGINT NOT NULL DEFAULT 0,
     time_to_land_ms BIGINT,
-    lines_added BIGINT DEFAULT 0,
-    lines_removed BIGINT DEFAULT 0,
+    lines_added BIGINT NOT NULL DEFAULT 0,
+    lines_removed BIGINT NOT NULL DEFAULT 0,
     time_to_first_edit_ms BIGINT,
-    cold_start_reads BIGINT DEFAULT 0,
+    cold_start_reads BIGINT NOT NULL DEFAULT 0,
     delegation_ratio DOUBLE,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_metrics_session ON session_metrics(session);
 
@@ -1141,8 +1141,8 @@ CREATE TABLE IF NOT EXISTS fragility_cascade (
     id VARCHAR PRIMARY KEY,
     origin VARCHAR NOT NULL,  -- ref -> session
     downstream VARCHAR NOT NULL,  -- ref -> session
-    weight BIGINT DEFAULT 0,
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    weight BIGINT NOT NULL DEFAULT 0,
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS fragility_cascade_pair ON fragility_cascade(origin, downstream);
 
@@ -1155,7 +1155,7 @@ CREATE TABLE IF NOT EXISTS commit_classification (
     message VARCHAR,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS commit_classification_commit ON commit_classification(commit);
 CREATE INDEX IF NOT EXISTS commit_classification_kind_ts ON commit_classification(kind, ts);
@@ -1166,8 +1166,8 @@ CREATE TABLE IF NOT EXISTS branch (
     name VARCHAR NOT NULL,
     head_sha VARCHAR,
     upstream VARCHAR,
-    is_default BOOLEAN DEFAULT FALSE,
-    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS branch_repo_name ON branch(repository, name);
@@ -1175,7 +1175,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS branch_repo_name ON branch(repository, name);
 CREATE TABLE IF NOT EXISTS pull_request (
     id VARCHAR PRIMARY KEY,
     repository VARCHAR NOT NULL,  -- ref -> repository
-    provider VARCHAR DEFAULT 'github',
+    provider VARCHAR NOT NULL DEFAULT 'github',
     number BIGINT NOT NULL,
     title VARCHAR NOT NULL,
     state VARCHAR NOT NULL,
@@ -1188,10 +1188,10 @@ CREATE TABLE IF NOT EXISTS pull_request (
     opened_at TIMESTAMP,
     closed_at TIMESTAMP,
     merged_at TIMESTAMP,
-    additions BIGINT DEFAULT 0,
-    deletions BIGINT DEFAULT 0,
-    changed_files BIGINT DEFAULT 0,
-    commit_count BIGINT DEFAULT 0,
+    additions BIGINT NOT NULL DEFAULT 0,
+    deletions BIGINT NOT NULL DEFAULT 0,
+    changed_files BIGINT NOT NULL DEFAULT 0,
+    commit_count BIGINT NOT NULL DEFAULT 0,
     labels VARCHAR,
     raw VARCHAR,
     updated_at TIMESTAMP
@@ -1204,12 +1204,12 @@ CREATE TABLE IF NOT EXISTS review_event (
     pull_request VARCHAR NOT NULL,  -- ref -> pull_request
     repository VARCHAR NOT NULL,  -- ref -> repository
     reviewer VARCHAR,
-    reviewer_kind VARCHAR DEFAULT 'unknown',
+    reviewer_kind VARCHAR NOT NULL DEFAULT 'unknown',
     state VARCHAR NOT NULL,
     body_excerpt VARCHAR,
-    severity VARCHAR DEFAULT 'unknown',
-    category VARCHAR DEFAULT 'unknown',
-    unresolved BOOLEAN DEFAULT FALSE,
+    severity VARCHAR NOT NULL DEFAULT 'unknown',
+    category VARCHAR NOT NULL DEFAULT 'unknown',
+    unresolved BOOLEAN NOT NULL DEFAULT FALSE,
     raw VARCHAR,
     ts TIMESTAMP NOT NULL
 );
@@ -1221,7 +1221,7 @@ CREATE TABLE IF NOT EXISTS check_run (
     pull_request VARCHAR,  -- ref -> pull_request
     commit VARCHAR,  -- ref -> commit
     repository VARCHAR NOT NULL,  -- ref -> repository
-    provider VARCHAR DEFAULT 'github',
+    provider VARCHAR NOT NULL DEFAULT 'github',
     name VARCHAR NOT NULL,
     status VARCHAR NOT NULL,
     conclusion VARCHAR,
@@ -1240,16 +1240,16 @@ CREATE TABLE IF NOT EXISTS delivery_outcome (
     checkout VARCHAR,  -- ref -> checkout
     pull_request VARCHAR,  -- ref -> pull_request
     status VARCHAR NOT NULL,
-    promotion_path VARCHAR DEFAULT 'unknown',
+    promotion_path VARCHAR NOT NULL DEFAULT 'unknown',
     main_branch VARCHAR,
     produced_commits VARCHAR,
     promoted_commits VARCHAR,
     pr_size VARCHAR,
     review_pain VARCHAR,
     phase_metrics VARCHAR,
-    confidence VARCHAR DEFAULT 'medium',
+    confidence VARCHAR NOT NULL DEFAULT 'medium',
     evidence VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS delivery_session ON delivery_outcome(session);
@@ -1258,9 +1258,9 @@ CREATE INDEX IF NOT EXISTS delivery_status ON delivery_outcome(repository, statu
 
 CREATE TABLE IF NOT EXISTS workflow_snapshot (
     id VARCHAR PRIMARY KEY,
-    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     payload VARCHAR NOT NULL,
-    source VARCHAR DEFAULT 'workflow-refresh'
+    source VARCHAR NOT NULL DEFAULT 'workflow-refresh'
 );
 CREATE INDEX IF NOT EXISTS workflow_snapshot_generated ON workflow_snapshot(generated_at);
 
@@ -1273,14 +1273,14 @@ CREATE TABLE IF NOT EXISTS phase_span (
     start_ts TIMESTAMP NOT NULL,
     end_ts TIMESTAMP NOT NULL,
     duration_ms BIGINT NOT NULL,
-    user_turns BIGINT DEFAULT 0,
-    assistant_turns BIGINT DEFAULT 0,
-    tool_calls BIGINT DEFAULT 0,
-    files_read BIGINT DEFAULT 0,
-    files_touched BIGINT DEFAULT 0,
-    tests_run BIGINT DEFAULT 0,
-    interruptions BIGINT DEFAULT 0,
-    corrections BIGINT DEFAULT 0,
+    user_turns BIGINT NOT NULL DEFAULT 0,
+    assistant_turns BIGINT NOT NULL DEFAULT 0,
+    tool_calls BIGINT NOT NULL DEFAULT 0,
+    files_read BIGINT NOT NULL DEFAULT 0,
+    files_touched BIGINT NOT NULL DEFAULT 0,
+    tests_run BIGINT NOT NULL DEFAULT 0,
+    interruptions BIGINT NOT NULL DEFAULT 0,
+    corrections BIGINT NOT NULL DEFAULT 0,
     metrics VARCHAR,
     evidence VARCHAR
 );
@@ -1294,10 +1294,10 @@ CREATE TABLE IF NOT EXISTS skill_candidate (
     proposed_behavior VARCHAR NOT NULL,
     confidence VARCHAR NOT NULL,
     expected_impact VARCHAR,
-    status VARCHAR DEFAULT 'candidate',
+    status VARCHAR NOT NULL DEFAULT 'candidate',
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS skill_candidate_name ON skill_candidate(name);
 CREATE INDEX IF NOT EXISTS skill_candidate_status ON skill_candidate(status, created_at);
@@ -2051,7 +2051,7 @@ CREATE TABLE IF NOT EXISTS subagent_proposal (
     bounded_role VARCHAR NOT NULL,
     delegation_trigger VARCHAR NOT NULL,
     -- pattern matched against Task tool calls (see opportunity definition below)
-    example_task_patterns VARCHAR  -- JSON string[]
+    example_task_patterns VARCHAR NOT NULL  -- JSON string[]
 );
 CREATE UNIQUE INDEX IF NOT EXISTS subagent_proposal_uq ON subagent_proposal(proposal);
 
