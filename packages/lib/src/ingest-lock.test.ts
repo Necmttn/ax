@@ -436,6 +436,103 @@ describe("withIngestLock", () => {
         });
     });
 
+    /**
+     * `ingestLockHeldHere` is the WRITE CAPABILITY the seam checks (D1), so
+     * "this process registered a token once" is not enough to answer it: the
+     * in-process registry cannot see the file being taken over, removed, or
+     * rewritten by someone else. Every case below is a state where the registry
+     * still names us but the FILE does not, and the honest answer is `false`.
+     */
+    describe("ingestLockHeldHere verifies the lock FILE, not just the registry", () => {
+        /** Hold the lock, run `body` against the live lock file, restore nothing:
+         *  the point is to mutate the file from under a genuine holder. */
+        const whileHolding = (
+            lockPath: string,
+            body: () => void,
+        ): Promise<Array<boolean>> => {
+            const seen: Array<boolean> = [];
+            return run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.gen(function* () {
+                        seen.push(yield* ingestLockHeldHere(lockPath));
+                        body();
+                        seen.push(yield* ingestLockHeldHere(lockPath));
+                    }),
+                ),
+            ).then(() => seen);
+        };
+
+        test("another process replacing a stale lock revokes our write capability", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => {
+                    // What a takeover looks like on disk: our bytes gone, a live
+                    // foreign holder's bytes in their place. Our registry entry
+                    // still carries the OLD token.
+                    writeFileSync(
+                        lockPath,
+                        encodeLockPayload({
+                            pid: process.pid,
+                            startedAt: Date.now(),
+                            command: "the other ingest",
+                            token: "a-token-we-never-minted",
+                        }),
+                    );
+                });
+
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a removed lock file revokes it too", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => rmSync(lockPath));
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a corrupt lock file revokes it too", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => writeFileSync(lockPath, "{not json"));
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a lock file rewritten with our own bytes still counts as held", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => {
+                    // Same bytes, new inode - a benign shape (an atomic rewrite),
+                    // and the token still matches, so we DO still hold it.
+                    const bytes = readFileSync(lockPath);
+                    rmSync(lockPath);
+                    writeFileSync(lockPath, bytes);
+                });
+                expect(seen).toEqual([true, true]);
+            });
+        });
+
+        test("an unheld path is false whatever the file says", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                expect(await run(ingestLockHeldHere(lockPath))).toBe(false);
+                writeFileSync(
+                    lockPath,
+                    encodeLockPayload({
+                        pid: process.pid,
+                        startedAt: Date.now(),
+                        command: "someone else",
+                        token: "not-ours",
+                    }),
+                );
+                expect(await run(ingestLockHeldHere(lockPath))).toBe(false);
+            });
+        });
+    });
+
     test("ingestLockOptions derives the one lock path from the data dir", async () => {
         const built = await run(
             Effect.gen(function* () {
