@@ -6,7 +6,15 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { noteSkippedDylib, resolveTestDylib } from "../testing/duckdb-dylib.ts";
-import { DuckDb, DuckDbLayer, layerFromLib, makeConnection, openDatabase, readResult } from "./client.ts";
+import {
+    DuckDb,
+    DuckDbLayer,
+    DuckDbLiveWith,
+    layerFromLib,
+    makeConnection,
+    openDatabase,
+    readResult,
+} from "./client.ts";
 import type { DuckDbService } from "./client.ts";
 import type { LibDuckDb } from "./ffi.ts";
 import { DuckDbTypeId } from "./types.ts";
@@ -532,6 +540,58 @@ describe("DuckDbLayer (finding 1)", () => {
         expect(result._tag).toBe("Failure");
         if (result._tag === "Failure") {
             expect((result.failure as { _tag?: string })._tag).toBe("DuckDbDylibError");
+        }
+    });
+});
+
+// A8: `DuckDbLiveWith`'s `options.assetPath` must thread through to
+// `resolveDylibPath` as its `assetPath` fallback - this is the seam an
+// apps-side consumer (e.g. an embedded-binary build) will use to hand in a
+// bundled dylib without `packages/lib` importing anything from `apps/*`.
+// Neither of these ever touches a real dylib (the paths do not exist), so
+// they run unconditionally - no `withDuckDb`/skip needed. `AX_DUCKDB_DYLIB`
+// is saved/restored around each test in case the harness (or a developer's
+// shell) already has it set, mirroring dylib.test.ts's convention.
+describe("DuckDbLiveWith (A8)", () => {
+    test("threads options.assetPath through to resolveDylibPath", async () => {
+        const prev = process.env.AX_DUCKDB_DYLIB;
+        delete process.env.AX_DUCKDB_DYLIB;
+        try {
+            const assetPath = "/definitely/not/a/bundled-dylib.so";
+            const layer = DuckDbLiveWith({ assetPath });
+            const prog = Effect.asVoid(DuckDb).pipe(Effect.provide(layer)) as Effect.Effect<void, unknown>;
+
+            const result = await Effect.runPromise(Effect.result(prog));
+            expect(result._tag).toBe("Failure");
+            if (result._tag === "Failure") {
+                const failure = result.failure as { _tag?: string; message?: string };
+                expect(failure._tag).toBe("DuckDbDylibError");
+                // Proves the CONFIGURED path was the one resolveDylibPath
+                // tried (not the "no options" no-asset-path failure), i.e.
+                // that assetPath genuinely reached it.
+                expect(failure.message).toContain(assetPath);
+            }
+        } finally {
+            if (prev !== undefined) process.env.AX_DUCKDB_DYLIB = prev;
+        }
+    });
+
+    test("with no options at all, fails with the no-asset-available message (same as DuckDbLive)", async () => {
+        const prev = process.env.AX_DUCKDB_DYLIB;
+        delete process.env.AX_DUCKDB_DYLIB;
+        try {
+            const layer = DuckDbLiveWith();
+            const prog = Effect.asVoid(DuckDb).pipe(Effect.provide(layer)) as Effect.Effect<void, unknown>;
+
+            const result = await Effect.runPromise(Effect.result(prog));
+            expect(result._tag).toBe("Failure");
+            if (result._tag === "Failure") {
+                const failure = result.failure as { _tag?: string; message?: string };
+                expect(failure._tag).toBe("DuckDbDylibError");
+                expect(failure.message).toContain("no libduckdb available");
+            }
+        } finally {
+            if (prev !== undefined) process.env.AX_DUCKDB_DYLIB = prev;
         }
     });
 });

@@ -18,8 +18,8 @@ export * from "./lock-state.ts";
 // only the PUBLIC surface is re-exported here, as an explicit named list so
 // it can never silently drift back to `export *` (see index.test.ts's
 // closed-set assertion).
-export type { DuckDbConnection, DuckDbService } from "./client.ts";
-export { DuckDb, DuckDbLayer, DuckDbLive, snapshotPath } from "./client.ts";
+export type { DuckDbConnection, DuckDbLiveOptions, DuckDbService } from "./client.ts";
+export { DuckDb, DuckDbLayer, DuckDbLive, DuckDbLiveWith, snapshotPath } from "./client.ts";
 
 export type { AcquireOptions, IngestLockHandle, IngestLockService } from "./lock.ts";
 export { IngestLock, IngestLockLayer, IngestLockLive, ingestLockPath } from "./lock.ts";
