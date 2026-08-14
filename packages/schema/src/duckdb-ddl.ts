@@ -22,14 +22,16 @@ export interface DuckdbIndex {
     readonly name: string;
     readonly table: string;
     readonly unique: boolean;
+    readonly columns: readonly string[];
 }
 
 export function parseDuckdbIndexes(sql: string = DUCKDB_SCHEMA_SQL): readonly DuckdbIndex[] {
-    const re = /^CREATE\s+(UNIQUE\s+)?INDEX IF NOT EXISTS\s+("?[\w]+"?)\s+ON\s+("?[\w]+"?)\s*\(/gm;
+    const re = /^CREATE\s+(UNIQUE\s+)?INDEX IF NOT EXISTS\s+("?[\w]+"?)\s+ON\s+("?[\w]+"?)\s*\(([^)]*)\)/gm;
     return [...sql.matchAll(re)].map((m) => ({
         name: stripQuotes(m[2]!),
         table: stripQuotes(m[3]!),
         unique: m[1] !== undefined,
+        columns: m[4]!.split(",").map((c) => stripQuotes(c.trim())),
     }));
 }
 

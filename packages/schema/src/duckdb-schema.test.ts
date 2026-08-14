@@ -67,12 +67,25 @@ describe("edge tables", () => {
     });
 
     test("every relation table is indexed on both sides", () => {
+        // A leftmost-prefix seek is what makes a composite index count: a
+        // B-tree/ART index on (in_id, ts, ...) serves an in_id-only seek just
+        // as a bare index on (in_id) would. Checking index NAMES (e.g. a
+        // "_in" suffix) is only a proxy for that and demands redundant
+        // duplicate single-column indexes on tables that are already covered
+        // by a composite (invoked, produced, opportunity). Check the real
+        // thing: the leading column of some index on the table.
         const indexes = parseDuckdbIndexes();
-        for (const table of relationTables) {
-            const onTable = indexes.filter((i) => i.table === table);
-            expect(onTable.some((i) => i.name.endsWith("_in"))).toBe(true);
-            expect(onTable.some((i) => i.name.endsWith("_out"))).toBe(true);
-        }
+        const uncovered = relationTables
+            .map((table) => {
+                const onTable = indexes.filter((i) => i.table === table);
+                return {
+                    table,
+                    hasIn: onTable.some((i) => i.columns[0] === "in_id"),
+                    hasOut: onTable.some((i) => i.columns[0] === "out_id"),
+                };
+            })
+            .filter((r) => !r.hasIn || !r.hasOut);
+        expect(uncovered).toEqual([]);
     });
 
     test("no column is named bare `in` or `out`", () => {
