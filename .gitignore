@@ -51,6 +51,9 @@ apps/site/public/studio/
 dogfood-output/
 checkpoints/
 
+# duckdb bench mini fixture (generated; real 524MB fixture is local-only)
+.bench-fixture/
+
 # generated preview HTML from prototype scripts - contains real transcript text
 scripts/prototypes/*-preview.html
 

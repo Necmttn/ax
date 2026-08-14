@@ -66,10 +66,18 @@ CREATE OR REPLACE TABLE spawned (
 );
 COPY spawned FROM 'jsonl/spawned.jsonl' (FORMAT json);
 
+CREATE OR REPLACE TABLE telemetry_of (
+  session_id VARCHAR,
+  otel_id VARCHAR,
+  linked_at TIMESTAMP
+);
+COPY telemetry_of FROM 'jsonl/telemetry_of.jsonl' (FORMAT json);
+
 SELECT 'turn' AS tbl, count(*) FROM turn
 UNION ALL SELECT 'tool_call', count(*) FROM tool_call
 UNION ALL SELECT 'session', count(*) FROM session
 UNION ALL SELECT 'commit', count(*) FROM "commit"
 UNION ALL SELECT 'skill', count(*) FROM skill
 UNION ALL SELECT 'invoked', count(*) FROM invoked
-UNION ALL SELECT 'spawned', count(*) FROM spawned;
+UNION ALL SELECT 'spawned', count(*) FROM spawned
+UNION ALL SELECT 'telemetry_of', count(*) FROM telemetry_of;
