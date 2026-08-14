@@ -33,7 +33,16 @@ export class NotAGitRepoError extends Schema.TaggedErrorClass<NotAGitRepoError>(
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface PwdResolution {
+/**
+ * What `$PWD` resolves to using GIT ALONE - no database of any kind.
+ *
+ * Split out of {@link PwdResolution} because the git half is the part every
+ * engine needs and the only part the v2 DuckDB readers can use: `existsInDb`
+ * below is a SurrealDB lookup, and a command routed without `AppLayer` (see the
+ * `"cache"` command runtime) has no `SurrealClient` to make it with. The
+ * DuckDB-side equivalent lives in `queries/repository-scope.ts`, over `CacheRead`.
+ */
+export interface PwdIdentity {
     /** Absolute path after symlink resolve. */
     readonly cwd: string;
     /** Result of `git rev-parse --show-toplevel`. */
@@ -46,6 +55,9 @@ export interface PwdResolution {
     readonly initialCommit: string | null;
     /** Identity as computed by chooseIdentity(). */
     readonly identity: RepositoryIdentity;
+}
+
+export interface PwdResolution extends PwdIdentity {
     /** RecordId("repository", repositoryKey). */
     readonly repositoryRecordId: RecordId;
     /** true iff a row at that id already exists in the DB. */
@@ -66,17 +78,17 @@ export const mainRepoRootFromGitCommonDir = (repoRoot: string, commonDir: string
 };
 
 /**
- * Resolve the current working directory (or the provided `cwd`) to a
- * `repository` record identity and check whether the record exists in DB.
+ * Resolve the current working directory (or the provided `cwd`) to a repository
+ * IDENTITY, using git only. No database, so this works on every command runtime.
  *
- * Requires: SurrealClient + ProcessService in the Effect environment.
+ * Requires: ProcessService + FileSystem in the Effect environment.
  */
-export const resolvePwdRepository = (
+export const resolvePwdIdentity = (
     cwd?: string,
 ): Effect.Effect<
-    PwdResolution,
-    NotAGitRepoError | DbError | ProcessError,
-    SurrealClient | ProcessService | FileSystem.FileSystem
+    PwdIdentity,
+    NotAGitRepoError | ProcessError,
+    ProcessService | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
         const proc = yield* ProcessService;
@@ -138,17 +150,6 @@ export const resolvePwdRepository = (
             checkoutRoot: mainRepoRoot,
         });
 
-        // Step 6: build RecordId
-        const repositoryRecordId = new RecordId("repository", identity.repositoryKey);
-
-        // Step 7: check DB existence
-        const db = yield* SurrealClient;
-        const queryResult = yield* db.query<[[{ id: unknown }[]]]>(
-            `SELECT id FROM repository:\`${identity.repositoryKey}\` LIMIT 1`,
-        );
-        const rows = queryResult[0] ?? [];
-        const existsInDb = rows.length > 0;
-
         return {
             cwd: resolvedCwd,
             repoRoot,
@@ -156,7 +157,37 @@ export const resolvePwdRepository = (
             remoteUrlNormalized,
             initialCommit,
             identity,
+        } satisfies PwdIdentity;
+    });
+
+/**
+ * Resolve the current working directory (or the provided `cwd`) to a
+ * `repository` record identity and check whether the record exists in DB.
+ *
+ * Requires: SurrealClient + ProcessService in the Effect environment. Callers
+ * that only need the git-derived identity (or that run without `AppLayer`) want
+ * {@link resolvePwdIdentity} instead - it is this function minus the DB lookup.
+ */
+export const resolvePwdRepository = (
+    cwd?: string,
+): Effect.Effect<
+    PwdResolution,
+    NotAGitRepoError | DbError | ProcessError,
+    SurrealClient | ProcessService | FileSystem.FileSystem
+> =>
+    Effect.gen(function* () {
+        const resolved = yield* resolvePwdIdentity(cwd);
+        const repositoryRecordId = new RecordId("repository", resolved.identity.repositoryKey);
+
+        const db = yield* SurrealClient;
+        const queryResult = yield* db.query<[[{ id: unknown }[]]]>(
+            `SELECT id FROM repository:\`${resolved.identity.repositoryKey}\` LIMIT 1`,
+        );
+        const rows = queryResult[0] ?? [];
+
+        return {
+            ...resolved,
             repositoryRecordId,
-            existsInDb,
+            existsInDb: rows.length > 0,
         } satisfies PwdResolution;
     });

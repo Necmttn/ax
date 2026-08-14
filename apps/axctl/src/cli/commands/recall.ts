@@ -1,10 +1,8 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
-import { CacheRead } from "@ax/lib/duckdb/seam";
-import type { DbError } from "@ax/lib/errors";
-import { ProcessService } from "@ax/lib/process";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { ProcessService, type ProcessError } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import {
@@ -14,7 +12,8 @@ import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
 import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../../queries/recall.ts";
 import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolveCacheRepository } from "../../queries/repository-scope.ts";
+import { resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
 import { ALL_CONTENT_CATEGORIES } from "../../ingest/content-type-classify.ts";
@@ -76,36 +75,59 @@ interface RecallCliOpts {
  * Resolve `--scope` flag + cwd into a RecallScope.
  *
  * Rules:
- *  - `--scope=all`  → { kind: "all" } (no DB lookup)
- *  - `--scope=here` → look up cwd repository; error if not a git repo
+ *  - `--scope=all`  → { kind: "all" } (no lookup at all)
+ *  - `--scope=here` → resolve cwd's repository in the CACHE; error if not a git repo
  *  - omitted        → auto-detect: try `here`; fall back to `all` silently
+ *
+ * PORTED OFF SURREALDB. This used to end in `resolvePwdRepository`, whose last
+ * step is a `SELECT ... FROM repository:<key>` through `SurrealClient` - so a
+ * command routed on the cache runtime died there. It now resolves the git
+ * identity (DB-free) and looks the repository ROW up in the snapshot, which is
+ * also more correct: DuckDB row ids are content-hashed by the writer, so the
+ * git-derived key is NOT the row id `session.repository` holds.
+ *
+ * A repository the cache has never seen falls back to `all`, with a note on
+ * stderr. Scoping to a repository with no rows can only ever return nothing, and
+ * "no matches" would send the user hunting for a query problem that isn't there;
+ * an explicit `--scope=here` still narrows (the user asked for it) but says why
+ * it will be empty.
  */
 const resolveScope = (
     scopeFlag: string | null,
 ): Effect.Effect<
     RecallScope,
-    DbError | import("@ax/lib/process").ProcessError,
-    SurrealClient | ProcessService | FileSystem.FileSystem
+    CacheReadError | ProcessError,
+    CacheRead | ProcessService | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 
         if (scopeFlag === "here" || scopeFlag === null) {
-            const resolution = yield* resolvePwdRepository().pipe(
+            const identity = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) => {
                     if (scopeFlag === "here") {
                         // explicit --scope=here outside a git repo → error
                         fail(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})`);
                     }
                     // auto-detect: not a git repo → silent fall-through to all
-                    return Effect.succeed(null as import("../../pwd.ts").PwdResolution | null);
+                    return Effect.succeed(null as PwdIdentity | null);
                 }),
             );
-            if (resolution === null) return { kind: "all" } as RecallScope;
-            return {
-                kind: "here",
-                repositoryKey: resolution.repositoryRecordId.id as string,
-            } as RecallScope;
+            if (identity === null) return { kind: "all" } as RecallScope;
+
+            const row = yield* resolveCacheRepository(identity);
+            if (Option.isNone(row)) {
+                if (scopeFlag === "here") {
+                    process.stderr.write(
+                        `axctl recall: nothing ingested for ${identity.mainRepoRoot} yet - ` +
+                        "--scope=here will be empty until `ax ingest here` runs\n",
+                    );
+                    // Honour the explicit request: a key no row carries.
+                    return { kind: "here", repositoryKey: identity.identity.repositoryKey } as RecallScope;
+                }
+                return { kind: "all" } as RecallScope;
+            }
+            return { kind: "here", repositoryKey: row.value } as RecallScope;
         }
 
         fail(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
@@ -372,6 +394,12 @@ export const recallCommand = Command.make(
     ),
 );
 
+/**
+ * The FIRST v2-ported vertical, and the template wave 2 follows: `recall` runs
+ * on the `"cache"` runtime, so it gets `CacheRead` over the published snapshot
+ * and a SurrealClient proxy that THROWS. Any un-ported path inside the vertical
+ * fails loudly instead of silently reading the old engine (D6).
+ */
 export const recallRuntime: RuntimeManifest = {
-    recall: "db",
+    recall: "cache",
 };
