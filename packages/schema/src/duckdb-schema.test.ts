@@ -129,16 +129,19 @@ describe("types and Surreal leftovers", () => {
         }
     });
 
-    test("datetimes are TIMESTAMPTZ, not naive TIMESTAMP (P2-1)", () => {
-        expect(DUCKDB_SCHEMA_SQL).toMatch(/\bTIMESTAMPTZ\b/);
+    // P2-1 (TIMESTAMPTZ for every datetime) is REVERTED: the bun:ffi DuckDB
+    // client cannot decode TIMESTAMP_TZ (probe-confirmed DuckDbUnsupportedTypeError
+    // against the real client + dylib). Every datetime column is plain TIMESTAMP
+    // now, under a UTC contract (writers normalize to UTC before insert; readers
+    // append `Z`). TIMESTAMPTZ is a banned type - see the banned-type guard in
+    // duckdb-parity.test.ts for the exhaustive per-column scan; this test just
+    // pins the header-level contract.
+    test("datetimes are plain TIMESTAMP (UTC contract); TIMESTAMPTZ is banned", () => {
+        expect(DUCKDB_SCHEMA_SQL).toMatch(/\bTIMESTAMP\b/);
         expect(DUCKDB_SCHEMA_SQL).not.toMatch(/\bDATETIME\b/);
-        // No column declaration line may use bare TIMESTAMP - a plain TIMESTAMP
-        // silently drops the UTC offset every Surreal datetime carries. Header
-        // prose is excluded via `statements` (comment lines stripped above).
-        const bareTimestampColumns = statements
-            .split("\n")
-            .filter((line) => /^\s*"?\w+"?\s+TIMESTAMP\b/.test(line) && !line.includes("TIMESTAMPTZ"));
-        expect(bareTimestampColumns).toEqual([]);
+        // No column declaration line (comments stripped via `statements`) may use
+        // TIMESTAMPTZ - the FFI client can't decode it.
+        expect(statements).not.toMatch(/\bTIMESTAMPTZ\b/);
     });
 
     test("index names are unique across the database", () => {
@@ -152,26 +155,34 @@ describe("types and Surreal leftovers", () => {
     });
 });
 
-describe("arrays (P2-3)", () => {
-    // Surreal array<scalar> -> native DuckDB list column; everything else
-    // (record arrays, objects) stays JSON VARCHAR. See the ARRAYS note in the
-    // schema.duckdb.sql header.
-    test("scalar array fields are native list columns, not JSON VARCHAR", () => {
-        const scalarArrayColumns: ReadonlyArray<{ readonly table: string; readonly column: string; readonly type: string }> = [
-            { table: "agent_def", column: "skills", type: "VARCHAR[]" },
-            { table: "hook_fire", column: "injected_titles", type: "VARCHAR[]" },
-            { table: "subagent_proposal", column: "example_task_patterns", type: "VARCHAR[]" },
-            { table: "wrapped_card", column: "series", type: "DOUBLE[]" },
+describe("arrays (P2-3, reverted)", () => {
+    // P2-3 (native DuckDB list columns for scalar array<T> fields) is REVERTED:
+    // the bun:ffi DuckDB client cannot decode LIST columns (probe-confirmed
+    // DuckDbUnsupportedTypeError against the real client + dylib). Every
+    // array<T> field - scalar or record/object - now stays JSON-encoded
+    // VARCHAR, same treatment. See the ARRAYS / BANNED TYPES notes in the
+    // schema.duckdb.sql header; the exhaustive per-column scan lives in the
+    // banned-type guard in duckdb-parity.test.ts.
+    test("formerly-native-list scalar array fields are JSON VARCHAR, not list columns", () => {
+        const scalarArrayColumns: ReadonlyArray<{ readonly table: string; readonly column: string }> = [
+            { table: "agent_def", column: "skills" },
+            { table: "hook_fire", column: "injected_titles" },
+            { table: "subagent_proposal", column: "example_task_patterns" },
+            { table: "wrapped_card", column: "series" },
         ];
-        for (const { column, type } of scalarArrayColumns) {
-            const re = new RegExp(`^\\s*${column}\\s+${type.replace(/\[/g, "\\[").replace(/\]/g, "\\]")}(?![\\w[])`, "m");
-            expect(DUCKDB_SCHEMA_SQL).toMatch(re);
+        for (const { column } of scalarArrayColumns) {
+            expect(DUCKDB_SCHEMA_SQL).toMatch(new RegExp(`^\\s*${column}\\s+VARCHAR\\b`, "m"));
+            expect(DUCKDB_SCHEMA_SQL).not.toMatch(new RegExp(`^\\s*${column}\\s+\\w+\\[\\]`, "m"));
         }
     });
 
-    test("a record<> array (hook_fire.top_prior_sessions) is out of P2-3 scope and stays JSON VARCHAR", () => {
+    test("a record<> array (hook_fire.top_prior_sessions) stays JSON VARCHAR, unaffected by the revert", () => {
         expect(DUCKDB_SCHEMA_SQL).toMatch(/^\s*top_prior_sessions\s+VARCHAR\s+NOT NULL/m);
         expect(DUCKDB_SCHEMA_SQL).not.toMatch(/^\s*top_prior_sessions\s+VARCHAR\[\]/m);
+    });
+
+    test("no native DuckDB list column type (`T[]`) survives anywhere in the DDL", () => {
+        expect(statements).not.toMatch(/^\s*"?\w+"?\s+\w+\[\]/m);
     });
 });
 
