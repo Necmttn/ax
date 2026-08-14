@@ -11,7 +11,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DUCKDB_SCHEMA_PATH, parseDuckdbTables } from "./duckdb-ddl.ts";
+import { fileURLToPath } from "node:url";
+import { parseDuckdbTables } from "./duckdb-ddl.ts";
+
+const DUCKDB_SCHEMA_PATH = fileURLToPath(new URL("./schema.duckdb.sql", import.meta.url));
 
 const resolveDuckdb = (): string | null => {
     const fromEnv = process.env.AX_DUCKDB_BIN;
@@ -58,6 +61,8 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             });
             expect(new TextDecoder().decode(run.stderr)).toBe("");
             expect(run.exitCode).toBe(0);
+            const stdout = new TextDecoder().decode(run.stdout).trim();
+            expect(stdout).toBe(String(parseDuckdbTables().length));
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -80,6 +85,9 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             const stdout = new TextDecoder().decode(run.stdout);
             if (run.exitCode !== 0 && /HTTP|network|Failed to download/i.test(new TextDecoder().decode(run.stderr))) {
                 // Offline: the fts extension cannot be fetched. Structural coverage stands.
+                console.log(
+                    "SKIPPED: FTS check skipped - the fts extension could not be downloaded (offline)",
+                );
                 return;
             }
             expect(run.exitCode).toBe(0);

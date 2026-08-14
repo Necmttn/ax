@@ -1418,6 +1418,8 @@ CREATE TABLE IF NOT EXISTS invoked (
 CREATE INDEX IF NOT EXISTS invoked_out_ts ON invoked(out_id, ts);
 CREATE INDEX IF NOT EXISTS invoked_session_out_ts ON invoked(session, out_id, ts);
 CREATE INDEX IF NOT EXISTS invoked_in_out_args ON invoked(in_id, out_id, args);
+CREATE INDEX IF NOT EXISTS invoked_in ON invoked(in_id);
+CREATE INDEX IF NOT EXISTS invoked_out ON invoked(out_id);
 
 -- Auto-load activations: a skill pulled in by a subagent's `skills:` frontmatter
 -- when that agent spawns. NO Skill-tool call fires, so these never appear as
@@ -1597,6 +1599,8 @@ CREATE TABLE IF NOT EXISTS produced (
 CREATE INDEX IF NOT EXISTS produced_in_ts ON produced(in_id, ts);
 CREATE INDEX IF NOT EXISTS produced_out_ts ON produced(out_id, ts);
 CREATE INDEX IF NOT EXISTS produced_repository_checkout_ts ON produced(repository, checkout, ts);
+CREATE INDEX IF NOT EXISTS produced_in ON produced(in_id);
+CREATE INDEX IF NOT EXISTS produced_out ON produced(out_id);
 
 CREATE TABLE IF NOT EXISTS touched (
     id VARCHAR PRIMARY KEY,
@@ -2051,7 +2055,7 @@ CREATE TABLE IF NOT EXISTS subagent_proposal (
     bounded_role VARCHAR NOT NULL,
     delegation_trigger VARCHAR NOT NULL,
     -- pattern matched against Task tool calls (see opportunity definition below)
-    example_task_patterns VARCHAR NOT NULL  -- JSON string[]
+    example_task_patterns VARCHAR NOT NULL DEFAULT '[]'  -- JSON string[]
 );
 CREATE UNIQUE INDEX IF NOT EXISTS subagent_proposal_uq ON subagent_proposal(proposal);
 
@@ -2154,6 +2158,7 @@ CREATE TABLE IF NOT EXISTS opportunity (
 );
 CREATE INDEX IF NOT EXISTS opportunity_in_ts ON opportunity(in_id, matched_at);
 CREATE INDEX IF NOT EXISTS opportunity_out ON opportunity(out_id);
+CREATE INDEX IF NOT EXISTS opportunity_in ON opportunity(in_id);
 
 -- ==== Checkpoint (decision support, never auto-verdict) ====
 -- One row per (experiment, kind) snapshot at +3 / +10 / +30 sessions

@@ -6,17 +6,14 @@
 // verification scripts (fidelity.ts / types.ts) that were both CLEAN over
 // all 138 tables / 1219 columns - the wave-2 seam port assumes this holds.
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import surql from "./schema.surql" with { type: "text" };
 import {
     DUCKDB_SCHEMA_SQL,
-    SURREAL_SCHEMA_PATH,
     parseDuckdbColumnDefs,
     parseDuckdbColumns,
     parseDuckdbTables,
     parseSurrealTables,
 } from "./duckdb-ddl.ts";
-
-const surql = readFileSync(SURREAL_SCHEMA_PATH, "utf8");
 
 // Expected table/column counts. Asserted explicitly so the property can never
 // silently shrink to comparing zero (or a handful of) tables/columns.

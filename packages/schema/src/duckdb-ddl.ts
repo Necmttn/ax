@@ -1,14 +1,8 @@
 // packages/schema/src/duckdb-ddl.ts
 /** Parse helpers over schema.duckdb.sql. The ONLY place a regex touches the DDL. */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import DUCKDB_SCHEMA_SQL_TEXT from "./schema.duckdb.sql" with { type: "text" };
 
-const HERE = new URL(".", import.meta.url).pathname;
-
-export const DUCKDB_SCHEMA_PATH = join(HERE, "schema.duckdb.sql");
-export const SURREAL_SCHEMA_PATH = join(HERE, "schema.surql");
-
-export const DUCKDB_SCHEMA_SQL: string = readFileSync(DUCKDB_SCHEMA_PATH, "utf8");
+export const DUCKDB_SCHEMA_SQL: string = DUCKDB_SCHEMA_SQL_TEXT;
 
 const stripQuotes = (name: string): string => name.replace(/^"|"$/g, "");
 
