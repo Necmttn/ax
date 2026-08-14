@@ -20,10 +20,7 @@ import { AxApi } from "@ax/lib/shared/api-contract";
 import { OtelWriter, OtelWriterLive } from "../../otel/writer.ts";
 import type { Signal } from "../../otel/signal.ts";
 import { SIGNALS } from "../../otel/signals.ts";
-
-// ------------------------------------------------------------------ types
-
-const ACK = { partialSuccess: {} } as const;
+import { OTLP_ACK } from "../../otel/spool-server.ts";
 
 // ------------------------------------------------------------------ core
 
@@ -49,7 +46,7 @@ export const handleOtlp = (
                 return null;
             }
         });
-        if (json === null) return ACK;
+        if (json === null) return OTLP_ACK;
 
         const writer = yield* OtelWriter;
         const spec = SIGNALS[signal];
@@ -60,7 +57,7 @@ export const handleOtlp = (
         const payload = yield* spec.decode(json).pipe(Effect.orElseSucceed(() => null));
         if (payload !== null) yield* spec.write(writer)(spec.normalize(payload));
 
-        return ACK;
+        return OTLP_ACK;
     }).pipe(Effect.provide(OtelWriterLive));
 
 // ------------------------------------------------------------------ group
@@ -79,7 +76,7 @@ const makeRawHandler = (signal: Signal) => () =>
             Effect.orElseSucceed(() => new ArrayBuffer(0)),
         );
         return yield* handleOtlp(signal, body, getEncoding(req)).pipe(
-            Effect.orElseSucceed(() => ACK),
+            Effect.orElseSucceed(() => OTLP_ACK),
         );
     });
 

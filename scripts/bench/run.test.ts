@@ -4,21 +4,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeMiniFixture } from "./gen-mini-fixture.ts";
-import { resolveDuckdbBin } from "./run.ts";
+import { FIXTURE_TABLES, resolveDuckdbBin } from "./run.ts";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 const SCRIPT = join(import.meta.dir, "run.ts");
-
-const FIXTURE_FILES = [
-    "turn",
-    "tool_call",
-    "session",
-    "commit",
-    "skill",
-    "invoked",
-    "spawned",
-    "telemetry_of",
-] as const;
 
 const runBench = (envOverrides: Record<string, string | undefined>) => {
     const env: Record<string, string | undefined> = { ...process.env };
@@ -39,7 +28,7 @@ const runBench = (envOverrides: Record<string, string | undefined>) => {
 
 const makeEmptyFixture = (): string => {
     const dir = mkdtempSync(join(tmpdir(), "ax-bench-empty-"));
-    for (const name of FIXTURE_FILES) {
+    for (const name of FIXTURE_TABLES) {
         writeFileSync(join(dir, `${name}.jsonl`), "", "utf8");
     }
     return dir;

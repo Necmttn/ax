@@ -27,6 +27,19 @@ import { attrMap, type KeyValue } from "./otlp-schema.ts";
 
 export type Signal = "metrics" | "traces" | "logs";
 
+/**
+ * The three OTLP/HTTP request paths ax's receiver accepts, mapped to the
+ * signal each one carries. Single source of truth for both the spool
+ * receiver's path allowlist (`spool-server.ts`'s `OTLP_PATHS`, derived as
+ * `Object.keys(...)`) and the spool ingest stage's path->signal dispatch
+ * (`otel-spool.ts`) - previously two separately-hand-maintained copies.
+ */
+export const OTLP_SIGNAL_PATHS: Readonly<Record<string, Signal>> = {
+    "/v1/metrics": "metrics",
+    "/v1/traces": "traces",
+    "/v1/logs": "logs",
+};
+
 /** A flat attr lookup, as produced by `attrMap`. */
 export type AttrMap = Map<string, string | number | boolean | null>;
 

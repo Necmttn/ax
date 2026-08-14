@@ -36,7 +36,7 @@ import {
     type TraceTransport,
 } from "@ax/lib/live-traces/Sink";
 import { runIngest, type RunIngestOptions } from "../ingest/run.ts";
-import { withIngestLock } from "../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "../ingest/ingest-lock.ts";
 import { StageRegistry } from "../ingest/stage/registry.ts";
 import { ingestStreamEventFromTrace } from "../ingest/stream-events.ts";
 import type { IngestStreamBus } from "./ingest-stream.ts";
@@ -52,10 +52,6 @@ export type IngestBaseServices =
     | StageRegistry
     | FileSystem.FileSystem
     | Path.Path;
-
-/** Mirrors `INGEST_LOCK_STALE_GRACE_MS` in `cli/commands/ingest.ts`: extra
- *  grace beyond the hard ingest timeout before a held lock is deemed stale. */
-const INGEST_LOCK_STALE_GRACE_MS = 60_000;
 
 /**
  * The `baseLayer` accepted by {@link startIngestWorkflow}. It must provide
@@ -155,12 +151,9 @@ export const startIngestWorkflow = (
         const lockedIngest = Effect.gen(function* () {
             const cfg = yield* AxConfig;
             const path = yield* Path.Path;
-            const staleMs = cfg.knobs.ingestTimeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS;
             yield* withIngestLock(
                 {
-                    lockPath: path.join(cfg.paths.dataDir, "ingest.lock"),
-                    command: opts.command,
-                    staleMs,
+                    ...ingestLockOptions(path, cfg.paths.dataDir, opts.command, cfg.knobs.ingestTimeoutSeconds),
                     // No `timeoutSeconds` - this path stays unbounded, same as
                     // before this change (see the module doc comment).
                     onBusy: (holder) =>
