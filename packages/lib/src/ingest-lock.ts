@@ -37,7 +37,10 @@
  *     holder's start time (`ps -o lstart=`), and a live pid whose fingerprint no
  *     longer matches is a corpse. Best-effort by design: `ps` can be missing or
  *     sandboxed, and a `null` there degrades exactly to pid-only liveness rather
- *     than failing an ingest.
+ *     than failing an ingest. That degrade is exactly why the probe is an
+ *     injectable seam (`procStartedAt`): a test that used the real `ps` would
+ *     pass or fail on whether the runner permits process inspection, not on
+ *     this module. Production never passes it.
  *
  *  4. CANONICAL-PATH IDENTITY. All process-local state is keyed by the canonical
  *     path, never by the string the caller passed: `ingest.lock`,
@@ -203,9 +206,23 @@ const isProcessAlive = (pid: number): boolean => {
     }
 };
 
+/**
+ * Invariant 3's fingerprint probe: the start time of a live process, or `null`
+ * when it cannot be established.
+ *
+ * It is a SEAM (`withIngestLock`'s `procStartedAt` option) and not just a
+ * function because the default reads the answer off the host - `ps` - and a
+ * host is not a fixture. A runner that sandboxes process inspection answers
+ * `null` for every pid, and `null` is the documented degrade-to-alive path
+ * (below), so a test written against the real probe asserts the environment as
+ * much as the code. Production always takes the default, so nothing about the
+ * shipped behaviour moves; only a test can substitute a deterministic answer.
+ */
+export type ProcStartedAtProbe = (pid: number) => string | null;
+
 /** The process start time `ps` reports, or `null` when `ps` cannot answer
  *  (missing, sandboxed, unexpected format) - invariant 3's best-effort half. */
-const processStartedAt = (pid: number): string | null => {
+export const processStartedAt: ProcStartedAtProbe = (pid) => {
     try {
         const probe = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)]);
         if (probe.exitCode !== 0) return null;
@@ -222,10 +239,10 @@ const processStartedAt = (pid: number): string | null => {
  * degrades to the pid probe alone; a failed probe NOW keeps the previous answer
  * (alive), so an unreadable start time can never turn a live holder into a corpse.
  */
-const holderIsLive = (holder: IngestLockInfo): boolean => {
+const holderIsLive = (holder: IngestLockInfo, probe: ProcStartedAtProbe): boolean => {
     if (!isProcessAlive(holder.pid)) return false;
     if (holder.procStartedAt === undefined) return true;
-    const current = processStartedAt(holder.pid);
+    const current = probe(holder.pid);
     return current === null || current === holder.procStartedAt;
 };
 
@@ -316,6 +333,11 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
         /** hard wall-clock cap on `work`; omitted = no timeout */
         readonly timeoutSeconds?: number;
         readonly now?: () => number;
+        /** Invariant 3's process-fingerprint probe. Omitted = the real `ps`
+         *  reader ({@link processStartedAt}), which is what every production
+         *  caller uses; a test substitutes a deterministic answer so the case
+         *  under test is not decided by whether the runner allows `ps`. */
+        readonly procStartedAt?: ProcStartedAtProbe;
         readonly onBusy: (holder: IngestLockInfo) => Effect.Effect<A2, E2, R2>;
         /** run when `work` exceeds `timeoutSeconds` (lock left to age) - e.g.
          *  finalize the run row + tell the user; runs AFTER the interrupted
@@ -338,6 +360,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const now = opts.now ?? (() => Date.now());
+        const probeStartedAt = opts.procStartedAt ?? processStartedAt;
         const lockPath = opts.lockPath;
 
         yield* fs.makeDirectory(path.dirname(lockPath), { recursive: true }).pipe(Effect.ignore);
@@ -345,7 +368,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
 
         /** The exact bytes this acquire wrote, so `release` can compare them. */
         const mintPayload = (): string => {
-            const procStartedAt = processStartedAt(process.pid);
+            const procStartedAt = probeStartedAt(process.pid);
             return encodeLockPayload({
                 pid: process.pid,
                 startedAt: now(),
@@ -379,7 +402,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
                 // in-process registry does.
                 return null;
             }
-            return holderIsLive(holder) ? holder : null;
+            return holderIsLive(holder, probeStartedAt) ? holder : null;
         };
 
         /**

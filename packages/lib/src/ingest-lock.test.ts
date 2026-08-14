@@ -9,8 +9,10 @@ import {
     encodeLockPayload,
     ingestLockHeldHere,
     ingestLockOptions,
+    processStartedAt,
     withIngestLock,
     type IngestLockInfo,
+    type ProcStartedAtProbe,
 } from "./ingest-lock.ts";
 
 const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -41,6 +43,7 @@ interface Overrides<A> {
     readonly timeoutSeconds?: number;
     readonly onTimeout?: () => Effect.Effect<void>;
     readonly afterWork?: (value: A) => Effect.Effect<void>;
+    readonly procStartedAt?: ProcStartedAtProbe;
 }
 
 /** The option bag every case below starts from. Optional fields are spread
@@ -54,7 +57,16 @@ const opts = <A>(lockPath: string, over: Overrides<A> = {}) => ({
     ...(over.timeoutSeconds === undefined ? {} : { timeoutSeconds: over.timeoutSeconds }),
     ...(over.onTimeout === undefined ? {} : { onTimeout: over.onTimeout }),
     ...(over.afterWork === undefined ? {} : { afterWork: over.afterWork }),
+    ...(over.procStartedAt === undefined ? {} : { procStartedAt: over.procStartedAt }),
 });
+
+/** A fingerprint probe that answers the same thing for every pid, so the case
+ *  under test is decided by this module and not by whether the runner lets
+ *  `ps` inspect processes. `null` is the "probe could not answer" reply. */
+const probeReturning =
+    (answer: string | null): ProcStartedAtProbe =>
+    () =>
+        answer;
 
 describe("decodeLockPayload", () => {
     test("round-trips a full payload", () => {
@@ -174,16 +186,78 @@ describe("withIngestLock", () => {
                 }),
             );
 
-            const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("stolen")));
+            // The probe is INJECTED so the case is decided here and not by the
+            // host: on a runner that sandboxes `ps` the real probe answers
+            // `null` for every pid, which is the documented degrade-to-alive
+            // path, and this case would report `busy` for entirely
+            // environmental reasons. Production keeps the real probe - see the
+            // default-wiring case below.
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning("Sat Aug 15 09:00:00 2026") }),
+                    Effect.succeed("stolen"),
+                ),
+            );
             expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
         });
     });
 
-    test("does NOT steal a live holder whose fingerprint matches", async () => {
+    test("does NOT steal a live holder whose fingerprint still matches", async () => {
         await withTempDir(async (dir) => {
             const lockPath = join(dir, "ingest.lock");
-            // pid 1 with no fingerprint recorded: liveness degrades to the pid
-            // probe alone, which says alive.
+            const fingerprint = "Sat Aug 15 09:00:00 2026";
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({
+                    pid: 1,
+                    startedAt: Date.now(),
+                    command: "live-holder",
+                    procStartedAt: fingerprint,
+                }),
+            );
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning(fingerprint) }),
+                    Effect.succeed("should not run"),
+                ),
+            );
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("a probe that cannot answer keeps the holder ALIVE, never turns it into a corpse", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            // Invariant 3 is best-effort: `ps` missing or sandboxed answers
+            // `null`, and that degrades to pid-only liveness rather than
+            // stealing a lock from a process that is genuinely running.
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({
+                    pid: 1,
+                    startedAt: Date.now(),
+                    command: "live-holder",
+                    procStartedAt: "Thu Jan  1 00:00:00 1970",
+                }),
+            );
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning(null) }),
+                    Effect.succeed("should not run"),
+                ),
+            );
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("does NOT steal a live holder that recorded no fingerprint at all", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            // pid 1 with no fingerprint recorded (an older build's payload):
+            // liveness degrades to the pid probe alone, which says alive. No
+            // probe is consulted on this path, so no injection is needed.
             writeFileSync(
                 lockPath,
                 encodeLockPayload({ pid: 1, startedAt: Date.now(), command: "live-holder" }),
@@ -191,6 +265,33 @@ describe("withIngestLock", () => {
 
             const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("should not run")));
             expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("with no probe passed, the lock it mints carries the REAL process fingerprint", async () => {
+        // The seam must not quietly become the production path: an omitted
+        // `procStartedAt` has to fall back to the real `ps` reader. Skipped
+        // where the host does not permit the probe at all - the point here is
+        // the wiring, and there is nothing to compare against when `ps` is
+        // unavailable.
+        const real = processStartedAt(process.pid);
+        if (real === null) return;
+
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const seen: Array<IngestLockInfo | null> = [];
+
+            await run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.sync(() => {
+                        seen.push(decodeLockPayload(readFileSync(lockPath, "utf8")));
+                    }),
+                ),
+            );
+
+            expect(seen).toHaveLength(1);
+            expect(seen[0]?.procStartedAt).toBe(real);
         });
     });
 

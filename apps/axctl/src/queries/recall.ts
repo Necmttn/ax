@@ -187,13 +187,25 @@ export const SKILL_PICKER_LIMIT = 500;
 
 export const PickerRow = Schema.Struct({ value: Schema.String, uses: Schema.BigInt });
 
+/**
+ * The tie-break every picker orders by after `uses DESC`. `uses` alone is not a
+ * total order: two equally-used projects (or skills) can come back in either
+ * order, and DuckDB is free to change which one on any plan, thread count or
+ * row layout. That is a real defect and not merely a flaky test - the list is
+ * an INTERACTIVE prompt, so the same graph would offer the same two entries in
+ * a different order run to run, and `LIMIT` would drop an arbitrary one of a
+ * tied pair at the cut-off. `value` is unique per row here (both queries group
+ * by it), so appending it makes the order total and therefore reproducible.
+ */
+const PICKER_ORDER = "ORDER BY uses DESC, value ASC";
+
 /** Projects by session count. */
 export const projectPickerQuery = (): Clause => ({
     sql: `SELECT project AS value, count(*) AS uses
           FROM session
           WHERE project IS NOT NULL AND project <> ''
           GROUP BY project
-          ORDER BY uses DESC
+          ${PICKER_ORDER}
           LIMIT ${PROJECT_PICKER_LIMIT}`,
     params: [],
 });
@@ -208,7 +220,7 @@ export const skillPickerQuery = (): Clause => ({
           JOIN skill sk ON sk.id = i.out_id
           WHERE sk.name IS NOT NULL
           GROUP BY sk.name
-          ORDER BY uses DESC
+          ${PICKER_ORDER}
           LIMIT ${SKILL_PICKER_LIMIT}`,
     params: [],
 });

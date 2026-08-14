@@ -15,8 +15,10 @@
  * The lookups are the same three inputs `chooseIdentity`
  * (`ingest/repository-identity.ts`) ranks, tried in the SAME order, so this
  * agrees with the identity the writer used - and so a stale `root_path` on some
- * other row can never outrank a remote-url match. Three statements rather than
- * one OR-ed statement with a ranking `CASE`, because the ranking would have to
+ * other row can never outrank a remote-url match. (The remote term is two
+ * statements, not one, because the stored spelling may be either the raw or the
+ * normalized URL - see `repositoryLookupQueries`.) Separate statements rather
+ * than one OR-ed statement with a ranking `CASE`, because the ranking would have to
  * bind every value twice (positional parameters cannot be reused), and an
  * off-by-one in a doubled bind list is the kind of bug that returns a wrong
  * answer instead of an error. Each is an indexed point lookup on a table with
@@ -45,15 +47,33 @@ const lookupOn = (column: string, value: DuckDbParam): Clause => ({
  * omitted rather than bound as NULL (`col = NULL` matches nothing, so binding it
  * would be a wasted round trip that reads like a real lookup).
  *
+ * BOTH SPELLINGS OF THE REMOTE ARE TRIED, normalized first, and both before the
+ * commit fallback. `chooseIdentity` ranks on the NORMALIZED remote, but the git
+ * ingest stage persists `repository.remote_url` RAW
+ * (`ingest/git.ts` writes `repo.remoteUrl`), and `normalizeGitRemoteUrl` is
+ * lossy - "git@github.com:Necmttn/ax.git" and "github.com/necmttn/ax" are the
+ * same repository under two spellings, and neither equals the other in SQL. A
+ * lookup that bound only the normalized form therefore matched nothing on a
+ * real cache and fell through to `initial_commit` - which is precisely the term
+ * that CANNOT separate a fork from its upstream, since a fork shares the root
+ * commit. So `--scope=here` in a fork could silently scope to the upstream's
+ * row. Trying both spellings costs one extra indexed point lookup in the miss
+ * case and keeps the remote - the only term that distinguishes forks - ahead of
+ * the commit, whichever spelling the writer stored.
+ *
  * `root_path` matches on the PRIMARY checkout root (`mainRepoRoot`), not on
  * `cwd` or on a linked worktree's root: that is what the git ingest persists, so
  * a query run from inside a worktree still finds the one repository row.
  */
 export const repositoryLookupQueries = (who: PwdIdentity): ReadonlyArray<Clause> => {
     const queries: Clause[] = [];
-    if (who.remoteUrlNormalized !== null && who.remoteUrlNormalized.length > 0) {
-        queries.push(lookupOn("remote_url", who.remoteUrlNormalized));
+    const remotes = new Set<string>();
+    for (const remote of [who.remoteUrlNormalized, who.remoteUrl]) {
+        // A repo whose remote already reads in normalized form yields one term,
+        // not the same statement twice.
+        if (remote !== null && remote.length > 0) remotes.add(remote);
     }
+    for (const remote of remotes) queries.push(lookupOn("remote_url", remote));
     if (who.initialCommit !== null && who.initialCommit.length > 0) {
         queries.push(lookupOn("initial_commit", who.initialCommit));
     }
