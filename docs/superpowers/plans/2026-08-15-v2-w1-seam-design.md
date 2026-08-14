@@ -44,6 +44,13 @@ path → acquire token (it needs one anyway, to tell a genuine second in-process
 crashed-run leftover), so the seam can ask it. This turns "writes only under the lock" from a comment
 into a machine-checked invariant with a test that bites.
 
+> **Fix round (2026-08-15).** The `Map` alone is not an answer to "do we hold the lock": it holds the
+> token WE minted, so a lock file that another process took over (invariant 5), or removed, or
+> corrupted, still read as "held here" and the seam opened the live database while someone else owned
+> it. `ingestLockHeldHere` now reads the FILE and requires the on-disk token to still be the registered
+> one. It remains a re-check at write time, not a guarantee for the duration of the write - the two
+> flock-class residuals (#789) are unchanged.
+
 **D2 - the merged lock lives in `packages/lib/src/ingest-lock.ts`.** The live module
 (`apps/axctl/src/ingest/ingest-lock.ts`, 3 callers) wins the CALL SURFACE; the duckdb module
 (`packages/lib/src/duckdb/lock.ts` + `lock-state.ts`, 0 production callers) contributes the per-acquire
@@ -61,16 +68,55 @@ zone - so on a non-UTC box the DDL default and every seam-stamped column would s
 time. Pinning the connection's TimeZone is the only place that can be fixed once for every reader and
 writer. Pinned by a test asserting a stamped write reads back as UTC.
 
+> **Fix round (2026-08-15).** The first implementation ASSERTED the clock instead of pinning it, on the
+> claim that `SET TimeZone='UTC'` was "unnecessary and actively broken". RETRACTED: that was measured
+> against ax's own icu-less build only. Measured against the OFFICIAL v1.5.5 build (what
+> `vendor/duckdb/` downloads, and what the gates run) under `TZ=Asia/Makassar`: unpinned, both
+> `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` and a DDL `DEFAULT CURRENT_TIMESTAMP` column land **+480 min**
+> off; `SET TimeZone='UTC'` succeeds and brings both to 0. So the pin is necessary, and asserting alone
+> turned a wrong timestamp into a REFUSAL of every write on any non-UTC host. Now: pin (best-effort -
+> the icu-less build rejects the statement and is already UTC), then assert. The pin covers READ
+> connections too, so `CURRENT_TIMESTAMP`-relative read filters compare like with like.
+>
+> Also retracted: the original test for this asserted TZ-independence by setting `process.env.TZ`
+> in-process, which DuckDB never sees (measured: `current_setting('TimeZone')` stays `UTC` and the skew
+> stays 0), so it passed whatever the seam did. The contract now lives in `seam-utc.test.ts`, which
+> re-execs itself with `TZ` set in the CHILD's environment.
+
 **D5 - read laziness, success-only memoization.** `CacheReadLayer` must be safe to put in any
 long-lived layer (`ax serve`, `ax mcp`) on a box with no dylib and no snapshot yet, so nothing is
 opened at layer-build time. The dylib + snapshot open on FIRST QUERY, memoized on SUCCESS ONLY: a
 long-lived daemon that queried before the first ingest must pick the snapshot up afterwards, so
 caching the failure would be wrong.
 
+> **Fix round (2026-08-15) - D5a, the memo is keyed on the snapshot's file identity.** Memoizing the
+> successful open *unconditionally* had the same defect one step later: a publish `rename`s a NEW file
+> over the snapshot path, so the held connection keeps reading the OLD inode, and `ax serve` / `ax mcp`
+> hold one `CacheRead` for the whole process - every request after the first ingest answered stale data
+> until restart. Each statement now `stat`s the path first (`dev:ino:size:mtime`, ~tens of microseconds
+> against a >100ms budget; the bench gate is unchanged) and reopens when it changed. The superseded
+> connection is RETIRED, not closed on the spot: a statement already running on it borrows the handle
+> for its whole duration and the connection closes when the last borrower lets go, so a concurrent read
+> never sees "the connection is closed". A snapshot that cannot be `stat`ed keeps the current handle.
+
 **D6 - `ax recall` gets its own `"cache"` command runtime.** The ported command is routed WITHOUT
 `AppLayer`, so it gets the throwing no-DB `SurrealClient` proxy. Any un-ported code path inside the
 vertical fails loudly instead of silently reading the old engine. This is the acceptance signal that
 the vertical really is ported, and it is the template wave 2 follows.
+
+> **Fix round (2026-08-15).** Shipped for real, and it needed one more port to be possible: the command
+> stayed on `"db"`, and default scope resolution still ended in `resolvePwdRepository`'s
+> `SurrealClient` lookup - so `ax recall --scope=all` on a machine without SurrealDB failed while
+> `AppLayer` started. Now: `withCache` (AxConfig + platform + ProcessService + `CacheReadLive` + the
+> throwing proxy) in `cli/index.ts`, `recall: "cache"`, and the pwd resolver SPLIT - `resolvePwdIdentity`
+> is git-only (no engine), and the cache-side repository lookup is `queries/repository-scope.ts`. It
+> looks the row up by the identity columns the DDL carries (`remote_url` → `initial_commit` →
+> `root_path`, `chooseIdentity`'s own ranking) instead of constructing an id, because DuckDB row ids are
+> content-hashed by a writer wave 2 has not written yet - and returns the ROW id, which is what
+> `session.repository` actually holds (the git-derived Surreal key does not). A repository the cache has
+> never seen falls back to `--scope=all` (with a stderr note under an explicit `--scope=here`). Proof is
+> `cli/recall-no-surreal.test.ts`: it spawns the real CLI with `AX_DB_URL` pointed at a dead port, and
+> fails (5.5s connect timeouts) the moment the manifest says `"db"`.
 
 **D7 - skills recall is plain SQL, not FTS.** Locked upstream by #758 and by the DDL header: only
 `turn.text_excerpt` and `commit.message` get `PRAGMA create_fts_index`. Skills move to `ILIKE`.

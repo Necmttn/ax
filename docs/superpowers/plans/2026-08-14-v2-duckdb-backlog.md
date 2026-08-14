@@ -120,6 +120,15 @@ Shared rules for all five:
 
 - Ports are REPLACEMENTS. No dual-run, no fallback to Surreal on a DuckDB miss - a fallback hides
   exactly the bug the port introduces.
+- **Flip the command runtime, and prove it out of process.** A CLI family's last porting step is
+  `"db"` -> `"cache"` in its `RuntimeManifest` (`cli/commands/manifest.ts`): `withCache` provides
+  `CacheRead` + AxConfig + platform + ProcessService and a `SurrealClient` proxy that THROWS, so an
+  un-ported path fails loudly instead of answering from the old engine. An in-process test cannot
+  check this (it is handed the layers either way) - copy `cli/recall-no-surreal.test.ts`, which spawns
+  the real CLI with `AX_DB_URL` on a dead port. Anything a ported reader still needs from Surreal (the
+  repository lookup was the one in w1) has to be ported WITH it, not left behind - see
+  `queries/repository-scope.ts` for the shape: look the row up by the DDL's identity columns rather
+  than constructing a content-hashed row id.
 - Tests run against a REAL temp DuckDB built from the real `schema.duckdb.sql`, via
   `duckdbTestSetup` (`@ax/lib/testing/duckdb-dylib`). SQL-text assertions do not count as
   coverage; they cannot tell a working query from one that merely looks right.
