@@ -1,0 +1,19 @@
+#!/bin/bash
+set -u
+cd "$(dirname "$0")"
+i=0
+fail=0
+ok=0
+while IFS=$'\t' read -r START END; do
+  i=$((i+1))
+  OUT="raw/toolcall_day_$(printf '%03d' $i).json"
+  ./export_one_window.sh "id, session, ts, name, status" tool_call ts "$START" "$END" "$OUT" > "$OUT.log" 2>&1
+  RC=$?
+  if [ "$RC" -ne 0 ] || [ -s "$OUT.err" ]; then
+    fail=$((fail+1))
+    echo "FAIL day $i [$START,$END) $(cat "$OUT.log")"
+  else
+    ok=$((ok+1))
+  fi
+done < toolcall_windows_daily.tsv
+echo "DONE ok=$ok fail=$fail total=$i"
