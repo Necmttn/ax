@@ -43,29 +43,62 @@ export const DEFAULT_TARGETS: BenchTargets = {
     cacheBytes: 1024 * 1024 * 1024,
 };
 
-const parseEnvNumber = (raw: string | undefined, fallback: number): number => {
+export class InvalidBenchTargetError extends Error {
+    constructor(name: string, raw: string) {
+        super(`invalid ${name}=${JSON.stringify(raw)}: expected a number`);
+        this.name = "InvalidBenchTargetError";
+    }
+}
+
+const parseEnvNumber = (
+    name: string,
+    raw: string | undefined,
+    fallback: number,
+): number => {
     if (raw === undefined || raw === "") return fallback;
     const n = Number(raw);
-    return Number.isFinite(n) ? n : fallback;
+    if (!Number.isFinite(n)) throw new InvalidBenchTargetError(name, raw);
+    return n;
 };
 
 export const loadTargets = (
     env: Record<string, string | undefined> = process.env,
 ): BenchTargets => ({
-    loadS: parseEnvNumber(env.AX_BENCH_MAX_LOAD_S, DEFAULT_TARGETS.loadS),
-    ftsS: parseEnvNumber(env.AX_BENCH_MAX_FTS_S, DEFAULT_TARGETS.ftsS),
+    loadS: parseEnvNumber(
+        "AX_BENCH_MAX_LOAD_S",
+        env.AX_BENCH_MAX_LOAD_S,
+        DEFAULT_TARGETS.loadS,
+    ),
+    ftsS: parseEnvNumber(
+        "AX_BENCH_MAX_FTS_S",
+        env.AX_BENCH_MAX_FTS_S,
+        DEFAULT_TARGETS.ftsS,
+    ),
     snapshotS: parseEnvNumber(
+        "AX_BENCH_MAX_SNAPSHOT_S",
         env.AX_BENCH_MAX_SNAPSHOT_S,
         DEFAULT_TARGETS.snapshotS,
     ),
-    bm25S: parseEnvNumber(env.AX_BENCH_MAX_BM25_MS, DEFAULT_TARGETS.bm25S * 1000) / 1000,
-    aggS: parseEnvNumber(env.AX_BENCH_MAX_AGG_MS, DEFAULT_TARGETS.aggS * 1000) / 1000,
+    bm25S:
+        parseEnvNumber(
+            "AX_BENCH_MAX_BM25_MS",
+            env.AX_BENCH_MAX_BM25_MS,
+            DEFAULT_TARGETS.bm25S * 1000,
+        ) / 1000,
+    aggS:
+        parseEnvNumber(
+            "AX_BENCH_MAX_AGG_MS",
+            env.AX_BENCH_MAX_AGG_MS,
+            DEFAULT_TARGETS.aggS * 1000,
+        ) / 1000,
     traversalS:
         parseEnvNumber(
+            "AX_BENCH_MAX_TRAVERSAL_MS",
             env.AX_BENCH_MAX_TRAVERSAL_MS,
             DEFAULT_TARGETS.traversalS * 1000,
         ) / 1000,
     cacheBytes: parseEnvNumber(
+        "AX_BENCH_MAX_CACHE_BYTES",
         env.AX_BENCH_MAX_CACHE_BYTES,
         DEFAULT_TARGETS.cacheBytes,
     ),

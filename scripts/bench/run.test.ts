@@ -66,10 +66,16 @@ describe("bench runner skip", () => {
         const fixture = makeEmptyFixture();
         temps.push(fixture);
         const bunDir = dirname(Bun.which("bun") ?? process.execPath);
+        // Deliberately exclude /usr/bin and /bin: a system-installed duckdb
+        // there would satisfy Bun.which("duckdb") and break this SKIP
+        // assertion. Only the bun dir (needed to spawn the script) plus a
+        // guaranteed-empty dir (in case an empty PATH misbehaves) are on PATH.
+        const emptyPathDir = mkdtempSync(join(tmpdir(), "ax-bench-emptypath-"));
+        temps.push(emptyPathDir);
         const r = runBench({
             AX_BENCH_FIXTURE: fixture,
             AX_DUCKDB_BIN: undefined,
-            PATH: [bunDir, "/usr/bin", "/bin"].join(":"),
+            PATH: [bunDir, emptyPathDir].join(":"),
         });
         expect(r.exitCode).toBe(0);
         expect(r.out).toContain("SKIP");
@@ -126,4 +132,33 @@ describe("bench runner suite", () => {
         expect(r.out).toContain("FAIL");
         expect(r.out).toContain("BM25 top-20");
     }, 120_000);
+
+    test.skipIf(!duckdb)("rejects a fixture where every table is empty instead of silently passing", () => {
+        if (!duckdb) return;
+        const fixture = makeEmptyFixture();
+        temps.push(fixture);
+        const r = runBench({
+            AX_BENCH_FIXTURE: fixture,
+            AX_DUCKDB_BIN: duckdb,
+        });
+        expect(r.exitCode).not.toBe(0);
+        expect(r.out).toContain("ERROR");
+        expect(r.out.toLowerCase()).toContain("empty");
+    }, 60_000);
+});
+
+describe("bench runner target validation", () => {
+    test("exits non-zero with the offending name+value when a target override is not a number", () => {
+        const fixture = makeEmptyFixture();
+        temps.push(fixture);
+        const r = runBench({
+            AX_BENCH_FIXTURE: fixture,
+            AX_DUCKDB_BIN: "/usr/bin/true",
+            AX_BENCH_MAX_BM25_MS: "10ms",
+        });
+        expect(r.exitCode).not.toBe(0);
+        expect(r.out).toContain("ERROR");
+        expect(r.out).toContain("AX_BENCH_MAX_BM25_MS");
+        expect(r.out).toContain("10ms");
+    });
 });

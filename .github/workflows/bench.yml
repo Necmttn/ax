@@ -28,7 +28,7 @@ jobs:
           duckdb_dir="$RUNNER_TEMP/duckdb"
           mkdir -p "$duckdb_dir"
           url="https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
-          if ! curl -fsSL --retry 3 --retry-delay 2 -o "$duckdb_dir/duckdb.zip" "$url"; then
+          if ! curl -fsSL --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 2 -o "$duckdb_dir/duckdb.zip" "$url"; then
             echo "SKIP: duckdb CLI not installable from $url"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -46,3 +46,9 @@ jobs:
         run: |
           bun scripts/bench/gen-mini-fixture.ts .bench-fixture
           bun scripts/bench/run.ts
+
+      - name: Run bench harness test suite
+        if: steps.duckdb.outputs.skip != 'true'
+        env:
+          AX_DUCKDB_BIN: ${{ steps.duckdb.outputs.bin }}
+        run: bun test scripts/bench

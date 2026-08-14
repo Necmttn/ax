@@ -13,8 +13,10 @@ import { join, resolve } from "node:path";
 import {
     evaluateGates,
     formatMetricTable,
+    InvalidBenchTargetError,
     loadTargets,
     type BenchMeasurements,
+    type BenchTargets,
 } from "./targets.ts";
 
 export const FIXTURE_TABLES = [
@@ -50,7 +52,11 @@ export const resolveDuckdbBin = (
 ): string | null => {
     const fromEnv = env.AX_DUCKDB_BIN;
     if (fromEnv) {
-        return existsSync(fromEnv) ? fromEnv : null;
+        // Resolve against the launch cwd now -- every duckdb spawn below runs
+        // with `cwd: workDir`, so a relative AX_DUCKDB_BIN would otherwise be
+        // looked up relative to the wrong directory.
+        const absolute = resolve(fromEnv);
+        return existsSync(absolute) ? absolute : null;
     }
     return Bun.which("duckdb");
 };
@@ -107,16 +113,32 @@ const failRun = (label: string, run: DuckRun, write: (line: string) => void): nu
     return 1;
 };
 
+// Counts result rows out of `.mode csv\n.headers off` output: every non-blank
+// line that isn't the trailing `.timer on` "Run Time" summary is one row.
+const countCsvResultRows = (out: string): number =>
+    out
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("Run Time")).length;
+
 const timeQueryMedian = (
     bin: string,
     sql: string,
     cwd: string,
     write: (line: string) => void,
     label: string,
+    minRows: number,
 ): number | null => {
     const warmup = runDuck(bin, ["bench.duckdb"], sql, cwd);
     if (warmup.status !== 0) {
         failRun(`${label} warmup`, warmup, write);
+        return null;
+    }
+    const rows = countCsvResultRows(warmup.stdout);
+    if (rows < minRows) {
+        write(
+            `ERROR: ${label} returned ${rows} row(s), expected >= ${minRows} -- fixture/query is degenerate`,
+        );
         return null;
     }
     const samples: number[] = [];
@@ -164,6 +186,17 @@ export const main = async (
         return 1;
     }
 
+    let targets: BenchTargets;
+    try {
+        targets = loadTargets(env);
+    } catch (err) {
+        if (err instanceof InvalidBenchTargetError) {
+            write(`ERROR: ${err.message}`);
+            return 1;
+        }
+        throw err;
+    }
+
     const workDir = join(tmpdir(), `ax-bench-${process.pid}-${Date.now()}`);
     mkdirSync(join(workDir, "jsonl"), { recursive: true });
     for (const name of FIXTURE_TABLES) {
@@ -188,6 +221,39 @@ export const main = async (
         const load = runDuck(duckdb, ["bench.duckdb"], loadSql, workDir);
         if (load.status !== 0) return failRun("load", load, write);
 
+        const countSql = [
+            ".mode csv",
+            ".headers off",
+            ...FIXTURE_TABLES.map(
+                (name) =>
+                    `SELECT '${name}', count(*) FROM ${name === "commit" ? '"commit"' : name};`,
+            ),
+        ].join("\n");
+        const counted = runDuck(duckdb, ["bench.duckdb"], countSql, workDir);
+        if (counted.status !== 0) {
+            return failRun("row-count sanity check", counted, write);
+        }
+        const rowCounts = new Map<string, number>();
+        for (const line of counted.stdout.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const idx = trimmed.lastIndexOf(",");
+            if (idx === -1) continue;
+            const n = Number(trimmed.slice(idx + 1).trim());
+            if (Number.isFinite(n)) {
+                rowCounts.set(trimmed.slice(0, idx).trim(), n);
+            }
+        }
+        const empty = FIXTURE_TABLES.filter(
+            (name) => (rowCounts.get(name) ?? 0) <= 0,
+        );
+        if (empty.length > 0) {
+            write(
+                `ERROR: fixture is empty/degenerate -- zero rows in: ${empty.join(", ")}`,
+            );
+            return 1;
+        }
+
         const ftsSql = `LOAD fts;\n${readSql("03_fts_build.sql")}`;
         const fts = runDuck(duckdb, ["bench.duckdb"], ftsSql, workDir);
         if (fts.status !== 0) return failRun("FTS rebuild", fts, write);
@@ -196,13 +262,18 @@ export const main = async (
         const snap = runDuck(duckdb, [], snapSql, workDir);
         if (snap.status !== 0) return failRun("snapshot copy", snap, write);
 
-        const query = (file: string, label: string): number | null =>
+        const query = (
+            file: string,
+            label: string,
+            minRows = 1,
+        ): number | null =>
             timeQueryMedian(
                 duckdb,
-                `LOAD fts;\n${readSql(file)}`,
+                `.mode csv\n.headers off\nLOAD fts;\n${readSql(file)}`,
                 workDir,
                 write,
                 label,
+                minRows,
             );
 
         const bm25S = query("04a_query_bm25.sql", "BM25 top-20");
@@ -225,9 +296,13 @@ export const main = async (
         if (traversalSpawnedS === null) return 1;
 
         const snapshotPath = join(workDir, "snapshot.duckdb");
-        const cacheBytes = existsSync(snapshotPath)
-            ? statSync(snapshotPath).size
-            : statSync(join(workDir, "bench.duckdb")).size;
+        if (!existsSync(snapshotPath)) {
+            write(
+                `ERROR: snapshot copy did not produce ${snapshotPath} -- refusing to fall back to bench.duckdb`,
+            );
+            return 1;
+        }
+        const cacheBytes = statSync(snapshotPath).size;
 
         const measured: BenchMeasurements = {
             loadS: load.elapsedS,
@@ -239,7 +314,7 @@ export const main = async (
             traversalSpawnedS,
             cacheBytes,
         };
-        const result = evaluateGates(measured, loadTargets(env));
+        const result = evaluateGates(measured, targets);
         write(formatMetricTable(result));
         write(
             `lookup=${lookupS}s join_drill=${joinDrillS}s work=${keepWork ? workDir : "deleted"}`,
