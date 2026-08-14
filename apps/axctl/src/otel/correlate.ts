@@ -41,8 +41,10 @@ const recordKey = (id: unknown): string | null => {
 };
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-/** Bare uuid from an otel `session_id` (already bare) or a `session:⟨uuid⟩` record. */
-const bareUuid = (v: unknown): string | null => {
+/** Bare uuid from an otel `session_id` (already bare) or a `session:⟨uuid⟩` record.
+ *  Exported so a test can prove `sessionRowId` (@ax/lib/stable-id) output still
+ *  round-trips back to the same uuid this matcher extracts (wave-0 P1-3). */
+export const bareUuid = (v: unknown): string | null => {
     if (v == null) return null;
     const s = typeof v === "string" ? v : String((v as { id?: unknown }).id ?? v);
     const m = UUID_RE.exec(s);

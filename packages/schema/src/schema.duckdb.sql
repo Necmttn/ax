@@ -16,6 +16,11 @@
 -- NATURAL_KEY_RECIPES for what each table hashes. Re-deriving the same input
 -- rewrites byte-identical ids, which is what lets sidecar refs survive a full
 -- re-derive; packages/lib/src/cache-integrity.ts counts the refs that do not.
+-- CARVE-OUT: `session.id` is the provider-native session id VERBATIM, not a hash
+-- of it (see sessionRowId). Its provider uuid is the value OTLP correlation and
+-- Studio deeplinks join session identity on, so hashing it would break those
+-- joins. Only a table whose natural key IS a single provider-native stable id
+-- qualifies; composite-key tables (turn = session + seq, etc.) stay hashed.
 --
 -- EDGES. Every Surreal RELATION table became a plain table with `in_id` / `out_id`
 -- VARCHAR columns holding the endpoint row ids, indexed on both sides. `in` and

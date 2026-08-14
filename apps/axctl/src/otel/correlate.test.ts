@@ -1,9 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { correlateOrphanOtel } from "./correlate.ts";
+import { sessionRowId } from "@ax/lib/stable-id";
+import { bareUuid, correlateOrphanOtel } from "./correlate.ts";
 
 const UUID = "019fbf3f-9241-40c3-b699-e1f62e7c5341";
+
+// Wave-0 finding P1-3: OTLP correlation matches sessions by extracting the uuid
+// straight out of `session.id`. If sessionRowId HASHED the uuid (the earlier
+// bug), bareUuid(session.id) would return null and every telemetry_of edge
+// would silently vanish. This pins the contract: a session row id round-trips
+// back to the exact uuid this matcher looks for.
+describe("session row id <-> OTLP correlation round-trip (P1-3)", () => {
+    test("bareUuid(sessionRowId(uuid)) recovers the uuid", () => {
+        expect(bareUuid(sessionRowId("claude", UUID))).toBe(UUID);
+        expect(bareUuid(sessionRowId("codex", UUID))).toBe(UUID);
+    });
+
+    test("a subagent session id (non-uuid) yields no uuid, so it is not correlated", () => {
+        expect(bareUuid(sessionRowId("claude", "claude-subagent-af3f3b45c70ccf85c"))).toBeNull();
+    });
+});
 
 /**
  * Stub the four query shapes the pass issues, in order:
