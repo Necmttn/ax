@@ -111,7 +111,26 @@ if [[ "$source_head" != "$duckdb_pinned_sha" ]]; then
     exit 1
 fi
 
-cp "$config_template" "$source_dir/extension/extension_config_local.cmake"
+# HEAD alone proves nothing about the WORKING TREE: a reused checkout could have
+# tracked files patched or extra sources dropped in and still report the pinned
+# HEAD. Reset hard to the pinned commit and wipe every untracked/ignored file
+# (incl. any previous build/) BEFORE applying our config, so the build only ever
+# compiles pinned sources plus the single file we add.
+git -C "$source_dir" reset --hard "$duckdb_pinned_sha"
+git -C "$source_dir" clean -fdx
+
+config_rel="extension/extension_config_local.cmake"
+cp "$config_template" "$source_dir/$config_rel"
+
+# The worktree must now differ from the pinned commit by that ONE file alone.
+# Anything else means tampering survived the reset (or the reset did not take) -
+# fail loudly rather than build it.
+unexpected=$(git -C "$source_dir" status --porcelain | grep -v -F -- "$config_rel" || true)
+if [[ -n "$unexpected" ]]; then
+    echo "reused DuckDB checkout at $source_dir is dirty beyond the config template after reset:" >&2
+    printf '%s\n' "$unexpected" >&2
+    exit 1
+fi
 # STATIC_LIBCPP=1 statically links libstdc++/libc++ into the DuckDB build so
 # the produced binaries don't depend on the runner's system C++ runtime -
 # needed on the Linux matrix legs (glibc/libstdc++ version skew between the
