@@ -176,6 +176,44 @@ export const SessionIdRow = Schema.Struct({ session_id: Schema.String });
 export const CountRow = Schema.Struct({ total: Schema.BigInt });
 
 // ---------------------------------------------------------------------------
+// Filter pickers (`--project=?`, `--skill=?`)
+// ---------------------------------------------------------------------------
+
+/** How many distinct values each picker offers to match against. Generous
+ *  enough that a real filter is always in the list, bounded so an interactive
+ *  prompt over a large graph stays instant. */
+export const PROJECT_PICKER_LIMIT = 200;
+export const SKILL_PICKER_LIMIT = 500;
+
+export const PickerRow = Schema.Struct({ value: Schema.String, uses: Schema.BigInt });
+
+/** Projects by session count. */
+export const projectPickerQuery = (): Clause => ({
+    sql: `SELECT project AS value, count(*) AS uses
+          FROM session
+          WHERE project IS NOT NULL AND project <> ''
+          GROUP BY project
+          ORDER BY uses DESC
+          LIMIT ${PROJECT_PICKER_LIMIT}`,
+    params: [],
+});
+
+/** Skills by invocation count. The Surreal version read `out.name` off each
+ *  edge - a per-edge deref over the whole `invoked` table; here it is a join
+ *  the planner can hash, which is the same reason the recall turn query joins
+ *  `session` rather than dereferencing it. */
+export const skillPickerQuery = (): Clause => ({
+    sql: `SELECT sk.name AS value, count(*) AS uses
+          FROM invoked i
+          JOIN skill sk ON sk.id = i.out_id
+          WHERE sk.name IS NOT NULL
+          GROUP BY sk.name
+          ORDER BY uses DESC
+          LIMIT ${SKILL_PICKER_LIMIT}`,
+    params: [],
+});
+
+// ---------------------------------------------------------------------------
 // Commits
 // ---------------------------------------------------------------------------
 

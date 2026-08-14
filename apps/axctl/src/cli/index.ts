@@ -4,6 +4,7 @@ import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
@@ -208,8 +209,12 @@ export const rootCommand = Command.make("axctl").pipe(
  * even though they are satisfied implicitly at runtime. This is the only
  * place the cast lives - callers stay type-safe.
  */
-const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
-    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient | CacheRead> =>
+    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<
+        void,
+        unknown,
+        SurrealClient | CacheRead
+    >;
 
 /** CLI invocation that has had its `SurrealClient` requirement satisfied. */
 type CliProgram = Effect.Effect<void, unknown, never>;
@@ -227,7 +232,7 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(AppLayer),
+        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive)),
         Effect.scoped,
     );
 
@@ -295,7 +300,10 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
-    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
+    const layer = Layer.mergeAll(
+        transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
+        CacheReadLive,
+    );
     return runCli(args).pipe(
         // After ingest completes successfully, link orphan OTLP rows to their
         // sessions via telemetry_of edges. Best-effort: never fails the ingest.
@@ -325,7 +333,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
     // SurrealClient connect path.
     return runCli(args).pipe(
         Effect.provideService(SurrealClient, stub),
-        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive)),
     );
 };
 

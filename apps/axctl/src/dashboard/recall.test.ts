@@ -26,6 +26,7 @@ import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
 import { CacheRead, CacheReadLayer, withCacheWrite, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { RecallResponse } from "@ax/lib/shared/dashboard-types";
+import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../queries/recall.ts";
 import { fetchRecall, type RecallParams } from "./recall.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall");
@@ -408,6 +409,70 @@ describe("recall: fan-out", () => {
         const res = await withRecall("ax-recall-case-", CORPUS, { q: "DuckDB" });
         expect(res.q).toBe("DuckDB");
         expect(res.hits).toHaveLength(3);
+    });
+});
+
+describe("recall: filter pickers", () => {
+    const withInvocations = (w: CacheWriteService) =>
+        Effect.gen(function* () {
+            yield* CORPUS(w);
+            yield* w.putMany("invoked", [
+                {
+                    id: "invoked:1",
+                    in_id: "turn:1",
+                    out_id: "skill:duckdb-ops",
+                    ts: T("2026-08-10T10:00:01.000Z"),
+                    session: "session:a",
+                    turn_has_error: false,
+                    was_corrected: false,
+                },
+                {
+                    id: "invoked:2",
+                    in_id: "turn:2",
+                    out_id: "skill:duckdb-ops",
+                    ts: T("2026-08-11T10:00:01.000Z"),
+                    session: "session:a",
+                    turn_has_error: false,
+                    was_corrected: false,
+                },
+                {
+                    id: "invoked:3",
+                    in_id: "turn:3",
+                    out_id: "skill:pancakes",
+                    ts: T("2026-08-12T10:00:01.000Z"),
+                    session: "session:b",
+                    turn_has_error: false,
+                    was_corrected: false,
+                },
+            ]);
+        });
+
+    /** Run one picker query against a published fixture. */
+    const picker = (fixture: Fixture, clause: Clause) =>
+        Effect.flatMap(CacheRead, (cache) => cache.rows(PickerRow, clause.sql, clause.params)).pipe(
+            Effect.provide(
+                CacheReadLayer({
+                    snapshotPath: fixture.snapshotPath,
+                    ...(dylibPath === null ? {} : { assetPath: dylibPath }),
+                }),
+            ),
+        );
+
+    dtest("--project=? lists every project by session count, most used first", async () => {
+        const fixture = await run(publish("ax-recall-pickproj-", withInvocations));
+        const rows = await run(picker(fixture, projectPickerQuery()));
+
+        expect(rows.map((r) => r.value)).toEqual(["ax", "other"]);
+        expect(rows.map((r) => Number(r.uses))).toEqual([1, 1]);
+    });
+
+    dtest("--skill=? lists every invoked skill by invocation count, most used first", async () => {
+        const fixture = await run(publish("ax-recall-pickskill-", withInvocations));
+        const rows = await run(picker(fixture, skillPickerQuery()));
+
+        // The Surreal version read `out.name` off every edge; this joins.
+        expect(rows.map((r) => r.value)).toEqual(["duckdb-ops", "pancakes"]);
+        expect(rows.map((r) => Number(r.uses))).toEqual([2, 1]);
     });
 });
 
