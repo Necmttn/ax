@@ -41,6 +41,7 @@ describe("effect cli", () => {
             "costs",
             "pricing",
             "serve",
+            "otlpd",
             "report",
             "recall",
             "skills",

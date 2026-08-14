@@ -1,7 +1,7 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "../install.ts";
+import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall, resolveTelemetryConsent } from "../install.ts";
 import { liveVersionDeps, printVersion, updateAxctl } from "../version.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { boolArg, jsonFlag, parseFileHints } from "./shared.ts";
@@ -37,8 +37,11 @@ export const updateCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
-export const installCommand = Command.make("install", {}, () =>
-    cmdInstall(),
+export const installCommand = Command.make("install", {
+    telemetry: Flag.boolean("telemetry").pipe(Flag.withDefault(false)),
+    noTelemetry: Flag.boolean("no-telemetry").pipe(Flag.withDefault(false)),
+}, ({ telemetry, noTelemetry }) =>
+    cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry) }),
 ).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
 
 export const setupCommand = Command.make(

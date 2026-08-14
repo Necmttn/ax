@@ -75,6 +75,8 @@ const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
 const SERVE_LABEL = "com.necmttn.ax-serve";
 const SERVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${SERVE_LABEL}.plist`);
+const OTLPD_LABEL = "com.necmttn.ax-otlpd";
+const OTLPD_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${OTLPD_LABEL}.plist`);
 
 /** Candidate install locations for the `ax studio` desktop app bundle (productName "ax studio"). */
 export const DESKTOP_APP_CANDIDATES: readonly string[] = [
@@ -368,6 +370,56 @@ export const servePlist = (binPath: string): string => `<?xml version="1.0" enco
 </dict>
 </plist>
 `;
+
+const otlpdDataDirEnv = (): string => process.env.AX_DATA_DIR
+    ? `
+    <key>AX_DATA_DIR</key>
+    <string>${process.env.AX_DATA_DIR}</string>`
+    : "";
+
+export const otlpdPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${OTLPD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>exec "${binPath}" otlpd</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+    <key>Crashed</key><true/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/otlpd.out</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/otlpd.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpdDataDirEnv()}
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+</dict>
+</plist>
+`;
+
+export const resolveTelemetryConsent = (
+    telemetry: boolean,
+    noTelemetry: boolean,
+): boolean => {
+    if (telemetry && noTelemetry) {
+        throw new Error("--telemetry and --no-telemetry cannot be used together");
+    }
+    return telemetry;
+};
 
 function which(cmd: string): string | null {
     const r = spawnSync("which", [cmd], { encoding: "utf8" });
@@ -1116,7 +1168,7 @@ export function formatDoctorReport(report: DoctorReport, json = false): string {
     return lines.join("\n");
 }
 
-export function cmdInstall(): Effect.Effect<
+export function cmdInstall(options: { readonly telemetry?: boolean } = {}): Effect.Effect<
     void,
     Error,
     FileSystem.FileSystem | Path.Path
@@ -1281,46 +1333,57 @@ export function cmdInstall(): Effect.Effect<
         yield* fs.remove(schemaPath, { force: true });
         }
 
-        // Write OTLP telemetry env into each installed harness config.
-        // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
-        const OTLP_ENDPOINT = "http://127.0.0.1:1738";
-        const claudeDir = posixPath.join(HOME, ".claude");
-        const claudeSettings = posixPath.join(claudeDir, "settings.json");
-        // Claude: only touch if ~/.claude exists (harness is installed).
-        const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
-        if (claudeDirExists) {
-            yield* Effect.promise(async () => {
-                try {
-                    let raw = "{}";
-                    try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
-                    const parsed = JSON.parse(raw) as Record<string, unknown>;
-                    const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
-                    await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
-                    console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
-                } catch (err) {
-                    console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
-                }
-            });
+        if (options.telemetry === true) {
+            yield* fs.writeFileString(OTLPD_PLIST, otlpdPlist(binSource));
+            console.log(`  wrote:  ${OTLPD_PLIST}`);
+            yield* Effect.promise(() => loadAgent(OTLPD_PLIST));
+        } else if (options.telemetry === false) {
+            yield* unloadAgent(OTLPD_PLIST);
         }
 
-        const codexDir = posixPath.join(HOME, ".codex");
-        const codexConfig = posixPath.join(codexDir, "config.toml");
-        // Codex: only touch if ~/.codex exists (harness is installed).
-        const codexDirExists = yield* fs.exists(codexDir).pipe(orAbsent(false));
-        if (codexDirExists) {
-            yield* Effect.promise(async () => {
-                try {
-                    let existing = "";
-                    try { existing = await Bun.file(codexConfig).text(); } catch { /* absent - start empty */ }
-                    const next = applyCodexOtelToml(existing, OTLP_ENDPOINT);
-                    if (next !== existing) {
-                        await Bun.write(codexConfig, next);
-                        console.log(`  otel: wrote Codex OTLP config → ${codexConfig}`);
+        // Write OTLP telemetry env into each installed harness config only
+        // after explicit consent.
+        // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
+        if (options.telemetry === true) {
+            const OTLP_ENDPOINT = "http://127.0.0.1:1738";
+            const claudeDir = posixPath.join(HOME, ".claude");
+            const claudeSettings = posixPath.join(claudeDir, "settings.json");
+            // Claude: only touch if ~/.claude exists (harness is installed).
+            const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
+            if (claudeDirExists) {
+                yield* Effect.promise(async () => {
+                    try {
+                        let raw = "{}";
+                        try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
+                        const parsed = JSON.parse(raw) as Record<string, unknown>;
+                        const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
+                        await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
+                        console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
+                    } catch (err) {
+                        console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
                     }
-                } catch (err) {
-                    console.warn(`  otel: could not update ${codexConfig}: ${(err as Error).message}`);
-                }
-            });
+                });
+            }
+
+            const codexDir = posixPath.join(HOME, ".codex");
+            const codexConfig = posixPath.join(codexDir, "config.toml");
+            // Codex: only touch if ~/.codex exists (harness is installed).
+            const codexDirExists = yield* fs.exists(codexDir).pipe(orAbsent(false));
+            if (codexDirExists) {
+                yield* Effect.promise(async () => {
+                    try {
+                        let existing = "";
+                        try { existing = await Bun.file(codexConfig).text(); } catch { /* absent - start empty */ }
+                        const next = applyCodexOtelToml(existing, OTLP_ENDPOINT);
+                        if (next !== existing) {
+                            await Bun.write(codexConfig, next);
+                            console.log(`  otel: wrote Codex OTLP config → ${codexConfig}`);
+                        }
+                    } catch (err) {
+                        console.warn(`  otel: could not update ${codexConfig}: ${(err as Error).message}`);
+                    }
+                });
+            }
         }
 
         const { BANNER } = yield* Effect.promise(() => import("./banner.ts"));
@@ -1578,7 +1641,7 @@ export function cmdUninstall(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         console.log("[axctl] uninstall");
-        for (const plist of [SERVE_PLIST, QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
+        for (const plist of [OTLPD_PLIST, SERVE_PLIST, QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
             const removed = yield* unloadAgent(plist);
             console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
         }

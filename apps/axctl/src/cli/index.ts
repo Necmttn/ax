@@ -11,6 +11,7 @@ import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
 import { contextCommand, contextRuntime } from "./commands/context.ts";
 import { projectCommand, projectRuntime } from "./commands/project.ts";
 import { serveCommand, mcpCommand, tuiCommand, serveRuntime } from "./commands/serve.ts";
+import { otlpdCommand, otlpdRuntime } from "./commands/otlpd.ts";
 import { shareCommand, shareRuntime } from "./commands/share.ts";
 import { starCommand, starRuntime } from "./commands/star.ts";
 import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
@@ -86,6 +87,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...contextRuntime,
     ...projectRuntime,
     ...serveRuntime,
+    ...otlpdRuntime,
     ...shareRuntime,
     ...starRuntime,
     ...dogfoodRuntime,
@@ -136,6 +138,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     rolesCommand,
     hooksCommand,
     serveCommand,
+    otlpdCommand,
     mcpCommand,
     tuiCommand,
     shareCommand,
