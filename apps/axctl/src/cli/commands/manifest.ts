@@ -9,6 +9,18 @@
 export type CommandRuntime =
     /** handlers reach SurrealDB - route through withDb (AppLayer) */
     | "db"
+    /**
+     * PORTED to the v2 DuckDB cache: handlers read the published snapshot
+     * through `CacheRead` and must never reach SurrealDB - route through
+     * withCache (AxConfig + platform + ProcessService + CacheReadLive, and the
+     * same throwing no-DB SurrealClient proxy `"none"` gets).
+     *
+     * The throwing proxy is the acceptance signal, not a safety net: any code
+     * path inside a ported vertical that still reaches for SurrealDB fails
+     * LOUDLY here instead of quietly answering from the old engine. A wave-2
+     * chunk flips its family's entry from `"db"` to `"cache"` as its last step.
+     */
+    | "cache"
     /** ingest pipeline - route through withIngest (IngestRuntimeLayer + trace transports) */
     | "ingest"
     /** must never touch the DB - route through withoutDb (Proxy SurrealClient that throws) */
