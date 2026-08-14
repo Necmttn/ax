@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs";
-import { DuckDb, DuckDbLayer } from "@ax/lib/duckdb";
+import { DuckDb, DuckDbLayer } from "@ax/lib/duckdb/internal";
 import { Effect } from "effect";
 
 const dylibPath = process.argv[2];

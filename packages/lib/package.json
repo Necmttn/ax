@@ -13,6 +13,7 @@
     "./shared/team-community": "./src/shared/team-community.ts",
     "./shared/team-fetch": "./src/shared/team-fetch.ts",
     "./duckdb": "./src/duckdb/index.ts",
+    "./duckdb/internal": "./src/duckdb/internal.ts",
     "./testing/duckdb-dylib": "./src/testing/duckdb-dylib.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
     "./testing/surreal": "./src/testing/surreal.ts",
