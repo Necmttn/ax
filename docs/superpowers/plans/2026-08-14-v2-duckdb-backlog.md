@@ -82,7 +82,7 @@ aggregates <200ms · traversals <50ms · cache file <1GB. Fixture: 524MB JSONL e
 
 ### Wave 1 - the load-bearing seam (after w0-ffi-client + w0-schema-ddl merge)
 
-- **w1-seam-design** [lane: judgment/opus, HOLD:human at gate] - The typed query seam every
+- **w1-seam-design** [lane: judgment/opus; hold lifted by operator 2026-08-14 - auto-merge on passing gate] - The typed query seam every
   reader/writer goes through: define the seam API (reads open the snapshot; writes only inside
   ingest under the lock), port ONE representative vertical (e.g. `queries/recall.ts` +
   its CLI command) end-to-end as the template, and produce the PARTITION LIST of the ~168
