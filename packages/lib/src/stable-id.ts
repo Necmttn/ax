@@ -193,147 +193,36 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
     "<derived>": "derivedRowId: owning session row id + source table + source row id + optional extra parts",
 };
 
-/** Tables in DUCKDB_SCHEMA_TABLES (packages/schema/src/duckdb-tables.ts) that
- *  do not yet have a concrete entry in NATURAL_KEY_RECIPES. This chunk
- *  (w0-schema-ddl) only translates the DDL and the id-generation contract -
- *  it does not wire real writers for these tables, so their natural keys
- *  are not yet pinned down. Wave-2 port chunks MUST remove a table from this
- *  set (and add a concrete NATURAL_KEY_RECIPES entry) as they wire its
- *  writer; packages/schema/src/duckdb-recipe-coverage.test.ts fails the
- *  build if a table is silently missing from BOTH. */
-export const RECIPE_TODO: ReadonlySet<string> = new Set([
-    "skill",
-    "skill_revision",
-    "agent_def",
-    "claude_sidecar_artifact",
-    "used_sidecar_artifact",
-    "agent_provider",
-    "agent_model",
-    "agent_session",
-    "file",
-    "symbol",
-    "error_signature",
-    "commit",
-    "repository",
-    "checkout",
-    "workspace",
-    "tool",
-    "content_type",
-    "has_content",
-    "plan",
-    "plan_item",
-    "artifact",
-    "content_document",
-    "content_block",
-    "content_atom",
-    "mentions_file",
-    "mentions_commit",
-    "mentions_artifact",
-    "plan_snapshot",
-    "compaction",
-    "insight",
-    "friction_event",
-    "turn_analysis",
-    "reaction_event",
-    "classifier_definition",
-    "classifier_run",
-    "classifier_result",
-    "classifier_graph_node",
-    "classifier_graph_edge",
-    "classifier_graph_fact",
-    "transcript_label_review",
-    "transcript_label_vector",
-    "semantic_signal",
-    "diagnostic_event",
-    "guidance",
-    "guidance_version",
-    "guidance_source",
-    "guidance_revision",
-    "guidance_config_artifact",
-    "stack",
-    "command_outcome",
-    "user_message_ngram",
-    "workflow_epoch",
-    "session_token_usage",
-    "turn_token_usage",
-    "session_health",
-    "session_metrics",
-    "fragility_cascade",
-    "commit_classification",
-    "branch",
-    "pull_request",
-    "review_event",
-    "check_run",
-    "delivery_outcome",
-    "workflow_snapshot",
-    "phase_span",
-    "skill_candidate",
-    "ingest_run",
-    "ingest_stage",
-    "ingest_event",
-    "query_sample",
-    "graph_health_check",
-    "role",
-    "plays_role",
-    "invoked",
-    "loaded",
-    "proposed",
-    "edited",
-    "mentioned_file",
-    "mentioned_symbol",
-    "mentioned_error",
-    "read_file",
-    "searched_file",
-    "corrected_by",
-    "expresses",
-    "reacts_to",
-    "has_classification",
-    "produced",
-    "touched",
-    "later_fixed_by",
-    "suggests_skill",
-    "has_checkout",
-    "concerns",
-    "resulted_in",
-    "produced_artifact",
-    "has_artifact",
-    "derived_from",
-    "skill_paired",
-    "recovered_by",
-    "spawned",
-    "advice",
-    "agent_event_child",
-    "used_model",
-    "agent_used_model",
-    "skill_triage_decision",
-    "harness_hook_event",
-    "hook_command_invocation",
-    "ax_invocation",
-    "feedback_case_type",
-    "feedback_case_result",
-    "hook_fire",
-    "proposal",
-    "directive_ngram",
-    "skill_proposal",
-    "subagent_proposal",
-    "hook_proposal",
-    "guidance_proposal",
-    "automation_proposal",
-    "cites_evidence",
-    "experiment",
-    "opportunity",
-    "checkpoint",
-    "dogfood_run",
-    "retro",
-    "reviewed",
-    "ingest_file_state",
-    "otel_metric_point",
-    "otel_span",
-    "otel_log_event",
-    "harness_tool_event",
-    "harness_run_context",
-    "wrapped_card",
-    "telemetry_of",
-    "run_evidence_event",
-    "run_evidence_ref",
-]);
+/**
+ * The two documentation-only keys in NATURAL_KEY_RECIPES that describe a RULE
+ * (`edgeRowId` / `derivedRowId`) rather than naming a table. Coverage checks must
+ * not read them as "a table by that literal name has a concrete recipe". `<` and
+ * `>` are not valid DuckDB identifier characters, so no parsed table name can
+ * ever equal one - but the coverage test asserts that rather than assuming it.
+ */
+export const PSEUDO_RECIPE_KEYS: ReadonlySet<string> = new Set(["<edge>", "<derived>"]);
+
+/**
+ * THERE IS NO `RECIPE_TODO` CONSTANT ANY MORE, deliberately.
+ *
+ * It used to be a hand-listed set of the 134 tables with no concrete recipe yet -
+ * a third mirror of the DDL's table list, alongside `duckdb-tables.ts` and the
+ * parity test's banned-type array, and the one most likely to rot: a table added
+ * to the DDL and forgotten here read as "covered".
+ *
+ * Coverage is now DERIVED where the DDL lives, in
+ * `packages/schema/src/duckdb-recipe-coverage.test.ts`: the todo set is simply
+ * every parsed DDL table minus the keys of `NATURAL_KEY_RECIPES` (minus
+ * {@link PSEUDO_RECIPE_KEYS}). The derived set was verified byte-for-byte
+ * identical to the hand-listed one it replaced.
+ *
+ * FOR WAVE-2 PORTERS: a table leaves the todo set by GAINING A RECIPE here -
+ * add its entry to `NATURAL_KEY_RECIPES` when you wire its writer, and the
+ * coverage set shrinks by itself. There is no second list to remember to edit,
+ * which is the whole point.
+ *
+ * Keeping the derivation out of this module also keeps `@ax/lib` free of a
+ * runtime dependency on `@ax/schema` (and the package cycle that came with it):
+ * this module is imported by every writer, and it should not drag the entire DDL
+ * text in to compute a constant only tests read.
+ */

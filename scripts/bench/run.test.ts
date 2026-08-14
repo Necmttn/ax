@@ -64,6 +64,12 @@ describe("bench runner skip", () => {
         const r = runBench({
             AX_BENCH_FIXTURE: fixture,
             AX_DUCKDB_BIN: undefined,
+            // Neutralize DUCKDB_DIST_DIR too: an ambient custom build (e.g.
+            // this machine's `scripts/build-duckdb.sh` output cached at
+            // $HOME/.cache/ax-duckdb/dist) would otherwise win over the empty
+            // PATH below and defeat the SKIP assertion this test exists to
+            // prove.
+            DUCKDB_DIST_DIR: emptyPathDir,
             PATH: [bunDir, emptyPathDir].join(":"),
         });
         expect(r.exitCode).toBe(0);
@@ -77,6 +83,10 @@ describe("bench runner skip", () => {
         const r = runBench({
             AX_BENCH_FIXTURE: fixture,
             AX_DUCKDB_BIN: join(tmpdir(), "no-such-duckdb-bin"),
+            // Same neutralization as above - AX_DUCKDB_BIN pointing nowhere
+            // must fail loudly (SKIP), not silently fall through to an
+            // ambient custom build.
+            DUCKDB_DIST_DIR: join(tmpdir(), "ax-bench-no-custom-build-here"),
         });
         expect(r.exitCode).toBe(0);
         expect(r.out).toContain("SKIP");
