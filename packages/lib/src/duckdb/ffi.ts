@@ -3,7 +3,8 @@
  * bare symbol table plus the handle conventions the rest of the module relies
  * on.
  *
- * THE HANDLE GOTCHA (solved in scripts/duckdb-spike/ffi/duckdb-ffi.ts):
+ * THE HANDLE GOTCHA (originally solved in the retired scripts/duckdb-spike/
+ * ffi/duckdb-ffi.ts prototype - see git history):
  * `duckdb_database`, `duckdb_connection`, `duckdb_config` and
  * `duckdb_prepared_statement` are opaque `void *` typedefs. In ARGUMENT
  * position they are passed BY VALUE, so they bind as `u64` and are read out of

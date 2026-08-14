@@ -1,8 +1,0 @@
-SELECT ts FROM turn ORDER BY ts LIMIT 1;
-SELECT ts FROM turn ORDER BY ts DESC LIMIT 1;
-SELECT ts FROM tool_call ORDER BY ts LIMIT 1;
-SELECT ts FROM tool_call ORDER BY ts DESC LIMIT 1;
-SELECT count() FROM invoked GROUP ALL;
-SELECT count() FROM spawned GROUP ALL;
-SELECT count() FROM telemetry_of GROUP ALL;
-SELECT count() FROM skill GROUP ALL;
