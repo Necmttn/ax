@@ -1,0 +1,210 @@
+/**
+ * Test-only resolution of a libduckdb shared library.
+ *
+ * Order: `AX_DUCKDB_DYLIB` (the injection point the custom static dylib from
+ * chunk w0-dylib-ci will use) -> the gitignored `vendor/duckdb/<version>/`
+ * cache -> a one-time download of the official prebuilt release. When the
+ * download is impossible (offline CI, unsupported platform) this returns a
+ * REASON rather than throwing, so suites can skip with a notice instead of
+ * failing red for an environment problem.
+ *
+ * The download is SINGLE-FLIGHT across processes (cross-review P3-4): one
+ * caller claims an exclusive-create sentinel and downloads, everyone else
+ * waits for the published library rather than racing it into the same files.
+ *
+ * `node:fs` is used deliberately here and only here in this module family:
+ * this is a TEST FIXTURE, not runtime code, so the `check:no-node-fs` gate
+ * (which scans runtime sources) does not apply and an Effect `FileSystem`
+ * would only add ceremony to something that runs before any layer exists.
+ */
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
+import { arch, platform } from "node:os";
+import { dirname, join } from "node:path";
+
+export const DUCKDB_VERSION = "v1.5.5";
+
+export type TestDylib =
+    | { readonly ok: true; readonly path: string }
+    | { readonly ok: false; readonly reason: string };
+
+export type RepoRootResult = { readonly ok: true; readonly dir: string } | { readonly ok: false };
+
+/**
+ * Walk up from `startDir` looking for the directory holding `turbo.json`.
+ * Exported separately from `repoRoot()` below so the failure path (no
+ * `turbo.json` found within 10 levels) is unit-testable without having to
+ * fake `import.meta.url`.
+ */
+export const repoRootFrom = (startDir: string): RepoRootResult => {
+    let dir = startDir;
+    for (let i = 0; i < 10; i += 1) {
+        if (existsSync(join(dir, "turbo.json"))) return { ok: true, dir };
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return { ok: false };
+};
+
+/**
+ * Repo root, found by walking up from this file. Uses `Bun.fileURLToPath`
+ * (not `new URL(...).pathname`) because the pathname is percent-encoded -
+ * a checkout under a path with a space or non-ASCII character (e.g.
+ * `/Users/x/My Projects/...`) would make every `existsSync` probe below miss
+ * and the walk would exhaust silently.
+ */
+const repoRoot = (): RepoRootResult => repoRootFrom(dirname(Bun.fileURLToPath(import.meta.url)));
+
+const libFileName = (): string => (platform() === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+
+/** Official release asset for this platform, or null when unsupported. */
+const releaseAsset = (): string | null => {
+    if (platform() === "darwin") return "libduckdb-osx-universal.zip";
+    if (platform() === "linux") {
+        return arch() === "arm64" ? "libduckdb-linux-arm64.zip" : "libduckdb-linux-amd64.zip";
+    }
+    return null;
+};
+
+export const vendorDir = (root: string): string => join(root, "vendor", "duckdb", DUCKDB_VERSION);
+
+/**
+ * How long a download sentinel may sit before it is treated as a corpse from
+ * a crashed or killed test process. Generous next to a ~40MB download, short
+ * enough that a killed CI job does not wedge the next one.
+ */
+const SENTINEL_STALE_MS = 10 * 60_000;
+
+/** How long a waiting process gives the downloader before giving up. */
+const SENTINEL_WAIT_MS = 5 * 60_000;
+const SENTINEL_POLL_MS = 100;
+
+/**
+ * Claim the exclusive right to run the download (cross-review P3-4).
+ *
+ * `bun test` can run several files - and CI several jobs - against ONE vendor
+ * directory, and the download wrote a fixed zip path and unzipped into a
+ * fixed directory. A second process arriving mid-download could read a
+ * partial archive, or a partially-extracted `libduckdb.dylib`, and fail with
+ * something that looks like a real dylib bug. Exactly one caller downloads;
+ * everyone else waits for the result (see `waitForFile`).
+ *
+ * `openSync(..., "wx")` is the atomic primitive - the same one the ingest
+ * lock uses - and a sentinel older than `SENTINEL_STALE_MS` is reclaimed so a
+ * crashed process cannot wedge every later run.
+ */
+export const claimDownloadSentinel = (sentinelPath: string): "claimed" | "busy" => {
+    try {
+        closeSync(openSync(sentinelPath, "wx"));
+        return "claimed";
+    } catch {
+        try {
+            const age = Date.now() - statSync(sentinelPath).mtimeMs;
+            if (age < SENTINEL_STALE_MS) return "busy";
+            rmSync(sentinelPath, { force: true });
+            closeSync(openSync(sentinelPath, "wx"));
+            return "claimed";
+        } catch {
+            // Either it vanished under us or another process reclaimed it
+            // first - both mean "somebody else is on it".
+            return "busy";
+        }
+    }
+};
+
+export const releaseDownloadSentinel = (sentinelPath: string): void => {
+    rmSync(sentinelPath, { force: true });
+};
+
+/** Wait for the download holder to publish `target`. */
+const waitForFile = async (target: string, sentinelPath: string): Promise<boolean> => {
+    const deadline = Date.now() + SENTINEL_WAIT_MS;
+    while (Date.now() < deadline) {
+        if (existsSync(target)) return true;
+        // The holder died without publishing: stop waiting on a ghost.
+        if (!existsSync(sentinelPath)) return existsSync(target);
+        await Bun.sleep(SENTINEL_POLL_MS);
+    }
+    return existsSync(target);
+};
+
+export const resolveTestDylib = async (): Promise<TestDylib> => {
+    const injected = process.env.AX_DUCKDB_DYLIB?.trim();
+    if (injected) {
+        return existsSync(injected)
+            ? { ok: true, path: injected }
+            : { ok: false, reason: `AX_DUCKDB_DYLIB points at a missing file: ${injected}` };
+    }
+
+    const root = repoRoot();
+    if (!root.ok) {
+        return {
+            ok: false,
+            reason:
+                "could not locate the repo root (walked up 10 levels from duckdb-dylib.ts without finding turbo.json)",
+        };
+    }
+    const dir = vendorDir(root.dir);
+
+    const cached = join(dir, libFileName());
+    if (existsSync(cached)) return { ok: true, path: cached };
+
+    const asset = releaseAsset();
+    if (asset === null) {
+        return { ok: false, reason: `no official libduckdb build for ${platform()}/${arch()}` };
+    }
+
+    const url = `https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/${asset}`;
+    mkdirSync(dir, { recursive: true });
+
+    // Cross-review P3-4: single-flight. Parallel test processes shared one
+    // zip path and one extraction directory, so a late arrival could read a
+    // half-written archive or a half-extracted library.
+    const sentinelPath = join(dir, `${asset}.download.lock`);
+    if (claimDownloadSentinel(sentinelPath) === "busy") {
+        const published = await waitForFile(cached, sentinelPath);
+        return published
+            ? { ok: true, path: cached }
+            : {
+                  ok: false,
+                  reason: `another process is downloading ${asset} and did not publish ${cached} in time; re-run, or remove ${sentinelPath} if nothing is downloading`,
+              };
+    }
+
+    try {
+        // Own the staged archive too: the sentinel already serializes
+        // downloaders, but a pid-scoped name keeps a leftover zip from a
+        // killed run out of this one's way.
+        const zipPath = join(dir, `${asset}.${process.pid}.part`);
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                return { ok: false, reason: `download failed: ${url} -> HTTP ${response.status}` };
+            }
+            await Bun.write(zipPath, await response.arrayBuffer());
+            const unzip = Bun.spawnSync(["unzip", "-o", "-q", zipPath, "-d", dir], {
+                stdout: "ignore",
+                stderr: "pipe",
+            });
+            if (unzip.exitCode !== 0) {
+                return { ok: false, reason: `unzip failed: ${unzip.stderr.toString().trim()}` };
+            }
+            if (!existsSync(cached)) {
+                return { ok: false, reason: `archive ${asset} did not contain ${libFileName()}` };
+            }
+            return { ok: true, path: cached };
+        } finally {
+            rmSync(zipPath, { force: true });
+        }
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, reason: `download failed: ${url} -> ${message}` };
+    } finally {
+        releaseDownloadSentinel(sentinelPath);
+    }
+};
+
+/** Prints a uniform notice so a skipped suite is visible in test output. */
+export const noteSkippedDylib = (suite: string, reason: string): void => {
+    console.warn(`[skip] ${suite}: no libduckdb available (${reason})`);
+};
