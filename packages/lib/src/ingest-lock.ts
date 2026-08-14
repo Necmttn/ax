@@ -259,6 +259,18 @@ const acquireMutexFor = (key: string): Semaphore.Semaphore => {
  * asks this before opening the live database, which is what makes "writes only
  * under the lock" checkable. Canonical-path keyed (invariant 4), so a caller
  * spelling the path differently still gets the right answer.
+ *
+ * BOTH HALVES ARE CHECKED, and the file half is not optional. The registry
+ * alone answers "did this process take a lock at this path and not release it" -
+ * which is NOT the same question. Between the acquire and the write, invariant
+ * 5's takeover (or a `staleMs` misjudgement, or a stray `rm`) can hand the lock
+ * to someone else, and the registry cannot see that happen: it holds the token
+ * WE minted, so a replaced lock file still read as "held here" and the seam
+ * opened the live database while another process owned it - two writers, the
+ * exact outcome this lock exists to prevent. So the on-disk token must still be
+ * the one this process registered; a missing, corrupt, or foreign-token file is
+ * `false`. This is a re-check at write time, not a guarantee for the duration of
+ * the write - see the two flock-class residuals in the module header.
  */
 export const ingestLockHeldHere = (
     lockPath: string,
@@ -266,7 +278,11 @@ export const ingestLockHeldHere = (
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const key = yield* canonicalPath(fs, lockPath);
-        return inProcessHolders.has(key);
+        const registered = inProcessHolders.get(key);
+        if (registered === undefined) return false;
+        const text = yield* readLockText(lockPath);
+        if (text === null) return false;
+        return decodeLockPayload(text)?.token === registered;
     });
 
 /** Best-effort raw read: a missing or unreadable lock file is `null` ("no
