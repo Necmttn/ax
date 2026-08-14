@@ -1,18 +1,62 @@
-import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "./db.ts";
-import { skipNotFound } from "./shared/fs-error.ts";
+import { Effect, FileSystem, Option, Path } from "effect";
+import { filePointer, SurrealClient } from "./db.ts";
+import { orAbsent, skipNotFound } from "./shared/fs-error.ts";
 
 const FILE_BUCKETS = ["transcripts", "codex_artifacts"] as const;
+
+/** Never delete a blob written more recently than this - guards the window
+ *  where a blob has just landed on disk (e.g. serve's live ingest, still
+ *  mid-write) but its `session` row referencing it hasn't been upserted yet. */
+const DEFAULT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface BlobGcResult {
     readonly scanned: number;
     readonly removed: number;
+    /** `fs.remove` failures - counted, not fatal (F9): one bad file must not
+     *  abort GC for every other candidate. */
+    readonly failed: number;
+    /** True when GC declined to run/delete anything this call - see
+     *  `skipReason` for why. `scanned`/`removed`/`failed` are all 0 then. */
+    readonly skipped: boolean;
+    readonly skipReason?: string;
 }
+
+export interface BlobGcOptions {
+    /**
+     * Only actually delete when the triggering ingest run was NOT
+     * since-windowed (i.e. it scanned every session). The reference set below
+     * is built from the CURRENT `session` table; after a DB wipe + a
+     * `--since`-windowed re-ingest, that table only holds the sessions the
+     * windowed run touched - every session outside the window looks
+     * unreferenced even though its blob is still live. Running GC against
+     * that partial view would permanently delete cold-but-referenced blobs.
+     */
+    readonly fullIngest: boolean;
+    /** Override the young-blob guard window (ms). Defaults to 24h. */
+    readonly minAgeMs?: number;
+    readonly now?: () => number;
+}
+
+const skip = (reason: string): BlobGcResult => ({
+    scanned: 0,
+    removed: 0,
+    failed: 0,
+    skipped: true,
+    skipReason: reason,
+});
 
 /** Remove local file-bucket blobs that no session row references. */
 export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
     bucketsDir: string,
+    opts: BlobGcOptions,
 ) {
+    if (!opts.fullIngest) {
+        return skip(
+            "ingest run was --since-windowed (partial); the session table is not a complete " +
+                "reference set, so blob GC was skipped to avoid deleting live blobs",
+        );
+    }
+
     const db = yield* SurrealClient;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -25,8 +69,19 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
             .filter((value): value is string => typeof value === "string"),
     );
 
+    if (referenced.size === 0) {
+        return skip(
+            "the session reference set is empty (0 rows with raw_file); refusing to run blob GC " +
+                "against an empty reference set, which would delete every blob",
+        );
+    }
+
+    const now = opts.now ?? (() => Date.now());
+    const minAgeMs = opts.minAgeMs ?? DEFAULT_MIN_AGE_MS;
+
     let scanned = 0;
     let removed = 0;
+    let failed = 0;
     for (const bucket of FILE_BUCKETS) {
         const bucketDir = path.join(bucketsDir, bucket);
         const entries = yield* fs.readDirectory(bucketDir).pipe(
@@ -37,11 +92,22 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
             const info = yield* fs.stat(filePath).pipe(skipNotFound(null));
             if (info === null || info.type !== "File") continue;
             scanned += 1;
-            if (referenced.has(`${bucket}:/${entry}`)) continue;
-            yield* fs.remove(filePath);
-            removed += 1;
+            if (referenced.has(filePointer(bucket, entry))) continue;
+
+            const ageMs = Option.match(info.mtime, {
+                onNone: () => Number.POSITIVE_INFINITY,
+                onSome: (mtime) => now() - mtime.getTime(),
+            });
+            if (ageMs < minAgeMs) continue; // young blob spared
+
+            const ok = yield* fs.remove(filePath).pipe(
+                Effect.as(true),
+                orAbsent(false),
+            );
+            if (ok) removed += 1;
+            else failed += 1;
         }
     }
 
-    return { scanned, removed } satisfies BlobGcResult;
+    return { scanned, removed, failed, skipped: false } satisfies BlobGcResult;
 });

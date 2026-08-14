@@ -32,6 +32,9 @@ const SCHEMA = `
     DEFINE FIELD event_name ON otel_log_event TYPE string;
     DEFINE FIELD observed_at ON otel_log_event TYPE datetime;
     DEFINE INDEX log_observed ON otel_log_event FIELDS observed_at CONCURRENTLY;
+
+    DEFINE TABLE telemetry_of TYPE RELATION SCHEMAFULL;
+    DEFINE FIELD linked_at ON telemetry_of TYPE datetime DEFAULT time::now();
 `;
 
 const seed = (db: SurrealClientShape) => db.query(`
@@ -61,6 +64,8 @@ const seed = (db: SurrealClientShape) => db.query(`
         harness: "test", event_name: "test",
         observed_at: time::now()
     };
+    RELATE otel_span:recent->telemetry_of->otel_metric_point:old;
+    RELATE otel_span:recent->telemetry_of->otel_metric_point:recent;
 `);
 
 const exists = (db: SurrealClientShape, record: string) =>
@@ -102,7 +107,10 @@ describe("OTLP retention (live DB)", () => {
                 yield* Effect.promise(() => db.raw.use({ namespace: "ax", database: TMP_DB }));
                 yield* db.query(SCHEMA);
                 yield* seed(db);
-                yield* retainRecentOtel();
+                const retention = yield* retainRecentOtel();
+                const [edgeRows] = yield* db.query<[Array<{ out: unknown }>]>(
+                    "SELECT out FROM telemetry_of;",
+                );
                 return {
                     metricOld: yield* exists(db, "otel_metric_point:old"),
                     metricRecent: yield* exists(db, "otel_metric_point:recent"),
@@ -110,6 +118,16 @@ describe("OTLP retention (live DB)", () => {
                     spanRecent: yield* exists(db, "otel_span:recent"),
                     logOld: yield* exists(db, "otel_log_event:old"),
                     logRecent: yield* exists(db, "otel_log_event:recent"),
+                    // The edge into the pruned `otel_metric_point:old` row must
+                    // be gone too; the edge into the surviving `recent` row
+                    // must remain. SurrealDB 3.0.x auto-drops a RELATION edge
+                    // as soon as its target record is deleted, so by the time
+                    // the explicit dangling-edge DELETE below runs, it usually
+                    // finds nothing left to do - `deletedEdges` legitimately
+                    // reads 0 while the edge is still gone (asserted via the
+                    // surviving-edge count instead).
+                    telemetryOfEdgeCount: (edgeRows ?? []).length,
+                    retentionDeletedEdges: retention.deletedEdges,
                 };
             });
             const cleanup = Effect.gen(function* () {
@@ -126,6 +144,11 @@ describe("OTLP retention (live DB)", () => {
             spanRecent: true,
             logOld: false,
             logRecent: true,
+            telemetryOfEdgeCount: 1,
+            // SurrealDB already auto-dropped the dangling edge as a side
+            // effect of the `otel_metric_point` delete above, so the
+            // explicit cleanup query legitimately finds 0 left to prune.
+            retentionDeletedEdges: 0,
         });
     }, TEST_TIMEOUT_MS);
 });

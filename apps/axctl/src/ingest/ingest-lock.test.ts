@@ -162,6 +162,80 @@ describe("withIngestLock", () => {
         expect(order).toEqual(["work-finalizer", "onTimeout"]);
     });
 
+    test("afterWork runs after work succeeds, still under the lock, then the lock is released", async () => {
+        const order: string[] = [];
+        const result = await run(
+            withIngestLock(
+                {
+                    lockPath,
+                    command: "ingest",
+                    staleMs: STALE_MS,
+                    now: () => T0,
+                    onBusy: () => Effect.succeed("busy" as const),
+                    afterWork: (value) =>
+                        Effect.sync(() => {
+                            order.push(`afterWork:${value}`);
+                            // still under the lock while afterWork runs
+                            expect(existsSync(lockPath)).toBe(true);
+                        }),
+                },
+                Effect.sync(() => {
+                    order.push("work");
+                    return "ran" as const;
+                }),
+            ),
+        );
+        expect(order).toEqual(["work", "afterWork:ran"]);
+        expect(result).toEqual({ _tag: "completed", value: "ran" });
+        expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("afterWork does not run when work times out, and the lock stays (cooldown)", async () => {
+        let afterWorkRan = false;
+        const result = await run(
+            withIngestLock(
+                {
+                    lockPath,
+                    command: "ingest",
+                    staleMs: STALE_MS,
+                    timeoutSeconds: 1,
+                    now: () => T0,
+                    onBusy: () => Effect.succeed("busy" as const),
+                    afterWork: () =>
+                        Effect.sync(() => {
+                            afterWorkRan = true;
+                        }),
+                },
+                Effect.never,
+            ),
+        );
+        expect(result).toEqual({ _tag: "timeout" });
+        expect(afterWorkRan).toBe(false);
+        expect(existsSync(lockPath)).toBe(true);
+    });
+
+    test("afterWork is NOT subject to timeoutSeconds - a slow afterWork after fast work still completes", async () => {
+        const result = await run(
+            withIngestLock(
+                {
+                    lockPath,
+                    command: "ingest",
+                    staleMs: STALE_MS,
+                    timeoutSeconds: 1,
+                    now: () => T0,
+                    onBusy: () => Effect.succeed("busy" as const),
+                    // Slower than the 1s `timeoutSeconds`, on its own it would
+                    // never trip the guillotine that only wraps `work`.
+                    afterWork: () =>
+                        Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1200))),
+                },
+                Effect.succeed("ran" as const),
+            ),
+        );
+        expect(result).toEqual({ _tag: "completed", value: "ran" });
+        expect(existsSync(lockPath)).toBe(false);
+    }, 5000);
+
     test("atomic acquire: a fresh live holder is never overwritten", async () => {
         // pre-existing fresh+live lock; withIngestLock must NOT clobber it.
         writeLock({ pid: process.pid, startedAt: T0, command: "holder" });

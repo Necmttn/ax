@@ -84,7 +84,7 @@ const readHolder = (
  * `{ _tag: "timeout" }` when `work` timed out (the lock is then left to age
  * out as a cooldown).
  */
-export const withIngestLock = <A, E, R, A2, E2, R2>(
+export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
     opts: {
         readonly lockPath: string;
         readonly command: string;
@@ -98,9 +98,19 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
          *  finalize the run row + tell the user; runs AFTER the interrupted
          *  work's own finalizers have completed */
         readonly onTimeout?: () => Effect.Effect<void, never, never>;
+        /**
+         * Runs once `work` completes successfully, still holding the lock, but
+         * NOT subject to `timeoutSeconds` - a slow-but-harmless follow-up (e.g.
+         * best-effort maintenance) can never retroactively flip a genuinely
+         * completed `work` into a `"timeout"` outcome. Errors must be handled
+         * by the caller (this signature has no error channel) so a maintenance
+         * fault can't fail the whole lock; an interrupt during `afterWork`
+         * still leaves the lock in place, same as an interrupt during `work`.
+         */
+        readonly afterWork?: (value: A) => Effect.Effect<void, never, R3>;
     },
     work: Effect.Effect<A, E, R>,
-): Effect.Effect<IngestLockOutcome<A, A2>, E | E2, R | R2 | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<IngestLockOutcome<A, A2>, E | E2, R | R2 | R3 | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const busy = (value: A2): IngestLockOutcome<A, A2> => ({ _tag: "busy", value });
         const fs = yield* FileSystem.FileSystem;
@@ -157,7 +167,19 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
             ? work.pipe(Effect.timeoutOption(`${opts.timeoutSeconds} seconds`))
             : work.pipe(Effect.map(Option.some));
 
-        const result = yield* timed.pipe(
+        // `afterWork` is sequenced AFTER the timeout check resolves, so it is
+        // never raced against `timeoutSeconds` - only genuinely-timed-out work
+        // skips it. It still runs before `deleteLock` below (see the combined
+        // effect's own onExit), so it stays "under the lock".
+        const timedThenAfter = Effect.gen(function* () {
+            const outcome = yield* timed;
+            if (Option.isSome(outcome) && opts.afterWork) {
+                yield* opts.afterWork(outcome.value);
+            }
+            return outcome;
+        });
+
+        const result = yield* timedThenAfter.pipe(
             Effect.onExit((exit) =>
                 Exit.hasInterrupts(exit)
                     ? Effect.void
