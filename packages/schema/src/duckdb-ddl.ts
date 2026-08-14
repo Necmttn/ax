@@ -48,6 +48,31 @@ export function parseDuckdbColumns(table: string, sql: string = DUCKDB_SCHEMA_SQ
         .filter((name) => name.length > 0 && !/^(PRIMARY|UNIQUE|CONSTRAINT|CHECK)$/i.test(name));
 }
 
+export interface DuckdbColumnDef {
+    readonly name: string;
+    readonly type: string;
+    readonly notNull: boolean;
+}
+
+/** Column definitions (name, type, NOT NULL) of one CREATE TABLE body, in declaration order. */
+export function parseDuckdbColumnDefs(table: string, sql: string = DUCKDB_SCHEMA_SQL): readonly DuckdbColumnDef[] {
+    const re = new RegExp(`^CREATE TABLE IF NOT EXISTS\\s+"?${table}"?\\s*\\(([\\s\\S]*?)^\\);`, "m");
+    const body = sql.match(re)?.[1];
+    if (body === undefined) return [];
+    return body
+        .split("\n")
+        .map((line) => line.replace(/--.*$/, "").trim())
+        .filter((line) => line.length > 0)
+        .map((line) => {
+            const parts = line.split(/\s+/);
+            const name = stripQuotes(parts[0]!);
+            const type = (parts[1] ?? "").replace(/,$/, "");
+            const notNull = /\bNOT NULL\b/.test(line);
+            return { name, type, notNull };
+        })
+        .filter((col) => col.name.length > 0 && !/^(PRIMARY|UNIQUE|CONSTRAINT|CHECK)$/i.test(col.name));
+}
+
 export interface SurrealTable {
     readonly table: string;
     readonly relation: boolean;
