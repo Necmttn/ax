@@ -27,6 +27,7 @@ import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
@@ -153,6 +154,11 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
         Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
         opts.services ?? AppLayer,
+        // v2: the recall vertical reads the published DuckDB snapshot, not
+        // SurrealDB. The layer opens nothing until a query actually arrives
+        // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that
+        // never serves a recall request exactly nothing.
+        CacheReadLive,
     ).pipe(
         Layer.provide([
             SystemGroupLive,

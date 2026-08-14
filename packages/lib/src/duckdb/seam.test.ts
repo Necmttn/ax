@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS note (
     body VARCHAR,
     ingested_at TIMESTAMP
 );
+-- A table with a SECOND unique constraint on top of its primary key, which most
+-- of the real schema has (turn_session_seq, commit_sha_uq, skill_name_uq, ...).
+-- Upserting into one of these is what INSERT OR REPLACE cannot do.
+CREATE TABLE IF NOT EXISTS keyed (
+    id VARCHAR PRIMARY KEY,
+    natural_a VARCHAR NOT NULL,
+    natural_b BIGINT NOT NULL,
+    body VARCHAR
+);
+CREATE UNIQUE INDEX IF NOT EXISTS keyed_natural_uq ON keyed(natural_a, natural_b);
 `;
 
 /** A live db + lock + snapshot triple in a fresh temp dir. */
@@ -232,6 +242,60 @@ describe("CacheWrite: the semantics the DDL cannot express", () => {
             // 600 rows crosses the 500-row batch boundary.
             expect(value?.count).toBe(600n);
             expect(value?.ragged._tag).toBe("Failure");
+        });
+    });
+
+    dtest("upserts into a table that has a SECOND unique constraint", async () => {
+        // `INSERT OR REPLACE` - the obvious spelling, and what this seam shipped
+        // with - fails on every such table with "Conflict target has to be
+        // provided for a DO UPDATE operation". Most of the real schema is such a
+        // table, so the whole write path was unusable beyond the simplest ones.
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-multiuq-");
+            const Keyed = Schema.Struct({ id: Schema.String, body: Schema.NullOr(Schema.String) });
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("keyed", { id: "k1", natural_a: "a", natural_b: 1, body: "first" });
+                        // Same id: a re-ingest REPLACES the row.
+                        yield* write.put("keyed", { id: "k1", natural_a: "a", natural_b: 1, body: "second" });
+                        const rows = yield* write.rows(Keyed, "SELECT id, body FROM keyed");
+                        // Different id, SAME natural key: a constraint violation
+                        // the caller must see, not a silent overwrite of k1.
+                        const collision = yield* Effect.result(
+                            write.put("keyed", { id: "k2", natural_a: "a", natural_b: 1, body: "impostor" }),
+                        );
+                        return { rows, collision: collision._tag };
+                    }),
+                ),
+            );
+
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.rows).toEqual([{ id: "k1", body: "second" }]);
+            expect(value?.collision).toBe("Failure");
+        });
+    });
+
+    dtest("refuses a row with no id, naming the schema-wide key invariant", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-noid-");
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        const result = yield* Effect.result(write.put("note", { body: "orphan" }));
+                        const counted = yield* write.rows(
+                            Schema.Struct({ n: Schema.BigInt }),
+                            "SELECT count(*) AS n FROM note",
+                        );
+                        return { result, n: counted[0]?.n };
+                    }),
+                ),
+            );
+
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.result._tag).toBe("Failure");
+            expect(JSON.stringify(value?.result)).toContain("needs an `id` on every row");
+            expect(value?.n).toBe(0n);
         });
     });
 

@@ -462,7 +462,26 @@ const writerOver = (
 
     const exec: CacheWriteService["exec"] = (sql, params) => conn.exec(sql, params);
 
-    /** One `INSERT OR REPLACE` covering `rows`, all of which must share `columns`. */
+    /**
+     * One upsert covering `rows`, all of which must share `columns`.
+     *
+     * The conflict target is stated EXPLICITLY, and it has to be. The obvious
+     * spelling - `INSERT OR REPLACE` - is DuckDB shorthand for "conflict on
+     * whichever unique constraint the table has", and it fails outright with
+     * "Conflict target has to be provided for a DO UPDATE operation when the
+     * table has multiple UNIQUE/PRIMARY KEY constraints" the moment a table
+     * carries a secondary unique index on top of its primary key. Most of this
+     * schema does: `turn` has `turn_session_seq`, `commit` has `commit_sha_uq`,
+     * `skill` has `skill_name_uq`, and forty-odd more. Naming `id` also states
+     * the intent that shorthand left ambiguous: a re-ingest REPLACES the row
+     * with the same content-hashed id, and a row that collides on a NATURAL key
+     * while carrying a different id is a constraint violation the caller should
+     * see, not a silent overwrite of a different row.
+     *
+     * `id VARCHAR PRIMARY KEY` on every table is a schema-wide invariant (see
+     * schema.duckdb.sql's ROW IDS header), and a row without one is refused
+     * below rather than inserted un-upsertably.
+     */
     const insertStatement = (
         table: string,
         columns: ReadonlyArray<string>,
@@ -487,10 +506,18 @@ const writerOver = (
                     ? quotedColumns
                     : [...quotedColumns, yield* quoteIdentifier("column", stamped)];
 
-            return `INSERT OR REPLACE INTO ${quotedTable} (${allColumns.join(", ")}) VALUES ${Array.from(
+            const updates = allColumns
+                .filter((column) => column !== '"id"')
+                .map((column) => `${column} = excluded.${column}`);
+            // A row that is nothing but its id has no column left to update, and
+            // `DO UPDATE SET` with an empty list is a syntax error.
+            const onConflict =
+                updates.length === 0 ? "DO NOTHING" : `DO UPDATE SET ${updates.join(", ")}`;
+
+            return `INSERT INTO ${quotedTable} (${allColumns.join(", ")}) VALUES ${Array.from(
                 { length: rowCount },
                 () => valuesForRow,
-            ).join(", ")}`;
+            ).join(", ")} ON CONFLICT ("id") ${onConflict}`;
         });
 
     const putMany: CacheWriteService["putMany"] = (table, rows) =>
@@ -504,12 +531,23 @@ const writerOver = (
                 Object.keys(row).filter((c) => c !== stamped);
 
             const columns = columnsOf(rows[0]!);
+            if (!columns.includes("id")) {
+                return yield* new DuckDbQueryError({
+                    sql: `INSERT INTO ${table}`,
+                    message:
+                        `putMany into ${table} needs an \`id\` on every row: every table in this schema is keyed ` +
+                        "by `id VARCHAR PRIMARY KEY`, and the upsert names it as the conflict target. Rows given " +
+                        `were missing it, so re-running ingest would append duplicates instead of replacing. Got [${columns.join(
+                            ", ",
+                        )}].`,
+                });
+            }
             const signature = [...columns].sort().join(",");
             for (let i = 1; i < rows.length; i += 1) {
                 const other = [...columnsOf(rows[i]!)].sort().join(",");
                 if (other !== signature) {
                     return yield* new DuckDbQueryError({
-                        sql: `INSERT OR REPLACE INTO ${table}`,
+                        sql: `INSERT INTO ${table}`,
                         message:
                             `putMany requires every row to have the same columns, but row ${i} has [${other}] ` +
                             `while row 0 has [${signature}]. Split them into separate putMany calls - a ragged ` +

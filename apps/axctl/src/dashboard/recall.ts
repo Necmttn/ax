@@ -1,14 +1,21 @@
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import {
-    RECALL_COUNT_SQL,
-    RECALL_COMMITS_COUNT_SQL,
-    RECALL_SKILLS_COUNT_SQL,
-    RECALL_SESSIONS_FOR_SKILL_SQL,
-    recallTurnsQuery,
-    recallCommitsQuery,
-    recallSkillsQuery,
+    CommitHitRow,
+    CountRow,
+    SessionIdRow,
+    SkillHitRow,
+    TurnHitRow,
+    commitCountQuery,
+    commitPageQuery,
+    sessionsForContentTypesQuery,
+    sessionsForSkillQuery,
+    skillCountQuery,
+    skillPageQuery,
+    truncate,
+    turnCountQuery,
+    turnPageQuery,
+    type TurnFilters,
 } from "../queries/recall.ts";
 import type {
     RecallHit,
@@ -17,9 +24,6 @@ import type {
     RecallResponse,
 } from "@ax/lib/shared/dashboard-types";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
-import { isRecord, recordIdString } from "@ax/lib/shared/row-fields";
-import { runQuery } from "@ax/lib/shared/graph-query";
-import { recordLiteral } from "@ax/lib/ids";
 
 const RECALL_PAGINATION: PaginationConfig = { defaultLimit: 50, maxLimit: 200 };
 
@@ -29,8 +33,9 @@ export type RecallScope =
     | {
         readonly kind: "here";
         /**
-         * Bare repository key (suitable for `recordLiteral("repository", key)`).
-         * E.g. `remote__github_com_foo_bar__<hash>` - NOT the full record id string.
+         * The repository's row id. In v2 this is a plain string bound as a
+         * parameter - the Surreal version had to splice it into the SQL as a
+         * record literal, because Surreal bindings could not carry record ids.
          */
         readonly repositoryKey: string;
       }
@@ -145,9 +150,9 @@ export const emptyRecallResponse = (
 
 export const fetchRecall = (
     params: RecallParams,
-): Effect.Effect<RecallResponse, DbError, SurrealClient> =>
+): Effect.Effect<RecallResponse, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cache = yield* CacheRead;
         const q = params.q.trim().toLowerCase();
         const { offset, limit } = clampPagination(
             { offset: params.offset, limit: params.limit },
@@ -160,194 +165,164 @@ export const fetchRecall = (
             return emptyRecallResponse(params.q, offset, limit);
         }
 
-        // ---------------------------------------------------------------------------
+        /** `count(*)` comes back as a DuckDB BIGINT, i.e. a JS bigint. */
+        const countOf = (clause: { readonly sql: string; readonly params: ReadonlyArray<unknown> }) =>
+            Effect.map(
+                cache.rows(CountRow, clause.sql, clause.params as ReadonlyArray<never>),
+                (rows) => Number(rows[0]?.total ?? 0n),
+            );
+
+        /** Session ids a prefilter narrowed to. `null` means "no prefilter". */
+        const sessionIdsFor = (
+            clause: { readonly sql: string; readonly params: ReadonlyArray<unknown> } | null,
+        ): Effect.Effect<ReadonlyArray<string> | null, CacheReadError, CacheRead> =>
+            clause === null
+                ? Effect.succeed(null)
+                : Effect.map(
+                      cache.rows(SessionIdRow, clause.sql, clause.params as ReadonlyArray<never>),
+                      (rows) => rows.map((r) => r.session_id),
+                  );
+
+        // ---------------------------------------------------------------------
         // Turn source
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
 
         const fetchTurns = (): Effect.Effect<
             { hits: RecallHit[]; total_count: number },
-            DbError,
-            SurrealClient
+            CacheReadError,
+            CacheRead
         > =>
             Effect.gen(function* () {
-                // Optional skill filter: materialise sessions first.
-                let sessionFilterClause = "";
-                if (params.skill && params.skill.trim()) {
-                    const skillRows = yield* db.query<[Array<Record<string, unknown>>]>(
-                        RECALL_SESSIONS_FOR_SKILL_SQL,
-                        { skill: params.skill.trim() },
-                    );
-                    const ids: string[] = [];
-                    const sessions = skillRows?.[0]?.[0]?.sessions;
-                    if (Array.isArray(sessions)) {
-                        for (const v of sessions) {
-                            const id = recordIdString(v);
-                            if (id) ids.push(id);
-                        }
-                    }
-                    if (ids.length === 0) {
-                        return { hits: [], total_count: 0 };
-                    }
-                    sessionFilterClause = `AND session IN [${ids.join(", ")}]`;
+                const skill = params.skill?.trim();
+                const wantTypes = params.types && params.types.length > 0 ? params.types : null;
+
+                // Two independent session prefilters. Each narrows the set; an
+                // EMPTY result from either means no turn can match, so recall
+                // short-circuits without running the (much more expensive) FTS
+                // query at all.
+                const [bySkill, byType] = yield* Effect.all(
+                    [
+                        sessionIdsFor(skill ? sessionsForSkillQuery(skill) : null),
+                        sessionIdsFor(wantTypes ? sessionsForContentTypesQuery(wantTypes) : null),
+                    ],
+                    { concurrency: "unbounded" },
+                );
+
+                let sessionIds: ReadonlyArray<string> | null = null;
+                for (const set of [bySkill, byType]) {
+                    if (set === null) continue;
+                    if (set.length === 0) return { hits: [], total_count: 0 };
+                    sessionIds =
+                        sessionIds === null ? set : sessionIds.filter((id) => set.includes(id));
+                    if (sessionIds.length === 0) return { hits: [], total_count: 0 };
                 }
 
-                // Content-type filter: prefilter session ids via the has_content edge.
-                // The edge denormalizes `session` so this query is deref-free.
-                // Record ids are inlined as literals (alphanumeric category names
-                // are safe without quoting); bindings cannot carry record id arrays.
-                if (params.types && params.types.length > 0) {
-                    const typeLiterals = params.types.map((t) => `content_type:${t}`).join(", ");
-                    const typeRows = yield* db.query<[Array<{ sid: string }>]>(
-                        `SELECT type::string(session) AS sid FROM has_content WHERE session != NONE AND out IN [${typeLiterals}]`,
-                    );
-                    const typeIds = (typeRows?.[0] ?? [])
-                        .map((r) => r.sid)
-                        .filter((s) => s.length > 0);
-                    if (typeIds.length === 0) {
-                        return { hits: [], total_count: 0 };
-                    }
-                    const typeClause = `AND session IN [${typeIds.join(", ")}]`;
-                    sessionFilterClause = sessionFilterClause
-                        ? `${sessionFilterClause} ${typeClause}`
-                        : typeClause;
-                }
-
-                // Repository scope filter on turns: filter by session.repository.
-                // Record-typed fields require record literals, not bindings.
-                if (params.scope?.kind === "here") {
-                    const repoClause = `AND session.repository = ${recordLiteral("repository", params.scope.repositoryKey)}`;
-                    sessionFilterClause = sessionFilterClause
-                        ? `${sessionFilterClause} ${repoClause}`
-                        : repoClause;
-                }
-
-                const baseBindings: Record<string, unknown> = {
+                const filters: TurnFilters = {
                     q,
                     project: params.project?.trim() || null,
                     since: params.since?.trim() || null,
+                    sessionIds,
+                    repositoryId: params.scope?.kind === "here" ? params.scope.repositoryKey : null,
                 };
 
-                const [mapped, countRows] = yield* Effect.all(
+                const page = turnPageQuery(filters, offset, limit);
+                const [rows, totalFromCount] = yield* Effect.all(
                     [
-                        runQuery(recallTurnsQuery, {
-                            q,
-                            project: baseBindings.project as string | null,
-                            since: baseBindings.since as string | null,
-                            offset,
-                            limit,
-                            sessionFilterClause,
-                        }),
-                        db.query<[Array<Record<string, unknown>>]>(
-                            RECALL_COUNT_SQL(sessionFilterClause),
-                            baseBindings,
-                        ),
+                        cache.rows(TurnHitRow, page.sql, page.params),
+                        countOf(turnCountQuery(filters)),
                     ],
                     { concurrency: "unbounded" },
                 );
 
-                const hits: RecallHit[] = mapped.filter(
-                    (h): h is RecallHit => h !== null,
-                );
+                const hits: RecallHit[] = rows.map((row) => ({
+                    turn_id: row.turn_id,
+                    session_id: row.session_id,
+                    project: row.project,
+                    source: row.source,
+                    cwd: row.cwd,
+                    role: row.role,
+                    // The API contract carries timestamps as ISO strings. The
+                    // seam decodes a TIMESTAMP column to a Date (UTC, ms grain),
+                    // so this is the one place the two meet.
+                    ts: row.ts.toISOString(),
+                    snippet: truncate(row.text_excerpt ?? ""),
+                }));
 
-                const countRow = countRows?.[0]?.[0];
-                const totalFromCount = isRecord(countRow)
-                    ? Number(countRow.total ?? 0)
-                    : 0;
-                const total_count = Math.max(
-                    Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
-                    hits.length + offset,
-                );
-
-                return { hits, total_count };
+                // Defensive floor, carried over: a count-query hiccup must never
+                // report fewer results than were actually paged back.
+                return { hits, total_count: Math.max(totalFromCount, hits.length + offset) };
             });
 
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // Commit source
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
 
         const fetchCommits = (): Effect.Effect<
             { commits: RecallCommitHit[]; total_count: number },
-            DbError,
-            SurrealClient
+            CacheReadError,
+            CacheRead
         > =>
             Effect.gen(function* () {
-                // Record-typed fields require record literals, not bindings, for correct comparison.
-                const scopeClause = params.scope?.kind === "here"
-                    ? `AND repository = ${recordLiteral("repository", params.scope.repositoryKey)}`
-                    : "";
+                const repositoryId = params.scope?.kind === "here" ? params.scope.repositoryKey : null;
+                const page = commitPageQuery(q, repositoryId, limit);
 
-                const [mapped, countRows] = yield* Effect.all(
+                const [rows, totalFromCount] = yield* Effect.all(
                     [
-                        runQuery(recallCommitsQuery, {
-                            q,
-                            limit,
-                            scopeClause,
-                            repository: null,
-                        }),
-                        db.query<[Array<Record<string, unknown>>]>(
-                            RECALL_COMMITS_COUNT_SQL(scopeClause),
-                            { q, limit },
-                        ),
+                        cache.rows(CommitHitRow, page.sql, page.params),
+                        countOf(commitCountQuery(q, repositoryId)),
                     ],
                     { concurrency: "unbounded" },
                 );
 
-                const commits: RecallCommitHit[] = mapped.filter(
-                    (h): h is RecallCommitHit => h !== null,
-                );
+                const commits: RecallCommitHit[] = rows.map((row) => ({
+                    commit_id: row.commit_id,
+                    sha: row.sha,
+                    repo: row.repo,
+                    repository: row.repository,
+                    ts: row.ts.toISOString(),
+                    // No `search::highlight` equivalent in DuckDB: the snippet is
+                    // the message itself, truncated - the same thing the turn
+                    // source always did.
+                    snippet: truncate(row.message ?? row.sha),
+                    score: row.score,
+                }));
 
-                const countRow = countRows?.[0]?.[0];
-                const totalFromCount = isRecord(countRow)
-                    ? Number(countRow.total ?? 0)
-                    : 0;
-                const total_count = Math.max(
-                    Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
-                    commits.length,
-                );
-
-                return { commits, total_count };
+                return { commits, total_count: Math.max(totalFromCount, commits.length) };
             });
 
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // Skill source
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
 
         const fetchSkills = (): Effect.Effect<
             { skills: RecallSkillHit[]; total_count: number },
-            DbError,
-            SurrealClient
+            CacheReadError,
+            CacheRead
         > =>
             Effect.gen(function* () {
-                const [mapped, countRows] = yield* Effect.all(
+                const page = skillPageQuery(q, limit);
+                const [rows, totalFromCount] = yield* Effect.all(
                     [
-                        runQuery(recallSkillsQuery, { q, limit }),
-                        db.query<[Array<Record<string, unknown>>]>(
-                            RECALL_SKILLS_COUNT_SQL,
-                            { q },
-                        ),
+                        cache.rows(SkillHitRow, page.sql, page.params),
+                        countOf(skillCountQuery(q)),
                     ],
                     { concurrency: "unbounded" },
                 );
 
-                const skills: RecallSkillHit[] = mapped.filter(
-                    (h): h is RecallSkillHit => h !== null,
-                );
+                const skills: RecallSkillHit[] = rows.map((row) => ({
+                    skill_id: row.skill_id,
+                    name: row.name,
+                    description: row.description,
+                    snippet: truncate(row.description ?? row.name),
+                    score: row.score,
+                }));
 
-                const countRow = countRows?.[0]?.[0];
-                const totalFromCount = isRecord(countRow)
-                    ? Number(countRow.total ?? 0)
-                    : 0;
-                const total_count = Math.max(
-                    Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
-                    skills.length,
-                );
-
-                return { skills, total_count };
+                return { skills, total_count: Math.max(totalFromCount, skills.length) };
             });
 
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // Fan-out: run requested sources in parallel
-        // ---------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
 
         const wantTurn = sources.includes("turn");
         const wantCommit = sources.includes("commit");
