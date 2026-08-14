@@ -1,13 +1,17 @@
 name: Build DuckDB
 
+# Manual-only: nothing consumes these artifacts yet (no release step wires
+# them into a published binary), and the full matrix costs ~3 runner-hours
+# per run, so a tag push must not trigger it automatically.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

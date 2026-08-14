@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, readFileSync } from "node:fs";
+import { accessSync, constants, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repoRoot = join(import.meta.dir, "..");
@@ -34,7 +35,12 @@ describe("custom DuckDB build", () => {
         );
 
         expect(workflow).toContain("workflow_dispatch:");
-        expect(workflow).toContain("tags:");
+        // No consumer wires these artifacts into a release yet, and the full
+        // matrix costs ~3 runner-hours per run - manual dispatch only, no
+        // push/tag trigger.
+        expect(workflow).not.toContain("push:");
+        expect(workflow).not.toContain("tags:");
+        expect(workflow).toContain("cancel-in-progress: true");
         expect(workflow).toContain("macos-14");
         expect(workflow).toContain("ubuntu-24.04-arm");
         expect(workflow).toContain("ubuntu-24.04");
@@ -63,26 +69,38 @@ describe("custom DuckDB build", () => {
     test.skipIf(!process.env.AX_DUCKDB_DYLIB)(
         "the emitted dynamic library completes the real air-gap FTS and JSON smoke test",
         () => {
-            const result = spawnSync(
-                "bun",
-                [join(repoRoot, "scripts/smoke-duckdb-dylib.ts"), process.env.AX_DUCKDB_DYLIB!],
-                {
-                    cwd: repoRoot,
-                    encoding: "utf8",
-                    env: {
-                        ...process.env,
-                        HTTP_PROXY: "http://127.0.0.1:9",
-                        HTTPS_PROXY: "http://127.0.0.1:9",
-                        ALL_PROXY: "http://127.0.0.1:9",
-                        NO_PROXY: "",
+            // Mirror build-duckdb.sh's smoke_duckdb_dylib: run against a
+            // scratch HOME so the real one (extension cache, config) can
+            // never leak into or be mutated by the air-gap smoke test.
+            const smokeHome = mkdtempSync(join(tmpdir(), "ax-duckdb-dylib-smoke-test-"));
+            try {
+                const result = spawnSync(
+                    "bun",
+                    [
+                        join(repoRoot, "scripts/smoke-duckdb-dylib.ts"),
+                        process.env.AX_DUCKDB_DYLIB!,
+                    ],
+                    {
+                        cwd: repoRoot,
+                        encoding: "utf8",
+                        env: {
+                            ...process.env,
+                            HOME: smokeHome,
+                            HTTP_PROXY: "http://127.0.0.1:9",
+                            HTTPS_PROXY: "http://127.0.0.1:9",
+                            ALL_PROXY: "http://127.0.0.1:9",
+                            NO_PROXY: "",
+                        },
                     },
-                },
-            );
+                );
 
-            expect(result.status).toBe(0);
-            expect(result.stdout).toContain("fts=hello static world");
-            expect(result.stdout).toContain("json=42");
-            expect(result.stdout).toContain("DuckDB dynamic library air-gap smoke passed");
+                expect(result.status).toBe(0);
+                expect(result.stdout).toContain("fts=hello static world");
+                expect(result.stdout).toContain("json=42");
+                expect(result.stdout).toContain("DuckDB dynamic library air-gap smoke passed");
+            } finally {
+                rmSync(smokeHome, { recursive: true, force: true });
+            }
         },
     );
 });

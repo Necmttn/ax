@@ -2,8 +2,11 @@
 /**
  * Generate the custom DuckDB library import for a compiled `ax` binary.
  *
- *   bun scripts/gen-duckdb-embed.ts          # build DuckDB and write manifest
- *   bun scripts/gen-duckdb-embed.ts --stub   # restore the committed stub
+ *   bun scripts/gen-duckdb-embed.ts --manifest   # build DuckDB and write manifest
+ *   bun scripts/gen-duckdb-embed.ts --stub       # restore the committed stub
+ *
+ * Both flags are required explicitly - there is no default action - so a bare
+ * invocation can never silently overwrite the committed stub.
  *
  * A later cutover will connect these functions to scripts/build-axctl.ts.
  */
@@ -20,15 +23,20 @@ const STUB = `// AUTO-GENERATED stub - replaced during a custom DuckDB embed bui
 export const DUCKDB_DYLIB: string | undefined = undefined;
 `;
 
-export function writeStub(): void {
-    writeFileSync(GEN_FILE, STUB);
+/** Restore the empty stub. Defaults to the committed generated file. */
+export function writeStub(targetFile: string = GEN_FILE): void {
+    writeFileSync(targetFile, STUB);
 }
 
-/** Write the embed manifest for an existing platform library. */
-export function writeManifestFromDylib(dylibPath: string): void {
+/**
+ * Write the embed manifest for an existing platform library.
+ * `targetFile` defaults to the committed generated file; tests inject a
+ * temp-copy path so they never mutate the real one.
+ */
+export function writeManifestFromDylib(dylibPath: string, targetFile: string = GEN_FILE): void {
     if (!existsSync(dylibPath)) throw new Error(`DuckDB library not found: ${dylibPath}`);
 
-    let spec = relative(dirname(GEN_FILE), dylibPath).split(/[\\/]/).join("/");
+    let spec = relative(dirname(targetFile), dylibPath).split(/[\\/]/).join("/");
     if (!spec.startsWith(".")) spec = `./${spec}`;
 
     const manifest = [
@@ -39,11 +47,11 @@ export function writeManifestFromDylib(dylibPath: string): void {
         "export const DUCKDB_DYLIB: string | undefined = duckdbDylib;",
         "",
     ].join("\n");
-    writeFileSync(GEN_FILE, manifest);
+    writeFileSync(targetFile, manifest);
 }
 
 /** Build the custom DuckDB library, then emit its Bun file import. */
-export function writeManifest(): void {
+export function writeManifest(targetFile: string = GEN_FILE): void {
     const build = spawnSync(join(REPO_ROOT, "scripts/build-duckdb.sh"), [], {
         cwd: REPO_ROOT,
         stdio: "inherit",
@@ -52,11 +60,24 @@ export function writeManifest(): void {
 
     const libraryName = process.platform === "darwin" ? "libduckdb.dylib" : "libduckdb.so";
     const dylibPath = join(REPO_ROOT, "dist/duckdb", libraryName);
-    writeManifestFromDylib(dylibPath);
-    console.log(`[gen-duckdb-embed] embedded ${dylibPath} → ${GEN_FILE}`);
+    writeManifestFromDylib(dylibPath, targetFile);
+    console.log(`[gen-duckdb-embed] embedded ${dylibPath} → ${targetFile}`);
+}
+
+function printUsage(): void {
+    console.error(
+        "usage: bun scripts/gen-duckdb-embed.ts --manifest | --stub\n" +
+            "  --manifest   build DuckDB and write the embed manifest\n" +
+            "  --stub       restore the committed empty stub",
+    );
 }
 
 if (import.meta.main) {
-    if (process.argv.includes("--stub")) writeStub();
-    else writeManifest();
+    const args = process.argv.slice(2);
+    if (args.includes("--stub")) writeStub();
+    else if (args.includes("--manifest")) writeManifest();
+    else {
+        printUsage();
+        process.exit(1);
+    }
 }

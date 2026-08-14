@@ -35,10 +35,11 @@ function query(sql: string): { result: ReturnType<typeof ptr>; buffer: Uint8Arra
         result,
     );
     if (state !== 0) {
-        const errorPointer = symbols.duckdb_result_error(result);
-        const message = errorPointer
-            ? new CString(errorPointer as never).toString()
-            : "unknown DuckDB error";
+        // duckdb_result_error is declared `returns: cstring` in duckdb-ffi.ts,
+        // so bun:ffi already marshals it to a JS string (or null) - wrapping
+        // the returned value in `new CString(...)` re-interprets a JS string
+        // as a pointer and corrupts/crashes.
+        const message = symbols.duckdb_result_error(result) ?? "unknown DuckDB error";
         symbols.duckdb_destroy_result(result);
         throw new Error(`${sql}\n${message}`);
     }
@@ -46,12 +47,19 @@ function query(sql: string): { result: ReturnType<typeof ptr>; buffer: Uint8Arra
 }
 
 function execute(sql: string): void {
-    const { result } = query(sql);
+    // Destructure `buffer` too, not just `result` - `result` is a bare
+    // pointer into `buffer`'s backing memory with no reference of its own,
+    // so once the returned object is discarded the buffer is eligible for
+    // GC. If that happens before duckdb_destroy_result runs, the native call
+    // reads/frees already-collected memory. Holding `buffer` in scope for
+    // the query's full lifetime (through the destroy call) pins it.
+    const { result, buffer } = query(sql);
     symbols.duckdb_destroy_result(result);
+    void buffer;
 }
 
 function scalar(sql: string): string {
-    const { result } = query(sql);
+    const { result, buffer } = query(sql);
     try {
         if (symbols.duckdb_row_count(result) !== 1n) {
             throw new Error(`expected one row from: ${sql}`);
@@ -65,6 +73,7 @@ function scalar(sql: string): string {
         }
     } finally {
         symbols.duckdb_destroy_result(result);
+        void buffer;
     }
 }
 
