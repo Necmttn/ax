@@ -5,10 +5,11 @@
  * and we assert the registry/envelope shape directly.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildServer, wrapToolError, wrapToolResult } from "./server.ts";
 import { axMcpTools } from "./tools.ts";
@@ -394,7 +395,7 @@ describe("result wrapping", () => {
 
 describe("MCP server over in-memory transport", () => {
     it("lists the recall tool via tools/list", async () => {
-        const runtime = ManagedRuntime.make(AppLayer);
+        const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive));
         const server = buildServer(runtime);
         const client = new Client({ name: "smoke-test", version: "0.0.0" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
