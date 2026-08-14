@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { ingestOtelSpool, otelSpoolStage } from "./otel-spool.ts";
+import { ingestOtelSpool, otelSpoolStage, stampReceivedAt } from "./otel-spool.ts";
 
 const roots: string[] = [];
 
@@ -74,5 +74,35 @@ describe("otel-spool ingest stage", () => {
     it("declares the ingest stage contract", () => {
         expect(otelSpoolStage.meta.key).toBe("otel-spool");
         expect(otelSpoolStage.meta.tags).toEqual(["ingest"]);
+    });
+});
+
+describe("stampReceivedAt (timeless-event epoch collision guard)", () => {
+    const received = new Date("2026-08-14T12:00:00.000Z");
+
+    it("stamps an epoch-dated (timeless) row with received_at", () => {
+        const rows = [{ event_name: "e", observed_at: new Date(0) }];
+        const out = stampReceivedAt(rows, received);
+        expect(out[0]!.observed_at.toISOString()).toBe(received.toISOString());
+    });
+
+    it("leaves a row that already has a real event-time untouched", () => {
+        const real = new Date("2026-06-15T00:00:00.000Z");
+        const rows = [{ event_name: "e", observed_at: real }];
+        const out = stampReceivedAt(rows, received);
+        expect(out[0]!.observed_at).toBe(real);
+    });
+
+    it("two timeless events at the same received_at get the same fallback, but distinct-time events do not alias at the epoch", () => {
+        const a = stampReceivedAt([{ observed_at: new Date(0) }], new Date("2026-08-14T12:00:00.000Z"));
+        const b = stampReceivedAt([{ observed_at: new Date(0) }], new Date("2026-08-14T12:05:00.000Z"));
+        // Different POSTs (different received_at) no longer collide at 1970.
+        expect(a[0]!.observed_at.toISOString()).not.toBe(b[0]!.observed_at.toISOString());
+    });
+
+    it("is a no-op when received_at is null or invalid", () => {
+        const rows = [{ observed_at: new Date(0) }];
+        expect(stampReceivedAt(rows, null)[0]!.observed_at.getTime()).toBe(0);
+        expect(stampReceivedAt(rows, new Date("nope"))[0]!.observed_at.getTime()).toBe(0);
     });
 });

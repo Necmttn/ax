@@ -3,7 +3,7 @@
 .timer on
 SELECT sk.name, count(*) AS n
 FROM invoked i
-JOIN skill sk ON i.skill_id = sk.id
+JOIN skill sk ON i.out_id = sk.id
 GROUP BY sk.name
 ORDER BY n DESC
 LIMIT 20;

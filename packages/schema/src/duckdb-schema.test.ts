@@ -9,7 +9,7 @@ import {
     parseDuckdbTables,
     parseSurrealTables,
 } from "./duckdb-ddl.ts";
-import { DUCKDB_SCHEMA_TABLES } from "./duckdb-tables.ts";
+import { DUCKDB_SCHEMA_TABLES, SIDECAR_JUDGMENT_TABLES } from "./duckdb-tables.ts";
 const surrealTables = parseSurrealTables(surql);
 const duckTables = parseDuckdbTables();
 const duckTableSet = new Set(duckTables);
@@ -217,9 +217,42 @@ describe("manifest", () => {
     test("every entry carries a non-empty note and a known stage and kind", () => {
         for (const entry of DUCKDB_SCHEMA_TABLES) {
             expect(entry.note.length).toBeGreaterThan(0);
-            expect(["active", "conditional", "staged"]).toContain(entry.stage);
+            expect(["active", "conditional", "staged", "sidecar"]).toContain(entry.stage);
             expect(["node", "edge"]).toContain(entry.kind);
         }
+    });
+
+    // Wave-0 finding P1-2: the DDL header says durable judgment lives in the
+    // SQLite sidecar and the DuckDB cache is REBUILDABLE, but the manifest had
+    // these tables marked `active` - a cache rebuild would erase user decisions.
+    // Every durable judgment table (proposals, verdicts, role tags + weights,
+    // retros, triage/label-review decisions, dogfood runs) must be `sidecar`.
+    test("every judgment table is marked stage: sidecar (durable, never rebuilt)", () => {
+        const JUDGMENT_TABLES = [
+            "proposal",
+            "skill_proposal",
+            "subagent_proposal",
+            "hook_proposal",
+            "guidance_proposal",
+            "automation_proposal",
+            "experiment",
+            "checkpoint",
+            "role",
+            "plays_role",
+            "retro",
+            "skill_triage_decision",
+            "transcript_label_review",
+            "dogfood_run",
+        ] as const;
+        const stageOf = new Map(DUCKDB_SCHEMA_TABLES.map((t) => [t.table, t.stage] as const));
+        for (const table of JUDGMENT_TABLES) {
+            expect(stageOf.get(table)).toBe("sidecar");
+        }
+        // The exported set and this explicit list must agree, and no OTHER table
+        // may be silently marked sidecar without being enumerated here.
+        expect([...SIDECAR_JUDGMENT_TABLES].sort()).toEqual([...JUDGMENT_TABLES].sort());
+        const sidecarInManifest = DUCKDB_SCHEMA_TABLES.filter((t) => t.stage === "sidecar").map((t) => t.table);
+        expect(sidecarInManifest.sort()).toEqual([...JUDGMENT_TABLES].sort());
     });
 
     test("kind matches the Surreal relation flag", () => {

@@ -8,6 +8,13 @@
  * rewrites the same ids, which is what makes the cache rebuildable and
  * makes sidecar refs (SQLite) survive a full re-derive.
  *
+ * ONE CARVE-OUT: when a table's natural key IS ALREADY a single provider-native
+ * stable id, the row id is that identifier VERBATIM, not a hash of it. The
+ * canonical case is `session` (see `sessionRowId`): its provider uuid is the
+ * value the rest of the system joins session identity on (OTLP correlation,
+ * Studio deeplinks), so hashing it would break those joins. Composite keys
+ * (turn = session + seq, etc.) have no single provider id and stay hashed.
+ *
  * APPEND-STABILITY (P1-2): a natural key must be append-stable - re-deriving
  * after a source file grows (more lines appended to a transcript) must
  * produce IDENTICAL ids for rows that were already seen before the file
@@ -85,8 +92,31 @@ export function stableId(table: string, parts: readonly NaturalKeyPart[]): strin
     return hasher.digest("hex").slice(0, ID_HEX_LENGTH);
 }
 
-export function sessionRowId(provider: string, providerSessionId: string): string {
-    return stableId("session", [provider, providerSessionId]);
+/**
+ * The `session` row id is the provider-native session identifier VERBATIM - it
+ * is NOT hashed. A provider's session id (a uuid for a main session, a
+ * `<provider>-subagent-<hash>` id for a subagent) is already a stable, globally
+ * unique natural key, and session identity is joined on that BARE value across
+ * the system: OTLP correlation extracts the uuid straight out of `session.id`
+ * (apps/axctl/src/otel/correlate.ts), Studio deeplinks address
+ * `/sessions/<bare-session-id>`, and `ax otel` coverage matches uuid-to-uuid.
+ * The earlier `stableId("session", [provider, id])` replaced the uuid with 32
+ * hex chars that match no uuid, silently zeroing every one of those joins
+ * (wave-0 finding P1-3). This mirrors the old SurrealDB `session:<id>` keying,
+ * where the key was the raw provider session id.
+ *
+ * `provider` stays in the signature for call-site symmetry with the other
+ * row-id helpers, but is NOT folded into the id: provider-native session ids do
+ * not collide across providers (uuids are globally unique; subagent ids embed
+ * the provider name), exactly as the single-namespace Surreal scheme assumed.
+ *
+ * Only tables whose natural key IS itself a provider-native stable id qualify
+ * for verbatim ids. `turn`/`tool_call`/`agent_event` are keyed on a COMPOSITE
+ * (session id + seq + ...), so they have no single provider id to be and stay
+ * hashed via `stableId`.
+ */
+export function sessionRowId(_provider: string, providerSessionId: string): string {
+    return providerSessionId;
 }
 
 export function turnRowId(sessionId: string, seq: number): string {
@@ -155,7 +185,7 @@ export function edgeRowId(
  *  not yet have a concrete recipe below is tracked in RECIPE_TODO instead
  *  of silently having none. */
 export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
-    session: "provider + provider-native session id",
+    session: "the provider-native session id VERBATIM (NOT hashed) - see sessionRowId; the one carve-out from the hash-the-natural-key rule",
     turn: "session row id + provider-native turn seq",
     tool_call: "session row id + seq + (provider call id OR an explicit ordinal) - see toolCallRowId",
     agent_event: "agent_session row id + seq + provider event id (when present)",

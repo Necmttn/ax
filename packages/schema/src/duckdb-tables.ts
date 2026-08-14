@@ -5,9 +5,50 @@
 export interface DuckdbTableSpec {
     readonly table: string;
     readonly kind: "node" | "edge";
-    readonly stage: "active" | "conditional" | "staged";
+    /**
+     * - `active`      - derived from files on disk (transcripts/git/skills/OTLP
+     *                   spool); REBUILDABLE, dropped + re-derived on a cache rebuild.
+     * - `conditional` - active, but only written under a runtime gate (e.g. a
+     *                   GitHub remote + working `gh`).
+     * - `staged`      - reserved/not-yet-wired; also rebuildable.
+     * - `sidecar`     - DURABLE JUDGMENT that a cache rebuild MUST NOT erase
+     *                   (user/agent decisions: proposals, verdicts, role tags +
+     *                   weights, retros, triage/label-review decisions, dogfood
+     *                   runs). The DDL header says durable judgment lives in the
+     *                   SQLite sidecar; this flag is the machine-readable copy of
+     *                   that contract so nothing can treat these tables as
+     *                   rebuildable-from-transcripts. See SIDECAR_JUDGMENT_TABLES.
+     */
+    readonly stage: "active" | "conditional" | "staged" | "sidecar";
     readonly note: string;
 }
+
+/**
+ * Durable judgment tables (wave-3 `c-sidecar-sqlite`): user/agent DECISIONS that
+ * cannot be re-derived from transcripts/git/skills, so a cache rebuild must not
+ * drop them. Enumerated here as the single source of truth; the manifest below
+ * marks each `stage: "sidecar"` and duckdb-schema.test.ts asserts the two agree.
+ *
+ * NOTE: "spar labels" (the wave-3 list) are `session.labels` VALUES stamped by
+ * spar-score, i.e. a COLUMN on the (rebuildable) `session` table, not a table of
+ * their own - there is nothing table-grained to mark here for them.
+ */
+export const SIDECAR_JUDGMENT_TABLES: ReadonlySet<string> = new Set([
+    "proposal",
+    "skill_proposal",
+    "subagent_proposal",
+    "hook_proposal",
+    "guidance_proposal",
+    "automation_proposal",
+    "experiment",
+    "checkpoint",
+    "role",
+    "plays_role",
+    "retro",
+    "skill_triage_decision",
+    "transcript_label_review",
+    "dogfood_run",
+]);
 
 export const DUCKDB_SCHEMA_TABLES: readonly DuckdbTableSpec[] = [
     { table: "skill", kind: "node", stage: "active", note: "Installed skills and slash commands. SEMANTICS (P2-2): ingested_at used Surreal `VALUE time::now()`, not a DEFAULT - the writer must stamp CURRENT_TIMESTAMP on every insert AND update, since DuckDB DEFAULT only fires on an omitted-column insert." },
@@ -53,7 +94,7 @@ export const DUCKDB_SCHEMA_TABLES: readonly DuckdbTableSpec[] = [
     { table: "classifier_graph_node", kind: "node", stage: "active", note: "Generic classifier graph nodes projected from package operations." },
     { table: "classifier_graph_edge", kind: "node", stage: "active", note: "Generic classifier graph edges projected from package operations." },
     { table: "classifier_graph_fact", kind: "node", stage: "active", note: "Generic classifier graph facts projected from package operations." },
-    { table: "transcript_label_review", kind: "node", stage: "active", note: "Human/agent review verdicts for mined transcript label candidates." },
+    { table: "transcript_label_review", kind: "node", stage: "sidecar", note: "Human/agent review verdicts for mined transcript label candidates." },
     { table: "transcript_label_vector", kind: "node", stage: "active", note: "Embedding vectors and nearest-neighbor refs for transcript label candidates." },
     { table: "semantic_signal", kind: "node", stage: "active", note: "Reusable meanings promoted from analyzed turns." },
     { table: "diagnostic_event", kind: "node", stage: "active", note: "Derived diagnostics from failed commands and friction." },
@@ -85,8 +126,8 @@ export const DUCKDB_SCHEMA_TABLES: readonly DuckdbTableSpec[] = [
     { table: "ingest_event", kind: "node", stage: "active", note: "Append-like ingest progress events." },
     { table: "query_sample", kind: "node", stage: "staged", note: "Reserved query execution samples." },
     { table: "graph_health_check", kind: "node", stage: "staged", note: "Persisted graph health check rows." },
-    { table: "role", kind: "node", stage: "active", note: "Skill role labels used for weighting and grouping." },
-    { table: "plays_role", kind: "edge", stage: "active", note: "Skill-to-role classification edges." },
+    { table: "role", kind: "node", stage: "sidecar", note: "Skill role labels used for weighting and grouping." },
+    { table: "plays_role", kind: "edge", stage: "sidecar", note: "Skill-to-role classification edges." },
     { table: "invoked", kind: "edge", stage: "active", note: "Turn-to-skill invocation edges." },
     { table: "loaded", kind: "edge", stage: "active", note: "Session-to-skill auto-load activations (subagent skills: frontmatter); separate from invoked." },
     { table: "proposed", kind: "edge", stage: "active", note: "Skills mentioned but not invoked." },
@@ -117,26 +158,26 @@ export const DUCKDB_SCHEMA_TABLES: readonly DuckdbTableSpec[] = [
     { table: "agent_event_child", kind: "edge", stage: "active", note: "Provider-event parent-child edges." },
     { table: "used_model", kind: "edge", stage: "active", note: "Session-to-agent-model usage edges." },
     { table: "agent_used_model", kind: "edge", stage: "active", note: "Provider-session-to-agent-model usage edges." },
-    { table: "skill_triage_decision", kind: "node", stage: "active", note: "Dashboard keep/archive/review decisions per skill." },
+    { table: "skill_triage_decision", kind: "node", stage: "sidecar", note: "Dashboard keep/archive/review decisions per skill." },
     { table: "harness_hook_event", kind: "node", stage: "active", note: "Native agent harness hook lifecycle events." },
     { table: "hook_command_invocation", kind: "node", stage: "active", note: "Commands invoked by native harness hooks." },
     { table: "ax_invocation", kind: "node", stage: "active", note: "ax's own CLI invocations (redacted) for self-telemetry / utilization." },
     { table: "feedback_case_type", kind: "node", stage: "active", note: "Feedback backtest case definitions." },
     { table: "feedback_case_result", kind: "node", stage: "active", note: "Feedback backtest results." },
     { table: "hook_fire", kind: "node", stage: "active", note: "Runtime file-context hook decisions." },
-    { table: "proposal", kind: "node", stage: "active", note: "Polymorphic shortlist of repeated workflow improvement candidates." },
+    { table: "proposal", kind: "node", stage: "sidecar", note: "Polymorphic shortlist of repeated workflow improvement candidates." },
     { table: "directive_ngram", kind: "node", stage: "active", note: "Per-user n-gram lift table: which user-turn markers predict captured outcomes (directive mining v2, #587)." },
-    { table: "skill_proposal", kind: "node", stage: "active", note: "Typed payload rows for skill-form proposals." },
-    { table: "subagent_proposal", kind: "node", stage: "active", note: "Typed payload rows for subagent-form proposals." },
-    { table: "hook_proposal", kind: "node", stage: "active", note: "Typed payload rows for hook-form proposals." },
-    { table: "guidance_proposal", kind: "node", stage: "active", note: "Typed payload rows for guidance-file proposals." },
-    { table: "automation_proposal", kind: "node", stage: "active", note: "Typed payload rows for automation-form proposals." },
+    { table: "skill_proposal", kind: "node", stage: "sidecar", note: "Typed payload rows for skill-form proposals." },
+    { table: "subagent_proposal", kind: "node", stage: "sidecar", note: "Typed payload rows for subagent-form proposals." },
+    { table: "hook_proposal", kind: "node", stage: "sidecar", note: "Typed payload rows for hook-form proposals." },
+    { table: "guidance_proposal", kind: "node", stage: "sidecar", note: "Typed payload rows for guidance-file proposals." },
+    { table: "automation_proposal", kind: "node", stage: "sidecar", note: "Typed payload rows for automation-form proposals." },
     { table: "cites_evidence", kind: "edge", stage: "active", note: "Proposal-to-evidence edges." },
-    { table: "experiment", kind: "node", stage: "active", note: "Accepted proposals and scaffold/verdict state." },
+    { table: "experiment", kind: "node", stage: "sidecar", note: "Accepted proposals and scaffold/verdict state." },
     { table: "opportunity", kind: "edge", stage: "active", note: "Experiment trigger recurrence evidence edges." },
-    { table: "checkpoint", kind: "node", stage: "active", note: "Experiment measurement snapshots and user verdicts." },
-    { table: "dogfood_run", kind: "node", stage: "active", note: "Terminal dogfood scenario results." },
-    { table: "retro", kind: "node", stage: "active", note: "Structured session retrospectives." },
+    { table: "checkpoint", kind: "node", stage: "sidecar", note: "Experiment measurement snapshots and user verdicts." },
+    { table: "dogfood_run", kind: "node", stage: "sidecar", note: "Terminal dogfood scenario results." },
+    { table: "retro", kind: "node", stage: "sidecar", note: "Structured session retrospectives." },
     { table: "reviewed", kind: "edge", stage: "active", note: "Session-to-retro review edges." },
     { table: "ingest_file_state", kind: "node", stage: "active", note: "Per-source ingest watermark (mtime/size/sha) for skip-unchanged re-ingest." },
     { table: "otel_metric_point", kind: "node", stage: "active", note: "Harness OTLP metric data points (cost/token/usage)." },

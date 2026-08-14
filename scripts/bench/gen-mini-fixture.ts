@@ -76,24 +76,28 @@ export const writeMiniFixture = (
         scope: i % 2 === 0 ? "user" : "project",
     }));
 
+    // Edge JSONL keys must match the in_id/out_id column names the load DDL
+    // (02_duckdb_load.sql) declares - COPY ... (FORMAT json) matches by name, so
+    // a key mismatch silently loads NULLs. These track production edge shapes.
     const invoked = Array.from({ length: INVOKED_ROWS }, (_, i) => ({
-        turn_id: `turn:t${String(i % TURN_ROWS).padStart(5, "0")}`,
-        skill_id: skillId(i % SKILL_ROWS),
+        in_id: `turn:t${String(i % TURN_ROWS).padStart(5, "0")}`,
+        out_id: skillId(i % SKILL_ROWS),
         session: sessionId(i % SESSION_ROWS),
         ts: iso(i + 3),
     }));
 
     const spawned = Array.from({ length: SPAWNED_ROWS }, (_, i) => ({
-        parent_session: sessionId(i % SESSION_ROWS),
-        child_session: sessionId((i + 1) % SESSION_ROWS),
+        in_id: sessionId(i % SESSION_ROWS),
+        out_id: sessionId((i + 1) % SESSION_ROWS),
         ts: iso(i * 15),
         agent_type: i % 2 === 0 ? "Explore" : "general-purpose",
         description: `dispatch ${i}`,
     }));
 
     const telemetry = Array.from({ length: TELEMETRY_ROWS }, (_, i) => ({
-        session_id: sessionId(i % SESSION_ROWS),
-        otel_id: `otel:o${String(i).padStart(4, "0")}`,
+        in_id: sessionId(i % SESSION_ROWS),
+        out_id: `otel:o${String(i).padStart(4, "0")}`,
+        out_table: "otel_log_event",
         linked_at: iso(i * 9),
     }));
 

@@ -2,10 +2,19 @@ import { homedir } from "node:os";
 import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
+import { isAllowedHost } from "../dashboard/host-guard.ts";
 import { OTLP_SIGNAL_PATHS } from "./signal.ts";
 
 export const OTLP_ACK = { partialSuccess: {} } as const;
 export const OTLP_SPOOL_RETENTION_DAYS = 90;
+
+/**
+ * Cap on a single OTLP request body. OTLP batches are small (a few KB of JSON
+ * per export); this bound (disk-exhaustion / ingest-OOM defense) is generous
+ * for a real exporter but refuses a multi-GB body that would balloon the daily
+ * spool file and OOM the whole-file read on the ingest side.
+ */
+export const OTLP_MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 export class OtlpSpoolServerError extends Schema.TaggedErrorClass<OtlpSpoolServerError>(
     "OtlpSpoolServerError",
@@ -148,8 +157,19 @@ export const startOtlpSpoolServer = (
         const server = yield* Effect.try({
             try: () => Bun.serve({
                 hostname,
+                // Disk-exhaustion / ingest-OOM defense: Bun rejects a body larger
+                // than this before fetch() runs (413), so a giant POST can never
+                // reach the spool file.
+                maxRequestBodySize: OTLP_MAX_BODY_BYTES,
                 port: opts.port ?? DEFAULT_DASHBOARD_PORT,
                 async fetch(request) {
+                    // DNS-rebinding / browser telemetry-injection defense: a
+                    // PRESENT, non-loopback Host header can only come from a
+                    // browser page pointed at this loopback receiver. Reject it
+                    // (a real exporter sends loopback or no Host at all).
+                    if (!isAllowedHost(request.headers.get("host"))) {
+                        return new Response("forbidden", { status: 403 });
+                    }
                     const pathname = new URL(request.url).pathname;
                     if (request.method !== "POST" || !OTLP_PATHS.has(pathname)) {
                         return new Response("Not Found", { status: 404 });

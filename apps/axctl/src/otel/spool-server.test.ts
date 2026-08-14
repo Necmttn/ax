@@ -6,6 +6,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import {
     OTLP_ACK,
+    OTLP_MAX_BODY_BYTES,
     defaultOtlpSpoolDir,
     startOtlpSpoolServer,
     type OtlpSpoolServer,
@@ -50,6 +51,37 @@ describe("OTLP spool receiver", () => {
             path: "/v1/metrics",
             body: raw,
         }]);
+    });
+
+    it("rejects a present, non-loopback Host header with 403 (DNS-rebinding defense)", async () => {
+        const now = new Date("2026-08-14T12:34:56.000Z");
+        const { spoolDir, server } = await start(() => now);
+
+        const response = await fetch(`${server.url}/v1/metrics`, {
+            method: "POST",
+            headers: { "content-type": "application/json", host: "attacker.com" },
+            body: '{"resourceMetrics":[]}',
+        });
+
+        expect(response.status).toBe(403);
+        // A rejected request must never reach the spool file.
+        expect(await Bun.file(join(spoolDir, "2026-08-14.jsonl")).exists()).toBe(false);
+    });
+
+    it("rejects an oversized body (disk-exhaustion / ingest-OOM defense)", async () => {
+        const now = new Date("2026-08-14T12:34:56.000Z");
+        const { spoolDir, server } = await start(() => now);
+        // One byte past the cap; Bun refuses it before fetch() runs.
+        const huge = "x".repeat(OTLP_MAX_BODY_BYTES + 1);
+
+        const response = await fetch(`${server.url}/v1/logs`, {
+            method: "POST",
+            body: huge,
+        }).catch(() => ({ status: 413 }) as Response);
+
+        expect(response.status).toBe(413);
+        // Nothing oversized was spooled.
+        expect(await Bun.file(join(spoolDir, "2026-08-14.jsonl")).exists()).toBe(false);
     });
 
     it("returns 2xx and preserves a malformed body", async () => {

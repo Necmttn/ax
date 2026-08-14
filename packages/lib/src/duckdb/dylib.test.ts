@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { BunFileSystem } from "@effect/platform-bun";
 import { Effect } from "effect";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractDylib, isEmbeddedPath, resolveDylibPath } from "./dylib.ts";
@@ -74,6 +74,44 @@ describe("extractDylib", () => {
         expect(statSync(second).mtimeMs).toBe(firstMtime);
         // The reuse path must never leave a staging file behind either.
         expect(readdirSync(cache).length).toBe(1);
+    });
+
+    test("creates the cache dir owner-only (0700) and publishes the dylib read-only (0400)", async () => {
+        const dir = tempDir();
+        const cache = join(dir, "cache");
+        const source = join(dir, "src.bin");
+        await Bun.write(source, "duckdb-bytes");
+
+        const out = await runWithFs(extractDylib(source, cache));
+
+        // No group/other permissions on the cache dir; owner-read-only on the file.
+        expect(statSync(cache).mode & 0o077).toBe(0);
+        expect(statSync(out).mode & 0o777).toBe(0o400);
+    });
+
+    test("rejects a tampered cache file and re-extracts the trusted bytes (adversarial P2)", async () => {
+        const dir = tempDir();
+        const cache = join(dir, "cache");
+        const source = join(dir, "src.bin");
+        await Bun.write(source, "trusted-duckdb-bytes");
+
+        const out = await runWithFs(extractDylib(source, cache));
+        expect(await Bun.file(out).text()).toBe("trusted-duckdb-bytes");
+
+        // A same-user attacker plants a malicious library at the predictable
+        // content-hash path (the file is published 0400, so make it writable
+        // first, as an attacker with the same uid could).
+        chmodSync(out, 0o600);
+        await Bun.write(out, "MALICIOUS-PAYLOAD");
+        expect(await Bun.file(out).text()).toBe("MALICIOUS-PAYLOAD");
+
+        // The next resolve must NOT dlopen the tampered bytes: it re-hashes the
+        // on-disk file, sees the mismatch, and re-extracts the trusted bytes.
+        const second = await runWithFs(extractDylib(source, cache));
+        expect(second).toBe(out);
+        expect(await Bun.file(out).text()).toBe("trusted-duckdb-bytes");
+        // Republished read-only again.
+        expect(statSync(out).mode & 0o777).toBe(0o400);
     });
 });
 

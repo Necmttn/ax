@@ -146,7 +146,9 @@ describe("determinism property", () => {
     // deliberate cache-version bump - doing so invalidates every cached row.
     test("golden row ids are pinned as literals - a regression here breaks every cached row", () => {
         expect(stableId("turn", ["a", 1])).toBe("95e2451f95fb1c6e49bf93c263fa43b6");
-        expect(sessionRowId("claude", "abc")).toBe("3a73bc66bd73afd6c665b1eaa73ec88c");
+        // session is the carve-out: its id is the provider session id VERBATIM,
+        // never a hash (wave-0 finding P1-3) - so this pin is the input string.
+        expect(sessionRowId("claude", "abc")).toBe("abc");
         expect(turnRowId("s1", 7)).toBe("fcfa5ac272f770611d02bbb6c810c19f");
         expect(toolCallRowId("s1", 7, { callId: "toolu_01" })).toBe("772e683e4e9b8bc61b92f1851151a875");
         expect(toolCallRowId("s1", 7, { ordinal: 0 })).toBe("95e7c99eb759ffa4fc9732136b6e11ce");
@@ -157,8 +159,23 @@ describe("determinism property", () => {
     });
 
     test("delegation: helpers compute exactly stableId(table, parts)", () => {
-        expect(sessionRowId("claude", "abc")).toBe(stableId("session", ["claude", "abc"]));
+        // session is the carve-out - its id is the raw provider id, so it does
+        // NOT delegate to stableId. turn (composite key) still does.
         expect(turnRowId("s1", 7)).toBe(stableId("turn", ["s1", 7]));
+    });
+
+    test("sessionRowId is the provider session id verbatim, ignoring provider (P1-3)", () => {
+        // The value OTLP correlation + Studio deeplinks join on must be the bare
+        // provider id, not a hash. A raw uuid round-trips unchanged, so
+        // correlate.ts's bareUuid(session.id) recovers the same uuid it matches
+        // otel session_id against.
+        const uuid = "019fbf3f-1a2b-4c5d-8e9f-0a1b2c3d4e5f";
+        expect(sessionRowId("claude", uuid)).toBe(uuid);
+        // provider does not alter the id (globally-unique ids never collide).
+        expect(sessionRowId("codex", uuid)).toBe(sessionRowId("claude", uuid));
+        // subagent ids (non-uuid) pass through verbatim too.
+        expect(sessionRowId("claude", "claude-subagent-af3f3b45c70ccf85c"))
+            .toBe("claude-subagent-af3f3b45c70ccf85c");
     });
 
     test("500 keys from a genuinely varied 32-bit PRNG collide never and repeat always", () => {

@@ -23,15 +23,23 @@ export interface BlobGcResult {
 
 export interface BlobGcOptions {
     /**
-     * Only actually delete when the triggering ingest run was NOT
-     * since-windowed (i.e. it scanned every session). The reference set below
-     * is built from the CURRENT `session` table; after a DB wipe + a
-     * `--since`-windowed re-ingest, that table only holds the sessions the
-     * windowed run touched - every session outside the window looks
-     * unreferenced even though its blob is still live. Running GC against
-     * that partial view would permanently delete cold-but-referenced blobs.
+     * Only actually delete when the triggering ingest run scanned EVERY
+     * session - a truly GLOBAL ingest with no scope narrowing of any kind. The
+     * reference set below is built from the CURRENT `session` table, so it is a
+     * trustworthy "everything referenced" set ONLY when the run that populated
+     * it was unscoped. Any narrowing makes the table a PARTIAL view and turns
+     * every out-of-scope session's still-live blob into a false GC candidate:
+     *   - `--since=` windowing (after a DB wipe + windowed re-ingest, the table
+     *     holds only the windowed sessions);
+     *   - repo/project scope (`ax ingest here`, an explicit project/claude
+     *     project) - only that repo's sessions are touched, so another repo's
+     *     blobs look unreferenced;
+     *   - a `--stages=` subset that skips the session-writing stages entirely.
+     * Running GC against any such partial view would permanently delete
+     * cold-but-referenced blobs, so the caller must pass the single
+     * `isGlobalIngest` predicate (see cli/commands/ingest.ts) here.
      */
-    readonly fullIngest: boolean;
+    readonly isGlobalIngest: boolean;
     /** Override the young-blob guard window (ms). Defaults to 24h. */
     readonly minAgeMs?: number;
     readonly now?: () => number;
@@ -50,10 +58,10 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
     bucketsDir: string,
     opts: BlobGcOptions,
 ) {
-    if (!opts.fullIngest) {
+    if (!opts.isGlobalIngest) {
         return skip(
-            "ingest run was --since-windowed (partial); the session table is not a complete " +
-                "reference set, so blob GC was skipped to avoid deleting live blobs",
+            "ingest run was scoped (--since / repo / --stages subset); the session table is not a " +
+                "complete reference set, so blob GC was skipped to avoid deleting live blobs",
         );
     }
 

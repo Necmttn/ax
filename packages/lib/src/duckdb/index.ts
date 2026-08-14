@@ -9,6 +9,7 @@
 export * from "./errors.ts";
 export * from "./types.ts";
 export * from "./row-decode.ts";
+export * from "./bigint-column.ts";
 export * from "./dylib.ts";
 export * from "./lock-state.ts";
 

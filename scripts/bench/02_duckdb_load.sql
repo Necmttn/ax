@@ -49,29 +49,45 @@ CREATE OR REPLACE TABLE skill (
 );
 COPY skill FROM 'jsonl/skill.jsonl' (FORMAT json);
 
+-- Edge tables use the SAME in_id/out_id column names + index shapes as
+-- production (packages/schema/src/schema.duckdb.sql). The bench previously used
+-- invented names (turn_id/skill_id/parent_session/child_session/session_id/
+-- otel_id), so its graph queries never exercised the real edge column names or
+-- indexes - a gate could pass while a production edge join failed (wave-0
+-- finding P1/P2). Keep the bench's mini-fixture row counts; only the shapes
+-- track production now.
 CREATE OR REPLACE TABLE invoked (
-  turn_id VARCHAR,
-  skill_id VARCHAR,
+  in_id VARCHAR,   -- ref -> turn
+  out_id VARCHAR,  -- ref -> skill
   session VARCHAR,
   ts TIMESTAMP
 );
 COPY invoked FROM 'jsonl/invoked.jsonl' (FORMAT json);
+CREATE INDEX invoked_out_ts ON invoked(out_id, ts);
+CREATE INDEX invoked_session_out_ts ON invoked(session, out_id, ts);
+CREATE INDEX invoked_in ON invoked(in_id);
+CREATE INDEX invoked_out ON invoked(out_id);
 
 CREATE OR REPLACE TABLE spawned (
-  parent_session VARCHAR,
-  child_session VARCHAR,
+  in_id VARCHAR,   -- ref -> session (parent)
+  out_id VARCHAR,  -- ref -> session (child)
   ts TIMESTAMP,
   agent_type VARCHAR,
   description VARCHAR
 );
 COPY spawned FROM 'jsonl/spawned.jsonl' (FORMAT json);
+CREATE INDEX spawned_in ON spawned(in_id);
+CREATE INDEX spawned_out ON spawned(out_id);
 
 CREATE OR REPLACE TABLE telemetry_of (
-  session_id VARCHAR,
-  otel_id VARCHAR,
+  in_id VARCHAR,
+  out_id VARCHAR,
+  out_table VARCHAR,
   linked_at TIMESTAMP
 );
 COPY telemetry_of FROM 'jsonl/telemetry_of.jsonl' (FORMAT json);
+CREATE INDEX telemetry_of_in ON telemetry_of(in_id);
+CREATE INDEX telemetry_of_out ON telemetry_of(out_id);
 
 SELECT 'turn' AS tbl, count(*) FROM turn
 UNION ALL SELECT 'tool_call', count(*) FROM tool_call

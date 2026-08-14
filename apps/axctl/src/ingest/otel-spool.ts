@@ -13,6 +13,10 @@ import type { StageDef } from "./stage/registry.ts";
 interface SpoolEnvelope {
     readonly path: string;
     readonly body: string;
+    /** Server receive time (spool-server stamps every record). Used as the
+     *  observed_at FALLBACK for OTLP events that carry no event-time, so two
+     *  timeless events do not collide on the unix-epoch row key. */
+    readonly received_at: string | null;
 }
 
 const decodeEnvelope = (line: string): SpoolEnvelope | null => {
@@ -21,11 +25,36 @@ const decodeEnvelope = (line: string): SpoolEnvelope | null => {
         if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
         const record = value as Record<string, unknown>;
         return typeof record.path === "string" && typeof record.body === "string"
-            ? { path: record.path, body: record.body }
+            ? {
+                path: record.path,
+                body: record.body,
+                received_at: typeof record.received_at === "string" ? record.received_at : null,
+            }
             : null;
     } catch {
         return null;
     }
+};
+
+/**
+ * OTLP events that carry no event-time normalize to `observed_at = new Date(0)`
+ * (the unix epoch - see nanoToDate). The metric/log row keys embed observed_at,
+ * so two such timeless events in one session would collide on the epoch key and
+ * silently overwrite (stable-id bans time keys; missing times must not alias).
+ * Stamp any epoch-dated row with the spool record's `received_at` instead, so
+ * events received at different times get distinct identities/ordering.
+ */
+const EPOCH_MS = 0;
+export const stampReceivedAt = <R extends { readonly observed_at: Date }>(
+    rows: readonly R[],
+    receivedAt: Date | null,
+): readonly R[] => {
+    if (receivedAt === null || Number.isNaN(receivedAt.getTime())) return rows;
+    return rows.map((r) =>
+        r.observed_at instanceof Date && r.observed_at.getTime() === EPOCH_MS
+            ? { ...r, observed_at: receivedAt }
+            : r,
+    );
 };
 
 const parseBody = (body: string): unknown | undefined => {
@@ -78,6 +107,12 @@ export const ingestOtelSpool = (
             ...(opts.runId === undefined ? {} : { runId: opts.runId }),
             processFile: (candidate) =>
                 Effect.gen(function* () {
+                    // Whole-file read (not a true tail): the daily spool file is
+                    // re-read in full whenever it changes. The work-unit
+                    // watermark (jsonl-work-unit.ts) skips UNCHANGED files, so a
+                    // quiescent day is not re-read; only a file that grew is read
+                    // whole. A real offset tail is a larger change tracked in
+                    // REPORT.md (wave-1 seam).
                     const text = yield* fs.readFileString(candidate.path);
                     const writer = yield* OtelWriter;
                     for (const line of text.split("\n")) {
@@ -101,7 +136,10 @@ export const ingestOtelSpool = (
                             malformed += 1;
                             continue;
                         }
-                        const normalized = spec.normalize(decoded.value);
+                        const receivedAt = envelope.received_at === null
+                            ? null
+                            : new Date(envelope.received_at);
+                        const normalized = stampReceivedAt(spec.normalize(decoded.value), receivedAt);
                         yield* spec.write(writer)(normalized);
                         payloads += 1;
                         rows += normalized.length;
