@@ -20,6 +20,7 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
+import { stageAndRename } from "../staged-rename.ts";
 import { DuckDbDylibError } from "./errors.ts";
 
 export interface ResolveDylibOptions {
@@ -127,46 +128,33 @@ export const extractDylib = (
             .makeDirectory(cacheDir, { recursive: true, mode: CACHE_DIR_MODE })
             .pipe(Effect.mapError(toDylibError(`failed to create the dylib cache dir ${cacheDir}`)));
 
-        // Stage in a UNIQUELY-suffixed sibling and rename, so a concurrent
-        // reader can never observe a half-written dylib. `Effect.ensuring`
-        // removes the staging file on ANY failure between write and rename
-        // (after a successful rename it is already gone, so the cleanup is a
-        // no-op) - same crash-safety shape as writeFileAtomic in
-        // atomic-write.ts.
-        //
-        // Cross-review P3-3: the suffix used to be the pid ALONE, which is
-        // not unique WITHIN a process - two fibers extracting the same
-        // content hash concurrently (a plausible shape: two layers built in
-        // parallel) shared one staging path, so one could rename or remove
-        // the file the other was still writing, and a caller could see
-        // truncated bytes or a bare NotFound. A random component makes the
-        // staging name unique per call, which is what the rename-to-publish
-        // dance already assumed.
-        const staging = `${out}.${process.pid}.${crypto.randomUUID()}.tmp`;
-        const stageAndPublish = Effect.gen(function* () {
-            yield* Effect.tryPromise({
-                try: () => Bun.write(staging, bytes),
-                catch: (err) =>
-                    new DuckDbDylibError({
-                        message: `failed to stage the extracted dylib at ${staging}: ${
-                            err instanceof Error ? err.message : String(err)
-                        }`,
-                    }),
-            });
-
-            yield* fs
-                .rename(staging, out)
-                .pipe(Effect.mapError(toDylibError(`failed to publish the extracted dylib to ${out}`)));
-
+        // Stage in a uniquely-named sibling and rename, so a concurrent reader
+        // can never observe a half-written dylib, and the staging file is
+        // removed on every failure path. That whole dance - including the
+        // pid+uuid naming that cross-review P3-3 established (a pid-only suffix
+        // is not unique WITHIN a process, so two fibers extracting the same
+        // content hash shared one staging path and could rename or remove the
+        // file the other was still writing) - is `stageAndRename`.
+        yield* stageAndRename<DuckDbDylibError>(out, {
+            stage: (staging) =>
+                Effect.tryPromise({
+                    try: () => Bun.write(staging, bytes),
+                    catch: (err) =>
+                        new DuckDbDylibError({
+                            message: `failed to stage the extracted dylib at ${staging}: ${
+                                err instanceof Error ? err.message : String(err)
+                            }`,
+                        }),
+                }),
             // Publish read-only so a later same-user process cannot overwrite the
             // trusted bytes in place (a fresh extraction still renames over it -
             // rename needs write on the DIR, not the file). Best-effort: a chmod
             // failure must not fail the whole open - the reuse re-hash above is
             // the actual integrity gate.
-            yield* fs.chmod(out, DYLIB_FILE_MODE).pipe(Effect.ignore);
+            afterRename: fs.chmod(out, DYLIB_FILE_MODE).pipe(Effect.ignore),
+            onFsError: (step, err) =>
+                toDylibError(`failed to publish the extracted dylib to ${out} (${step})`)(err),
         });
-
-        yield* stageAndPublish.pipe(Effect.ensuring(fs.remove(staging).pipe(Effect.ignore)));
 
         return out;
     });

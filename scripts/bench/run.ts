@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { duckdbBinPath } from "./duckdb-bin.ts";
 import {
     evaluateGates,
     formatMetricTable,
@@ -47,19 +48,14 @@ export const resolveFixtureDir = (
     return dir;
 };
 
+/** Re-exported for callers that already imported the bench-local name; the
+ *  resolution itself lives in `./duckdb-bin.ts` (shared with
+ *  packages/schema/src/duckdb-load.test.ts and scripts/build-duckdb.test.ts,
+ *  collapsing what used to be three CLI-binary lookups behind two env names
+ *  into one). */
 export const resolveDuckdbBin = (
     env: Record<string, string | undefined> = process.env,
-): string | null => {
-    const fromEnv = env.AX_DUCKDB_BIN;
-    if (fromEnv) {
-        // Resolve against the launch cwd now -- every duckdb spawn below runs
-        // with `cwd: workDir`, so a relative AX_DUCKDB_BIN would otherwise be
-        // looked up relative to the wrong directory.
-        const absolute = resolve(fromEnv);
-        return existsSync(absolute) ? absolute : null;
-    }
-    return Bun.which("duckdb");
-};
+): string | null => duckdbBinPath(env);
 
 export const lastTimerRealS = (output: string): number | null => {
     const matches = [...output.matchAll(/real\s+([0-9.]+)/g)];

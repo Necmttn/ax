@@ -32,6 +32,7 @@ import { BunFileSystem } from "@effect/platform-bun";
 import { Context, Effect, FileSystem, Layer, Schema, type Scope } from "effect";
 import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
+import { stageAndRename } from "../staged-rename.ts";
 import { canonicalPath } from "./canonical-path.ts";
 import { resolveDylibPath } from "./dylib.ts";
 import {
@@ -675,24 +676,14 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
      * not use it as the ingest-time publish path.
      */
     const publishSnapshot: DuckDbService["publishSnapshot"] = (livePath, targetPath, options) => {
-        const tmp = `${targetPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-        // Cross-review P3-6: this used to be `Effect.ignore`, so a temp file
-        // that could NOT be removed vanished from the record entirely - and
-        // the temp file here is a COMPLETE COPY of the database, i.e. the
-        // largest piece of litter this module can leave. `force: true`
-        // already tolerates "already gone", so anything reaching this handler
-        // is a real failure and is worth one line in the log. It still must
-        // not fail the publish: this runs as an `Effect.ensuring` finalizer,
-        // where masking the primary error would be worse than the leak.
-        const removeTmp = fs.remove(tmp, { force: true, recursive: true }).pipe(
-            Effect.catch((err) =>
-                Effect.logWarning(
-                    `ax duckdb: could not remove the temporary snapshot copy at ${tmp}: ${err.message}`,
-                ),
-            ),
-        );
-
-        const copyThrough = (conn: DuckDbConnection) => {
+        // The temp-path naming, the pre-stage clear, the atomic rename, and the
+        // remove-the-temp-on-every-exit-path finalizer (including cross-review
+        // P3-6's "log, do not ignore" - the litter here is a COMPLETE COPY of
+        // the database) all live in `stageAndRename` (`@ax/lib/staged-rename`),
+        // shared with the config writer and the dylib extractor. What stays
+        // here is what only a database publish needs: the same-file and
+        // wrong-`from` guards, and the CHECKPOINT/ATTACH/COPY/DETACH itself.
+        const copyThrough = (conn: DuckDbConnection, tmp: string) => {
             // A per-call alias, not a fixed constant. Fix round 1's `from`
             // hands publishSnapshot a caller-owned, LONG-LIVED connection
             // that is reused across repeated publishes - the whole point of
@@ -787,7 +778,7 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
                 }
             }
 
-            const liveExists = yield* fs.exists(livePath).pipe(
+            const liveExists: boolean = yield* fs.exists(livePath).pipe(
                 Effect.mapError(
                     (err) =>
                         new SnapshotPublishError({
@@ -803,56 +794,47 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
                 });
             }
 
-            // A leftover temp file from a prior crashed/interrupted publish
-            // must not collide with this run's ATTACH.
-            yield* removeTmp;
-
-            yield* fs.makeDirectory(posixPath.dirname(targetPath), { recursive: true }).pipe(
-                Effect.mapError(
-                    (err) =>
-                        new SnapshotPublishError({
-                            snapshotPath: targetPath,
-                            message: `failed to create the snapshot directory: ${err.message}`,
-                        }),
-                ),
-            );
-
-            if (options?.from) {
-                // Caller-owned connection - copy through it directly (RULING
-                // R14) and never close it, we don't own its lifecycle.
-                yield* copyThrough(options.from);
-            } else {
-                // Finding 6 (final fix round): `open` then `copyThrough` used
-                // to be two separate `yield*`s, so an interrupt landing
-                // BETWEEN them leaked the write handle on the live database
-                // for the life of the process - `conn.close` was never
-                // reached because `Effect.ensuring` was only attached to the
-                // SECOND yield. `acquireUseRelease` (the non-scoped sibling
-                // of the `Effect.acquireRelease` `scoped` already uses above)
-                // makes acquire+use+release one atomic unit: acquisition is
-                // uninterruptible, and release is guaranteed to run once
-                // acquisition succeeds, however `use` ends - success, typed
-                // failure, defect, or interruption. Close the writer BEFORE
-                // the rename below, on every path.
-                yield* Effect.acquireUseRelease(
-                    open(livePath, { readOnly: false }),
-                    (conn) => copyThrough(conn),
-                    (conn) => conn.close,
-                );
-            }
-
-            yield* fs.rename(tmp, targetPath).pipe(
-                Effect.mapError(
-                    (err) =>
-                        new SnapshotPublishError({
-                            snapshotPath: targetPath,
-                            message: `failed to rename the temp snapshot into place: ${err.message}`,
-                        }),
-                ),
-            );
+            yield* stageAndRename<SnapshotPublishError | DuckDbOpenError>(targetPath, {
+                stage: (tmp) =>
+                    options?.from
+                        ? // Caller-owned connection - copy through it directly
+                          // (RULING R14) and never close it, we don't own its
+                          // lifecycle.
+                          copyThrough(options.from, tmp)
+                        : // Finding 6 (final fix round): `open` then
+                          // `copyThrough` used to be two separate `yield*`s, so
+                          // an interrupt landing BETWEEN them leaked the write
+                          // handle on the live database for the life of the
+                          // process - `conn.close` was never reached because
+                          // `Effect.ensuring` was only attached to the SECOND
+                          // yield. `acquireUseRelease` makes acquire+use+release
+                          // one atomic unit: acquisition is uninterruptible, and
+                          // release is guaranteed to run once acquisition
+                          // succeeds, however `use` ends - success, typed
+                          // failure, defect, or interruption. This closes the
+                          // writer BEFORE the rename, on every path, because the
+                          // whole `stage` step completes before `stageAndRename`
+                          // renames.
+                          Effect.acquireUseRelease(
+                              open(livePath, { readOnly: false }),
+                              (conn) => copyThrough(conn, tmp),
+                              (conn) => conn.close,
+                          ),
+                onFsError: (step, err) =>
+                    new SnapshotPublishError({
+                        snapshotPath: targetPath,
+                        message:
+                            step === "rename"
+                                ? `failed to rename the temp snapshot into place: ${err.message}`
+                                : `failed to prepare the snapshot destination (${step}): ${err.message}`,
+                    }),
+                // `fs` is closed over from the layer (RULING R6), so the shared
+                // primitive's `FileSystem` requirement is satisfied HERE and
+                // `DuckDbService`'s signatures keep `R = never`.
+            }).pipe(Effect.provideService(FileSystem.FileSystem, fs));
         });
 
-        return attempt.pipe(Effect.ensuring(removeTmp));
+        return attempt;
     };
 
     const openSnapshot: DuckDbService["openSnapshot"] = (path) =>

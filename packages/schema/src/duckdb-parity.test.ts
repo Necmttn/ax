@@ -7,13 +7,15 @@
 // all 138 tables / 1219 columns - the wave-2 seam port assumes this holds.
 import { describe, expect, test } from "bun:test";
 import surql from "./schema.surql" with { type: "text" };
+import { accessorFor } from "@ax/lib/duckdb/row-decode";
+import { DuckDbTypeId } from "@ax/lib/duckdb/types";
 import {
     DUCKDB_SCHEMA_SQL,
     parseDuckdbColumnDefs,
     parseDuckdbColumns,
     parseDuckdbTables,
     parseSurrealTables,
-} from "./duckdb-ddl.ts";
+} from "./parse-duckdb-schema.ts";
 
 // Expected table/column counts. Asserted explicitly so the property can never
 // silently shrink to comparing zero (or a handful of) tables/columns.
