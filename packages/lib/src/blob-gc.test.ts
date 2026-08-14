@@ -59,7 +59,7 @@ describe("gcFileBuckets", () => {
 
             // Orphans are freshly written (age ~0), so disable the young-blob
             // guard here - it's covered by its own test below.
-            const result = yield* gcFileBuckets(root, { fullIngest: true, minAgeMs: 0 });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, minAgeMs: 0 });
 
             expect(result).toEqual({ scanned: 4, removed: 2, failed: 0, skipped: false });
             expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
@@ -69,7 +69,7 @@ describe("gcFileBuckets", () => {
         }).pipe(Effect.provide(layer))));
     });
 
-    test("skips entirely for a since-windowed (partial) ingest run", async () => {
+    test("skips entirely for a scoped (partial) ingest run", async () => {
         const db = makeTestSurrealClient({
             routes: {
                 "SELECT raw_file FROM session": [[
@@ -87,13 +87,13 @@ describe("gcFileBuckets", () => {
             yield* fs.makeDirectory(transcripts);
             yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "remove");
 
-            const result = yield* gcFileBuckets(root, { fullIngest: false });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: false });
 
             expect(result.skipped).toBe(true);
-            expect(result.skipReason).toMatch(/since-windowed/);
+            expect(result.skipReason).toMatch(/scoped/);
             expect(result.scanned).toBe(0);
             expect(result.removed).toBe(0);
-            // A since-windowed run must never touch disk - the orphan survives.
+            // A scoped run must never touch disk - the orphan survives.
             expect(yield* fs.exists(path.join(transcripts, "orphan.jsonl"))).toBe(true);
         }).pipe(Effect.provide(layer))));
     });
@@ -112,7 +112,7 @@ describe("gcFileBuckets", () => {
             yield* fs.makeDirectory(transcripts);
             yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "remove");
 
-            const result = yield* gcFileBuckets(root, { fullIngest: true });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true });
 
             expect(result.skipped).toBe(true);
             expect(result.skipReason).toMatch(/empty/);
@@ -141,7 +141,7 @@ describe("gcFileBuckets", () => {
             yield* fs.writeFileString(path.join(transcripts, "young-orphan.jsonl"), "remove");
 
             // Default 24h age guard, real "now" - the orphan was just written.
-            const result = yield* gcFileBuckets(root, { fullIngest: true });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true });
 
             expect(result.skipped).toBe(false);
             expect(result.removed).toBe(0);
@@ -172,7 +172,7 @@ describe("gcFileBuckets", () => {
             // Simulate the clock 2 days ahead so the just-written orphan reads
             // as 2 days old against the 24h default guard.
             const twoDaysLater = () => Date.now() + 2 * 24 * 60 * 60 * 1000;
-            const result = yield* gcFileBuckets(root, { fullIngest: true, now: twoDaysLater });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, now: twoDaysLater });
 
             expect(result).toEqual({ scanned: 2, removed: 1, failed: 0, skipped: false });
             expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
@@ -206,7 +206,7 @@ describe("gcFileBuckets", () => {
                 db.layer,
                 Layer.mergeAll(withFailingRemove(failingOrphan), BunPath.layer),
             );
-            const result = yield* gcFileBuckets(root, { fullIngest: true, minAgeMs: 0 }).pipe(
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, minAgeMs: 0 }).pipe(
                 Effect.provide(layer),
             );
 

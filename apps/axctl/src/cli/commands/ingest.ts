@@ -209,6 +209,26 @@ interface IngestCommandOpts {
     readonly claudeProject?: string;
 }
 
+/**
+ * Blob GC deletes any bucket blob no `session` row references. That is only
+ * safe when the run built a COMPLETE reference set - i.e. a truly GLOBAL
+ * ingest. `--since` was the only scope the old `fullIngest` gate checked (#F2),
+ * but repo/project scope (`ax ingest here`, an explicit project) and a
+ * `--stages=` subset each leave the `session` table a PARTIAL view too, so a
+ * scoped run would GC blobs referenced only by out-of-scope repos/sessions.
+ *
+ * This is the single predicate the GC gate reads: true ONLY when NONE of the
+ * scope narrowings are present - no `--since=`, no `--stages=`/stage subset,
+ * and no repo/project scope (repoPaths / claudeProject, set by
+ * `ax ingest here` and project-scoped callers). Retention (otel, rebuildable)
+ * is unaffected and still runs on every ingest.
+ */
+export const isGlobalIngest = (args: readonly string[], opts: IngestCommandOpts = {}): boolean =>
+    !args.some((a) => a.startsWith("--since=")) &&
+    !args.some((a) => a.startsWith("--stages=")) &&
+    opts.repoPaths === undefined &&
+    opts.claudeProject === undefined;
+
 /** `ax ingest-here` resumes as `ax ingest here`; everything else as-is. */
 const resumeCommand = (command: string): string =>
     command === "ingest-here" ? "ax ingest here" : `ax ${command}`;
@@ -365,10 +385,11 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         );
 
         // GC's reference set is built from the CURRENT `session` table (#F2):
-        // a `--since`-windowed run only touches sessions inside that window,
-        // so the table is a PARTIAL view of what's referenced. Only a full
-        // (unwindowed) ingest run is trustworthy enough to GC against.
-        const fullIngest = !args.some((a) => a.startsWith("--since="));
+        // any scoped run (--since window, repo/project scope, or a --stages
+        // subset) leaves that table a PARTIAL view of what's referenced. Only a
+        // truly GLOBAL ingest run is trustworthy enough to GC against, so the
+        // gate reads the single `isGlobalIngest` predicate over args + scope.
+        const globalIngest = isGlobalIngest(args, opts);
 
         const work = runIngest({
             command: commandName,
@@ -402,7 +423,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
                 }
 
                 const blobGc = yield* runMaintenanceHalf(
-                    gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), { fullIngest }),
+                    gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), { isGlobalIngest: globalIngest }),
                 );
                 if (blobGc.error) {
                     process.stderr.write(`axctl ${commandName}: blob gc failed - ${blobGc.error}\n`);
