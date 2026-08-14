@@ -78,6 +78,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax sessions metrics`, `ax evidence weekly` - session health and weekly evidence rollups
 - `ax sessions show <id> --turns[=full] --json` - provider-neutral ordered Turn excerpts or full text for one session
 - `ax serve` - local dashboard with live ingest, session browser, and health views
+- `ax otlpd` - OTLP spool receiver (telemetry micro-listener)
 - `ax tui` - terminal skills browser
 
 ### Setup and ingest

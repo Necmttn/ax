@@ -10,6 +10,7 @@ axctl ingest [--since=N] [--reset] [--stages=<list>]   # backfill the graph
 axctl ingest here [--since=Nd] [--stages=<list>]       # scope ingest to the git repo at $PWD
 axctl derive <signals|intents>              # re-run a derive pass standalone
 axctl serve                                 # live web dashboard
+axctl otlpd                                 # OTLP spool receiver (telemetry micro-listener)
 axctl mcp                                   # MCP server (stdio) - read-only graph queries for agents
 axctl report                                # one-shot static HTML
 axctl tui                                   # interactive terminal dashboard
@@ -90,7 +91,7 @@ axctl version [--check|--banner]
 
 > `axctl --help` lists the everyday commands plus the read-only insight
 > surfaces (`ingest`, `sessions`, `signals`, `improve`, `retro`, `recall`,
-> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `contribute`,
+> `skills`, `hooks`, `roles`, `serve`, `otlpd`, `mcp`, `tui`, `share`, `contribute`,
 > `install`, `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
 > `report`, `context`, `hook`, `project`, `evidence`, `classifiers`,
 > `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
