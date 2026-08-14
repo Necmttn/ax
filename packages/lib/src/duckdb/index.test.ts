@@ -11,7 +11,7 @@ describe("@ax/lib/duckdb public surface", () => {
     // either direction, without this test failing. This subsumes the two
     // former per-group "exports X" tests (services/layers/helpers, tagged
     // errors) - every name they checked is a member of this exact set.
-    test("the runtime surface is exactly this closed set of 30 names", () => {
+    test("the runtime surface is exactly this closed set of 21 names", () => {
         const names = Object.keys(duckdb as Record<string, unknown>).sort();
         expect(names).toEqual(
             [
@@ -25,23 +25,14 @@ describe("@ax/lib/duckdb public surface", () => {
                 "DuckDbQueryError",
                 "DuckDbTypeId",
                 "DuckDbUnsupportedTypeError",
-                "IngestLock",
-                "IngestLockError",
-                "IngestLockHeldError",
-                "IngestLockLayer",
-                "IngestLockLive",
                 // BIGINT-column coercion schema for queryAs (wave-0 P2-10).
                 "NumberFromBigIntColumn",
                 "SnapshotPublishError",
                 "accessorFor",
                 "coerceValue",
-                "decideLock",
-                "decodeLockPayload",
                 "duckDbTypeName",
                 "dylibCacheDir",
-                "encodeLockPayload",
                 "extractDylib",
-                "ingestLockPath",
                 "isEmbeddedPath",
                 "resolveDylibPath",
                 "snapshotPath",

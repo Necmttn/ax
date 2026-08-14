@@ -22,7 +22,7 @@ import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { locateTranscript, type Harness } from "@ax/lib/transcript-locator";
 import { runIngest } from "../ingest/run.ts";
-import { ingestLockOptions, withIngestLock } from "../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry } from "../ingest/stage/registry.ts";
 
 /** A transcript found on disk for a session that isn't in the graph. */

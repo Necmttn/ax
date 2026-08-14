@@ -36,7 +36,7 @@ import {
     type TraceTransport,
 } from "@ax/lib/live-traces/Sink";
 import { runIngest, type RunIngestOptions } from "../ingest/run.ts";
-import { ingestLockOptions, withIngestLock } from "../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry } from "../ingest/stage/registry.ts";
 import { ingestStreamEventFromTrace } from "../ingest/stream-events.ts";
 import type { IngestStreamBus } from "./ingest-stream.ts";

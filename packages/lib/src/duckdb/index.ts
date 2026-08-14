@@ -11,7 +11,6 @@ export * from "./types.ts";
 export * from "./row-decode.ts";
 export * from "./bigint-column.ts";
 export * from "./dylib.ts";
-export * from "./lock-state.ts";
 
 // `client.ts` and `lock.ts` each keep one internal test-only seam private to
 // this barrel - `makeConnection`/`readResult` (client.ts) and `base`
@@ -22,5 +21,8 @@ export * from "./lock-state.ts";
 export type { DuckDbConnection, DuckDbLiveOptions, DuckDbService } from "./client.ts";
 export { DuckDb, DuckDbLayer, DuckDbLive, DuckDbLiveWith, snapshotPath } from "./client.ts";
 
-export type { AcquireOptions, IngestLockHandle, IngestLockService } from "./lock.ts";
-export { IngestLock, IngestLockLayer, IngestLockLive, ingestLockPath } from "./lock.ts";
+// The ingest lock is NOT here. It lives at `@ax/lib/ingest-lock`, because it is
+// not a DuckDB concept - it is the single-flight guarantee ax ingests have
+// always had, and the CLI, the share recovery path and the dashboard's live
+// ingest all take it. This package DEPENDS on it (the write seam refuses to
+// open the live database unless it is held); it does not own it.
