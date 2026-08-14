@@ -826,6 +826,19 @@ function loadedDbPid(): number | null {
     return Number.isFinite(pid) ? pid : null;
 }
 
+/** launchctl PID of our otlpd LaunchAgent, or null. Mirrors {@link loadedDbPid}
+ *  so a 1738 owner-check can tell "our otlpd" from a foreign listener. */
+function loadedOtlpdPid(): number | null {
+    if (!isMacos()) return null;
+    const r = spawnSync("launchctl", ["list", OTLPD_LABEL], { encoding: "utf8" });
+    if (r.status !== 0) return null;
+    const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    const m = output.match(/"PID"\s*=\s*(\d+);/);
+    if (!m) return null;
+    const pid = Number.parseInt(m[1] ?? "", 10);
+    return Number.isFinite(pid) ? pid : null;
+}
+
 function launchdStatus(
     label: string,
     plist: string,
@@ -966,6 +979,9 @@ function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.Fi
                 yield* launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
                 yield* launchdStatus(QUOTA_REFRESH_LABEL, QUOTA_REFRESH_PLIST),
                 yield* launchdStatus(SERVE_LABEL, SERVE_PLIST),
+                // otlpd is consent-gated + write-only while serve owns 1738, so a
+                // "not loaded; plist=present" line here is normal, not a fault.
+                yield* launchdStatus(OTLPD_LABEL, OTLPD_PLIST),
             ],
         };
     });
@@ -1633,6 +1649,28 @@ export function cmdDaemon(
                 return db && watch && derive && quotaRefresh && serve;
             });
 
+        // otlpd binds the SAME port (1738) serve does, so it must never start
+        // while another process already owns it. Load it only when its plist
+        // exists, no serve LaunchAgent is managing that port (mirrors
+        // resolveOtlpdPlistDecision's serveAgentManaged gate), and nothing
+        // foreign is currently LISTENing on 1738.
+        const otlpdShouldLoad = (): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+            Effect.gen(function* () {
+                const plistExists = yield* fs.exists(OTLPD_PLIST).pipe(orAbsent(false));
+                if (!plistExists) return false;
+                const serveManaged = yield* fs.exists(SERVE_PLIST).pipe(orAbsent(false));
+                if (serveManaged) return false;
+                const probe = probePort(DEFAULT_DASHBOARD_PORT);
+                if (probe.listening && (probe.holder === null || probe.holder.pid !== loadedOtlpdPid())) {
+                    return false;
+                }
+                return true;
+            });
+        const maybeLoadOtlpd = (): Effect.Effect<void, never, FileSystem.FileSystem> =>
+            Effect.gen(function* () {
+                if (yield* otlpdShouldLoad()) yield* Effect.promise(() => loadAgent(OTLPD_PLIST));
+            });
+
         if (!isMacos()) {
             console.log(formatDaemonStatus(yield* collectDaemonStatus(), parsed.json));
             if (parsed.command !== "status") {
@@ -1650,14 +1688,19 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
                 yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
                 yield* Effect.promise(() => loadAgent(SERVE_PLIST));
+                // Last, and only when 1738 is free (serve otherwise owns it).
+                yield* maybeLoadOtlpd();
             }
         } else if (parsed.command === "stop") {
+            // otlpd first - it shares serve's port, so drop it before the rest.
+            yield* Effect.promise(() => unloadAgentKeepPlist(OTLPD_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(SERVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
         } else if (parsed.command === "restart") {
+            yield* Effect.promise(() => unloadAgentKeepPlist(OTLPD_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(SERVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
@@ -1671,6 +1714,7 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
                 yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
                 yield* Effect.promise(() => loadAgent(SERVE_PLIST));
+                yield* maybeLoadOtlpd();
             }
         }
 
