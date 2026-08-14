@@ -58,39 +58,20 @@ function surrealTypesByTable(): Map<string, Map<string, SurrealFieldType>> {
     return out;
 }
 
-/** The Surreal `array<T>` element types that become a native DuckDB list
- *  column (P2-3). Anything else - `record<...>`, `object`, nested/flexible
- *  shapes - stays JSON-encoded VARCHAR, unchanged. */
-function scalarArrayElementDuckType(elementType: string): string | null {
-    switch (elementType) {
-        case "string":
-            return "VARCHAR";
-        case "int":
-            return "BIGINT";
-        case "float":
-            return "DOUBLE";
-        case "number":
-            return "DOUBLE";
-        case "bool":
-            return "BOOLEAN";
-        case "datetime":
-            return "TIMESTAMPTZ";
-        default:
-            return null;
-    }
-}
-
-/** Maps a Surreal DEFINE FIELD TYPE to the DuckDB type it must translate to. */
+/** Maps a Surreal DEFINE FIELD TYPE to the DuckDB type it must translate to.
+ *
+ *  P2-3 (native list columns for scalar `array<T>` fields) and P2-1
+ *  (`datetime` -> TIMESTAMPTZ) are both REVERTED (see the UTC CONTRACT / FFI
+ *  CLIENT COMPATIBILITY notes in schema.duckdb.sql's header): the bun:ffi
+ *  DuckDB client's row-major `duckdb_value_*` accessors cannot decode
+ *  TIMESTAMP_TZ or LIST, so every scalar array stays JSON-encoded VARCHAR
+ *  (same as record/object arrays - no distinction by element type anymore)
+ *  and every datetime is plain TIMESTAMP. */
 function expectedDuckType(t: string): string {
     if (t.startsWith("record<")) return "VARCHAR";
-    if (t.startsWith("array<")) {
-        const elementType = t.slice("array<".length, t.lastIndexOf(">"));
-        const listType = scalarArrayElementDuckType(elementType);
-        // A scalar element type (string/int/float/number/bool/datetime) becomes a
-        // native DuckDB list column; anything else (record<>, nested objects) is
-        // still JSON text in a VARCHAR column - unaffected by P2-3.
-        return listType !== null ? `${listType}[]` : "VARCHAR";
-    }
+    // Every array<T> - scalar or not - is JSON-encoded VARCHAR now; DuckDB
+    // native list columns (`T[]`) are banned (FFI client can't decode LIST).
+    if (t.startsWith("array<")) return "VARCHAR";
     if (t === "object") return "VARCHAR";
     switch (t) {
         case "string":
@@ -104,7 +85,10 @@ function expectedDuckType(t: string): string {
         case "bool":
             return "BOOLEAN";
         case "datetime":
-            return "TIMESTAMPTZ";
+            // Plain TIMESTAMP, never TIMESTAMPTZ - the FFI client cannot decode
+            // TIMESTAMP_TZ (DuckDbUnsupportedTypeError, probe-confirmed). Writers
+            // must normalize to UTC before insert; readers append `Z`.
+            return "TIMESTAMP";
         default:
             return `?${t}`;
     }
@@ -241,6 +225,55 @@ describe("type + nullability parity (Surreal DEFINE FIELD TYPE == DuckDB column 
 
         expect(problems).toEqual([]);
         expect(checked).toBe(EXPECTED_COLUMNS_COMPARED);
+    });
+});
+
+// Regression guard for the whole "DDL drifted ahead of the FFI client" conflict
+// class (TIMESTAMPTZ + native LIST columns were both added in a review round
+// that didn't know the reader can't decode either - see the BANNED TYPES note
+// in schema.duckdb.sql's header). The bun:ffi DuckDB client decodes results
+// with the deprecated row-major `duckdb_value_*` accessors (it cannot pass
+// structs by value, so it can't use the columnar/vector API); a probe against
+// the real client + dylib confirmed TIMESTAMP_TZ and LIST both raise
+// DuckDbUnsupportedTypeError. None of these may appear as a column type
+// anywhere in the DDL, and this test scans every column's actual type token -
+// not a fixed set of "known offender" columns - so a future column reintroducing
+// any of them fails here regardless of which table it lands on.
+describe("banned-type guard (FFI client compatibility)", () => {
+    const BANNED_TYPE_TOKENS = [
+        "UUID",
+        "ENUM",
+        "BIT",
+        "TIMESTAMP_S",
+        "TIMESTAMP_MS",
+        "TIMESTAMP_NS",
+        "TIMESTAMP_TZ",
+        "TIMESTAMPTZ", // short-form alias for TIMESTAMP_TZ / TIMESTAMP WITH TIME ZONE
+        "TIME_TZ",
+        "TIMETZ", // short-form alias for TIME_TZ
+    ];
+
+    test("no column in the DDL uses a banned (FFI-unreadable) type", () => {
+        const problems: string[] = [];
+        let checked = 0;
+
+        for (const table of duckTables) {
+            for (const def of parseDuckdbColumnDefs(table)) {
+                checked += 1;
+                if (def.type.endsWith("[]")) {
+                    // Native DuckDB list column - the FFI client cannot decode LIST.
+                    problems.push(`${table}.${def.name}: native LIST column (${def.type}) is banned`);
+                    continue;
+                }
+                if (BANNED_TYPE_TOKENS.includes(def.type.toUpperCase())) {
+                    problems.push(`${table}.${def.name}: banned type ${def.type}`);
+                }
+            }
+        }
+
+        // Sanity floor so this can't silently degrade to scanning zero columns.
+        expect(checked).toBeGreaterThan(1000);
+        expect(problems).toEqual([]);
     });
 });
 
