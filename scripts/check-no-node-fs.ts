@@ -51,6 +51,11 @@ const EXCLUDED_FILES: readonly string[] = [
     // fires as `bun <file>.ts` outside the axctl Effect runtime, so node fs/os/
     // path are the correct deps. Committed here for reproducibility, not bundled.
     "apps/axctl/src/advice/advise-tap.ts",
+    // Test-only fixture: resolves a libduckdb dylib from a plain `beforeAll`,
+    // returning a plain Promise deliberately outside the Effect runtime.
+    // Porting it to FileSystem would force every downstream test file that
+    // needs a dylib path to build a platform layer just to call it.
+    "packages/lib/src/testing/duckdb-dylib.ts",
 ];
 
 const BANNED_SPECIFIERS = [
