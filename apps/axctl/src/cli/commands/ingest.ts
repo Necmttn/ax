@@ -14,7 +14,7 @@ import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
 import { retainRecentOtel, type OtelRetentionResult } from "../../otel/retention.ts";
 import { AX_VERSION } from "../version.ts";
-import { ingestLockOptions, withIngestLock } from "../../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../../ingest/stage/types.ts";

@@ -77,22 +77,12 @@ export class DuckDbDylibError extends Schema.TaggedErrorClass<DuckDbDylibError>(
     message: Schema.String,
 }) {}
 
-/** Another process holds the ingest lock. Carries who, so the CLI can say so. */
-export class IngestLockHeldError extends Schema.TaggedErrorClass<IngestLockHeldError>(
-    "IngestLockHeldError",
-)("IngestLockHeldError", {
-    path: Schema.String,
-    pid: Schema.Number,
-    startedAt: Schema.String,
-}) {}
-
-/** The lock file itself could not be read/written (permissions, bad dir, ...). */
-export class IngestLockError extends Schema.TaggedErrorClass<IngestLockError>(
-    "IngestLockError",
-)("IngestLockError", {
-    path: Schema.String,
-    message: Schema.String,
-}) {}
+// The ingest lock's failures are NOT here. It reports contention as an OUTCOME
+// (`IngestLockOutcome` in `@ax/lib/ingest-lock`), not an error, because a busy
+// skip is the correct, expected result of a second ingest - the watcher re-fires
+// anyway - and modelling it as a failure made every caller unwrap it back into a
+// success. The two error classes that used to live here had no callers left once
+// the two lock implementations merged.
 
 /** Snapshot publication failed before the atomic rename landed. */
 export class SnapshotPublishError extends Schema.TaggedErrorClass<SnapshotPublishError>(
