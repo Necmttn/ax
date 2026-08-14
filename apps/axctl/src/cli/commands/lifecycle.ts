@@ -1,10 +1,18 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "../install.ts";
+import {
+    cmdDaemon,
+    cmdDoctor,
+    cmdInstall,
+    cmdSetup,
+    cmdUninstall,
+    resolveTelemetryConsent,
+    telemetryConsentConflict,
+} from "../install.ts";
 import { liveVersionDeps, printVersion, updateAxctl } from "../version.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { boolArg, jsonFlag, parseFileHints } from "./shared.ts";
+import { boolArg, fail, jsonFlag, parseFileHints } from "./shared.ts";
 
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
 const bannerFlag = Flag.boolean("banner").pipe(Flag.withDefault(false));
@@ -37,9 +45,17 @@ export const updateCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
-export const installCommand = Command.make("install", {}, () =>
-    cmdInstall(),
-).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
+export const installCommand = Command.make("install", {
+    telemetry: Flag.boolean("telemetry").pipe(Flag.withDefault(false)),
+    noTelemetry: Flag.boolean("no-telemetry").pipe(Flag.withDefault(false)),
+}, ({ telemetry, noTelemetry }) => {
+    // Pure flag validation BEFORE any Effect/install work. fail() calls
+    // process.exit(2) synchronously with a clean one-line message - no
+    // thrown plain Error, no stack trace (matches ingest.ts/quota.ts/dojo.ts).
+    const conflict = telemetryConsentConflict(telemetry, noTelemetry);
+    if (conflict !== null) fail(conflict);
+    return cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry) });
+}).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
 
 export const setupCommand = Command.make(
     "setup",

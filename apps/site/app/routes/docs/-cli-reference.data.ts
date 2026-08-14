@@ -683,6 +683,17 @@ ax daemon: running (pid 48213)
         ],
       },
       {
+        name: "otlpd",
+        job: "OTLP spool receiver (telemetry micro-listener): appends inbound OTLP JSON to the local spool.",
+        signature: "ax otlpd",
+        flags: [],
+        receipt: `$ ax otlpd
+ax otlpd listening on http://127.0.0.1:1738`,
+        detail: [
+          "A standalone micro-listener that spools OTLP JSON to disk without booting the full serve daemon; a LaunchAgent (com.necmttn.ax-otlpd) can keep it running.",
+        ],
+      },
+      {
         name: "mcp",
         job: "Run a stdio MCP server exposing ax's read-only queries as tools to an agent.",
         signature: "ax mcp",

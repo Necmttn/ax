@@ -75,6 +75,8 @@ const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
 const SERVE_LABEL = "com.necmttn.ax-serve";
 const SERVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${SERVE_LABEL}.plist`);
+const OTLPD_LABEL = "com.necmttn.ax-otlpd";
+const OTLPD_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${OTLPD_LABEL}.plist`);
 
 /** Candidate install locations for the `ax studio` desktop app bundle (productName "ax studio"). */
 export const DESKTOP_APP_CANDIDATES: readonly string[] = [
@@ -368,6 +370,117 @@ export const servePlist = (binPath: string): string => `<?xml version="1.0" enco
 </dict>
 </plist>
 `;
+
+// The otlpd spool dir is decoupled from AX_DATA_DIR (see spool-server.ts
+// defaultOtlpSpoolDir) - forward AX_OTLP_SPOOL_DIR into the LaunchAgent's env
+// when the installer's own env carries an override, not AX_DATA_DIR.
+const otlpdSpoolDirEnv = (): string => process.env.AX_OTLP_SPOOL_DIR
+    ? `
+    <key>AX_OTLP_SPOOL_DIR</key>
+    <string>${process.env.AX_OTLP_SPOOL_DIR}</string>`
+    : "";
+
+export const otlpdPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${OTLPD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>exec "${binPath}" otlpd</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+    <key>Crashed</key><true/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/otlpd.out</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/otlpd.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpdSpoolDirEnv()}
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+</dict>
+</plist>
+`;
+
+/**
+ * Tri-state telemetry consent, resolved from the `--telemetry`/`--no-telemetry`
+ * flags:
+ *   - "grant"    - explicit `--telemetry`: install + start collecting.
+ *   - "revoke"   - explicit `--no-telemetry`: unload the receiver.
+ *   - "preserve" - neither flag passed (plain `ax install`): touch nothing -
+ *     whatever consent state already exists on disk stays exactly as it is.
+ *     A bare re-run of `ax install` must never silently revoke a prior
+ *     `--telemetry` consent (issue: `resolveTelemetryConsent` used to
+ *     collapse to a boolean, so no flags looked identical to `--no-telemetry`
+ *     and unloaded an already-consented otlpd agent).
+ */
+export type TelemetryConsent = "grant" | "revoke" | "preserve";
+
+/** Pure predicate: a conflict message when both flags are set, else null. */
+export const telemetryConsentConflict = (
+    telemetry: boolean,
+    noTelemetry: boolean,
+): string | null =>
+    telemetry && noTelemetry
+        ? "axctl install: --telemetry and --no-telemetry cannot be used together"
+        : null;
+
+/** Resolves the tri-state consent. Assumes `telemetryConsentConflict` has
+ *  already been checked (returns null) - the caller raises the usage error. */
+export const resolveTelemetryConsent = (
+    telemetry: boolean,
+    noTelemetry: boolean,
+): TelemetryConsent => {
+    if (telemetry) return "grant";
+    if (noTelemetry) return "revoke";
+    return "preserve";
+};
+
+export type OtlpdPlistDecision =
+    | { readonly action: "write-and-load" }
+    | { readonly action: "write-only"; readonly note: string }
+    | { readonly action: "unload" }
+    | { readonly action: "noop" };
+
+/**
+ * Decide what `cmdInstall` should do to the otlpd LaunchAgent plist, given
+ * the resolved tri-state consent:
+ *   - "preserve" ALWAYS no-ops - the plist is neither written nor unloaded,
+ *     regardless of whatever is already on disk (loaded-by-prior-consent, or
+ *     never-consented). That's what "preserve existing state" means.
+ *   - "revoke" always unloads.
+ *   - "grant" writes the plist, but only bootstraps/loads it when no `ax
+ *     serve` LaunchAgent is being installed/present - `ax serve` binds the
+ *     same OTLP port and runs its own receiver until the spool-first
+ *     receiver cutover, so loading otlpd alongside it would collide. The IDE
+ *     desktop-app model has no serve LaunchAgent (`serveAgentManaged: false`
+ *     there), so otlpd loads normally in that model.
+ */
+export const resolveOtlpdPlistDecision = (
+    consent: TelemetryConsent,
+    opts: { readonly serveAgentManaged: boolean },
+): OtlpdPlistDecision => {
+    if (consent === "revoke") return { action: "unload" };
+    if (consent === "preserve") return { action: "noop" };
+    return opts.serveAgentManaged
+        ? {
+            action: "write-only",
+            note: "  otlpd: wrote the LaunchAgent but did not start it - ax serve currently owns the OTLP receiver on this port; otlpd activates at the spool cutover",
+        }
+        : { action: "write-and-load" };
+};
 
 function which(cmd: string): string | null {
     const r = spawnSync("which", [cmd], { encoding: "utf8" });
@@ -1116,7 +1229,7 @@ export function formatDoctorReport(report: DoctorReport, json = false): string {
     return lines.join("\n");
 }
 
-export function cmdInstall(): Effect.Effect<
+export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = {}): Effect.Effect<
     void,
     Error,
     FileSystem.FileSystem | Path.Path
@@ -1281,46 +1394,79 @@ export function cmdInstall(): Effect.Effect<
         yield* fs.remove(schemaPath, { force: true });
         }
 
-        // Write OTLP telemetry env into each installed harness config.
-        // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
-        const OTLP_ENDPOINT = "http://127.0.0.1:1738";
-        const claudeDir = posixPath.join(HOME, ".claude");
-        const claudeSettings = posixPath.join(claudeDir, "settings.json");
-        // Claude: only touch if ~/.claude exists (harness is installed).
-        const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
-        if (claudeDirExists) {
-            yield* Effect.promise(async () => {
-                try {
-                    let raw = "{}";
-                    try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
-                    const parsed = JSON.parse(raw) as Record<string, unknown>;
-                    const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
-                    await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
-                    console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
-                } catch (err) {
-                    console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
-                }
-            });
+        // Tri-state: "preserve" (no --telemetry/--no-telemetry flag - the
+        // common re-run case) touches neither the plist file nor its loaded
+        // state, so a bare `ax install` never silently revokes a prior
+        // `--telemetry` consent. `serveAgentManaged` mirrors the branch
+        // above: the plain LaunchAgent model installs its own `ax serve`
+        // agent (which owns the OTLP port until the otlpd cutover); the IDE
+        // desktop-app model has no serve LaunchAgent at all.
+        const consent: TelemetryConsent = options.telemetry ?? "preserve";
+        const otlpdDecision = resolveOtlpdPlistDecision(consent, { serveAgentManaged: !desktopApp });
+        switch (otlpdDecision.action) {
+            case "write-and-load": {
+                yield* fs.writeFileString(OTLPD_PLIST, otlpdPlist(binSource));
+                console.log(`  wrote:  ${OTLPD_PLIST}`);
+                yield* Effect.promise(() => loadAgent(OTLPD_PLIST));
+                break;
+            }
+            case "write-only": {
+                yield* fs.writeFileString(OTLPD_PLIST, otlpdPlist(binSource));
+                console.log(`  wrote:  ${OTLPD_PLIST}`);
+                console.log(otlpdDecision.note);
+                break;
+            }
+            case "unload": {
+                yield* unloadAgent(OTLPD_PLIST);
+                break;
+            }
+            case "noop":
+                break;
         }
 
-        const codexDir = posixPath.join(HOME, ".codex");
-        const codexConfig = posixPath.join(codexDir, "config.toml");
-        // Codex: only touch if ~/.codex exists (harness is installed).
-        const codexDirExists = yield* fs.exists(codexDir).pipe(orAbsent(false));
-        if (codexDirExists) {
-            yield* Effect.promise(async () => {
-                try {
-                    let existing = "";
-                    try { existing = await Bun.file(codexConfig).text(); } catch { /* absent - start empty */ }
-                    const next = applyCodexOtelToml(existing, OTLP_ENDPOINT);
-                    if (next !== existing) {
-                        await Bun.write(codexConfig, next);
-                        console.log(`  otel: wrote Codex OTLP config → ${codexConfig}`);
+        // Write OTLP telemetry env into each installed harness config only
+        // on fresh explicit consent - "preserve" must not rewrite it either.
+        // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
+        if (consent === "grant") {
+            const OTLP_ENDPOINT = "http://127.0.0.1:1738";
+            const claudeDir = posixPath.join(HOME, ".claude");
+            const claudeSettings = posixPath.join(claudeDir, "settings.json");
+            // Claude: only touch if ~/.claude exists (harness is installed).
+            const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
+            if (claudeDirExists) {
+                yield* Effect.promise(async () => {
+                    try {
+                        let raw = "{}";
+                        try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
+                        const parsed = JSON.parse(raw) as Record<string, unknown>;
+                        const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
+                        await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
+                        console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
+                    } catch (err) {
+                        console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
                     }
-                } catch (err) {
-                    console.warn(`  otel: could not update ${codexConfig}: ${(err as Error).message}`);
-                }
-            });
+                });
+            }
+
+            const codexDir = posixPath.join(HOME, ".codex");
+            const codexConfig = posixPath.join(codexDir, "config.toml");
+            // Codex: only touch if ~/.codex exists (harness is installed).
+            const codexDirExists = yield* fs.exists(codexDir).pipe(orAbsent(false));
+            if (codexDirExists) {
+                yield* Effect.promise(async () => {
+                    try {
+                        let existing = "";
+                        try { existing = await Bun.file(codexConfig).text(); } catch { /* absent - start empty */ }
+                        const next = applyCodexOtelToml(existing, OTLP_ENDPOINT);
+                        if (next !== existing) {
+                            await Bun.write(codexConfig, next);
+                            console.log(`  otel: wrote Codex OTLP config → ${codexConfig}`);
+                        }
+                    } catch (err) {
+                        console.warn(`  otel: could not update ${codexConfig}: ${(err as Error).message}`);
+                    }
+                });
+            }
         }
 
         const { BANNER } = yield* Effect.promise(() => import("./banner.ts"));
@@ -1578,7 +1724,7 @@ export function cmdUninstall(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         console.log("[axctl] uninstall");
-        for (const plist of [SERVE_PLIST, QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
+        for (const plist of [OTLPD_PLIST, SERVE_PLIST, QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
             const removed = yield* unloadAgent(plist);
             console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
         }

@@ -37,4 +37,5 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "digest",
     "team",
     "usage",
+    "otlpd",
 ];
