@@ -1,19 +1,12 @@
 import { ptr } from "bun:ffi";
-import { describe, expect, test } from "bun:test";
-import { noteSkippedDylib, resolveTestDylib } from "../testing/duckdb-dylib.ts";
+import { describe, expect } from "bun:test";
+import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { cstr, DUCKDB_RESULT_SIZE, DUCKDB_SUCCESS, handleBuffer, openLibDuckDb, readCString } from "./ffi.ts";
 
-// Resolved at module load (top-level await), not in `beforeAll`, so
-// `test.skipIf` below sees a real boolean at test-registration time and bun
-// reports a SKIP status - distinct from a pass - when no dylib is available.
-// (`resolveTestDylib` never throws; it returns a `{ ok: false, reason }`
-// instead, so this await is safe even offline.)
-const found = await resolveTestDylib();
-const dylib = found.ok ? found.path : null;
-if (!found.ok) noteSkippedDylib("duckdb ffi", found.reason);
+const { dylibPath: dylib, dtest } = await duckdbTestSetup("duckdb ffi");
 
 describe("openLibDuckDb", () => {
-    test.skipIf(dylib === null)(
+    dtest(
         "binds every symbol the client needs, including the row-major value accessors",
         () => {
             const lib = openLibDuckDb(dylib as string);
@@ -59,7 +52,7 @@ describe("openLibDuckDb", () => {
         },
     );
 
-    test.skipIf(dylib === null)("runs an in-memory round trip through the bound symbols", () => {
+    dtest("runs an in-memory round trip through the bound symbols", () => {
         const lib = openLibDuckDb(dylib as string);
         const db = handleBuffer();
         const conn = handleBuffer();
@@ -90,7 +83,7 @@ describe("openLibDuckDb", () => {
     // number." instead of throwing or decoding, so this assertion would have
     // failed (message would equal that TypeError text) against the
     // unfixed implementation.
-    test.skipIf(dylib === null)("readCString decodes a bigint pointer read out of a BigUint64Array", () => {
+    dtest("readCString decodes a bigint pointer read out of a BigUint64Array", () => {
         const lib = openLibDuckDb(dylib as string);
         const db = handleBuffer();
         const errorBuf = handleBuffer();

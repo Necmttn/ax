@@ -17,9 +17,13 @@
  * (which scans runtime sources) does not apply and an Effect `FileSystem`
  * would only add ceremony to something that runs before any layer exists.
  */
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
-import { arch, platform } from "node:os";
+import { afterAll, test } from "bun:test";
+import { Effect, type Layer } from "effect";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync } from "node:fs";
+import { arch, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DuckDb, DuckDbLayer, type DuckDbService } from "../duckdb/client.ts";
+import type { DuckDbDylibError } from "../duckdb/errors.ts";
 
 export const DUCKDB_VERSION = "v1.5.5";
 
@@ -207,4 +211,72 @@ export const resolveTestDylib = async (): Promise<TestDylib> => {
 /** Prints a uniform notice so a skipped suite is visible in test output. */
 export const noteSkippedDylib = (suite: string, reason: string): void => {
     console.warn(`[skip] ${suite}: no libduckdb available (${reason})`);
+};
+
+/** F1: the pasted preamble every `duckdb/*.test.ts` suite carried - resolve a
+ *  dylib, build a skip-aware `test`, and (for suites that open a real
+ *  database) a `DuckDb` layer + temp-dir tracker + a `withDuckDb` runner.
+ *  Previously hand-copied into client.test.ts, snapshot.test.ts, and
+ *  ffi.test.ts. */
+export interface DuckDbTestSetup {
+    /** The resolved dylib path, or `null` when none is available. */
+    readonly dylibPath: string | null;
+    /** `test`, bound to skip (not pass) every dylib-dependent case when no
+     *  dylib is available - registering at module load (not inside a
+     *  `beforeAll`) so bun reports a real SKIP status instead of a silent
+     *  PASS on a dylib-less box. */
+    readonly dtest: typeof test;
+    /** `DuckDbLayer(dylibPath)`, or `null` when no dylib is available. Only
+     *  ever consumed through `withDuckDb` below - exposed too for a suite
+     *  that needs to `Effect.provide` it directly. */
+    readonly layer: Layer.Layer<DuckDb, DuckDbDylibError> | null;
+    /**
+     * A fresh `mkdtemp`-created directory under `<prefix>`, tracked for
+     * cleanup in one `afterAll` this call registers the first time it runs
+     * (so every suite gets exactly one, however many `tempDir` calls it
+     * makes) - mirrors the measured leak fix in dylib.test.ts.
+     */
+    readonly tempDir: (prefix: string) => string;
+    /** Runs `body` with the `DuckDb` service, through `layer`. Only safe to
+     *  call from a case registered via `dtest` (which skips registration
+     *  entirely when `layer` is null) - the non-null assertion is safe by
+     *  construction. */
+    readonly withDuckDb: <A>(
+        body: (db: DuckDbService) => Effect.Effect<A, unknown>,
+    ) => () => Promise<void>;
+}
+
+/**
+ * Build a {@link DuckDbTestSetup} for one suite. `suiteName` labels the
+ * skip notice (e.g. `"duckdb client"`) exactly as the hand-copied preambles
+ * did. Call once per test file, at module load (`await duckdbTestSetup(...)`
+ * at the top level) so `dtest` sees a real boolean at registration time.
+ */
+export const duckdbTestSetup = async (suiteName: string): Promise<DuckDbTestSetup> => {
+    const found = await resolveTestDylib();
+    const dylibPath = found.ok ? found.path : null;
+    if (!found.ok) noteSkippedDylib(suiteName, found.reason);
+    const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
+    const dtest = test.skipIf(dylibPath === null);
+
+    const createdTempDirs: string[] = [];
+    afterAll(() => {
+        for (const dir of createdTempDirs) rmSync(dir, { recursive: true, force: true });
+    });
+    const tempDir = (prefix: string): string => {
+        const dir = mkdtempSync(join(tmpdir(), prefix));
+        createdTempDirs.push(dir);
+        return dir;
+    };
+
+    const withDuckDb = <A>(body: (db: DuckDbService) => Effect.Effect<A, unknown>) => async () => {
+        await Effect.runPromise(
+            Effect.gen(function* () {
+                const db = yield* DuckDb;
+                yield* body(db);
+            }).pipe(Effect.provide(layer as NonNullable<typeof layer>)) as Effect.Effect<void>,
+        );
+    };
+
+    return { dylibPath, dtest, layer, tempDir, withDuckDb };
 };

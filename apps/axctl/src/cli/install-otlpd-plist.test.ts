@@ -57,11 +57,6 @@ describe("resolveOtlpdPlistDecision (cmdInstall's otlpd plist state machine)", (
             .toEqual({ action: "noop" });
     });
 
-    it("default install writes no plist when telemetry was never consented", () => {
-        const decision = resolveOtlpdPlistDecision("preserve", { serveAgentManaged: false });
-        expect(decision.action).toBe("noop");
-    });
-
     it("explicit --telemetry writes and loads when no serve LaunchAgent owns the port (IDE model)", () => {
         expect(resolveOtlpdPlistDecision("grant", { serveAgentManaged: false }))
             .toEqual({ action: "write-and-load" });

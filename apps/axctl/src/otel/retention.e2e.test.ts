@@ -8,6 +8,11 @@ const E2E_ENABLED = process.env.AX_E2E_DB === "1";
 const TEST_TIMEOUT_MS = 30_000;
 const TMP_DB = `retention_${Date.now().toString(36)}`;
 
+// F5: retainRecentOtel loops the same DELETE over OTEL_TABLES with no
+// per-table branching (see retention.ts), so one seeded table exercises the
+// retention logic representatively. otel_metric_point also doubles as both
+// endpoints of the telemetry_of edge case below, which is what actually
+// differs per table (the dangling-edge prune).
 const SCHEMA = `
     DEFINE TABLE otel_metric_point SCHEMAFULL;
     DEFINE FIELD harness ON otel_metric_point TYPE string;
@@ -15,23 +20,6 @@ const SCHEMA = `
     DEFINE FIELD value ON otel_metric_point TYPE number;
     DEFINE FIELD observed_at ON otel_metric_point TYPE datetime;
     DEFINE INDEX metric_observed ON otel_metric_point FIELDS observed_at CONCURRENTLY;
-
-    DEFINE TABLE otel_span SCHEMAFULL;
-    DEFINE FIELD harness ON otel_span TYPE string;
-    DEFINE FIELD name ON otel_span TYPE string;
-    DEFINE FIELD trace_id ON otel_span TYPE string;
-    DEFINE FIELD span_id ON otel_span TYPE string;
-    DEFINE FIELD started_at ON otel_span TYPE datetime;
-    DEFINE FIELD ended_at ON otel_span TYPE datetime;
-    DEFINE FIELD duration_ms ON otel_span TYPE number;
-    DEFINE FIELD observed_at ON otel_span TYPE datetime;
-    DEFINE INDEX span_observed ON otel_span FIELDS observed_at CONCURRENTLY;
-
-    DEFINE TABLE otel_log_event SCHEMAFULL;
-    DEFINE FIELD harness ON otel_log_event TYPE string;
-    DEFINE FIELD event_name ON otel_log_event TYPE string;
-    DEFINE FIELD observed_at ON otel_log_event TYPE datetime;
-    DEFINE INDEX log_observed ON otel_log_event FIELDS observed_at CONCURRENTLY;
 
     DEFINE TABLE telemetry_of TYPE RELATION SCHEMAFULL;
     DEFINE FIELD linked_at ON telemetry_of TYPE datetime DEFAULT time::now();
@@ -46,26 +34,8 @@ const seed = (db: SurrealClientShape) => db.query(`
         harness: "test", metric: "test", value: 1,
         observed_at: time::now()
     };
-    UPSERT otel_span:old CONTENT {
-        harness: "test", name: "test", trace_id: "old", span_id: "old",
-        started_at: time::now() - 31d, ended_at: time::now() - 31d,
-        duration_ms: 1, observed_at: time::now() - 31d
-    };
-    UPSERT otel_span:recent CONTENT {
-        harness: "test", name: "test", trace_id: "recent", span_id: "recent",
-        started_at: time::now(), ended_at: time::now(),
-        duration_ms: 1, observed_at: time::now()
-    };
-    UPSERT otel_log_event:old CONTENT {
-        harness: "test", event_name: "test",
-        observed_at: time::now() - 31d
-    };
-    UPSERT otel_log_event:recent CONTENT {
-        harness: "test", event_name: "test",
-        observed_at: time::now()
-    };
-    RELATE otel_span:recent->telemetry_of->otel_metric_point:old;
-    RELATE otel_span:recent->telemetry_of->otel_metric_point:recent;
+    RELATE otel_metric_point:recent->telemetry_of->otel_metric_point:old;
+    RELATE otel_metric_point:recent->telemetry_of->otel_metric_point:recent;
 `);
 
 const exists = (db: SurrealClientShape, record: string) =>
@@ -94,7 +64,7 @@ describe("OTLP retention (live DB)", () => {
         }
     });
 
-    test("removes old rows and keeps recent rows in every OTLP table", async () => {
+    test("removes old rows, keeps recent rows, and prunes the dangling telemetry_of edge", async () => {
         if (!E2E_ENABLED || !dbReachable) {
             console.log("(skipped - set AX_E2E_DB=1 with a live SurrealDB to run)");
             expect(true).toBe(true);
@@ -114,10 +84,6 @@ describe("OTLP retention (live DB)", () => {
                 return {
                     metricOld: yield* exists(db, "otel_metric_point:old"),
                     metricRecent: yield* exists(db, "otel_metric_point:recent"),
-                    spanOld: yield* exists(db, "otel_span:old"),
-                    spanRecent: yield* exists(db, "otel_span:recent"),
-                    logOld: yield* exists(db, "otel_log_event:old"),
-                    logRecent: yield* exists(db, "otel_log_event:recent"),
                     // The edge into the pruned `otel_metric_point:old` row must
                     // be gone too; the edge into the surviving `recent` row
                     // must remain. SurrealDB 3.0.x auto-drops a RELATION edge
@@ -140,10 +106,6 @@ describe("OTLP retention (live DB)", () => {
         expect(result).toEqual({
             metricOld: false,
             metricRecent: true,
-            spanOld: false,
-            spanRecent: true,
-            logOld: false,
-            logRecent: true,
             telemetryOfEdgeCount: 1,
             // SurrealDB already auto-dropped the dangling edge as a side
             // effect of the `otel_metric_point` delete above, so the

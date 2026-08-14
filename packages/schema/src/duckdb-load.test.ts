@@ -26,6 +26,19 @@ const resolveDuckdb = (): string | null => {
 
 const duckdb = resolveDuckdb();
 
+/** F3: create a fresh `mkdtemp` dir, hand `body` the `cache.duckdb` path
+ *  inside it, and remove the dir afterward regardless of outcome - every
+ *  test below repeated this `mkdtempSync` + `try/finally` + `join(dir,
+ *  "cache.duckdb")` boilerplate around its own script. */
+const withTempDuckdbDir = <A>(body: (dbPath: string) => A): A => {
+    const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
+    try {
+        return body(join(dir, "cache.duckdb"));
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+};
+
 describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
     if (duckdb === null) {
         test.skip("SKIPPED: no duckdb binary (set AX_DUCKDB_BIN or put duckdb on PATH)", () => {});
@@ -33,9 +46,7 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
     }
 
     test("loads with no error and creates every declared table", () => {
-        const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
-        try {
-            const dbPath = join(dir, "cache.duckdb");
+        withTempDuckdbDir((dbPath) => {
             const script = `.read ${DUCKDB_SCHEMA_PATH}\nSELECT table_name FROM duckdb_tables() ORDER BY table_name;\n`;
             const run = Bun.spawnSync([duckdb, "-batch", "-noheader", "-list", dbPath], {
                 stdin: new TextEncoder().encode(script),
@@ -46,15 +57,11 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             expect(run.exitCode).toBe(0);
             const created = stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
             expect([...created].sort()).toEqual([...parseDuckdbTables()].sort());
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
+        });
     });
 
     test("re-reading the DDL into the same database is idempotent", () => {
-        const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
-        try {
-            const dbPath = join(dir, "cache.duckdb");
+        withTempDuckdbDir((dbPath) => {
             const script = `.read ${DUCKDB_SCHEMA_PATH}\n.read ${DUCKDB_SCHEMA_PATH}\nSELECT count(*) FROM duckdb_tables();\n`;
             const run = Bun.spawnSync([duckdb, "-batch", "-noheader", "-list", dbPath], {
                 stdin: new TextEncoder().encode(script),
@@ -63,9 +70,7 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             expect(run.exitCode).toBe(0);
             const stdout = new TextDecoder().decode(run.stdout).trim();
             expect(stdout).toBe(String(parseDuckdbTables().length));
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
+        });
     });
 
     // P2-5: the earlier version of this suite only loaded the DDL and listed
@@ -82,9 +87,7 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
     // DuckDbUnsupportedTypeError). This test now exercises the UTC-contract
     // TIMESTAMP path and JSON-encoded VARCHAR arrays in their place.
     test("representative inserts round-trip through UTC timestamps, JSON-encoded arrays, defaults, and a polymorphic edge", () => {
-        const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
-        try {
-            const dbPath = join(dir, "cache.duckdb");
+        withTempDuckdbDir((dbPath) => {
             const script = [
                 `.read ${DUCKDB_SCHEMA_PATH}`,
                 // JSON-encoded VARCHAR (session.labels) + a DEFAULT-reliant column
@@ -142,15 +145,11 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             expect(secondSkill).toBe("skill-b");
 
             expect(concernsEdge).toBe("tool_call|skill");
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
+        });
     });
 
     test("the two FTS surfaces build with PRAGMA create_fts_index", () => {
-        const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
-        try {
-            const dbPath = join(dir, "cache.duckdb");
+        withTempDuckdbDir((dbPath) => {
             const script = [
                 `.read ${DUCKDB_SCHEMA_PATH}`,
                 "INSTALL fts; LOAD fts;",
@@ -171,8 +170,6 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
             }
             expect(run.exitCode).toBe(0);
             expect(stdout).toContain("fts-ok");
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
+        });
     });
 });
