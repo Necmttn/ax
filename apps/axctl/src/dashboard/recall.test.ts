@@ -462,8 +462,52 @@ describe("recall: filter pickers", () => {
         const fixture = await run(publish("ax-recall-pickproj-", withInvocations));
         const rows = await run(picker(fixture, projectPickerQuery()));
 
+        // Both projects have ONE session, so this asserts the tie-break, not
+        // the count: `uses DESC` alone leaves DuckDB free to return either row
+        // first, which would make an interactive picker reorder itself between
+        // runs (and drop an arbitrary one of a tied pair at `LIMIT`). The
+        // secondary `value ASC` is what fixes the order.
         expect(rows.map((r) => r.value)).toEqual(["ax", "other"]);
         expect(rows.map((r) => Number(r.uses))).toEqual([1, 1]);
+    });
+
+    dtest("both pickers break a count tie on the value, in ascending order", async () => {
+        const fixture = await run(
+            publish("ax-recall-picktie-", (w) =>
+                Effect.gen(function* () {
+                    yield* withInvocations(w);
+                    // A second skill with the SAME invocation count as
+                    // `pancakes`, named so that insertion order and sorted
+                    // order disagree: a query without the tie-break can pass by
+                    // luck when the fixture is already in the asserted order.
+                    yield* w.put("skill", {
+                        id: "skill:aardvark",
+                        name: "aardvark",
+                        scope: "user",
+                        dir_path: "/skills/aardvark",
+                        description: "sorts before pancakes",
+                        content_hash: "h3",
+                    });
+                    yield* w.put("invoked", {
+                        id: "invoked:4",
+                        in_id: "turn:3",
+                        out_id: "skill:aardvark",
+                        ts: T("2026-08-12T11:00:01.000Z"),
+                        session: "session:b",
+                        turn_has_error: false,
+                        was_corrected: false,
+                    });
+                }),
+            ),
+        );
+
+        const skills = await run(picker(fixture, skillPickerQuery()));
+        // duckdb-ops has 2; aardvark and pancakes are tied at 1 and sort by name.
+        expect(skills.map((r) => r.value)).toEqual(["duckdb-ops", "aardvark", "pancakes"]);
+        expect(skills.map((r) => Number(r.uses))).toEqual([2, 1, 1]);
+
+        const projects = await run(picker(fixture, projectPickerQuery()));
+        expect(projects.map((r) => r.value)).toEqual(["ax", "other"]);
     });
 
     dtest("--skill=? lists every invoked skill by invocation count, most used first", async () => {

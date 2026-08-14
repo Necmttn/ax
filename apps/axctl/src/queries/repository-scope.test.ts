@@ -24,6 +24,7 @@ const identity = (
     cwd: "/w/ax",
     repoRoot: "/w/ax",
     mainRepoRoot: "/w/ax",
+    remoteUrl: "git@github.com:Necmttn/ax.git",
     remoteUrlNormalized: "github.com/necmttn/ax",
     initialCommit: "abc123",
     ...over,
@@ -60,11 +61,13 @@ describe("repositoryLookupQueries", () => {
 
         expect(queries.map((q) => q.sql)).toEqual([
             "SELECT id FROM repository WHERE remote_url = ? LIMIT 1",
+            "SELECT id FROM repository WHERE remote_url = ? LIMIT 1",
             "SELECT id FROM repository WHERE initial_commit = ? LIMIT 1",
             "SELECT id FROM repository WHERE root_path = ? LIMIT 1",
         ]);
         expect(queries.map((q) => q.params)).toEqual([
             ["github.com/necmttn/ax"],
+            ["git@github.com:Necmttn/ax.git"],
             ["abc123"],
             ["/w/ax"],
         ]);
@@ -72,9 +75,33 @@ describe("repositoryLookupQueries", () => {
         for (const q of queries) expect(q.sql).not.toContain("'");
     });
 
+    test("both remote spellings are tried BEFORE the initial-commit fallback", () => {
+        // `ingest/git.ts` persists the RAW remote while `chooseIdentity` ranks
+        // the normalized one, so the raw spelling has to be a remote term and
+        // not an afterthought: a fork shares its upstream's root commit, so a
+        // lookup that reached `initial_commit` with the remote unmatched could
+        // select the UPSTREAM's row for a fork's `--scope=here`.
+        const columnOf = (sql: string) => sql.split("WHERE ")[1]?.split(" =")[0];
+        const columns = repositoryLookupQueries(identity()).map((q) => columnOf(q.sql));
+
+        expect(columns).toEqual(["remote_url", "remote_url", "initial_commit", "root_path"]);
+    });
+
+    test("a remote that is already normalized yields ONE term, not the same statement twice", () => {
+        const queries = repositoryLookupQueries(
+            identity({ remoteUrl: "github.com/necmttn/ax" }),
+        );
+
+        expect(queries.map((q) => q.params)).toEqual([
+            ["github.com/necmttn/ax"],
+            ["abc123"],
+            ["/w/ax"],
+        ]);
+    });
+
     test("omits the terms the git identity has no value for", () => {
         const queries = repositoryLookupQueries(
-            identity({ remoteUrlNormalized: null, initialCommit: null }),
+            identity({ remoteUrl: null, remoteUrlNormalized: null, initialCommit: null }),
         );
 
         // `col = NULL` matches nothing, so a bound-NULL term would be a wasted
@@ -111,7 +138,7 @@ describe("resolveCacheRepository", () => {
             ),
         );
         const found = await lookup(
-            identity({ remoteUrlNormalized: null, kind: "initial_commit" }),
+            identity({ remoteUrl: null, remoteUrlNormalized: null, kind: "initial_commit" }),
             fixture.snapshotPath,
         );
 
@@ -125,7 +152,12 @@ describe("resolveCacheRepository", () => {
             ),
         );
         const found = await lookup(
-            identity({ remoteUrlNormalized: null, initialCommit: null, kind: "local_path_hash" }),
+            identity({
+                remoteUrl: null,
+                remoteUrlNormalized: null,
+                initialCommit: null,
+                kind: "local_path_hash",
+            }),
             fixture.snapshotPath,
         );
 
@@ -155,6 +187,57 @@ describe("resolveCacheRepository", () => {
         expect(Option.getOrNull(found)).toBe("repo-row-ax");
     });
 
+    dtest("finds the row when the cache stored the RAW remote url", async () => {
+        // What `ingest/git.ts` actually persists is `repo.remoteUrl` - the raw
+        // spelling git reports - while `chooseIdentity` ranks the normalized
+        // one. A reader that bound only the normalized form matched nothing
+        // here and fell through to the weaker terms.
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-repo-scope-raw-"), dylibPath, (w) =>
+                w.put("repository", {
+                    id: "repo-row-raw",
+                    name: "ax",
+                    remote_url: "git@github.com:Necmttn/ax.git",
+                    root_path: "/somewhere/else",
+                    initial_commit: null,
+                }),
+            ),
+        );
+        const found = await lookup(identity(), fixture.snapshotPath);
+
+        expect(Option.getOrNull(found)).toBe("repo-row-raw");
+    });
+
+    dtest("a fork does not resolve to its upstream through the shared root commit", async () => {
+        // A fork shares its upstream's root commit, so `initial_commit` cannot
+        // separate them - the remote is the only term that can. With the raw
+        // spelling stored, a normalized-only lookup missed the remote, reached
+        // the commit, and scoped `--scope=here` to the UPSTREAM's row.
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-repo-scope-fork-"), dylibPath, (w) =>
+                w.putMany("repository", [
+                    {
+                        id: "repo-row-upstream",
+                        name: "ax",
+                        remote_url: "git@github.com:upstream/ax.git",
+                        root_path: "/w/upstream-ax",
+                        initial_commit: "abc123",
+                    },
+                    {
+                        id: "repo-row-fork",
+                        name: "ax",
+                        remote_url: "git@github.com:Necmttn/ax.git",
+                        root_path: "/w/ax",
+                        initial_commit: "abc123",
+                    },
+                ]),
+            ),
+        );
+        const found = await lookup(identity(), fixture.snapshotPath);
+
+        expect(Option.getOrNull(found)).toBe("repo-row-fork");
+    });
+
     dtest("a repository the cache has never seen is none, not a wrong row", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-repo-scope-miss-"), dylibPath, REPOSITORIES),
@@ -164,6 +247,7 @@ describe("resolveCacheRepository", () => {
                 cwd: "/w/nope",
                 repoRoot: "/w/nope",
                 mainRepoRoot: "/w/nope",
+                remoteUrl: "git@github.com:Necmttn/nope.git",
                 remoteUrlNormalized: "github.com/necmttn/nope",
                 initialCommit: "999999",
             }),

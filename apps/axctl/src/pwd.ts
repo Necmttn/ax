@@ -49,6 +49,17 @@ export interface PwdIdentity {
     readonly repoRoot: string;
     /** Primary checkout root; differs from repoRoot inside linked worktrees. */
     readonly mainRepoRoot: string;
+    /**
+     * `remote.origin.url` EXACTLY as git reports it (e.g.
+     * "git@github.com:foo/bar.git"), or null.
+     *
+     * Carried alongside the normalized form because the two are not
+     * interchangeable at a lookup: `normalizeGitRemoteUrl` is lossy and has no
+     * inverse, and the git ingest stage persists `repository.remote_url` RAW.
+     * A reader holding only the normalized spelling therefore cannot match the
+     * column it is querying - see `queries/repository-scope.ts`.
+     */
+    readonly remoteUrl: string | null;
     /** Normalized remote URL (e.g. "github.com/foo/bar"), or null. */
     readonly remoteUrlNormalized: string | null;
     /** SHA of the initial (root) commit, or null. */
@@ -154,6 +165,7 @@ export const resolvePwdIdentity = (
             cwd: resolvedCwd,
             repoRoot,
             mainRepoRoot,
+            remoteUrl: rawRemoteUrl,
             remoteUrlNormalized,
             initialCommit,
             identity,
