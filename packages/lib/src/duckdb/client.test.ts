@@ -1,57 +1,48 @@
 import { ptr } from "bun:ffi";
 import { BunFileSystem } from "@effect/platform-bun";
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Schema } from "effect";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { noteSkippedDylib, resolveTestDylib } from "../testing/duckdb-dylib.ts";
-import { DuckDb, DuckDbLayer, layerFromLib, makeConnection, openDatabase, readResult } from "./client.ts";
-import type { DuckDbService } from "./client.ts";
+import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
+import {
+    DuckDb,
+    DuckDbLayer,
+    DuckDbLiveWith,
+    layerFromLib,
+    makeConnection,
+    openDatabase,
+    readResult,
+} from "./client.ts";
 import type { LibDuckDb } from "./ffi.ts";
 import { DuckDbTypeId } from "./types.ts";
 
-// Resolved at module load (top-level await), not in `beforeAll`, so
-// `test.skipIf` below sees a real boolean at test-registration time and bun
-// reports a SKIP status - distinct from a PASS - when no dylib is available.
-// Finding 3 (final fix round): the previous `beforeAll` + runtime
-// `expect(skipReason.length).toBeGreaterThan(0)` guard reported PASS for
-// every one of these tests on a dylib-less box, with only a console.warn as
-// the signal - mirrors ffi.test.ts's convention exactly.
-const found = await resolveTestDylib();
-const dylibPath = found.ok ? found.path : null;
-if (!found.ok) noteSkippedDylib("duckdb client", found.reason);
-const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
+const { dtest, tempDir, withDuckDb } = await duckdbTestSetup("duckdb client");
+const tempDb = () => join(tempDir("ax-duckdb-client-"), "test.db");
 
-/** `test`, bound to skip (not pass) every dylib-dependent case below when no
- *  dylib is available. */
-const dtest = test.skipIf(dylibPath === null);
-
-// Finding 4 (final fix round): every dir this suite creates is collected
-// here and removed in one afterAll - see dylib.test.ts for the measured
-// leak this closes.
-const createdTempDirs: string[] = [];
-const tempDb = (name = "test.db") => {
-    const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-client-"));
-    createdTempDirs.push(dir);
-    return join(dir, name);
-};
-
-afterAll(() => {
-    for (const dir of createdTempDirs) rmSync(dir, { recursive: true, force: true });
-});
-
-/** Runs `body` with the DuckDb service. Only ever invoked via `dtest`, which
- *  skips registration entirely when `layer` is null - the non-null assertion
- *  is safe by construction. */
-const withDuckDb = <A>(body: (db: DuckDbService) => Effect.Effect<A, unknown>) => async () => {
-    await Effect.runPromise(
-        Effect.gen(function* () {
-            const db = yield* DuckDb;
-            yield* body(db);
-        }).pipe(Effect.provide(layer as NonNullable<typeof layer>)) as Effect.Effect<void>,
-    );
-};
+/**
+ * F2: a minimal fake `LibDuckDb` for a unit test that only needs a handful
+ * of symbols stubbed - replaces five hand-rolled
+ * `{ symbols: {...} } as unknown as LibDuckDb` literals below. `bun:ffi`
+ * brands every real symbol function with a `__ffi_function_callable` unique
+ * symbol only `dlopen` can produce, so a plain stub function can never
+ * structurally satisfy `LibDuckDb["symbols"]` - `overrides.symbols` stays a
+ * loose callable-value record and the cast to `unknown` still happens here,
+ * same as every literal it replaces; this only removes the boilerplate
+ * around it. `close` defaults to a no-op - every fake below except the
+ * `layerFromLib` one never calls it (`conn.close` reaches
+ * `duckdb_disconnect`/`duckdb_close` in `symbols`, not `lib.close`).
+ */
+const makeFakeLib = (
+    overrides: {
+        readonly symbols?: Record<string, (...args: never[]) => unknown>;
+        readonly close?: () => void;
+    } = {},
+): LibDuckDb =>
+    ({
+        symbols: overrides.symbols ?? {},
+        close: overrides.close ?? ((): void => {}),
+    }) as unknown as LibDuckDb;
 
 describe("DuckDb", () => {
     dtest(
@@ -468,7 +459,7 @@ describe("DuckDb", () => {
 describe("readResult (Part B unit test)", () => {
     test("a not-null cell with a NULL duckdb_value_varchar pointer raises DuckDbUnsupportedTypeError, not an empty string", () => {
         const resultPtr = ptr(new Uint8Array(8));
-        const fakeLib = {
+        const fakeLib = makeFakeLib({
             symbols: {
                 duckdb_column_count: () => 1n,
                 duckdb_column_name: () => null, // -> readResult falls back to "column_0"
@@ -493,7 +484,7 @@ describe("readResult (Part B unit test)", () => {
                     throw new Error("must not be called - there is no pointer to free");
                 },
             },
-        } as unknown as LibDuckDb;
+        });
 
         expect(() => readResult(fakeLib, resultPtr)).toThrow();
         try {
@@ -536,11 +527,63 @@ describe("DuckDbLayer (finding 1)", () => {
     });
 });
 
+// A8: `DuckDbLiveWith`'s `options.assetPath` must thread through to
+// `resolveDylibPath` as its `assetPath` fallback - this is the seam an
+// apps-side consumer (e.g. an embedded-binary build) will use to hand in a
+// bundled dylib without `packages/lib` importing anything from `apps/*`.
+// Neither of these ever touches a real dylib (the paths do not exist), so
+// they run unconditionally - no `withDuckDb`/skip needed. `AX_DUCKDB_DYLIB`
+// is saved/restored around each test in case the harness (or a developer's
+// shell) already has it set, mirroring dylib.test.ts's convention.
+describe("DuckDbLiveWith (A8)", () => {
+    test("threads options.assetPath through to resolveDylibPath", async () => {
+        const prev = process.env.AX_DUCKDB_DYLIB;
+        delete process.env.AX_DUCKDB_DYLIB;
+        try {
+            const assetPath = "/definitely/not/a/bundled-dylib.so";
+            const layer = DuckDbLiveWith({ assetPath });
+            const prog = Effect.asVoid(DuckDb).pipe(Effect.provide(layer)) as Effect.Effect<void, unknown>;
+
+            const result = await Effect.runPromise(Effect.result(prog));
+            expect(result._tag).toBe("Failure");
+            if (result._tag === "Failure") {
+                const failure = result.failure as { _tag?: string; message?: string };
+                expect(failure._tag).toBe("DuckDbDylibError");
+                // Proves the CONFIGURED path was the one resolveDylibPath
+                // tried (not the "no options" no-asset-path failure), i.e.
+                // that assetPath genuinely reached it.
+                expect(failure.message).toContain(assetPath);
+            }
+        } finally {
+            if (prev !== undefined) process.env.AX_DUCKDB_DYLIB = prev;
+        }
+    });
+
+    test("with no options at all, fails with the no-asset-available message (same as DuckDbLive)", async () => {
+        const prev = process.env.AX_DUCKDB_DYLIB;
+        delete process.env.AX_DUCKDB_DYLIB;
+        try {
+            const layer = DuckDbLiveWith();
+            const prog = Effect.asVoid(DuckDb).pipe(Effect.provide(layer)) as Effect.Effect<void, unknown>;
+
+            const result = await Effect.runPromise(Effect.result(prog));
+            expect(result._tag).toBe("Failure");
+            if (result._tag === "Failure") {
+                const failure = result.failure as { _tag?: string; message?: string };
+                expect(failure._tag).toBe("DuckDbDylibError");
+                expect(failure.message).toContain("no libduckdb available");
+            }
+        } finally {
+            if (prev !== undefined) process.env.AX_DUCKDB_DYLIB = prev;
+        }
+    });
+});
+
 describe("makeConnection.close (Part B-style unit test)", () => {
     test("close disconnects and closes exactly once; a second close is a no-op", () => {
         let disconnectCalls = 0;
         let closeCalls = 0;
-        const fakeLib = {
+        const fakeLib = makeFakeLib({
             symbols: {
                 duckdb_disconnect: () => {
                     disconnectCalls += 1;
@@ -549,7 +592,7 @@ describe("makeConnection.close (Part B-style unit test)", () => {
                     closeCalls += 1;
                 },
             },
-        } as unknown as LibDuckDb;
+        });
 
         const conn = makeConnection(
             fakeLib,
@@ -577,7 +620,7 @@ describe("makeConnection.close (Part B-style unit test)", () => {
         const boom = () => {
             throw new Error("native call after close");
         };
-        const fakeLib = {
+        const fakeLib = makeFakeLib({
             symbols: {
                 duckdb_disconnect: () => {},
                 duckdb_close: () => {},
@@ -586,7 +629,7 @@ describe("makeConnection.close (Part B-style unit test)", () => {
                 duckdb_column_count: boom,
                 duckdb_row_count: boom,
             },
-        } as unknown as LibDuckDb;
+        });
 
         const conn = makeConnection(
             fakeLib,
@@ -621,14 +664,14 @@ describe("makeConnection.close (Part B-style unit test)", () => {
 describe("openDatabase (P3-1)", () => {
     test("destroys the config even when duckdb_create_config fails", () => {
         let destroyCalls = 0;
-        const fakeLib = {
+        const fakeLib = makeFakeLib({
             symbols: {
                 duckdb_create_config: () => 1, // != DUCKDB_SUCCESS
                 duckdb_destroy_config: () => {
                     destroyCalls += 1;
                 },
             },
-        } as unknown as LibDuckDb;
+        });
 
         expect(() => openDatabase(fakeLib, "/fake/path.db", false)).toThrow();
         expect(destroyCalls).toBe(1);
@@ -642,12 +685,11 @@ describe("openDatabase (P3-1)", () => {
 describe("layerFromLib (P3-2)", () => {
     test("closing the layer scope releases the dynamic library handle", async () => {
         let closeCalls = 0;
-        const fakeLib = {
-            symbols: {},
+        const fakeLib = makeFakeLib({
             close: () => {
                 closeCalls += 1;
             },
-        } as unknown as LibDuckDb;
+        });
 
         await Effect.runPromise(
             Effect.asVoid(DuckDb).pipe(

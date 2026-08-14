@@ -193,7 +193,6 @@ DEFINE FIELD type               ON agent_event TYPE string;
 DEFINE FIELD role               ON agent_event TYPE option<string>;
 DEFINE FIELD text               ON agent_event TYPE option<string>;
 DEFINE FIELD text_excerpt       ON agent_event TYPE option<string>;
-DEFINE FIELD raw                ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD labels             ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics            ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE INDEX IF NOT EXISTS agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;

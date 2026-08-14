@@ -328,7 +328,6 @@ CREATE TABLE IF NOT EXISTS agent_event (
     role VARCHAR,
     text VARCHAR,
     text_excerpt VARCHAR,
-    raw VARCHAR,  -- JSON-encoded
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR  -- JSON-encoded
 );

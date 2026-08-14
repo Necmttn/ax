@@ -12,56 +12,14 @@
  * client keeps as `bigint` (see row-decode.ts) - so the expected values below
  * are `1n`/`2n`, not `1`/`2`.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
 import { Effect } from "effect";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { noteSkippedDylib, resolveTestDylib } from "../testing/duckdb-dylib.ts";
-import { DuckDb, DuckDbLayer } from "./client.ts";
-import type { DuckDbService } from "./client.ts";
+import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 
-// Resolved at module load (top-level await), not in `beforeAll`, so
-// `test.skipIf` below sees a real boolean at test-registration time and bun
-// reports a SKIP status - distinct from a PASS - when no dylib is available.
-// Finding 3 (final fix round): the previous `beforeAll` + runtime
-// `expect(skipReason.length).toBeGreaterThan(0)` guard reported PASS for
-// every one of these tests on a dylib-less box, with only a console.warn as
-// the signal - mirrors ffi.test.ts's convention exactly.
-const found = await resolveTestDylib();
-const dylibPath = found.ok ? found.path : null;
-if (!found.ok) noteSkippedDylib("duckdb snapshot", found.reason);
-const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
-
-/** `test`, bound to skip (not pass) every dylib-dependent case below when no
- *  dylib is available. */
-const dtest = test.skipIf(dylibPath === null);
-
-// Finding 4 (final fix round): every dir this suite creates is collected
-// here and removed in one afterAll - see dylib.test.ts for the measured
-// leak this closes.
-const createdTempDirs: string[] = [];
-const workDir = () => {
-    const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-snapshot-"));
-    createdTempDirs.push(dir);
-    return dir;
-};
-
-afterAll(() => {
-    for (const dir of createdTempDirs) rmSync(dir, { recursive: true, force: true });
-});
-
-/** Runs `body` with the DuckDb service. Only ever invoked via `dtest`, which
- *  skips registration entirely when `layer` is null - the non-null assertion
- *  is safe by construction. */
-const withDuckDb = <A>(body: (db: DuckDbService) => Effect.Effect<A, unknown>) => async () => {
-    await Effect.runPromise(
-        Effect.gen(function* () {
-            const db = yield* DuckDb;
-            yield* body(db);
-        }).pipe(Effect.provide(layer as NonNullable<typeof layer>)) as Effect.Effect<void>,
-    );
-};
+const { dtest, tempDir, withDuckDb } = await duckdbTestSetup("duckdb snapshot");
+const workDir = () => tempDir("ax-duckdb-snapshot-");
 
 describe("publishSnapshot", () => {
     dtest(

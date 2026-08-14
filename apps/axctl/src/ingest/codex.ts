@@ -263,17 +263,6 @@ function compactCodexToolCall(call: MutableToolCallWrite, maxBytes: number): Mut
     };
 }
 
-function compactCodexFunctionOutputEventRaw(
-    payload: Record<string, unknown>,
-    maxBytes: number,
-): Record<string, unknown> {
-    return {
-        type: stringField(payload, "type") ?? "function_call_output",
-        call_id: stringField(payload, "call_id"),
-        output: compactPayload(payload.output, maxBytes),
-    };
-}
-
 type ToolResultFields = {
     outputJson: unknown;
     outputExcerpt: string | null;
@@ -626,7 +615,6 @@ function createCodexExtractor(
             role: "tool_call",
             text: null,
             textExcerpt: null,
-            raw: payload,
             labels: {
                 source: "codex_transcript",
                 toolName,
@@ -711,7 +699,6 @@ function createCodexExtractor(
             role: "function_call_output",
             text: result.outputExcerpt,
             textExcerpt: result.outputExcerpt,
-            raw: compactCodexFunctionOutputEventRaw(payload, payloadMaxBytes),
             labels: {
                 source: "codex_transcript",
                 callId,
@@ -904,7 +891,6 @@ function createCodexExtractor(
                     role: null,
                     text: null,
                     textExcerpt: null,
-                    raw: { replacement_count: Array.isArray(payload.replacement_history) ? payload.replacement_history.length : 0 },
                     labels: { source: "codex_transcript" },
                     metrics: { strategy: "history_replacement", turnSeq: seq },
                 }, session);
@@ -967,7 +953,6 @@ function createCodexExtractor(
                         role,
                         text,
                         textExcerpt,
-                        raw: payload,
                         labels: {
                             source: "codex_transcript",
                             messageKind: kind,

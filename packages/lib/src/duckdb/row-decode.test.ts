@@ -116,27 +116,11 @@ describe("coerceValue", () => {
         expect(coerceValue(DuckDbTypeId.TIME, "10:11:12")).toBe("10:11:12");
     });
 
-    // Fix round 1 (ruling R10): TIMESTAMP_TZ is no longer in TIMESTAMP_TYPES
-    // (accessorFor now excludes it entirely, see row-decode.ts's
+    // Fix round 1 (ruling R10): TIMESTAMP_TZ is no longer in the reachable
+    // set (accessorFor now excludes it entirely, see row-decode.ts's
     // VARCHAR_TYPES comment - duckdb_value_varchar can't render it, so it
-    // never reaches coerceValue from the real read path). These two tests
-    // used to call coerceValue with DuckDbTypeId.TIMESTAMP_TZ to exercise
-    // parseTimestamp's offset/Z-suffix branches; they now do so through
-    // DuckDbTypeId.TIMESTAMP instead, which stays in TIMESTAMP_TYPES - this
-    // is honest about the branches being defensive/unreached-in-production
-    // today (real TIMESTAMP text from DuckDB is always offset-free), kept as
-    // pure-function robustness coverage rather than deleted.
-    test("parseTimestamp normalizes an explicit offset without double-applying it (defensive branch)", () => {
-        const ts = coerceValue(DuckDbTypeId.TIMESTAMP, "2026-08-14 10:11:12+02");
-        expect((ts as Date).toISOString()).toBe("2026-08-14T08:11:12.000Z");
-    });
-
-    test("parseTimestamp doesn't double a Z suffix that's already present (defensive branch)", () => {
-        const ts = coerceValue(DuckDbTypeId.TIMESTAMP, "2026-08-14 10:11:12Z");
-        expect(ts).toBeInstanceOf(Date);
-        expect((ts as Date).toISOString()).toBe("2026-08-14T10:11:12.000Z");
-    });
-
+    // never reaches coerceValue from the real read path). It falls through
+    // to plain text, same as DATE/TIME.
     test("TIMESTAMP_TZ is no longer special-cased - accessorFor excludes it upstream, so coerceValue now treats it as opaque text like DATE/TIME", () => {
         expect(coerceValue(DuckDbTypeId.TIMESTAMP_TZ, "2026-08-14 10:11:12+02")).toBe(
             "2026-08-14 10:11:12+02",

@@ -88,42 +88,16 @@ export const accessorFor = (typeId: number): AccessorKind | null => {
 };
 
 /**
- * Types read as text but handed back as a Date. As of fix round 1, this is
- * exactly ONE type - `TIMESTAMP_S`/`_MS`/`_NS`/`_TZ` and `TIME_TZ` were all
- * removed from `VARCHAR_TYPES` above (they never reach `coerceValue` from
- * the real read path any more), so keeping them here too would just be dead
- * entries. Left as a `Set` rather than inlining `typeId === TIMESTAMP`
- * below so a future temporal type can be added back in one place if a later
- * libduckdb build ever fixes the accessor for it.
- */
-const TIMESTAMP_TYPES: ReadonlySet<number> = new Set([DuckDbTypeId.TIMESTAMP]);
-
-/**
  * DuckDB prints a `TIMESTAMP` (offset-free, means UTC here) as
- * `YYYY-MM-DD HH:MM:SS[.ffffff]`, so the common case just needs a `Z`
- * appended. The `Z`-suffix and explicit-offset branches below exist for
- * defensive robustness against text that already carries either - `TIMESTAMP`
- * never actually renders one, and `TIMESTAMP_TZ` (which would have) is no
- * longer routed here at all (fix round 1; see the comment on
- * `VARCHAR_TYPES`), so neither branch is exercised by any type today. Kept,
- * not deleted, as pure and independently-testable behavior of this
- * function, in case a future offset-bearing temporal type is ever routed
- * here.
+ * `YYYY-MM-DD HH:MM:SS[.ffffff]`, so this just replaces the space with `T`
+ * and appends `Z`. `TIMESTAMP` never renders an existing `Z` suffix or an
+ * explicit offset - `TIMESTAMP_TZ` is the type that would have, and it is
+ * excluded upstream entirely (fix round 1; see the comment on
+ * `VARCHAR_TYPES`) - so this is the only type ever routed here, and it is
+ * the only shape this function needs to handle.
  */
-const parseTimestamp = (text: string): Date | string => {
-    if (/Z$/.test(text)) {
-        return finishTimestamp(text.replace(" ", "T"), text);
-    }
-    const offsetMatch = /([+-])(\d{2}(?::?\d{2})?)$/.exec(text);
-    if (offsetMatch) {
-        const [, sign, digits] = offsetMatch;
-        const clean = digits.replace(":", "");
-        const offset = `${sign}${clean.slice(0, 2)}:${clean.slice(2, 4) || "00"}`;
-        const body = text.slice(0, offsetMatch.index).replace(" ", "T");
-        return finishTimestamp(`${body}${offset}`, text);
-    }
-    return finishTimestamp(`${text.replace(" ", "T")}Z`, text);
-};
+const parseTimestamp = (text: string): Date | string =>
+    finishTimestamp(`${text.replace(" ", "T")}Z`, text);
 
 /**
  * Parse `iso`; fall back to `original` text rather than an Invalid Date.
@@ -156,7 +130,7 @@ export const coerceValue = (
     raw: boolean | bigint | number | string,
 ): DuckDbValue => {
     if (typeof raw === "string") {
-        return TIMESTAMP_TYPES.has(typeId) ? parseTimestamp(raw) : raw;
+        return typeId === DuckDbTypeId.TIMESTAMP ? parseTimestamp(raw) : raw;
     }
     if (typeof raw === "bigint") {
         // 64-bit columns stay bigint so a row's TS type never depends on the

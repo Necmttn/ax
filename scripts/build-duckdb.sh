@@ -5,7 +5,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 build_root=${DUCKDB_BUILD_ROOT:-"$repo_root/dist/duckdb-build"}
 source_dir="$build_root/src"
 dist_dir=${DUCKDB_DIST_DIR:-"$repo_root/dist/duckdb"}
-config_template="$repo_root/scripts/duckdb-spike/static-build/extension_config_local.cmake"
+config_template="$repo_root/scripts/duckdb/extension_config_local.cmake"
 # Pinned to the v1.5.5 tag's commit sha, not the tag name - a tag can be
 # force-moved on the remote, and a cached checkout could silently drift onto
 # a re-tagged commit without this. Resolve a new sha with:

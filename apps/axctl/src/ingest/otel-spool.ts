@@ -3,18 +3,12 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { defaultOtlpSpoolDir } from "../otel/spool-server.ts";
 import { SIGNALS } from "../otel/signals.ts";
-import type { Signal } from "../otel/signal.ts";
+import { OTLP_SIGNAL_PATHS } from "../otel/signal.ts";
 import { OtelWriter, OtelWriterLive } from "../otel/writer.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { walkJsonlFilesStrict, type JsonlFileCandidate } from "./walk-jsonl.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-
-const PATH_SIGNAL: Readonly<Record<string, Signal>> = {
-    "/v1/metrics": "metrics",
-    "/v1/traces": "traces",
-    "/v1/logs": "logs",
-};
 
 interface SpoolEnvelope {
     readonly path: string;
@@ -89,7 +83,7 @@ export const ingestOtelSpool = (
                     for (const line of text.split("\n")) {
                         if (line.trim().length === 0) continue;
                         const envelope = decodeEnvelope(line);
-                        const signal = envelope ? PATH_SIGNAL[envelope.path] : undefined;
+                        const signal = envelope ? OTLP_SIGNAL_PATHS[envelope.path] : undefined;
                         if (!envelope || !signal) {
                             malformed += 1;
                             continue;

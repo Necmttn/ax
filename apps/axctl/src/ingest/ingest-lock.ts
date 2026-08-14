@@ -27,6 +27,39 @@
 import { Effect, Exit, FileSystem, Option, Path } from "effect";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 
+/**
+ * Extra grace beyond the hard ingest timeout (`AxConfig.knobs.ingestTimeoutSeconds`)
+ * before a held lock is deemed stale and stolen: the owner should have
+ * self-cancelled at the timeout, so anything older is genuinely dead.
+ */
+export const INGEST_LOCK_STALE_GRACE_MS = 60_000;
+
+/**
+ * The `lockPath` + `command` + `staleMs` trio every `withIngestLock` caller
+ * builds - previously copy-pasted across `cli/commands/ingest.ts`,
+ * `share/recover.ts`, and `dashboard/ingest-workflow.ts` (including
+ * `INGEST_LOCK_STALE_GRACE_MS` itself, each with its own "mirrors ..." doc
+ * comment pointing at the other two).
+ *
+ * `timeoutSeconds` here only SIZES the staleness grace window - it is
+ * deliberately not itself part of the returned object. A caller that wants
+ * `work` bounded spreads this alongside its own `timeoutSeconds:
+ * timeoutSeconds`; a caller that wants `work` to stay unbounded (the
+ * dashboard's live-ingest path) spreads this and stops there, still sizing
+ * `staleMs` off the same number so a would-be timeout leaves a lock that ages
+ * out on the same schedule a bounded run's would have.
+ */
+export const ingestLockOptions = (
+    path: Path.Path,
+    dataDir: string,
+    command: string,
+    timeoutSeconds: number,
+): { readonly lockPath: string; readonly command: string; readonly staleMs: number } => ({
+    lockPath: path.join(dataDir, "ingest.lock"),
+    command,
+    staleMs: timeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS,
+});
+
 export interface IngestLockInfo {
     readonly pid: number;
     /** epoch ms when the lock was acquired */

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
+import { OTLP_SIGNAL_PATHS } from "./signal.ts";
 
 export const OTLP_ACK = { partialSuccess: {} } as const;
 export const OTLP_SPOOL_RETENTION_DAYS = 90;
@@ -13,7 +14,7 @@ export class OtlpSpoolServerError extends Schema.TaggedErrorClass<OtlpSpoolServe
     cause: Schema.Defect(),
 }) {}
 
-const OTLP_PATHS = new Set(["/v1/metrics", "/v1/traces", "/v1/logs"]);
+const OTLP_PATHS = new Set(Object.keys(OTLP_SIGNAL_PATHS));
 const DAY_MS = 86_400_000;
 const FILE_RE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
 

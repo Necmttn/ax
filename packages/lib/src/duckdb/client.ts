@@ -900,14 +900,33 @@ const baseLayer = (
 export const DuckDbLayer = (dylibPath: string): Layer.Layer<DuckDb, DuckDbDylibError> =>
     baseLayer(dylibPath).pipe(Layer.provide(BunFileSystem.layer));
 
-const baseLive: Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> = layerFromLib(
-    Effect.gen(function* () {
-        const dylibPath = yield* resolveDylibPath();
-        return yield* openLibOrFail(dylibPath);
-    }),
-);
+/** Options for {@link DuckDbLiveWith}. */
+export interface DuckDbLiveOptions {
+    /** The bundled asset path (an apps-side `{ type: "file" }` embed import).
+     *  `packages/lib` cannot import from `apps/*`, so the embed lives on the
+     *  consumer's side and is threaded in here rather than imported directly -
+     *  see `apps/axctl/src/duckdb-embed.gen.ts`'s header for the consumer this
+     *  unblocks (#791, wave 3 c-binary-embed). `null` and `undefined` both mean
+     *  "no bundled asset". */
+    readonly assetPath?: string | null;
+}
 
-/** Layer that resolves the dylib itself (env override / bundled asset). */
-export const DuckDbLive: Layer.Layer<DuckDb, DuckDbDylibError> = baseLive.pipe(
-    Layer.provide(BunFileSystem.layer),
-);
+const baseLiveWith = (
+    options?: DuckDbLiveOptions,
+): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
+    layerFromLib(
+        Effect.gen(function* () {
+            const assetPath = options?.assetPath ?? undefined;
+            const dylibPath = yield* resolveDylibPath(assetPath === undefined ? {} : { assetPath });
+            return yield* openLibOrFail(dylibPath);
+        }),
+    );
+
+/** Layer that resolves the dylib itself (env override / bundled asset).
+ *  `options.assetPath` threads through to {@link resolveDylibPath} as its
+ *  fallback source once `AX_DUCKDB_DYLIB` is unset - see {@link DuckDbLiveOptions}. */
+export const DuckDbLiveWith = (options?: DuckDbLiveOptions): Layer.Layer<DuckDb, DuckDbDylibError> =>
+    baseLiveWith(options).pipe(Layer.provide(BunFileSystem.layer));
+
+/** `DuckDbLiveWith()` with no bundled asset - env override only. */
+export const DuckDbLive: Layer.Layer<DuckDb, DuckDbDylibError> = DuckDbLiveWith();

@@ -28,6 +28,7 @@ export const REPARSE_TARGET_ENV = {
     metrics: "AX_REDERIVE_METRICS",
     analysis: "AX_REDERIVE_ANALYSIS",
     content: "AX_REDERIVE_CONTENT",
+    "otel-spool": "AX_REDERIVE_OTEL_SPOOL",
 } as const satisfies Record<string, string>;
 
 export type ReparseTarget = keyof typeof REPARSE_TARGET_ENV;

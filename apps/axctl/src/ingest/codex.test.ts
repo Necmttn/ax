@@ -963,21 +963,6 @@ describe("Codex transcript extraction", () => {
         expect(outputEvent.text).toHaveLength(1200);
         expect(outputEvent.text).toBe(outputEvent.textExcerpt);
         expect(outputEvent.text).not.toBe(largeOutput);
-        const raw = outputEvent.raw as { output?: unknown };
-        expect(raw).toMatchObject({
-            type: "function_call_output",
-            call_id: "call_large",
-        });
-
-        expect(raw.output).toMatchObject({
-            truncated: true,
-            bytes: expect.any(Number),
-        });
-        const compactedOutput = raw.output as { excerpt?: unknown };
-        expect(typeof compactedOutput.excerpt).toBe("string");
-        if (typeof compactedOutput.excerpt === "string") {
-            expect(compactedOutput.excerpt.length).toBeLessThan(largeOutput.length);
-        }
     });
 
     test("streaming extraction drains completed tool calls after their output arrives", () => {

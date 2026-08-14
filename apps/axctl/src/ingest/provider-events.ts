@@ -62,7 +62,6 @@ export interface AgentEventWrite {
     readonly role?: string | null;
     readonly text?: string | null;
     readonly textExcerpt?: string | null;
-    readonly raw?: JsonInput;
     readonly labels?: JsonInput;
     readonly metrics?: JsonInput;
 }

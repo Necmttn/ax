@@ -101,8 +101,5 @@ community/.gist-etag-cache.json
 # alchemy IaC local state (community worker) - resource state, never committed
 .alchemy/
 
-/BRIEF.md
-/REPORT.md
-
 # DuckDB dylib cache used by @ax/lib/duckdb tests (downloaded, never committed)
 vendor/duckdb/

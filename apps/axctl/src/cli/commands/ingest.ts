@@ -14,7 +14,7 @@ import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
 import { retainRecentOtel, type OtelRetentionResult } from "../../otel/retention.ts";
 import { AX_VERSION } from "../version.ts";
-import { withIngestLock } from "../../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "../../ingest/ingest-lock.ts";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../../ingest/stage/types.ts";
@@ -209,13 +209,6 @@ interface IngestCommandOpts {
     readonly claudeProject?: string;
 }
 
-/**
- * Extra grace beyond the hard ingest timeout (`AxConfig.knobs.ingestTimeoutSeconds`)
- * before a held lock is deemed stale and stolen: the owner should have
- * self-cancelled at the timeout, so anything older is genuinely dead.
- */
-const INGEST_LOCK_STALE_GRACE_MS = 60_000;
-
 /** `ax ingest-here` resumes as `ax ingest here`; everything else as-is. */
 const resumeCommand = (command: string): string =>
     command === "ingest-here" ? "ax ingest here" : `ax ${command}`;
@@ -270,6 +263,27 @@ export const formatMaintenanceSummary = (summary: MaintenanceSummary): string =>
     return `ingest: maintenance - ${parts.join("; ")}`;
 };
 
+/** One half of a `MaintenanceSummary` field pair (`otel`/`otelError`,
+ *  `blobGc`/`blobGcError`). */
+interface MaintenanceHalf<A> {
+    readonly result?: A;
+    readonly error?: string;
+}
+
+/**
+ * Run one independent maintenance half, catching its failure into
+ * `{ error }` instead of letting it fail the whole `afterWork` - each half
+ * must report its own outcome without ever taking the other down with it.
+ */
+const runMaintenanceHalf = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+): Effect.Effect<MaintenanceHalf<A>, never, R> =>
+    effect.pipe(
+        Effect.map((result): MaintenanceHalf<A> => ({ result })),
+        Effect.catch((error): Effect.Effect<MaintenanceHalf<A>> =>
+            Effect.succeed({ error: errorText(error) })),
+    );
+
 /**
  * Sessions persisted by this run so far, summed from the per-stage `counts`
  * JSON already written to `ingest_stage` rows. Feeds the FAILED verdict
@@ -304,7 +318,6 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const path = yield* Path.Path;
-        const lockPath = path.join(cfg.paths.dataDir, "ingest.lock");
         const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.
@@ -383,22 +396,13 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // logs a warn line instead of vanishing.
         const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
             Effect.gen(function* () {
-                const otel = yield* retainRecentOtel().pipe(
-                    Effect.map((result): { result?: OtelRetentionResult; error?: string } => ({ result })),
-                    Effect.catch((error): Effect.Effect<{ result?: OtelRetentionResult; error?: string }> =>
-                        Effect.succeed({ error: errorText(error) })),
-                );
+                const otel = yield* runMaintenanceHalf(retainRecentOtel());
                 if (otel.error) {
                     process.stderr.write(`axctl ${commandName}: otel retention failed - ${otel.error}\n`);
                 }
 
-                const blobGc = yield* gcFileBuckets(
-                    path.join(cfg.paths.dataDir, "buckets"),
-                    { fullIngest },
-                ).pipe(
-                    Effect.map((result): { result?: BlobGcResult; error?: string } => ({ result })),
-                    Effect.catch((error): Effect.Effect<{ result?: BlobGcResult; error?: string }> =>
-                        Effect.succeed({ error: errorText(error) })),
+                const blobGc = yield* runMaintenanceHalf(
+                    gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), { fullIngest }),
                 );
                 if (blobGc.error) {
                     process.stderr.write(`axctl ${commandName}: blob gc failed - ${blobGc.error}\n`);
@@ -425,9 +429,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // the lock goes stale rather than charging a still-busy DB.
         const outcome = yield* withIngestLock(
             {
-                lockPath,
-                command: commandName,
-                staleMs: timeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS,
+                ...ingestLockOptions(path, cfg.paths.dataDir, commandName, timeoutSeconds),
                 timeoutSeconds,
                 onBusy: (holder) =>
                     Effect.sync(() =>

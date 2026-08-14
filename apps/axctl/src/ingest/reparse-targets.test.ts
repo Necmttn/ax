@@ -37,6 +37,14 @@ describe("resolveReparseTargets", () => {
         expect(new Set(vars).size).toBe(vars.length);
         for (const v of vars) expect(v).toStartWith("AX_REDERIVE_");
     });
+
+    test("otel-spool is a known target (G: registers the otel-spool ingest stage)", () => {
+        expect(REPARSE_TARGET_ENV["otel-spool"]).toBe("AX_REDERIVE_OTEL_SPOOL");
+        const sel = resolveReparseTargets("otel-spool");
+        expect(sel.targets).toEqual(["otel-spool"]);
+        expect(sel.envVars).toEqual(["AX_REDERIVE_OTEL_SPOOL"]);
+        expect(sel.unknown).toEqual([]);
+    });
 });
 
 describe("applyReparseSelection", () => {

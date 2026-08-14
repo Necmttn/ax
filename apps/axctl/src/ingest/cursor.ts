@@ -381,7 +381,6 @@ function pushCursorToolCall(input: {
         role: "assistant",
         text: toolName,
         textExcerpt: toolName,
-        raw: rawToolPayload(input.raw),
         labels: {
             source: "cursor_state_vscdb",
             toolName,
@@ -515,15 +514,6 @@ function pushCursorMessage(input: {
         role,
         text,
         textExcerpt,
-        raw: {
-            sourceKey: input.sourceKey,
-            cursorConversationId: input.session.cursorConversationId,
-            cursorMessageId: rawId,
-            id: rawId,
-            role,
-            text,
-            timestamp: input.message.timestamp,
-        },
         labels: {
             source: "cursor_state_vscdb",
             sourceKey: input.sourceKey,
