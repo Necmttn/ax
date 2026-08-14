@@ -50,12 +50,17 @@ describe("custom DuckDB build", () => {
         expect(workflow).toContain("actions/upload-artifact@v4");
     });
 
-    test.skipIf(!process.env.AX_DUCKDB_SHELL)(
+    // Collapsed from the former AX_DUCKDB_SHELL knob onto the one CLI-binary
+    // env name (AX_DUCKDB_BIN) - see scripts/bench/duckdb-bin.ts. This test
+    // needs to name a SPECIFIC just-built shell to smoke, not "find any
+    // duckdb", so it reads the env var directly rather than through the
+    // auto-preferring duckdbBinPath() resolver.
+    test.skipIf(!process.env.AX_DUCKDB_BIN)(
         "the built shell completes the real air-gap FTS and JSON smoke test",
         () => {
             const result = spawnSync(
                 join(repoRoot, "scripts/build-duckdb.sh"),
-                ["--smoke-only", process.env.AX_DUCKDB_SHELL!],
+                ["--smoke-only", process.env.AX_DUCKDB_BIN!],
                 { cwd: repoRoot, encoding: "utf8" },
             );
 

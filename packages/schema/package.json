@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@ax/lib": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:"
   }

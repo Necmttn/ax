@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     NATURAL_KEY_RECIPES,
-    RECIPE_TODO,
+    PSEUDO_RECIPE_KEYS,
     agentEventRowId,
     derivedRowId,
     edgeRowId,
@@ -280,22 +280,19 @@ describe("append-stability property (P1-2)", () => {
     });
 });
 
-describe("NATURAL_KEY_RECIPES + RECIPE_TODO", () => {
+describe("NATURAL_KEY_RECIPES", () => {
     test("documents every id helper's table", () => {
         for (const t of ["session", "turn", "tool_call", "agent_event"]) {
             expect(NATURAL_KEY_RECIPES[t]).toBeTruthy();
         }
     });
 
-    test("the recipe rule names append-stability and bans content hashes and absolute paths", () => {
-        // The rule is documented as a module-level comment (see stable-id.ts), not
-        // a runtime string - this test pins the exported artifacts that stand in
-        // for it: a concrete recipe or an explicit TODO for every table.
-        expect(RECIPE_TODO.size).toBeGreaterThan(0);
-    });
-
-    test("no table appears in both NATURAL_KEY_RECIPES and RECIPE_TODO", () => {
-        const overlap = [...RECIPE_TODO].filter((t) => t in NATURAL_KEY_RECIPES);
-        expect(overlap).toEqual([]);
+    test("the pseudo keys are exactly the rule-describing ones, and are not table names", () => {
+        // `<edge>` / `<derived>` describe a RULE (edgeRowId / derivedRowId), not
+        // a table. Coverage lives in packages/schema (which is where the DDL
+        // is): duckdb-recipe-coverage.test.ts derives the todo set from the
+        // parsed DDL minus these keys, so nothing here mirrors a table list.
+        expect([...PSEUDO_RECIPE_KEYS].sort()).toEqual(["<derived>", "<edge>"]);
+        for (const key of PSEUDO_RECIPE_KEYS) expect(NATURAL_KEY_RECIPES[key]).toBeTruthy();
     });
 });
