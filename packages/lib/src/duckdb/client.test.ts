@@ -15,6 +15,7 @@ import {
     readResult,
 } from "./client.ts";
 import type { LibDuckDb } from "./ffi.ts";
+import { NumberFromBigIntColumn } from "./bigint-column.ts";
 import { DuckDbTypeId } from "./types.ts";
 
 const { dtest, tempDir, withDuckDb } = await duckdbTestSetup("duckdb client");
@@ -353,6 +354,74 @@ describe("DuckDb", () => {
                 const min = yield* conn.query("SELECT CAST(? AS BIGINT) AS v", [-(2n ** 63n)]);
                 expect(min.rows[0]!.v).toBe(-9223372036854775808n);
 
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // Wave-0 finding P1/P2: a VARCHAR bind goes through a NUL-terminated C
+    // string, which silently TRUNCATES at an embedded NUL - and the length-less
+    // read accessor cannot detect it on the way back out. The write side now
+    // makes that a loud typed failure instead of silent data loss.
+    dtest(
+        "refuses a VARCHAR parameter containing a NUL byte instead of silently truncating",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("CREATE TABLE t (note VARCHAR)");
+
+                const result = yield* Effect.result(conn.exec("INSERT INTO t VALUES (?)", ["a\0b"]));
+                expect(result._tag).toBe("Failure");
+                if (result._tag === "Failure") {
+                    expect(result.failure._tag).toBe("DuckDbQueryError");
+                    expect((result.failure as { message: string }).message).toMatch(/NUL byte/i);
+                }
+                // Nothing was written - the guard fired before the bind.
+                const count = yield* conn.query("SELECT count(*) AS n FROM t");
+                expect(count.rows[0]!.n).toBe(0n);
+
+                // A NUL-free string still binds fine.
+                yield* conn.exec("INSERT INTO t VALUES (?)", ["clean"]);
+                const ok = yield* conn.query("SELECT note FROM t");
+                expect(ok.rows).toEqual([{ note: "clean" }]);
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // Wave-0 finding P2: a BIGINT column decodes to `bigint`, so `queryAs` with
+    // a `Schema.Number` field must FAIL (typed), never silently lossy-convert -
+    // and `NumberFromBigIntColumn` is the sanctioned coercion for a small BIGINT.
+    dtest(
+        "queryAs over a BIGINT column: Schema.Number fails, NumberFromBigIntColumn coerces",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                // A real production BIGINT column, not the INTEGER the old test used.
+                yield* conn.exec("CREATE TABLE t (n BIGINT)");
+                yield* conn.exec("INSERT INTO t VALUES (42)");
+
+                // A number-typed field against a BIGINT column: typed failure.
+                const AsNumber = Schema.Struct({ n: Schema.Number });
+                const failed = yield* Effect.result(conn.queryAs(AsNumber, "SELECT n FROM t"));
+                expect(failed._tag).toBe("Failure");
+                if (failed._tag === "Failure") expect(failed.failure._tag).toBe("DuckDbDecodeError");
+
+                // Schema.BigInt keeps full precision.
+                const AsBigInt = Schema.Struct({ n: Schema.BigInt });
+                expect(yield* conn.queryAs(AsBigInt, "SELECT n FROM t")).toEqual([{ n: 42n }]);
+
+                // The coercion schema yields a number for an in-range value...
+                const AsCoerced = Schema.Struct({ n: NumberFromBigIntColumn });
+                expect(yield* conn.queryAs(AsCoerced, "SELECT n FROM t")).toEqual([{ n: 42 }]);
+
+                // ... and FAILS (not truncates) when the BIGINT exceeds a JS number.
+                yield* conn.exec("INSERT INTO t VALUES (9007199254740993)"); // MAX_SAFE_INTEGER + 2
+                const overflow = yield* Effect.result(
+                    conn.queryAs(AsCoerced, "SELECT n FROM t ORDER BY n"),
+                );
+                expect(overflow._tag).toBe("Failure");
+                if (overflow._tag === "Failure") expect(overflow.failure._tag).toBe("DuckDbDecodeError");
                 yield* conn.close;
             }),
         ),

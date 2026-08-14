@@ -61,6 +61,17 @@ export interface DuckDbConnection {
         sql: string,
         params?: ReadonlyArray<DuckDbParam>,
     ) => Effect.Effect<QueryResult, DuckDbQueryError | DuckDbUnsupportedTypeError>;
+    /**
+     * Decode each result row through `schema`. BIGINT CONTRACT: a DuckDB
+     * `BIGINT`/`UBIGINT` column decodes to a JS `bigint` (row-decode.ts keeps
+     * 64-bit widths as bigint so a row's TS type never depends on the value's
+     * magnitude), and the raw rows go STRAIGHT through `schema` - so a field
+     * typed `Schema.Number` against a BIGINT column FAILS with a
+     * `DuckDbDecodeError` (a bigint is not a number); it is never silently
+     * rounded. Type such a field `Schema.BigInt` to keep full precision, or
+     * `NumberFromBigIntColumn` (bigint-column.ts) to coerce to number with an
+     * out-of-safe-range failure instead of a lossy convert.
+     */
     readonly queryAs: <S extends Schema.Top>(
         schema: S,
         sql: string,
@@ -225,6 +236,9 @@ export const bindableBigInt = (value: bigint): boolean => value >= I64_MIN && va
 const bigintRangeMessage = (idx: number, value: bigint): string =>
     `parameter ${idx} (${value}) is outside the range this client can bind: DuckDB binds integers as a signed 64-bit int64 (${I64_MIN} to ${I64_MAX}), and a wider value would silently wrap. Pass it as text (and store the column as VARCHAR or HUGEINT) instead.`;
 
+const nulByteMessage = (idx: number): string =>
+    `parameter ${idx} contains a NUL byte (U+0000): this client binds VARCHAR through a NUL-terminated C string, so the value would be SILENTLY TRUNCATED at the first NUL on the way in - and the length-less read accessor cannot detect the truncation on the way back out (see readResult's fix-round-2 note). Strip or escape NUL bytes upstream before binding (writer enforcement lands with wave-2 writers, #790).`;
+
 /** Bind one prepared-statement parameter (1-based `idx`). Returns the
  *  `duckdb_state` from the underlying bind call so the caller can check it. */
 const bindParam = (lib: LibDuckDb, stmtHandle: bigint, idx: bigint, param: DuckDbParam): number => {
@@ -293,6 +307,16 @@ const runStatement = (
                 throw new DuckDbQueryError({
                     sql: sqlExcerpt(sql),
                     message: bigintRangeMessage(i + 1, param),
+                });
+            }
+            // A VARCHAR bind through a NUL-terminated C string would silently
+            // truncate at an embedded NUL. The read side documents "callers must
+            // escape NUL bytes" but nothing enforced it - make the silent
+            // truncation a loud, typed failure at the write boundary instead.
+            if (typeof param === "string" && param.includes("\0")) {
+                throw new DuckDbQueryError({
+                    sql: sqlExcerpt(sql),
+                    message: nulByteMessage(i + 1),
                 });
             }
             const bindState = bindParam(lib, stmtHandle, BigInt(i + 1), params[i]);
