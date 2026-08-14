@@ -531,7 +531,6 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             role,
             text: name,
             textExcerpt: name,
-            raw: block,
             labels: {
                 source: "claude_transcript",
                 toolName: name,
@@ -927,7 +926,6 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             role,
             text,
             textExcerpt: providerEventTextExcerpt(text),
-            raw: block,
             labels: {
                 source: "claude_transcript",
                 toolUseId: callId,
@@ -1097,7 +1095,6 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                     role: null,
                     text,
                     textExcerpt,
-                    raw: rawEntry,
                     labels: {
                         source: "claude_transcript",
                         messageKind: kind,
@@ -1130,7 +1127,6 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 role,
                 text,
                 textExcerpt,
-                raw: rawEntry,
                 labels: {
                     source: "claude_transcript",
                     messageKind: kind,

@@ -364,7 +364,6 @@ function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER)
             role: "assistant",
             text: toolName,
             textExcerpt: toolName,
-            raw: block,
             labels: {
                 source: desc.jsonlLabel,
                 toolName,
@@ -540,7 +539,6 @@ function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER)
                 role,
                 text,
                 textExcerpt,
-                raw: entry,
                 labels: {
                     source: desc.jsonlLabel,
                     messageKind,

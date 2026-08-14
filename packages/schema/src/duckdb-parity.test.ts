@@ -18,7 +18,13 @@ import {
 // Expected table/column counts. Asserted explicitly so the property can never
 // silently shrink to comparing zero (or a handful of) tables/columns.
 const EXPECTED_TABLES_COMPARED = 138;
-const EXPECTED_COLUMNS_COMPARED = 1219;
+// A7 (agent_event.raw prune): schema.surql's `agent_event.raw` field was
+// removed (ax never wrote it - buildAgentEventStatement already omitted it
+// from the CONTENT it upserts). schema.duckdb.sql's `agent_event.raw` column
+// is intentionally left in place (out of scope for that prune) and is simply
+// no longer iterated from the Surreal side, so the checked count drops by
+// exactly one.
+const EXPECTED_COLUMNS_COMPARED = 1218;
 
 // DEFINE FIELD [OVERWRITE] <name> ON [TABLE] <table> ...
 // Nested object sub-fields (e.g. measured.ratio) never match \w+ so they are

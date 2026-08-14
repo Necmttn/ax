@@ -176,7 +176,6 @@ describe("provider event writer statement builders", () => {
                     role: "user",
                     text: "Implement Task 1",
                     textExcerpt: "Implement Task 1",
-                    raw: { id: "evt-1/unsafe" },
                     labels: { source: "codex" },
                     metrics: { tokens: 4 },
                 },

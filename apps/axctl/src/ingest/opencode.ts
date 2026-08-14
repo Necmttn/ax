@@ -455,7 +455,6 @@ function processStepFinishCompactions(input: {
             role: null,
             text: null,
             textExcerpt: null,
-            raw,
             labels: {
                 source: "opencode_sqlite",
                 sourceConfidence: "derived",
@@ -524,7 +523,6 @@ function pushMessage(input: {
         role: string;
         text: string | null;
         hasToolUse?: boolean;
-        raw: unknown;
         parentProviderEventId?: string | null;
         labels: Record<string, unknown>;
         metrics?: Record<string, unknown>;
@@ -576,7 +574,6 @@ function pushMessage(input: {
         role: input.row.role,
         text: input.row.text,
         textExcerpt,
-        raw: input.row.raw,
         labels: {
             source: "opencode_sqlite",
             sessionId: input.row.session_id,
@@ -657,7 +654,6 @@ function processToolPart(input: {
         role: "assistant",
         text: toolName,
         textExcerpt: toolName,
-        raw: input.part.data,
         labels: {
             source: "opencode_sqlite",
             toolName,
@@ -810,12 +806,6 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                         created: row.created_at,
                         role,
                         text,
-                        raw: {
-                            id: row.id,
-                            sessionId: row.session_id,
-                            role: row.role,
-                            createdAt: row.created_at,
-                        },
                         labels: {},
                     },
                     session,
@@ -914,15 +904,6 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                         role,
                         text: texts.length > 0 ? texts.join("\n") : null,
                         hasToolUse: toolParts.length > 0,
-                        raw: {
-                            id: row.id,
-                            sessionId: row.session_id,
-                            data: messageData,
-                            parts: parsedParts.map((part) => ({
-                                id: part.row.id,
-                                data: part.data,
-                            })) ?? [],
-                        },
                         parentProviderEventId: stringField(messageData, "parentID"),
                         labels: {
                             model,

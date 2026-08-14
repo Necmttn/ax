@@ -68,7 +68,6 @@ export interface ClaudeSdkAppendEventPayload {
     readonly role?: string | null;
     readonly text?: string | null;
     readonly textExcerpt?: string | null;
-    readonly raw?: JsonInput;
     readonly labels?: LabelRecord | null;
     readonly metrics?: JsonInput;
 }
@@ -279,7 +278,6 @@ export const claudeSdkAppendPayloadToAgentEventBatch = (
             ...(event.role !== undefined ? { role: event.role } : {}),
             ...(event.text !== undefined ? { text: event.text } : {}),
             ...(event.textExcerpt !== undefined ? { textExcerpt: event.textExcerpt } : {}),
-            ...(event.raw !== undefined ? { raw: event.raw } : {}),
             labels: sdkEventLabels(event.labels),
             ...(event.metrics !== undefined ? { metrics: event.metrics } : {}),
         };
