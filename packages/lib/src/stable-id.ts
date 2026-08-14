@@ -141,6 +141,38 @@ export function agentEventRowId(agentSessionId: string, seq: number, providerEve
     return stableId("agent_event", [agentSessionId, seq, providerEventId ?? null]);
 }
 
+/**
+ * A git commit, keyed on `(repo, sha)` - exactly the table's own
+ * `commit_sha_uq` unique index, so the row id and the natural key can never
+ * disagree. Append-stable by construction: a sha is content-addressed by git and
+ * `repo` is the repository's stable slug, so re-deriving a longer git history
+ * rewrites every previously-seen commit to the same id.
+ *
+ * The commit `ts` is deliberately NOT a key part: the same commit re-read after
+ * a rebase-free fetch must keep its id, and a timestamp is banned anyway (see
+ * `encodePart`'s epoch-magnitude ban).
+ */
+export function commitRowId(repo: string, sha: string): string {
+    return stableId("commit", [repo, sha]);
+}
+
+/**
+ * An installed skill, keyed on its NAME alone - the table's `skill_name_uq`
+ * unique index, and the value every reader joins on (`ax skills weighted`, the
+ * recall skill picker, the `invoked` edge's target).
+ *
+ * `dir_path` is deliberately NOT a key part, on two counts: it is an absolute
+ * path (a banned key part - see the module header), and the same skill
+ * reinstalled under another root is the SAME catalogue entry, which is precisely
+ * what a name-unique index says. The name is used verbatim as the hash input -
+ * plugin-namespaced names keep their `:`, since nothing here has SurrealDB's
+ * record-id character restrictions (the `:` -> `__` encoding in
+ * `packages/lib/src/skill-id.ts` existed only for those).
+ */
+export function skillRowId(name: string): string {
+    return stableId("skill", [name]);
+}
+
 /** The provider-native row this derived row was built from: an existing
  *  graph row's own (already provider-native, already append-stable) id -
  *  never a file identity. */
@@ -189,6 +221,10 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
     turn: "session row id + provider-native turn seq",
     tool_call: "session row id + seq + (provider call id OR an explicit ordinal) - see toolCallRowId",
     agent_event: "agent_session row id + seq + provider event id (when present)",
+    commit: "repo slug + commit sha (the commit_sha_uq unique index) - see commitRowId; NEVER the commit ts",
+    skill: "the skill name alone (the skill_name_uq unique index) - see skillRowId; NEVER dir_path (absolute path)",
+    invoked: "edgeRowId('invoked', turn row id, skill row id, JSON.stringify(args)) - args discriminates two invocations of the same skill in one turn",
+    has_content: "edgeRowId('has_content', tool_call row id, content_type row id) - one classification per (tool_call, content_type) pair, so no discriminator",
     "<edge>": "edgeRowId: edge table + in_id + out_id + optional discriminator",
     "<derived>": "derivedRowId: owning session row id + source table + source row id + optional extra parts",
 };

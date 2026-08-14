@@ -4,10 +4,12 @@ import {
     NATURAL_KEY_RECIPES,
     PSEUDO_RECIPE_KEYS,
     agentEventRowId,
+    commitRowId,
     derivedRowId,
     edgeRowId,
     encodeNaturalKey,
     sessionRowId,
+    skillRowId,
     stableId,
     toolCallRowId,
     turnRowId,
@@ -280,9 +282,49 @@ describe("append-stability property (P1-2)", () => {
     });
 });
 
+describe("the recall vertical's tables (wave 1 wires writers for all six)", () => {
+    test("commit ids key on (repo, sha) - the table's own unique index", () => {
+        expect(commitRowId("ax", "aaa1111")).toBe(commitRowId("ax", "aaa1111"));
+        // Same sha in a different repo is a different row (commit_sha_uq is the
+        // PAIR), and a different sha in the same repo is too.
+        expect(commitRowId("other", "aaa1111")).not.toBe(commitRowId("ax", "aaa1111"));
+        expect(commitRowId("ax", "bbb2222")).not.toBe(commitRowId("ax", "aaa1111"));
+    });
+
+    test("skill ids key on the name alone, so a moved install is the same catalogue row", () => {
+        expect(skillRowId("duckdb-ops")).toBe(skillRowId("duckdb-ops"));
+        expect(skillRowId("pancakes")).not.toBe(skillRowId("duckdb-ops"));
+        // Plugin-namespaced names are ordinary strings here - no `:`-encoding, so
+        // nothing can collide two distinct plugin skills onto one id.
+        expect(skillRowId("superpowers:tdd")).not.toBe(skillRowId("superpowers__tdd"));
+    });
+
+    test("invoked edges discriminate on args, so one turn can invoke a skill twice", () => {
+        const turn = turnRowId("session-a", 1);
+        const skill = skillRowId("duckdb-ops");
+        const first = edgeRowId("invoked", turn, skill, JSON.stringify({ path: "a" }));
+        const second = edgeRowId("invoked", turn, skill, JSON.stringify({ path: "b" }));
+        expect(first).not.toBe(second);
+        expect(edgeRowId("invoked", turn, skill, JSON.stringify({ path: "a" }))).toBe(first);
+    });
+
+    test("has_content edges key on the (tool_call, content_type) pair", () => {
+        const call = toolCallRowId("session-a", 2, { callId: "toolu_01" });
+        const edge = edgeRowId("has_content", call, "binary");
+        expect(edgeRowId("has_content", call, "binary")).toBe(edge);
+        expect(edgeRowId("has_content", call, "code")).not.toBe(edge);
+    });
+
+    test("every one of the six has a concrete recipe (none left in the derived todo set)", () => {
+        for (const table of ["session", "turn", "commit", "skill", "invoked", "has_content"]) {
+            expect(NATURAL_KEY_RECIPES[table], `${table} has no recipe`).toBeTruthy();
+        }
+    });
+});
+
 describe("NATURAL_KEY_RECIPES", () => {
     test("documents every id helper's table", () => {
-        for (const t of ["session", "turn", "tool_call", "agent_event"]) {
+        for (const t of ["session", "turn", "tool_call", "agent_event", "commit", "skill"]) {
             expect(NATURAL_KEY_RECIPES[t]).toBeTruthy();
         }
     });
