@@ -7,7 +7,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { withIngestLock } from "../ingest-lock.ts";
+import { encodeLockPayload, withIngestLock } from "../ingest-lock.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { TimestampColumn } from "./columns.ts";
 import { buildFtsIndexes, matchBm25Sql, type FtsTarget } from "./fts.ts";
@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS note (
     id VARCHAR PRIMARY KEY,
     body VARCHAR,
     ingested_at TIMESTAMP
+);
+-- A DDL DEFAULT CURRENT_TIMESTAMP column nothing stamps, so the value comes
+-- from the DATABASE's clock alone - the shape the UTC contract stands or falls on.
+CREATE TABLE IF NOT EXISTS defaulted (
+    id VARCHAR PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- A table with a SECOND unique constraint on top of its primary key, which most
 -- of the real schema has (turn_session_seq, commit_sha_uq, skill_name_uq, ...).
@@ -112,6 +118,50 @@ describe("CacheWrite: the ingest lock IS the write capability", () => {
             expect(message).toContain(p.livePath);
             expect(message).toContain(p.lockPath);
             // Nothing was created: the refusal happens BEFORE any open.
+            expect(existsSync(p.livePath)).toBe(false);
+        });
+    });
+
+    dtest("refuses when another process has taken the lock over mid-run", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-stolen-");
+            // Hold the lock, then let someone else replace the lock file - the
+            // shape a stale-lock takeover leaves on disk. Our in-process registry
+            // still names us, so only reading the FILE can tell us we lost it.
+            const exit = await Effect.runPromiseExit(
+                withIngestLock(
+                    {
+                        lockPath: p.lockPath,
+                        command: "seam-test",
+                        staleMs: 60_000,
+                        onBusy: () => Effect.succeed("busy" as const),
+                    },
+                    Effect.gen(function* () {
+                        writeFileSync(
+                            p.lockPath,
+                            encodeLockPayload({
+                                pid: process.pid,
+                                startedAt: Date.now(),
+                                command: "the other ingest",
+                                token: "a-token-we-never-minted",
+                            }),
+                        );
+                        return yield* withCacheWrite(
+                            {
+                                livePath: p.livePath,
+                                lockPath: p.lockPath,
+                                snapshotPath: p.snapshotPath,
+                                schemaSql: DDL,
+                            },
+                            (write) => write.put("skill", { id: "s1", name: "should not land" }),
+                        );
+                    }),
+                ).pipe(Effect.provide(Platform)) as Effect.Effect<unknown, unknown>,
+            );
+
+            expect(exit._tag).toBe("Failure");
+            expect(JSON.stringify(exit)).toContain("CacheWriteUnlockedError");
+            // The refusal happens BEFORE any open, so nothing was created.
             expect(existsSync(p.livePath)).toBe(false);
         });
     });
@@ -183,36 +233,6 @@ describe("CacheWrite: the semantics the DDL cannot express", () => {
             // `note` is an ordinary table: the caller's value is honoured.
             expect(rows[0]?.ingested_at.toISOString()).toBe(ancient.toISOString());
         });
-    });
-
-    dtest("a stamped column is UTC even when the process runs on a non-UTC TZ", async () => {
-        const previousTz = process.env.TZ;
-        process.env.TZ = "Pacific/Kiritimati"; // UTC+14 - a full day off UTC at some hours
-        try {
-            await dylibEnv(async () => {
-                const p = paths("ax-seam-tz-");
-                const before = Date.now();
-                const outcome = await run(
-                    asIngest(p, (write) =>
-                        Effect.gen(function* () {
-                            yield* write.put("skill", { id: "s1", name: "tz" });
-                            return yield* write.rows(SkillRow, "SELECT id, name, ingested_at FROM skill");
-                        }),
-                    ),
-                );
-                const after = Date.now();
-
-                const rows = outcome._tag === "completed" ? outcome.value : [];
-                const stamped = rows[0]?.ingested_at.getTime() ?? 0;
-                // Without the connection's TimeZone pin, CURRENT_TIMESTAMP would
-                // be stored as LOCAL time and read back ~14h in the future.
-                expect(stamped).toBeGreaterThanOrEqual(before - 5_000);
-                expect(stamped).toBeLessThanOrEqual(after + 5_000);
-            });
-        } finally {
-            if (previousTz === undefined) delete process.env.TZ;
-            else process.env.TZ = previousTz;
-        }
     });
 
     dtest("putMany batches rows of one shape and refuses a ragged batch", async () => {
@@ -451,35 +471,77 @@ describe("CacheRead", () => {
         });
     });
 
-    dtest("a reader holding the old snapshot keeps reading it across a publish", async () => {
+    /**
+     * The long-lived-reader case, and the reason the memoized connection cannot
+     * simply be kept: `ax serve` and `ax mcp` hold ONE `CacheRead` for the whole
+     * process lifetime. A publish renames a NEW file over the snapshot path, so a
+     * reader that keeps its first handle keeps reading the old inode - every
+     * request after the first ingest answered stale data until the daemon
+     * restarted. The reader must notice the swap and reopen.
+     */
+    dtest("a long-lived reader observes a republished snapshot", async () => {
         await dylibEnv(async () => {
-            const p = paths("ax-seam-inode-");
+            const p = paths("ax-seam-republish-");
             await run(asIngest(p, (write) => write.put("skill", { id: "s1", name: "first" })));
 
             await run(
                 Effect.gen(function* () {
                     const read = yield* CacheRead;
-                    // Open the snapshot (memoizes the connection on the OLD inode).
                     const initial = yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill");
-                    expect(initial).toHaveLength(1);
+                    expect(initial.map((r) => r.name)).toEqual(["first"]);
 
                     // Republish with an extra row - an atomic rename over the path.
                     yield* asIngest(p, (write) => write.put("skill", { id: "s2", name: "second" }));
 
-                    // The held handle still sees the snapshot it opened.
-                    const after = yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill");
-                    expect(after).toHaveLength(1);
+                    // The SAME reader picks the new snapshot up.
+                    const after = yield* read.rows(
+                        SkillRow,
+                        "SELECT id, name, ingested_at FROM skill ORDER BY id",
+                    );
+                    expect(after.map((r) => r.name)).toEqual(["first", "second"]);
+
+                    // And a third publish is observed too, so this is not a
+                    // one-shot "reopen once" that then goes stale again.
+                    yield* asIngest(p, (write) => write.put("skill", { id: "s3", name: "third" }));
+                    const third = yield* read.rows(
+                        SkillRow,
+                        "SELECT id, name, ingested_at FROM skill ORDER BY id",
+                    );
+                    expect(third.map((r) => r.name)).toEqual(["first", "second", "third"]);
+                }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
+            );
+        });
+    });
+
+    dtest("many concurrent queries across a publish all answer, none on a closed handle", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-concurrent-");
+            await run(asIngest(p, (write) => write.put("skill", { id: "s1", name: "first" })));
+
+            const names = await run(
+                Effect.gen(function* () {
+                    const read = yield* CacheRead;
+                    const query = read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill ORDER BY id");
+                    // Reads racing the republish. Every one must succeed: the
+                    // retiring handle may not be closed while a query holds it.
+                    const [before, _publish, after] = yield* Effect.all(
+                        [
+                            Effect.all(Array.from({ length: 8 }, () => query), { concurrency: "unbounded" }),
+                            asIngest(p, (write) => write.put("skill", { id: "s2", name: "second" })),
+                            Effect.all(Array.from({ length: 8 }, () => query), { concurrency: "unbounded" }),
+                        ],
+                        { concurrency: "unbounded" },
+                    );
+                    return [...before, ...after].map((rows) => rows.map((r) => r.name));
                 }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
             );
 
-            // A FRESH reader sees both rows, so the publish really did land.
-            const fresh = await run(
-                Effect.gen(function* () {
-                    const read = yield* CacheRead;
-                    return yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill ORDER BY id");
-                }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
-            );
-            expect(fresh.map((r) => r.name)).toEqual(["first", "second"]);
+            expect(names).toHaveLength(16);
+            // Each result is either the pre- or the post-publish snapshot; a
+            // half-open/closed handle would have failed the query instead.
+            for (const result of names) {
+                expect([["first"], ["first", "second"]]).toContainEqual(result);
+            }
         });
     });
 

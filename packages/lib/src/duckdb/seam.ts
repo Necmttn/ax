@@ -4,8 +4,9 @@
  *
  *   READS  ({@link CacheRead})  open the PUBLISHED SNAPSHOT, read-only. They
  *          never touch the live database, so an ingest writing at full speed
- *          cannot slow a query down, and a reader holding the old snapshot keeps
- *          reading it uninterrupted across a publish.
+ *          cannot slow a query down; a statement in flight when a publish lands
+ *          finishes against the snapshot it started on, and the next statement
+ *          picks the new one up (see {@link CacheReadLayer}).
  *   WRITES ({@link withCacheWrite}) open the live database read-write, and ONLY
  *          inside ingest, under the ingest lock. Not by convention: the write
  *          constructor asks `@ax/lib/ingest-lock` whether this process holds the
@@ -17,13 +18,12 @@
  * WHAT THE SEAM OWNS THAT THE DDL CANNOT SAY. Three things the schema file is
  * structurally unable to express, so they live here or nowhere:
  *
- *  1. THE UTC CLOCK CHECK on every write connection (`assertUtcClock`). The DDL
- *     declares every TIMESTAMP column to be UTC, and both its
- *     `DEFAULT CURRENT_TIMESTAMP` columns and the stamped columns below take
- *     their value from the DATABASE's clock. If that clock were not UTC they
- *     would silently record local time. Note this is a CHECK, not a `SET`: see
- *     `assertUtcClock` for the measurement showing why `SET TimeZone='UTC'` is
- *     both unnecessary and actively broken against the dylib ax ships.
+ *  1. THE UTC PIN on every connection (`pinUtc`), plus a clock CHECK on every
+ *     write connection (`assertUtcClock`). The DDL declares every TIMESTAMP
+ *     column to be UTC, and both its `DEFAULT CURRENT_TIMESTAMP` columns and the
+ *     stamped columns below take their value from the DATABASE's clock. If that
+ *     clock were not UTC they would silently record local time. Pin first, then
+ *     verify - see `pinUtc` for the measurement behind that order.
  *  2. {@link WRITE_STAMPED_COLUMNS}. Surreal's `VALUE time::now()` OVERWROTE the
  *     caller's value on every create AND every update. A DuckDB `DEFAULT` only
  *     fires when an INSERT omits the column, and does nothing at all on UPDATE,
@@ -41,7 +41,9 @@
  * the dylib and the snapshot and remembers them. A FAILURE is deliberately not
  * remembered: the common shape is a daemon that started before the first ingest,
  * and it must pick the snapshot up once it appears rather than reporting "no
- * cache" for the rest of its life.
+ * cache" for the rest of its life. The same argument applies AFTER the first
+ * success - a memoized connection goes stale on the next publish - which is why
+ * the memo is keyed on the snapshot's file identity rather than held forever.
  *
  * RULING R6: runtime module under `packages/lib/src/` - `node:fs` / `node:path`
  * are banned; filesystem access goes through `FileSystem.FileSystem`.
@@ -54,6 +56,7 @@ import {
     snapshotPath as defaultSnapshotPath,
     type DuckDbConnection,
     type DuckDbLiveOptions,
+    type DuckDbService,
 } from "./client.ts";
 import {
     DuckDbDecodeError,
@@ -222,30 +225,44 @@ export const utcClockOk = (dbNow: Date, jsNow: Date): boolean =>
     Math.abs(dbNow.getTime() - jsNow.getTime()) <= UTC_CLOCK_TOLERANCE_MS;
 
 /**
+ * Pin this connection's session time zone to UTC. Best-effort by design, and
+ * ALWAYS followed by {@link assertUtcClock} on the write path: the pin is the
+ * fix, the assert is the proof.
+ *
+ * WHY BOTH, with the measurement. DuckDB's `CURRENT_TIMESTAMP` is a TIMESTAMPTZ,
+ * and storing it into a naive TIMESTAMP column converts it through the session's
+ * `TimeZone`. `TimeZone` is a setting the `icu` extension registers, so the two
+ * builds ax runs against behave differently - measured under `TZ=Asia/Makassar`
+ * (UTC+8), reading back `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` and a DDL
+ * `DEFAULT CURRENT_TIMESTAMP` column:
+ *
+ *   - OFFICIAL v1.5.5 build (icu linked - what `vendor/duckdb/` downloads and
+ *     what CI runs): `TimeZone` IS in the catalog and defaults to the HOST zone.
+ *     Unpinned, both values land 480 minutes off - local wall time in a column
+ *     the DDL declares UTC. `SET TimeZone='UTC'` succeeds and brings both to 0.
+ *   - ax's own build (`scripts/build-duckdb.sh`, only `json` + `fts`): the
+ *     statement FAILS with "Setting with name TimeZone is not in the catalog",
+ *     and without icu DuckDB has no time-zone database at all, so it renders
+ *     TIMESTAMPTZ in UTC unconditionally - already correct, nothing to pin.
+ *
+ * So the failure is ignored: on the only build that rejects the statement, the
+ * property it would have established already holds. Nothing is assumed either
+ * way - `assertUtcClock` then measures the PROPERTY ("what the database stores
+ * as now() is UTC now") on every write connection, so a build or a setting that
+ * defeats the pin is a loud typed refusal rather than silent local timestamps.
+ *
+ * RETRACTION: an earlier version of this module asserted WITHOUT pinning, on the
+ * claim that `SET TimeZone='UTC'` was "unnecessary and actively broken". That was
+ * measured against ax's own icu-less build only. Against the official build the
+ * statement works and IS necessary, and asserting alone turned a wrong timestamp
+ * into a refusal of every single write on any non-UTC host.
+ */
+const pinUtc = (conn: DuckDbConnection): Effect.Effect<void> =>
+    Effect.ignore(conn.exec("SET TimeZone='UTC'"));
+
+/**
  * Prove the database's own clock lands in UTC before writing anything with it.
- *
- * The DDL declares every TIMESTAMP column to be UTC, and both its
- * `DEFAULT CURRENT_TIMESTAMP` columns and {@link WRITE_STAMPED_COLUMNS} take
- * their value from the DATABASE's clock, not this process's. DuckDB's
- * `CURRENT_TIMESTAMP` is a TIMESTAMPTZ, and storing it into a naive TIMESTAMP
- * column converts it using the session's `TimeZone` - so if that were ever not
- * UTC, every one of those columns would silently record local time and nothing
- * downstream could tell.
- *
- * The obvious guard - `SET TimeZone='UTC'` on every connection - is WRONG here,
- * and measurably so: `TimeZone` is a setting the `icu` extension registers, and
- * the dylib ax ships is built with only `json` + `fts`, so the statement fails
- * outright with "Setting with name TimeZone is not in the catalog". Without icu
- * DuckDB has no time-zone database at all and renders TIMESTAMPTZ in UTC
- * unconditionally: verified against the shipped build by storing
- * `CURRENT_TIMESTAMP` under `TZ=Pacific/Kiritimati` (UTC+14) and under `TZ=UTC`
- * and getting the same instant, matching the host's UTC clock.
- *
- * So the guarantee comes from how the dylib is BUILT, which is exactly the kind
- * of guarantee that should be checked rather than assumed: a future build that
- * links icu (for `AT TIME ZONE` support, say) on a machine whose TZ is not UTC
- * would silently reintroduce the bug. This asserts the PROPERTY - "what the
- * database stores as now() is UTC now" - instead of trusting the mechanism.
+ * Runs AFTER {@link pinUtc}, so a failure here means the pin did not take.
  */
 const assertUtcClock = (
     conn: DuckDbConnection,
@@ -276,23 +293,29 @@ const assertUtcClock = (
                     `refusing to write: the database stores CURRENT_TIMESTAMP as ${dbNow.toISOString()} while this ` +
                     `process's UTC clock reads ${jsNow.toISOString()} - a gap of ` +
                     `${Math.round((dbNow.getTime() - jsNow.getTime()) / 60_000)} minutes. Every TIMESTAMP column in ` +
-                    "this schema is declared UTC, so writing now would silently store local time. This almost " +
-                    "certainly means the libduckdb build links the icu extension and its TimeZone setting is not " +
-                    "UTC; ax's own build (scripts/build-duckdb.sh) links only json + fts, which pins DuckDB to UTC.",
+                    "this schema is declared UTC, so writing now would silently store local time. This connection " +
+                    "was already pinned with `SET TimeZone='UTC'` (see pinUtc), so the gap means either that " +
+                    "statement did not take against this libduckdb build or the host clock itself is wrong.",
             });
         }
     });
 
-/** The read half of the service, over an already-resolved connection getter. */
-const readerOver = (
-    connect: Effect.Effect<DuckDbConnection, CacheUnavailableError>,
-    path: string,
-): CacheReadService => {
+/**
+ * Borrow the connection for the duration of ONE statement. The read layer swaps
+ * connections underneath (see {@link CacheReadLayer}), so a statement must hold
+ * the handle it was issued against rather than re-resolving it.
+ */
+type WithConnection = <A, E, R>(
+    use: (conn: DuckDbConnection) => Effect.Effect<A, E, R>,
+) => Effect.Effect<A, E | CacheUnavailableError, R>;
+
+/** The read half of the service, over a connection-borrowing combinator. */
+const readerOver = (withConnection: WithConnection, path: string): CacheReadService => {
     const raw: CacheReadService["raw"] = (sql, params) =>
-        Effect.flatMap(connect, (conn) => conn.query(sql, params));
+        withConnection((conn) => conn.query(sql, params));
 
     const rows: CacheReadService["rows"] = (schema, sql, params) =>
-        Effect.flatMap(connect, (conn) => conn.queryAs(schema, sql, params));
+        withConnection((conn) => conn.queryAs(schema, sql, params));
 
     const first = <S extends Schema.Top>(
         schema: S,
@@ -312,8 +335,60 @@ export interface CacheReadOptions extends DuckDbLiveOptions {
 }
 
 /**
+ * One open snapshot, plus the file identity it was opened on and the number of
+ * statements currently running against it.
+ */
+interface SnapshotHandle {
+    readonly conn: DuckDbConnection;
+    /** `dev:ino:size:mtime` of the file this connection actually opened. */
+    readonly identity: string;
+    /** Statements in flight. A retired handle is closed when this reaches 0. */
+    inFlight: number;
+    /** A newer snapshot has been published and opened; this one is on its way out. */
+    retired: boolean;
+}
+
+/**
+ * The published snapshot's FILE IDENTITY, or `null` when it cannot be read
+ * (removed, permissions, a filesystem that will not answer).
+ *
+ * `ino` is the load-bearing part: a publish `rename`s a NEW file over the path,
+ * so the inode changes even when size and mtime happen to coincide. Size and
+ * mtime ride along for filesystems that do not report an inode.
+ */
+const snapshotIdentity = (
+    fs: FileSystem.FileSystem,
+    path: string,
+): Effect.Effect<string | null> =>
+    fs.stat(path).pipe(
+        Effect.map((info) => {
+            const ino = Option.getOrElse(info.ino, () => 0);
+            const mtime = Option.match(info.mtime, { onNone: () => 0, onSome: (d) => d.getTime() });
+            return `${info.dev}:${ino}:${info.size}:${mtime}`;
+        }),
+        Effect.orElseSucceed(() => null),
+    );
+
+/**
  * A `CacheRead` over the published snapshot. Opens nothing until the first
  * query; memoizes the open on SUCCESS only (see the module header).
+ *
+ * AND REOPENS WHEN THE SNAPSHOT IS REPUBLISHED. A publish renames a new file
+ * over the snapshot path, so a connection held across it keeps reading the OLD
+ * inode - and `ax serve` / `ax mcp` hold ONE `CacheRead` for the whole process
+ * lifetime, so every request after the first ingest answered stale data until
+ * the daemon restarted. Each statement therefore checks the file identity first
+ * (one `stat`, ~tens of microseconds against a >100ms query budget) and reopens
+ * when it changed.
+ *
+ * The old connection is NOT closed at that moment: a statement already running
+ * against it would get "the connection is closed" instead of its rows. It is
+ * RETIRED and closed when its last in-flight statement lets go - which is also
+ * why a statement borrows its handle for its whole duration rather than
+ * re-resolving the current one mid-flight.
+ *
+ * A snapshot that cannot be `stat`ed (a publish's rename window, a removed file)
+ * keeps the current handle rather than tearing a working reader down.
  */
 export const CacheReadLayer = (options?: CacheReadOptions): Layer.Layer<CacheRead> =>
     Layer.effect(CacheRead)(
@@ -323,47 +398,109 @@ export const CacheReadLayer = (options?: CacheReadOptions): Layer.Layer<CacheRea
             const liveOptions: DuckDbLiveOptions =
                 options?.assetPath === undefined ? {} : { assetPath: options.assetPath };
 
-            // Plain mutable cells rather than a Ref: everything that reads or
-            // writes them happens inside one synchronous statement under the
-            // gate below, so there is no interleaving to protect against, and a
-            // Ref would only obscure that the finalizer needs to see them.
-            let conn: DuckDbConnection | null = null;
-            let closeLib: (() => void) | null = null;
-            // One permit, so a burst of concurrent first-queries opens the
-            // database ONCE instead of racing N dylib loads.
+            // Plain mutable cells rather than a Ref: every read/write of them
+            // below happens inside one synchronous statement (never straddling a
+            // yield), and a Ref would only obscure that the finalizer needs to
+            // see them.
+            let lib: { readonly db: DuckDbService; readonly close: () => void } | null = null;
+            let current: SnapshotHandle | null = null;
+            const retiring = new Set<SnapshotHandle>();
+            // One permit, so a burst of concurrent first-queries (or of queries
+            // that all notice the same new snapshot) opens the database ONCE
+            // instead of racing N opens.
             const gate = Semaphore.makeUnsafe(1);
 
             yield* Effect.addFinalizer(() =>
                 Effect.gen(function* () {
-                    if (conn !== null) yield* conn.close;
-                    if (closeLib !== null) closeLib();
+                    for (const handle of retiring) yield* handle.conn.close;
+                    retiring.clear();
+                    if (current !== null) yield* current.conn.close;
+                    if (lib !== null) lib.close();
                 }),
             );
 
-            const openOnce = Effect.gen(function* () {
-                if (conn !== null) return conn;
-                const opened = yield* openDuckDbService(fs, liveOptions).pipe(
-                    Effect.mapError(toUnavailable(path)),
-                );
-                const connection = yield* opened.db.open(path, { readOnly: true }).pipe(
-                    // Do not leak the dylib handle when the database itself is
-                    // the thing that will not open - the overwhelmingly common
-                    // case, since "no snapshot yet" lands here.
-                    Effect.tapError(() => Effect.sync(opened.close)),
-                    Effect.mapError(toUnavailable(path)),
-                );
-                conn = connection;
-                closeLib = opened.close;
-                return connection;
-            });
+            /** Close a retired handle once nothing is reading through it. */
+            const closeIfIdle = (handle: SnapshotHandle): Effect.Effect<void> =>
+                Effect.suspend(() => {
+                    if (!handle.retired || handle.inFlight > 0) return Effect.void;
+                    retiring.delete(handle);
+                    return handle.conn.close;
+                });
 
-            const connect: Effect.Effect<DuckDbConnection, CacheUnavailableError> = Effect.suspend(() =>
-                // Fast path: already open, no permit needed. Re-checked inside
-                // the permit because two fibers can both miss it here.
-                conn !== null ? Effect.succeed(conn) : gate.withPermits(1)(openOnce),
+            /** The dylib, loaded once. A load FAILURE is not remembered (D5). */
+            const openedLib = Effect.suspend(() =>
+                lib !== null
+                    ? Effect.succeed(lib)
+                    : openDuckDbService(fs, liveOptions).pipe(
+                          Effect.mapError(toUnavailable(path)),
+                          Effect.tap((opened) => Effect.sync(() => (lib = opened))),
+                      ),
             );
 
-            return readerOver(connect, path);
+            const openSnapshot = (identity: string | null) =>
+                Effect.gen(function* () {
+                    const opened = yield* openedLib;
+                    const conn = yield* opened.db.open(path, { readOnly: true }).pipe(
+                        Effect.mapError(toUnavailable(path)),
+                    );
+                    // Pin the session zone on readers too: an icu-linked build
+                    // otherwise evaluates CURRENT_TIMESTAMP (and any comparison
+                    // against it) at LOCAL wall time - see `pinUtc`.
+                    yield* pinUtc(conn);
+                    // Re-stat AFTER the open when the pre-check could not answer,
+                    // so the handle always carries the identity it really opened.
+                    const opened_identity = identity ?? (yield* snapshotIdentity(fs, path));
+                    return {
+                        conn,
+                        identity: opened_identity ?? "unknown",
+                        inFlight: 0,
+                        retired: false,
+                    } satisfies SnapshotHandle;
+                });
+
+            /** Claim a handle for one statement, reopening if the file changed. */
+            const claim: Effect.Effect<SnapshotHandle, CacheUnavailableError> = Effect.gen(function* () {
+                const identity = yield* snapshotIdentity(fs, path);
+                const open = current;
+                // Fast path: the snapshot on disk is the one we have open.
+                // Re-checked under the permit, because two fibers can both miss.
+                if (open !== null && (identity === null || identity === open.identity)) {
+                    open.inFlight += 1;
+                    return open;
+                }
+                return yield* gate.withPermits(1)(
+                    Effect.gen(function* () {
+                        const held = current;
+                        const fresh = yield* snapshotIdentity(fs, path);
+                        if (held !== null && (fresh === null || fresh === held.identity)) {
+                            held.inFlight += 1;
+                            return held;
+                        }
+                        // Opened BEFORE retiring the old handle, so a failed
+                        // reopen leaves the working reader exactly as it was.
+                        const handle = yield* openSnapshot(fresh);
+                        if (held !== null) {
+                            held.retired = true;
+                            retiring.add(held);
+                            yield* closeIfIdle(held);
+                        }
+                        current = handle;
+                        handle.inFlight += 1;
+                        return handle;
+                    }),
+                );
+            });
+
+            const release = (handle: SnapshotHandle): Effect.Effect<void> =>
+                Effect.suspend(() => {
+                    handle.inFlight -= 1;
+                    return closeIfIdle(handle);
+                });
+
+            const withConnection: WithConnection = (use) =>
+                Effect.acquireUseRelease(claim, (handle) => use(handle.conn), release);
+
+            return readerOver(withConnection, path);
         }),
     ).pipe(Layer.provide(BunFileSystem.layer));
 
@@ -427,6 +564,7 @@ export const withCacheWrite = <A, E, R>(
             ),
             (conn) =>
                 Effect.gen(function* () {
+                    yield* pinUtc(conn);
                     yield* assertUtcClock(conn, options.livePath);
                     if (options.schemaSql !== null) yield* conn.exec(options.schemaSql);
 
@@ -458,7 +596,10 @@ const writerOver = (
     livePath: string,
     target: string,
 ): CacheWriteService => {
-    const reader = readerOver(Effect.succeed(conn), target);
+    // The writer owns exactly one connection for its whole lifetime, so
+    // "borrowing" it is just calling with it - no identity check, no reopen: a
+    // writer must keep reading the LIVE database it is writing.
+    const reader = readerOver((use) => use(conn), target);
 
     const exec: CacheWriteService["exec"] = (sql, params) => conn.exec(sql, params);
 
