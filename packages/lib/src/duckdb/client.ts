@@ -859,6 +859,61 @@ const openLibOrFail = (dylibPath: string): Effect.Effect<LibDuckDb, DuckDbDylibE
     });
 
 /**
+ * An open `DuckDbService` plus the function that releases the dylib behind it.
+ * Scope-free ON PURPOSE - see {@link openDuckDbService}.
+ */
+export interface OpenedDuckDb {
+    readonly db: DuckDbService;
+    /** Release the `dlopen` handle. Idempotent-ish and never throws: an
+     *  unloadable dylib must not fail a teardown. */
+    readonly close: () => void;
+}
+
+const openedFrom = (lib: LibDuckDb, fs: FileSystem.FileSystem): OpenedDuckDb => ({
+    db: makeService(lib, fs),
+    close: () => {
+        try {
+            lib.close();
+        } catch {
+            /* an unloadable dylib must not fail teardown */
+        }
+    },
+});
+
+/**
+ * Open libduckdb and build the service over it, WITHOUT a `Scope`.
+ *
+ * Every other constructor here is a `Layer`, which is right for a program that
+ * knows at startup that it needs a database. The read seam does not: it must be
+ * safe to put in a long-lived layer (`ax serve`, `ax mcp`) on a machine with no
+ * dylib and no cache yet, and only pay for - and only fail on - the first query
+ * that actually arrives. A layer cannot express that, because `Layer.effect`
+ * runs eagerly at provide time. So the seam holds THIS, calls it lazily, and
+ * calls `close` from its own layer finalizer.
+ *
+ * `fs` is passed in rather than required, so the result has `R = never` and can
+ * be called from inside a service method.
+ */
+export const openDuckDbService = (
+    fs: FileSystem.FileSystem,
+    options?: DuckDbLiveOptions,
+): Effect.Effect<OpenedDuckDb, DuckDbDylibError> =>
+    Effect.gen(function* () {
+        const assetPath = options?.assetPath ?? undefined;
+        const dylibPath = yield* resolveDylibPath(assetPath === undefined ? {} : { assetPath }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+        );
+        return yield* openDuckDbServiceAt(fs, dylibPath);
+    });
+
+/** {@link openDuckDbService} with the dylib path already decided. */
+export const openDuckDbServiceAt = (
+    fs: FileSystem.FileSystem,
+    dylibPath: string,
+): Effect.Effect<OpenedDuckDb, DuckDbDylibError> =>
+    Effect.map(openLibOrFail(dylibPath), (lib) => openedFrom(lib, fs));
+
+/**
  * The one place a `DuckDb` layer is built, over whatever effect produces the
  * `LibDuckDb`.
  *
