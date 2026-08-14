@@ -2,29 +2,25 @@
 /**
  * Acceptance: the DDL loads clean into a FRESH DuckDB.
  *
- * Uses a real duckdb binary when one is reachable ($AX_DUCKDB_BIN, then PATH).
- * With no binary the load cannot be proven, so the test SKIPS loudly rather
- * than passing vacuously - the structural suite in duckdb-schema.test.ts is
- * what still runs everywhere.
+ * Uses a real duckdb binary when one is reachable - the custom static build
+ * (`DUCKDB_DIST_DIR`/`<repoRoot>/dist/duckdb`), then `$AX_DUCKDB_BIN`, then
+ * PATH; see `scripts/bench/duckdb-bin.ts` (the one shared resolver, also used
+ * by scripts/bench/run.ts and scripts/build-duckdb.test.ts). With no binary
+ * the load cannot be proven, so the test SKIPS loudly rather than passing
+ * vacuously - the structural suite in duckdb-schema.test.ts is what still
+ * runs everywhere.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { duckdbBinPath } from "../../../scripts/bench/duckdb-bin.ts";
 import { parseDuckdbTables } from "./duckdb-ddl.ts";
 
 const DUCKDB_SCHEMA_PATH = fileURLToPath(new URL("./schema.duckdb.sql", import.meta.url));
 
-const resolveDuckdb = (): string | null => {
-    const fromEnv = process.env.AX_DUCKDB_BIN;
-    if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
-    const which = Bun.spawnSync(["which", "duckdb"]);
-    const path = new TextDecoder().decode(which.stdout).trim();
-    return which.exitCode === 0 && path.length > 0 ? path : null;
-};
-
-const duckdb = resolveDuckdb();
+const duckdb = duckdbBinPath();
 
 /** F3: create a fresh `mkdtemp` dir, hand `body` the `cache.duckdb` path
  *  inside it, and remove the dir afterward regardless of outcome - every

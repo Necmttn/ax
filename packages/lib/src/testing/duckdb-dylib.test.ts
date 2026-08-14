@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     claimDownloadSentinel,
+    libFileName,
     releaseDownloadSentinel,
     repoRootFrom,
     resolveTestDylib,
+    vendorDir,
 } from "./duckdb-dylib.ts";
 
 describe("resolveTestDylib", () => {
@@ -30,6 +32,43 @@ describe("resolveTestDylib", () => {
         } finally {
             if (prev === undefined) delete process.env.AX_DUCKDB_DYLIB;
             else process.env.AX_DUCKDB_DYLIB = prev;
+        }
+    });
+});
+
+describe("custom-build priority", () => {
+    test("prefers the custom-built artifact over the vendored download", async () => {
+        const root = repoRootFrom(import.meta.dir);
+        if (!root.ok) throw new Error("expected to find the repo root from the test file's location");
+
+        // Prove a WIN over an existing vendor copy, not just its absence.
+        // Never overwrite real vendor bytes: only create a fake vendor file
+        // when one is not already there, and only remove what we created.
+        const vendorFile = join(vendorDir(root.dir), libFileName());
+        const vendorAlreadyExisted = existsSync(vendorFile);
+        if (!vendorAlreadyExisted) {
+            mkdirSync(vendorDir(root.dir), { recursive: true });
+            writeFileSync(vendorFile, "fake-vendor-dylib-for-priority-test");
+        }
+
+        const distDir = mkdtempSync(join(tmpdir(), "ax-duckdb-dist-"));
+        const customFile = join(distDir, libFileName());
+        writeFileSync(customFile, "fake-custom-dylib-for-priority-test");
+
+        const prevDylib = process.env.AX_DUCKDB_DYLIB;
+        const prevDist = process.env.DUCKDB_DIST_DIR;
+        delete process.env.AX_DUCKDB_DYLIB;
+        process.env.DUCKDB_DIST_DIR = distDir;
+        try {
+            const found = await resolveTestDylib();
+            expect(found).toEqual({ ok: true, path: customFile });
+        } finally {
+            if (prevDylib === undefined) delete process.env.AX_DUCKDB_DYLIB;
+            else process.env.AX_DUCKDB_DYLIB = prevDylib;
+            if (prevDist === undefined) delete process.env.DUCKDB_DIST_DIR;
+            else process.env.DUCKDB_DIST_DIR = prevDist;
+            rmSync(distDir, { recursive: true, force: true });
+            if (!vendorAlreadyExisted) rmSync(vendorFile, { force: true });
         }
     });
 });

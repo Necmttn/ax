@@ -1,12 +1,15 @@
 /**
  * Test-only resolution of a libduckdb shared library.
  *
- * Order: `AX_DUCKDB_DYLIB` (the injection point the custom static dylib from
- * chunk w0-dylib-ci will use) -> the gitignored `vendor/duckdb/<version>/`
- * cache -> a one-time download of the official prebuilt release. When the
- * download is impossible (offline CI, unsupported platform) this returns a
- * REASON rather than throwing, so suites can skip with a notice instead of
- * failing red for an environment problem.
+ * Order: `AX_DUCKDB_DYLIB` (the injection point tests use to point at an
+ * arbitrary dylib) -> the custom static build at
+ * `${DUCKDB_DIST_DIR ?? <repoRoot>/dist/duckdb}/<libFileName()>` (produced by
+ * `scripts/build-duckdb.sh`; the ONLY artifact that can `LOAD fts` offline) ->
+ * the gitignored `vendor/duckdb/<version>/` cache -> a one-time download of
+ * the official prebuilt release. When the download is impossible (offline
+ * CI, unsupported platform) this returns a REASON rather than throwing, so
+ * suites can skip with a notice instead of failing red for an environment
+ * problem.
  *
  * The download is SINGLE-FLIGHT across processes (cross-review P3-4): one
  * caller claims an exclusive-create sentinel and downloads, everyone else
@@ -59,7 +62,15 @@ export const repoRootFrom = (startDir: string): RepoRootResult => {
  */
 const repoRoot = (): RepoRootResult => repoRootFrom(dirname(Bun.fileURLToPath(import.meta.url)));
 
-const libFileName = (): string => (platform() === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+/** Exported so callers (e.g. the custom-build priority test) can build a
+ *  platform-correct path without duplicating the darwin/linux switch. */
+export const libFileName = (): string => (platform() === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+
+/** The custom static-build dist dir: `DUCKDB_DIST_DIR`, or `<repoRoot>/dist/duckdb`
+ *  when unset. Mirrors what `scripts/build-duckdb.sh` writes to and what
+ *  `scripts/bench/duckdb-bin.ts` resolves the CLI binary against. */
+export const customBuildDistDir = (root: string): string =>
+    process.env.DUCKDB_DIST_DIR?.trim() || join(root, "dist", "duckdb");
 
 /** Official release asset for this platform, or null when unsupported. */
 const releaseAsset = (): string | null => {
@@ -148,6 +159,9 @@ export const resolveTestDylib = async (): Promise<TestDylib> => {
                 "could not locate the repo root (walked up 10 levels from duckdb-dylib.ts without finding turbo.json)",
         };
     }
+    const customBuild = join(customBuildDistDir(root.dir), libFileName());
+    if (existsSync(customBuild)) return { ok: true, path: customBuild };
+
     const dir = vendorDir(root.dir);
 
     const cached = join(dir, libFileName());

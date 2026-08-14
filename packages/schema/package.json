@@ -15,7 +15,8 @@
     },
     "./schema.duckdb.sql": "./src/schema.duckdb.sql",
     "./duckdb-ddl": { "types": "./src/duckdb-ddl.ts", "import": "./src/duckdb-ddl.ts" },
-    "./duckdb-tables": { "types": "./src/duckdb-tables.ts", "import": "./src/duckdb-tables.ts" }
+    "./duckdb-tables": { "types": "./src/duckdb-tables.ts", "import": "./src/duckdb-tables.ts" },
+    "./parse-duckdb-schema": { "types": "./src/parse-duckdb-schema.ts", "import": "./src/parse-duckdb-schema.ts" }
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
