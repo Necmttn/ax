@@ -1,8 +1,9 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, Layer, Option, Path, References } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
@@ -11,6 +12,7 @@ import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
+import { retainRecentOtel, type OtelRetentionResult } from "../../otel/retention.ts";
 import { AX_VERSION } from "../version.ts";
 import { withIngestLock } from "../../ingest/ingest-lock.ts";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
@@ -231,6 +233,44 @@ export const formatIngestSkipSummary = (skippedFiles: number): string =>
     `ingest: ok - ${skippedFiles} file(s) skipped (per-file isolation; retried next run)`;
 
 /**
+ * Best-effort maintenance run after a successful ingest (otel retention +
+ * blob GC). Either side may have failed independently, or blob GC may have
+ * declined to run (see `BlobGcResult.skipped`) - callers pass whichever
+ * halves actually resolved.
+ */
+export interface MaintenanceSummary {
+    readonly otel?: OtelRetentionResult;
+    readonly otelError?: string;
+    readonly blobGc?: BlobGcResult;
+    readonly blobGcError?: string;
+}
+
+/** One-line maintenance summary (F5/F6): reports pruned/deleted counts (or
+ *  the failure reason) for otel retention + blob GC so a slow-but-successful
+ *  ingest's aftermath is legible without grepping the DB. Exported for tests. */
+export const formatMaintenanceSummary = (summary: MaintenanceSummary): string => {
+    const parts: string[] = [];
+
+    if (summary.otelError) {
+        parts.push(`otel retention FAILED - ${summary.otelError}`);
+    } else if (summary.otel) {
+        const rows = Object.values(summary.otel.deletedByTable).reduce((a, b) => a + b, 0);
+        parts.push(`otel pruned ${rows} row(s) + ${summary.otel.deletedEdges} edge(s)`);
+    }
+
+    if (summary.blobGcError) {
+        parts.push(`blob gc FAILED - ${summary.blobGcError}`);
+    } else if (summary.blobGc?.skipped) {
+        parts.push(`blob gc skipped (${summary.blobGc.skipReason})`);
+    } else if (summary.blobGc) {
+        const failedSuffix = summary.blobGc.failed > 0 ? `, ${summary.blobGc.failed} failed` : "";
+        parts.push(`blob gc removed ${summary.blobGc.removed}/${summary.blobGc.scanned} blob(s)${failedSuffix}`);
+    }
+
+    return `ingest: maintenance - ${parts.join("; ")}`;
+};
+
+/**
  * Sessions persisted by this run so far, summed from the per-stage `counts`
  * JSON already written to `ingest_stage` rows. Feeds the FAILED verdict
  * (#265) - the stage stats themselves are lost down the error channel.
@@ -311,6 +351,12 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             Effect.ignore,
         );
 
+        // GC's reference set is built from the CURRENT `session` table (#F2):
+        // a `--since`-windowed run only touches sessions inside that window,
+        // so the table is a PARTIAL view of what's referenced. Only a full
+        // (unwindowed) ingest run is trustworthy enough to GC against.
+        const fullIngest = !args.some((a) => a.startsWith("--since="));
+
         const work = runIngest({
             command: commandName,
             args,
@@ -328,6 +374,47 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             // slightly early - the derive reserve absorbs that.
             ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
         });
+
+        // Best-effort maintenance (otel retention + blob GC), still under the
+        // lock, but NOT subject to `timeoutSeconds` (F5/F6) - passed as
+        // `afterWork` so slow-but-harmless maintenance can never retroactively
+        // stamp a genuinely-completed ingest as timeout-failed. Each half is
+        // caught independently (never `Effect.ignore`-d silently) so a fault
+        // logs a warn line instead of vanishing.
+        const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+            Effect.gen(function* () {
+                const otel = yield* retainRecentOtel().pipe(
+                    Effect.map((result): { result?: OtelRetentionResult; error?: string } => ({ result })),
+                    Effect.catch((error): Effect.Effect<{ result?: OtelRetentionResult; error?: string }> =>
+                        Effect.succeed({ error: errorText(error) })),
+                );
+                if (otel.error) {
+                    process.stderr.write(`axctl ${commandName}: otel retention failed - ${otel.error}\n`);
+                }
+
+                const blobGc = yield* gcFileBuckets(
+                    path.join(cfg.paths.dataDir, "buckets"),
+                    { fullIngest },
+                ).pipe(
+                    Effect.map((result): { result?: BlobGcResult; error?: string } => ({ result })),
+                    Effect.catch((error): Effect.Effect<{ result?: BlobGcResult; error?: string }> =>
+                        Effect.succeed({ error: errorText(error) })),
+                );
+                if (blobGc.error) {
+                    process.stderr.write(`axctl ${commandName}: blob gc failed - ${blobGc.error}\n`);
+                }
+
+                process.stderr.write(
+                    `${
+                        formatMaintenanceSummary({
+                            ...(otel.result ? { otel: otel.result } : {}),
+                            ...(otel.error ? { otelError: otel.error } : {}),
+                            ...(blobGc.result ? { blobGc: blobGc.result } : {}),
+                            ...(blobGc.error ? { blobGcError: blobGc.error } : {}),
+                        })
+                    }\n`,
+                );
+            });
 
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
@@ -360,6 +447,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
                         status: "partial",
                         metrics: { error: `timeout after ${timeoutSeconds}s` },
                     })).pipe(Effect.ignore),
+                afterWork,
             },
             work,
         ).pipe(

@@ -12,8 +12,19 @@
  * `ingest:<runId>`. `ingestStreamEventFromTrace` strips that prefix back to
  * `<runId>`, so the stream name is known before the run starts. The CLI path is
  * unchanged: the CLI does not pass `runId`, so it keeps generating its own.
+ *
+ * **Single-flight (#F3)**: the run is wrapped in the SAME `ingest.lock` file
+ * the CLI uses (`withIngestLock`), so a live-ingest trigger while a CLI/watcher
+ * ingest already holds the lock fails fast instead of piling a second
+ * concurrent ingest onto SurrealDB (the exact contention `withIngestLock` was
+ * built to prevent - see ingest-lock.ts's header). A busy skip never runs
+ * `runIngest` at all; it publishes a synthetic `run_finished{failed}` event
+ * (same shape the early-failure path below already uses) so the stream
+ * terminates cleanly instead of hanging. No `timeoutSeconds` is passed, so
+ * (matching `RunIngestOptions.deadlineMs`'s own doc comment) this path stays
+ * unbounded - only the CLI/`share/recover.ts` callers impose a hard cap.
  */
-import { Cause, Effect, Layer } from "effect";
+import { Cause, Effect, FileSystem, Layer, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient } from "@ax/lib/db";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
@@ -25,12 +36,26 @@ import {
     type TraceTransport,
 } from "@ax/lib/live-traces/Sink";
 import { runIngest, type RunIngestOptions } from "../ingest/run.ts";
+import { withIngestLock } from "../ingest/ingest-lock.ts";
 import { StageRegistry } from "../ingest/stage/registry.ts";
 import { ingestStreamEventFromTrace } from "../ingest/stream-events.ts";
 import type { IngestStreamBus } from "./ingest-stream.ts";
 
-/** Services `runIngest` needs that the caller must provide via `baseLayer`. */
-export type IngestBaseServices = SurrealClient | AxConfig | ProcessService | StageRegistry;
+/** Services `runIngest` (+ the single-flight lock) need that the caller must
+ *  provide via `baseLayer`. `FileSystem`/`Path` are read/written for the lock
+ *  file; production callers already get them from `AppLayer` (it re-exposes
+ *  its Bun-backed platform layer via `provideMerge` - see packages/lib/src/layers.ts). */
+export type IngestBaseServices =
+    | SurrealClient
+    | AxConfig
+    | ProcessService
+    | StageRegistry
+    | FileSystem.FileSystem
+    | Path.Path;
+
+/** Mirrors `INGEST_LOCK_STALE_GRACE_MS` in `cli/commands/ingest.ts`: extra
+ *  grace beyond the hard ingest timeout before a held lock is deemed stale. */
+const INGEST_LOCK_STALE_GRACE_MS = 60_000;
 
 /**
  * The `baseLayer` accepted by {@link startIngestWorkflow}. It must provide
@@ -122,7 +147,45 @@ export const startIngestWorkflow = (
         // this when it forwards a `run_finished`, so the failure handler below
         // only emits a synthetic terminal event when none was published.
         const state: TerminalState = { finished: false };
-        const program = runIngest({ ...opts, runId: () => runId }).pipe(
+        // Single-flight (#F3): the same `ingest.lock` file the CLI holds. A
+        // busy skip never calls `runIngest` at all - it publishes the
+        // synthetic terminal event itself (mirroring the catchCause guard
+        // below) so the stream terminates cleanly instead of hanging on a
+        // run that never happened.
+        const lockedIngest = Effect.gen(function* () {
+            const cfg = yield* AxConfig;
+            const path = yield* Path.Path;
+            const staleMs = cfg.knobs.ingestTimeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS;
+            yield* withIngestLock(
+                {
+                    lockPath: path.join(cfg.paths.dataDir, "ingest.lock"),
+                    command: opts.command,
+                    staleMs,
+                    // No `timeoutSeconds` - this path stays unbounded, same as
+                    // before this change (see the module doc comment).
+                    onBusy: (holder) =>
+                        Effect.gen(function* () {
+                            yield* Effect.logWarning(
+                                `live ingest skipped: another ingest (pid ${holder.pid}, ` +
+                                    `${holder.command}) is already running`,
+                            ).pipe(Effect.annotateLogs("runId", runId));
+                            if (!state.finished) {
+                                state.finished = true;
+                                yield* Effect.promise(() =>
+                                    bus.publish(runId, {
+                                        kind: "run_finished",
+                                        runId,
+                                        status: "failed",
+                                        durationMs: 0,
+                                    }),
+                                );
+                            }
+                        }),
+                },
+                runIngest({ ...opts, runId: () => runId }),
+            );
+        });
+        const program = lockedIngest.pipe(
             // Single combined provide; `provideMerge` keeps the original
             // override order (the bus-backed TraceSink wins over any TraceSink
             // a caller's baseLayer happens to carry - see IngestBaseLayer docs).

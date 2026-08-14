@@ -1,11 +1,15 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DbError } from "@ax/lib/errors";
 import type { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { AxConfigLive } from "@ax/lib/config";
+import { AxConfigTest } from "@ax/lib/config";
 import { ProcessServiceTest } from "@ax/lib/process";
+import type { IngestLockInfo } from "../ingest/ingest-lock.ts";
 import { StageRegistry, StageRegistryLive, type StageDef } from "../ingest/stage/registry.ts";
 import { BaseStageStats, StageMeta } from "../ingest/stage/types.ts";
 import type { RunIngestOptions } from "../ingest/run.ts";
@@ -43,16 +47,29 @@ const failingStage = (key: string, deps: string[] = []): StageDef => ({
     run: () => Effect.fail(new DbError({ operation: "query", message: `${key} blew up` })),
 });
 
+let dataDir: string;
+beforeEach(() => {
+    // Isolated per-test dataDir: startIngestWorkflow now single-flights
+    // through `<dataDir>/ingest.lock` (#F3) - without this override
+    // AxConfigLive's real default (~/.local/share/ax) would have every test
+    // acquire/release an actual lock file on the machine running the suite.
+    dataDir = mkdtempSync(join(tmpdir(), "ax-ingest-workflow-"));
+});
+afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+});
+
 const baseServices = (dbLayer: Layer.Layer<SurrealClient>, registry: Layer.Layer<StageRegistry>) => {
     const process = ProcessServiceTest({
         route: () => new Error("ProcessService not expected in this test"),
     });
-    // AxConfigLive now reads the persisted runtime endpoint at acquisition, so
-    // it needs FileSystem; provide the real Bun-backed FS beneath it.
+    const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+    // `provideMerge` re-exposes FileSystem/Path alongside AxConfig - both the
+    // config build AND the workflow's own lock-file IO need them (IngestBaseServices).
     return Layer.mergeAll(
         dbLayer,
         registry,
-        AxConfigLive.pipe(Layer.provide(BunFileSystem.layer)),
+        AxConfigTest({ paths: { dataDir } }).pipe(Layer.provideMerge(platform)),
         process,
     );
 };
@@ -159,5 +176,36 @@ describe("startIngestWorkflow", () => {
         expect(runFinished && runFinished.kind === "run_finished" && runFinished.status).toBe("failed");
         expect(countTerminal(history)).toBe(1);
         for (const e of history) expect(e.runId).toBe(runId);
+    });
+
+    it("single-flight (#F3): skips the pipeline and publishes a clean run_finished{failed} when the CLI lock is held", async () => {
+        const db = fakeDb();
+        const registry = StageRegistryLive([stage("skills")]);
+        const bus = new InMemoryIngestStreamBus();
+
+        // A fresh lock owned by a live pid (ourselves) - withIngestLock treats
+        // this exactly like a concurrent CLI/watcher ingest already running.
+        writeFileSync(
+            join(dataDir, "ingest.lock"),
+            JSON.stringify(
+                { pid: process.pid, startedAt: Date.now(), command: "cli-ingest" } satisfies IngestLockInfo,
+            ),
+        );
+
+        const { runId } = await Effect.runPromise(
+            startIngestWorkflow(opts(), bus, baseServices(db.layer, registry)),
+        );
+
+        const history = await waitForFinish(bus, runId);
+
+        // The busy skip must never run the pipeline - no run_started/stage events.
+        expect(history.some((e) => e.kind === "run_started")).toBe(false);
+        const runFinished = history.find((e) => e.kind === "run_finished");
+        expect(runFinished && runFinished.kind === "run_finished" && runFinished.status).toBe("failed");
+        expect(countTerminal(history)).toBe(1);
+
+        // The held lock is untouched - a busy skip must not steal/clobber it.
+        const held = JSON.parse(readFileSync(join(dataDir, "ingest.lock"), "utf8")) as IngestLockInfo;
+        expect(held.command).toBe("cli-ingest");
     });
 });
