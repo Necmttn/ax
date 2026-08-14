@@ -128,6 +128,13 @@ const exists = (db: SurrealClientShape, recordKey: string) =>
         .query<[{ id: unknown }[]]>(`SELECT id FROM agent_event:\`${recordKey}\`;`)
         .pipe(Effect.map((rows) => (rows?.[0]?.length ?? 0) > 0));
 
+const hasRaw = (db: SurrealClientShape, recordKey: string) =>
+    db
+        .query<[{ has_raw: boolean }[]]>(
+            `SELECT raw IS NOT NONE AS has_raw FROM agent_event:\`${recordKey}\`;`,
+        )
+        .pipe(Effect.map((rows) => rows?.[0]?.[0]?.has_raw === true));
+
 const provide = <A>(eff: Effect.Effect<A, unknown, SurrealClient>): Promise<A> =>
     Effect.runPromise(eff.pipe(Effect.provide(AppLayer)) as Effect.Effect<A, unknown, never>);
 
@@ -163,13 +170,22 @@ describe(
                     yield* cleanup(db);
                     yield* ingestOnce(db);
                     const firstCount = yield* countSessionEvents(db);
-                    // Identical second ingest: must not throw, count unchanged.
+                    // Simulate a row from an older writer. CONTENT replacement
+                    // on the second ingest must remove this legacy raw field.
+                    yield* db.query(
+                        `UPDATE agent_event:\`${callEventKey}\` SET raw = "legacy";`,
+                    );
+                    expect(yield* hasRaw(db, callEventKey)).toBe(true);
+                    // Identical second ingest: must not throw, count unchanged,
+                    // and no legacy raw payload remains.
                     yield* ingestOnce(db);
                     const secondCount = yield* countSessionEvents(db);
                     const callPresent = yield* exists(db, callEventKey);
-                    return { firstCount, secondCount, callPresent };
+                    const rawPresent = yield* hasRaw(db, callEventKey);
+                    return { firstCount, secondCount, callPresent, rawPresent };
                 }));
                 expect(result.callPresent).toBe(true);
+                expect(result.rawPresent).toBe(false);
                 expect(result.firstCount).toBeGreaterThan(0);
                 expect(result.secondCount).toBe(result.firstCount);
             },

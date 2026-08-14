@@ -244,7 +244,6 @@ const buildAgentEventStatement = (event: AgentEventWrite): string => {
         ["role", surrealOptionString(event.role)],
         ["text", surrealOptionString(event.text)],
         ["text_excerpt", surrealOptionString(event.textExcerpt)],
-        ["raw", surrealJsonTextOption(event.raw)],
         ["labels", surrealJsonTextOption(event.labels)],
         ["metrics", surrealJsonTextOption(event.metrics)],
     ])};`;

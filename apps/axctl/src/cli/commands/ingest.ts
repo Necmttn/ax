@@ -3,6 +3,7 @@ import { Effect, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { gcFileBuckets } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
@@ -11,6 +12,7 @@ import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
+import { retainRecentOtel } from "../../otel/retention.ts";
 import { AX_VERSION } from "../version.ts";
 import { withIngestLock } from "../../ingest/ingest-lock.ts";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
@@ -327,7 +329,14 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             // lock's own clock starts a hair after this, so the deadline reads
             // slightly early - the derive reserve absorbs that.
             ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
-        });
+        }).pipe(
+            // Keep maintenance inside the ingest lock. Both tasks are
+            // best-effort and only run after a real ingest succeeds.
+            Effect.tap(() => Effect.ignore(retainRecentOtel())),
+            Effect.tap(() => Effect.ignore(
+                gcFileBuckets(path.join(cfg.paths.dataDir, "buckets")),
+            )),
+        );
 
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a

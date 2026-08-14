@@ -228,6 +228,7 @@ describe("provider event writer statement builders", () => {
         expect(sql).toContain("provider_event_id: \"evt-1/unsafe\"");
         expect(parentEventStatement).toContain("parent_provider_event_id: NONE");
         expect(parentEventStatement).not.toContain("provider_session_id:");
+        expect(parentEventStatement).not.toContain("raw:");
         expect(childEventStatement).toContain("parent_provider_event_id: \"evt-1/unsafe\"");
         expect(childEventStatement).not.toContain("provider_session_id:");
         expect(sql).toContain("seq: 1");
