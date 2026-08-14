@@ -73,4 +73,22 @@ describe("checkCacheIntegrity", () => {
         expect(idx.get("b")?.has("1")).toBe(true);
         expect(idx.get("c")).toBeUndefined();
     });
+
+    test("__proto__ and constructor target tables survive as real own keys, sum stays consistent", () => {
+        const refs = [
+            ref({ sidecarId: "a", targetTable: "__proto__", targetId: "gone1" }),
+            ref({ sidecarId: "b", targetTable: "__proto__", targetId: "gone2" }),
+            ref({ sidecarId: "c", targetTable: "constructor", targetId: "gone3" }),
+        ];
+        const r = checkCacheIntegrity(refs, index);
+        expect(r.dangling).toBe(3);
+        expect(Object.prototype.hasOwnProperty.call(r.byTargetTable, "__proto__")).toBe(true);
+        expect(Object.prototype.hasOwnProperty.call(r.byTargetTable, "constructor")).toBe(true);
+        const protoKey: string = "__proto__";
+        const ctorKey: string = "constructor";
+        expect(r.byTargetTable[protoKey]).toBe(2);
+        expect(r.byTargetTable[ctorKey]).toBe(1);
+        const sum = Object.values(r.byTargetTable).reduce((a, b) => a + b, 0);
+        expect(sum).toBe(r.dangling);
+    });
 });

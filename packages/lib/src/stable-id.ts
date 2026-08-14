@@ -15,6 +15,10 @@ export type NaturalKeyPart = string | number | bigint | boolean | null | undefin
 
 const ID_HEX_LENGTH = 32;
 
+/** `number` and `bigint` share the same `i:` tag on purpose: `1` and `1n` are
+ *  the same natural key value (a provider seq/offset arriving as either JS
+ *  number or bigint should hash identically), so `stableId("t",[1]) ===
+ *  stableId("t",[1n])` is INTENDED, not a bug to "fix". */
 const encodePart = (part: NaturalKeyPart): string => {
     if (part === null) return "n:";
     if (part === undefined) return "u:";

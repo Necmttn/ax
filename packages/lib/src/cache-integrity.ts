@@ -54,7 +54,12 @@ export function checkCacheIntegrity(
     options?: { readonly sampleLimit?: number },
 ): IntegrityReport {
     const sampleLimit = options?.sampleLimit ?? DEFAULT_SAMPLE_LIMIT;
-    const byTargetTable: Record<string, number> = {};
+    // A plain object literal corrupts on table names like "__proto__" (silently
+    // routes through the prototype chain instead of becoming an own key) or
+    // "constructor" (overwrites a non-numeric built-in). A Map has no such
+    // collisions; Object.fromEntries below defines real own properties for
+    // every key, "__proto__" and "constructor" included.
+    const byTargetTable = new Map<string, number>();
     const samples: DanglingRef[] = [];
     let checked = 0;
     let dangling = 0;
@@ -66,9 +71,9 @@ export function checkCacheIntegrity(
             live === undefined ? "unknown_table" : live.has(ref.targetId) ? null : "missing_id";
         if (reason === null) continue;
         dangling += 1;
-        byTargetTable[ref.targetTable] = (byTargetTable[ref.targetTable] ?? 0) + 1;
+        byTargetTable.set(ref.targetTable, (byTargetTable.get(ref.targetTable) ?? 0) + 1);
         if (samples.length < sampleLimit) samples.push({ ...ref, reason });
     }
 
-    return { checked, dangling, byTargetTable, samples, ok: dangling === 0 };
+    return { checked, dangling, byTargetTable: Object.fromEntries(byTargetTable), samples, ok: dangling === 0 };
 }
