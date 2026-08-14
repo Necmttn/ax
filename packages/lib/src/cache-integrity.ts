@@ -51,9 +51,20 @@ const DEFAULT_SAMPLE_LIMIT = 20;
 export function checkCacheIntegrity(
     refs: Iterable<SidecarRef>,
     cacheIds: CacheIdIndex,
-    options?: { readonly sampleLimit?: number },
+    options?: {
+        readonly sampleLimit?: number;
+        /** Tables that are known to exist in the cache schema even when they
+         *  currently hold zero rows (so `cacheIds` carries no entry for
+         *  them). Without this, a ref into a real-but-empty table is
+         *  indistinguishable from a ref into a table that was renamed or
+         *  dropped, and both report `unknown_table` - which is the wrong
+         *  diagnosis for the empty-table case (the row is genuinely
+         *  `missing_id`, not pointed at a table ax no longer knows about). */
+        readonly knownTables?: ReadonlySet<string>;
+    },
 ): IntegrityReport {
     const sampleLimit = options?.sampleLimit ?? DEFAULT_SAMPLE_LIMIT;
+    const knownTables = options?.knownTables;
     // A plain object literal corrupts on table names like "__proto__" (silently
     // routes through the prototype chain instead of becoming an own key) or
     // "constructor" (overwrites a non-numeric built-in). A Map has no such
@@ -67,8 +78,12 @@ export function checkCacheIntegrity(
     for (const ref of refs) {
         checked += 1;
         const live = cacheIds.get(ref.targetTable);
-        const reason: DanglingRef["reason"] | null =
-            live === undefined ? "unknown_table" : live.has(ref.targetId) ? null : "missing_id";
+        const tableIsKnown = live !== undefined || (knownTables?.has(ref.targetTable) ?? false);
+        const reason: DanglingRef["reason"] | null = !tableIsKnown
+            ? "unknown_table"
+            : (live?.has(ref.targetId) ?? false)
+              ? null
+              : "missing_id";
         if (reason === null) continue;
         dangling += 1;
         byTargetTable.set(ref.targetTable, (byTargetTable.get(ref.targetTable) ?? 0) + 1);

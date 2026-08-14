@@ -58,10 +58,40 @@ function surrealTypesByTable(): Map<string, Map<string, SurrealFieldType>> {
     return out;
 }
 
+/** The Surreal `array<T>` element types that become a native DuckDB list
+ *  column (P2-3). Anything else - `record<...>`, `object`, nested/flexible
+ *  shapes - stays JSON-encoded VARCHAR, unchanged. */
+function scalarArrayElementDuckType(elementType: string): string | null {
+    switch (elementType) {
+        case "string":
+            return "VARCHAR";
+        case "int":
+            return "BIGINT";
+        case "float":
+            return "DOUBLE";
+        case "number":
+            return "DOUBLE";
+        case "bool":
+            return "BOOLEAN";
+        case "datetime":
+            return "TIMESTAMPTZ";
+        default:
+            return null;
+    }
+}
+
 /** Maps a Surreal DEFINE FIELD TYPE to the DuckDB type it must translate to. */
 function expectedDuckType(t: string): string {
     if (t.startsWith("record<")) return "VARCHAR";
-    if (t.startsWith("array<") || t === "object") return "VARCHAR";
+    if (t.startsWith("array<")) {
+        const elementType = t.slice("array<".length, t.lastIndexOf(">"));
+        const listType = scalarArrayElementDuckType(elementType);
+        // A scalar element type (string/int/float/number/bool/datetime) becomes a
+        // native DuckDB list column; anything else (record<>, nested objects) is
+        // still JSON text in a VARCHAR column - unaffected by P2-3.
+        return listType !== null ? `${listType}[]` : "VARCHAR";
+    }
+    if (t === "object") return "VARCHAR";
     switch (t) {
         case "string":
             return "VARCHAR";
@@ -74,7 +104,7 @@ function expectedDuckType(t: string): string {
         case "bool":
             return "BOOLEAN";
         case "datetime":
-            return "TIMESTAMP";
+            return "TIMESTAMPTZ";
         default:
             return `?${t}`;
     }
@@ -90,6 +120,24 @@ function renamedColumn(field: string): string {
 const relationByTable = new Map(parseSurrealTables(surql).map((t) => [t.table, t.relation] as const));
 const duckTables = parseDuckdbTables();
 const duckTableSet = new Set(duckTables);
+
+// P1-1: Surreal `TYPE RELATION SCHEMAFULL` edges with no FROM/TO are untyped -
+// Surreal's own record id carries the endpoint table name inline, which a bare
+// DuckDB VARCHAR row id loses. Each such table gets an explicit `in_table`
+// and/or `out_table` VARCHAR NOT NULL column for the side(s) that are actually
+// polymorphic in real writers (see the POLYMORPHIC EDGES note in
+// schema.duckdb.sql's header). These columns have no Surreal DEFINE FIELD
+// counterpart, so the strict field<->column equality below must allow them.
+const POLYMORPHIC_EDGE_EXTRA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+    concerns: ["in_table", "out_table"],
+    resulted_in: ["in_table", "out_table"],
+    produced_artifact: ["in_table", "out_table"],
+    has_artifact: ["in_table", "out_table"],
+    derived_from: ["in_table", "out_table"],
+    cites_evidence: ["in_table", "out_table"],
+    opportunity: ["out_table"],
+    telemetry_of: ["out_table"],
+};
 
 describe("column-set parity (Surreal field set == DuckDB column set)", () => {
     const surrealFields = surrealFieldsByTable();
@@ -110,6 +158,7 @@ describe("column-set parity (Surreal field set == DuckDB column set)", () => {
                 expected.add("in_id");
                 expected.add("out_id");
             }
+            for (const extra of POLYMORPHIC_EDGE_EXTRA_COLUMNS[table] ?? []) expected.add(extra);
             for (const f of fields) expected.add(renamedColumn(f));
 
             for (const c of expected) {

@@ -23,16 +23,63 @@
 -- translation; every other table and column name is unchanged from schema.surql so
 -- the reader/writer port stays mechanical.
 --
+-- POLYMORPHIC EDGES (P1-1). A Surreal `DEFINE TABLE x TYPE RELATION FROM a TO b`
+-- edge is single-target: `in`/`out` always point at tables `a`/`b`, so the DuckDB
+-- `in_id`/`out_id` VARCHAR carries enough information on its own (the reader
+-- already knows which table to look the id up in). But `DEFINE TABLE x TYPE
+-- RELATION SCHEMAFULL` with NO FROM/TO is untyped: Surreal's own record id
+-- (`table:id`) carries the target table name inline, and readers such as
+-- `type::table(out)` (apps/axctl/src/classifiers/facts.ts) depend on recovering
+-- it. A bare DuckDB VARCHAR row id has no table prefix, so that information would
+-- be silently lost on translation. THE RULE: every such untyped edge table gets an
+-- explicit `in_table VARCHAR NOT NULL` and/or `out_table VARCHAR NOT NULL` column
+-- (only for the side(s) that are actually polymorphic) recording the endpoint's
+-- source table name, written alongside `in_id`/`out_id` by the same insert. The
+-- eight Surreal `TYPE RELATION SCHEMAFULL` (no FROM/TO) tables this applies to:
+--   * concerns, resulted_in, produced_artifact, has_artifact, derived_from,
+--     cites_evidence - both `in` and `out` vary in real writers (or are reserved
+--     generic evidence edges with no FROM/TO to narrow them) -> both columns.
+--   * opportunity, telemetry_of - only `out` varies; every writer relates FROM a
+--     hardcoded fixed table (`experiment:`, `session:` respectively), so only
+--     `out_table` is added; adding a constant `in_table` would carry no
+--     information.
+--
 -- REFERENCES. Reference columns keep their Surreal field name and hold the target
 -- row's `id` as VARCHAR. There are deliberately NO FOREIGN KEY constraints: the
 -- derive stages insert in whatever order the sources arrive, and a re-derive
 -- rewrites tables independently. Referential integrity is a CHECK, not a
 -- constraint - packages/lib/src/cache-integrity.ts.
 --
--- TYPES. Surreal `datetime` -> TIMESTAMP. `int` -> BIGINT, `float` -> DOUBLE,
--- `bool` -> BOOLEAN. Fields that hold JSON-encoded objects or arrays in Surreal
--- (v3 has no `flexible<object>`) stay VARCHAR and are marked `-- JSON` at the
--- column; they are still JSON text, readable with DuckDB's json functions.
+-- TYPES. Surreal `datetime` -> TIMESTAMPTZ (== `TIMESTAMP WITH TIME ZONE`; DuckDB
+-- accepts the short form as a real alias, not merely display sugar - see the
+-- DuckDB timestamp docs). A plain `TIMESTAMP` silently drops the UTC offset Surreal
+-- datetimes always carry (P2-1), so every datetime column in this file uses
+-- TIMESTAMPTZ, never bare TIMESTAMP. `int` -> BIGINT, `float`/`number` -> DOUBLE,
+-- `bool` -> BOOLEAN.
+--
+-- ARRAYS (P2-3). Surreal `array<T>` where T is a scalar (string/int/float/number/
+-- bool/datetime) becomes a native DuckDB list column of the mapped element type
+-- (`VARCHAR[]`, `BIGINT[]`, `DOUBLE[]`, `BOOLEAN[]`, `TIMESTAMPTZ[]`) - DuckDB lists
+-- are a real first-class type, not a translation compromise, so there is no reason
+-- to flatten a scalar array through JSON text. Everything else that is JSON in
+-- Surreal - JSON-encoded object fields, arrays of records/objects, and any
+-- `flexible`/nested-object shape (v3 has no `flexible<object>`) - stays VARCHAR and
+-- is marked `-- JSON` at the column; still JSON text, readable with DuckDB's json
+-- functions.
+--
+-- SEMANTICS (P2-2): `VALUE time::now()` cannot be expressed in DDL. Surreal's
+-- `VALUE` clause OVERWRITES whatever the caller supplies, on every create AND every
+-- update - it is not a fallback. A DuckDB `DEFAULT` only fires when an INSERT
+-- omits the column outright, and does nothing at all on UPDATE. These three
+-- columns used `VALUE time::now()` in schema.surql and therefore need the writer
+-- (not the DDL default) to stamp `CURRENT_TIMESTAMP` on every write that touches
+-- them, insert or update alike:
+--   * skill.ingested_at
+--   * skill_revision.ts
+--   * agent_def.ingested_at
+-- Every other `... DEFAULT CURRENT_TIMESTAMP` column below used Surreal `DEFAULT
+-- time::now()` (a true default, honored only when the caller omits the field),
+-- which DuckDB DEFAULT reproduces exactly - no writer discipline required there.
 --
 -- FULL-TEXT SEARCH. Not in this file. FTS indexes are BUILT AT INGEST, after the
 -- rows land, because DuckDB's fts extension materializes an index table from the
@@ -72,9 +119,9 @@ CREATE TABLE IF NOT EXISTS skill (
     description VARCHAR,  -- parsed from frontmatter; body + raw frontmatter read from dir_path on demand
     content_hash VARCHAR NOT NULL,
     bytes BIGINT,
-    ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at TIMESTAMP,  -- reconcile: stamped when present on disk
-    deleted_at TIMESTAMP  -- reconcile: soft tombstone when absent on disk
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMPTZ,  -- reconcile: stamped when present on disk
+    deleted_at TIMESTAMPTZ  -- reconcile: soft tombstone when absent on disk
 );
 CREATE UNIQUE INDEX IF NOT EXISTS skill_name_uq ON skill(name);
 CREATE INDEX IF NOT EXISTS skill_scope ON skill(scope);
@@ -94,7 +141,7 @@ CREATE TABLE IF NOT EXISTS skill_revision (
     bytes BIGINT,
     prev_bytes BIGINT,
     change VARCHAR NOT NULL,  -- 'added' | 'changed'
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS skill_revision_ts ON skill_revision(ts);
 CREATE INDEX IF NOT EXISTS skill_revision_skill ON skill_revision(skill);
@@ -110,12 +157,12 @@ CREATE TABLE IF NOT EXISTS agent_def (
     dir_path VARCHAR NOT NULL,
     description VARCHAR,
     model VARCHAR,
-    skills VARCHAR,  -- JSON string[]; declared skills: frontmatter list
+    skills VARCHAR[],  -- declared skills: frontmatter list (P2-3: native list, not JSON)
     content_hash VARCHAR NOT NULL,
     bytes BIGINT,
-    ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at TIMESTAMP,
-    deleted_at TIMESTAMP
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_def_name_uq ON agent_def(name);
 CREATE INDEX IF NOT EXISTS agent_def_scope ON agent_def(scope);
@@ -127,8 +174,8 @@ CREATE TABLE IF NOT EXISTS session (
     model VARCHAR,
     reasoning_effort VARCHAR,  -- codex: turn_context effort (minimal|low|medium|high|xhigh, last seen); claude: settings.json effortLevel (high|medium|low), stamped only on sessions active at ingest time
     source VARCHAR NOT NULL DEFAULT 'claude',  -- 'claude' | 'codex'
-    started_at TIMESTAMP,
-    ended_at TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
     raw_file VARCHAR,  -- f"transcripts:/<id>.jsonl" pointer; full original jsonl
     labels VARCHAR,  -- JSON string[]; e.g. ["spar"]; spar-score stamps variant sessions
     repository VARCHAR,  -- ref -> repository
@@ -153,12 +200,12 @@ CREATE TABLE IF NOT EXISTS claude_sidecar_artifact (
     safe_relative_path VARCHAR NOT NULL,
     path_hash VARCHAR NOT NULL,
     size BIGINT NOT NULL,
-    mtime TIMESTAMP NOT NULL,
+    mtime TIMESTAMPTZ NOT NULL,
     content_hash VARCHAR,
     session VARCHAR,  -- ref -> session
     relation_ids_json VARCHAR,
     relation_attrs_json VARCHAR,
-    observed_at TIMESTAMP NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL,
     excerpt VARCHAR,
     attrs_json VARCHAR
 );
@@ -182,7 +229,7 @@ CREATE TABLE IF NOT EXISTS used_sidecar_artifact (
     pattern VARCHAR,
     "offset" BIGINT,
     "limit" BIGINT,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS used_sidecar_artifact_in ON used_sidecar_artifact(in_id);
 CREATE INDEX IF NOT EXISTS used_sidecar_artifact_out ON used_sidecar_artifact(out_id);
@@ -194,8 +241,8 @@ CREATE TABLE IF NOT EXISTS agent_provider (
     display_name VARCHAR NOT NULL,
     version VARCHAR,
     capabilities VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_provider_name_uq ON agent_provider(name);
 
@@ -215,8 +262,8 @@ CREATE TABLE IF NOT EXISTS agent_model (
     fast_multiplier DOUBLE,
     context_window BIGINT,
     pricing_source VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_model_name_uq ON agent_model(name);
 CREATE INDEX IF NOT EXISTS agent_model_provider ON agent_model(provider);
@@ -234,10 +281,10 @@ CREATE TABLE IF NOT EXISTS agent_session (
     raw VARCHAR,  -- JSON-encoded
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    started_at TIMESTAMP,
-    ended_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_session_provider_id ON agent_session(provider, provider_session_id);
 CREATE INDEX IF NOT EXISTS agent_session_ax_session ON agent_session(ax_session);
@@ -250,7 +297,7 @@ CREATE TABLE IF NOT EXISTS agent_event (
     provider_event_id VARCHAR,
     parent_provider_event_id VARCHAR,
     seq BIGINT NOT NULL,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     type VARCHAR NOT NULL,
     role VARCHAR,
     text VARCHAR,
@@ -268,7 +315,7 @@ CREATE TABLE IF NOT EXISTS turn (
     session VARCHAR NOT NULL,  -- ref -> session; was: REFERENCE ON DELETE CASCADE
     agent_event VARCHAR,  -- ref -> agent_event
     seq BIGINT NOT NULL,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     role VARCHAR NOT NULL,  -- 'user' | 'assistant' | 'tool_result'
     message_kind VARCHAR,  -- 'task' | 'context' | 'control' | 'tool_result' | 'system_or_developer' | 'assistant' | 'tool_call'
     intent_kind VARCHAR,  -- 'organic_task' | 'correction' | 'preference' | 'wrapper_instruction' | ...
@@ -303,7 +350,7 @@ CREATE TABLE IF NOT EXISTS symbol (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
     kind VARCHAR,  -- 'camel' | 'snake' | 'function' | ...
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS symbol_name_uq ON symbol(name);
 
@@ -311,7 +358,7 @@ CREATE TABLE IF NOT EXISTS error_signature (
     id VARCHAR PRIMARY KEY,
     text VARCHAR NOT NULL,
     normalized VARCHAR NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS error_signature_norm_uq ON error_signature(normalized);
 
@@ -321,7 +368,7 @@ CREATE TABLE IF NOT EXISTS "commit" (
     repo VARCHAR NOT NULL,
     message VARCHAR,
     author VARCHAR,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     repository VARCHAR,  -- ref -> repository
     checkout VARCHAR,  -- ref -> checkout
     -- option<bool>, not bool DEFAULT false: the git stage re-UPSERTs commits via
@@ -341,8 +388,8 @@ CREATE TABLE IF NOT EXISTS repository (
     root_path VARCHAR,
     initial_commit VARCHAR,
     default_branch VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS repository_remote ON repository(remote_url);
 CREATE INDEX IF NOT EXISTS repository_initial_commit ON repository(initial_commit);
@@ -355,8 +402,8 @@ CREATE TABLE IF NOT EXISTS checkout (
     head_sha VARCHAR,
     worktree_name VARCHAR,
     dirty BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS checkout_path_uq ON checkout(repository, path);
 
@@ -366,8 +413,8 @@ CREATE TABLE IF NOT EXISTS workspace (
     checkout VARCHAR,  -- ref -> checkout
     root_path VARCHAR NOT NULL,
     name VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS tool (
@@ -377,8 +424,8 @@ CREATE TABLE IF NOT EXISTS tool (
     identity VARCHAR,
     kind VARCHAR,
     labels VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tool_identity_uq ON tool(provider, name, identity);
 
@@ -389,7 +436,7 @@ CREATE TABLE IF NOT EXISTS tool_call (
     turn VARCHAR,  -- ref -> turn
     tool VARCHAR,  -- ref -> tool
     name VARCHAR NOT NULL,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     status VARCHAR,
     input_json VARCHAR,  -- JSON-encoded
     output_json VARCHAR,  -- JSON-encoded
@@ -432,7 +479,7 @@ CREATE TABLE IF NOT EXISTS has_content (
     fine_label VARCHAR,
     bytes BIGINT NOT NULL DEFAULT 0,
     session VARCHAR,  -- ref -> session
-    ts TIMESTAMP NOT NULL
+    ts TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS has_content_in ON has_content(in_id);
 CREATE INDEX IF NOT EXISTS has_content_out ON has_content(out_id);
@@ -446,8 +493,8 @@ CREATE TABLE IF NOT EXISTS plan (
     summary VARCHAR,
     status VARCHAR,
     items VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS plan_session ON plan(session);
 CREATE INDEX IF NOT EXISTS plan_source_session ON plan(source, session);
@@ -461,10 +508,10 @@ CREATE TABLE IF NOT EXISTS plan_item (
     active_form VARCHAR,
     status VARCHAR,
     raw VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP,
-    first_seen_at TIMESTAMP,
-    last_seen_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ,
+    first_seen_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item(plan, seq);
 
@@ -476,8 +523,8 @@ CREATE TABLE IF NOT EXISTS artifact (
     path VARCHAR,
     content_hash VARCHAR,
     raw VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS artifact_hash ON artifact(content_hash);
 
@@ -505,7 +552,7 @@ CREATE TABLE IF NOT EXISTS content_document (
     raw VARCHAR,
     labels VARCHAR,
     metrics VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS content_document_source ON content_document(source_kind, source_ref);
 CREATE INDEX IF NOT EXISTS content_document_hash ON content_document(content_hash);
@@ -535,7 +582,7 @@ CREATE TABLE IF NOT EXISTS content_block (
     raw VARCHAR,
     labels VARCHAR,
     metrics VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS content_block_document_seq ON content_block(document, seq);
 CREATE INDEX IF NOT EXISTS content_block_kind ON content_block(kind, ts);
@@ -557,7 +604,7 @@ CREATE TABLE IF NOT EXISTS content_atom (
     end_offset BIGINT,
     confidence DOUBLE NOT NULL DEFAULT 1.0,
     raw VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS content_atom_kind_value ON content_atom(kind, normalized);
 CREATE INDEX IF NOT EXISTS content_atom_block ON content_atom(block);
@@ -575,7 +622,7 @@ CREATE TABLE IF NOT EXISTS mentions_file (
     confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
     workspace VARCHAR,  -- ref -> workspace
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_file_in ON mentions_file(in_id);
 CREATE INDEX IF NOT EXISTS mentions_file_out ON mentions_file(out_id);
@@ -590,7 +637,7 @@ CREATE TABLE IF NOT EXISTS mentions_commit (
     confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
     workspace VARCHAR,  -- ref -> workspace
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_commit_in ON mentions_commit(in_id);
 CREATE INDEX IF NOT EXISTS mentions_commit_out ON mentions_commit(out_id);
@@ -603,7 +650,7 @@ CREATE TABLE IF NOT EXISTS mentions_artifact (
     block VARCHAR NOT NULL,  -- ref -> content_block
     confidence DOUBLE NOT NULL DEFAULT 1.0,
     source_kind VARCHAR NOT NULL,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentions_artifact_in ON mentions_artifact(in_id);
 CREATE INDEX IF NOT EXISTS mentions_artifact_out ON mentions_artifact(out_id);
@@ -618,7 +665,7 @@ CREATE TABLE IF NOT EXISTS plan_snapshot (
     items VARCHAR NOT NULL,  -- JSON-encoded
     summary VARCHAR,
     explanation VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS plan_snapshot_plan_ts ON plan_snapshot(plan, ts);
 CREATE INDEX IF NOT EXISTS plan_snapshot_agent_event ON plan_snapshot(agent_event);
@@ -628,7 +675,7 @@ CREATE TABLE IF NOT EXISTS compaction (
     session VARCHAR NOT NULL,  -- ref -> session
     agent_event VARCHAR,  -- ref -> agent_event
     harness VARCHAR NOT NULL,  -- provider name: claude|codex|pi|cursor|opencode
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     trigger VARCHAR,  -- auto|manual|hook
     strategy VARCHAR NOT NULL,  -- summarize|history_replacement|encrypted
     source_confidence VARCHAR NOT NULL,  -- explicit|derived
@@ -651,7 +698,7 @@ CREATE TABLE IF NOT EXISTS insight (
     text VARCHAR NOT NULL,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS insight_subject ON insight(subject_type, subject_id);
 
@@ -664,7 +711,7 @@ CREATE TABLE IF NOT EXISTS friction_event (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     raw VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS friction_session_kind ON friction_event(session, kind);
 
@@ -680,8 +727,8 @@ CREATE TABLE IF NOT EXISTS turn_analysis (
     method VARCHAR NOT NULL,
     signals VARCHAR,  -- JSON-encoded
     text VARCHAR,
-    ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS turn_analysis_turn ON turn_analysis(turn);
 CREATE INDEX IF NOT EXISTS turn_analysis_session_act ON turn_analysis(session, act);
@@ -702,8 +749,8 @@ CREATE TABLE IF NOT EXISTS reaction_event (
     user_text VARCHAR,
     assistant_text VARCHAR,
     context_json VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS reaction_event_user_turn ON reaction_event(user_turn);
 CREATE INDEX IF NOT EXISTS reaction_event_session_ts ON reaction_event(session, ts);
@@ -718,14 +765,14 @@ CREATE TABLE IF NOT EXISTS classifier_definition (
     input VARCHAR NOT NULL,
     labels VARCHAR NOT NULL,  -- JSON-encoded
     targets VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_definition_key_version ON classifier_definition(classifier_key, version);
 
 CREATE TABLE IF NOT EXISTS classifier_run (
     id VARCHAR PRIMARY KEY,
-    started_at TIMESTAMP NOT NULL,
-    finished_at TIMESTAMP,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ,
     status VARCHAR NOT NULL,
     classifier_keys VARCHAR NOT NULL,  -- JSON-encoded
     since_days BIGINT,
@@ -752,8 +799,8 @@ CREATE TABLE IF NOT EXISTS classifier_result (
     method VARCHAR NOT NULL,
     evidence_json VARCHAR NOT NULL,
     signals VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS classifier_result_classifier ON classifier_result(classifier_key, classifier_version);
 CREATE INDEX IF NOT EXISTS classifier_result_turn ON classifier_result(turn);
@@ -766,7 +813,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_node (
     label VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_node_graph_id ON classifier_graph_node(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_node_kind ON classifier_graph_node(kind);
@@ -780,7 +827,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_edge (
     evidence_path VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_edge_graph_id ON classifier_graph_edge(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_edge_kind ON classifier_graph_edge(kind);
@@ -798,7 +845,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_fact (
     evidence_edges_json VARCHAR NOT NULL,
     properties_json VARCHAR NOT NULL,
     source_kind VARCHAR NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_fact_graph_id ON classifier_graph_fact(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_fact_kind ON classifier_graph_fact(kind);
@@ -822,7 +869,7 @@ CREATE TABLE IF NOT EXISTS transcript_label_review (
     reviewer VARCHAR NOT NULL,
     rationale VARCHAR NOT NULL,
     evidence_paths_json VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_review_candidate ON transcript_label_review(candidate_id);
 CREATE INDEX IF NOT EXISTS transcript_label_review_graph_fact ON transcript_label_review(graph_fact_id);
@@ -838,7 +885,7 @@ CREATE TABLE IF NOT EXISTS transcript_label_vector (
     embedding_ref VARCHAR NOT NULL,
     nearest_reviewed_candidate_ids_json VARCHAR NOT NULL,  -- JSON-encoded
     nearest_scores_json VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_vector_candidate ON transcript_label_vector(candidate_id);
 CREATE INDEX IF NOT EXISTS transcript_label_vector_graph_fact ON transcript_label_vector(graph_fact_id);
@@ -852,8 +899,8 @@ CREATE TABLE IF NOT EXISTS semantic_signal (
     description VARCHAR,
     method VARCHAR NOT NULL,
     confidence DOUBLE NOT NULL,
-    first_seen TIMESTAMP,
-    last_seen TIMESTAMP,
+    first_seen TIMESTAMPTZ,
+    last_seen TIMESTAMPTZ,
     metrics VARCHAR  -- JSON-encoded
 );
 CREATE UNIQUE INDEX IF NOT EXISTS semantic_signal_kind_label ON semantic_signal(kind, label);
@@ -868,7 +915,7 @@ CREATE TABLE IF NOT EXISTS diagnostic_event (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     raw VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS diagnostic_session_kind ON diagnostic_event(session, kind);
 
@@ -878,8 +925,8 @@ CREATE TABLE IF NOT EXISTS guidance (
     title VARCHAR,
     status VARCHAR NOT NULL DEFAULT 'active',
     labels VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_slug_uq ON guidance(slug);
 CREATE INDEX IF NOT EXISTS guidance_status ON guidance(status);
@@ -890,7 +937,7 @@ CREATE TABLE IF NOT EXISTS guidance_version (
     version VARCHAR NOT NULL,
     text VARCHAR NOT NULL,
     raw VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR NOT NULL DEFAULT 'proposed',
     scope VARCHAR,
     risk VARCHAR,
@@ -910,7 +957,7 @@ CREATE TABLE IF NOT EXISTS guidance_source (
     evidence_strength VARCHAR NOT NULL,
     git_root VARCHAR,
     tracked BOOLEAN NOT NULL DEFAULT FALSE,
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_source_path_uq ON guidance_source(path);
 CREATE INDEX IF NOT EXISTS guidance_source_scope ON guidance_source(scope, provider);
@@ -928,7 +975,7 @@ CREATE TABLE IF NOT EXISTS guidance_revision (
     evidence_strength VARCHAR NOT NULL,
     commit_evidence VARCHAR,
     file_evidence VARCHAR,
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_revision_source_hash ON guidance_revision(source_path, content_hash);
 CREATE INDEX IF NOT EXISTS guidance_revision_scope ON guidance_revision(scope, observed_at);
@@ -963,7 +1010,7 @@ CREATE TABLE IF NOT EXISTS guidance_config_artifact (
     permission_ask_count BIGINT NOT NULL,
     permission_deny_count BIGINT NOT NULL,
     metadata_json VARCHAR,
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact(provider, path_hash);
 CREATE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact(provider, kind, scope);
@@ -975,8 +1022,8 @@ CREATE TABLE IF NOT EXISTS stack (
     name VARCHAR NOT NULL,
     aliases VARCHAR,  -- JSON-encoded
     labels VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS stack_name_uq ON stack(name);
 
@@ -991,7 +1038,7 @@ CREATE TABLE IF NOT EXISTS command_outcome (
     text VARCHAR,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS command_outcome_kind_ts ON command_outcome(kind, ts);
 CREATE INDEX IF NOT EXISTS command_outcome_session ON command_outcome(session, ts);
@@ -1006,8 +1053,8 @@ CREATE TABLE IF NOT EXISTS user_message_ngram (
     near_failed_tool_count BIGINT NOT NULL DEFAULT 0,
     near_edit_count BIGINT NOT NULL DEFAULT 0,
     near_verification_count BIGINT NOT NULL DEFAULT 0,
-    first_seen TIMESTAMP,
-    last_seen TIMESTAMP
+    first_seen TIMESTAMPTZ,
+    last_seen TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS user_message_ngram_n_count ON user_message_ngram(n, count);
 CREATE INDEX IF NOT EXISTS user_message_ngram_text ON user_message_ngram(ngram);
@@ -1015,8 +1062,8 @@ CREATE INDEX IF NOT EXISTS user_message_ngram_text ON user_message_ngram(ngram);
 CREATE TABLE IF NOT EXISTS workflow_epoch (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
-    starts_at TIMESTAMP,
-    ends_at TIMESTAMP,
+    starts_at TIMESTAMPTZ,
+    ends_at TIMESTAMPTZ,
     evidence_kind VARCHAR,
     evidence_ref VARCHAR,
     notes VARCHAR
@@ -1047,7 +1094,7 @@ CREATE TABLE IF NOT EXISTS session_token_usage (
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
     burn_buckets VARCHAR,  -- JSON-encoded number[]; sessions-list BURN sparkline
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_token_usage_session ON session_token_usage(session);
 CREATE INDEX IF NOT EXISTS session_token_usage_epoch ON session_token_usage(workflow_epoch, source, ts);
@@ -1077,7 +1124,7 @@ CREATE TABLE IF NOT EXISTS turn_token_usage (
     usage_source VARCHAR NOT NULL,
     usage_quality VARCHAR NOT NULL,
     raw VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS turn_token_usage_turn ON turn_token_usage(turn);
 CREATE INDEX IF NOT EXISTS turn_token_usage_session_seq ON turn_token_usage(session, seq);
@@ -1108,7 +1155,7 @@ CREATE TABLE IF NOT EXISTS session_health (
     correction_turns BIGINT NOT NULL DEFAULT 0,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_health_session ON session_health(session);
 CREATE INDEX IF NOT EXISTS session_health_epoch ON session_health(workflow_epoch, source, ts);
@@ -1125,7 +1172,7 @@ CREATE TABLE IF NOT EXISTS session_metrics (
     time_to_first_edit_ms BIGINT,
     cold_start_reads BIGINT NOT NULL DEFAULT 0,
     delegation_ratio DOUBLE,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_metrics_session ON session_metrics(session);
 
@@ -1142,7 +1189,7 @@ CREATE TABLE IF NOT EXISTS fragility_cascade (
     origin VARCHAR NOT NULL,  -- ref -> session
     downstream VARCHAR NOT NULL,  -- ref -> session
     weight BIGINT NOT NULL DEFAULT 0,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS fragility_cascade_pair ON fragility_cascade(origin, downstream);
 
@@ -1155,7 +1202,7 @@ CREATE TABLE IF NOT EXISTS commit_classification (
     message VARCHAR,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS commit_classification_commit ON commit_classification(commit);
 CREATE INDEX IF NOT EXISTS commit_classification_kind_ts ON commit_classification(kind, ts);
@@ -1167,8 +1214,8 @@ CREATE TABLE IF NOT EXISTS branch (
     head_sha VARCHAR,
     upstream VARCHAR,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
-    first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at TIMESTAMP
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS branch_repo_name ON branch(repository, name);
 
@@ -1185,16 +1232,16 @@ CREATE TABLE IF NOT EXISTS pull_request (
     merge_sha VARCHAR,
     author VARCHAR,
     url VARCHAR,
-    opened_at TIMESTAMP,
-    closed_at TIMESTAMP,
-    merged_at TIMESTAMP,
+    opened_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ,
+    merged_at TIMESTAMPTZ,
     additions BIGINT NOT NULL DEFAULT 0,
     deletions BIGINT NOT NULL DEFAULT 0,
     changed_files BIGINT NOT NULL DEFAULT 0,
     commit_count BIGINT NOT NULL DEFAULT 0,
     labels VARCHAR,
     raw VARCHAR,
-    updated_at TIMESTAMP
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pull_request_repo_number ON pull_request(repository, number);
 CREATE INDEX IF NOT EXISTS pull_request_state ON pull_request(repository, state, updated_at);
@@ -1211,7 +1258,7 @@ CREATE TABLE IF NOT EXISTS review_event (
     category VARCHAR NOT NULL DEFAULT 'unknown',
     unresolved BOOLEAN NOT NULL DEFAULT FALSE,
     raw VARCHAR,
-    ts TIMESTAMP NOT NULL
+    ts TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS review_event_pr_ts ON review_event(pull_request, ts);
 CREATE INDEX IF NOT EXISTS review_event_severity ON review_event(repository, severity, ts);
@@ -1227,8 +1274,8 @@ CREATE TABLE IF NOT EXISTS check_run (
     conclusion VARCHAR,
     url VARCHAR,
     raw VARCHAR,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS check_run_pr ON check_run(pull_request, status, conclusion);
 CREATE INDEX IF NOT EXISTS check_run_commit ON check_run(commit, status, conclusion);
@@ -1249,8 +1296,8 @@ CREATE TABLE IF NOT EXISTS delivery_outcome (
     phase_metrics VARCHAR,
     confidence VARCHAR NOT NULL DEFAULT 'medium',
     evidence VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS delivery_session ON delivery_outcome(session);
 CREATE INDEX IF NOT EXISTS delivery_pr ON delivery_outcome(pull_request);
@@ -1258,7 +1305,7 @@ CREATE INDEX IF NOT EXISTS delivery_status ON delivery_outcome(repository, statu
 
 CREATE TABLE IF NOT EXISTS workflow_snapshot (
     id VARCHAR PRIMARY KEY,
-    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     payload VARCHAR NOT NULL,
     source VARCHAR NOT NULL DEFAULT 'workflow-refresh'
 );
@@ -1270,8 +1317,8 @@ CREATE TABLE IF NOT EXISTS phase_span (
     phase VARCHAR NOT NULL,
     start_turn VARCHAR,  -- ref -> turn
     end_turn VARCHAR,  -- ref -> turn
-    start_ts TIMESTAMP NOT NULL,
-    end_ts TIMESTAMP NOT NULL,
+    start_ts TIMESTAMPTZ NOT NULL,
+    end_ts TIMESTAMPTZ NOT NULL,
     duration_ms BIGINT NOT NULL,
     user_turns BIGINT NOT NULL DEFAULT 0,
     assistant_turns BIGINT NOT NULL DEFAULT 0,
@@ -1297,7 +1344,7 @@ CREATE TABLE IF NOT EXISTS skill_candidate (
     status VARCHAR NOT NULL DEFAULT 'candidate',
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS skill_candidate_name ON skill_candidate(name);
 CREATE INDEX IF NOT EXISTS skill_candidate_status ON skill_candidate(status, created_at);
@@ -1306,11 +1353,11 @@ CREATE TABLE IF NOT EXISTS ingest_run (
     command VARCHAR NOT NULL,
     status VARCHAR NOT NULL DEFAULT 'running',
     since_days BIGINT,
-    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Heartbeat: bumped on every stage start/finish so a genuinely-live "running"
     -- run is distinguishable from one stranded by a crash (doctor stale-run check).
-    last_progress_at TIMESTAMP,
-    ended_at TIMESTAMP,
+    last_progress_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
     metrics VARCHAR  -- JSON
 );
 CREATE INDEX IF NOT EXISTS ingest_run_status_started ON ingest_run(status, started_at);
@@ -1321,8 +1368,8 @@ CREATE TABLE IF NOT EXISTS ingest_stage (
     source VARCHAR NOT NULL,
     stage VARCHAR NOT NULL,
     status VARCHAR NOT NULL DEFAULT 'running',
-    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ended_at TIMESTAMP,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMPTZ,
     counts VARCHAR,  -- JSON
     error_text VARCHAR
 );
@@ -1337,7 +1384,7 @@ CREATE TABLE IF NOT EXISTS ingest_event (
     message VARCHAR NOT NULL,
     counts VARCHAR,  -- JSON
     raw VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ingest_event_run_ts ON ingest_event(run, ts);
 CREATE INDEX IF NOT EXISTS ingest_event_source_ts ON ingest_event(source, ts);
@@ -1350,7 +1397,7 @@ CREATE TABLE IF NOT EXISTS query_sample (
     duration_ms BIGINT,
     error_text VARCHAR,
     row_count BIGINT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS graph_health_check (
@@ -1359,7 +1406,7 @@ CREATE TABLE IF NOT EXISTS graph_health_check (
     status VARCHAR NOT NULL,
     count BIGINT NOT NULL DEFAULT 0,
     rows VARCHAR,  -- JSON
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS graph_health_kind_created ON graph_health_check(kind, created_at);
 
@@ -1385,7 +1432,7 @@ CREATE TABLE IF NOT EXISTS plays_role (
     source VARCHAR NOT NULL,
     weight DOUBLE,
     rationale VARCHAR,
-    since TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    since TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS plays_role_in ON plays_role(in_id);
 CREATE INDEX IF NOT EXISTS plays_role_out ON plays_role(out_id);
@@ -1398,7 +1445,7 @@ CREATE TABLE IF NOT EXISTS invoked (
     in_id VARCHAR NOT NULL,  -- ref -> turn
     out_id VARCHAR NOT NULL,  -- ref -> skill
     args VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     -- Denormalised source session. Session-detail top-skills must avoid
     -- dereferencing the source turn's session across every invoked edge for
     -- large sessions.
@@ -1430,7 +1477,7 @@ CREATE TABLE IF NOT EXISTS loaded (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> session
     out_id VARCHAR NOT NULL,  -- ref -> skill
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     agent VARCHAR,  -- the scoping agent
     source VARCHAR NOT NULL DEFAULT 'frontmatter'
 );
@@ -1442,7 +1489,7 @@ CREATE TABLE IF NOT EXISTS proposed (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
     out_id VARCHAR NOT NULL,  -- ref -> skill
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     context_excerpt VARCHAR
 );
 -- proposed-but-never-invoked counts traverse the skill side.
@@ -1455,7 +1502,7 @@ CREATE TABLE IF NOT EXISTS edited (
     in_id VARCHAR NOT NULL,  -- ref -> turn
     out_id VARCHAR NOT NULL,  -- ref -> file
     tool VARCHAR NOT NULL,  -- 'Edit'|'Write'|'NotebookEdit'
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     checkout VARCHAR,  -- ref -> checkout
     path_seen VARCHAR,
     absolute_path_seen VARCHAR,
@@ -1476,7 +1523,7 @@ CREATE TABLE IF NOT EXISTS mentioned_file (
     source VARCHAR NOT NULL DEFAULT 'text',  -- 'text' | 'tool_input' | 'tool_output'
     confidence DOUBLE,
     excerpt VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentioned_file_in ON mentioned_file(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_file_out ON mentioned_file(out_id);
@@ -1489,7 +1536,7 @@ CREATE TABLE IF NOT EXISTS mentioned_symbol (
     source VARCHAR NOT NULL DEFAULT 'text',
     confidence DOUBLE,
     excerpt VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentioned_symbol_in ON mentioned_symbol(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_symbol_out ON mentioned_symbol(out_id);
@@ -1501,7 +1548,7 @@ CREATE TABLE IF NOT EXISTS mentioned_error (
     source VARCHAR NOT NULL DEFAULT 'text',
     confidence DOUBLE,
     excerpt VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS mentioned_error_in ON mentioned_error(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_error_out ON mentioned_error(out_id);
@@ -1514,7 +1561,7 @@ CREATE TABLE IF NOT EXISTS read_file (
     path_seen VARCHAR,
     absolute_path_seen VARCHAR,
     excerpt VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS read_file_in ON read_file(in_id);
 CREATE INDEX IF NOT EXISTS read_file_out ON read_file(out_id);
@@ -1527,7 +1574,7 @@ CREATE TABLE IF NOT EXISTS searched_file (
     path_seen VARCHAR,
     absolute_path_seen VARCHAR,
     excerpt VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS searched_file_in ON searched_file(in_id);
 CREATE INDEX IF NOT EXISTS searched_file_out ON searched_file(out_id);
@@ -1538,7 +1585,7 @@ CREATE TABLE IF NOT EXISTS corrected_by (
     in_id VARCHAR NOT NULL,  -- ref -> turn
     out_id VARCHAR NOT NULL,  -- ref -> turn
     pattern VARCHAR,  -- which negation pattern matched
-    ts TIMESTAMP NOT NULL
+    ts TIMESTAMPTZ NOT NULL
 );
 -- correction-rate lookups walk the assistant turn that was corrected.
 CREATE INDEX IF NOT EXISTS corrected_by_in ON corrected_by(in_id);
@@ -1552,7 +1599,7 @@ CREATE TABLE IF NOT EXISTS expresses (
     session VARCHAR,  -- ref -> session
     confidence DOUBLE NOT NULL,
     method VARCHAR NOT NULL,
-    ts TIMESTAMP NOT NULL
+    ts TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS expresses_in ON expresses(in_id);
 CREATE INDEX IF NOT EXISTS expresses_out ON expresses(out_id);
@@ -1567,7 +1614,7 @@ CREATE TABLE IF NOT EXISTS reacts_to (
     act VARCHAR NOT NULL,
     confidence DOUBLE NOT NULL,
     signal VARCHAR,  -- ref -> semantic_signal
-    ts TIMESTAMP NOT NULL
+    ts TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reacts_to_in ON reacts_to(in_id);
 CREATE INDEX IF NOT EXISTS reacts_to_out ON reacts_to(out_id);
@@ -1581,7 +1628,7 @@ CREATE TABLE IF NOT EXISTS has_classification (
     label VARCHAR NOT NULL,
     target VARCHAR NOT NULL,
     confidence DOUBLE NOT NULL,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS has_classification_in ON has_classification(in_id);
 CREATE INDEX IF NOT EXISTS has_classification_out ON has_classification(out_id);
@@ -1592,7 +1639,7 @@ CREATE TABLE IF NOT EXISTS produced (
     out_id VARCHAR NOT NULL,  -- ref -> commit
     repository VARCHAR,  -- ref -> repository
     checkout VARCHAR,  -- ref -> checkout
-    ts TIMESTAMP,
+    ts TIMESTAMPTZ,
     source VARCHAR,
     kind VARCHAR
 );
@@ -1613,7 +1660,7 @@ CREATE TABLE IF NOT EXISTS touched (
     new_path VARCHAR,
     repository VARCHAR,  -- ref -> repository
     checkout VARCHAR,  -- ref -> checkout
-    ts TIMESTAMP
+    ts TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS touched_in ON touched(in_id);
 CREATE INDEX IF NOT EXISTS touched_out ON touched(out_id);
@@ -1631,7 +1678,7 @@ CREATE TABLE IF NOT EXISTS later_fixed_by (
     days_between DOUBLE,
     confidence VARCHAR NOT NULL,
     reason VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS later_fixed_by_in ON later_fixed_by(in_id);
 CREATE INDEX IF NOT EXISTS later_fixed_by_out ON later_fixed_by(out_id);
@@ -1643,7 +1690,7 @@ CREATE TABLE IF NOT EXISTS suggests_skill (
     reason VARCHAR,
     evidence VARCHAR,  -- JSON
     confidence VARCHAR NOT NULL,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS suggests_skill_in ON suggests_skill(in_id);
 CREATE INDEX IF NOT EXISTS suggests_skill_out ON suggests_skill(out_id);
@@ -1652,23 +1699,28 @@ CREATE TABLE IF NOT EXISTS has_checkout (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> repository
     out_id VARCHAR NOT NULL,  -- ref -> checkout
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS has_checkout_in ON has_checkout(in_id);
 CREATE INDEX IF NOT EXISTS has_checkout_out ON has_checkout(out_id);
 
 -- Untyped relation in Surreal (no FROM/TO): endpoints are whatever the writer
--- relates, so in_id / out_id carry ids from more than one table.
+-- relates, so in_id / out_id carry ids from more than one table. `in_table` /
+-- `out_table` recover the table name Surreal's own record id would have carried
+-- inline (P1-1 - see the POLYMORPHIC EDGES note in the file header); both sides
+-- are polymorphic on every table in this block, so both columns are required.
 CREATE TABLE IF NOT EXISTS concerns (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     kind VARCHAR,
     weight BIGINT,
     reason VARCHAR,
     labels VARCHAR,  -- JSON
     metrics VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS concerns_in ON concerns(in_id);
 CREATE INDEX IF NOT EXISTS concerns_out ON concerns(out_id);
@@ -1678,9 +1730,11 @@ CREATE TABLE IF NOT EXISTS resulted_in (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     kind VARCHAR,
     labels VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS resulted_in_in ON resulted_in(in_id);
 CREATE INDEX IF NOT EXISTS resulted_in_out ON resulted_in(out_id);
@@ -1689,9 +1743,11 @@ CREATE TABLE IF NOT EXISTS produced_artifact (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     kind VARCHAR,
     labels VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS produced_artifact_in ON produced_artifact(in_id);
 CREATE INDEX IF NOT EXISTS produced_artifact_out ON produced_artifact(out_id);
@@ -1700,9 +1756,11 @@ CREATE TABLE IF NOT EXISTS has_artifact (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     kind VARCHAR,
     labels VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS has_artifact_in ON has_artifact(in_id);
 CREATE INDEX IF NOT EXISTS has_artifact_out ON has_artifact(out_id);
@@ -1711,9 +1769,11 @@ CREATE TABLE IF NOT EXISTS derived_from (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     kind VARCHAR,
     labels VARCHAR,  -- JSON
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS derived_from_in ON derived_from(in_id);
 CREATE INDEX IF NOT EXISTS derived_from_out ON derived_from(out_id);
@@ -1724,7 +1784,7 @@ CREATE TABLE IF NOT EXISTS skill_paired (
     in_id VARCHAR NOT NULL,  -- ref -> skill
     out_id VARCHAR NOT NULL,  -- ref -> skill
     count BIGINT NOT NULL DEFAULT 1,
-    last_seen TIMESTAMP NOT NULL
+    last_seen TIMESTAMPTZ NOT NULL
 );
 -- Endpoint indexes: the dashboard skill-detail `paired` block filters by
 -- `in_id = $skill OR out_id = $skill` (apps/axctl/src/queries/skill-detail.ts).
@@ -1736,7 +1796,7 @@ CREATE TABLE IF NOT EXISTS recovered_by (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
     out_id VARCHAR NOT NULL,  -- ref -> skill
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     error_excerpt VARCHAR
 );
 CREATE INDEX IF NOT EXISTS recovered_by_in ON recovered_by(in_id);
@@ -1754,7 +1814,7 @@ CREATE TABLE IF NOT EXISTS spawned (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> session
     out_id VARCHAR NOT NULL,  -- ref -> session
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     tool VARCHAR,  -- e.g. "spawn_agent" | "Task"
     tool_call VARCHAR,  -- ref -> tool_call
     nickname VARCHAR,  -- codex assigns "Turing", "Babbage", etc.
@@ -1774,7 +1834,7 @@ CREATE INDEX IF NOT EXISTS spawned_out ON spawned(out_id);
 -- description at query time.
 CREATE TABLE IF NOT EXISTS advice (
     id VARCHAR PRIMARY KEY,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     session VARCHAR,  -- ref -> session (parent/advised session)
     tool VARCHAR,  -- normally "Agent"
     description VARCHAR,  -- dispatch tool_input.description (join key)
@@ -1791,7 +1851,7 @@ CREATE TABLE IF NOT EXISTS agent_event_child (
     agent_session VARCHAR NOT NULL,  -- ref -> agent_session
     provider VARCHAR NOT NULL,  -- ref -> agent_provider
     kind VARCHAR NOT NULL DEFAULT 'parent',
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS agent_event_child_in ON agent_event_child(in_id);
 CREATE INDEX IF NOT EXISTS agent_event_child_out ON agent_event_child(out_id);
@@ -1805,7 +1865,7 @@ CREATE TABLE IF NOT EXISTS used_model (
     estimated_tokens BIGINT NOT NULL DEFAULT 0,
     estimated_cost_usd DOUBLE,
     pricing_source VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS used_model_in ON used_model(in_id);
 CREATE INDEX IF NOT EXISTS used_model_out ON used_model(out_id);
@@ -1816,7 +1876,7 @@ CREATE TABLE IF NOT EXISTS agent_used_model (
     out_id VARCHAR NOT NULL,  -- ref -> agent_model
     provider VARCHAR NOT NULL,  -- ref -> agent_provider
     source VARCHAR NOT NULL,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS agent_used_model_in ON agent_used_model(in_id);
 CREATE INDEX IF NOT EXISTS agent_used_model_out ON agent_used_model(out_id);
@@ -1831,7 +1891,7 @@ CREATE TABLE IF NOT EXISTS skill_triage_decision (
     skill_name VARCHAR NOT NULL,
     decision VARCHAR NOT NULL,  -- keep | archive | review
     reason VARCHAR,
-    decided_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    decided_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS skill_triage_decision_name ON skill_triage_decision(skill_name);
 
@@ -1843,7 +1903,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS skill_triage_decision_name ON skill_triage_dec
 CREATE TABLE IF NOT EXISTS harness_hook_event (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     harness VARCHAR NOT NULL,  -- claude | codex
     event_name VARCHAR NOT NULL,  -- PreToolUse | PostToolUse | SessionStart | ...
     hook_name VARCHAR NOT NULL,  -- e.g. PreToolUse:Bash
@@ -1864,7 +1924,7 @@ CREATE TABLE IF NOT EXISTS hook_command_invocation (
     id VARCHAR PRIMARY KEY,
     hook_event VARCHAR NOT NULL,  -- ref -> harness_hook_event
     session VARCHAR NOT NULL,  -- ref -> session
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     harness VARCHAR NOT NULL,  -- claude | codex
     event_name VARCHAR NOT NULL,
     hook_name VARCHAR NOT NULL,
@@ -1894,7 +1954,7 @@ CREATE INDEX IF NOT EXISTS hook_command_invocation_by_effect ON hook_command_inv
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ax_invocation (
     id VARCHAR PRIMARY KEY,
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     command VARCHAR NOT NULL,
     flags VARCHAR NOT NULL,
     exit_code BIGINT NOT NULL,
@@ -1920,8 +1980,8 @@ CREATE TABLE IF NOT EXISTS feedback_case_type (
     rule_kind VARCHAR NOT NULL,  -- deterministic | ai_review | hybrid
     rule_json VARCHAR NOT NULL,  -- JSON
     status VARCHAR NOT NULL DEFAULT 'active',  -- active | paused | retired
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS feedback_case_type_name ON feedback_case_type(name);
 CREATE INDEX IF NOT EXISTS feedback_case_type_status ON feedback_case_type(status);
@@ -1932,12 +1992,12 @@ CREATE TABLE IF NOT EXISTS feedback_case_result (
     target_kind VARCHAR NOT NULL,
     target VARCHAR,  -- ref -> hook_command_invocation
     session VARCHAR,  -- ref -> session
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     status VARCHAR NOT NULL,  -- passed | failed | inconclusive
     reason VARCHAR NOT NULL,
     window_json VARCHAR NOT NULL,  -- JSON (inspected window)
     evidence_json VARCHAR NOT NULL,  -- JSON (matched evidence)
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS feedback_case_result_by_case ON feedback_case_result(case_type, observed_at);
 CREATE INDEX IF NOT EXISTS feedback_case_result_by_status ON feedback_case_result(status);
@@ -1954,7 +2014,7 @@ CREATE INDEX IF NOT EXISTS feedback_case_result_by_session ON feedback_case_resu
 CREATE TABLE IF NOT EXISTS hook_fire (
     id VARCHAR PRIMARY KEY,
     -- Common telemetry base fields (mirrors packages/lib/src/telemetry-base.ts).
-    ts TIMESTAMP NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
     kind VARCHAR NOT NULL,  -- always "hook_fire"
     session VARCHAR,  -- ref -> session
     file VARCHAR,  -- ref -> file
@@ -1969,8 +2029,8 @@ CREATE TABLE IF NOT EXISTS hook_fire (
     reason VARCHAR NOT NULL,
     prior_sessions_considered BIGINT NOT NULL,
     task_excerpt VARCHAR NOT NULL,  -- clipped 240 chars
-    top_prior_sessions VARCHAR NOT NULL,  -- JSON session-id string[]
-    injected_titles VARCHAR NOT NULL DEFAULT '[]'  -- JSON string[] (max 3, empty when inject=false)
+    top_prior_sessions VARCHAR NOT NULL,  -- JSON session-record-id array; a record[] element type, so out of P2-3 scalar-array scope
+    injected_titles VARCHAR[] NOT NULL DEFAULT []  -- clipped titles of injected sessions (max 3, empty when inject=false); P2-3: native list
 );
 CREATE INDEX IF NOT EXISTS hook_fire_by_ts ON hook_fire(ts);
 CREATE INDEX IF NOT EXISTS hook_fire_by_session ON hook_fire(session);
@@ -2008,8 +2068,8 @@ CREATE TABLE IF NOT EXISTS proposal (
     -- serve) producing the row that fills hypothesis_template
     reject_reason VARCHAR,
     baseline VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS proposal_dedupe_uq ON proposal(dedupe_sig);
 CREATE INDEX IF NOT EXISTS proposal_status_freq ON proposal(status, frequency);
@@ -2028,9 +2088,9 @@ CREATE TABLE IF NOT EXISTS directive_ngram (
     outcomes BIGINT NOT NULL DEFAULT 0, -- of those, # followed by a captured outcome
     lift DOUBLE NOT NULL DEFAULT 0, -- P(outcome|ngram)/P(outcome)
     sessions BIGINT NOT NULL DEFAULT 0, -- distinct sessions (sparsity guard)
-    first_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen TIMESTAMP,
-    refit_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMPTZ,
+    refit_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS directive_ngram_uq ON directive_ngram(ngram);
 CREATE INDEX IF NOT EXISTS directive_ngram_lift ON directive_ngram(lift);
@@ -2055,7 +2115,7 @@ CREATE TABLE IF NOT EXISTS subagent_proposal (
     bounded_role VARCHAR NOT NULL,
     delegation_trigger VARCHAR NOT NULL,
     -- pattern matched against Task tool calls (see opportunity definition below)
-    example_task_patterns VARCHAR NOT NULL DEFAULT '[]'  -- JSON string[]
+    example_task_patterns VARCHAR[] NOT NULL DEFAULT []  -- P2-3: native list, not JSON
 );
 CREATE UNIQUE INDEX IF NOT EXISTS subagent_proposal_uq ON subagent_proposal(proposal);
 
@@ -2104,16 +2164,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS automation_proposal_uq ON automation_proposal(
 -- as foreclosing the most important query: "which friction events have
 -- not yet produced a proposal?" Heterogeneous source/target follows the
 -- existing `derived_from` / `concerns` pattern (RELATION SCHEMAFULL).
--- `in` = proposal, `out` = the cited evidence record
--- (friction_event | command_outcome | skill_candidate |
---  hook_command_invocation | spawned | ...).
+-- `in` = the citing record (proposal | classifier_result - both are real
+-- writers, see apps/axctl/src/classifiers/repository.ts and
+-- apps/axctl/src/ingest/derive-proposals.ts), `out` = the cited evidence
+-- record (friction_event | command_outcome | skill_candidate |
+--  hook_command_invocation | spawned | turn | classifier_graph_node | ...).
+-- BOTH sides are polymorphic (P1-1), so both get an explicit table column.
 CREATE TABLE IF NOT EXISTS cites_evidence (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
+    in_table VARCHAR NOT NULL,
+    out_table VARCHAR NOT NULL,
     count BIGINT NOT NULL DEFAULT 1,
     kind VARCHAR,
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS cites_evidence_in ON cites_evidence(in_id);
 CREATE INDEX IF NOT EXISTS cites_evidence_out ON cites_evidence(out_id);
@@ -2130,8 +2195,8 @@ CREATE TABLE IF NOT EXISTS experiment (
     proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
     artifact VARCHAR,  -- ref -> skill
     artifact_path VARCHAR,
-    scaffolded_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    scaffolded_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     locked_verdict VARCHAR,
     status VARCHAR NOT NULL DEFAULT 'task_emitted',
     -- task_emitted | scaffolded | regressed | retired
@@ -2149,11 +2214,16 @@ CREATE INDEX IF NOT EXISTS experiment_created ON experiment(created_at);
 -- Verdict math at checkpoint time is `addressed / opportunities` per window.
 -- Modeled as a RELATION (in = experiment, out = matched evidence record)
 -- so the heterogeneous evidence target works the same way as cites_evidence.
+-- Only `out` is polymorphic (P1-1): the writer
+-- (apps/axctl/src/ingest/derive-opportunities.ts buildOpportunityStatements)
+-- always relates FROM a fixed `experiment:` record, so `in_table` would be a
+-- constant column and is intentionally omitted.
 CREATE TABLE IF NOT EXISTS opportunity (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
-    matched_at TIMESTAMP NOT NULL,
+    out_table VARCHAR NOT NULL,
+    matched_at TIMESTAMPTZ NOT NULL,
     was_addressed BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS opportunity_in_ts ON opportunity(in_id, matched_at);
@@ -2186,7 +2256,7 @@ CREATE TABLE IF NOT EXISTS checkpoint (
     suggested VARCHAR,
     -- adopted | ignored | regressed | no_longer_needed | partial
     user_verdict VARCHAR,
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS checkpoint_experiment_kind ON checkpoint(experiment, kind, observed_at);
 
@@ -2210,8 +2280,8 @@ CREATE TABLE IF NOT EXISTS dogfood_run (
     timeout_seconds BIGINT,
     transcript_artifact VARCHAR,  -- ref -> artifact
     cwd VARCHAR,
-    started_at TIMESTAMP NOT NULL,
-    ended_at TIMESTAMP NOT NULL
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS dogfood_run_id_uq ON dogfood_run(run_id);
 CREATE INDEX IF NOT EXISTS dogfood_run_status_ts ON dogfood_run(status, ended_at);
@@ -2243,7 +2313,7 @@ CREATE TABLE IF NOT EXISTS retro (
     next VARCHAR,
     raw VARCHAR,        -- original JSON payload
     repository VARCHAR,  -- ref -> repository
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS retro_session_uq ON retro(session);
 CREATE INDEX IF NOT EXISTS retro_source_ts ON retro(source, created_at);
@@ -2257,7 +2327,7 @@ CREATE TABLE IF NOT EXISTS reviewed (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS reviewed_in ON reviewed(in_id);
 CREATE INDEX IF NOT EXISTS reviewed_out ON reviewed(out_id);
@@ -2294,7 +2364,7 @@ CREATE TABLE IF NOT EXISTS ingest_file_state (
     size DOUBLE,
     sha VARCHAR,  -- git HEAD watermark
     since_days DOUBLE,  -- git history window walked
-    ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state(path);
 CREATE INDEX IF NOT EXISTS ingest_file_state_source ON ingest_file_state(source_kind);
@@ -2323,7 +2393,7 @@ CREATE TABLE IF NOT EXISTS otel_metric_point (
     skill_name VARCHAR,
     agent_name VARCHAR,
     attrs VARCHAR,   -- JSON-encoded
-    observed_at TIMESTAMP NOT NULL
+    observed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS otel_metric_session ON otel_metric_point(session_id);
 CREATE INDEX IF NOT EXISTS otel_metric_observed ON otel_metric_point(observed_at);
@@ -2336,11 +2406,11 @@ CREATE TABLE IF NOT EXISTS otel_span (
     span_id VARCHAR NOT NULL,
     parent_span_id VARCHAR,
     session_id VARCHAR,
-    started_at TIMESTAMP NOT NULL,
-    ended_at TIMESTAMP NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ NOT NULL,
     duration_ms DOUBLE NOT NULL,
     attrs VARCHAR,        -- JSON-encoded
-    observed_at TIMESTAMP NOT NULL
+    observed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS otel_span_session ON otel_span(session_id);
 CREATE INDEX IF NOT EXISTS otel_span_observed ON otel_span(observed_at);
@@ -2359,7 +2429,7 @@ CREATE TABLE IF NOT EXISTS otel_log_event (
     duration_ms DOUBLE,
     status_code DOUBLE,
     attrs VARCHAR,
-    observed_at TIMESTAMP NOT NULL
+    observed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event(session_id);
 CREATE INDEX IF NOT EXISTS otel_log_event_observed ON otel_log_event(observed_at);
@@ -2381,7 +2451,7 @@ CREATE TABLE IF NOT EXISTS harness_tool_event (
     error_type VARCHAR,
     duration_ms DOUBLE,
     attrs VARCHAR,
-    observed_at TIMESTAMP NOT NULL
+    observed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS harness_tool_event_session ON harness_tool_event(session);
 CREATE INDEX IF NOT EXISTS harness_tool_event_kind ON harness_tool_event(event_kind);
@@ -2407,7 +2477,7 @@ CREATE TABLE IF NOT EXISTS harness_run_context (
     terminal_type VARCHAR,
     source_event VARCHAR,  -- ref -> otel_log_event
     attrs VARCHAR,
-    observed_at TIMESTAMP NOT NULL
+    observed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS harness_run_context_session ON harness_run_context(session);
 CREATE INDEX IF NOT EXISTS harness_run_context_harness ON harness_run_context(harness);
@@ -2425,11 +2495,11 @@ CREATE TABLE IF NOT EXISTS wrapped_card (
     body VARCHAR NOT NULL,   -- <=2 supporting lines
     sensitivity VARCHAR NOT NULL DEFAULT 'public',  -- public | sensitive
     "position" BIGINT NOT NULL DEFAULT 0,
-    series VARCHAR NOT NULL DEFAULT '[]',  -- JSON number[]
+    series DOUBLE[] NOT NULL DEFAULT [],  -- P2-3: native list, not JSON
     -- optional grounding sparkline - REAL data points (e.g. daily sessions
     -- on the card's model), rendered as the card's bar strip
     series_label VARCHAR,
-    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ---------------------------------------------------------------------------
@@ -2441,12 +2511,17 @@ CREATE TABLE IF NOT EXISTS wrapped_card (
 -- and `cites_evidence` (unconstrained polymorphic relations). Union-target
 -- syntax (FROM session TO otel_metric_point | otel_span) is not used
 -- elsewhere in this schema; omitting it is the safe, consistent choice.
+-- Only `out` is polymorphic (P1-1): the writer
+-- (apps/axctl/src/otel/correlate.ts) always relates FROM a fixed `session:`
+-- record, so `in_table` would be a constant column and is intentionally
+-- omitted; `out_table` records which otel_* table the linked row lives in.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS telemetry_of (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
     out_id VARCHAR NOT NULL,
-    linked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    out_table VARCHAR NOT NULL,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS telemetry_of_in ON telemetry_of(in_id);
 CREATE INDEX IF NOT EXISTS telemetry_of_out ON telemetry_of(out_id);
@@ -2472,7 +2547,7 @@ CREATE TABLE IF NOT EXISTS run_evidence_event (
     session VARCHAR NOT NULL,  -- ref -> session
     root_session VARCHAR,  -- ref -> session
     parent_session VARCHAR,  -- ref -> session
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     provider VARCHAR NOT NULL,
     -- objective|task_state|tool_observation|verification|policy_decision|boundary|artifact_ref|repo_state|claim|derived_summary
     kind VARCHAR NOT NULL,
@@ -2498,7 +2573,7 @@ CREATE TABLE IF NOT EXISTS run_evidence_event (
     input_hash VARCHAR,
     output_hash VARCHAR,
     attrs VARCHAR,  -- JSON-encoded
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS run_evidence_event_session ON run_evidence_event(session, ts);
 CREATE INDEX IF NOT EXISTS run_evidence_event_kind ON run_evidence_event(session, kind);
@@ -2509,7 +2584,7 @@ CREATE TABLE IF NOT EXISTS run_evidence_ref (
     id VARCHAR PRIMARY KEY,
     "event" VARCHAR NOT NULL,  -- ref -> run_evidence_event
     session VARCHAR NOT NULL,  -- ref -> session
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ts TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- record|file|sidecar|url|command|commit|external_event
     ref_kind VARCHAR NOT NULL,
     target_table VARCHAR,

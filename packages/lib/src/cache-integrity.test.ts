@@ -74,6 +74,30 @@ describe("checkCacheIntegrity", () => {
         expect(idx.get("c")).toBeUndefined();
     });
 
+    test("a ref into a known-but-empty table reports missing_id, not unknown_table", () => {
+        // "workspace" has no rows in the fixture index at all (buildCacheIdIndex
+        // never saw a row for it), so without knownTables this would read as
+        // unknown_table - the wrong diagnosis for a real, empty table.
+        const r = checkCacheIntegrity([ref({ targetTable: "workspace", targetId: "w1" })], index, {
+            knownTables: new Set(["workspace"]),
+        });
+        expect(r.dangling).toBe(1);
+        expect(r.samples[0]?.reason).toBe("missing_id");
+        expect(r.byTargetTable).toEqual({ workspace: 1 });
+    });
+
+    test("a ref into a table absent from both the index and knownTables stays unknown_table", () => {
+        const r = checkCacheIntegrity([ref({ targetTable: "ghost", targetId: "x" })], index, {
+            knownTables: new Set(["workspace"]),
+        });
+        expect(r.samples[0]?.reason).toBe("unknown_table");
+    });
+
+    test("knownTables does not affect a table already present in the cache index", () => {
+        const r = checkCacheIntegrity([ref({ targetId: "gone" })], index, { knownTables: new Set(["session"]) });
+        expect(r.samples[0]?.reason).toBe("missing_id");
+    });
+
     test("__proto__ and constructor target tables survive as real own keys, sum stays consistent", () => {
         const refs = [
             ref({ sidecarId: "a", targetTable: "__proto__", targetId: "gone1" }),

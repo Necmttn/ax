@@ -29,17 +29,25 @@ export function parseDuckdbIndexes(sql: string = DUCKDB_SCHEMA_SQL): readonly Du
     }));
 }
 
-/** Columns of one CREATE TABLE body, in declaration order. */
-export function parseDuckdbColumns(table: string, sql: string = DUCKDB_SCHEMA_SQL): readonly string[] {
+/** Raw, comment-stripped, blank-filtered column-definition lines of one CREATE
+ *  TABLE body, in declaration order. The one place both `parseDuckdbColumns`
+ *  and `parseDuckdbColumnDefs` extract a table body and split it into lines -
+ *  keeping this logic in a single helper is what the P3-1 standards finding
+ *  asked for (two independent regex-driven parsers of the same table body can
+ *  silently diverge on a DDL format change; one parser cannot). */
+function duckdbTableBodyLines(table: string, sql: string): readonly string[] {
     const re = new RegExp(`^CREATE TABLE IF NOT EXISTS\\s+"?${table}"?\\s*\\(([\\s\\S]*?)^\\);`, "m");
-    const body = sql.match(re)?.[1];
+    const body = re.exec(sql)?.[1];
     if (body === undefined) return [];
     return body
         .split("\n")
         .map((line) => line.replace(/--.*$/, "").trim())
-        .filter((line) => line.length > 0)
-        .map((line) => stripQuotes(line.split(/\s+/)[0]!))
-        .filter((name) => name.length > 0 && !/^(PRIMARY|UNIQUE|CONSTRAINT|CHECK)$/i.test(name));
+        .filter((line) => line.length > 0);
+}
+
+/** Columns of one CREATE TABLE body, in declaration order. */
+export function parseDuckdbColumns(table: string, sql: string = DUCKDB_SCHEMA_SQL): readonly string[] {
+    return parseDuckdbColumnDefs(table, sql).map((col) => col.name);
 }
 
 export interface DuckdbColumnDef {
@@ -50,13 +58,7 @@ export interface DuckdbColumnDef {
 
 /** Column definitions (name, type, NOT NULL) of one CREATE TABLE body, in declaration order. */
 export function parseDuckdbColumnDefs(table: string, sql: string = DUCKDB_SCHEMA_SQL): readonly DuckdbColumnDef[] {
-    const re = new RegExp(`^CREATE TABLE IF NOT EXISTS\\s+"?${table}"?\\s*\\(([\\s\\S]*?)^\\);`, "m");
-    const body = sql.match(re)?.[1];
-    if (body === undefined) return [];
-    return body
-        .split("\n")
-        .map((line) => line.replace(/--.*$/, "").trim())
-        .filter((line) => line.length > 0)
+    return duckdbTableBodyLines(table, sql)
         .map((line) => {
             const parts = line.split(/\s+/);
             const name = stripQuotes(parts[0]!);

@@ -68,6 +68,73 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
         }
     });
 
+    // P2-5: the earlier version of this suite only loaded the DDL and listed
+    // tables - it never proved a single row could actually be written and
+    // read back. This test inserts one representative row per risky
+    // translation decision from the cross-review (P1-1 polymorphic edges,
+    // P2-1 TIMESTAMPTZ offset preservation, P2-2 DEFAULT-only-on-omit
+    // semantics, P2-3 native list columns) and asserts the values survive a
+    // round trip through the real DuckDB engine.
+    test("representative inserts round-trip through offset timestamps, lists, JSON text, defaults, and a polymorphic edge", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
+        try {
+            const dbPath = join(dir, "cache.duckdb");
+            const script = [
+                `.read ${DUCKDB_SCHEMA_PATH}`,
+                // JSON-encoded VARCHAR (session.labels) + a DEFAULT-reliant column
+                // (session.source has DEFAULT 'claude', omitted here on purpose).
+                `INSERT INTO session (id, labels) VALUES ('s1', '["spar"]');`,
+                `SELECT id, source, labels, json_extract_string(labels, '$[0]') FROM session WHERE id = 's1';`,
+                // TIMESTAMPTZ with a non-UTC offset (+05:30): the UTC instant must
+                // survive the round trip even though DuckDB may display it in a
+                // different session-local zone.
+                `INSERT INTO "commit" (id, sha, repo, ts) VALUES ('c1', 'deadbeef', 'ax', TIMESTAMPTZ '2026-06-15 10:00:00+05:30');`,
+                `SELECT epoch(ts) FROM "commit" WHERE id = 'c1';`,
+                // Native list column (P2-3): agent_def.skills is VARCHAR[], not JSON text.
+                `INSERT INTO agent_def (id, name, scope, dir_path, skills, content_hash) VALUES ('a1', 'my-agent', 'user', '/x', ['skill-a', 'skill-b'], 'hash1');`,
+                `SELECT skills FROM agent_def WHERE id = 'a1';`,
+                // Polymorphic edge row (P1-1): concerns carries an explicit
+                // in_table/out_table pair alongside in_id/out_id.
+                `INSERT INTO concerns (id, in_id, out_id, in_table, out_table, kind) VALUES ('e1', 'tool1', 'skill1', 'tool_call', 'skill', 'test');`,
+                `SELECT in_table, out_table FROM concerns WHERE id = 'e1';`,
+            ].join("\n");
+            const run = Bun.spawnSync([duckdb, "-batch", "-noheader", "-list", dbPath], {
+                stdin: new TextEncoder().encode(`${script}\n`),
+            });
+            const stderr = new TextDecoder().decode(run.stderr);
+            expect(stderr).toBe("");
+            expect(run.exitCode).toBe(0);
+
+            const lines = new TextDecoder()
+                .decode(run.stdout)
+                .split("\n")
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0);
+            expect(lines.length).toBe(4);
+
+            const [sessionRow, commitEpoch, agentDefSkills, concernsEdge] = lines as [string, string, string, string];
+
+            // DEFAULT-reliant column: source was never supplied on insert, so
+            // DuckDB's `DEFAULT CURRENT_TIMESTAMP`-style column default (here a
+            // literal string default) must have fired.
+            const [id, source, labels, firstLabel] = sessionRow.split("|");
+            expect(id).toBe("s1");
+            expect(source).toBe("claude");
+            expect(labels).toBe('["spar"]');
+            expect(firstLabel).toBe("spar");
+
+            // The instant, not the display offset, is what must be preserved -
+            // 2026-06-15T10:00:00+05:30 is 2026-06-15T04:30:00Z.
+            const expectedEpoch = Date.UTC(2026, 5, 15, 4, 30, 0) / 1000;
+            expect(Number(commitEpoch)).toBe(expectedEpoch);
+
+            expect(agentDefSkills).toBe("[skill-a, skill-b]");
+            expect(concernsEdge).toBe("tool_call|skill");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("the two FTS surfaces build with PRAGMA create_fts_index", () => {
         const dir = mkdtempSync(join(tmpdir(), "ax-duckdb-ddl-"));
         try {
