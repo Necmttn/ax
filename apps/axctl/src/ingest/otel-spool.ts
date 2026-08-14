@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { defaultOtlpDataDir } from "../otel/spool-server.ts";
+import { defaultOtlpSpoolDir } from "../otel/spool-server.ts";
 import { SIGNALS } from "../otel/signals.ts";
 import type { Signal } from "../otel/signal.ts";
 import { OtelWriter, OtelWriterLive } from "../otel/writer.ts";
@@ -43,7 +43,7 @@ const parseBody = (body: string): unknown | undefined => {
 };
 
 export interface IngestOtelSpoolOptions {
-    readonly dataDir?: string;
+    readonly spoolDir?: string;
     readonly runId?: string;
 }
 
@@ -66,8 +66,7 @@ export const ingestOtelSpool = (
 > =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const spoolDir = path.join(opts.dataDir ?? defaultOtlpDataDir(), "otlp", "spool");
+        const spoolDir = opts.spoolDir ?? defaultOtlpSpoolDir();
         const candidates = yield* walkJsonlFilesStrict(spoolDir, 0);
         let payloads = 0;
         let rows = 0;

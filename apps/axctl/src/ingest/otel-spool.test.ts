@@ -32,9 +32,8 @@ const metricPayload = {
 
 describe("otel-spool ingest stage", () => {
     it("decodes a spool file and writes OTLP rows once", async () => {
-        const dataDir = await mkdtemp(join(tmpdir(), "ax-otel-spool-stage-"));
-        roots.push(dataDir);
-        const spoolDir = join(dataDir, "otlp", "spool");
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-spool-stage-"));
+        roots.push(spoolDir);
         await mkdir(spoolDir, { recursive: true });
         const line = JSON.stringify({
             received_at: "2026-08-14T12:00:00.000Z",
@@ -59,7 +58,7 @@ describe("otel-spool ingest stage", () => {
         const layer = Layer.mergeAll(tc.layer, BunFileSystem.layer, BunPath.layer);
 
         const run = () => Effect.runPromise(
-            ingestOtelSpool({ dataDir }).pipe(Effect.provide(layer)),
+            ingestOtelSpool({ spoolDir }).pipe(Effect.provide(layer)),
         );
         const first = await run();
         const second = await run();
