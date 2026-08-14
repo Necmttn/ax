@@ -142,23 +142,11 @@ function isLocalDevOrigin(origin: string): boolean {
     return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
-
-/**
- * True when the Host header names the loopback interface (optional :port), or
- * is absent. A DNS-rebinding page re-points its own domain at 127.0.0.1 and
- * issues same-origin requests, sailing past CORS; the only value it cannot
- * forge is the Host header (the browser always sends its own domain). So a
- * PRESENT, non-loopback Host is rejected; a MISSING Host (curl, unit tests,
- * non-browser callers) is allowed - a browser can never produce that.
- */
-export function isAllowedHost(host: string | null): boolean {
-    if (host === null || host === "") return true;
-    const hostname = host.startsWith("[")
-        ? host.slice(0, host.indexOf("]") + 1) // strip :port after ]
-        : host.split(":")[0]!;
-    return LOOPBACK_HOSTS.has(hostname);
-}
+// The loopback Host-header guard now lives in a dep-free module shared with the
+// OTLP spool server (host-guard.ts). Imported for use below and re-exported so
+// existing importers and tests keep resolving it from server.ts.
+import { isAllowedHost } from "./host-guard.ts";
+export { isAllowedHost };
 
 function corsHeadersFor(origin: string | null, requestedHeaders?: string | null): Record<string, string> {
     if (!origin) return {};
