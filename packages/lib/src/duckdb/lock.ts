@@ -5,9 +5,12 @@
  * ingest, under this lock.
  *
  * The lock is a small JSON file (`lock-state.ts`'s `LockPayload`) holding the
- * writer's pid and start time. `decideLock` (pure, tested in isolation)
- * classifies what's on disk into `free` / `held` / `stale` given a liveness
- * probe; this module supplies that probe (`process.kill(pid, 0)`), the real
+ * writer's pid, when it took the lock, a per-acquire random token (so a stale
+ * handle can tell its own lock from a successor's) and the holder process's
+ * start time (so a REUSED pid is not mistaken for a live holder).
+ * `decideLock` (pure, tested in isolation) classifies what's on disk into
+ * `free` / `held` / `stale` given a liveness probe; this module supplies that
+ * probe (`process.kill(pid, 0)`, plus the start-time fingerprint), the real
  * filesystem operations, and the acquire/release lifecycle around them.
  *
  * The exclusive create (`"wx"`) is what actually breaks a race between two
@@ -128,7 +131,10 @@
  * bounded as CONTENTION (fail fast / poll), not retried - only the holder can
  * clear that condition, so a retry against it is a busy-wait by construction.
  *
- * Residual, stated precisely rather than assumed away:
+ * Residual, stated precisely rather than assumed away. Read (1) and (2) with
+ * the cross-review note below: BOTH now require two distinct PROCESSES. Two
+ * fibers of THIS process can no longer both be inside `acquire` for the same
+ * canonical path at all, because the per-path acquire mutex serializes them.
  *  1. `reclaimStaleToken` removes the token BY PATH; it never confirms that
  *     the file it removes is the file it classified. Two losers can observe
  *     the SAME reclaimable token, and the second one's remove can land AFTER
@@ -170,8 +176,11 @@
  *  5. The only primitives that actually arbitrate residuals (1) and (2) are an
  *     OS advisory lock (`flock`/`fcntl`) held ACROSS the takeover, or a design
  *     that never removes a foreign file. Both are out of scope for this chunk
- *     and are raised to the v2-duckdb epic, gated on wiring this module into
- *     `ax ingest` - nothing imports it outside its own test today.
+ *     and are tracked as issue #789 on the v2-duckdb epic, gated on wiring
+ *     this module into `ax ingest` - nothing imports it outside its own test
+ *     today. The cross-review fixes below deliberately did NOT attempt that
+ *     redesign; they close the in-process and same-handle holes, which are a
+ *     different (and reachable without any leaked token) class of bug.
  *  6. `confirmAndTakeOver` folds "the lock file VANISHED between the confirm
  *     read and the `stat`" (`age === null`) into `"unconfirmable"` rather than
  *     `"retry"`. The lock is actually FREE at that instant, so a no-wait caller
@@ -198,9 +207,50 @@
  * closed over by one layer instance is invisible to a second in-process
  * acquirer that goes through a DIFFERENT layer instance for the SAME path -
  * exactly the `ax serve`-forking-`runIngest` shape this module is built for.
- * `inProcessHolders` below is a module-level `Map<path, boolean>`, the one
- * piece of truly global state in this file, scoped by the resolved lock path
- * so it is correct regardless of how many layer instances a consumer builds.
+ * `inProcessHolders` below is a module-level `Map`, scoped by the CANONICAL
+ * lock path, so it is correct regardless of how many layer instances a
+ * consumer builds.
+ *
+ * CROSS-REVIEW FIXES (what this module no longer gets wrong). Four holes that
+ * an earlier version of this comment did not list, each closed and each
+ * covered by a test that is RED against the previous implementation:
+ *  - P1-3, the create/register race. `createExclusive` wrote the lock file
+ *    and only THEN called `setSelfHolds`. A second fiber scheduled in that
+ *    gap read a file naming OUR pid with `selfHolds` still false - which
+ *    `decideLock` calls `stale` - and took over a lock the first fiber had
+ *    just won, so BOTH held a handle. Every acquire for a given canonical
+ *    path now runs under a per-path `Semaphore` (1 permit), which removes the
+ *    interleave rather than reordering two statements inside it, and the
+ *    create+register pair is `Effect.uninterruptible` so interruption cannot
+ *    split it either. `acquire` pairs that with an `onInterrupt` that
+ *    releases a lock created but never handed to a caller: the outcome is
+ *    always owned or removed, never orphaned. This says NOTHING about other
+ *    processes - see residuals (1) and (2).
+ *  - P1-4, a stale handle deleting its successor. `release` asked only "does
+ *    the file name our pid", which every handle from this process satisfies,
+ *    so acquire A -> release A -> acquire B -> release A (a duplicated or
+ *    late release) deleted B's live lock. Each acquire now stamps a random
+ *    `token` into the payload, and `release` removes the file only when the
+ *    bytes on disk are still EXACTLY the ones it wrote. A superseded handle's
+ *    release is a no-op success, and it does not clear the current holder's
+ *    in-process registration either.
+ *  - P1-5, path aliasing. Process-local state was keyed by the caller's
+ *    STRING, so `ingest.lock`, `/abs/ingest.lock` and a symlinked alias of
+ *    the directory looked like three separate locks and the second spelling
+ *    stole the first one's live lock. All process-local state is now keyed by
+ *    the canonical path (`canonicalKey`, resolved once per service).
+ *  - P2-3, pid reuse. A crashed holder's pid gets handed to some unrelated
+ *    process, which then reads as a live holder forever (`ax ingest` blocked
+ *    with nothing running). The payload carries the holder's process start
+ *    time (`ps -o lstart=`, best effort) and a live pid whose fingerprint no
+ *    longer matches is treated as stale. A missing/unreadable fingerprint
+ *    degrades exactly to the old pid-only behavior.
+ *  - P2-5, release reporting success after failing. `release` ended in
+ *    `Effect.ignore`, so a failed unlink (permissions, read-only mount, IO)
+ *    was reported as a successful release while the lock file stayed on disk
+ *    and every other process kept seeing a live holder. Real failures now
+ *    surface as `IngestLockError`; only the benign already-gone case is
+ *    silent.
  *
  * RULING R6: this is a runtime module under `packages/lib/src/`, so
  * `node:fs` / `node:path` are banned (`check:no-node-fs`). Filesystem access
@@ -211,16 +261,36 @@
  * banned and stays.
  */
 import { BunFileSystem } from "@effect/platform-bun";
-import { Context, Effect, FileSystem, Layer, Option, type PlatformError } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Semaphore, type PlatformError } from "effect";
 import { homedir } from "node:os";
 import { skipNotFound } from "../shared/fs-error.ts";
 import { posixPath } from "../shared/path.ts";
+import { canonicalPath } from "./canonical-path.ts";
 import { IngestLockError, IngestLockHeldError } from "./errors.ts";
-import { decideLock, decodeLockPayload, encodeLockPayload, type LockPayload } from "./lock-state.ts";
+import {
+    decideLock,
+    decodeLockPayload,
+    encodeLockPayload,
+    type LockDecision,
+    type LockPayload,
+} from "./lock-state.ts";
 
 export interface IngestLockHandle {
     readonly path: string;
-    readonly release: Effect.Effect<void>;
+    /**
+     * Give the lock back. Releasing a handle that no longer owns the file on
+     * disk (someone else took over, or this handle was already released) is a
+     * SUCCESS - the postcondition "this handle holds nothing" is met either
+     * way, and a late release never touches a successor's lock (cross-review
+     * P1-4).
+     *
+     * It DOES have an error channel (cross-review P2-5): when the unlink or
+     * the read genuinely fails - permissions, a read-only mount, IO - the
+     * lock file is still there and every other process will keep seeing a
+     * live holder, so reporting success would be a lie the operator can only
+     * discover by hand. `NotFound` is the one silent case.
+     */
+    readonly release: Effect.Effect<void, IngestLockError>;
 }
 
 export interface AcquireOptions {
@@ -236,6 +306,13 @@ export interface AcquireOptions {
      * (2s). So under pathological churn a no-wait `acquire()` can take up to
      * ~2s before failing with a typed error naming the file that blocked it.
      * Ordinary contention against a held lock still returns in ~1ms.
+     *
+     * One more same-process caveat (cross-review P1-3): acquires for the same
+     * canonical path are SERIALIZED in this process, so a no-wait acquire
+     * issued while another fiber's `wait: true` acquire is polling queues
+     * behind that fiber instead of failing immediately. It is bounded by the
+     * waiting fiber's own `timeoutMs`, and the outcome is the same one it
+     * would have reached anyway.
      */
     readonly wait?: boolean;
     /** Deadline for the `held` poll loop in wait mode. Default `DEFAULT_TIMEOUT_MS` (30s). */
@@ -337,6 +414,15 @@ interface AttemptCtx {
      *  including the ones no-wait mode would otherwise retry unbounded. */
     readonly deadline: number;
     readonly pollMs: number;
+    /** The CANONICAL lock path - the key for every piece of process-local
+     *  state (`inProcessHolders`, the acquire mutex). Never the raw string
+     *  the caller passed; see `canonicalKey` and cross-review P1-5. */
+    readonly key: string;
+    /** Set the moment this attempt actually creates the lock file, so
+     *  `acquire`'s interrupt finalizer can remove a lock that never reached
+     *  its caller. Mutable by design - it is per-acquire scratch state, not
+     *  configuration. */
+    readonly owned: { release: Effect.Effect<void, IngestLockError> | null };
 }
 
 const toLockError = (path: string, err: PlatformError.PlatformError): IngestLockError =>
@@ -350,22 +436,110 @@ const isNotFoundError = (err: PlatformError.PlatformError): boolean =>
 
 /**
  * Process-wide (deliberately NOT per-layer-instance) in-process holding
- * state, keyed by the resolved lock path - see the module doc comment for
- * why a `Ref` closed over by one layer instance is not enough. The only
- * reader/writer of this map is `selfHoldsFor`/`setSelfHolds` below; nothing
- * else touches it. Plain synchronous `Map` mutation is safe here: Effect
- * fibers only interleave at yield points, and every read/write of a single
- * entry below happens inside one synchronous statement, never straddling a
- * yield.
+ * state, keyed by the CANONICAL lock path - see the module doc comment for
+ * why a `Ref` closed over by one layer instance is not enough, and P1-5 for
+ * why the key must be canonical rather than whatever string the caller
+ * happened to pass.
+ *
+ * The value is the current holder's ACQUIRE TOKEN, not a boolean (P1-4): a
+ * boolean cannot tell "the handle clearing this is the one that set it" from
+ * "a stale handle from two acquires ago is clearing a successor's ownership",
+ * and the latter silently un-registers a live holder. Presence in the map IS
+ * `selfHolds`.
+ *
+ * Plain synchronous `Map` mutation is safe here: Effect fibers only interleave
+ * at yield points, and every read/write of a single entry below happens inside
+ * one synchronous statement, never straddling a yield.
  */
-const inProcessHolders = new Map<string, boolean>();
+const inProcessHolders = new Map<string, string>();
 
-const selfHoldsFor = (path: string): boolean => inProcessHolders.get(path) ?? false;
+const selfHoldsFor = (key: string): boolean => inProcessHolders.has(key);
 
-const setSelfHolds = (path: string, value: boolean): void => {
-    if (value) inProcessHolders.set(path, true);
-    else inProcessHolders.delete(path);
+const registerSelfHold = (key: string, token: string): void => {
+    inProcessHolders.set(key, token);
 };
+
+/** Clear ONLY if `token` is still the registered holder - a late release from
+ *  a superseded handle must not un-register the current one. */
+const clearSelfHold = (key: string, token: string): void => {
+    if (inProcessHolders.get(key) === token) inProcessHolders.delete(key);
+};
+
+/**
+ * One acquire-critical-section mutex per canonical lock path (cross-review
+ * P1-3). Module-level for the same reason `inProcessHolders` is: a `Ref` or
+ * a semaphore closed over by one layer instance is invisible to a second
+ * acquirer that goes through a different layer instance for the same file.
+ *
+ * What it buys: `createExclusive` writes the lock file and only THEN
+ * registers the holder in `inProcessHolders`. Between those two steps the
+ * file on disk names OUR pid while `selfHolds` is still false - which
+ * `decideLock` classifies as `stale` - so a second fiber scheduled in that
+ * gap would take over a lock the first fiber had just legitimately won, and
+ * both would hold a handle. Serializing the whole acquire per path removes
+ * the interleave entirely, which also subsumes any ordering fix inside
+ * `createExclusive`.
+ *
+ * What it does NOT buy: anything against another PROCESS. Cross-process
+ * arbitration is still the `"wx"`-create plus steal-token protocol below,
+ * with the residuals the module doc comment lists.
+ *
+ * Cost: a same-process acquire that is WAITING (`wait: true`) holds the
+ * permit while it polls, so a concurrent same-process acquire queues behind
+ * it rather than failing fast. That is bounded by the waiter's own
+ * `timeoutMs`, and queueing behind a same-process waiter is the same outcome
+ * it would have reached anyway (the lock is taken).
+ */
+const acquireMutexes = new Map<string, Semaphore.Semaphore>();
+
+const acquireMutexFor = (key: string): Semaphore.Semaphore => {
+    const existing = acquireMutexes.get(key);
+    if (existing !== undefined) return existing;
+    const created = Semaphore.makeUnsafe(1);
+    acquireMutexes.set(key, created);
+    return created;
+};
+
+/**
+ * The holder process's start time, as `ps` reports it - the fingerprint that
+ * distinguishes "the holder is still running" from "the OS handed that pid to
+ * something else" (cross-review P2-3).
+ *
+ * Best effort ON PURPOSE: `ps` can be missing, sandboxed, or formatted
+ * differently, and none of that is a reason to fail an ingest. A `null` here
+ * degrades exactly to the previous behavior (pid liveness alone).
+ */
+const processStartedAt = (pid: number): Effect.Effect<string | null> =>
+    Effect.sync(() => {
+        try {
+            const probe = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)]);
+            if (probe.exitCode !== 0) return null;
+            const text = probe.stdout.toString().trim();
+            return text.length === 0 ? null : text;
+        } catch {
+            return null;
+        }
+    });
+
+/**
+ * Is the process named by `holder` STILL the process that took the lock?
+ * `process.kill(pid, 0)` alone answers the weaker question "does this pid
+ * exist", and a crashed holder's pid is reused freely - on Linux the counter
+ * wraps at a few tens of thousands - so an unrelated long-lived process could
+ * hold the ingest lock hostage until it exited. When the payload carries a
+ * start-time fingerprint, a MISMATCH means the pid was reused: the recorded
+ * holder is dead and the lock is stale.
+ */
+const holderIsLive = (holder: LockPayload): Effect.Effect<boolean> =>
+    Effect.suspend(() => {
+        if (!isAlive(holder.pid)) return Effect.succeed(false);
+        if (holder.proc_started_at === undefined) return Effect.succeed(true);
+        return processStartedAt(holder.pid).pipe(
+            // A failed probe must not turn a live holder into a corpse, so an
+            // unreadable start time keeps the old answer (alive).
+            Effect.map((current) => current === null || current === holder.proc_started_at),
+        );
+    });
 
 /** Build the `IngestLockService` over an already-acquired `FileSystem`. */
 const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService => {
@@ -412,11 +586,63 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
                 ),
             );
 
-    const holder: Effect.Effect<LockPayload | null, IngestLockError> = readLockText.pipe(
-        Effect.map((text) =>
-            text === null ? null : (decideLock(text, isAlive, process.pid, selfHoldsFor(path)).holder ?? null),
-        ),
+    /**
+     * The canonical spelling of `path`, resolved once and cached (cross-review
+     * P1-5). EVERY piece of process-local state - `inProcessHolders`, the
+     * per-path acquire mutex - is keyed by this, never by the string the
+     * caller passed: `ingest.lock`, `/abs/ingest.lock` and a symlinked alias
+     * of the directory all name ONE file, and keying by the raw string made
+     * the second name look like a different lock, so it stole the first one's
+     * live lock instead of reporting it held.
+     *
+     * File OPERATIONS still use `path` as given - it addresses the same file,
+     * and error messages should echo what the caller wrote. Only IDENTITY is
+     * canonical. Resolution never fails (see canonical-path.ts); a relative
+     * path is resolved against the cwd at FIRST use, which is also when the
+     * lock directory is guaranteed to exist.
+     */
+    let cachedKey: string | null = null;
+    const canonicalKey: Effect.Effect<string> = Effect.suspend(() =>
+        cachedKey !== null
+            ? Effect.succeed(cachedKey)
+            : canonicalPath(fs, path).pipe(
+                  Effect.tap((resolved) =>
+                      Effect.sync(() => {
+                          cachedKey = resolved;
+                      }),
+                  ),
+              ),
     );
+
+    const ensureDir = fs
+        .makeDirectory(posixPath.dirname(path), { recursive: true })
+        .pipe(Effect.mapError((err) => toLockError(path, err)));
+
+    /**
+     * `decideLock` against what is currently on disk, with the liveness probe
+     * upgraded to the pid-reuse-aware one (P2-3). The probe is effectful (it
+     * may spawn `ps`), so it is resolved HERE and handed to the pure decision
+     * function as a plain boolean for the holder's own pid.
+     */
+    const decideNow = (key: string, text: string | null): Effect.Effect<LockDecision> =>
+        Effect.gen(function* () {
+            if (text === null) return decideLock(null, isAlive, process.pid, selfHoldsFor(key));
+            const parsed = decodeLockPayload(text);
+            const live = parsed === null ? false : yield* holderIsLive(parsed);
+            return decideLock(
+                text,
+                (pid) => (parsed !== null && pid === parsed.pid ? live : isAlive(pid)),
+                process.pid,
+                selfHoldsFor(key),
+            );
+        });
+
+    const holder: Effect.Effect<LockPayload | null, IngestLockError> = Effect.gen(function* () {
+        const text = yield* readLockText;
+        if (text === null) return null;
+        const key = yield* canonicalKey;
+        return (yield* decideNow(key, text)).holder ?? null;
+    });
 
     /**
      * One attempt: decide against what's currently on disk, take the lock if
@@ -426,12 +652,8 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
         ctx: AttemptCtx,
     ): Effect.Effect<IngestLockHandle, IngestLockHeldError | IngestLockError> =>
         Effect.gen(function* () {
-            yield* fs
-                .makeDirectory(posixPath.dirname(path), { recursive: true })
-                .pipe(Effect.mapError((err) => toLockError(path, err)));
-
             const text = yield* readLockText;
-            const decision = decideLock(text, isAlive, process.pid, selfHoldsFor(path));
+            const decision = yield* decideNow(ctx.key, text);
 
             if (decision.kind === "held") {
                 // `decideLock` always attaches `holder` on a "held" decision.
@@ -457,7 +679,7 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
                 return yield* stealStale(text!, ctx);
             }
 
-            const created = yield* createExclusive();
+            const created = yield* createExclusive(ctx);
             if (created === "retry") {
                 return yield* retryOrGiveUp(
                     ctx,
@@ -510,14 +732,33 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
      * its own, still-held token forever. Every caller now loops back only
      * after the token has been released, and only against `ctx.deadline`.
      */
-    const createExclusive = (): Effect.Effect<IngestLockHandle | "retry", IngestLockError> =>
+    const createExclusive = (
+        ctx: AttemptCtx,
+    ): Effect.Effect<IngestLockHandle | "retry", IngestLockError> =>
         Effect.gen(function* () {
-            const payload = encodeLockPayload({ pid: process.pid, started_at: new Date().toISOString() });
+            // Cross-review P1-4: a per-acquire random token, so `release` can
+            // tell ITS OWN lock from a successor's byte-for-byte. Without it
+            // a late release of a superseded handle deleted whatever this
+            // process had acquired since - unlocking a live ingest run.
+            const token = crypto.randomUUID();
+            // Cross-review P2-3: the holder's own process start time, so a
+            // reused pid does not read as a live holder later.
+            const procStartedAt = yield* processStartedAt(process.pid);
+            const payload = encodeLockPayload({
+                pid: process.pid,
+                started_at: new Date().toISOString(),
+                token,
+                ...(procStartedAt === null ? {} : { proc_started_at: procStartedAt }),
+            });
             const written = yield* Effect.result(fs.writeFileString(path, payload, { flag: "wx" }));
 
             if (written._tag === "Success") {
-                setSelfHolds(path, true);
-                return { path, release: releaseHandle };
+                registerSelfHold(ctx.key, token);
+                const release = releaseFor(ctx.key, payload, token);
+                // Recorded so `acquire`'s interrupt finalizer can undo a lock
+                // that was created but never reached its caller.
+                ctx.owned.release = release;
+                return { path, release };
             }
 
             if (isAlreadyExists(written.failure)) {
@@ -525,7 +766,18 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
             }
 
             return yield* toLockError(path, written.failure);
-        });
+        }).pipe(
+            // Cross-review P1-3, interruption half: the create and the
+            // ownership registration must be ONE step. Interruption landing
+            // between them would leave a lock file on disk that this process
+            // owns but does not know it owns - and `decideLock` calls exactly
+            // that shape `stale`, so the next acquirer would steal it while
+            // the (interrupted) creator's caller may still believe it holds
+            // the lock. `acquire` pairs this with an `onInterrupt` that
+            // releases a lock created but never handed back, so the outcome
+            // is always "owned" or "removed", never "orphaned".
+            Effect.uninterruptible,
+        );
 
     /**
      * Take the steal token (`<path>.steal`, `"wx"`-created - exactly one
@@ -591,7 +843,7 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
             // deliberately swallowed (`Effect.ignore`) rather than masking
             // the primary result. That leak is no longer permanent: the
             // token now ages out after `STALE_RECLAIM_AGE_MS`.
-            const outcome = yield* confirmAndTakeOver(staleText).pipe(
+            const outcome = yield* confirmAndTakeOver(staleText, ctx).pipe(
                 Effect.ensuring(removeTolerant(tokenPath).pipe(Effect.ignore)),
             );
             if (outcome === "unconfirmable") {
@@ -641,7 +893,7 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
             const tokenText = yield* readTolerant(tokenPath);
             if (tokenText === null) return true; // already gone
             const tokenHolder = decodeLockPayload(tokenText);
-            if (tokenHolder !== null && !isAlive(tokenHolder.pid)) {
+            if (tokenHolder !== null && !(yield* holderIsLive(tokenHolder))) {
                 yield* removeTolerant(tokenPath);
                 return true;
             }
@@ -680,6 +932,7 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
      */
     const confirmAndTakeOver = (
         staleText: string,
+        ctx: AttemptCtx,
     ): Effect.Effect<IngestLockHandle | "retry" | "unconfirmable", IngestLockError> =>
         Effect.gen(function* () {
             const reread = yield* readLockText;
@@ -709,47 +962,82 @@ const makeService = (fs: FileSystem.FileSystem, path: string): IngestLockService
             // name is nonce'd, so nothing else should be racing it).
             yield* removeTolerant(stagingPath);
 
-            return yield* createExclusive();
+            return yield* createExclusive(ctx);
         });
 
     /**
-     * Re-read the file and unlink only when the payload's pid is ours - a
-     * late/idempotent release must never delete a successor's lock. Uses
-     * `decodeLockPayload` directly (not `decideLock`) because release only
-     * cares "does the file currently name our pid", not the held/stale
-     * classification. Always clears the in-process holding state for `path`,
-     * whether or not the on-disk file was ours to remove - once `release` is
-     * called, THIS process no longer considers itself the holder, full stop.
-     * The `IngestLockHandle` contract (matching `close` in `client.ts`) gives
-     * `release` no error channel, so any failure here (e.g. permission denied
-     * on the unlink) is swallowed rather than propagated - release is always
-     * best-effort.
+     * Re-read the file and unlink it ONLY when its bytes are still exactly
+     * the payload this handle wrote.
+     *
+     * Cross-review P1-4: the old check was "does the file name our pid",
+     * which EVERY handle from this process passes. So the sequence acquire A
+     * -> release A -> acquire B -> release A (a late or duplicated release,
+     * e.g. a scope finalizer running after an explicit release) deleted B's
+     * lock: a live ingest run silently unlocked, with the next acquirer free
+     * to write the same database concurrently. The per-acquire token in the
+     * payload makes the comparison identity-checking rather than
+     * pid-checking, and a byte compare needs no parsing at all.
+     *
+     * A stale handle's release is a SUCCESS, not an error - "the lock I held
+     * is no longer mine" is precisely what a late release should conclude,
+     * and it must not clear the CURRENT holder's registration either (hence
+     * the token-matched `clearSelfHold`).
+     *
+     * Cross-review P2-5: this used to end in `Effect.ignore`, so a read or
+     * unlink failure - a permission change, a read-only mount, an IO error -
+     * reported SUCCESS while the lock file stayed on disk, and every other
+     * process went on seeing a live holder. Real failures now surface as
+     * `IngestLockError`; the benign already-gone case (`NotFound`, someone
+     * else cleaned up) stays silent, via `removeTolerant`/`readLockText`.
      */
-    const releaseHandle: Effect.Effect<void> = readLockText.pipe(
-        Effect.flatMap((text) => {
-            if (text === null) return Effect.void;
-            const current = decodeLockPayload(text);
-            if (current?.pid !== process.pid) return Effect.void;
-            return removeTolerant(path);
-        }),
-        Effect.ensuring(Effect.sync(() => setSelfHolds(path, false))),
-        Effect.ignore,
-    );
+    const releaseFor = (
+        key: string,
+        payloadText: string,
+        token: string,
+    ): Effect.Effect<void, IngestLockError> =>
+        readLockText.pipe(
+            Effect.flatMap((text) =>
+                text !== null && text === payloadText ? removeTolerant(path) : Effect.void,
+            ),
+            Effect.ensuring(Effect.sync(() => clearSelfHold(key, token))),
+        );
 
-    const acquire: IngestLockService["acquire"] = (options) => {
-        const wait = options?.wait ?? false;
-        const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-        const pollMs = options?.pollMs ?? DEFAULT_POLL_MS;
-        const now = Date.now();
-        // Wait mode: one deadline governs both the `held` poll loop and the
-        // internal loop-backs. No-wait mode: `held` fails immediately
-        // (`waitUntil === null`), but the internal loop-backs - which are
-        // progress, not waiting - still get a bounded budget so nothing can
-        // spin. The fast paths reach neither.
-        const waitUntil = wait ? now + timeoutMs : null;
-        const deadline = now + (wait ? timeoutMs : NO_WAIT_RETRY_BUDGET_MS);
-        return attempt({ waitUntil, deadline, pollMs });
-    };
+    const acquire: IngestLockService["acquire"] = (options) =>
+        Effect.gen(function* () {
+            const wait = options?.wait ?? false;
+            const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+            const pollMs = options?.pollMs ?? DEFAULT_POLL_MS;
+
+            // Hoisted out of `attempt` (it used to run on every recursion):
+            // the directory has to exist before the path can be canonicalized
+            // OR written, and once per acquire is enough.
+            yield* ensureDir;
+            const key = yield* canonicalKey;
+
+            const now = Date.now();
+            // Wait mode: one deadline governs both the `held` poll loop and
+            // the internal loop-backs. No-wait mode: `held` fails immediately
+            // (`waitUntil === null`), but the internal loop-backs - which are
+            // progress, not waiting - still get a bounded budget so nothing
+            // can spin. The fast paths reach neither.
+            const waitUntil = wait ? now + timeoutMs : null;
+            const deadline = now + (wait ? timeoutMs : NO_WAIT_RETRY_BUDGET_MS);
+            const ctx: AttemptCtx = { waitUntil, deadline, pollMs, key, owned: { release: null } };
+
+            // Cross-review P1-3: one acquire per canonical path at a time, so
+            // no fiber can observe the window between "the lock file exists"
+            // and "this process is registered as its holder". `onInterrupt`
+            // sits INSIDE the permit so a lock created but never handed back
+            // to a caller is removed while no other acquirer can be running -
+            // the half-created lock is always either owned or gone.
+            return yield* acquireMutexFor(key).withPermits(1)(
+                attempt(ctx).pipe(
+                    Effect.onInterrupt(() =>
+                        ctx.owned.release === null ? Effect.void : Effect.ignore(ctx.owned.release),
+                    ),
+                ),
+            );
+        });
 
     return { acquire, holder };
 };

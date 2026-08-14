@@ -1,11 +1,12 @@
 import { ptr } from "bun:ffi";
+import { BunFileSystem } from "@effect/platform-bun";
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { noteSkippedDylib, resolveTestDylib } from "../testing/duckdb-dylib.ts";
-import { DuckDb, DuckDbLayer, makeConnection, readResult } from "./client.ts";
+import { DuckDb, DuckDbLayer, layerFromLib, makeConnection, openDatabase, readResult } from "./client.ts";
 import type { DuckDbService } from "./client.ts";
 import type { LibDuckDb } from "./ffi.ts";
 import { DuckDbTypeId } from "./types.ts";
@@ -299,6 +300,135 @@ describe("DuckDb", () => {
         ),
     );
 
+    // Cross-review P1-1: `makeConnection` captured the connection pointer up
+    // front and no operation re-checked `closed`, so a query issued after
+    // `close` handed a freed pointer to `duckdb_query` - reproduced as a Bun
+    // SEGMENTATION FAULT, i.e. a process kill with no catchable error at all.
+    // Every operation now fails with a typed `DuckDbQueryError` instead.
+    dtest(
+        "a query after close fails with a typed error instead of segfaulting",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("CREATE TABLE t (id INTEGER)");
+                yield* conn.close;
+
+                const queried = yield* Effect.result(conn.query("SELECT 1 AS n"));
+                expect(queried._tag).toBe("Failure");
+                if (queried._tag === "Failure") {
+                    expect(queried.failure._tag).toBe("DuckDbQueryError");
+                    expect((queried.failure as { message: string }).message.toLowerCase()).toContain(
+                        "closed",
+                    );
+                }
+
+                const executed = yield* Effect.result(conn.exec("INSERT INTO t VALUES (1)"));
+                expect(executed._tag).toBe("Failure");
+                if (executed._tag === "Failure") expect(executed.failure._tag).toBe("DuckDbQueryError");
+
+                // close itself stays idempotent (no double free).
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // Cross-review P1-2: every `bigint` parameter went through
+    // `duckdb_bind_int64`, which SILENTLY WRAPS - `2n**63n` was reproduced
+    // arriving as `-2n**63n`, and `2n**100n` as `0n`. Corrupt data with no
+    // signal is the worst possible outcome for a store, so out-of-range
+    // values are now a typed failure naming the value and the i64 limit.
+    dtest(
+        "refuses a bigint parameter outside the signed 64-bit range instead of wrapping it",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+
+                for (const value of [2n ** 63n, 2n ** 100n, -(2n ** 63n) - 1n]) {
+                    const result = yield* Effect.result(
+                        conn.query("SELECT CAST(? AS BIGINT) AS v", [value]),
+                    );
+                    expect(result._tag).toBe("Failure");
+                    if (result._tag === "Failure") {
+                        expect(result.failure._tag).toBe("DuckDbQueryError");
+                        const message = (result.failure as { message: string }).message;
+                        expect(message).toContain(value.toString());
+                        expect(message).toContain("9223372036854775807");
+                    }
+                }
+
+                // ... while both boundary values still bind exactly.
+                const max = yield* conn.query("SELECT CAST(? AS BIGINT) AS v", [2n ** 63n - 1n]);
+                expect(max.rows[0]!.v).toBe(9223372036854775807n);
+                const min = yield* conn.query("SELECT CAST(? AS BIGINT) AS v", [-(2n ** 63n)]);
+                expect(min.rows[0]!.v).toBe(-9223372036854775808n);
+
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // Cross-review P2-1: rows were built on a normal `{}`, so a `__proto__`
+    // column vanished (the setter swallows the assignment) and a duplicate
+    // column name silently overwrote the earlier value - data loss with no
+    // signal either way.
+    dtest(
+        "a __proto__ column round-trips instead of vanishing into the prototype setter",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                const result = yield* conn.query(`SELECT 42 AS "__proto__"`);
+                const row = result.rows[0]!;
+                expect(Object.getPrototypeOf(row)).toBe(null);
+                // 42 (not 42n): an untyped integer literal is INTEGER, which
+                // row-decode narrows to a JS number - the point here is that
+                // the KEY survives at all.
+                expect(row["__proto__"]).toBe(42);
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    dtest(
+        "duplicate column names fail loudly instead of silently overwriting",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("CREATE TABLE a (v INTEGER)");
+                yield* conn.exec("CREATE TABLE b (v INTEGER)");
+                yield* conn.exec("INSERT INTO a VALUES (1)");
+                yield* conn.exec("INSERT INTO b VALUES (2)");
+                const result = yield* Effect.result(conn.query("SELECT a.v, b.v FROM a, b"));
+                expect(result._tag).toBe("Failure");
+                if (result._tag === "Failure") {
+                    expect(result.failure._tag).toBe("DuckDbQueryError");
+                    expect((result.failure as { message: string }).message).toContain("alias");
+                }
+                // the documented workaround works
+                const ok = yield* conn.query("SELECT a.v AS av, b.v AS bv FROM a, b");
+                expect(ok.rows).toEqual([{ av: 1, bv: 2 }]);
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // Cross-review P2-2: DuckDB stores TIMESTAMP at MICROSECOND grain; a JS
+    // `Date` is millisecond-grain, so the last three digits are dropped. ax
+    // data is millisecond-grain, so this is the accepted trade - PINNED here
+    // so it stays a documented contract rather than an accident.
+    dtest(
+        "TIMESTAMP microseconds truncate to milliseconds (documented, pinned)",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                const result = yield* conn.query(
+                    "SELECT TIMESTAMP '2026-08-14 10:11:12.999999' AS ts",
+                );
+                expect((result.rows[0]!.ts as Date).toISOString()).toBe("2026-08-14T10:11:12.999Z");
+                yield* conn.close;
+            }),
+        ),
+    );
+
     dtest(
         "round-trips 2000 varchar rows correctly",
         withDuckDb((db) =>
@@ -437,6 +567,95 @@ describe("makeConnection.close (Part B-style unit test)", () => {
         Effect.runSync(conn.close);
         Effect.runSync(conn.close);
         expect(disconnectCalls).toBe(1);
+        expect(closeCalls).toBe(1);
+    });
+
+    // Cross-review P1-1, unit half: prove NO native symbol is reached after
+    // close. The e2e half (above) proves the process survives; this proves
+    // WHY - the guard short-circuits before any pointer is dereferenced.
+    test("no operation touches a native symbol after close", () => {
+        const boom = () => {
+            throw new Error("native call after close");
+        };
+        const fakeLib = {
+            symbols: {
+                duckdb_disconnect: () => {},
+                duckdb_close: () => {},
+                duckdb_query: boom,
+                duckdb_prepare: boom,
+                duckdb_column_count: boom,
+                duckdb_row_count: boom,
+            },
+        } as unknown as LibDuckDb;
+
+        const conn = makeConnection(
+            fakeLib,
+            "/fake/path.db",
+            false,
+            new BigUint64Array(1),
+            new BigUint64Array(1),
+        );
+        Effect.runSync(conn.close);
+
+        const ops: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+            conn.query("SELECT 1"),
+            conn.exec("SELECT 1"),
+            conn.queryAs(Schema.Struct({ n: Schema.Number }), "SELECT 1 AS n"),
+        ];
+        for (const op of ops) {
+            const result = Effect.runSync(Effect.result(op));
+            expect(result._tag).toBe("Failure");
+            if (result._tag === "Failure") {
+                expect((result.failure as { _tag: string })._tag).toBe("DuckDbQueryError");
+                expect((result.failure as { message: string }).message.toLowerCase()).toContain(
+                    "closed",
+                );
+            }
+        }
+    });
+});
+
+// Cross-review P3-1: duckdb.h requires `duckdb_destroy_config` even when
+// `duckdb_create_config` FAILS (duckdb.h:1018-1023) - the failure path threw
+// without it, leaking whatever the call had already allocated.
+describe("openDatabase (P3-1)", () => {
+    test("destroys the config even when duckdb_create_config fails", () => {
+        let destroyCalls = 0;
+        const fakeLib = {
+            symbols: {
+                duckdb_create_config: () => 1, // != DUCKDB_SUCCESS
+                duckdb_destroy_config: () => {
+                    destroyCalls += 1;
+                },
+            },
+        } as unknown as LibDuckDb;
+
+        expect(() => openDatabase(fakeLib, "/fake/path.db", false)).toThrow();
+        expect(destroyCalls).toBe(1);
+    });
+});
+
+// Cross-review P3-2: the layers held the `dlopen` handle for the life of the
+// process - repeated layer construction (a fresh AppLayer per run, the shape
+// this repo already builds) retained one dylib handle each. The layer is now
+// scoped: releasing it calls `lib.close()`.
+describe("layerFromLib (P3-2)", () => {
+    test("closing the layer scope releases the dynamic library handle", async () => {
+        let closeCalls = 0;
+        const fakeLib = {
+            symbols: {},
+            close: () => {
+                closeCalls += 1;
+            },
+        } as unknown as LibDuckDb;
+
+        await Effect.runPromise(
+            Effect.asVoid(DuckDb).pipe(
+                Effect.provide(
+                    layerFromLib(Effect.succeed(fakeLib)).pipe(Layer.provide(BunFileSystem.layer)),
+                ),
+            ) as Effect.Effect<void>,
+        );
         expect(closeCalls).toBe(1);
     });
 });

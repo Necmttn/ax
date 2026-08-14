@@ -7,6 +7,7 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
+    symlinkSync,
     unlinkSync,
     utimesSync,
     writeFileSync,
@@ -14,7 +15,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeLockPayload, encodeLockPayload } from "./lock-state.ts";
-import { base, IngestLock, IngestLockLayer, type IngestLockService } from "./lock.ts";
+import {
+    base,
+    IngestLock,
+    IngestLockLayer,
+    type IngestLockHandle,
+    type IngestLockService,
+} from "./lock.ts";
 
 // Finding 4 (final fix round): every dir this suite creates - via the two
 // helpers below AND the one inline `mkdtempSync` further down - is collected
@@ -44,7 +51,7 @@ const lockDir = () => newTempDir();
  */
 const HANG_GUARD_MS = 2_000;
 
-type AcquiredHandle = { readonly path: string; readonly release: Effect.Effect<void> };
+type AcquiredHandle = IngestLockHandle;
 
 const boundedAcquire = (lock: IngestLockService, options?: Parameters<IngestLockService["acquire"]>[0]) =>
     Effect.timeoutOption(Effect.result(lock.acquire(options)), HANG_GUARD_MS);
@@ -570,6 +577,282 @@ describe("IngestLock", () => {
         expect(failure._tag).toBe("IngestLockError");
         expect(failure.path).toBe(path);
         expect(readFileSync(path, "utf8")).toBe(""); // untouched - not seized
+    });
+
+    // ---------------------------------------------------------------------
+    // Cross-review fixes: P1-3 (create/register race), P1-4 (a stale handle
+    // deleting its successor), P1-5 (path aliasing), P2-3 (pid reuse), P2-5
+    // (release errors reported as success).
+    // ---------------------------------------------------------------------
+
+    // P1-3: `createExclusive` wrote the lock file and only THEN registered
+    // `selfHolds`. A second fiber scheduled in that gap read a file naming
+    // OUR pid with `selfHolds` still false - which `decideLock` calls `stale`
+    // - and stole the lock the first fiber had just won. Both fibers ended up
+    // with a handle. The decorated `writeFileString` below makes that gap
+    // deterministic by holding the first winner inside the write for 50ms.
+    test("two concurrent same-process acquires: exactly one wins, the other is told it is held", async () => {
+        const path = lockPath();
+        let delayedWrite = false;
+        const results = await withDecoratedLock(
+            path,
+            (real) => ({
+                writeFileString: (
+                    target: string,
+                    data: string,
+                    options?: {
+                        readonly flag?: FileSystem.OpenFlag | undefined;
+                        readonly mode?: number | undefined;
+                    },
+                ) =>
+                    Effect.suspend(() => {
+                        const write = real.writeFileString(target, data, options);
+                        if (target !== path || options?.flag !== "wx" || delayedWrite) return write;
+                        delayedWrite = true;
+                        // The winner is descheduled AFTER its file exists but
+                        // BEFORE it can return - the exact interleave.
+                        return write.pipe(Effect.tap(() => Effect.sleep(50)));
+                    }),
+            }),
+            (lock) =>
+                Effect.all([Effect.result(lock.acquire()), Effect.result(lock.acquire())], {
+                    concurrency: "unbounded",
+                }),
+        );
+
+        const outcomes = results as ReadonlyArray<{
+            readonly _tag: string;
+            readonly failure?: { readonly _tag: string; readonly pid: number };
+            readonly success?: AcquiredHandle;
+        }>;
+        const winners = outcomes.filter((r) => r._tag === "Success");
+        expect(winners.length).toBe(1);
+        const loser = outcomes.find((r) => r._tag === "Failure")!;
+        expect(loser.failure?._tag).toBe("IngestLockHeldError");
+        expect(loser.failure?.pid).toBe(process.pid);
+        expect(existsSync(path)).toBe(true);
+
+        await Effect.runPromise(Effect.orDie(winners[0]!.success!.release));
+        expect(existsSync(path)).toBe(false);
+    });
+
+    // P1-4: release checked only "does the file name my pid". Every handle
+    // from THIS process passes that check, so a late release of an already
+    // released handle deleted whatever this process had acquired SINCE -
+    // unlocking a live ingest run without anyone noticing. Each acquire now
+    // stamps a random token into the payload and release removes the file
+    // only when the bytes on disk are still exactly the ones it wrote.
+    test("releasing a stale handle does not delete the successor's lock", async () => {
+        const path = lockPath();
+        await withLock(path, (lock) =>
+            Effect.gen(function* () {
+                const first = yield* lock.acquire();
+                yield* first.release;
+
+                const second = yield* lock.acquire();
+                const secondText = readFileSync(path, "utf8");
+
+                // The stale handle releases again - a no-op success.
+                yield* first.release;
+
+                expect(existsSync(path)).toBe(true);
+                expect(readFileSync(path, "utf8")).toBe(secondText);
+                // ... and the successor is still the registered in-process
+                // holder, so a third acquire is still correctly rejected.
+                const third = yield* Effect.result(lock.acquire());
+                expect(third._tag).toBe("Failure");
+                if (third._tag === "Failure") {
+                    expect((third.failure as { _tag: string })._tag).toBe("IngestLockHeldError");
+                }
+
+                yield* second.release;
+                expect(existsSync(path)).toBe(false);
+            }),
+        );
+    });
+
+    test("two acquires of the same path never write the same payload bytes", async () => {
+        const path = lockPath();
+        const texts = await withLock(path, (lock) =>
+            Effect.gen(function* () {
+                const first = yield* lock.acquire();
+                const a = readFileSync(path, "utf8");
+                yield* first.release;
+                const second = yield* lock.acquire();
+                const b = readFileSync(path, "utf8");
+                yield* second.release;
+                return [a, b] as const;
+            }),
+        );
+        expect(texts[0]).not.toBe(texts[1]);
+    });
+
+    // P1-5: process-local state was keyed by the STRING the caller passed, so
+    // the same file under two names (symlinked dir, relative vs absolute)
+    // looked like two different locks - and the second name stole the first
+    // one's live lock. State is now keyed by the canonical path.
+    test("a symlinked alias of the lock directory is recognised as the SAME lock", async () => {
+        const realDir = newTempDir();
+        const aliasDir = join(newTempDir(), "alias");
+        symlinkSync(realDir, aliasDir, "dir");
+
+        const realPath = join(realDir, "ingest.lock");
+        const aliasPath = join(aliasDir, "ingest.lock");
+
+        const first = await Effect.runPromise(
+            Effect.gen(function* () {
+                const lock = yield* IngestLock;
+                return yield* lock.acquire();
+            }).pipe(Effect.provide(IngestLockLayer(realPath))) as Effect.Effect<AcquiredHandle>,
+        );
+
+        const result = await Effect.runPromise(
+            Effect.gen(function* () {
+                const lock = yield* IngestLock;
+                return yield* Effect.result(lock.acquire());
+            }).pipe(Effect.provide(IngestLockLayer(aliasPath))) as Effect.Effect<unknown>,
+        );
+
+        expect((result as { _tag: string })._tag).toBe("Failure");
+        const failure = (result as { failure: { _tag: string; pid: number } }).failure;
+        expect(failure._tag).toBe("IngestLockHeldError");
+        expect(failure.pid).toBe(process.pid);
+        expect(existsSync(realPath)).toBe(true);
+
+        await Effect.runPromise(Effect.orDie(first.release));
+    });
+
+    test("a relative spelling of the lock path is recognised as the SAME lock", async () => {
+        const dir = newTempDir();
+        const absolute = join(dir, "ingest.lock");
+        const cwd = process.cwd();
+        try {
+            process.chdir(dir);
+            const first = await Effect.runPromise(
+                Effect.gen(function* () {
+                    const lock = yield* IngestLock;
+                    return yield* lock.acquire();
+                }).pipe(Effect.provide(IngestLockLayer("ingest.lock"))) as Effect.Effect<AcquiredHandle>,
+            );
+
+            const result = await Effect.runPromise(
+                Effect.gen(function* () {
+                    const lock = yield* IngestLock;
+                    return yield* Effect.result(lock.acquire());
+                }).pipe(Effect.provide(IngestLockLayer(absolute))) as Effect.Effect<unknown>,
+            );
+            expect((result as { _tag: string })._tag).toBe("Failure");
+            expect((result as { failure: { _tag: string } }).failure._tag).toBe("IngestLockHeldError");
+
+            await Effect.runPromise(Effect.orDie(first.release));
+        } finally {
+            process.chdir(cwd);
+        }
+    });
+
+    // P2-3: pid liveness alone cannot tell "the holder is still running" from
+    // "the OS handed that pid to something unrelated". The payload now
+    // carries the holder's process start time (best effort); a live pid whose
+    // start time no longer matches is a corpse, not a holder.
+    test("a live pid whose recorded start time no longer matches is stale, not held", async () => {
+        const path = lockPath();
+        writeFileSync(
+            path,
+            encodeLockPayload({
+                pid: 1,
+                started_at: new Date().toISOString(),
+                proc_started_at: "Thu Jan  1 00:00:00 1970",
+            }),
+        );
+
+        const outcome = await withLock(path, (lock) => boundedAcquire(lock));
+        const result = terminated(outcome as Option.Option<{ _tag: string; success: AcquiredHandle }>);
+        expect(result._tag).toBe("Success");
+        expect(decodeLockPayload(readFileSync(path, "utf8"))?.pid).toBe(process.pid);
+        await Effect.runPromise(Effect.orDie(result.success.release));
+    });
+
+    test("a live pid whose recorded start time still matches stays held", async () => {
+        const path = lockPath();
+        const ps = Bun.spawnSync(["ps", "-o", "lstart=", "-p", "1"]);
+        const fingerprint = ps.stdout.toString().trim();
+        expect(fingerprint.length).toBeGreaterThan(0); // ps must work for this test to mean anything
+        writeFileSync(
+            path,
+            encodeLockPayload({
+                pid: 1,
+                started_at: new Date().toISOString(),
+                proc_started_at: fingerprint,
+            }),
+        );
+
+        const outcome = await withLock(path, (lock) => boundedAcquire(lock));
+        const result = terminated(outcome as Option.Option<{ _tag: string; failure: unknown }>);
+        expect(result._tag).toBe("Failure");
+        expect((result.failure as { _tag: string })._tag).toBe("IngestLockHeldError");
+    });
+
+    test("an acquired lock records the holder's process start time", async () => {
+        const path = lockPath();
+        await withLock(path, (lock) =>
+            Effect.gen(function* () {
+                const handle = yield* lock.acquire();
+                const payload = decodeLockPayload(readFileSync(path, "utf8"));
+                expect(payload?.proc_started_at?.length ?? 0).toBeGreaterThan(0);
+                yield* handle.release;
+            }),
+        );
+    });
+
+    // P2-5: release swallowed EVERY error, so a permission failure on the
+    // unlink reported success while the lock file stayed on disk - every
+    // other process then saw a live holder forever. Only the benign
+    // already-gone case is silent now.
+    test("a failing removal during release surfaces as IngestLockError", async () => {
+        const path = lockPath();
+        const outcome = await withDecoratedLock(
+            path,
+            (real) => ({
+                remove: (
+                    target: string,
+                    options?: { readonly recursive?: boolean | undefined; readonly force?: boolean | undefined },
+                ) =>
+                    target === path
+                        ? Effect.fail(
+                              PlatformError.systemError({
+                                  _tag: "PermissionDenied",
+                                  module: "FileSystem",
+                                  method: "remove",
+                                  pathOrDescriptor: target,
+                              }),
+                          )
+                        : real.remove(target, options),
+            }),
+            (lock) =>
+                Effect.gen(function* () {
+                    const handle = yield* lock.acquire();
+                    return yield* Effect.result(handle.release);
+                }),
+        );
+
+        expect((outcome as { _tag: string })._tag).toBe("Failure");
+        expect((outcome as { failure: { _tag: string } }).failure._tag).toBe("IngestLockError");
+        // the file really is still there - which is exactly why the caller
+        // has to hear about it.
+        expect(existsSync(path)).toBe(true);
+        unlinkSync(path);
+    });
+
+    test("releasing an already-removed lock is a silent success", async () => {
+        const path = lockPath();
+        await withLock(path, (lock) =>
+            Effect.gen(function* () {
+                const handle = yield* lock.acquire();
+                unlinkSync(path); // somebody cleaned up behind us
+                const result = yield* Effect.result(handle.release);
+                expect(result._tag).toBe("Success");
+            }),
+        );
     });
 
     // ...but an empty lock file that has aged out IS a genuine corpse, and

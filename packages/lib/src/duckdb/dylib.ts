@@ -97,12 +97,22 @@ export const extractDylib = (
             .makeDirectory(cacheDir, { recursive: true })
             .pipe(Effect.mapError(toDylibError(`failed to create the dylib cache dir ${cacheDir}`)));
 
-        // Stage in a pid-suffixed sibling and rename, so a concurrent reader
-        // can never observe a half-written dylib. `Effect.ensuring` removes
-        // the staging file on ANY failure between write and rename (after a
-        // successful rename it is already gone, so the cleanup is a no-op) -
-        // same crash-safety shape as writeFileAtomic in atomic-write.ts.
-        const staging = `${out}.${process.pid}.tmp`;
+        // Stage in a UNIQUELY-suffixed sibling and rename, so a concurrent
+        // reader can never observe a half-written dylib. `Effect.ensuring`
+        // removes the staging file on ANY failure between write and rename
+        // (after a successful rename it is already gone, so the cleanup is a
+        // no-op) - same crash-safety shape as writeFileAtomic in
+        // atomic-write.ts.
+        //
+        // Cross-review P3-3: the suffix used to be the pid ALONE, which is
+        // not unique WITHIN a process - two fibers extracting the same
+        // content hash concurrently (a plausible shape: two layers built in
+        // parallel) shared one staging path, so one could rename or remove
+        // the file the other was still writing, and a caller could see
+        // truncated bytes or a bare NotFound. A random component makes the
+        // staging name unique per call, which is what the rename-to-publish
+        // dance already assumed.
+        const staging = `${out}.${process.pid}.${crypto.randomUUID()}.tmp`;
         const stageAndPublish = Effect.gen(function* () {
             yield* Effect.tryPromise({
                 try: () => Bun.write(staging, bytes),

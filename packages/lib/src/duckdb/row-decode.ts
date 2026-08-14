@@ -125,7 +125,26 @@ const parseTimestamp = (text: string): Date | string => {
     return finishTimestamp(`${text.replace(" ", "T")}Z`, text);
 };
 
-/** Parse `iso`; fall back to `original` text rather than an Invalid Date. */
+/**
+ * Parse `iso`; fall back to `original` text rather than an Invalid Date.
+ *
+ * PRECISION IS LOST HERE, DELIBERATELY (cross-review P2-2). DuckDB stores
+ * `TIMESTAMP` at MICROSECOND grain and renders all six digits; a JS `Date`
+ * holds whole MILLISECONDS, so `new Date(...)` TRUNCATES the last three:
+ * `2026-08-14 10:11:12.999999` comes back as `...12.999Z`, and the same
+ * applies to pre-epoch instants (truncation toward the millisecond boundary
+ * `Date` can represent, never a rounding). Nothing warns; the value simply
+ * loses its tail.
+ *
+ * This is accepted, not overlooked: every ax timestamp is millisecond-grain
+ * (JS `Date.now()`, transcript timestamps, OTLP millis), so the truncated
+ * digits carry no information ax ever wrote, and a `Date` is what every
+ * caller and every `Schema` in this repo expects. A caller that genuinely
+ * needs microsecond fidelity must NOT read the column as `TIMESTAMP` - it
+ * should project it in SQL (`CAST(ts AS VARCHAR)`, or `epoch_us(ts)` for an
+ * exact integer) and keep the text/bigint. The behavior is pinned by a test
+ * in row-decode.test.ts so it stays a contract rather than an accident.
+ */
 const finishTimestamp = (iso: string, original: string): Date | string => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? original : date;

@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { repoRootFrom, resolveTestDylib } from "./duckdb-dylib.ts";
+import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+    claimDownloadSentinel,
+    releaseDownloadSentinel,
+    repoRootFrom,
+    resolveTestDylib,
+} from "./duckdb-dylib.ts";
 
 describe("resolveTestDylib", () => {
     test("either resolves to a real file on disk or explains why it cannot", async () => {
@@ -23,6 +30,40 @@ describe("resolveTestDylib", () => {
         } finally {
             if (prev === undefined) delete process.env.AX_DUCKDB_DYLIB;
             else process.env.AX_DUCKDB_DYLIB = prev;
+        }
+    });
+});
+
+// Cross-review P3-4: parallel test processes shared ONE zip path and ONE
+// extraction directory, so a second process could read a half-written
+// archive or a half-extracted library. Downloads now run single-file behind
+// an exclusive-create sentinel; everyone else waits for the result.
+describe("download single-flight", () => {
+    test("only the first caller claims the sentinel; a second call is told to wait", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dylib-sentinel-"));
+        try {
+            const sentinel = join(dir, "download.lock");
+            expect(claimDownloadSentinel(sentinel)).toBe("claimed");
+            expect(claimDownloadSentinel(sentinel)).toBe("busy");
+            releaseDownloadSentinel(sentinel);
+            expect(claimDownloadSentinel(sentinel)).toBe("claimed");
+            releaseDownloadSentinel(sentinel);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("a sentinel left behind by a crashed process ages out instead of wedging every later run", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dylib-sentinel-"));
+        try {
+            const sentinel = join(dir, "download.lock");
+            expect(claimDownloadSentinel(sentinel)).toBe("claimed");
+            const longAgo = new Date(Date.now() - 60 * 60_000);
+            utimesSync(sentinel, longAgo, longAgo);
+            expect(claimDownloadSentinel(sentinel)).toBe("claimed");
+            releaseDownloadSentinel(sentinel);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
         }
     });
 });

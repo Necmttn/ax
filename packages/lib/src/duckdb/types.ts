@@ -47,9 +47,29 @@ export type DuckDbTypeId = (typeof DuckDbTypeId)[keyof typeof DuckDbTypeId];
 export const duckDbTypeName = (id: number): string =>
     Object.entries(DuckDbTypeId).find(([, v]) => v === id)?.[0] ?? `TYPE_${id}`;
 
-/** Every JS value a decoded cell can take. */
+/**
+ * Every JS value a decoded cell can take.
+ *
+ * `Date` (a `TIMESTAMP` column) is MILLISECOND-grain while DuckDB stores
+ * microseconds, so the last three digits of a sub-second value are TRUNCATED
+ * on the way out - `10:11:12.999999` reads back as `10:11:12.999`
+ * (cross-review P2-2; see `finishTimestamp` in row-decode.ts for why this is
+ * the accepted trade for ax data, and what to do when it is not acceptable:
+ * project the column as text or `epoch_us(...)`).
+ *
+ * `bigint` is reserved for 64-bit integer columns (`BIGINT`/`UBIGINT`), so a
+ * row's TS type never depends on the magnitude of the value it happens to
+ * hold; narrower integer widths come back as `number`.
+ */
 export type DuckDbValue = string | number | bigint | boolean | Date | null;
 
+/**
+ * One decoded row, keyed by column name. Built on a NULL-PROTOTYPE object
+ * (cross-review P2-1), so `__proto__`, `constructor` and `toString` are plain
+ * data keys like any other and a lookup can never reach `Object.prototype`.
+ * Column names are unique by construction - a result with two columns of the
+ * same name is refused at decode time rather than silently collapsing them.
+ */
 export type DuckDbRow = Readonly<Record<string, DuckDbValue>>;
 
 export interface DuckDbColumn {

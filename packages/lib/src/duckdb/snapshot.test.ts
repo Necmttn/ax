@@ -202,6 +202,94 @@ describe("publishSnapshot", () => {
     );
 });
 
+// Cross-review P1-6 / P2-4: `publishSnapshot` trusted its arguments. With a
+// `from` connection open on a DIFFERENT database it published that unrelated
+// database under the caller's snapshot name; with live === snapshot it
+// renamed the live pathname onto itself, leaving any later writer working on
+// an unlinked inode. Both are now typed refusals, compared on the CANONICAL
+// (realpath'd) form so `./x` and a symlinked alias cannot slip past.
+describe("publishSnapshot argument checks", () => {
+    dtest(
+        "refuses to publish when options.from is open on a different database",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const other = join(dir, "other.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER)");
+                yield* rw.close;
+
+                const foreign = yield* db.open(other);
+                yield* foreign.exec("CREATE TABLE other_table (id INTEGER)");
+
+                const result = yield* Effect.result(db.publishSnapshot(live, snap, { from: foreign }));
+                expect(result._tag).toBe("Failure");
+                if (result._tag === "Failure") {
+                    expect(result.failure._tag).toBe("SnapshotPublishError");
+                    const message = (result.failure as { message: string }).message;
+                    expect(message).toContain("other.duckdb");
+                    expect(message).toContain("live.duckdb");
+                }
+                // nothing was published from the wrong database
+                expect(existsSync(snap)).toBe(false);
+                expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+
+                yield* foreign.close;
+            }),
+        ),
+    );
+
+    dtest(
+        "accepts options.from opened through a path alias of the same database",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER)");
+                yield* rw.exec("INSERT INTO t VALUES (1)");
+
+                // Same file, spelled differently - canonicalization must see
+                // through it rather than rejecting a legitimate publish.
+                yield* db.publishSnapshot(join(dir, ".", "live.duckdb"), snap, { from: rw });
+                const reader = yield* db.openSnapshot(snap);
+                expect((yield* reader.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(1n);
+                yield* reader.close;
+                yield* rw.close;
+            }),
+        ),
+    );
+
+    dtest(
+        "refuses to publish a database onto itself",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER)");
+                yield* rw.close;
+
+                for (const target of [live, join(dir, ".", "live.duckdb")]) {
+                    const result = yield* Effect.result(db.publishSnapshot(live, target));
+                    expect(result._tag).toBe("Failure");
+                    if (result._tag === "Failure") {
+                        expect(result.failure._tag).toBe("SnapshotPublishError");
+                        expect((result.failure as { message: string }).message).toContain("same");
+                    }
+                }
+                expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+            }),
+        ),
+    );
+});
+
 describe("publishSnapshot options.from (RULING R14)", () => {
     dtest(
         "publishing through the caller's own connection sees commits made through that same connection",

@@ -143,6 +143,20 @@ describe("coerceValue", () => {
         );
     });
 
+    // Cross-review P2-2: DuckDB keeps TIMESTAMP at MICROSECOND grain and a JS
+    // `Date` is millisecond-grain, so the last three digits are dropped -
+    // `.999999` becomes `.999`, and the same truncation applies to negative
+    // (pre-epoch) instants. ax data is millisecond-grain, so this is the
+    // accepted trade rather than a bug to fix; it is PINNED here (and stated
+    // in the decoder docstring + the `DuckDbValue` docs) so it stays a
+    // contract instead of an accident.
+    test("truncates sub-millisecond precision, documented and pinned", () => {
+        const ts = coerceValue(DuckDbTypeId.TIMESTAMP, "2026-08-14 10:11:12.999999");
+        expect((ts as Date).toISOString()).toBe("2026-08-14T10:11:12.999Z");
+        const before = coerceValue(DuckDbTypeId.TIMESTAMP, "1969-07-20 20:17:40.123456");
+        expect((before as Date).toISOString()).toBe("1969-07-20T20:17:40.123Z");
+    });
+
     test("leaves an unparseable timestamp as its original text rather than an Invalid Date", () => {
         expect(coerceValue(DuckDbTypeId.TIMESTAMP, "infinity")).toBe("infinity");
     });

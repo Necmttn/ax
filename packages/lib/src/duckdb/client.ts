@@ -32,6 +32,7 @@ import { BunFileSystem } from "@effect/platform-bun";
 import { Context, Effect, FileSystem, Layer, Schema, type Scope } from "effect";
 import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
+import { canonicalPath } from "./canonical-path.ts";
 import { resolveDylibPath } from "./dylib.ts";
 import {
     DuckDbDecodeError,
@@ -145,7 +146,10 @@ const duckdbFree = (lib: LibDuckDb, p: number | bigint | null | undefined): void
  * than here, so this function can stay a plain sync throw-on-failure helper
  * with no `R` channel to thread through.
  */
-const openDatabase = (
+// Exported (not part of the DuckDbService product surface) so the P3-1
+// config-destruction guarantee can be unit-tested against a fake LibDuckDb -
+// a failing `duckdb_create_config` cannot be provoked through a real dylib.
+export const openDatabase = (
     lib: LibDuckDb,
     path: string,
     readOnly: boolean,
@@ -153,6 +157,11 @@ const openDatabase = (
     const cfgBuf = handleBuffer();
     const createState = lib.symbols.duckdb_create_config(ptr(cfgBuf));
     if (createState !== DUCKDB_SUCCESS) {
+        // Cross-review P3-1: duckdb.h (v1.5.5, lines 1018-1023) documents
+        // that `duckdb_destroy_config` must run even when creation FAILS -
+        // the out-param can already hold a partially-initialised config. The
+        // throw used to skip it, leaking that allocation on every failure.
+        lib.symbols.duckdb_destroy_config(ptr(cfgBuf));
         throw new DuckDbOpenError({ path, readOnly, message: "duckdb_create_config failed" });
     }
 
@@ -193,6 +202,28 @@ const openDatabase = (
 
     return { dbBuf, connBuf };
 };
+
+/**
+ * The inclusive bounds of DuckDB's `BIGINT` / C `int64_t`, which is the only
+ * integer width `duckdb_bind_int64` (the sole integer bind this client binds)
+ * can carry.
+ */
+const I64_MIN = -(2n ** 63n);
+const I64_MAX = 2n ** 63n - 1n;
+
+/**
+ * Cross-review P1-2: every `bigint` parameter went straight to
+ * `duckdb_bind_int64`, and `bun:ffi`'s `i64` marshalling WRAPS silently -
+ * `2n**63n` was reproduced arriving as `-2n**63n`, and `2n**100n` as `0n`.
+ * Corrupt data with no signal is the worst failure mode a store can have, so
+ * an out-of-range value is refused BEFORE it reaches the FFI boundary. The
+ * caller keeps the exact value in the message, plus the limit it broke, so
+ * the fix (store it as VARCHAR/HUGEINT text) is obvious from the error alone.
+ */
+export const bindableBigInt = (value: bigint): boolean => value >= I64_MIN && value <= I64_MAX;
+
+const bigintRangeMessage = (idx: number, value: bigint): string =>
+    `parameter ${idx} (${value}) is outside the range this client can bind: DuckDB binds integers as a signed 64-bit int64 (${I64_MIN} to ${I64_MAX}), and a wider value would silently wrap. Pass it as text (and store the column as VARCHAR or HUGEINT) instead.`;
 
 /** Bind one prepared-statement parameter (1-based `idx`). Returns the
  *  `duckdb_state` from the underlying bind call so the caller can check it. */
@@ -257,6 +288,13 @@ const runStatement = (
     try {
         const stmtHandle = stmtBuf[0]!;
         for (let i = 0; i < params.length; i += 1) {
+            const param = params[i];
+            if (typeof param === "bigint" && !bindableBigInt(param)) {
+                throw new DuckDbQueryError({
+                    sql: sqlExcerpt(sql),
+                    message: bigintRangeMessage(i + 1, param),
+                });
+            }
             const bindState = bindParam(lib, stmtHandle, BigInt(i + 1), params[i]);
             if (bindState !== DUCKDB_SUCCESS) {
                 throw new DuckDbQueryError({
@@ -321,7 +359,11 @@ const runStatement = (
 // LibDuckDb: Part A now excludes every currently-known trigger of the guard
 // from VARCHAR_TYPES structurally, so no real SQL type reaches it any more -
 // see client.test.ts.
-export const readResult = (lib: LibDuckDb, resultPtr: ReturnType<typeof ptr>): QueryResult => {
+export const readResult = (
+    lib: LibDuckDb,
+    resultPtr: ReturnType<typeof ptr>,
+    sql = "",
+): QueryResult => {
     const columnCount = Number(lib.symbols.duckdb_column_count(resultPtr));
     const columns: DuckDbColumn[] = [];
     for (let c = 0; c < columnCount; c += 1) {
@@ -329,6 +371,19 @@ export const readResult = (lib: LibDuckDb, resultPtr: ReturnType<typeof ptr>): Q
         const name = readCString(lib.symbols.duckdb_column_name(resultPtr, idx)) ?? `column_${c}`;
         const typeId = lib.symbols.duckdb_column_type(resultPtr, idx);
         columns.push({ name, typeId });
+    }
+
+    // Cross-review P2-1, half one: a row is keyed BY COLUMN NAME, so two
+    // columns sharing a name (`SELECT a.v, b.v FROM a, b` - DuckDB permits
+    // it) used to overwrite each other and hand the caller one value where it
+    // asked for two. That is silent data loss on a read path, so it is a
+    // typed refusal naming the fix.
+    const duplicate = columns.find((c, i) => columns.findIndex((o) => o.name === c.name) !== i);
+    if (duplicate !== undefined) {
+        throw new DuckDbQueryError({
+            sql: sqlExcerpt(sql),
+            message: `the result has more than one column named "${duplicate.name}"; rows are keyed by column name, so alias them (e.g. SELECT a.${duplicate.name} AS a_${duplicate.name}, b.${duplicate.name} AS b_${duplicate.name}) to keep both values`,
+        });
     }
 
     const unsupported = unsupportedColumns(columns);
@@ -345,7 +400,13 @@ export const readResult = (lib: LibDuckDb, resultPtr: ReturnType<typeof ptr>): Q
     const rows: DuckDbRow[] = [];
     for (let r = 0; r < rowCount; r += 1) {
         const rowIdx = BigInt(r);
-        const row: Record<string, DuckDbValue> = {};
+        // Cross-review P2-1, half two: on a normal `{}` the assignment
+        // `row["__proto__"] = v` hits Object.prototype's `__proto__` SETTER,
+        // which ignores a non-object value - so a `__proto__` column silently
+        // vanished from every row. A null-prototype object has no inherited
+        // accessors at all, so every column name (`__proto__`, `constructor`,
+        // `toString`) round-trips as plain data.
+        const row: Record<string, DuckDbValue> = Object.create(null) as Record<string, DuckDbValue>;
         for (let c = 0; c < columnCount; c += 1) {
             const colIdx = BigInt(c);
             const column = columns[c]!;
@@ -431,22 +492,51 @@ export const makeConnection = (
         // use of that address. Never read directly; it exists to be held.
         const { resultPtr, resultBuf } = runStatement(lib, connHandle, sql, params);
         try {
-            return readResult(lib, resultPtr);
+            return readResult(lib, resultPtr, sql);
         } finally {
             lib.symbols.duckdb_destroy_result(resultPtr);
             void resultBuf;
         }
     };
 
-    const query: DuckDbConnection["query"] = (sql, params = []) =>
-        Effect.try({
-            try: () => runQuery(sql, params),
-            catch: (err) =>
-                err instanceof DuckDbQueryError || err instanceof DuckDbUnsupportedTypeError
-                    ? err
-                    : new DuckDbQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
-        });
+    /**
+     * Cross-review P1-1: `connHandle` is captured ONCE, above, and `close`
+     * frees the database and connection behind it - so every operation issued
+     * after `close` handed a DANGLING pointer to libduckdb. That is not a
+     * catchable error: it was reproduced as a Bun SEGMENTATION FAULT, the
+     * process gone with no stack, no Effect failure, and nothing written to
+     * the caller's log. Use-after-close is a caller bug either way, but this
+     * client's job is to make it a typed failure the caller can see, so every
+     * operation re-checks the flag first and NO native symbol is reached.
+     *
+     * `Effect.suspend` matters: the check has to run when the effect RUNS,
+     * not when it is built - a `query(...)` value constructed before `close`
+     * and run after it must still refuse.
+     */
+    const refuseIfClosed = (sql: string): Effect.Effect<never, DuckDbQueryError> =>
+        Effect.fail(
+            new DuckDbQueryError({
+                sql: sqlExcerpt(sql),
+                message: `the connection to ${path} is closed; open a new one (a statement on a closed connection would dereference a freed native handle)`,
+            }),
+        );
 
+    const query: DuckDbConnection["query"] = (sql, params = []) =>
+        Effect.suspend(() =>
+            closed
+                ? refuseIfClosed(sql)
+                : Effect.try({
+                      try: () => runQuery(sql, params),
+                      catch: (err) =>
+                          err instanceof DuckDbQueryError || err instanceof DuckDbUnsupportedTypeError
+                              ? err
+                              : new DuckDbQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
+                  }),
+        );
+
+    // `exec` and `queryAs` both run THROUGH `query`, so the closed-connection
+    // guard above covers all three - there is no second path to the native
+    // handle to forget.
     const exec: DuckDbConnection["exec"] = (sql, params = []) =>
         Effect.map(query(sql, params), (result) => result.rowsChanged);
 
@@ -562,7 +652,21 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
      */
     const publishSnapshot: DuckDbService["publishSnapshot"] = (livePath, targetPath, options) => {
         const tmp = `${targetPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-        const removeTmp = fs.remove(tmp, { force: true, recursive: true }).pipe(Effect.ignore);
+        // Cross-review P3-6: this used to be `Effect.ignore`, so a temp file
+        // that could NOT be removed vanished from the record entirely - and
+        // the temp file here is a COMPLETE COPY of the database, i.e. the
+        // largest piece of litter this module can leave. `force: true`
+        // already tolerates "already gone", so anything reaching this handler
+        // is a real failure and is worth one line in the log. It still must
+        // not fail the publish: this runs as an `Effect.ensuring` finalizer,
+        // where masking the primary error would be worse than the leak.
+        const removeTmp = fs.remove(tmp, { force: true, recursive: true }).pipe(
+            Effect.catch((err) =>
+                Effect.logWarning(
+                    `ax duckdb: could not remove the temporary snapshot copy at ${tmp}: ${err.message}`,
+                ),
+            ),
+        );
 
         const copyThrough = (conn: DuckDbConnection) => {
             // A per-call alias, not a fixed constant. Fix round 1's `from`
@@ -576,12 +680,22 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
             // silently, since the connection stays otherwise usable. A
             // randomized alias means the next publish simply never collides.
             const alias = `ax_snapshot_${crypto.randomUUID().replace(/-/g, "")}`;
-            // Best-effort only: DETACHing an alias that was never actually
-            // attached (e.g. this call's OWN `ATTACH` below is what failed)
-            // is expected to fail, and a finalizer passed to
-            // `Effect.ensuring` must be `Effect<X, never, R>` - it can never
-            // fail, and must never mask the real error with a cleanup error.
-            const detach = conn.exec(`DETACH "${alias}"`).pipe(Effect.ignore);
+            // A finalizer passed to `Effect.ensuring` must be
+            // `Effect<X, never, R>` - it can never fail, and must never mask
+            // the real error with a cleanup error. Cross-review P3-7: it used
+            // to be `Effect.ignore`, which is stronger than "do not mask" -
+            // it erased the event. This finalizer only ever runs on a span
+            // whose `ATTACH` ALREADY SUCCEEDED, so a failing DETACH means the
+            // caller's own long-lived connection is still carrying an
+            // attached database (the exact leak `from` was built to avoid),
+            // and the caller has nothing else to go on. Log it, do not fail.
+            const detach = conn.exec(`DETACH "${alias}"`).pipe(
+                Effect.catch((err) =>
+                    Effect.logWarning(
+                        `ax duckdb: could not DETACH the temporary snapshot database "${alias}" after publishing to ${targetPath}: ${err.message}`,
+                    ),
+                ),
+            );
 
             return Effect.gen(function* () {
                 yield* conn.exec("CHECKPOINT");
@@ -615,6 +729,40 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
         };
 
         const attempt = Effect.gen(function* () {
+            // Cross-review P1-6 + P2-4, both checked BEFORE anything is
+            // created or opened, and both compared on the CANONICAL path so
+            // `./x`, a relative spelling, or a symlinked directory cannot
+            // fool them (see canonical-path.ts).
+            const canonicalLive = yield* canonicalPath(fs, livePath);
+            const canonicalTarget = yield* canonicalPath(fs, targetPath);
+
+            // P2-4: publishing a database onto ITSELF is never what the
+            // caller means. The rename would replace the live pathname with
+            // the copy, leaving any writer that still holds the original open
+            // on an unlinked inode - its later commits going to a file
+            // nothing can ever read again.
+            if (canonicalLive === canonicalTarget) {
+                return yield* new SnapshotPublishError({
+                    snapshotPath: targetPath,
+                    message: `cannot publish a database onto itself: the live path ${livePath} and the snapshot path ${targetPath} are the same file`,
+                });
+            }
+
+            // P1-6: `from` exists so the copy runs through the connection
+            // that owns the live database (RULING R14). A connection open on
+            // a DIFFERENT database would copy THAT one and publish it under
+            // this snapshot's name - wrong data, no error, indistinguishable
+            // downstream from a successful publish.
+            if (options?.from) {
+                const canonicalFrom = yield* canonicalPath(fs, options.from.path);
+                if (canonicalFrom !== canonicalLive) {
+                    return yield* new SnapshotPublishError({
+                        snapshotPath: targetPath,
+                        message: `options.from is open on a different database (${options.from.path}) than the live path being published (${livePath}); pass the connection that owns the live database`,
+                    });
+                }
+            }
+
             const liveExists = yield* fs.exists(livePath).pipe(
                 Effect.mapError(
                     (err) =>
@@ -704,28 +852,58 @@ const openLibOrFail = (dylibPath: string): Effect.Effect<LibDuckDb, DuckDbDylibE
             }),
     });
 
-const baseLayer = (
-    dylibPath: string,
+/**
+ * The one place a `DuckDb` layer is built, over whatever effect produces the
+ * `LibDuckDb`.
+ *
+ * Cross-review P3-2: `Layer.effect` runs its effect IN THE LAYER'S SCOPE, so
+ * an `Effect.addFinalizer` here is released when the layer is - and `dlopen`
+ * handles are a per-process resource this repo hands out repeatedly (a fresh
+ * `AppLayer` per `run(provide(...))` call is the established shape), so
+ * never calling `lib.close()` retained one dylib handle per layer for the
+ * life of the process. Bun documents `close()` as the release operation.
+ *
+ * Closing is best-effort by design: the finalizer must not fail, and a dylib
+ * that refuses to unload is not a reason to fail a program that has already
+ * finished its work.
+ *
+ * Exported (not on the barrel) so the release is unit-testable against a fake
+ * `LibDuckDb` - a real `dlopen` handle has no observable "was I closed".
+ */
+export const layerFromLib = (
+    openLib: Effect.Effect<LibDuckDb, DuckDbDylibError, FileSystem.FileSystem>,
 ): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
     Layer.effect(DuckDb)(
         Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
-            const lib = yield* openLibOrFail(dylibPath);
+            const lib = yield* openLib;
+            yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                    try {
+                        lib.close();
+                    } catch {
+                        /* an unloadable dylib must not fail teardown */
+                    }
+                }),
+            );
             return makeService(lib, fs);
         }),
     );
+
+const baseLayer = (
+    dylibPath: string,
+): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
+    layerFromLib(openLibOrFail(dylibPath));
 
 /** Layer over an explicit dylib path - the injection point for tests and for
  *  the custom static dylib from chunk w0-dylib-ci. */
 export const DuckDbLayer = (dylibPath: string): Layer.Layer<DuckDb, DuckDbDylibError> =>
     baseLayer(dylibPath).pipe(Layer.provide(BunFileSystem.layer));
 
-const baseLive: Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> = Layer.effect(DuckDb)(
+const baseLive: Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> = layerFromLib(
     Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
         const dylibPath = yield* resolveDylibPath();
-        const lib = yield* openLibOrFail(dylibPath);
-        return makeService(lib, fs);
+        return yield* openLibOrFail(dylibPath);
     }),
 );
 
