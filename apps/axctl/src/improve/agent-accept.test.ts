@@ -181,6 +181,90 @@ describe("acceptProposal with real SQLite", () => {
         expect(readFileSync(safe.task_path!, "utf8")).toContain("Recovery Path: remove the hook");
     });
 
+    test("writes a subagent task from its sidecar payload", async () => {
+        const result = await runWithProposal({
+            id: "subagent-one",
+            form: "subagent",
+            title: "Review migrations",
+            hypothesis: "Migration reviews need a bounded role.",
+            dedupe_sig: "migration_reviewer",
+            subagent_payload: {
+                bounded_role: "Review schema migrations only.",
+                delegation_trigger: "A change includes a migration.",
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "migration_reviewer", taskDir: root }));
+
+        expect(result.status).toBe("ok");
+        const body = readFileSync(result.task_path!, "utf8");
+        expect(body).toContain("form=subagent");
+        expect(body).toContain("Role: Review schema migrations only.");
+        expect(body).toContain("Delegation trigger: A change includes a migration.");
+    });
+
+    test("writes a harness check task with baseline evidence", async () => {
+        const result = await runWithProposal({
+            id: "harness-one",
+            form: "harness_check",
+            title: "Check offline startup",
+            hypothesis: "The command must work without SurrealDB.",
+            dedupe_sig: "offline_startup",
+            baseline: "The old command connects to port 8521.",
+        }, (_judgment, root) => acceptProposal({ sigOrId: "offline_startup", taskDir: root }));
+
+        expect(result.status).toBe("ok");
+        const body = readFileSync(result.task_path!, "utf8");
+        expect(body).toContain("form=harness_check");
+        expect(body).toContain("The command must work without SurrealDB.");
+        expect(body).toContain("Baseline evidence:\nThe old command connects to port 8521.");
+    });
+
+    test("requires the complete automation safety contract", async () => {
+        const unsafe = await runWithProposal({
+            id: "automation-unsafe",
+            form: "automation",
+            title: "Unsafe automation",
+            hypothesis: "A schedule can reduce manual work.",
+            dedupe_sig: "unsafe_automation",
+            automation_payload: {
+                trigger_signal: "new transcript",
+                action: "ax ingest",
+                schedule: "hourly",
+                recovery_path: "remove the schedule",
+                smoke_test_command: null,
+                disable_command: null,
+                failure_mode: null,
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "unsafe_automation", taskDir: root }));
+        expect(unsafe.status).toBe("unsupported_form");
+        expect(unsafe.message).toContain("smoke test");
+        expect(unsafe.message).toContain("disable switch");
+        expect(unsafe.message).toContain("failure mode");
+
+        const safe = await runWithProposal({
+            id: "automation-safe",
+            form: "automation",
+            title: "Safe automation",
+            hypothesis: "A schedule can reduce manual work.",
+            dedupe_sig: "safe_automation",
+            automation_payload: {
+                trigger_signal: "new transcript",
+                action: "ax ingest",
+                schedule: "hourly",
+                recovery_path: "remove the schedule",
+                smoke_test_command: "ax status",
+                disable_command: "launchctl unload com.example.ax.plist",
+                failure_mode: "fail_open",
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "safe_automation", taskDir: root }));
+        expect(safe.status).toBe("ok");
+        const body = readFileSync(safe.task_path!, "utf8");
+        expect(body).toContain("form=automation");
+        expect(body).toContain("Recovery Path: remove the schedule");
+        expect(body).toContain("Smoke Test: ax status");
+        expect(body).toContain("Disable Switch: launchctl unload com.example.ax.plist");
+        expect(body).toContain("Failure Mode: fail_open");
+    });
+
     test("cleans the temporary task when the SQLite transaction fails", async () => {
         const sig = "atomic_failure";
         const result = await runWithProposal({
