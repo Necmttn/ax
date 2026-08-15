@@ -1,12 +1,15 @@
 /**
  * Test-only resolution of a libduckdb shared library.
  *
- * Order: `AX_DUCKDB_DYLIB` (the injection point the custom static dylib from
- * chunk w0-dylib-ci will use) -> the gitignored `vendor/duckdb/<version>/`
- * cache -> a one-time download of the official prebuilt release. When the
- * download is impossible (offline CI, unsupported platform) this returns a
- * REASON rather than throwing, so suites can skip with a notice instead of
- * failing red for an environment problem.
+ * Order: `AX_DUCKDB_DYLIB` (the injection point tests use to point at an
+ * arbitrary dylib) -> the custom static build at
+ * `${DUCKDB_DIST_DIR ?? <repoRoot>/dist/duckdb}/<libFileName()>` (produced by
+ * `scripts/build-duckdb.sh`; the ONLY artifact that can `LOAD fts` offline) ->
+ * the gitignored `vendor/duckdb/<version>/` cache -> a one-time download of
+ * the official prebuilt release. When the download is impossible (offline
+ * CI, unsupported platform) this returns a REASON rather than throwing, so
+ * suites can skip with a notice instead of failing red for an environment
+ * problem.
  *
  * The download is SINGLE-FLIGHT across processes (cross-review P3-4): one
  * caller claims an exclusive-create sentinel and downloads, everyone else
@@ -59,7 +62,15 @@ export const repoRootFrom = (startDir: string): RepoRootResult => {
  */
 const repoRoot = (): RepoRootResult => repoRootFrom(dirname(Bun.fileURLToPath(import.meta.url)));
 
-const libFileName = (): string => (platform() === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+/** Exported so callers (e.g. the custom-build priority test) can build a
+ *  platform-correct path without duplicating the darwin/linux switch. */
+export const libFileName = (): string => (platform() === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+
+/** The custom static-build dist dir: `DUCKDB_DIST_DIR`, or `<repoRoot>/dist/duckdb`
+ *  when unset. Mirrors what `scripts/build-duckdb.sh` writes to and what
+ *  `scripts/bench/duckdb-bin.ts` resolves the CLI binary against. */
+export const customBuildDistDir = (root: string): string =>
+    process.env.DUCKDB_DIST_DIR?.trim() || join(root, "dist", "duckdb");
 
 /** Official release asset for this platform, or null when unsupported. */
 const releaseAsset = (): string | null => {
@@ -148,6 +159,9 @@ export const resolveTestDylib = async (): Promise<TestDylib> => {
                 "could not locate the repo root (walked up 10 levels from duckdb-dylib.ts without finding turbo.json)",
         };
     }
+    const customBuild = join(customBuildDistDir(root.dir), libFileName());
+    if (existsSync(customBuild)) return { ok: true, path: customBuild };
+
     const dir = vendorDir(root.dir);
 
     const cached = join(dir, libFileName());
@@ -213,11 +227,109 @@ export const noteSkippedDylib = (suite: string, reason: string): void => {
     console.warn(`[skip] ${suite}: no libduckdb available (${reason})`);
 };
 
+// ---------------------------------------------------------------------------
+// FTS capability - "is there a libduckdb?" is NOT the whole question
+// ---------------------------------------------------------------------------
+
+/**
+ * `resolveTestDylib` answers "is there a libduckdb?". Suites treated that as
+ * sufficient, and it is not: ax links the `fts` extension STATICALLY into its
+ * own build (`scripts/build-duckdb.sh`), and the upstream release artifact
+ * this module downloads as a last resort does not carry fts at all. Every
+ * suite that publishes a cache fixture goes through `buildFtsIndexes`, so it
+ * needs `LOAD fts` to work - and against the upstream artifact it does not.
+ *
+ * The failure this was written for: CI provisioned no DuckDB, fell through to
+ * the upstream download, and 36 behaviour tests died with
+ * `Install it first using "INSTALL fts"` - one provisioning gap wearing the
+ * costume of 36 unrelated product bugs. The same suites were GREEN locally,
+ * because a developer box that has ever run `INSTALL fts` keeps the extension
+ * in `~/.duckdb/extensions/<version>/<platform>/` where ANY dylib picks it up.
+ * Green locally, red in CI, and neither answer was about the code under test.
+ *
+ * So capability is PROBED, and the answer carries a reason a human can act on.
+ */
+export type FtsCapability = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+/** The one place the "how do I get a working DuckDB" answer is written down. */
+export const ftsProvisioningHint = (reason: string): string =>
+    [
+        `no FTS-capable libduckdb: ${reason}`,
+        `ax links the fts extension STATICALLY into its own DuckDB ${DUCKDB_VERSION} build.`,
+        `The upstream release artifact CANNOT "LOAD fts" - it ships fts as a separate download.`,
+        `Build the real one:  bash scripts/build-duckdb.sh   (lands in dist/duckdb/, picked up automatically)`,
+        `Or point at an existing one:  DUCKDB_DIST_DIR=/path/to/dist/duckdb`,
+    ].join("\n");
+
+/**
+ * Probe by issuing `LOAD fts` EXACTLY as {@link buildFtsIndexes} does - no
+ * air-gap pragmas. Probing differently from the code under test is how you get
+ * a probe that disagrees with reality: an air-gapped probe would report
+ * "incapable" on a developer box whose suites do in fact pass. Whether the
+ * SHIPPED artifact links fts statically is a different question, and
+ * `scripts/build-duckdb.sh`'s air-gap smoke is what answers it.
+ */
+export const probeFtsCapable = async (dylibPath: string): Promise<FtsCapability> => {
+    const program = Effect.gen(function* () {
+        const db = yield* DuckDb;
+        const conn = yield* db.open(":memory:");
+        yield* Effect.ensuring(conn.exec("LOAD fts"), conn.close);
+    });
+    try {
+        await Effect.runPromise(
+            Effect.provide(program, DuckDbLayer(dylibPath)) as Effect.Effect<void>,
+        );
+        return { ok: true };
+    } catch (err) {
+        // DuckDB's answer is several lines ("IO Error: Extension ... not
+        // found." / "Install it first using \"INSTALL fts\"."); the first
+        // non-empty one identifies it without burying the hint that follows.
+        const text = err instanceof Error ? err.message : String(err);
+        const first = text.split("\n").find((line) => line.trim().length > 0)?.trim();
+        return { ok: false, reason: first && first.length > 0 ? first : "LOAD fts failed" };
+    }
+};
+
+/**
+ * CI sets `AX_DUCKDB_REQUIRE_FTS=1`. It turns "no FTS-capable duckdb" from a
+ * skip into a hard failure, so a broken provisioning step can never be
+ * mistaken for a green run. Locally it stays unset and suites skip with the
+ * hint instead of demanding an hour-long DuckDB build from every contributor.
+ */
+export const requireFtsFromEnv = (
+    env: Record<string, string | undefined> = process.env,
+): boolean => {
+    const raw = env.AX_DUCKDB_REQUIRE_FTS?.trim().toLowerCase();
+    if (raw === undefined || raw === "") return false;
+    return raw !== "0" && raw !== "false";
+};
+
+export type FtsGate =
+    | { readonly mode: "run" }
+    | { readonly mode: "skip"; readonly message: string }
+    | { readonly mode: "fail"; readonly message: string };
+
+/** Pure decision, so the policy is testable without a dylib on disk. */
+export const decideFtsGate = (capability: FtsCapability, required: boolean): FtsGate => {
+    if (capability.ok) return { mode: "run" };
+    const message = ftsProvisioningHint(capability.reason);
+    return required ? { mode: "fail", message } : { mode: "skip", message };
+};
+
 /** F1: the pasted preamble every `duckdb/*.test.ts` suite carried - resolve a
  *  dylib, build a skip-aware `test`, and (for suites that open a real
  *  database) a `DuckDb` layer + temp-dir tracker + a `withDuckDb` runner.
  *  Previously hand-copied into client.test.ts, snapshot.test.ts, and
  *  ffi.test.ts. */
+export interface DuckDbTestSetupOptions {
+    /**
+     * The suite reaches `buildFtsIndexes` - directly, or through
+     * `publishCacheFixture`, which builds the indexes for EVERY fixture. Such
+     * a suite needs a dylib that can `LOAD fts`, not merely a dylib.
+     */
+    readonly requireFts?: boolean;
+}
+
 export interface DuckDbTestSetup {
     /** The resolved dylib path, or `null` when none is available. */
     readonly dylibPath: string | null;
@@ -252,10 +364,36 @@ export interface DuckDbTestSetup {
  * did. Call once per test file, at module load (`await duckdbTestSetup(...)`
  * at the top level) so `dtest` sees a real boolean at registration time.
  */
-export const duckdbTestSetup = async (suiteName: string): Promise<DuckDbTestSetup> => {
+export const duckdbTestSetup = async (
+    suiteName: string,
+    options: DuckDbTestSetupOptions = {},
+): Promise<DuckDbTestSetup> => {
     const found = await resolveTestDylib();
-    const dylibPath = found.ok ? found.path : null;
-    if (!found.ok) noteSkippedDylib(suiteName, found.reason);
+    let dylibPath = found.ok ? found.path : null;
+    if (!found.ok && options.requireFts !== true) noteSkippedDylib(suiteName, found.reason);
+
+    // An FTS suite asks a stricter question than "is there a dylib?", so it
+    // gets a stricter answer - and when provisioning is broken it gets ONE
+    // actionable failure instead of every case in the file dying on the same
+    // extension error.
+    if (options.requireFts === true) {
+        const capability: FtsCapability =
+            dylibPath === null
+                ? { ok: false, reason: found.ok ? "no libduckdb resolved" : found.reason }
+                : await probeFtsCapable(dylibPath);
+        const gate = decideFtsGate(capability, requireFtsFromEnv());
+        if (gate.mode !== "run") {
+            dylibPath = null;
+            if (gate.mode === "fail") {
+                test(`${suiteName}: an FTS-capable libduckdb is required`, () => {
+                    throw new Error(gate.message);
+                });
+            } else {
+                console.warn(`[skip] ${suiteName}: ${gate.message}`);
+            }
+        }
+    }
+
     const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
     const dtest = test.skipIf(dylibPath === null);
 

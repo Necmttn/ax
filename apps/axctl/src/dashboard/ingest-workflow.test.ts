@@ -9,7 +9,7 @@ import type { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { AxConfigTest } from "@ax/lib/config";
 import { ProcessServiceTest } from "@ax/lib/process";
-import type { IngestLockInfo } from "../ingest/ingest-lock.ts";
+import type { IngestLockInfo } from "@ax/lib/ingest-lock";
 import { StageRegistry, StageRegistryLive, type StageDef } from "../ingest/stage/registry.ts";
 import { BaseStageStats, StageMeta } from "../ingest/stage/types.ts";
 import type { RunIngestOptions } from "../ingest/run.ts";
@@ -183,13 +183,18 @@ describe("startIngestWorkflow", () => {
         const registry = StageRegistryLive([stage("skills")]);
         const bus = new InMemoryIngestStreamBus();
 
-        // A fresh lock owned by a live pid (ourselves) - withIngestLock treats
-        // this exactly like a concurrent CLI/watcher ingest already running.
+        // A fresh lock owned by a live pid that is NOT us - withIngestLock treats
+        // this exactly like a concurrent CLI/watcher ingest already running. pid 1
+        // is always alive (its owner is root, so the liveness probe gets EPERM,
+        // which still means alive).
+        //
+        // It must not be OUR pid: a lock file naming this process while this
+        // process is not registered as holding it is, by definition, a leftover
+        // from a crashed earlier run (or a pid the OS reused), and the lock
+        // deliberately takes that over rather than wedging ingestion forever.
         writeFileSync(
             join(dataDir, "ingest.lock"),
-            JSON.stringify(
-                { pid: process.pid, startedAt: Date.now(), command: "cli-ingest" } satisfies IngestLockInfo,
-            ),
+            JSON.stringify({ pid: 1, startedAt: Date.now(), command: "cli-ingest" } satisfies IngestLockInfo),
         );
 
         const { runId } = await Effect.runPromise(

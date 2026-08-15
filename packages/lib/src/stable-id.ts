@@ -141,6 +141,38 @@ export function agentEventRowId(agentSessionId: string, seq: number, providerEve
     return stableId("agent_event", [agentSessionId, seq, providerEventId ?? null]);
 }
 
+/**
+ * A git commit, keyed on `(repo, sha)` - exactly the table's own
+ * `commit_sha_uq` unique index, so the row id and the natural key can never
+ * disagree. Append-stable by construction: a sha is content-addressed by git and
+ * `repo` is the repository's stable slug, so re-deriving a longer git history
+ * rewrites every previously-seen commit to the same id.
+ *
+ * The commit `ts` is deliberately NOT a key part: the same commit re-read after
+ * a rebase-free fetch must keep its id, and a timestamp is banned anyway (see
+ * `encodePart`'s epoch-magnitude ban).
+ */
+export function commitRowId(repo: string, sha: string): string {
+    return stableId("commit", [repo, sha]);
+}
+
+/**
+ * An installed skill, keyed on its NAME alone - the table's `skill_name_uq`
+ * unique index, and the value every reader joins on (`ax skills weighted`, the
+ * recall skill picker, the `invoked` edge's target).
+ *
+ * `dir_path` is deliberately NOT a key part, on two counts: it is an absolute
+ * path (a banned key part - see the module header), and the same skill
+ * reinstalled under another root is the SAME catalogue entry, which is precisely
+ * what a name-unique index says. The name is used verbatim as the hash input -
+ * plugin-namespaced names keep their `:`, since nothing here has SurrealDB's
+ * record-id character restrictions (the `:` -> `__` encoding in
+ * `packages/lib/src/skill-id.ts` existed only for those).
+ */
+export function skillRowId(name: string): string {
+    return stableId("skill", [name]);
+}
+
 /** The provider-native row this derived row was built from: an existing
  *  graph row's own (already provider-native, already append-stable) id -
  *  never a file identity. */
@@ -189,151 +221,44 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
     turn: "session row id + provider-native turn seq",
     tool_call: "session row id + seq + (provider call id OR an explicit ordinal) - see toolCallRowId",
     agent_event: "agent_session row id + seq + provider event id (when present)",
+    commit: "repo slug + commit sha (the commit_sha_uq unique index) - see commitRowId; NEVER the commit ts",
+    skill: "the skill name alone (the skill_name_uq unique index) - see skillRowId; NEVER dir_path (absolute path)",
+    invoked: "edgeRowId('invoked', turn row id, skill row id, JSON.stringify(args)) - args discriminates two invocations of the same skill in one turn",
+    has_content: "edgeRowId('has_content', tool_call row id, content_type row id) - one classification per (tool_call, content_type) pair, so no discriminator",
     "<edge>": "edgeRowId: edge table + in_id + out_id + optional discriminator",
     "<derived>": "derivedRowId: owning session row id + source table + source row id + optional extra parts",
 };
 
-/** Tables in DUCKDB_SCHEMA_TABLES (packages/schema/src/duckdb-tables.ts) that
- *  do not yet have a concrete entry in NATURAL_KEY_RECIPES. This chunk
- *  (w0-schema-ddl) only translates the DDL and the id-generation contract -
- *  it does not wire real writers for these tables, so their natural keys
- *  are not yet pinned down. Wave-2 port chunks MUST remove a table from this
- *  set (and add a concrete NATURAL_KEY_RECIPES entry) as they wire its
- *  writer; packages/schema/src/duckdb-recipe-coverage.test.ts fails the
- *  build if a table is silently missing from BOTH. */
-export const RECIPE_TODO: ReadonlySet<string> = new Set([
-    "skill",
-    "skill_revision",
-    "agent_def",
-    "claude_sidecar_artifact",
-    "used_sidecar_artifact",
-    "agent_provider",
-    "agent_model",
-    "agent_session",
-    "file",
-    "symbol",
-    "error_signature",
-    "commit",
-    "repository",
-    "checkout",
-    "workspace",
-    "tool",
-    "content_type",
-    "has_content",
-    "plan",
-    "plan_item",
-    "artifact",
-    "content_document",
-    "content_block",
-    "content_atom",
-    "mentions_file",
-    "mentions_commit",
-    "mentions_artifact",
-    "plan_snapshot",
-    "compaction",
-    "insight",
-    "friction_event",
-    "turn_analysis",
-    "reaction_event",
-    "classifier_definition",
-    "classifier_run",
-    "classifier_result",
-    "classifier_graph_node",
-    "classifier_graph_edge",
-    "classifier_graph_fact",
-    "transcript_label_review",
-    "transcript_label_vector",
-    "semantic_signal",
-    "diagnostic_event",
-    "guidance",
-    "guidance_version",
-    "guidance_source",
-    "guidance_revision",
-    "guidance_config_artifact",
-    "stack",
-    "command_outcome",
-    "user_message_ngram",
-    "workflow_epoch",
-    "session_token_usage",
-    "turn_token_usage",
-    "session_health",
-    "session_metrics",
-    "fragility_cascade",
-    "commit_classification",
-    "branch",
-    "pull_request",
-    "review_event",
-    "check_run",
-    "delivery_outcome",
-    "workflow_snapshot",
-    "phase_span",
-    "skill_candidate",
-    "ingest_run",
-    "ingest_stage",
-    "ingest_event",
-    "query_sample",
-    "graph_health_check",
-    "role",
-    "plays_role",
-    "invoked",
-    "loaded",
-    "proposed",
-    "edited",
-    "mentioned_file",
-    "mentioned_symbol",
-    "mentioned_error",
-    "read_file",
-    "searched_file",
-    "corrected_by",
-    "expresses",
-    "reacts_to",
-    "has_classification",
-    "produced",
-    "touched",
-    "later_fixed_by",
-    "suggests_skill",
-    "has_checkout",
-    "concerns",
-    "resulted_in",
-    "produced_artifact",
-    "has_artifact",
-    "derived_from",
-    "skill_paired",
-    "recovered_by",
-    "spawned",
-    "advice",
-    "agent_event_child",
-    "used_model",
-    "agent_used_model",
-    "skill_triage_decision",
-    "harness_hook_event",
-    "hook_command_invocation",
-    "ax_invocation",
-    "feedback_case_type",
-    "feedback_case_result",
-    "hook_fire",
-    "proposal",
-    "directive_ngram",
-    "skill_proposal",
-    "subagent_proposal",
-    "hook_proposal",
-    "guidance_proposal",
-    "automation_proposal",
-    "cites_evidence",
-    "experiment",
-    "opportunity",
-    "checkpoint",
-    "dogfood_run",
-    "retro",
-    "reviewed",
-    "ingest_file_state",
-    "otel_metric_point",
-    "otel_span",
-    "otel_log_event",
-    "harness_tool_event",
-    "harness_run_context",
-    "wrapped_card",
-    "telemetry_of",
-    "run_evidence_event",
-    "run_evidence_ref",
-]);
+/**
+ * The two documentation-only keys in NATURAL_KEY_RECIPES that describe a RULE
+ * (`edgeRowId` / `derivedRowId`) rather than naming a table. Coverage checks must
+ * not read them as "a table by that literal name has a concrete recipe". `<` and
+ * `>` are not valid DuckDB identifier characters, so no parsed table name can
+ * ever equal one - but the coverage test asserts that rather than assuming it.
+ */
+export const PSEUDO_RECIPE_KEYS: ReadonlySet<string> = new Set(["<edge>", "<derived>"]);
+
+/**
+ * THERE IS NO `RECIPE_TODO` CONSTANT ANY MORE, deliberately.
+ *
+ * It used to be a hand-listed set of the 134 tables with no concrete recipe yet -
+ * a third mirror of the DDL's table list, alongside `duckdb-tables.ts` and the
+ * parity test's banned-type array, and the one most likely to rot: a table added
+ * to the DDL and forgotten here read as "covered".
+ *
+ * Coverage is now DERIVED where the DDL lives, in
+ * `packages/schema/src/duckdb-recipe-coverage.test.ts`: the todo set is simply
+ * every parsed DDL table minus the keys of `NATURAL_KEY_RECIPES` (minus
+ * {@link PSEUDO_RECIPE_KEYS}). The derived set was verified byte-for-byte
+ * identical to the hand-listed one it replaced.
+ *
+ * FOR WAVE-2 PORTERS: a table leaves the todo set by GAINING A RECIPE here -
+ * add its entry to `NATURAL_KEY_RECIPES` when you wire its writer, and the
+ * coverage set shrinks by itself. There is no second list to remember to edit,
+ * which is the whole point.
+ *
+ * Keeping the derivation out of this module also keeps `@ax/lib` free of a
+ * runtime dependency on `@ax/schema` (and the package cycle that came with it):
+ * this module is imported by every writer, and it should not drag the entire DDL
+ * text in to compute a constant only tests read.
+ */

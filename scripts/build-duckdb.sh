@@ -137,8 +137,11 @@ fi
 # build runner and wherever the artifact ships). Passed through only when the
 # caller sets it (e.g. the workflow's `static_libcpp` matrix entry); omitted
 # entirely otherwise so local/macOS builds are unaffected.
-# shellcheck disable=SC2086
-GEN=ninja CORE_EXTENSIONS='json' EXTENSION_STATIC_BUILD=1 ${STATIC_LIBCPP:+STATIC_LIBCPP=$STATIC_LIBCPP} make -C "$source_dir"
+make_env=(GEN=ninja CORE_EXTENSIONS='json' EXTENSION_STATIC_BUILD=1)
+if [[ -n ${STATIC_LIBCPP:-} ]]; then
+    make_env+=("STATIC_LIBCPP=$STATIC_LIBCPP")
+fi
+env "${make_env[@]}" make -C "$source_dir"
 
 case $(uname -s) in
     Darwin) library_name=libduckdb.dylib ;;

@@ -1,9 +1,8 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { ProcessService } from "@ax/lib/process";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { ProcessService, type ProcessError } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import {
@@ -11,8 +10,10 @@ import {
 } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
+import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../../queries/recall.ts";
 import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolveCacheRepository } from "../../queries/repository-scope.ts";
+import { resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
 import { ALL_CONTENT_CATEGORIES } from "../../ingest/content-type-classify.ts";
@@ -74,36 +75,59 @@ interface RecallCliOpts {
  * Resolve `--scope` flag + cwd into a RecallScope.
  *
  * Rules:
- *  - `--scope=all`  → { kind: "all" } (no DB lookup)
- *  - `--scope=here` → look up cwd repository; error if not a git repo
+ *  - `--scope=all`  → { kind: "all" } (no lookup at all)
+ *  - `--scope=here` → resolve cwd's repository in the CACHE; error if not a git repo
  *  - omitted        → auto-detect: try `here`; fall back to `all` silently
+ *
+ * PORTED OFF SURREALDB. This used to end in `resolvePwdRepository`, whose last
+ * step is a `SELECT ... FROM repository:<key>` through `SurrealClient` - so a
+ * command routed on the cache runtime died there. It now resolves the git
+ * identity (DB-free) and looks the repository ROW up in the snapshot, which is
+ * also more correct: DuckDB row ids are content-hashed by the writer, so the
+ * git-derived key is NOT the row id `session.repository` holds.
+ *
+ * A repository the cache has never seen falls back to `all`, with a note on
+ * stderr. Scoping to a repository with no rows can only ever return nothing, and
+ * "no matches" would send the user hunting for a query problem that isn't there;
+ * an explicit `--scope=here` still narrows (the user asked for it) but says why
+ * it will be empty.
  */
 const resolveScope = (
     scopeFlag: string | null,
 ): Effect.Effect<
     RecallScope,
-    DbError | import("@ax/lib/process").ProcessError,
-    SurrealClient | ProcessService | FileSystem.FileSystem
+    CacheReadError | ProcessError,
+    CacheRead | ProcessService | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 
         if (scopeFlag === "here" || scopeFlag === null) {
-            const resolution = yield* resolvePwdRepository().pipe(
+            const identity = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) => {
                     if (scopeFlag === "here") {
                         // explicit --scope=here outside a git repo → error
                         fail(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})`);
                     }
                     // auto-detect: not a git repo → silent fall-through to all
-                    return Effect.succeed(null as import("../../pwd.ts").PwdResolution | null);
+                    return Effect.succeed(null as PwdIdentity | null);
                 }),
             );
-            if (resolution === null) return { kind: "all" } as RecallScope;
-            return {
-                kind: "here",
-                repositoryKey: resolution.repositoryRecordId.id as string,
-            } as RecallScope;
+            if (identity === null) return { kind: "all" } as RecallScope;
+
+            const row = yield* resolveCacheRepository(identity);
+            if (Option.isNone(row)) {
+                if (scopeFlag === "here") {
+                    process.stderr.write(
+                        `axctl recall: nothing ingested for ${identity.mainRepoRoot} yet - ` +
+                        "--scope=here will be empty until `ax ingest here` runs\n",
+                    );
+                    // Honour the explicit request: a key no row carries.
+                    return { kind: "here", repositoryKey: identity.identity.repositoryKey } as RecallScope;
+                }
+                return { kind: "all" } as RecallScope;
+            }
+            return { kind: "here", repositoryKey: row.value } as RecallScope;
         }
 
         fail(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
@@ -147,95 +171,92 @@ async function pickFromList(
     return candidates[n - 1]!.value;
 }
 
+/** One candidate value a picker can offer, with its usage count. */
+interface PickerCandidate {
+    readonly value: string;
+    readonly uses: number;
+}
+
+/**
+ * Match a user-supplied filter against the candidate list, WITHOUT deciding
+ * what to do about it - the caller owns prompting and exiting. Pure, so the
+ * matching rules (exact wins; one substring hit auto-selects; zero or many
+ * needs the user) are testable without a database or a TTY.
+ *
+ * `alias` gives a candidate a second searchable form - for projects, the
+ * prettified slug, so `--project=ax` finds the mangled directory-slug form.
+ */
+export type PickerMatch =
+    | { readonly kind: "exact"; readonly value: string }
+    | { readonly kind: "one"; readonly value: string }
+    | { readonly kind: "none" }
+    | { readonly kind: "many"; readonly candidates: ReadonlyArray<PickerCandidate> };
+
+export const matchPicker = (
+    input: string,
+    candidates: ReadonlyArray<PickerCandidate>,
+    alias: (value: string) => string = (v) => v,
+): PickerMatch => {
+    const trimmed = input.trim();
+    if (trimmed === "" || trimmed === "?") return { kind: "many", candidates };
+    const exact = candidates.find((c) => c.value === trimmed);
+    if (exact) return { kind: "exact", value: exact.value };
+    const lower = trimmed.toLowerCase();
+    const matches = candidates.filter(
+        (c) =>
+            c.value.toLowerCase().includes(lower) || alias(c.value).toLowerCase().includes(lower),
+    );
+    if (matches.length === 1) return { kind: "one", value: matches[0]!.value };
+    if (matches.length === 0) return { kind: "none" };
+    return { kind: "many", candidates: matches };
+};
+
+/** How many candidates an interactive picker shows at once. */
+const PICKER_PAGE = 30;
+
+const candidatesFor = (clause: Clause) =>
+    Effect.gen(function* () {
+        const cache = yield* CacheRead;
+        const rows = yield* cache.rows(PickerRow, clause.sql, clause.params);
+        return rows.map((r) => ({ value: r.value, uses: Number(r.uses) }));
+    });
+
+/** Resolve `--project` (a slug, a substring, or `?`) to a stored project slug. */
 const resolveProject = (input: string | null) =>
     Effect.gen(function* () {
         if (input === null) return null;
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT project, count() AS c FROM session
-             WHERE project IS NOT NONE
-             GROUP BY project ORDER BY c DESC LIMIT 200;`,
-        );
-        const all = (rows?.[0] ?? [])
-            .map((r) => ({
-                slug: String(r.project ?? ""),
-                count: Number(r.c ?? 0),
-            }))
-            .filter((r) => r.slug.length > 0);
-        const trimmed = input.trim();
-        if (trimmed === "" || trimmed === "?") {
-            return yield* Effect.promise(() =>
-                pickFromList(
-                    "project",
-                    all.slice(0, 30).map((r) => ({
-                        value: r.slug,
-                        hint: `${prettifyProjectSlug(r.slug)} · ${r.count} sessions`,
-                    })),
-                ),
-            );
-        }
-        const exact = all.find((r) => r.slug === trimmed);
-        if (exact) return exact.slug;
-        const lower = trimmed.toLowerCase();
-        const matches = all.filter(
-            (r) =>
-                r.slug.toLowerCase().includes(lower) ||
-                prettifyProjectSlug(r.slug).toLowerCase().includes(lower),
-        );
-        if (matches.length === 1) return matches[0]!.slug;
-        if (matches.length === 0) {
-            fail(`axctl recall: no project matches "${trimmed}". Try: axctl recall ... --project=?`);
+        const all = yield* candidatesFor(projectPickerQuery());
+        const hint = (c: PickerCandidate) =>
+            `${prettifyProjectSlug(c.value)} · ${c.uses} sessions`;
+        const match = matchPicker(input, all, prettifyProjectSlug);
+        if (match.kind === "exact" || match.kind === "one") return match.value;
+        if (match.kind === "none") {
+            fail(`axctl recall: no project matches "${input.trim()}". Try: axctl recall ... --project=?`);
         }
         return yield* Effect.promise(() =>
             pickFromList(
                 "project",
-                matches.slice(0, 30).map((r) => ({
-                    value: r.slug,
-                    hint: `${prettifyProjectSlug(r.slug)} · ${r.count} sessions`,
-                })),
+                match.candidates.slice(0, PICKER_PAGE).map((c) => ({ value: c.value, hint: hint(c) })),
             ),
         );
     });
 
+/** Resolve `--skill` (a name, a substring, or `?`) to a stored skill name. */
 const resolveSkill = (input: string | null) =>
     Effect.gen(function* () {
         if (input === null) return null;
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT out.name AS name, count() AS c FROM invoked
-             WHERE out.name IS NOT NONE
-             GROUP BY name ORDER BY c DESC LIMIT 500;`,
-        );
-        const all = (rows?.[0] ?? [])
-            .map((r) => ({ name: String(r.name ?? ""), count: Number(r.c ?? 0) }))
-            .filter((r) => r.name.length > 0);
-        const trimmed = input.trim();
-        if (trimmed === "" || trimmed === "?") {
-            return yield* Effect.promise(() =>
-                pickFromList(
-                    "skill",
-                    all.slice(0, 30).map((r) => ({
-                        value: r.name,
-                        hint: `${r.count} invocations`,
-                    })),
-                ),
-            );
-        }
-        const exact = all.find((r) => r.name === trimmed);
-        if (exact) return exact.name;
-        const lower = trimmed.toLowerCase();
-        const matches = all.filter((r) => r.name.toLowerCase().includes(lower));
-        if (matches.length === 1) return matches[0]!.name;
-        if (matches.length === 0) {
-            fail(`axctl recall: no skill matches "${trimmed}". Try: axctl recall ... --skill=?`);
+        const all = yield* candidatesFor(skillPickerQuery());
+        const match = matchPicker(input, all);
+        if (match.kind === "exact" || match.kind === "one") return match.value;
+        if (match.kind === "none") {
+            fail(`axctl recall: no skill matches "${input.trim()}". Try: axctl recall ... --skill=?`);
         }
         return yield* Effect.promise(() =>
             pickFromList(
                 "skill",
-                matches.slice(0, 30).map((r) => ({
-                    value: r.name,
-                    hint: `${r.count} invocations`,
-                })),
+                match.candidates
+                    .slice(0, PICKER_PAGE)
+                    .map((c) => ({ value: c.value, hint: `${c.uses} invocations` })),
             ),
         );
     });
@@ -373,6 +394,12 @@ export const recallCommand = Command.make(
     ),
 );
 
+/**
+ * The FIRST v2-ported vertical, and the template wave 2 follows: `recall` runs
+ * on the `"cache"` runtime, so it gets `CacheRead` over the published snapshot
+ * and a SurrealClient proxy that THROWS. Any un-ported path inside the vertical
+ * fails loudly instead of silently reading the old engine (D6).
+ */
 export const recallRuntime: RuntimeManifest = {
-    recall: "db",
+    recall: "cache",
 };

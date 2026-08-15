@@ -25,10 +25,11 @@
  * keep working on the typed args, mirroring `apps/axctl/src/dashboard/server.ts`.
  */
 import { z, type ZodRawShape } from "zod";
-import { Effect, type ManagedRuntime, type Layer } from "effect";
+import { Effect, Layer, type ManagedRuntime } from "effect";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppLayer } from "@ax/lib/layers";
+import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { wrapToolError, wrapToolResult } from "./wrap.ts";
 import {
     fetchRecall,
@@ -88,13 +89,16 @@ import { defaultQuotaCachePath } from "../quota/cache.ts";
 import { QuotaEnvLive } from "../quota/quota-env.ts";
 
 /**
- * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
- * trace transport). The service/error params are derived from the layer so they
- * stay in sync if `AppLayer` changes.
+ * The long-lived MCP runtime: `AppLayer` (SurrealClient + config + trace
+ * transport) merged with `CacheReadLive`, the v2 read seam over the published
+ * DuckDB snapshot that `recall` now goes through. The service/error params are
+ * derived from the layers so they stay in sync if either changes.
  */
+const McpRuntimeLayer = Layer.mergeAll(AppLayer, CacheReadLive);
+
 export type AxRuntime = ManagedRuntime.ManagedRuntime<
-    Layer.Success<typeof AppLayer>,
-    Layer.Error<typeof AppLayer>
+    Layer.Success<typeof McpRuntimeLayer>,
+    Layer.Error<typeof McpRuntimeLayer>
 >;
 
 /**

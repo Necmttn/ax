@@ -120,6 +120,11 @@ describe("resolvePwdRepository", () => {
         expect(res.cwd).toBe(dir);
         expect(res.repoRoot).toBe(dir);
         expect(res.remoteUrlNormalized).toBe("github.com/foo/bar");
+        // The RAW spelling is carried too, not just the normalized one: the git
+        // ingest stage persists `repository.remote_url` raw, so a reader that
+        // only had the normalized form could not match the column it queries
+        // (`queries/repository-scope.ts`).
+        expect(res.remoteUrl).toBe("git@github.com:foo/bar.git");
         expect(res.identity.kind).toBe("remote");
         expect(res.identity.repositoryKey).toContain("remote__");
         expect(res.repositoryRecordId).toBeInstanceOf(RecordId);
@@ -145,6 +150,7 @@ describe("resolvePwdRepository", () => {
         expect(res.identity.kind).toBe("initial_commit");
         expect(res.initialCommit).toBe(sha);
         expect(res.remoteUrlNormalized).toBeNull();
+        expect(res.remoteUrl).toBeNull();
         expect(res.identity.repositoryKey).toContain("initial__");
         expect(res.existsInDb).toBe(false);
     });

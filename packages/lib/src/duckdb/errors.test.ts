@@ -5,7 +5,6 @@ import {
     DuckDbOpenError,
     DuckDbQueryError,
     DuckDbUnsupportedTypeError,
-    IngestLockHeldError,
     SnapshotPublishError,
 } from "./errors.ts";
 
@@ -20,13 +19,6 @@ describe("duckdb errors", () => {
         expect(new DuckDbUnsupportedTypeError({ column: "payload", typeId: 18 })._tag)
             .toBe("DuckDbUnsupportedTypeError");
         expect(new DuckDbDylibError({ message: "not found" })._tag).toBe("DuckDbDylibError");
-        expect(
-            new IngestLockHeldError({
-                path: "/tmp/ingest.lock",
-                pid: 42,
-                startedAt: "2026-08-14T00:00:00.000Z",
-            })._tag,
-        ).toBe("IngestLockHeldError");
         expect(new SnapshotPublishError({ snapshotPath: "/tmp/s.db", message: "boom" })._tag)
             .toBe("SnapshotPublishError");
     });

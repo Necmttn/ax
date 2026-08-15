@@ -304,6 +304,17 @@ describe("effect cli", () => {
         expect(DB_COMMANDS.has("pricing")).toBe(true);
     });
 
+    test("recall is routed on the v2 cache runtime, and never opens SurrealDB", () => {
+        // The acceptance signal for the ported vertical (D6): `"cache"` gets
+        // CacheRead + the THROWING SurrealClient proxy, so any un-ported path
+        // inside recall fails loudly instead of answering from the old engine.
+        expect(entryRuntime(RUNTIME_BY_COMMAND["recall"]!)).toBe("cache");
+        // DB_COMMANDS is what decides whether AppLayer (and its connect) is
+        // built, so a ported command MUST be absent from it.
+        expect(DB_COMMANDS.has("recall")).toBe(false);
+        expect(topLevelNames()).toContain("recall");
+    });
+
     test("share and star route through manifests as no-DB commands - no dispatch bypass (#242)", () => {
         const names = topLevelNames();
         expect(names).toContain("share");

@@ -15,7 +15,9 @@
 import { ManagedRuntime } from "effect";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Layer } from "effect";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { AX_VERSION } from "../cli/version.ts";
 import { axMcpTools, type AxRuntime } from "./tools.ts";
 
@@ -47,7 +49,11 @@ export const buildServer = (rt: AxRuntime): McpServer => {
  * `args` is accepted to mirror `serveDashboard(args)`; unused for now.
  */
 export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
-    const runtime = ManagedRuntime.make(AppLayer);
+    // v2: `recall` reads the published DuckDB snapshot rather than SurrealDB.
+    // CacheReadLive opens nothing until a query arrives, so a server whose
+    // client never calls `recall` pays nothing for it - and one that starts
+    // before the first ingest picks the snapshot up when it appears.
+    const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive));
 
     const server = buildServer(runtime);
     const transport = new StdioServerTransport();

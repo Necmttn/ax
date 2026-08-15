@@ -39,7 +39,7 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.38.1",
+      "version": "0.39.3",
       "bin": {
         "axctl": "./bin/axctl",
       },
@@ -234,6 +234,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@ax/onboarding-prompt": "workspace:*",
+        "@ax/schema": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "effect": "catalog:",
         "surrealdb": "^2.0.0",
@@ -268,6 +269,7 @@
       "name": "@ax/schema",
       "version": "0.0.0",
       "devDependencies": {
+        "@ax/lib": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
       },

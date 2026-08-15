@@ -1,52 +1,89 @@
 import { describe, expect, test } from "bun:test";
 import * as duckdb from "./index.ts";
+import * as internal from "./internal.ts";
 
+/**
+ * The two entry points are pinned as CLOSED SETS, in both directions.
+ *
+ * The barrel was once five blind `export *`s and leaked three test-only seams
+ * (`base`, `makeConnection`, `readResult`). A closed set catches a leak; pinning
+ * BOTH sets also catches the opposite drift - a seam name quietly demoted to
+ * `internal`, or a raw-client name promoted into the surface queries import.
+ * The split is the point: `@ax/lib/duckdb` is what a query may use, and
+ * `@ax/lib/duckdb/internal` is what only the seam and its tests may.
+ */
 describe("@ax/lib/duckdb public surface", () => {
-    // Finding 5 (final fix round): the barrel used to be five blind
-    // `export *`s, three names too many - `base` (lock.ts, a test-only
-    // decorated-FileSystem seam), `makeConnection`, and `readResult`
-    // (client.ts) leaked through even though `client.ts` deliberately keeps
-    // its own equivalent seam (`baseLayer`) private. A closed-set assertion
-    // pins the surface so it cannot silently regrow those three, or drift in
-    // either direction, without this test failing. This subsumes the two
-    // former per-group "exports X" tests (services/layers/helpers, tagged
-    // errors) - every name they checked is a member of this exact set.
-    test("the runtime surface is exactly this closed set of 30 names", () => {
-        const names = Object.keys(duckdb as Record<string, unknown>).sort();
-        expect(names).toEqual(
+    test("the seam surface is exactly this closed set", () => {
+        expect(Object.keys(duckdb as Record<string, unknown>).sort()).toEqual(
             [
-                "DuckDb",
+                // The seam itself.
+                "CacheRead",
+                "CacheReadLayer",
+                "CacheReadLive",
+                "CacheUnavailableError",
+                "CacheWriteUnlockedError",
+                "UTC_CLOCK_TOLERANCE_MS",
+                "WRITE_STAMPED_COLUMNS",
+                "utcClockOk",
+                "withCacheWrite",
+                // The row-decode contract.
+                "JsonArrayColumn",
+                "JsonObjectColumn",
+                "NumberFromBigIntColumn",
+                "TextColumn",
+                "TimestampColumn",
+                // Full-text search.
+                "FTS_TARGETS",
+                "buildFtsIndexes",
+                "ftsSchemaName",
+                "matchBm25Sql",
+                // Failure modes.
                 "DuckDbDecodeError",
                 "DuckDbDylibError",
+                "DuckDbOpenError",
+                "DuckDbQueryError",
+                "DuckDbUnsupportedTypeError",
+                "SnapshotPublishError",
+                // Where the snapshot lives.
+                "snapshotPath",
+            ].sort(),
+        );
+    });
+
+    test("the raw client is NOT reachable from the seam barrel", () => {
+        // Named individually rather than derived from `internal`: the assertion
+        // is about these specific escape hatches, and deriving it would pass
+        // vacuously if `internal` itself were ever emptied.
+        for (const name of ["DuckDb", "DuckDbLayer", "openDuckDbService", "coerceValue", "resolveDylibPath"]) {
+            expect(Object.keys(duckdb as Record<string, unknown>)).not.toContain(name);
+        }
+    });
+
+    test("the internal surface is exactly this closed set", () => {
+        expect(Object.keys(internal as Record<string, unknown>).sort()).toEqual(
+            [
+                "DuckDb",
                 "DuckDbLayer",
                 "DuckDbLive",
                 "DuckDbLiveWith",
-                "DuckDbOpenError",
-                "DuckDbQueryError",
                 "DuckDbTypeId",
-                "DuckDbUnsupportedTypeError",
-                "IngestLock",
-                "IngestLockError",
-                "IngestLockHeldError",
-                "IngestLockLayer",
-                "IngestLockLive",
-                // BIGINT-column coercion schema for queryAs (wave-0 P2-10).
-                "NumberFromBigIntColumn",
-                "SnapshotPublishError",
                 "accessorFor",
                 "coerceValue",
-                "decideLock",
-                "decodeLockPayload",
                 "duckDbTypeName",
                 "dylibCacheDir",
-                "encodeLockPayload",
                 "extractDylib",
-                "ingestLockPath",
                 "isEmbeddedPath",
+                "openDuckDbService",
+                "openDuckDbServiceAt",
                 "resolveDylibPath",
-                "snapshotPath",
                 "unsupportedColumns",
             ].sort(),
         );
+    });
+
+    test("the two surfaces do not overlap", () => {
+        const seam = new Set(Object.keys(duckdb as Record<string, unknown>));
+        const shared = Object.keys(internal as Record<string, unknown>).filter((n) => seam.has(n));
+        expect(shared).toEqual([]);
     });
 });

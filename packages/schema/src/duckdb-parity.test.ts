@@ -7,13 +7,15 @@
 // all 138 tables / 1219 columns - the wave-2 seam port assumes this holds.
 import { describe, expect, test } from "bun:test";
 import surql from "./schema.surql" with { type: "text" };
+import { accessorFor } from "@ax/lib/duckdb/row-decode";
+import { DuckDbTypeId } from "@ax/lib/duckdb/types";
 import {
     DUCKDB_SCHEMA_SQL,
     parseDuckdbColumnDefs,
     parseDuckdbColumns,
     parseDuckdbTables,
     parseSurrealTables,
-} from "./duckdb-ddl.ts";
+} from "./parse-duckdb-schema.ts";
 
 // Expected table/column counts. Asserted explicitly so the property can never
 // silently shrink to comparing zero (or a handful of) tables/columns.
@@ -246,18 +248,43 @@ describe("type + nullability parity (Surreal DEFINE FIELD TYPE == DuckDB column 
 // not a fixed set of "known offender" columns - so a future column reintroducing
 // any of them fails here regardless of which table it lands on.
 describe("banned-type guard (FFI client compatibility)", () => {
-    const BANNED_TYPE_TOKENS = [
-        "UUID",
-        "ENUM",
-        "BIT",
-        "TIMESTAMP_S",
-        "TIMESTAMP_MS",
-        "TIMESTAMP_NS",
-        "TIMESTAMP_TZ",
-        "TIMESTAMPTZ", // short-form alias for TIMESTAMP_TZ / TIMESTAMP WITH TIME ZONE
-        "TIME_TZ",
-        "TIMETZ", // short-form alias for TIME_TZ
+    // Derived, not hand-maintained (v2 W1 "derived schema truth"): a type
+    // token is banned exactly when the FFI client has no row-major accessor
+    // for it - `accessorFor` (packages/lib/src/duckdb/row-decode.ts) returns
+    // null for the `DuckDbTypeId` (packages/lib/src/duckdb/types.ts) it maps
+    // to. Two SQL spelling aliases are added on top because they are real
+    // spellings a DDL author could type for the same (unsupported) type but
+    // are not `DuckDbTypeId` enum key names themselves.
+    const SQL_SPELLING_ALIASES = [
+        "TIMESTAMPTZ", // alias for TIMESTAMP_TZ / TIMESTAMP WITH TIME ZONE
+        "TIMETZ", // alias for TIME_TZ
     ];
+    const BANNED_TYPE_TOKENS = [
+        ...Object.entries(DuckDbTypeId)
+            .filter(([, id]) => accessorFor(id) === null)
+            .map(([name]) => name),
+        ...SQL_SPELLING_ALIASES,
+    ];
+
+    test("the derived set still covers every previously known FFI-unreadable spelling", () => {
+        // Regression floor: the derivation must never shrink below the set
+        // that was hand-maintained before this chunk (it may grow - see the
+        // parser-sanity test below for the exact superset this derives to).
+        for (const must of [
+            "UUID",
+            "ENUM",
+            "BIT",
+            "TIMESTAMP_S",
+            "TIMESTAMP_MS",
+            "TIMESTAMP_NS",
+            "TIMESTAMP_TZ",
+            "TIMESTAMPTZ",
+            "TIME_TZ",
+            "TIMETZ",
+        ]) {
+            expect(BANNED_TYPE_TOKENS).toContain(must);
+        }
+    });
 
     test("no column in the DDL uses a banned (FFI-unreadable) type", () => {
         const problems: string[] = [];
@@ -280,6 +307,39 @@ describe("banned-type guard (FFI client compatibility)", () => {
         // Sanity floor so this can't silently degrade to scanning zero columns.
         expect(checked).toBeGreaterThan(1000);
         expect(problems).toEqual([]);
+    });
+
+    // Pins the exact derived set so a future accessorFor/DuckDbTypeId change
+    // is a visible diff here, not a silent widening or narrowing. The
+    // derivation is WIDER than the hand-written list it replaced (which had
+    // exactly the 10 entries in the regression-floor test above): BLOB,
+    // STRUCT, MAP, UNION, ARRAY and INVALID also have no row-major accessor
+    // and are real DuckDB type spellings, so they are correctly banned too -
+    // none of them appear as a column type in the current DDL (verified by
+    // the "no column ... banned" test above still passing), so this is a
+    // strictly more complete guard, not a behavior change.
+    test("pins the exact derived token set", () => {
+        expect([...BANNED_TYPE_TOKENS].sort()).toEqual(
+            [
+                "ARRAY",
+                "BIT",
+                "BLOB",
+                "ENUM",
+                "INVALID",
+                "LIST",
+                "MAP",
+                "STRUCT",
+                "TIME_TZ",
+                "TIMESTAMP_MS",
+                "TIMESTAMP_NS",
+                "TIMESTAMP_S",
+                "TIMESTAMP_TZ",
+                "TIMESTAMPTZ",
+                "TIMETZ",
+                "UNION",
+                "UUID",
+            ].sort(),
+        );
     });
 });
 

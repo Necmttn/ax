@@ -2,7 +2,7 @@
  * One-line ingest verdicts (#265/#266): exit-path messages for timeout,
  * failure, and clean-with-skips runs. Pure formatters - the exit-code wiring
  * itself lives in cmdIngest and is exercised via the ingest-lock outcome
- * tests (src/ingest/ingest-lock.test.ts).
+ * tests (packages/lib/src/ingest-lock.test.ts).
  */
 import { describe, expect, test } from "bun:test";
 import {

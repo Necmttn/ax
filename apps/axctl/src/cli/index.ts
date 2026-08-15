@@ -3,7 +3,10 @@ import { Cause, Effect, Exit, Layer } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { AxConfigLive } from "@ax/lib/config";
+import { ProcessServiceLive } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
@@ -208,8 +211,12 @@ export const rootCommand = Command.make("axctl").pipe(
  * even though they are satisfied implicitly at runtime. This is the only
  * place the cast lives - callers stay type-safe.
  */
-const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
-    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient | CacheRead> =>
+    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<
+        void,
+        unknown,
+        SurrealClient | CacheRead
+    >;
 
 /** CLI invocation that has had its `SurrealClient` requirement satisfied. */
 type CliProgram = Effect.Effect<void, unknown, never>;
@@ -227,7 +234,7 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(AppLayer),
+        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive)),
         Effect.scoped,
     );
 
@@ -295,7 +302,10 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
-    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
+    const layer = Layer.mergeAll(
+        transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
+        CacheReadLive,
+    );
     return runCli(args).pipe(
         // After ingest completes successfully, link orphan OTLP rows to their
         // sessions via telemetry_of edges. Best-effort: never fails the ingest.
@@ -306,35 +316,69 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
 };
 
 /**
- * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
- * commands (install/daemon/doctor/uninstall/version/update) and unknown
- * commands / typos - none of these should reach the DB, so accidental
- * access is a bug worth surfacing loudly.
+ * A sentinel SurrealClient that panics on access. Shared by the two no-DB
+ * runtimes (`withoutDb`, `withCache`): reaching the DB from either is a bug, and
+ * a loud throw naming the property beats a 5s connect timeout or - worse, on a
+ * ported command - a silent answer from the old engine.
  */
-const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
-    const stub: SurrealClientShape = new Proxy({} as SurrealClientShape, {
+const throwingSurrealClient = (): SurrealClientShape =>
+    new Proxy({} as SurrealClientShape, {
         get(_target, prop) {
             throw new Error(
                 `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
             );
         },
     });
+
+/**
+ * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
+ * commands (install/daemon/doctor/uninstall/version/update) and unknown
+ * commands / typos - none of these should reach the DB, so accidental
+ * access is a bug worth surfacing loudly.
+ */
+const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
     // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
     // @effect/platform-native and require FileSystem + Path. Provide the real
     // Bun-backed layers here (no DB), so they run without dragging in AppLayer's
     // SurrealClient connect path.
-    return runCli(args).pipe(
-        Effect.provideService(SurrealClient, stub),
-        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+    runCli(args).pipe(
+        Effect.provideService(SurrealClient, throwingSurrealClient()),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive)),
     );
-};
+
+/**
+ * The v2 runtime: everything a PORTED command needs and nothing more -
+ * `CacheRead` over the published DuckDB snapshot, `AxConfig`, the platform
+ * layers, `ProcessService` (git, for `--scope=here`), and the throwing no-DB
+ * SurrealClient proxy.
+ *
+ * No `AppLayer`, so no SurrealDB connect on the way in: `ax recall` works on a
+ * machine that has never run SurrealDB, which is the whole point of the v2
+ * cut-over. And no `withIngestStalenessPreflight` - that warning is one indexed
+ * SurrealDB query, so it belongs to the un-ported half of the CLI (the ported
+ * equivalent reads the snapshot's own freshness, and is wave 3's).
+ */
+const withCache = (args: ReadonlyArray<string>): CliProgram =>
+    runCli(args).pipe(
+        Effect.provideService(SurrealClient, throwingSurrealClient()),
+        Effect.provide(
+            Layer.mergeAll(
+                AxConfigLive.pipe(Layer.provideMerge(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+                ProcessServiceLive,
+                CacheReadLive,
+            ),
+        ),
+        Effect.scoped,
+    );
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
 // ingest superset layer). Anything outside this set runs through `withoutDb`
-// so the user gets fast, honest errors (e.g. "unknown command") instead of a
-// 5s connect timeout. Derived - do not hand-edit; declare runtime in the
-// owning commands/<family>.ts manifest instead. db-conditional families are
-// excluded: dispatch resolves them per-invocation via resolveRuntime.
+// (or, for a v2-ported command, `withCache`) so the user gets fast, honest
+// errors (e.g. "unknown command") instead of a 5s connect timeout. Derived - do
+// not hand-edit; declare runtime in the owning commands/<family>.ts manifest
+// instead. `"cache"` commands are deliberately NOT here: they must never open a
+// SurrealDB connection. db-conditional families are excluded too: dispatch
+// resolves them per-invocation via resolveRuntime.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
         .map(([name, entry]) => [name, entryRuntime(entry)] as const)
@@ -403,7 +447,9 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
             ? withDb(args)
             : runtime === "ingest"
                 ? withIngest(args)
-                : withoutDb(args);
+                : runtime === "cache"
+                    ? withCache(args)
+                    : withoutDb(args);
     }
     return withoutDb(args);
 };
