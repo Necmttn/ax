@@ -18,9 +18,16 @@
  * SPLIT IN TWO, ON PURPOSE. {@link collectSidecarRefs} needs the sidecar and
  * nothing else; the join against live cache ids is `checkCacheIntegrity` in
  * ../cache-integrity.ts, which takes plain data. So the interesting logic is
- * testable with no DuckDB running, and the same functions serve both callers -
- * ingest (checking against the LIVE database it just wrote, before publish) and
- * `ax doctor` (checking against the published snapshot).
+ * testable with no DuckDB running.
+ *
+ * NO PRODUCTION CALLER YET. This chunk ships the mechanism and its cross-engine
+ * test (integrity-e2e.test.ts publishes a real snapshot and re-derives against
+ * it); the two surfaces that will USE it are separate ports and are not wired
+ * here. The split above is what lets both of them share these functions when
+ * they land: ingest will check against the LIVE database it just wrote, before
+ * publish, and `ax doctor` will check against the published snapshot. Until then
+ * a dangling ref is measurable but not reported anywhere, which is a gap to close
+ * and not a property to rely on.
  *
  * THE CACHE READER IS AN ARGUMENT, NEVER A SERVICE. Same rule wave 2 arrived at
  * for every module called from both sides of ingest (F1/F2 in the backlog): a

@@ -11,11 +11,13 @@ export {
     TimestampColumn,
 } from "./columns.ts";
 export {
+    SidecarConnectionReplacedError,
     SidecarDecodeError,
     SidecarQueryError,
     SidecarUnavailableError,
     type JudgmentError,
 } from "./errors.ts";
+export { findExtraStatement, isSingleStatement, type ExtraStatement } from "./statement.ts";
 export {
     checkSidecarRefs,
     collectSidecarRefs,

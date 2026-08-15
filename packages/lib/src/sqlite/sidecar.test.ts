@@ -209,6 +209,91 @@ describe("the judgment sidecar seam", () => {
         expect(failure.message).toContain("cannot be a bound parameter");
     });
 
+    describe("one statement per call", () => {
+        // `bun:sqlite` prepares the FIRST statement and silently drops the rest.
+        // On a durable store that is a decision written and its replacement lost,
+        // reported as success - so the seam refuses instead.
+
+        test("refuses two statements in exec, and writes NEITHER", async () => {
+            const outcome = await run((j) =>
+                Effect.gen(function* () {
+                    const failure = yield* Effect.flip(
+                        j.exec(
+                            "INSERT INTO role (id, name) VALUES ('r1', 'first'); " +
+                                "INSERT INTO role (id, name) VALUES ('r2', 'second')",
+                        ),
+                    );
+                    const count = yield* j.first(
+                        Schema.Struct({ n: Schema.Number }),
+                        "SELECT count(*) AS n FROM role",
+                    );
+                    return { failure, count };
+                }),
+            );
+            expect(outcome.failure._tag).toBe("SidecarQueryError");
+            expect(outcome.failure.message).toContain("more than one statement");
+            // The refusal is the point: without it the first INSERT would land
+            // and the second would vanish, leaving a half-applied write.
+            expect(Option.getOrNull(outcome.count)?.n).toBe(0);
+        });
+
+        test("refuses two statements in raw", async () => {
+            const failure = await run((j) => Effect.flip(j.raw("SELECT 1; SELECT 2")));
+            expect(failure._tag).toBe("SidecarQueryError");
+            expect(failure.message).toContain("more than one statement");
+        });
+
+        test("refuses two statements inside a transaction body too", async () => {
+            const failure = await run((j) =>
+                Effect.flip(
+                    j.transaction((transaction) =>
+                        transaction.exec("DELETE FROM role; DELETE FROM plays_role"),
+                    ),
+                ),
+            );
+            expect(failure._tag).toBe("SidecarQueryError");
+            expect(failure.message).toContain("more than one statement");
+        });
+
+        test("allows a trailing semicolon, and a semicolon inside a value", async () => {
+            const found = await run((j) =>
+                Effect.gen(function* () {
+                    yield* j.exec("INSERT INTO role (id, name) VALUES (?, ?);", ["r1", "a-role"]);
+                    // The bound value carries a semicolon. It is data, not a
+                    // separator, and refusing it would push callers off bound
+                    // parameters - the opposite of what this seam wants.
+                    yield* j.put("plays_role", {
+                        id: "pr1",
+                        in_id: "skill:tdd",
+                        out_id: "r1",
+                        source: "user",
+                        rationale: "runs; then checks",
+                    });
+                    return yield* j.first(
+                        Schema.Struct({ rationale: Schema.String }),
+                        "SELECT rationale FROM plays_role WHERE id = ?",
+                        ["pr1"],
+                    );
+                }),
+            );
+            expect(Option.getOrNull(found)?.rationale).toBe("runs; then checks");
+        });
+
+        test("still applies the multi-statement DDL on open", async () => {
+            // The exemption that makes the guard usable at all: `schemaSql` is
+            // the whole sidecar DDL and runs on `database.exec`, not through the
+            // seam. If the guard had leaked into that path, no table would exist.
+            const tables = await run((j) =>
+                j.rows(
+                    Schema.Struct({ name: Schema.String }),
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+                ),
+            );
+            expect(tables.map((t) => t.name)).toContain("plays_role");
+            expect(tables.map((t) => t.name)).toContain("session_label");
+        });
+    });
+
     test("writes a batch larger than one statement's worth of rows", async () => {
         // PUT_BATCH_ROWS is 200; 450 forces three statements, and the last one is
         // a different width than the first two.
@@ -454,6 +539,73 @@ describe("the judgment sidecar seam", () => {
 
         expect(Exit.isFailure(result.failedCleanup)).toBe(true);
         expect(Exit.isFailure(result.oldConnectionMarker)).toBe(true);
+
+        const other = new Database(sidecarPath, { readonly: true });
+        const roleCount = other.query<{ n: number }, []>("SELECT count(*) AS n FROM role").get()?.n;
+        other.close();
+        expect(roleCount).toBe(1);
+    });
+
+    test("retries an operation that was queued behind a connection-killing transaction", async () => {
+        // The blast radius of a replaced connection must be the transaction that
+        // caused it - NOT whatever else was waiting on the permit. A queued
+        // operation is refused before it touches the dead handle, so nothing ran
+        // and the layer can safely run it again on a fresh connection.
+        const outcome = await run((j) =>
+            Effect.gen(function* () {
+                // Bound to the connection, so its absence later PROVES a
+                // different connection answered.
+                yield* j.exec("CREATE TEMP TABLE connection_marker (id INTEGER)");
+
+                const inTransaction = yield* Deferred.make<void>();
+                const release = yield* Deferred.make<void>();
+
+                const killer = yield* Effect.forkChild(
+                    Effect.exit(
+                        j.transaction((transaction) =>
+                            Effect.gen(function* () {
+                                yield* Deferred.succeed(inTransaction, undefined);
+                                yield* Deferred.await(release);
+                                // Ends the transaction from inside the body, so
+                                // the release action meets a real COMMIT failure
+                                // and then a real ROLLBACK failure.
+                                yield* transaction.exec("ROLLBACK");
+                            }),
+                        ),
+                    ),
+                );
+
+                yield* Deferred.await(inTransaction);
+                const queued = yield* Effect.forkChild(
+                    Effect.exit(j.put("role", { id: roleRowId("queued"), name: "queued" })),
+                );
+                // Let `queued` resolve the service and block on the permit, so it
+                // is genuinely waiting when the connection dies.
+                yield* Effect.yieldNow;
+                yield* Effect.yieldNow;
+                yield* Effect.yieldNow;
+                yield* Deferred.succeed(release, undefined);
+
+                const killerExit = yield* Fiber.join(killer);
+                const queuedExit = yield* Fiber.join(queued);
+                const markerExit = yield* Effect.exit(j.raw("SELECT id FROM connection_marker"));
+                const rows = yield* j.rows(
+                    Schema.Struct({ id: Schema.String }),
+                    "SELECT id FROM role ORDER BY id",
+                );
+                return { killerExit, queuedExit, markerExit, rows };
+            }),
+        );
+
+        // The transaction that broke the connection still fails. Its body RAN,
+        // so it is never retried and never silently repeated.
+        expect(Exit.isFailure(outcome.killerExit)).toBe(true);
+        // The bystander does not.
+        expect(Exit.isSuccess(outcome.queuedExit)).toBe(true);
+        // The temp table is gone, so the retry really did use a NEW connection.
+        expect(Exit.isFailure(outcome.markerExit)).toBe(true);
+        // Written exactly once - not zero (dropped) and not twice (replayed).
+        expect(outcome.rows.map((r) => r.id)).toEqual([roleRowId("queued")]);
 
         const other = new Database(sidecarPath, { readonly: true });
         const roleCount = other.query<{ n: number }, []>("SELECT count(*) AS n FROM role").get()?.n;

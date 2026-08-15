@@ -35,6 +35,19 @@
  *  3. Identifier quoting and validation, for the same reason the cache seam owns
  *     it: a table or column name is the one part of a statement that cannot be a
  *     bound parameter.
+ *  4. ONE STATEMENT PER CALL. `bun:sqlite` prepares only the first statement in
+ *     a string and DISCARDS the rest without an error, so `exec("DELETE ...;
+ *     INSERT ...")` would delete a decision and never write its replacement, and
+ *     still report success. {@link singleStatement} refuses that instead - see
+ *     ./statement.ts. The layer's `schemaSql` is exempt by construction: it runs
+ *     on `database.exec`, which executes every statement.
+ *  5. RECOVERY AFTER A POISONED CONNECTION. A transaction whose COMMIT and then
+ *     ROLLBACK both fail closes the shared connection rather than leaving a
+ *     half-open one behind. Operations already queued behind it are refused with
+ *     `SidecarConnectionReplacedError` BEFORE they run a statement, and
+ *     {@link JudgmentLayer} retries each of them once on a fresh connection - so
+ *     the blast radius of that rare failure is the transaction that caused it,
+ *     not whatever else happened to be waiting.
  *
  * WAL, AND WHY THE SIDECAR CAN BE OPEN IN TWO PROCESSES AT ONCE. `ax serve`
  * holds the sidecar open for the dashboard while the user runs `ax improve
@@ -66,12 +79,14 @@ import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
 import {
     errorMessage,
+    SidecarConnectionReplacedError,
     SidecarDecodeError,
     SidecarQueryError,
     SidecarUnavailableError,
     sqlExcerpt,
     type JudgmentError,
 } from "./errors.ts";
+import { findExtraStatement } from "./statement.ts";
 
 /**
  * What a caller may bind. `Date` and `boolean` are in the list because the seam
@@ -184,6 +199,33 @@ const toBindable = (value: SidecarParam): SidecarValue => {
     return value;
 };
 
+/**
+ * ONE statement per call, refused loudly rather than truncated silently.
+ *
+ * `bun:sqlite`'s prepared-statement API compiles only the FIRST statement in the
+ * text and drops the rest with no error and no signal in `changes` - so
+ * `exec("DELETE ...; INSERT ...")` would delete a judgment row, never write its
+ * replacement, and return success. See ./statement.ts for the scanner and for
+ * why `schemaSql` (which legitimately carries the whole DDL) does NOT come
+ * through here: it runs on `database.exec`, which executes every statement.
+ */
+const singleStatement = (sql: string): Effect.Effect<void, SidecarQueryError> => {
+    const extra = findExtraStatement(sql);
+    return extra === null
+        ? Effect.void
+        : Effect.fail(
+              new SidecarQueryError({
+                  sql: sqlExcerpt(sql),
+                  message:
+                      "refusing to run more than one statement in a single call: this seam prepares the " +
+                      "statement, which compiles only the FIRST one and DISCARDS the rest without an error - " +
+                      `so everything from offset ${extra.separatorIndex} would be silently dropped. Split the ` +
+                      "call, and wrap the parts in `transaction` if they must be atomic. The dropped text " +
+                      `began: ${extra.excerpt}`,
+              }),
+          );
+};
+
 export interface JudgmentLayerOptions {
     /**
      * DDL applied on open. REQUIRED, and the caller supplies the text, because
@@ -215,22 +257,51 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
     // statements, which are individually atomic and need no serialisation.
     const txGate = Semaphore.makeUnsafe(1);
 
+    // Set when this service's own connection has been closed out from under it
+    // (see `rollbackOrInvalidate`). From that moment the handle is useless, and
+    // the honest answer to any further call is "nothing ran, open a new one".
+    let replaced = false;
+
+    /**
+     * Refuse BEFORE the first statement if the connection is already gone.
+     *
+     * The placement is the whole point, and it is why {@link SidecarConnectionReplacedError}
+     * can promise that NOTHING RAN. `replaced` is only ever set inside a
+     * transaction's release, which holds the permit - so a caller that finds it
+     * set must have been queued on the permit, which means its first statement
+     * had not been reached. `Effect.suspend` defers the read until the permit is
+     * actually held, rather than sampling it when the effect was built.
+     *
+     * Callers of the TRANSACTION BODY do not go through this: they run on a
+     * connection whose liveness was checked when the transaction opened.
+     */
+    const alive = <A, E, R>(
+        effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E | SidecarConnectionReplacedError, R> =>
+        Effect.suspend<A, E | SidecarConnectionReplacedError, R>(() =>
+            replaced ? Effect.fail(new SidecarConnectionReplacedError({ path })) : effect,
+        );
+
     const bind = (params?: ReadonlyArray<SidecarParam>): SidecarValue[] =>
         (params ?? []).map(toBindable);
 
     const raw: JudgmentService["raw"] = (sql, params) =>
-        Effect.try({
-            try: () => db.query(sql).all(...bind(params)) as ReadonlyArray<SidecarRow>,
-            catch: (err) =>
-                new SidecarQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
-        });
+        Effect.flatMap(singleStatement(sql), () =>
+            Effect.try({
+                try: () => db.query(sql).all(...bind(params)) as ReadonlyArray<SidecarRow>,
+                catch: (err) =>
+                    new SidecarQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
+            }),
+        );
 
     const exec: JudgmentService["exec"] = (sql, params) =>
-        Effect.try({
-            try: () => db.query(sql).run(...bind(params)).changes,
-            catch: (err) =>
-                new SidecarQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
-        });
+        Effect.flatMap(singleStatement(sql), () =>
+            Effect.try({
+                try: () => db.query(sql).run(...bind(params)).changes,
+                catch: (err) =>
+                    new SidecarQueryError({ sql: sqlExcerpt(sql), message: errorMessage(err) }),
+            }),
+        );
 
     const rows: JudgmentService["rows"] = <S extends Schema.Top>(
         schema: S,
@@ -350,6 +421,11 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
      * Rollback runs on interruption as well as on failure. A failed COMMIT also
      * starts rollback. A failed rollback invalidates the shared connection
      * before the semaphore releases its permit.
+     *
+     * The caller of THIS transaction still hears the original commit error - it
+     * is not a `SidecarConnectionReplacedError` and is never retried, because its
+     * body DID run. Only the operations queued behind it get that error, and only
+     * they are retried.
      */
     const transactionService: JudgmentTransaction = { rows, first, raw, exec, put, putMany };
 
@@ -357,7 +433,12 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
         Effect.asVoid(exec("ROLLBACK")).pipe(
             Effect.catch((rollbackError) =>
                 Effect.try({
-                    try: invalidate,
+                    try: () => {
+                        // Marked BEFORE the close is attempted: whether or not
+                        // closing succeeds, this connection is not usable again.
+                        replaced = true;
+                        invalidate();
+                    },
                     catch: (closeError) =>
                         new SidecarQueryError({
                             sql: "ROLLBACK",
@@ -373,19 +454,21 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
         body: (transaction: JudgmentTransaction) => Effect.Effect<A, E, R>,
     ) =>
         txGate.withPermits(1)(
-            Effect.acquireUseRelease(
-                exec("BEGIN IMMEDIATE"),
-                () => body(transactionService),
-                (_, exit) =>
-                    Exit.isSuccess(exit)
-                        ? Effect.asVoid(exec("COMMIT")).pipe(
-                              Effect.catch((commitError) =>
-                                  rollbackOrInvalidate().pipe(
-                                      Effect.flatMap(() => Effect.fail(commitError)),
+            alive(
+                Effect.acquireUseRelease(
+                    exec("BEGIN IMMEDIATE"),
+                    () => body(transactionService),
+                    (_, exit) =>
+                        Exit.isSuccess(exit)
+                            ? Effect.asVoid(exec("COMMIT")).pipe(
+                                  Effect.catch((commitError) =>
+                                      rollbackOrInvalidate().pipe(
+                                          Effect.flatMap(() => Effect.fail(commitError)),
+                                      ),
                                   ),
-                              ),
-                          )
-                        : Effect.ignore(rollbackOrInvalidate()),
+                              )
+                            : Effect.ignore(rollbackOrInvalidate()),
+                ),
             ),
         ) as Effect.Effect<A, E | JudgmentError, R>;
 
@@ -393,18 +476,22 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
     // transaction, or it would become part of that transaction and share its
     // commit or rollback. Transaction bodies use `transactionService`, whose
     // methods do not acquire the permit again.
+    //
+    // `alive` sits INSIDE the permit and OUTSIDE the statement, so an operation
+    // that waited behind a transaction which killed the connection refuses
+    // before it touches the dead handle.
     const guardedRows: JudgmentService["rows"] = (schema, sql, params) =>
-        txGate.withPermits(1)(rows(schema, sql, params));
+        txGate.withPermits(1)(alive(rows(schema, sql, params)));
     const guardedFirst: JudgmentService["first"] = (schema, sql, params) =>
-        txGate.withPermits(1)(first(schema, sql, params));
+        txGate.withPermits(1)(alive(first(schema, sql, params)));
     const guardedRaw: JudgmentService["raw"] = (sql, params) =>
-        txGate.withPermits(1)(raw(sql, params));
+        txGate.withPermits(1)(alive(raw(sql, params)));
     const guardedExec: JudgmentService["exec"] = (sql, params) =>
-        txGate.withPermits(1)(exec(sql, params));
+        txGate.withPermits(1)(alive(exec(sql, params)));
     const guardedPut: JudgmentService["put"] = (table, row) =>
-        txGate.withPermits(1)(put(table, row));
+        txGate.withPermits(1)(alive(put(table, row)));
     const guardedPutMany: JudgmentService["putMany"] = (table, rowsIn) =>
-        txGate.withPermits(1)(putMany(table, rowsIn));
+        txGate.withPermits(1)(alive(putMany(table, rowsIn)));
 
     return {
         rows: guardedRows,
@@ -438,12 +525,17 @@ export const JudgmentLayer = (options: JudgmentLayerOptions): Layer.Layer<Judgme
 
             let opened: JudgmentService | null = null;
             let handle: Database | null = null;
+            // Set by the finalizer. `openOnce` would happily re-open the file
+            // after the scope closed, and that handle would have no finalizer
+            // left to close it - so a retry must not reach for one.
+            let released = false;
             // One permit, so a burst of concurrent first-statements opens the
             // database ONCE instead of racing N opens.
             const gate = Semaphore.makeUnsafe(1);
 
             yield* Effect.addFinalizer(() =>
                 Effect.sync(() => {
+                    released = true;
                     handle?.close();
                     handle = null;
                     opened = null;
@@ -515,23 +607,52 @@ export const JudgmentLayer = (options: JudgmentLayerOptions): Layer.Layer<Judgme
                       ),
             );
 
+            /**
+             * Run one operation against the CURRENT service, and run it again on
+             * a fresh connection if that one was replaced under it.
+             *
+             * WHY A RETRY IS SAFE HERE, AND ONLY HERE. A connection is replaced
+             * in exactly one place: a transaction whose COMMIT and then ROLLBACK
+             * both failed, in its release action, while it holds the transaction
+             * permit. So an operation can only meet a replaced connection by
+             * having WAITED on that permit - and the liveness check it then hits
+             * sits before its first statement (see `alive` in `serviceOver`).
+             * `SidecarConnectionReplacedError` therefore means "nothing ran", and
+             * re-running cannot double-apply a write. Any OTHER failure - a
+             * constraint, a decode, the self-invalidating transaction's own
+             * commit error - is not this error, and is passed straight through.
+             *
+             * ONCE, not a loop: a second replacement inside the retry is a
+             * sidecar that is failing repeatedly, and the caller should hear that
+             * rather than have it hidden behind another attempt.
+             */
+            const onCurrent = <A, E, R>(
+                use: (service: JudgmentService) => Effect.Effect<A, E, R>,
+            ): Effect.Effect<A, E | SidecarUnavailableError, R> =>
+                Effect.flatMap(openOnce, (service) =>
+                    use(service).pipe(
+                        Effect.catch((error) =>
+                            error instanceof SidecarConnectionReplacedError && !released
+                                ? Effect.flatMap(openOnce, use)
+                                : Effect.fail(error),
+                        ),
+                    ),
+                );
+
             // The service is a thin forwarder onto the lazily-opened one. Each
             // method re-resolves through `openOnce`, which is a memo hit after
             // the first statement.
             const rows: JudgmentService["rows"] = (schema, sql, params) =>
-                Effect.flatMap(openOnce, (s) => s.rows(schema, sql, params));
+                onCurrent((s) => s.rows(schema, sql, params));
             const first: JudgmentService["first"] = (schema, sql, params) =>
-                Effect.flatMap(openOnce, (s) => s.first(schema, sql, params));
-            const raw: JudgmentService["raw"] = (sql, params) =>
-                Effect.flatMap(openOnce, (s) => s.raw(sql, params));
-            const exec: JudgmentService["exec"] = (sql, params) =>
-                Effect.flatMap(openOnce, (s) => s.exec(sql, params));
-            const put: JudgmentService["put"] = (table, row) =>
-                Effect.flatMap(openOnce, (s) => s.put(table, row));
+                onCurrent((s) => s.first(schema, sql, params));
+            const raw: JudgmentService["raw"] = (sql, params) => onCurrent((s) => s.raw(sql, params));
+            const exec: JudgmentService["exec"] = (sql, params) => onCurrent((s) => s.exec(sql, params));
+            const put: JudgmentService["put"] = (table, row) => onCurrent((s) => s.put(table, row));
             const putMany: JudgmentService["putMany"] = (table, rowsIn) =>
-                Effect.flatMap(openOnce, (s) => s.putMany(table, rowsIn));
+                onCurrent((s) => s.putMany(table, rowsIn));
             const transaction: JudgmentService["transaction"] = (body) =>
-                Effect.flatMap(openOnce, (s) => s.transaction(body));
+                onCurrent((s) => s.transaction(body));
 
             return { rows, first, raw, exec, put, putMany, transaction, path };
         }),
