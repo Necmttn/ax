@@ -27,6 +27,28 @@ export interface IngestRunHeartbeatRow {
 export const REAP_GRACE_SECONDS = 60;
 
 /**
+ * The heartbeat as milliseconds, or `null` when there is nothing usable.
+ *
+ * Two callers hand this two different types and always have: doctor's raw HTTP
+ * probe sees a JSON string, while a graph read sees whatever its client decoded.
+ * Under SurrealDB that was also a string; the DuckDB seam decodes a TIMESTAMP to
+ * a `Date`, and the old `Date.parse(String(value))` round-tripped one through
+ * `"Wed Aug 15 2026 12:00:00 GMT+0000"` - which parses, but only to whole
+ * seconds, so a `Date` silently lost its milliseconds on the way to a
+ * millisecond comparison. A `Date` is now read directly.
+ */
+const heartbeatMs = (value: unknown): number | null => {
+    if (value instanceof Date) {
+        const ms = value.getTime();
+        return Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value !== "string" || value.length === 0) return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+/**
  * Is this "running" row crash residue? Every clean exit path (ok / error /
  * interrupt / timeout) settles the row, so a row whose newest heartbeat
  * (`last_progress_at`, else `started_at`) is past the budget was killed
@@ -38,8 +60,12 @@ export const isStrandedRun = (
     nowMs: number,
     staleAfterMs: number,
 ): boolean => {
-    const beat = Date.parse(String(row.last_progress_at ?? row.started_at ?? ""));
-    if (!Number.isFinite(beat)) return true;
+    // `??` on the RAW values, not on the parsed ones: a row that HAS a
+    // `last_progress_at` which does not parse is unreadable residue, and must
+    // stay stranded rather than quietly falling back to a recent `started_at`
+    // and reading as live. Only an absent field falls through.
+    const beat = heartbeatMs(row.last_progress_at ?? row.started_at);
+    if (beat === null) return true;
     return nowMs - beat > staleAfterMs;
 };
 
