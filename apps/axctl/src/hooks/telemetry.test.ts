@@ -1,20 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { HOOK_FIRE_SPOOL_FILE, type HookFireSpoolEnvelope } from "./spool.ts";
 import { recordHookFire } from "./telemetry.ts";
 
-/**
- * After ADR-0005 the hook telemetry write path no longer calls `db.upsert`;
- * `writeTelemetryRow` builds an `UPSERT` statement and runs it through
- * `executeStatements` → `db.query`. The fake therefore spies on `query`,
- * collecting every emitted SQL string; it is no longer the assertion target.
- */
-function fakeClient(): { client: SurrealClientShape; statements: string[] } {
-    const tc = makeTestSurrealClient({ fallback: [] });
-    return { client: tc.client, statements: tc.captured };
-}
+const roots: string[] = [];
+const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
+afterEach(async () => {
+    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+const spoolDir = async (): Promise<string> => {
+    const root = await mkdtemp(join(tmpdir(), "ax-hook-telemetry-"));
+    roots.push(root);
+    return root;
+};
 
 const minimalPriorSession = {
     session: "session:s1",
@@ -39,147 +43,89 @@ const minimalPriorSession = {
     last_seen: null,
 };
 
+const run = (effect: Effect.Effect<void, never, import("effect").FileSystem.FileSystem | import("effect").Path.Path>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(Platform)));
+
+const rowsIn = async (dir: string): Promise<ReadonlyArray<HookFireSpoolEnvelope["row"]>> => {
+    const text = await readFile(join(dir, HOOK_FIRE_SPOOL_FILE), "utf8");
+    return text.trim().split("\n").map((line) => (JSON.parse(line) as HookFireSpoolEnvelope).row);
+};
+
 describe("recordHookFire", () => {
-    test("writes one hook_fire row per file in the input", async () => {
-        const { client, statements } = fakeClient();
+    test("spools one synced hook_fire row per input file", async () => {
+        const dir = await spoolDir();
+        await run(recordHookFire({
+            input: {
+                event: "pre-edit",
+                task: "fix knowledge route tab bug",
+                files: ["src/a.ts", "src/b.ts"],
+                sessionId: "session:s1",
+                format: "claude",
+            },
+            decision: { inject: true, reason: "high_signal" },
+            priorSessions: [minimalPriorSession],
+            harness: "claude",
+            latencyMs: 42,
+            now: new Date("2026-05-17T10:00:00Z"),
+            spoolDir: dir,
+        }));
 
-        await Effect.runPromise(
-            recordHookFire({
-                input: {
-                    event: "pre-edit",
-                    task: "fix knowledge route tab bug",
-                    files: ["src/a.ts", "src/b.ts"],
-                    sessionId: "session:s1",
-                    format: "claude",
-                },
-                decision: { inject: true, reason: "high_signal" },
-                priorSessions: [minimalPriorSession],
-                harness: "claude",
-                latencyMs: 42,
-                now: new Date("2026-05-17T10:00:00Z"),
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
-        );
-
-        // recordHookFire calls writeTelemetryRow once per file; each one is an
-        // executeStatements([oneStatement]) → exactly one db.query call.
-        expect(statements).toHaveLength(2);
-        expect(statements[0]!).toMatch(/^UPSERT hook_fire:`[0-9a-f]{16}` CONTENT \{/);
-        expect(statements[1]!).toMatch(/^UPSERT hook_fire:`[0-9a-f]{16}` CONTENT \{/);
-        expect(statements[0]!).toContain('file_path: "src/a.ts"');
-        expect(statements[1]!).toContain('file_path: "src/b.ts"');
-        // Different file path → different deterministic id (different record key).
-        const id0 = statements[0]!.match(/^UPSERT hook_fire:`([0-9a-f]{16})`/)![1];
-        const id1 = statements[1]!.match(/^UPSERT hook_fire:`([0-9a-f]{16})`/)![1];
-        expect(id0).not.toBe(id1);
+        const rows = await rowsIn(dir);
+        expect(rows).toHaveLength(2);
+        expect(rows.map((row) => row.file_path)).toEqual(["src/a.ts", "src/b.ts"]);
+        expect(rows[0]!.id).not.toBe(rows[1]!.id);
+        expect(rows[0]).toMatchObject({
+            harness: "claude",
+            event: "pre-edit",
+            inject: true,
+            reason: "high_signal",
+            latency_ms: 42,
+            prior_sessions_considered: 1,
+            top_prior_sessions: ["session:s1"],
+        });
     });
 
-    test("populates harness, event, decision, latency, and prior session metadata", async () => {
-        const { client, statements } = fakeClient();
-        const priors = [
-            { ...minimalPriorSession, session: "session:s1" },
-            { ...minimalPriorSession, session: "session:s2", weight: 5 },
-            { ...minimalPriorSession, session: "session:s3", weight: 2 },
-            { ...minimalPriorSession, session: "session:s4", weight: 1 },
-        ];
+    test("clips the task excerpt to 240 characters", async () => {
+        const dir = await spoolDir();
+        await run(recordHookFire({
+            input: { event: "read", task: "x".repeat(500), files: ["src/a.ts"], format: "plain" },
+            decision: { inject: false, reason: "no_prior_sessions" },
+            priorSessions: [],
+            harness: "unknown",
+            latencyMs: 1,
+            spoolDir: dir,
+        }));
 
-        await Effect.runPromise(
-            recordHookFire({
-                input: {
-                    event: "pre-edit",
-                    task: "x",
-                    files: ["src/a.ts"],
-                    sessionId: "session:s1",
-                    format: "claude",
-                },
-                decision: { inject: true, reason: "high_signal" },
-                priorSessions: priors,
-                harness: "claude",
-                latencyMs: 137,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
-        );
-
-        const sql = statements[0]!;
-        expect(sql).toContain('harness: "claude"');
-        expect(sql).toContain('event: "pre-edit"');
-        expect(sql).toContain("inject: true");
-        expect(sql).toContain('reason: "high_signal"');
-        expect(sql).toContain("latency_ms: 137");
-        expect(sql).toContain('kind: "hook_fire"');
-        expect(sql).toContain("ok: true");
-        expect(sql).toContain("prior_sessions_considered: 4");
-        // Top 3 sessions only, in order, as native record references.
-        expect(sql).toContain(
-            "top_prior_sessions: [session:`s1`, session:`s2`, session:`s3`]",
-        );
-        expect(sql).not.toContain("session:`s4`");
+        const rows = await rowsIn(dir);
+        expect(rows[0]!.task_excerpt).toBe(`${"x".repeat(239)}…`);
     });
 
-    test("clips task_excerpt to 240 chars", async () => {
-        const { client, statements } = fakeClient();
-        const longTask = "x".repeat(500);
+    test("writes no spool file when input.files is empty", async () => {
+        const dir = await spoolDir();
+        await run(recordHookFire({
+            input: { event: "unknown", task: "x", files: [], format: "plain" },
+            decision: { inject: false, reason: "no_files" },
+            priorSessions: [],
+            harness: "unknown",
+            latencyMs: 1,
+            spoolDir: dir,
+        }));
 
-        await Effect.runPromise(
-            recordHookFire({
-                input: {
-                    event: "pre-edit",
-                    task: longTask,
-                    files: ["src/a.ts"],
-                    format: "plain",
-                },
-                decision: { inject: false, reason: "no_prior_sessions" },
-                priorSessions: [],
-                harness: "claude",
-                latencyMs: 1,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
-        );
-
-        const sql = statements[0]!;
-        // The clipped excerpt (239 chars + ellipsis) is present; the full
-        // 500-char string is not.
-        expect(sql).toContain(`task_excerpt: "${"x".repeat(239)}…"`);
-        expect(sql).not.toContain("x".repeat(500));
+        expect(await Bun.file(join(dir, HOOK_FIRE_SPOOL_FILE)).exists()).toBe(false);
     });
 
-    test("emits no rows when input.files is empty", async () => {
-        const { client, statements } = fakeClient();
+    test("fails open when the spool path cannot be written", async () => {
+        const root = await spoolDir();
+        const notDirectory = join(root, "not-a-directory");
+        await Bun.write(notDirectory, "occupied");
 
-        await Effect.runPromise(
-            recordHookFire({
-                input: {
-                    event: "pre-edit",
-                    task: "x",
-                    files: [],
-                    format: "plain",
-                },
-                decision: { inject: false, reason: "no_files" },
-                priorSessions: [],
-                harness: "claude",
-                latencyMs: 1,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
-        );
-
-        expect(statements).toHaveLength(0);
-    });
-
-    test("swallows db errors so the hook still emits output", async () => {
-        const failing: SurrealClientShape = makeTestSurrealClient({
-            fallback: Effect.fail(new DbError({ operation: "query", message: "db is down" })),
-        }).client;
-
-        await Effect.runPromise(
-            recordHookFire({
-                input: {
-                    event: "pre-edit",
-                    task: "x",
-                    files: ["src/a.ts"],
-                    format: "plain",
-                },
-                decision: { inject: false, reason: "no_prior_sessions" },
-                priorSessions: [],
-                harness: "claude",
-                latencyMs: 1,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, failing))),
-        );
-        // No throw = pass. The hook output path must never fail because telemetry failed.
+        await run(recordHookFire({
+            input: { event: "read", task: "x", files: ["src/a.ts"], format: "plain" },
+            decision: { inject: false, reason: "no_prior_sessions" },
+            priorSessions: [],
+            harness: "unknown",
+            latencyMs: 1,
+            spoolDir: notDirectory,
+        }));
     });
 });

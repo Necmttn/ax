@@ -1,12 +1,10 @@
-import { Effect } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, type FileSystem, type Path } from "effect";
 import {
     deterministicId,
-    writeTelemetryRow,
     type TelemetryBaseRow,
     type TelemetryHarness,
 } from "@ax/lib/telemetry-base";
+import { appendHookFireSpool, type HookFireSpoolRow } from "./spool.ts";
 import type { FileContextHookInput, FileContextHookDecision } from "./file-context-hook.ts";
 import type {
     FileMemoryCommit,
@@ -21,7 +19,7 @@ export interface HookFireRow extends TelemetryBaseRow {
     readonly reason: string;
     readonly prior_sessions_considered: number;
     readonly task_excerpt: string;
-    readonly top_prior_sessions: readonly RecordId[];
+    readonly top_prior_sessions: readonly string[];
     readonly injected_titles: readonly string[];
 }
 
@@ -31,14 +29,14 @@ const TITLE_EXCERPT_MAX = 160;
 
 const clipExcerpt = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
-function parseSessionRid(value: string | undefined): RecordId | null {
+function parseSessionRef(value: string | undefined): string | null {
     if (!value) return null;
     const idx = value.indexOf(":");
     if (idx < 0) return null;
     const table = value.slice(0, idx);
     const id = value.slice(idx + 1).replace(/^⟨|⟩$/g, "");
     if (!table || !id) return null;
-    return new RecordId(table, id);
+    return `${table}:${id}`;
 }
 
 export interface RecordHookFireParams {
@@ -50,17 +48,22 @@ export interface RecordHookFireParams {
     readonly harness: TelemetryHarness;
     readonly latencyMs: number;
     readonly now?: Date;
+    readonly spoolDir?: string;
 }
 
-export const recordHookFire = (params: RecordHookFireParams): Effect.Effect<void, never, SurrealClient> =>
+export const recordHookFire = (params: RecordHookFireParams): Effect.Effect<
+    void,
+    never,
+    FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         if (params.input.files.length === 0) return;
         const ts = params.now ?? new Date();
         const tsMs = String(ts.getTime());
         const topPriors = params.priorSessions.slice(0, TOP_PRIOR_SESSIONS);
-        const topPriorRids = topPriors
-            .map((s) => parseSessionRid(s.session))
-            .filter((rid): rid is RecordId => rid !== null);
+        const topPriorRefs = topPriors
+            .map((s) => parseSessionRef(s.session))
+            .filter((ref): ref is string => ref !== null);
         // injected_titles is the at-a-glance summary surfaced by `axctl hook
         // log`. Prefer the highest-precision signals so reviewers see WHY a
         // fire injected, not just "some prior session existed."
@@ -104,15 +107,25 @@ export const recordHookFire = (params: RecordHookFireParams): Effect.Effect<void
                 reason: params.decision.reason,
                 prior_sessions_considered: params.priorSessions.length,
                 task_excerpt: clipExcerpt(params.input.task, TASK_EXCERPT_MAX),
-                top_prior_sessions: topPriorRids,
+                top_prior_sessions: topPriorRefs,
                 injected_titles: injectedTitles,
             };
-            yield* writeTelemetryRow("hook_fire", row);
+            const spoolRow: HookFireSpoolRow = {
+                ...row,
+                ts: row.ts.toISOString(),
+                session: row.session ?? null,
+                file: row.file ?? null,
+                top_prior_sessions: [...row.top_prior_sessions],
+                injected_titles: [...row.injected_titles],
+            };
+            yield* appendHookFireSpool(spoolRow, {
+                ...(params.spoolDir === undefined ? {} : { spoolDir: params.spoolDir }),
+            });
         }
     }).pipe(
         Effect.catch((err) =>
             Effect.sync(() => {
-                console.error("axctl hook telemetry write failed:", err);
+                console.error("ax hook telemetry spool write failed:", err);
             }),
         ),
     );
