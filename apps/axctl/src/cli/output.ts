@@ -47,16 +47,6 @@ export const catchCacheReadErrorAndExit =
             ),
         );
 
-/** Report a typed DuckDB cache read failure at a CLI handler boundary. */
-export const catchCacheReadErrorAndExit =
-    (prefix: string) =>
-    <A, R>(eff: Effect.Effect<A, CacheReadError, R>): Effect.Effect<A, never, R> =>
-        eff.pipe(
-            Effect.catch((error) =>
-                stderrExit(`${prefix}: cache error - ${error.message}\n`, 1),
-            ),
-        );
-
 /**
  * Write `message` to stderr and terminate the process with `code`.
  *

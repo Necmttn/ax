@@ -29,7 +29,7 @@ import { Effect, Layer, type ManagedRuntime } from "effect";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheReadLive, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
 import { wrapToolError, wrapToolResult } from "./wrap.ts";
 import {
@@ -130,6 +130,21 @@ interface AxMcpToolSpec<Shape extends ZodRawShape> {
     readonly run: (args: z.infer<z.ZodObject<Shape>>, rt: AxRuntime) => Promise<unknown>;
 }
 
+const CACHE_READ_ERROR_TAGS = new Set<CacheReadError["_tag"]>([
+    "CacheUnavailableError", "DuckDbQueryError", "DuckDbUnsupportedTypeError", "DuckDbDecodeError",
+]);
+
+const isCacheReadError = (error: unknown): error is CacheReadError =>
+    typeof error === "object" && error !== null && "_tag" in error &&
+    CACHE_READ_ERROR_TAGS.has((error as { readonly _tag: CacheReadError["_tag"] })._tag);
+
+const handleMcpBoundaryError = (error: unknown): never => {
+    if (isCacheReadError(error)) {
+        throw new Error(`ax cache read failed: ${error.message}`, { cause: error });
+    }
+    throw error;
+};
+
 /**
  * Minimal SDK registration seam. The SDK's `registerTool<InputArgs>` derives its
  * callback type as `ToolCallback<InputArgs>` -> `ShapeOutput<InputArgs>`, a
@@ -162,8 +177,13 @@ export const defineMcpTool = <Shape extends ZodRawShape>(
     // handler. The SDK already validates before its callback fires (mcp.js
     // safeParseAsync), so this parse is idempotent on the live path; it exists
     // so direct `tool.run(...)` callers (tests) get the same validated input.
-    const run = async (args: Record<string, unknown>, rt: AxRuntime): Promise<unknown> =>
-        spec.run(schema.parse(args), rt);
+    const run = async (args: Record<string, unknown>, rt: AxRuntime): Promise<unknown> => {
+        try {
+            return await spec.run(schema.parse(args), rt);
+        } catch (error) {
+            return handleMcpBoundaryError(error);
+        }
+    };
     return {
         name: spec.name,
         description: spec.description,

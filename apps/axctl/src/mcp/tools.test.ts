@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
+import { CacheUnavailableError } from "@ax/lib/duckdb/seam";
 import { axMcpTools, defineMcpTool } from "./tools.ts";
 
 /**
@@ -105,6 +106,28 @@ describe("defineMcpTool (typed zod factory)", () => {
             run: async () => "unreachable",
         });
         await expect(tool.run({ n: "not-a-number" }, rt)).rejects.toThrow();
+    });
+
+    it("reports a typed cache failure at the MCP boundary", async () => {
+        const cause = new CacheUnavailableError({
+            path: "/tmp/missing.duckdb",
+            message: "no published cache",
+        });
+        const tool = defineMcpTool({
+            name: "cache-failure",
+            description: "cache failure",
+            inputSchema: {},
+            run: async () => Promise.reject(cause),
+        });
+
+        try {
+            await tool.run({}, rt);
+            throw new Error("expected tool failure");
+        } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).toBe("ax cache read failed: no published cache");
+            expect((error as Error).cause).toBe(cause);
+        }
     });
 
     it("carries name/description/inputSchema onto the descriptor", () => {
