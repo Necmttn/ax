@@ -7,6 +7,7 @@ import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
 import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
@@ -234,7 +235,7 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive)),
+        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive)),
         Effect.scoped,
     );
 
@@ -305,6 +306,7 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     const layer = Layer.mergeAll(
         transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
         CacheReadLive,
+        JudgmentLive,
     );
     return runCli(args).pipe(
         // After ingest completes successfully, link orphan OTLP rows to their
@@ -343,7 +345,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
     // SurrealClient connect path.
     runCli(args).pipe(
         Effect.provideService(SurrealClient, throwingSurrealClient()),
-        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive)),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive, JudgmentLive)),
     );
 
 /**
@@ -366,6 +368,7 @@ const withCache = (args: ReadonlyArray<string>): CliProgram =>
                 AxConfigLive.pipe(Layer.provideMerge(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
                 ProcessServiceLive,
                 CacheReadLive,
+                JudgmentLive,
             ),
         ),
         Effect.scoped,

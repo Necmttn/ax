@@ -30,6 +30,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import { wrapToolError, wrapToolResult } from "./wrap.ts";
 import {
     fetchRecall,
@@ -94,7 +95,7 @@ import { QuotaEnvLive } from "../quota/quota-env.ts";
  * DuckDB snapshot that `recall` now goes through. The service/error params are
  * derived from the layers so they stay in sync if either changes.
  */
-const McpRuntimeLayer = Layer.mergeAll(AppLayer, CacheReadLive);
+const McpRuntimeLayer = Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive);
 
 export type AxRuntime = ManagedRuntime.ManagedRuntime<
     Layer.Success<typeof McpRuntimeLayer>,
