@@ -1,84 +1,91 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { buildRecentInjectsQuery, findRecentInjects } from "./dedup.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("hook dedup", { requireFts: true });
 
 describe("buildRecentInjectsQuery", () => {
     test("includes the session, inject=true, file_path IN list, and window", () => {
-        const sql = buildRecentInjectsQuery({
+        const query = buildRecentInjectsQuery({
             sessionRid: "session:abc",
             filePaths: ["src/a.ts", "src/b.ts"],
             windowMinutes: 30,
         });
-        expect(sql).toContain("session = session:abc");
-        expect(sql).toContain("inject = true");
-        expect(sql).toContain("file_path IN ['src/a.ts', 'src/b.ts']");
-        expect(sql).toContain("ts >= time::now() - 30m");
+        expect(query.sql).toContain("session = ?");
+        expect(query.sql).toContain("inject = true");
+        expect(query.sql).toContain("file_path IN (?, ?)");
+        expect(query.sql).toContain("CURRENT_TIMESTAMP");
+        expect(query.params).toEqual(["session:abc", "src/a.ts", "src/b.ts", 30]);
     });
 
-    test("rejects file paths that contain single quotes", () => {
-        expect(() =>
-            buildRecentInjectsQuery({
-                sessionRid: "session:abc",
-                filePaths: ["x'rm -rf /'"],
-                windowMinutes: 30,
-            }),
-        ).toThrow();
+    test("binds file paths that contain single quotes", () => {
+        const query = buildRecentInjectsQuery({
+            sessionRid: "session:abc",
+            filePaths: ["src/user's-file.ts"],
+            windowMinutes: 30,
+        });
+        expect(query.sql).not.toContain("user's-file");
+        expect(query.params).toContain("src/user's-file.ts");
     });
 });
 
 describe("findRecentInjects", () => {
-    test("returns an empty set when sessionId is missing", async () => {
-        const result = await Effect.runPromise(
-            findRecentInjects({
-                sessionId: undefined,
-                filePaths: ["src/a.ts"],
-                windowMinutes: 30,
-            }).pipe(Effect.provide(neverCalledClient().layer)),
+    dtest("reads recent injected paths from the published cache", async () => {
+        const now = new Date();
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-hook-dedup-"), dylibPath, (write) =>
+                Effect.gen(function* () {
+                    for (const [id, filePath, inject] of [
+                        ["recent-a", "src/a.ts", true],
+                        ["recent-b", "src/b.ts", false],
+                    ] as const) {
+                        yield* write.put("hook_fire", {
+                            id,
+                            ts: now,
+                            kind: "hook_fire",
+                            session: "session:abc",
+                            file: null,
+                            file_path: filePath,
+                            harness: "claude",
+                            ok: true,
+                            latency_ms: 1,
+                            event: "pre-edit",
+                            inject,
+                            reason: inject ? "high_signal" : "low_signal_only",
+                            prior_sessions_considered: 1,
+                            task_excerpt: "test",
+                            top_prior_sessions: "[]",
+                            injected_titles: "[]",
+                        });
+                    }
+                }),
+            ),
         );
-        expect(result.size).toBe(0);
-    });
-
-    test("returns an empty set when filePaths is empty", async () => {
-        const result = await Effect.runPromise(
-            findRecentInjects({
-                sessionId: "session:abc",
-                filePaths: [],
-                windowMinutes: 30,
-            }).pipe(Effect.provide(neverCalledClient().layer)),
-        );
-        expect(result.size).toBe(0);
-    });
-
-    test("returns a set of paths from rows whose file_path appears in hook_fire", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            fallback: [[
-                { file_path: "src/a.ts" },
-                { file_path: "src/a.ts" }, // duplicates collapse
-            ]],
-        });
 
         const result = await Effect.runPromise(
             findRecentInjects({
                 sessionId: "session:abc",
                 filePaths: ["src/a.ts", "src/b.ts"],
                 windowMinutes: 30,
-            }).pipe(Effect.provide(tc.layer)),
+            }).pipe(Effect.provide(readFixture(fixture.snapshotPath, dylibPath)), Effect.scoped),
         );
+        expect([...result]).toEqual(["src/a.ts"]);
+    });
 
-        expect(result.has("src/a.ts")).toBe(true);
-        expect(result.has("src/b.ts")).toBe(false);
-        expect(result.size).toBe(1);
-        expect(tc.captured.at(-1)).toContain("hook_fire");
+    test("returns an empty set before it resolves the cache", async () => {
+        const missingSession = await Effect.runPromise(findRecentInjects({
+            sessionId: undefined,
+            filePaths: ["src/a.ts"],
+            windowMinutes: 30,
+        }).pipe(Effect.provide(readFixture("/missing/snapshot.duckdb", dylibPath)), Effect.scoped));
+        const missingFiles = await Effect.runPromise(findRecentInjects({
+            sessionId: "session:abc",
+            filePaths: [],
+            windowMinutes: 30,
+        }).pipe(Effect.provide(readFixture("/missing/snapshot.duckdb", dylibPath)), Effect.scoped));
+        expect(missingSession.size).toBe(0);
+        expect(missingFiles.size).toBe(0);
     });
 });
-
-function neverCalledClient(): TestSurrealClient {
-    return makeTestSurrealClient({
-        denyWrites: true,
-        fallback: () => {
-            throw new Error("query should not have been called");
-        },
-    });
-}
