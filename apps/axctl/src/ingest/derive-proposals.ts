@@ -75,7 +75,11 @@ const proposalWrite = (
         readonly sig: string; readonly frequency: number; readonly confidence: string },
     form: string,
     baseline: unknown,
-): ProposalWrite => ({ table: "proposal", row: cacheRow({
+    exists: boolean,
+): ProposalWrite => ({ table: "proposal", row: cacheRow(exists ? {
+    id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis, dedupe_sig: row.sig,
+    frequency: row.frequency, confidence: row.confidence, updated_at: new Date(),
+} : {
     id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis, dedupe_sig: row.sig,
     frequency: row.frequency, confidence: row.confidence, status: "open", origin: "mined",
     hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: jsonParam(baseline),
@@ -195,7 +199,7 @@ export const deriveDirectiveProposalRows = (
 // Workflow proposals (form='guidance', section='workflows') - v1
 // Recurring skill-arc sequences (mined by mineArcs) become guidance proposals
 // so the agent can codify their best workflows. Reuses GuidanceProposalRow +
-// buildGuidanceProposalStatements; section="workflows" discriminates from
+// buildGuidanceProposalWrites; section="workflows" discriminates from
 // section="directives" proposals in guidance_proposal. Mirrors the directive
 // path exactly but with section="workflows". Spec: milestone B (issue #588).
 // ---------------------------------------------------------------------------
@@ -254,13 +258,13 @@ export const deriveWorkflowProposalRows = (
     return { rows: rows.slice(0, limit), skipped };
 };
 
-export const buildGuidanceProposalStatements = (
+export const buildGuidanceProposalWrites = (
     rows: readonly GuidanceProposalRow[],
-    _existingSigs: ReadonlySet<string> = new Set(),
+    existingSigs: ReadonlySet<string> = new Set(),
 ): ProposalWrite[] => {
     const writes: ProposalWrite[] = [];
     for (const row of rows) {
-        writes.push(proposalWrite(row, "guidance", { frequency: row.frequency, evidence: row.evidenceSummary }));
+        writes.push(proposalWrite(row, "guidance", { frequency: row.frequency, evidence: row.evidenceSummary }, existingSigs.has(row.sig)));
         writes.push({ table: "guidance_proposal", row: cacheRow({ id: row.proposalKey,
             proposal: row.proposalKey, file_target: row.fileTarget, section: row.section,
             suggested_text: row.suggestedText }) });
@@ -331,13 +335,13 @@ export const deriveRoutingProposalRow = (input: {
 
 /**
  * Build SurrealQL statements for a routing proposal row. Mirrors
- * buildGuidanceProposalStatements: CREATE on first sight, UPDATE mutable
+ * buildGuidanceProposalWrites: insert on first sight, update mutable
  * fields on re-derive. No typed payload table (hook form is self-contained).
  */
-export const buildRoutingProposalStatements = (
+export const buildRoutingProposalWrites = (
     row: RoutingProposalRow,
-    _existingSigs: ReadonlySet<string> = new Set(),
-): ProposalWrite[] => [proposalWrite(row, "hook", { frequency: row.frequency })];
+    existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => [proposalWrite(row, "hook", { frequency: row.frequency }, existingSigs.has(row.sig))];
 
 // ---------------------------------------------------------------------------
 // Image context proposal (form='subagent') - isolate heavy visual context signal
@@ -401,13 +405,13 @@ export const deriveImageContextProposalRow = (
 
 /**
  * Build SurrealQL statements for an image-context proposal row. Mirrors
- * buildRoutingProposalStatements: CREATE on first sight, UPDATE mutable
+ * buildRoutingProposalWrites: insert on first sight, update mutable
  * fields on re-derive. No typed payload table (subagent form is self-contained).
  */
-export const buildImageContextProposalStatements = (
+export const buildImageContextProposalWrites = (
     row: ImageContextProposalRow,
-    _existingSigs: ReadonlySet<string> = new Set(),
-): ProposalWrite[] => [proposalWrite(row, "subagent", { frequency: row.frequency })];
+    existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => [proposalWrite(row, "subagent", { frequency: row.frequency }, existingSigs.has(row.sig))];
 
 export interface DeriveProposalsOpts {
     readonly minFrequency: number;
@@ -523,13 +527,13 @@ export const deriveSkillProposalRows = (
  * table. The caller (`deriveProposals`) fetches it once before computing
  * rows so the partition is consistent within one ingest pass.
  */
-export const buildSkillProposalStatements = (
+export const buildSkillProposalWrites = (
     rows: readonly SkillProposalRow[],
-    _existingSigs: ReadonlySet<string> = new Set(),
+    existingSigs: ReadonlySet<string> = new Set(),
 ): ProposalWrite[] => {
     const writes: ProposalWrite[] = [];
     for (const row of rows) {
-        writes.push(proposalWrite(row, "skill", { frequency: row.frequency, metrics: row.metrics }));
+        writes.push(proposalWrite(row, "skill", { frequency: row.frequency, metrics: row.metrics }, existingSigs.has(row.sig)));
         writes.push({ table: "skill_proposal", row: cacheRow({ id: row.proposalKey,
             proposal: row.proposalKey, trigger_pattern: row.triggerPattern, suspected_gap: row.suspectedGap,
             proposed_behavior: row.proposedBehavior, expected_impact: row.expectedImpact }) });
@@ -566,7 +570,7 @@ FROM skill_candidate`),
         const existingSigs = new Set(existingProposals.map((p) => p.dedupe_sig));
         const { rows: skillRows, skipped: skillSkipped } =
             deriveSkillProposalRows(candidates, existingSkillNames, opts.minFrequency);
-        const skillStmts = buildSkillProposalStatements(skillRows, existingSigs);
+        const skillStmts = buildSkillProposalWrites(skillRows, existingSigs);
 
         // Phase C11: also derive guidance-form proposals from the harness
         // grounding - project-doctor logic that identifies "you should add a
@@ -576,16 +580,14 @@ FROM skill_candidate`),
         // The GROUNDING, not the full report: `learningCandidates` comes from
         // git plus the guidance sources (see `mainBranchLearning`), while the
         // report's other half reads the published DuckDB snapshot. This stage
-        // writes SurrealDB, so taking the full report would make one ingest
-        // operation span both engines - and answer from a snapshot that omits
-        // whatever the run in progress has written.
+        // The same lock-held cache writer supplies all current-run data.
         const { buildHarnessGrounding } = yield* Effect.promise(() =>
             import("../project/harness.ts"),
         );
         const harnessGrounding = yield* buildHarnessGrounding();
         const { rows: guidanceRows, skipped: guidanceSkipped } =
             deriveGuidanceProposalRows(harnessGrounding.learningCandidates);
-        const guidanceStmts = buildGuidanceProposalStatements(guidanceRows, existingSigs);
+        const guidanceWrites = buildGuidanceProposalWrites(guidanceRows, existingSigs);
 
         // Routing proposal (form='hook'): derive from dispatch candidate analytics.
         // Query failure is tolerated - if dispatch data isn't available the stage
@@ -617,8 +619,8 @@ FROM skill_candidate`),
                 topClasses: dispatchResult.topClasses,
             })
             : null;
-        const routingStmts = routingRow
-            ? buildRoutingProposalStatements(routingRow, existingSigs)
+        const routingWrites = routingRow
+            ? buildRoutingProposalWrites(routingRow, existingSigs)
             : [];
 
         // Image context proposal (form='subagent'): derive from image-read analytics.
@@ -630,8 +632,8 @@ FROM skill_candidate`),
         const imageContextRow = imageContextResult
             ? deriveImageContextProposalRow(imageContextResult, sinceDays)
             : null;
-        const imageContextStmts = imageContextRow
-            ? buildImageContextProposalStatements(imageContextRow, existingSigs)
+        const imageContextWrites = imageContextRow
+            ? buildImageContextProposalWrites(imageContextRow, existingSigs)
             : [];
 
         // Directive proposals (form='guidance'): mine proactive standing
@@ -672,7 +674,7 @@ WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
 
         const { rows: directiveRows, skipped: directiveSkipped } =
             deriveDirectiveProposalRows(scoredDirectiveCandidates);
-        const directiveStmts = buildGuidanceProposalStatements(directiveRows, existingSigs);
+        const directiveWrites = buildGuidanceProposalWrites(directiveRows, existingSigs);
 
         // Workflow proposals (form='guidance', section='workflows'): derive recurring
         // skill-arc patterns into codification suggestions (milestone B, #588).
@@ -683,12 +685,12 @@ WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
         );
         const { rows: workflowRows, skipped: workflowSkipped } =
             deriveWorkflowProposalRows(workflowArcs);
-        const workflowStmts = workflowRows.length > 0
-            ? buildGuidanceProposalStatements(workflowRows, existingSigs)
+        const workflowWrites = workflowRows.length > 0
+            ? buildGuidanceProposalWrites(workflowRows, existingSigs)
             : [];
 
         const existingBySig = new Map(existingProposals.map((row) => [row.dedupe_sig, row]));
-        const writes = [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts, ...workflowStmts];
+        const writes = [...skillStmts, ...guidanceWrites, ...routingWrites, ...imageContextWrites, ...directiveWrites, ...workflowWrites];
         for (const item of writes) {
             if (item.table === "proposal") {
                 const sig = String(item.row.dedupe_sig);

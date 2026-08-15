@@ -102,7 +102,7 @@ export const computePrMergeDirtySessions = (
         const shaClause = inClause("sha", diff.changedShas);
         const commits = yield* write.rows(
             CommitRow,
-            `SELECT id, sha FROM "commit" WHERE ${shaClause.sql}`,
+            `SELECT id, sha FROM "commit" WHERE true ${shaClause.sql}`,
             shaClause.params,
         );
         const resolvedShas = new Set(commits.map((row) => row.sha));
@@ -111,7 +111,7 @@ export const computePrMergeDirtySessions = (
             ? []
             : yield* write.rows(
                 SessionRow,
-                `SELECT DISTINCT in_id AS session FROM produced WHERE ${commitClause.sql}`,
+                `SELECT DISTINCT in_id AS session FROM produced WHERE true ${commitClause.sql}`,
                 commitClause.params,
             );
 
@@ -146,6 +146,6 @@ export const advancePrMergeWatermark = (
                 watermarkRowId(WATERMARK_SOURCE, prMergeWatermarkPath(prKey)),
             );
             const clause = inClause("id", ids);
-            yield* write.exec(`DELETE FROM ingest_file_state WHERE ${clause.sql}`, clause.params);
+            yield* write.exec(`DELETE FROM ingest_file_state WHERE true ${clause.sql}`, clause.params);
         }
     });

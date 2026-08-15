@@ -163,7 +163,7 @@ export const overlapFilesMatch = (
     return false;
 };
 
-export const buildOpportunityStatements = (
+export const buildOpportunityRows = (
     experimentKey: string,
     matches: ReadonlyArray<{
         readonly evidenceTable: string;
@@ -304,7 +304,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -356,7 +356,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -402,7 +402,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 byHookForm += matches.length;
-                allRows.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -440,7 +440,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 byGuidanceForm += matches.length;
-                allRows.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 

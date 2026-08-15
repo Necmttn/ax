@@ -3,10 +3,9 @@ import { BunFileSystem } from "@effect/platform-bun";
 import type { ServerWebSocket } from "bun";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
-import { recordRef } from "../ingest/evidence-writers.ts";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { surrealJson, surrealString } from "@ax/lib/shared/surql";
+import { recordRef, surrealJson, surrealString } from "@ax/lib/shared/surql";
 
 /** Bun-backed FS + Path layer for the standalone fs Effects this module runs
  *  via `Effect.runPromise` (the dogfood server is plain async, not Effect). */

@@ -22,7 +22,7 @@ import { findAgent } from "../agents/config.ts";
  * `ax skills` lifecycle subcommands: config (list+status), reconcile, scope,
  * park/unpark, rm. Spliced into the existing `skillsCommand` group. Handlers
  * provide SkillSourceRegistryLive (+ AgentSourceRegistryLive for scope);
- * SurrealClient/FileSystem/Path come from AppLayer.
+ * FileSystem and Path come from AppLayer.
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));

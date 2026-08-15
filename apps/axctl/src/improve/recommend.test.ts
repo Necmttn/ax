@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendItem } from "./recommend.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { recommend as recommendWithRead, formatRecommendations, selectByIndices, parseIndexInput, type RecommendItem } from "./recommend.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 const layerWith = (rows: ReadonlyArray<unknown>) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.succeed([rows] as unknown as T),
-    } as never);
+    makeTestCacheRead({ fallback: rows }).layer;
+const recommend = (options: Parameters<typeof recommendWithRead>[1]) => Effect.gen(function* () {
+    return yield* recommendWithRead(yield* CacheRead, options);
+});
 
 describe("recommend", () => {
     test("ranks by confidence × recency × frequency", async () => {

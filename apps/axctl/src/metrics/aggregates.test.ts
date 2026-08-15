@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { SkillName } from "@ax/lib/brands";
 import {
     aggregateGroups,
@@ -248,17 +249,19 @@ const db = (input: {
     pricing?: Array<Record<string, unknown>>;
     invoked?: Array<Record<string, unknown>>;
     seenSql?: string[];
-}) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+}) => {
+    const fallback = (sql: string) => {
             input.seenSql?.push(sql);
-            if (sql.includes("FROM session_token_usage")) return Effect.succeed([input.usage ?? []] as unknown as T);
-            if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
-            if (sql.includes("agent_model")) return Effect.succeed([input.pricing ?? []] as unknown as T);
-            if (sql.includes("FROM invoked")) return Effect.succeed([input.invoked ?? []] as unknown as T);
-            return Effect.succeed([input.metrics ?? []] as unknown as T);
-        },
-    } as never);
+            if (sql.includes("FROM session_token_usage")) return input.usage ?? [];
+            if (sql.includes("FROM session_health")) return input.health ?? [];
+            if (sql.includes("agent_model")) return input.pricing ?? [];
+            if (sql.includes("FROM invoked")) return input.invoked ?? [];
+            return input.metrics ?? [];
+    };
+    const cache = makeTestCacheRead({ fallback });
+    const surreal = makeTestSurrealClient({ fallback: (sql) => [fallback(sql)] });
+    return Layer.merge(surreal.layer, cache.layer);
+};
 
 describe("fetchAggregateRows", () => {
     test("joins metrics + health + usage on the normalized session key", async () => {
@@ -321,9 +324,11 @@ describe("fetchAggregateRows", () => {
             seenSql,
         }))));
         const healthSql = seenSql.find((s) => s.includes("FROM session_health"))!;
-        expect(healthSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        expect(healthSql).toContain("session IN (?, ?)");
+        expect(healthSql).not.toContain("'");
         const usageSql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
-        expect(usageSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        expect(usageSql).toContain("session IN (?, ?)");
+        expect(usageSql).not.toContain("'");
     });
 
     test("empty metrics scan skips the secondary scans entirely", async () => {

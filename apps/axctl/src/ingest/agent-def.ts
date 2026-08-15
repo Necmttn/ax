@@ -146,7 +146,7 @@ export class AgentDefStats extends BaseStageStats.extend<AgentDefStats>("AgentDe
  *
  * Depends on: (none - leaf)
  * Tags: ingest
- * Requires (beyond SurrealClient): FileSystem, Path, AgentSourceRegistry - see
+ * Requires FileSystem, Path, and AgentSourceRegistry. See
  *   INTEGRATION NOTES for the runtime layer wiring.
  */
 export const agentDefStage: StageDef<

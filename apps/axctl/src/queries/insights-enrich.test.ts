@@ -8,12 +8,14 @@
  * unchanged.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, type Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { enrichInsightRows, foldContentTypeOntoFriction } from "./insights-enrich.ts";
 
-function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
+function makeMockDb(): { layer: Layer.Layer<SurrealClient | CacheRead>; captured: string[] } {
     const tc = makeTestSurrealClient({
         denyWrites: true,
         fallback: (sql) => {
@@ -35,7 +37,7 @@ function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] }
             return [[]];
         },
     });
-    return { layer: tc.layer, captured: tc.captured };
+    return { layer: Layer.merge(tc.layer, makeTestCacheRead().layer), captured: tc.captured };
 }
 
 const baseRow = {
@@ -98,8 +100,8 @@ describe("enrichInsightRows", () => {
     });
 
     test("friction: enriches rows with otlp_cost_usd and otlp_tokens via a single batch", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        const cache = makeTestCacheRead({
             routes: [
                 {
                     match: "FROM otel_metric_point",
@@ -119,22 +121,21 @@ describe("enrichInsightRows", () => {
             { id: "friction_event:f2", session_ref: "session:s2", session: "session:s2", kind: "tool_failure", ts: new Date() },
         ];
         const rows = await Effect.runPromise(
-            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(tc.layer)),
+            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(Layer.merge(tc.layer, cache.layer))),
         );
         expect(rows[0]!.otlp_cost_usd).toBe(0.25);
         expect(rows[0]!.otlp_tokens).toBe(800);
         expect(rows[1]!.otlp_cost_usd).toBeNull();
         expect(rows[1]!.otlp_tokens).toBeNull();
         // 3 queries total: otel_metric_point + otel_log_event + has_content
-        expect(tc.captured).toHaveLength(3);
+        expect(cache.captured).toHaveLength(2);
+        expect(tc.captured).toHaveLength(1);
     });
 
     test("friction: enriches rows with contentType from session-dominant has_content category", async () => {
         const tc = makeTestSurrealClient({
             denyWrites: true,
             routes: [
-                { match: "FROM otel_metric_point", rows: [[]] },
-                { match: "FROM otel_log_event", rows: [[]] },
                 {
                     match: "FROM has_content",
                     rows: [[
@@ -144,12 +145,13 @@ describe("enrichInsightRows", () => {
                 },
             ],
         });
+        const cache = makeTestCacheRead();
         const frictionRows = [
             { id: "friction_event:f1", session_ref: "session:s1", session: "session:s1", kind: "tool_failure", ts: new Date() },
             { id: "friction_event:f2", session_ref: "session:s2", session: "session:s2", kind: "tool_failure", ts: new Date() },
         ];
         const rows = await Effect.runPromise(
-            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(tc.layer)),
+            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(Layer.merge(tc.layer, cache.layer))),
         );
         // session s1 has dominant category "unknown" (500 bytes > 200)
         expect(rows[0]!.contentType).toBe("unknown");

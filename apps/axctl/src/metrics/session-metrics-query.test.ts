@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { fetchSessionHealthMap, fetchSessionMetrics } from "./session-metrics-query.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { fetchSessionHealthMap as fetchSessionHealthMapWithRead, fetchSessionMetrics as fetchSessionMetricsWithRead } from "./session-metrics-query.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 /** Dispatching mock: metrics listing vs health batch vs token-usage batch vs pricing fetch. */
 const db = (input: {
@@ -11,21 +12,25 @@ const db = (input: {
     pricing?: Array<Record<string, unknown>>;
     seenSql?: string[];
 }) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+    makeTestCacheRead({ fallback: (sql) => {
             input.seenSql?.push(sql);
             if (sql.includes("FROM session_health")) {
-                return Effect.succeed([input.health ?? []] as unknown as T);
+                return input.health ?? [];
             }
             if (sql.includes("FROM session_token_usage")) {
-                return Effect.succeed([input.usage ?? []] as unknown as T);
+                return input.usage ?? [];
             }
             if (sql.includes("agent_model")) {
-                return Effect.succeed([input.pricing ?? []] as unknown as T);
+                return input.pricing ?? [];
             }
-            return Effect.succeed([input.metrics] as unknown as T);
-        },
-    } as never);
+            return input.metrics;
+        } }).layer;
+const fetchSessionMetrics = (input: Parameters<typeof fetchSessionMetricsWithRead>[1]) => Effect.gen(function* () {
+    return yield* fetchSessionMetricsWithRead(yield* CacheRead, input);
+});
+const fetchSessionHealthMap = (ids: readonly string[] | null) => Effect.gen(function* () {
+    return yield* fetchSessionHealthMapWithRead(yield* CacheRead, ids);
+});
 
 describe("fetchSessionMetrics", () => {
     test("maps joined rows into typed SessionMetricsRow[] (stored cost preserved)", async () => {
@@ -89,7 +94,8 @@ describe("fetchSessionMetrics", () => {
         expect(metricsSql).not.toContain("$parent");
         expect(metricsSql).not.toContain("session_health");
         const healthSql = seenSql.find((s) => s.includes("FROM session_health"))!;
-        expect(healthSql).toContain("WHERE session IN [session:`s1`]");
+        expect(healthSql).toContain("WHERE TRUE AND session IN (?)");
+        expect(healthSql).not.toContain("session:`s1`");
     });
 
     test("unknown model leaves cost null (unknown ≠ $0)", async () => {

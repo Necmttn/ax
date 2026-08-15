@@ -94,7 +94,7 @@ const errorText = (error: unknown): string =>
  *                     effort) - a crash must never strand the row in
  *                     "running" (#269); the defect still propagates
  *
- * The finalizer runs while the SurrealClient scope is still open (inner
+ * The finalizer runs while the cache write scope is still open (inner
  * scope unwinds before the layer closes the connection), so the last write
  * has a live connection. The interruption arm requires the process main
  * fiber to actually be interrupted on SIGINT - see BunRuntime.runMain in

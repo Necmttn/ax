@@ -48,7 +48,12 @@ const retroProposalWrite = (
         readonly sig: string; readonly frequency: number; readonly confidence: string },
     form: string,
     baseline: unknown,
-): RetroProposalWrite => ({ table: "proposal", row: cacheRow({
+    exists: boolean,
+): RetroProposalWrite => ({ table: "proposal", row: cacheRow(exists ? {
+    id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis,
+    dedupe_sig: row.sig, frequency: row.frequency, confidence: row.confidence,
+    updated_at: new Date(),
+} : {
     id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis,
     dedupe_sig: row.sig, frequency: row.frequency, confidence: row.confidence,
     status: "open", origin: "mined", hypothesis_template: null, evidence_query: null,
@@ -397,9 +402,9 @@ export const deriveRetroProposalRows = (
  * `cites_evidence TO` union yet. Provenance is captured in the
  * `baseline` JSON instead (`tool`, `retroKeys`, `sessionKeys`).
  */
-export const buildRetroSkillProposalStatements = (
+export const buildRetroSkillProposalWrites = (
     rows: readonly RetroSkillProposalRow[],
-    _existingSigs: ReadonlySet<string> = new Set(),
+    existingSigs: ReadonlySet<string> = new Set(),
 ): RetroProposalWrite[] => {
     const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
@@ -409,7 +414,7 @@ export const buildRetroSkillProposalStatements = (
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
         };
-        writes.push(retroProposalWrite(row, "skill", baseline));
+        writes.push(retroProposalWrite(row, "skill", baseline, existingSigs.has(row.sig)));
         writes.push({ table: "skill_proposal", row: cacheRow({ id: row.proposalKey, proposal: row.proposalKey,
             trigger_pattern: row.triggerPattern, suspected_gap: row.suspectedGap,
             proposed_behavior: row.proposedBehavior, expected_impact: row.expectedImpact }) });
@@ -472,13 +477,13 @@ export const deriveRetroCorrectionProposalRows = (
 };
 
 /**
- * Mirror of {@link buildRetroSkillProposalStatements} but emits `form="guidance"`
+ * Mirror of {@link buildRetroSkillProposalWrites} but emits `form="guidance"`
  * + `guidance_proposal` payload. Baseline JSON encodes
  * `kind:"corrections"` so the verdict layer can recognize the source.
  */
-export const buildRetroCorrectionGuidanceStatements = (
+export const buildRetroCorrectionGuidanceWrites = (
     rows: readonly RetroGuidanceProposalRow[],
-    _existingSigs: ReadonlySet<string> = new Set(),
+    existingSigs: ReadonlySet<string> = new Set(),
 ): RetroProposalWrite[] => {
     const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
@@ -488,7 +493,7 @@ export const buildRetroCorrectionGuidanceStatements = (
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
         };
-        writes.push(retroProposalWrite(row, "guidance", baseline));
+        writes.push(retroProposalWrite(row, "guidance", baseline, existingSigs.has(row.sig)));
         writes.push({ table: "guidance_proposal", row: cacheRow({ id: row.proposalKey,
             proposal: row.proposalKey, file_target: row.fileTarget, section: row.section,
             suggested_text: row.suggestedText }) });
@@ -553,9 +558,9 @@ export const deriveRetroFrictionSkillRows = (
     return { rows, skipped };
 };
 
-export const buildRetroFrictionSkillStatements = (
+export const buildRetroFrictionSkillWrites = (
     rows: readonly RetroFrictionSkillProposalRow[],
-    _existingSigs: ReadonlySet<string> = new Set(),
+    existingSigs: ReadonlySet<string> = new Set(),
 ): RetroProposalWrite[] => {
     const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
@@ -565,7 +570,7 @@ export const buildRetroFrictionSkillStatements = (
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
         };
-        writes.push(retroProposalWrite(row, "skill", baseline));
+        writes.push(retroProposalWrite(row, "skill", baseline, existingSigs.has(row.sig)));
         writes.push({ table: "skill_proposal", row: cacheRow({ id: row.proposalKey,
             proposal: row.proposalKey, trigger_pattern: row.triggerPattern,
             suspected_gap: row.suspectedGap, proposed_behavior: row.proposedBehavior,
@@ -644,9 +649,9 @@ export const deriveRetroProposals = (
             deriveRetroFrictionSkillRows(frictionClusters, existingSkillNames);
 
         const writes = [
-            ...buildRetroSkillProposalStatements(toolRows, existingSigs),
-            ...buildRetroCorrectionGuidanceStatements(correctionRows, existingSigs),
-            ...buildRetroFrictionSkillStatements(frictionRows, existingSigs),
+            ...buildRetroSkillProposalWrites(toolRows, existingSigs),
+            ...buildRetroCorrectionGuidanceWrites(correctionRows, existingSigs),
+            ...buildRetroFrictionSkillWrites(frictionRows, existingSigs),
         ];
         const existingBySig = new Map(existingProposals.map((row) => [row.dedupe_sig, row]));
         for (const item of writes) {

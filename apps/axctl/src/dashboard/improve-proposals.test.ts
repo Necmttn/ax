@@ -5,8 +5,9 @@
  * and verify that fetchImproveProposals attaches a rendered brief to each row.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { createImpactEstimateCache } from "../improve/impact.ts";
 import {
     createHypothesisHydrationCache,
@@ -32,9 +33,17 @@ const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
 };
 
 const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead>,
     layer: Layer.Layer<SurrealClient>,
-) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+) => {
+    const emptyCache: CacheReadService = {
+        rows: () => Effect.succeed([]) as never,
+        first: () => Effect.succeed(Option.none()) as never,
+        raw: () => Effect.succeed({ columns: [], rows: [] }) as never,
+        snapshotPath: "(test)",
+    };
+    return Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, emptyCache)))));
+};
 
 const hydrationDeps = () => ({
     hydrationCache: createHypothesisHydrationCache(),

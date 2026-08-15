@@ -1,27 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Duration, Effect, Fiber, Layer, Path } from "effect";
+import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { BunFileSystem } from "@effect/platform-bun";
-import { AxConfigTest } from "@ax/lib/config";
 import { DbError } from "@ax/lib/errors";
-import { makeTestSurrealClient, type TestSurrealRoutes } from "@ax/lib/testing/surreal";
-import { reapIntervalSeconds, runReapLoop, superviseReapLoop } from "./reap-loop.ts";
-
-const strandedRow = { id: "ingest_run:dead", started_at: "2020-01-01T00:00:00.000Z" };
-
-const harness = (routes: TestSurrealRoutes) => {
-    const tc = makeTestSurrealClient({ routes });
-    const layer = Layer.mergeAll(
-        tc.layer,
-        AxConfigTest({ knobs: { ingestTimeoutSeconds: 900 } }).pipe(Layer.provide(BunFileSystem.layer)),
-        BunFileSystem.layer,
-        Path.layer,
-    );
-    return { tc, layer };
-};
-
-const reapUpdates = (captured: readonly string[]): string[] =>
-    captured.filter((sql) => sql.startsWith("UPDATE ingest_run:"));
+import { reapIntervalSeconds, runReapSchedule, superviseReapLoop } from "./reap-loop.ts";
 
 describe("reapIntervalSeconds", () => {
     test("defaults to 300s", () => {
@@ -129,77 +110,52 @@ describe("superviseReapLoop", () => {
     });
 });
 
-describe("runReapLoop", () => {
-    test("reaps a stranded row on the first tick, without waiting for an interval", async () => {
-        const { tc, layer } = harness({ "FROM ingest_run WHERE status = 'running'": [[strandedRow]] });
-
+describe("runReapSchedule", () => {
+    test("runs the first tick without waiting for an interval", async () => {
+        let calls = 0;
         await Effect.runPromise(
             Effect.gen(function* () {
-                const fiber = yield* Effect.forkChild(runReapLoop({ intervalSeconds: 300 }));
+                const fiber = yield* Effect.forkChild(runReapSchedule(Effect.sync(() => { calls += 1; }), 300));
                 yield* TestClock.adjust(Duration.zero);
-                // The real observable effect: the stuck row is settled in the DB.
-                expect(reapUpdates(tc.captured)).toHaveLength(1);
-                expect(reapUpdates(tc.captured)[0]).toContain(`status = "partial"`);
+                expect(calls).toBe(1);
                 yield* Fiber.interrupt(fiber);
-            }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+            }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
         );
     });
 
     test("keeps sweeping on each interval", async () => {
-        const { tc, layer } = harness({ "FROM ingest_run WHERE status = 'running'": [[strandedRow]] });
-
+        let calls = 0;
         await Effect.runPromise(
             Effect.gen(function* () {
-                const fiber = yield* Effect.forkChild(runReapLoop({ intervalSeconds: 300 }));
+                const fiber = yield* Effect.forkChild(runReapSchedule(Effect.sync(() => { calls += 1; }), 300));
                 yield* TestClock.adjust(Duration.zero);
-                expect(reapUpdates(tc.captured)).toHaveLength(1);
+                expect(calls).toBe(1);
                 yield* TestClock.adjust(Duration.minutes(5));
-                expect(reapUpdates(tc.captured)).toHaveLength(2);
+                expect(calls).toBe(2);
                 yield* TestClock.adjust(Duration.minutes(5));
-                expect(reapUpdates(tc.captured)).toHaveLength(3);
+                expect(calls).toBe(3);
                 yield* Fiber.interrupt(fiber);
-            }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+            }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
         );
     });
 
     test("a failing DB does not kill the loop - the next tick still sweeps", async () => {
-        let call = 0;
-        const { tc, layer } = harness({
-            "FROM ingest_run WHERE status = 'running'": () => {
-                call += 1;
-                return call === 1
-                    ? Effect.fail(new DbError({ operation: "query", message: "connection refused" }))
-                    : [[strandedRow]];
-            },
+        let calls = 0;
+        const tick = Effect.suspend(() => {
+            calls += 1;
+            return calls === 1
+                ? Effect.fail(new DbError({ operation: "query", message: "connection refused" }))
+                : Effect.void;
         });
-
         await Effect.runPromise(
             Effect.gen(function* () {
-                const fiber = yield* Effect.forkChild(runReapLoop({ intervalSeconds: 300 }));
+                const fiber = yield* Effect.forkChild(runReapSchedule(tick, 300));
                 yield* TestClock.adjust(Duration.zero);
-                expect(reapUpdates(tc.captured)).toHaveLength(0); // first tick failed
+                expect(calls).toBe(1);
                 yield* TestClock.adjust(Duration.minutes(5));
-                expect(reapUpdates(tc.captured)).toHaveLength(1); // recovered
+                expect(calls).toBe(2);
                 yield* Fiber.interrupt(fiber);
-            }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
-        );
-    });
-
-    test("leaves a live run alone", async () => {
-        const live = {
-            id: "ingest_run:live",
-            started_at: new Date().toISOString(),
-            last_progress_at: new Date().toISOString(),
-        };
-        const { tc, layer } = harness({ "FROM ingest_run WHERE status = 'running'": [[live]] });
-
-        await Effect.runPromise(
-            Effect.gen(function* () {
-                const fiber = yield* Effect.forkChild(runReapLoop({ intervalSeconds: 300 }));
-                yield* TestClock.adjust(Duration.zero);
-                expect(reapUpdates(tc.captured)).toHaveLength(0);
-                yield* Fiber.interrupt(fiber);
-            }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+            }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
         );
     });
 });

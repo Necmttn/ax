@@ -354,7 +354,7 @@ const loadDispatchRows = (read: CacheReadService, sinceDays: number, legs: boole
                 completion_tokens: row.completion_tokens ?? 0,
                 cache_read_tokens: row.cache_read_tokens ?? 0,
                 cache_create_tokens: row.cache_create_tokens ?? 0,
-                cost_usd: row.cost_usd ?? 0,
+                cost_usd: Number.isFinite(row.cost_usd ?? 0) ? row.cost_usd ?? 0 : 0,
             })),
             toolCalls,
             parentSessions,

@@ -11,15 +11,25 @@ import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { ProcessServiceLive } from "@ax/lib/process";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     buildHarnessGrounding,
-    fetchMainBranchGraphEvidence,
-    fetchObservedTooling,
+    fetchMainBranchGraphEvidence as fetchMainBranchGraphEvidenceWithRead,
+    fetchObservedTooling as fetchObservedToolingWithRead,
     type HarnessGrounding,
 } from "./harness.ts";
+
+const fetchObservedTooling = () => Effect.gen(function* () {
+    const read = yield* CacheRead;
+    return yield* fetchObservedToolingWithRead(read);
+});
+
+const fetchMainBranchGraphEvidence = () => Effect.gen(function* () {
+    const read = yield* CacheRead;
+    return yield* fetchMainBranchGraphEvidenceWithRead(read);
+});
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("project harness queries", {
     requireFts: true,

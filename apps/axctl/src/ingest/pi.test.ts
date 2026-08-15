@@ -2,27 +2,37 @@ import { describe, expect, test } from "bun:test";
 import { SkillName } from "@ax/lib/brands";
 import {
     agentEventRecordKey,
-    buildAgentEventStatements,
 } from "./provider-events.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
-    __testBuildPiBatchStatements,
     __testExtractPiJsonlLines,
     OMP_PROVIDER,
     ompStage,
     piStage,
     textFromPiContent,
+    toPiNormalizedBatch,
 } from "./pi.ts";
+
+const normalizedPiBatch = (
+    extract: Parameters<typeof toPiNormalizedBatch>[0],
+    desc?: Parameters<typeof toPiNormalizedBatch>[1],
+) => toPiNormalizedBatch(extract, desc);
 
 // Fixture skill names are plain string literals; brand via the schema constructor.
 const sn = (s: string): SkillName => SkillName.make(s);
 
 describe("Pi JSONL extraction", () => {
-    const extractAgentEventKeysAndSeqs = (statements: readonly string[]): { key: string; seq: number }[] =>
-        statements.flatMap((statement) => {
-            const match = statement.match(/^UPSERT agent_event:`([^`]+)` CONTENT \{[\s\S]*? seq: (\d+),/);
-            return match ? [{ key: match[1]!, seq: Number(match[2]) }] : [];
-        });
+    const extractAgentEventKeysAndSeqs = (
+        batch: ReturnType<typeof normalizedPiBatch>,
+    ): { key: string; seq: number }[] => batch.events.map((event) => ({
+        key: agentEventRecordKey({
+            provider: event.provider,
+            providerSessionId: event.providerSessionId,
+            ...(event.providerEventId == null ? {} : { providerEventId: event.providerEventId }),
+            seq: event.seq,
+        }),
+        seq: event.seq,
+    }));
 
     test("textFromPiContent joins text blocks and ignores unknown blocks", () => {
         expect(textFromPiContent([
@@ -245,10 +255,6 @@ describe("Pi JSONL extraction", () => {
             },
         ]);
 
-        const statements = buildAgentEventStatements({
-            sessions: [],
-            events: extracted.providerEvents,
-        });
         const customEventKey = agentEventRecordKey({
             provider: "pi",
             providerSessionId: "pi-session",
@@ -261,15 +267,15 @@ describe("Pi JSONL extraction", () => {
             providerEventId: "user-1",
             seq: 3,
         });
-        const edgeStatements = statements.filter((statement) =>
-            statement.startsWith("RELATE agent_event:"),
-        );
+        const keysByProviderId = new Map(extracted.providerEvents.flatMap((event) =>
+            event.providerEventId ? [[event.providerEventId, agentEventRecordKey(event)] as const] : []));
+        const edges = extracted.providerEvents.flatMap((event) =>
+            [...new Set([event.parentProviderEventId, ...(event.parentProviderEventIds ?? [])])]
+                .filter((id): id is string => id !== null && id !== undefined && keysByProviderId.has(id))
+                .map((id) => ({ parent: keysByProviderId.get(id)!, child: agentEventRecordKey(event) })));
 
-        expect(edgeStatements).toHaveLength(5);
-        expect(edgeStatements.join("\n")).toContain(
-            `RELATE agent_event:\`${customEventKey}\``,
-        );
-        expect(edgeStatements.join("\n")).toContain(`->agent_event:\`${userEventKey}\``);
+        expect(edges).toHaveLength(5);
+        expect(edges).toContainEqual({ parent: customEventKey, child: userEventKey });
     });
 
     test("invalid timestamps use safe fallbacks with warnings and do not throw", () => {
@@ -512,21 +518,21 @@ describe("Pi JSONL extraction", () => {
             },
         ]);
 
-        const sql = __testBuildPiBatchStatements(extracted).join("\n");
-        expect(sql).toContain("UPSERT tool_call:");
-        expect(sql).toContain("name: \"pi:read\"");
-        expect(sql).toContain("scope: \"pi-tool\"");
-        expect(sql).toContain("->invoked:");
-        expect(sql).toContain("session = session:`pi-tools`");
-        expect(sql).toContain("->concerns:");
-        expect(sql).toContain("UPSERT session_token_usage:`pi_tools`");
-        expect(sql).toContain("prompt_tokens: 12");
-        expect(sql).toContain("completion_tokens: 7");
-        expect(sql).toContain("cache_read_input_tokens: 2");
-        expect(sql).toContain("cache_creation_input_tokens: 1");
-        expect(sql).toContain("estimated_tokens: 19");
-        expect(sql).toContain('\\"token_source_quality\\":\\"explicit\\"');
-        expect(sql).toContain('\\"token_source_detail\\":\\"pi_usage_fields\\"');
+        const batch = normalizedPiBatch(extracted);
+        expect(batch.toolCalls).toHaveLength(1);
+        expect(batch.syntheticSkillInvocations[0]).toMatchObject({
+            sessionId: "pi-tools",
+            skillName: "pi:read",
+            skillScope: "pi-tool",
+        });
+        expect(batch.toolCallSkillRelations).toHaveLength(1);
+        expect(extracted.usage).toMatchObject({
+            input: 12,
+            output: 7,
+            cacheRead: 2,
+            cacheWrite: 1,
+            totalTokens: 19,
+        });
     });
 
     test("provider event keys and session seqs are stable and unique across repeated statement generation", () => {
@@ -576,8 +582,8 @@ describe("Pi JSONL extraction", () => {
         expect(second).not.toBeNull();
         if (!first || !second) return;
 
-        const firstEvents = extractAgentEventKeysAndSeqs(__testBuildPiBatchStatements(first));
-        const secondEvents = extractAgentEventKeysAndSeqs(__testBuildPiBatchStatements(second));
+        const firstEvents = extractAgentEventKeysAndSeqs(normalizedPiBatch(first));
+        const secondEvents = extractAgentEventKeysAndSeqs(normalizedPiBatch(second));
 
         expect(firstEvents).toEqual(secondEvents);
         expect(new Set(firstEvents.map((event) => event.key)).size).toBe(firstEvents.length);
@@ -622,18 +628,22 @@ describe("Pi JSONL extraction", () => {
         expect(extracted).not.toBeNull();
         if (!extracted) return;
 
-        const sql = __testBuildPiBatchStatements(extracted).join("\n");
-        expect(sql).toContain("->read_file:`");
-        expect(sql).toContain("path_seen = \"src/ingest/pi.ts\"");
-        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest/pi.ts\"");
-        expect(sql).toContain("evidence = \"tool_name:read\"");
-        expect(sql).toContain("->searched_file:`");
-        expect(sql).toContain("path_seen = \"src/ingest\"");
-        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest\"");
-        expect(sql).toContain("evidence = \"tool_name:grep\"");
+        const evidence = normalizedPiBatch(extracted).toolFileEvidence;
+        expect(evidence).toContainEqual(expect.objectContaining({
+            kind: "read_file",
+            pathSeen: "src/ingest/pi.ts",
+            path: "/Users/necmttn/Projects/ax/src/ingest/pi.ts",
+            evidence: "tool_name:read",
+        }));
+        expect(evidence).toContainEqual(expect.objectContaining({
+            kind: "searched_file",
+            pathSeen: "src/ingest",
+            path: "/Users/necmttn/Projects/ax/src/ingest",
+            evidence: "tool_name:grep",
+        }));
     });
 
-    test("turn statements escape session ids and timestamps through shared Surreal helpers", () => {
+    test("turn rows keep unsafe session ids as bound values", () => {
         const extracted = __testExtractPiJsonlLines([
             JSON.stringify({
                 type: "session",
@@ -657,12 +667,9 @@ describe("Pi JSONL extraction", () => {
         expect(extracted).not.toBeNull();
         if (!extracted) return;
 
-        const turnStatement = __testBuildPiBatchStatements(extracted)
-            .find((statement) => statement.startsWith("UPSERT turn:"));
-
-        expect(turnStatement).toContain("session: session:`pi\\`session\\nunsafe`");
-        expect(turnStatement).toContain('ts: d"2026-05-29T06:00:01.000Z"');
-        expect(turnStatement).not.toContain("session: session:`pi`session");
+        const turn = normalizedPiBatch(extracted).turns[0];
+        expect(turn?.sessionId).toBe("pi`session\nunsafe");
+        expect(turn?.ts).toBe("2026-05-29T06:00:01.000Z");
     });
 });
 
@@ -735,12 +742,11 @@ describe("omp (oh-my-pi) provider parity", () => {
         // Provider events carry the omp provider.
         expect(extracted!.providerEvents.every((e) => e.provider === "omp")).toBe(true);
 
-        const sql = __testBuildPiBatchStatements(extracted!, OMP_PROVIDER).join("\n");
-        expect(sql).toContain('provider: "omp"');
-        expect(sql).toContain('source: "omp"');
-        expect(sql).toContain('scope: "omp-tool"');
-        expect(sql).not.toContain('provider: "pi"');
-        expect(sql).not.toContain('"pi-tool"');
+        const batch = normalizedPiBatch(extracted!, OMP_PROVIDER);
+        expect(batch.sessions[0]?.provider).toBe("omp");
+        expect(batch.sessions[0]?.labels).toMatchObject({ source: "omp" });
+        expect(batch.syntheticSkillInvocations[0]?.skillScope).toBe("omp-tool");
+        expect(batch.events.every((event) => event.provider !== "pi")).toBe(true);
     });
 
     test("default descriptor still ingests as pi (back-compat)", () => {

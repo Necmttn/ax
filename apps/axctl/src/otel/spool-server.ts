@@ -44,6 +44,35 @@ export interface OtlpSpoolRecord {
     readonly body: string;
 }
 
+export interface AppendOtlpSpoolOptions {
+    readonly spoolDir?: string;
+    readonly now?: () => Date;
+}
+
+/** Append one accepted OTLP request to the daily durable spool. */
+export const appendOtlpSpool = (
+    pathname: string,
+    body: string,
+    opts: AppendOtlpSpoolOptions = {},
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const receivedAt = opts.now?.() ?? new Date();
+        const spoolDir = opts.spoolDir ?? defaultOtlpSpoolDir();
+        const record: OtlpSpoolRecord = {
+            received_at: receivedAt.toISOString(),
+            path: pathname,
+            body,
+        };
+        yield* fs.makeDirectory(spoolDir, { recursive: true });
+        yield* fs.writeFileString(
+            path.join(spoolDir, `${dayKey(receivedAt)}.jsonl`),
+            `${JSON.stringify(record)}\n`,
+            { flag: "a" },
+        );
+    });
+
 export interface PruneOtlpSpoolOptions {
     readonly spoolDir: string;
     readonly now: Date;

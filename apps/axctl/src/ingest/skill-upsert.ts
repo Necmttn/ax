@@ -1,5 +1,5 @@
 import type { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { skillRowId } from "@ax/lib/stable-id";
 import { cacheRow } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableId } from "@ax/lib/stable-id";
@@ -31,7 +31,7 @@ export function upsertSkillByName(
             [content.name],
         );
         const existing = Option.getOrNull(existingOption);
-        const id = existing?.id ?? skillRecordKey(content.name);
+        const id = existing?.id ?? skillRowId(content.name);
 
         // Drift log: append a skill_revision ONLY on a real content change (the
         // hash flipped) or the first sighting of a new skill. The current `skill`

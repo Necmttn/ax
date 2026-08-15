@@ -11,13 +11,6 @@
  *     `OtelDecodeError` (the error stays in the TYPED channel; fail-open
  *     `orElseSucceed(null)` is applied at the handleOtlp dispatch seam, NEVER
  *     here - fail-open is byte-sensitive).
- *   - `writeRows`                           - the `rows.length ? exec : void`
- *     render-and-write body (3×). `stmt` receives `(row, i)` so the LOG record
- *     id index is computed at RENDER time over the post-allowlist-filter
- *     emitted array (metric/span stmts ignore `i`).
- *
- * The flat, greppable per-column UPSERT SQL is intentionally NOT abstracted into
- * a Column DSL (kept in writer.ts).
  */
 import { Effect, Schema } from "effect";
 import { attrMap, type KeyValue } from "./otlp-schema.ts";
@@ -103,11 +96,6 @@ export const decodeSignal = <S extends Schema.Top>(schema: S, signal: string) =>
         Effect.mapError((e) => new OtelDecodeError({ signal, message: String(e) })),
     );
 
-/**
- * Render rows to UPSERT statements and execute them; no statement for an empty
- * batch. `stmt` is called as `stmt(row, i)` over the post-filter emitted array,
- * so a per-payload `index` (logs) stays stable and collision-free.
- */
 /** Typed decode failure. Lives here so `decodeSignal` has no import cycle. */
 export class OtelDecodeError extends Schema.TaggedErrorClass<OtelDecodeError>(
     "OtelDecodeError",

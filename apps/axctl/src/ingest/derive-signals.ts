@@ -3,11 +3,11 @@ import { SkillName } from "@ax/lib/brands";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
-import { edgeRowId, turnRowId } from "@ax/lib/stable-id";
+import { edgeRowId } from "@ax/lib/stable-id";
 import {
     deriveCorrections, deriveDiagnosticsFromToolCalls,
     deriveFrictionFromCorrections, deriveFrictionFromToolCalls,
-    deriveProposed, deriveRecovered, deriveSkillPairs,
+    correctedInvokedTurnKeys, deriveProposed, deriveRecovered, deriveSkillPairs,
     groupTurnsBySession, shouldDeriveAllTimeSkillPairs,
 } from "./signals/core.ts";
 import type {
@@ -214,10 +214,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
         );
         // Denormalise was_corrected onto invoked edges so cmdTaste's
         // corrections subquery becomes a pure index/scan filter (issue #31).
-        const wasCorrectedTurnKeys = [...new Set(correctionBatch.flatMap((edge) => {
-            const lo = Math.max(1, edge.correctedSeq - 3);
-            return Array.from({ length: edge.correctedSeq - lo + 1 }, (_, index) => turnRowId(edge.correctedSession, lo + index));
-        }))];
+        const wasCorrectedTurnKeys = correctedInvokedTurnKeys(correctionBatch);
         for (const key of wasCorrectedTurnKeys) yield* write.exec("UPDATE invoked SET was_corrected = true WHERE in_id = ?", [key]);
         yield* Effect.void.pipe(
             Effect.withSpan("signals.write.was-corrected", {

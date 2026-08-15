@@ -4,7 +4,6 @@ import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
-import { surrealJsonOption } from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -29,11 +28,7 @@ import {
 } from "./plans.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import {
-    buildNormalizedTranscriptStatements,
-    type NormalizedTranscriptBatch,
-    writeNormalizedTranscriptBatch,
-} from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 // Codex token counts arrive as numbers OR numeric strings - the toolkit's
 // integer probe (`intField`) is this parser's `numberField`.
 import {
@@ -52,10 +47,6 @@ import {
     makeToolCallWrite,
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
-import {
-    buildSessionTokenUsageStatement,
-    buildTurnTokenUsageStatement,
-} from "./token-usage-writers.ts";
 import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { isNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
@@ -1202,89 +1193,6 @@ export const __testStreamCodexFileGuarded = (
 
 export const __testCompactCodexToolCall = compactCodexToolCall;
 
-const buildCodexTokenUsageStatements = (
-    usage: CodexTokenUsage | null,
-    source: "codex" | "codex-subagent" = "codex",
-): string[] => {
-    if (!usage) return [];
-    const cost = estimateCost({
-        modelKey: usage.model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cacheCreationInputTokens: null,
-        cacheReadInputTokens: usage.cacheReadInputTokens,
-        estimatedTokens: usage.estimatedTokens,
-        // `usage.promptTokens` is `total_token_usage.input_tokens` - cumulative
-        // across the whole session at this point, not one request. See plan 003.
-        aggregated: true,
-    });
-    return [
-        // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
-        buildSessionTokenUsageStatement({
-            sessionId: usage.session,
-            source,
-            model: usage.model,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            cacheCreationInputTokens: null,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            reasoningOutputTokens: usage.reasoningOutputTokens,
-            estimatedTokens: usage.estimatedTokens,
-            contextWindow: usage.contextWindow,
-            cost: { modelRefKey: usage.model, estimate: cost },
-            labels: surrealJsonOption(tokenQualityLabels({
-                source: "codex_token_count",
-                tokenSourceQuality: "explicit",
-                tokenSourceDetail: "codex_token_count.total_token_usage",
-                model: usage.model,
-                modelSourceDetail: usage.model ? "codex_session.model_provider" : "missing_codex_model_provider",
-            })),
-            metrics: surrealJsonOption({
-                total_token_usage: usage.totalTokenUsage,
-                last_token_usage: usage.lastTokenUsage,
-                token_count_events: usage.tokenCountEvents,
-            }),
-            ts: usage.ts,
-        }),
-    ];
-};
-
-const buildCodexTurnTokenUsageStatements = (
-    usages: readonly CodexTurnTokenUsage[],
-    source: "codex" | "codex-subagent" = "codex",
-): string[] =>
-    usages.map((usage) =>
-        buildTurnTokenUsageStatement({
-            sessionId: usage.session,
-            seq: usage.seq,
-            source,
-            model: usage.model,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            cacheCreationInputTokens: usage.cacheCreationInputTokens,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            freshInputTokens: usage.freshInputTokens,
-            estimatedTokens: usage.estimatedTokens,
-            reasoningOutputTokens: usage.reasoningOutputTokens,
-            modelRefKey: usage.model,
-            cost: estimateCost({
-                modelKey: usage.model,
-                promptTokens: usage.promptTokens,
-                completionTokens: usage.completionTokens,
-                cacheCreationInputTokens: usage.cacheCreationInputTokens,
-                cacheReadInputTokens: usage.cacheReadInputTokens,
-                estimatedTokens: usage.estimatedTokens,
-                // `first_total` promptTokens is a cumulative sum, not one
-                // request's context - see `isCodexTurnUsageAggregated`.
-                ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
-            }),
-            usageSource: usage.usageSource,
-            usageQuality: usage.usageQuality,
-            raw: surrealJsonOption(usage.raw),
-            ts: usage.ts,
-        })
-    );
-
 const writeCodexTokenUsage = (
     write: CacheWriteService,
     usage: CodexTokenUsage | null,
@@ -1378,7 +1286,7 @@ const writeCodexTokenUsage = (
     }));
 });
 
-const toCodexNormalizedBatch = (
+export const toCodexNormalizedBatch = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
 ): NormalizedTranscriptBatch => ({
@@ -1454,21 +1362,6 @@ const toCodexNormalizedBatch = (
     planSnapshots: batch.planSnapshots,
     compactions: batch.compactions,
 });
-
-const buildCodexBatchStatements = (
-    batch: MutableCodexExtract,
-    payloadMaxBytes: number,
-    clearExisting = true,
-): string[] => [
-    ...buildNormalizedTranscriptStatements(
-        toCodexNormalizedBatch(batch, payloadMaxBytes),
-        { clearExisting },
-    ),
-    ...buildCodexTokenUsageStatements(batch.tokenUsage, codexSourceForThread(batch.session?.thread_source)),
-    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages, codexSourceForThread(batch.session?.thread_source)),
-];
-
-export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;

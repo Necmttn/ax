@@ -7,6 +7,8 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import type { Surreal } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { assembleAgenda, collectAgendaItems } from "./agenda.ts";
 import type { BudgetEnvelope, DojoItem } from "./schema.ts";
 
@@ -86,7 +88,8 @@ describe("collectAgendaItems", () => {
         getFile: () => Effect.succeed(""),
         raw: null as unknown as Surreal, // never touched by read-only agenda sources
     };
-    const env = Layer.mergeAll(Layer.succeed(SurrealClient, emptyClient), BunFileSystem.layer);
+    const surrealLayer = Layer.succeed(SurrealClient, emptyClient);
+    const env = Layer.mergeAll(surrealLayer, makeTestCacheRead().layer, BunFileSystem.layer);
 
     test("empty graph + missing task dir -> only the proposal-mint nudge", async () => {
         const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
@@ -111,7 +114,19 @@ describe("collectAgendaItems", () => {
             query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
                 Effect.fail("db offline") as unknown as Effect.Effect<T>,
         };
-        const failingEnv = Layer.mergeAll(Layer.succeed(SurrealClient, failingClient), BunFileSystem.layer);
+        const failingSurreal = Layer.succeed(SurrealClient, failingClient);
+        const fail = Effect.fail("db offline") as never;
+        const failingCache: CacheReadService = {
+            rows: () => fail,
+            first: () => fail,
+            raw: () => fail,
+            snapshotPath: "(failing-test-cache)",
+        };
+        const failingEnv = Layer.mergeAll(
+            failingSurreal,
+            Layer.succeed(CacheRead, failingCache),
+            BunFileSystem.layer,
+        );
         const collected = await Effect.runPromise(
             collectAgendaItems({
                 nowMs: Date.parse("2026-06-13T10:00:00.000Z"),

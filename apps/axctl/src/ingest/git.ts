@@ -335,124 +335,6 @@ const fetchCommits = Effect.fn("git.fetchCommits")(
 
 // ---------- DB writers ----------
 
-const sqlString = (value: string): string => `'${value.replaceAll("'", "''")}'`;
-
-interface CommitLookupInput {
-    repositoryId: string;
-    stableRepo: string;
-    checkoutPath: string;
-    sha: string;
-}
-
-interface FileLookupInput {
-    repositoryId: string;
-    stableRepo: string;
-    checkoutPath: string;
-    path: string;
-}
-
-interface CommitUpsertInput {
-    id: string;
-    stableRepo: string;
-    repositoryId: string;
-    sha: string;
-    message: string;
-    author: string;
-    ts: string;
-}
-
-interface FileUpsertInput {
-    id: string;
-    stableRepo: string;
-    repositoryId: string;
-    path: string;
-}
-
-export function buildCommitLookupQueries(input: CommitLookupInput): string[] {
-    return [
-        `SELECT id FROM "commit" WHERE repository = ${sqlString(input.repositoryId)} AND repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM "commit" WHERE repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM "commit" WHERE repository = ${sqlString(input.repositoryId)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM "commit" WHERE repo = ${sqlString(input.checkoutPath)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-    ];
-}
-
-export function buildFileLookupQueries(input: FileLookupInput): string[] {
-    return [
-        `SELECT id FROM file WHERE repository = ${sqlString(input.repositoryId)} AND repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repository = ${sqlString(input.repositoryId)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${sqlString(input.checkoutPath)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-    ];
-}
-
-export function buildCommitUpsertStatement(input: CommitUpsertInput): string {
-    return `INSERT INTO "commit" (id, sha, repo, message, author, ts, repository) VALUES (${sqlString(input.id)}, ${sqlString(input.sha)}, ${sqlString(input.stableRepo)}, ${sqlString(input.message)}, ${sqlString(input.author)}, ${sqlString(input.ts)}, ${sqlString(input.repositoryId)});`;
-}
-
-export function buildFileUpsertStatement(input: FileUpsertInput): string {
-    return `INSERT INTO file (id, repo, path, repository, identity_scope) VALUES (${sqlString(input.id)}, ${sqlString(input.stableRepo)}, ${sqlString(input.path)}, ${sqlString(input.repositoryId)}, 'repository');`;
-}
-
-interface TouchedRelationFile {
-    fileId: string;
-    additions: number | null;
-    deletions: number | null;
-}
-
-interface TouchedRelationInput {
-    commitId: string;
-    files: TouchedRelationFile[];
-    repositoryId: string;
-    checkoutId: string;
-    ts: string;
-}
-
-export function touchedRelationRecordKey(
-    commitId: string,
-    fileId: string,
-    checkoutId: string,
-): string {
-    return Bun.hash(`${relationEndpointKey(commitId)}|${relationEndpointKey(fileId)}|${relationEndpointKey(checkoutId)}`).toString(16).padStart(16, "0");
-}
-
-export function producedRelationRecordKey(sessionId: string, commitId: string): string {
-    return Bun.hash(`${relationEndpointKey(sessionId)}|${relationEndpointKey(commitId)}`).toString(16).padStart(16, "0");
-}
-
-function relationEndpointKey(record: string): string {
-    const trimmed = record.trim();
-    const tagged = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*):`(.+)`$/);
-    if (tagged) return `${tagged[1]}:${tagged[2]}`;
-    return trimmed;
-}
-
-export function buildTouchedRelationStatements(input: TouchedRelationInput): string[] {
-    const stmts: string[] = [];
-    for (const file of input.files) {
-        const add = file.additions === null ? "NONE" : String(file.additions);
-        const del = file.deletions === null ? "NONE" : String(file.deletions);
-        const edgeKey = touchedRelationRecordKey(input.commitId, file.fileId, input.checkoutId);
-        stmts.push(
-            `RELATE ${input.commitId}->touched:\`${edgeKey}\`->${file.fileId} SET additions = ${add}, deletions = ${del}, repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}";`,
-        );
-    }
-    return stmts;
-}
-
-export function buildProducedRelationStatements(input: {
-    readonly sessionIds: readonly string[];
-    readonly commitId: string;
-    readonly repositoryId: string;
-    readonly checkoutId: string;
-    readonly ts: string;
-}): string[] {
-    return input.sessionIds.map((sessionId) => {
-        const edgeKey = producedRelationRecordKey(sessionId, input.commitId);
-        return `RELATE ${sessionId}->produced:\`${edgeKey}\`->${input.commitId} SET repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}", source = "git", kind = "commit";`;
-    });
-}
-
 interface WriteStats {
     commits: number;
     files: number;
@@ -461,10 +343,16 @@ interface WriteStats {
     sessions: number;
 }
 
-export function buildSessionRepoWhere(repoPath: string): string {
-    const repoLit = sqlString(repoPath);
-    const prefixLit = sqlString(`${repoPath.endsWith("/") ? repoPath : `${repoPath}/`}%`);
-    return `(cwd = ${repoLit} OR cwd LIKE ${prefixLit})`;
+interface SqlClause {
+    readonly sql: string;
+    readonly params: readonly string[];
+}
+
+export function buildSessionRepoWhere(repoPath: string): SqlClause {
+    return {
+        sql: "(cwd = ? OR cwd LIKE ?)",
+        params: [repoPath, `${repoPath.endsWith("/") ? repoPath : `${repoPath}/`}%`],
+    };
 }
 
 export function nestedCheckoutPaths(
@@ -480,40 +368,14 @@ export function nestedCheckoutPaths(
 export function buildSessionCheckoutWhere(
     repoPath: string,
     excludedRepoPaths: readonly string[] = [],
-): string {
+): SqlClause {
     const base = buildSessionRepoWhere(repoPath);
     if (excludedRepoPaths.length === 0) return base;
-    const excluded = excludedRepoPaths.map(buildSessionRepoWhere).join(" OR ");
-    return `(${base} AND NOT (${excluded}))`;
-}
-
-export function buildSessionCheckoutUpdateStatement(
-    repoPath: string,
-    repositoryId: string,
-    checkoutId: string,
-    excludedRepoPaths: readonly string[] = [],
-): string {
-    return `UPDATE session SET repository = ${repositoryId}, checkout = ${checkoutId} WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)} RETURN NONE;`;
-}
-
-/**
- * Canonicalize `session.project` onto a single key for every session linked to
- * one logical repository. The harness parsers populate `project`
- * inconsistently - Claude stores a `~/.claude/projects/<slug>` dir slug, while
- * codex / pi / opencode / cursor store the raw cwd, and Claude worktrees get a
- * distinct slug per checkout - so the SAME repo fragments into many `project`
- * values and every exact-match grouping (project pages, workflow episodes)
- * misses cross-harness and cross-worktree sessions. Keying the rewrite on the
- * already-unified `repository` edge (rather than the cwd path) collapses all of
- * them, including orphan-worktree sessions whose checkout dir is gone. The
- * `project != ...` guard keeps the UPDATE a no-op once a session is canonical.
- */
-export function buildCanonicalProjectUpdate(
-    repositoryId: string,
-    canonicalSlug: string,
-): string {
-    const slugLit = sqlString(canonicalSlug);
-    return `UPDATE session SET project = ${slugLit} WHERE repository = ${sqlString(repositoryId)} AND (project IS NULL OR project != ${slugLit});`;
+    const excluded = excludedRepoPaths.map(buildSessionRepoWhere);
+    return {
+        sql: `(${base.sql} AND NOT (${excluded.map((clause) => clause.sql).join(" OR ")}))`,
+        params: [...base.params, ...excluded.flatMap((clause) => clause.params)],
+    };
 }
 
 /**
@@ -562,7 +424,8 @@ const linkedSessionCount = (
     excludedRepoPaths: readonly string[],
 ): Effect.Effect<number, CacheWriteError> =>
     Effect.gen(function* () {
-        const result = yield* write.raw(`SELECT count(*) AS count FROM session WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)}`);
+        const clause = buildSessionCheckoutWhere(repoPath, excludedRepoPaths);
+        const result = yield* write.raw(`SELECT count(*) AS count FROM session WHERE ${clause.sql}`, clause.params);
         const count = Number((result.rows[0] as Record<string, unknown> | undefined)?.count ?? 0);
         return Number.isFinite(count) ? count : 0;
     });
@@ -601,8 +464,9 @@ const writeRepo = Effect.fn("git.writeRepo")(
         yield* write.put("has_checkout", cacheRow({ id: edgeRowId("has_checkout", repositoryId, checkoutId),
             in_id: repositoryId, out_id: checkoutId, ts: new Date() }));
         const linkedSessions = yield* linkedSessionCount(write, repo.path, excludedSessionPaths);
-        yield* write.exec(`UPDATE session SET repository = ?, checkout = ? WHERE ${buildSessionCheckoutWhere(repo.path, excludedSessionPaths)}`,
-            [repositoryId, checkoutId]);
+        const sessionClause = buildSessionCheckoutWhere(repo.path, excludedSessionPaths);
+        yield* write.exec(`UPDATE session SET repository = ?, checkout = ? WHERE ${sessionClause.sql}`,
+            [repositoryId, checkoutId, ...sessionClause.params]);
 
         if (commits.length === 0)
             return {

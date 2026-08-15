@@ -40,10 +40,20 @@ export const reapIntervalSeconds = (env: NodeJS.ProcessEnv = process.env): numbe
  * are back to #697. Logged at debug - a transient reap failure is not something
  * a user needs on their terminal.
  */
+export const runReapSchedule = <A, E, R>(
+    tick: Effect.Effect<A, E, R>,
+    intervalSeconds: number,
+): Effect.Effect<void, never, R> =>
+    tick.pipe(
+        Effect.catchCause((cause) => Effect.logDebug("ax serve: ingest_run reap tick failed", cause)),
+        Effect.repeat(Schedule.spaced(Duration.seconds(intervalSeconds))),
+        Effect.asVoid,
+    );
+
 export const runReapLoop = (opts: {
     readonly intervalSeconds: number;
 }): Effect.Effect<void, never, AxConfig | FileSystem.FileSystem | Path.Path> =>
-    withConfigWrite((write) => reapStaleIngestRuns(write)).pipe(
+    runReapSchedule(withConfigWrite((write) => reapStaleIngestRuns(write)).pipe(
         Effect.tap((result) =>
             result.reaped > 0
                 ? Effect.logWarning(
@@ -52,10 +62,7 @@ export const runReapLoop = (opts: {
                 )
                 : Effect.void,
         ),
-        Effect.catchCause((cause) => Effect.logDebug("ax serve: ingest_run reap tick failed", cause)),
-        Effect.repeat(Schedule.spaced(Duration.seconds(opts.intervalSeconds))),
-        Effect.asVoid,
-    );
+    ), opts.intervalSeconds);
 
 /**
  * Re-arm `run` on rejection instead of dropping it for the daemon's whole

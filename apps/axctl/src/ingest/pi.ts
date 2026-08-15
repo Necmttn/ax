@@ -4,13 +4,12 @@ import { SkillName } from "@ax/lib/brands";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
-import { surrealJsonTextOption } from "@ax/lib/shared/surql";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { extractPiCompaction, type CompactionWrite } from "./compaction.ts";
-import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite, type AgentProviderName } from "./provider-events.ts";
@@ -35,7 +34,6 @@ import {
     makeToolCallWrite,
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
-import { buildSessionTokenUsageStatement } from "./token-usage-writers.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
@@ -624,39 +622,6 @@ export function __testExtractPiJsonlLines(
     return extractor.finish();
 }
 
-const buildPiTokenUsageStatements = (extract: PiExtract, desc: PiLikeProvider): string[] => {
-    if (!Object.values(extract.usage).some((value) => value > 0)) return [];
-    const estimatedTokens = extract.usage.totalTokens > 0
-        ? extract.usage.totalTokens
-        : extract.usage.input + extract.usage.output;
-    return [
-        buildSessionTokenUsageStatement({
-            sessionId: extract.session.id,
-            source: desc.provider,
-            model: extract.session.model,
-            promptTokens: extract.usage.input || null,
-            completionTokens: extract.usage.output || null,
-            cacheCreationInputTokens: extract.usage.cacheWrite || null,
-            cacheReadInputTokens: extract.usage.cacheRead || null,
-            estimatedTokens,
-            contextWindow: null,
-            labels: surrealJsonTextOption({
-                ...tokenQualityLabels({
-                    source: desc.jsonlLabel,
-                    tokenSourceQuality: "explicit",
-                    tokenSourceDetail: desc.tokenSourceDetail,
-                    model: extract.session.model,
-                    modelSourceDetail: extract.session.model
-                        ? `${desc.provider}_session.model`
-                        : `missing_${desc.provider}_session_model`,
-                }),
-            }),
-            metrics: surrealJsonTextOption({ usage: extract.usage }),
-            ts: extract.session.ended_at,
-        }),
-    ];
-};
-
 const writePiTokenUsage = (
     write: CacheWriteService,
     extract: PiExtract,
@@ -702,7 +667,7 @@ const writePiTokenUsage = (
     }));
 };
 
-const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider): NormalizedTranscriptBatch => ({
+export const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider = PI_PROVIDER): NormalizedTranscriptBatch => ({
     providers: [{
         name: desc.provider,
         displayName: desc.displayName,
@@ -774,13 +739,6 @@ const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider): Normaliz
     planSnapshots: [],
     compactions: extract.compactions,
 });
-
-const buildPiBatchStatements = (extract: PiExtract, desc: PiLikeProvider = PI_PROVIDER): string[] => [
-    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract, desc)),
-    ...buildPiTokenUsageStatements(extract, desc),
-];
-
-export const __testBuildPiBatchStatements = buildPiBatchStatements;
 
 interface PiIngestOpts {
     sinceDays: number | undefined;

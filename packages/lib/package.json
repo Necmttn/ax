@@ -15,6 +15,7 @@
     "./duckdb": "./src/duckdb/index.ts",
     "./duckdb/internal": "./src/duckdb/internal.ts",
     "./testing/duckdb-dylib": "./src/testing/duckdb-dylib.ts",
+    "./testing/cache": "./src/testing/cache.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
     "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {

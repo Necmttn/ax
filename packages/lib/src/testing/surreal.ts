@@ -2,6 +2,8 @@ import { Effect, Layer } from "effect";
 import type { RecordId, Surreal } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import type { DbError } from "../errors.ts";
+import type { CacheRead, CacheReadService } from "../duckdb/seam.ts";
+import { makeTestCacheRead } from "./cache.ts";
 
 /**
  * Shared in-memory `SurrealClient` test double. One factory replaces the
@@ -100,6 +102,10 @@ export interface TestSurrealClient {
     readonly client: SurrealClientShape;
     /** Provide as `Effect.provide(tc.layer)`. */
     readonly layer: Layer.Layer<SurrealClient>;
+    /** Independent cache fixture that uses the same static route definitions. */
+    readonly cacheLayer: Layer.Layer<CacheRead>;
+    /** Direct reader for functions that take the cache seam as an argument. */
+    readonly cache: CacheReadService;
     /** Every issued SQL string, in call order. */
     readonly captured: string[];
     /** Every `query` call with its bindings. */
@@ -189,9 +195,17 @@ export const makeTestSurrealClient = (
         raw: opts.raw ?? ({} as never),
     };
 
+    const cache = makeTestCacheRead({
+        routes: opts.routes as never,
+        responses: opts.responses as never,
+        fallback: opts.fallback as never,
+    });
+
     return {
         client,
         layer: Layer.succeed(SurrealClient, client),
+        cacheLayer: cache.layer,
+        cache: cache.service,
         captured,
         calls,
         upserts,
@@ -256,8 +270,8 @@ export const makeMockDb = (
             : { responses: responses as ReadonlyArray<TestSurrealRows> }),
     });
 
-/** Run an Effect against a {@link makeMockDb} mock's `SurrealClient` layer. */
+/** Run an Effect against paired static Surreal and cache fixtures. */
 export const runWithMock = <A, E>(
     db: TestSurrealClient,
-    effect: Effect.Effect<A, E, SurrealClient>,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(db.layer)));
+    effect: Effect.Effect<A, E, SurrealClient | CacheRead>,
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(db.layer, db.cacheLayer))));

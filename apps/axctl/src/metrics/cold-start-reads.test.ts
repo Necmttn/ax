@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { computeColdStartReads } from "./cold-start-reads.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { computeColdStartReads as computeColdStartReadsWithRead } from "./cold-start-reads.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 const db = (rows: Array<Record<string, unknown>>) =>
-    Layer.succeed(SurrealClient, { query: <T>(_sql: string) => Effect.succeed([rows] as unknown as T) } as never);
+    makeTestCacheRead({ fallback: rows }).layer;
+const computeColdStartReads = (ids: readonly string[]) => Effect.gen(function* () {
+    const read = yield* CacheRead;
+    return yield* computeColdStartReadsWithRead(read, ids);
+});
 
 describe("computeColdStartReads", () => {
     test("counts reads/searches before the first edit", async () => {

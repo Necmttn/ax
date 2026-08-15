@@ -70,7 +70,7 @@ function looseLineParse(raw: string): Record<string, unknown> {
     return out;
 }
 
-function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
+export function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
     const raw = fm["role"];
     if (raw === undefined || raw === null || raw === "") return [];
     const items = Array.isArray(raw) ? raw : [raw];

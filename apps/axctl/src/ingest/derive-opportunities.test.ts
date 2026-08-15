@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import {
-    buildOpportunityStatements,
+    buildOpportunityRows,
     hookBasenameFromArtifactPath,
     kebabNameFromArtifactPath,
     opportunityKey,
@@ -74,31 +74,26 @@ describe("overlapFilesMatch", () => {
     });
 });
 
-describe("buildOpportunityStatements", () => {
-    test("emits DELETE + RELATE per match with stable edge id", () => {
-        const stmts = buildOpportunityStatements("exp_1", [
+describe("buildOpportunityRows", () => {
+    test("emits one bound row per match with a stable edge id", () => {
+        const rows = buildOpportunityRows("exp_1", [
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z" },
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_b", ts: "2026-05-25T01:00:00.000Z" },
         ]);
-        const sql = stmts.join("\n");
-        expect(sql.match(/DELETE opportunity:/g)?.length).toBe(2);
-        expect(sql.match(/RELATE experiment:/g)?.length).toBe(2);
-        expect(sql).toContain("was_addressed = false");
-        expect(sql).toContain("->opportunity:");
-        expect(sql).toContain("->later_fixed_by:");
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toMatchObject({ in_id: "exp_1", out_id: "edge_a", out_table: "later_fixed_by", was_addressed: false });
+        expect(rows[0]!.id).toBe(opportunityKey("exp_1", "edge_a"));
     });
 
     test("no matches -> no statements", () => {
-        expect(buildOpportunityStatements("exp_1", [])).toEqual([]);
+        expect(buildOpportunityRows("exp_1", [])).toEqual([]);
     });
 
     test("addressed=true serializes was_addressed = true", () => {
-        const stmts = buildOpportunityStatements("exp_1", [
+        const rows = buildOpportunityRows("exp_1", [
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z", addressed: true },
         ]);
-        const sql = stmts.join("\n");
-        expect(sql).toContain("was_addressed = true");
-        expect(sql).not.toContain("was_addressed = false");
+        expect(rows[0]!.was_addressed).toBe(true);
     });
 });
 

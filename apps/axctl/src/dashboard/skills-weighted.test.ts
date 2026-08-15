@@ -21,7 +21,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import { RecordId } from "surrealdb";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { makeMockDb, makeTestSurrealClient, runWithMock } from "@ax/lib/testing/surreal";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
 
 // ---------------------------------------------------------------------------
@@ -292,17 +292,13 @@ describe("recovery latency (lens E)", () => {
     ];
 
     it("computes median_recovery_ms as median of recovery session durations", async () => {
-        const db = makeMockDb([
-            noSparSessions,    // 0 - spar ids
-            mockInvRows,       // 1 - invocation aggregate
-            mockRoleRows,      // 2 - role weights
-            mockDoctorBelow,   // 3 - doctor
-            [[]],              // 4 - deleted
-            [[]],              // 5 - synthetic
-            [[]],              // 6 - names
-            mockRecoveryEdges, // 7 - recovered_by
-            mockLatencyRows,   // 8 - otel_log_event latency
-        ]);
+        const db = makeTestSurrealClient({
+            responses: [
+                noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow,
+                [[]], [[]], [[]], mockRecoveryEdges,
+            ],
+            routes: { "FROM otel_log_event": mockLatencyRows },
+        });
 
         const result = await runWithMock(db, fetchSkillsWeighted());
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
@@ -366,17 +362,13 @@ describe("recovery latency (lens E)", () => {
         const singleEdge = [[{ skill: "skill:⟨superpowers:tdd⟩", session: "session:only-one" }]];
         const singleLatency = [[{ session_id: "only-one", d: 3750, n: 2 }]];
 
-        const db = makeMockDb([
-            noSparSessions,
-            mockInvRows,
-            mockRoleRows,
-            mockDoctorBelow,
-            [[]],
-            [[]],
-            [[]],
-            singleEdge,
-            singleLatency,
-        ]);
+        const db = makeTestSurrealClient({
+            responses: [
+                noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow,
+                [[]], [[]], [[]], singleEdge,
+            ],
+            routes: { "FROM otel_log_event": singleLatency },
+        });
 
         const result = await runWithMock(db, fetchSkillsWeighted());
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
@@ -397,17 +389,13 @@ describe("recovery latency (lens E)", () => {
             { session_id: "s2", d: 3000, n: 3 },
         ]];
 
-        const db = makeMockDb([
-            noSparSessions,
-            mockInvRows,
-            mockRoleRows,
-            mockDoctorBelow,
-            [[]],
-            [[]],
-            [[]],
-            edges,
-            latency,
-        ]);
+        const db = makeTestSurrealClient({
+            responses: [
+                noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow,
+                [[]], [[]], [[]], edges,
+            ],
+            routes: { "FROM otel_log_event": latency },
+        });
 
         const result = await runWithMock(db, fetchSkillsWeighted());
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;

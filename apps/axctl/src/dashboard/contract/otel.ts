@@ -2,11 +2,7 @@
  * OTLP HTTP receiver endpoints: POST /v1/metrics, /v1/traces, /v1/logs.
  *
  * All three signals return `{ partialSuccess: {} }` (the OTLP/HTTP ack).
- * The handler is fail-open: a bad body or decode failure logs a warning and
- * returns the ack without writing, so a misconfigured sender never crashes the
- * daemon. All three signals are decoded, normalized, and written to their
- * tables: metrics to otel_metric_point, traces to otel_span, logs to
- * otel_log_event.
+ * The database-free receiver owns durable spool writes.
  *
  * `handleOtlp` is a plain Effect (no HTTP layer) so the test suite can drive
  * it directly with a stub DB layer. `OtelGroupLive` wires it into the contract
@@ -19,28 +15,31 @@ import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import type { Signal } from "../../otel/signal.ts";
 import { SIGNALS } from "../../otel/signals.ts";
-import { OTLP_ACK } from "../../otel/spool-server.ts";
+import { appendOtlpSpool, OTLP_ACK } from "../../otel/spool-server.ts";
 
 // ------------------------------------------------------------------ core
 
 /**
  * Process one OTLP signal payload (already buffered as ArrayBuffer).
  * Fails open on parse/decode errors (warn + return ACK, no write).
- * Requires SurrealClient (transitively, via OtelWriterLive).
+ * This effect does not acquire a database service.
  */
 export const handleOtlp = (
     signal: Signal,
     body: ArrayBuffer,
     contentEncoding: string | undefined,
+    opts: { readonly spoolDir?: string; readonly now?: () => Date } = {},
 ) =>
     Effect.gen(function* () {
         const bytes = new Uint8Array(body);
         const raw = contentEncoding === "gzip" ? Bun.gunzipSync(bytes) : bytes;
 
         // Fail-open: catch parse errors without bubbling them up.
+        const text = new TextDecoder().decode(raw);
+        yield* appendOtlpSpool(`/v1/${signal}`, text, opts).pipe(Effect.ignore);
         const json: unknown = yield* Effect.sync(() => {
             try {
-                return JSON.parse(new TextDecoder().decode(raw)) as unknown;
+                return JSON.parse(text) as unknown;
             } catch {
                 return null;
             }

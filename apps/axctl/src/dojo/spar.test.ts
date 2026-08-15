@@ -3,7 +3,9 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestSurrealClient, type TestSurrealClientOptions } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import {
     COST_TOL,
     fetchSessionMetrics,
@@ -132,15 +134,21 @@ describe("renderSparReport", () => {
 // enrichSessions/churn read fan-out width from AxConfig.knobs.
 const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
 
+const paired = (options: TestSurrealClientOptions) => {
+    const tc = makeTestSurrealClient(options);
+    const cache = makeTestCacheRead({ routes: options.routes as never });
+    return { tc, layer: Layer.merge(tc.layer, cache.layer) };
+};
+
 const runDb = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | AxConfig>,
+    layer: Layer.Layer<SurrealClient | CacheRead>,
 ): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer))));
+    Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, configLayer))));
 
 const runDbOnly = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead>,
+    layer: Layer.Layer<SurrealClient | CacheRead>,
 ): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 describe("fetchSessionMetrics", () => {
@@ -148,7 +156,7 @@ describe("fetchSessionMetrics", () => {
         const since = new Date("2026-06-11T00:00:00.000Z");
         // routes: cost usage, churn base scan, churn fan-out, and the focused
         // turn/wall lookup. Unmatched -> [[]] (pricing falls back to built-in).
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
@@ -183,7 +191,7 @@ describe("fetchSessionMetrics", () => {
             },
         });
 
-        const m = await runDb(fetchSessionMetrics("session:`s1`", since), tc.layer);
+        const m = await runDb(fetchSessionMetrics("session:`s1`", since), layer);
         expect(m.costUsd).toBe(1.5);
         expect(m.turns).toBe(21);
         expect(m.wallMs).toBe(600_000);
@@ -197,7 +205,7 @@ describe("fetchSessionMetrics", () => {
         // zero verification failures) is FILTERED OUT of churn.hotSessions by
         // hasVerificationSignal. landed must come from the produced edge, not
         // hotSessions - otherwise the best outcome scores as a regression.
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
@@ -219,7 +227,7 @@ describe("fetchSessionMetrics", () => {
 
         const m = await runDb(
             fetchSessionMetrics("session:`clean`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.landed).toBe(true);
         expect(m.repairLines).toBe(0);
@@ -229,10 +237,10 @@ describe("fetchSessionMetrics", () => {
     });
 
     test("null cost + null turn/wall when nothing matches", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { layer } = paired({ denyWrites: true });
         const m = await runDb(
             fetchSessionMetrics("session:`ghost`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.costUsd).toBeNull();
         expect(m.turns).toBeNull();
@@ -245,13 +253,13 @@ describe("fetchSessionMetrics", () => {
 
 describe("findVariantSession", () => {
     test("returns the most recent bare id; embeds cwd + since literals", async () => {
-        const tc = makeTestSurrealClient({
+        const { tc, layer } = paired({
             denyWrites: true,
             routes: { "FROM session": [[{ id: "session:variant" }]] },
         });
         const id = await runDbOnly(
             findVariantSession("/abs/cwd", Date.parse("2026-06-13T10:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(id).toBe("session:variant");
         const sql = tc.captured[0]!;
@@ -261,10 +269,10 @@ describe("findVariantSession", () => {
     });
 
     test("returns null when no variant session exists", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { layer } = paired({ denyWrites: true });
         const id = await runDbOnly(
             findVariantSession("/abs/cwd", Date.now()),
-            tc.layer,
+            layer,
         );
         expect(id).toBeNull();
     });
@@ -276,7 +284,7 @@ describe("findVariantSession", () => {
 
 describe("stampSparSession", () => {
     test("issues UPDATE with labels = [\"spar\"] when session has no existing labels", async () => {
-        const tc = makeTestSurrealClient({
+        const { tc, layer } = paired({
             denyWrites: false,
             routes: {
                 // SELECT labels read: no existing labels (NONE row)
@@ -285,7 +293,7 @@ describe("stampSparSession", () => {
                 "UPDATE ": [[]],
             },
         });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        await runDbOnly(stampSparSession("session:abc"), layer);
         // The UPDATE should set labels to the JSON-encoded ["spar"]
         const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
         expect(updateSql).toBeDefined();
@@ -295,14 +303,14 @@ describe("stampSparSession", () => {
     });
 
     test("merges into existing labels without clobbering them", async () => {
-        const tc = makeTestSurrealClient({
+        const { tc, layer } = paired({
             denyWrites: false,
             routes: {
                 "SELECT labels FROM": [[{ labels: JSON.stringify(["existing"]) }]],
                 "UPDATE ": [[]],
             },
         });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        await runDbOnly(stampSparSession("session:abc"), layer);
         const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
         expect(updateSql).toBeDefined();
         // Must include both labels
@@ -311,13 +319,13 @@ describe("stampSparSession", () => {
     });
 
     test("is idempotent: does not issue an UPDATE when already tagged", async () => {
-        const tc = makeTestSurrealClient({
+        const { tc, layer } = paired({
             denyWrites: false,
             routes: {
                 "SELECT labels FROM": [[{ labels: JSON.stringify(["spar"]) }]],
             },
         });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        await runDbOnly(stampSparSession("session:abc"), layer);
         // Only the SELECT query should be captured; no UPDATE
         const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
         expect(updateSql).toBeUndefined();

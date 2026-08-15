@@ -6,6 +6,7 @@
  * keep new rules here, not in the stage wiring.
  */
 import type { SkillName } from "@ax/lib/brands";
+import { turnRecordKey } from "@ax/lib/ids";
 import { edgeRowId, skillRowId } from "@ax/lib/stable-id";
 import {
     isoTimestamp,
@@ -562,4 +563,14 @@ export function deriveSignalsFromEvidence(
         diagnosticEvents,
         turnCount,
     };
+}
+
+export function correctedInvokedTurnKeys(corrections: readonly CorrectionEdge[]): string[] {
+    return [...new Set(corrections.flatMap((edge) => {
+        const firstSeq = Math.max(1, edge.correctedSeq - 3);
+        return Array.from(
+            { length: edge.correctedSeq - firstSeq + 1 },
+            (_, index) => turnRecordKey(edge.correctedSession, firstSeq + index),
+        );
+    }))];
 }

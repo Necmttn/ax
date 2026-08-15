@@ -2,12 +2,16 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { ingestOtelSpool, otelSpoolStage, stampReceivedAt } from "./otel-spool.ts";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { ingestOtelSpool, otelSpoolStage, stampReceivedAt, type OtelSpoolIngestResult } from "./otel-spool.ts";
 
 const roots: string[] = [];
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("OTLP spool ingest", {
+    requireFts: true,
+});
 
 afterEach(async () => {
     for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -31,7 +35,7 @@ const metricPayload = {
 };
 
 describe("otel-spool ingest stage", () => {
-    it("decodes a spool file and writes OTLP rows once", async () => {
+    dtest("decodes a spool file and writes OTLP rows once", async () => {
         const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-spool-stage-"));
         roots.push(spoolDir);
         await mkdir(spoolDir, { recursive: true });
@@ -42,33 +46,23 @@ describe("otel-spool ingest stage", () => {
         });
         await writeFile(join(spoolDir, "2026-08-14.jsonl"), `${line}\n`);
 
-        const watermarks = new Map<string, { path: string; mtime_ms: number; size: number }>();
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                if (sql.includes("FROM ingest_file_state")) return [[...watermarks.values()]];
-                if (sql.includes("UPSERT ingest_file_state")) {
-                    const path = /path: "([^"]+)"/.exec(sql)?.[1];
-                    const mtimeMs = Number(/mtime_ms: (\d+)/.exec(sql)?.[1]);
-                    const size = Number(/size: (\d+)/.exec(sql)?.[1]);
-                    if (path) watermarks.set(path, { path, mtime_ms: mtimeMs, size });
-                }
-                return [[]];
-            },
-        });
-        const layer = Layer.mergeAll(tc.layer, BunFileSystem.layer, BunPath.layer);
-
-        const run = () => Effect.runPromise(
-            ingestOtelSpool({ spoolDir }).pipe(Effect.provide(layer)),
-        );
-        const first = await run();
-        const second = await run();
+        let first: OtelSpoolIngestResult | undefined;
+        let second: OtelSpoolIngestResult | undefined;
+        let rows: ReadonlyArray<{ readonly metric: string; readonly session_id: string | null }> = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-spool-writer-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                first = yield* ingestOtelSpool(write, { spoolDir });
+                second = yield* ingestOtelSpool(write, { spoolDir });
+                rows = yield* write.rows(
+                    Schema.Struct({ metric: Schema.String, session_id: Schema.NullOr(Schema.String) }),
+                    "SELECT metric, session_id FROM otel_metric_point",
+                );
+            }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+        ));
 
         expect(first).toMatchObject({ files: 1, payloads: 1, rows: 1, malformed: 0 });
         expect(second).toMatchObject({ files: 0, skippedUnchanged: 1 });
-        const writes = tc.captured.filter((sql) => sql.includes("UPSERT otel_metric_point"));
-        expect(writes).toHaveLength(1);
-        expect(writes[0]).toContain('metric = "claude_code.cost.usage"');
-        expect(writes[0]).toContain('session_id = "session-1"');
+        expect(rows).toEqual([{ metric: "claude_code.cost.usage", session_id: "session-1" }]);
     });
 
     it("declares the ingest stage contract", () => {

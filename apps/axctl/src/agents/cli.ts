@@ -19,7 +19,7 @@ import type { RuntimeManifest } from "../cli/commands/manifest.ts";
 /**
  * `ax agents` group: config/reconcile/scope/park/unpark/rm for agent definition
  * files. New top-level (hidden) group registered in cli/index.ts. Handlers
- * provide AgentSourceRegistryLive; SurrealClient/FileSystem/Path from AppLayer.
+ * provide AgentSourceRegistryLive; FileSystem and Path come from AppLayer.
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));

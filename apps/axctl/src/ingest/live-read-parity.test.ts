@@ -193,8 +193,8 @@ const queryAll = (read: CacheReadService): Effect.Effect<LiveResults, unknown> =
             fetchMainBranchGraphEvidence(read),
         ]);
         const [telemetryCost, telemetryLatency] = yield* Effect.all([
-            sessionTelemetryCost(read, []),
-            sessionTelemetryLatency(read, []),
+            sessionTelemetryCost(read, ["child"]),
+            sessionTelemetryLatency(read, ["child"]),
         ]);
         return {
             recommend: yield* recommend(read, { limit: 10 }),
@@ -205,8 +205,8 @@ const queryAll = (read: CacheReadService): Effect.Effect<LiveResults, unknown> =
                 limit: 20,
                 generatedAt: NOW,
             }),
-            sessionLoc: yield* computeSessionLoc(read, []),
-            sessionMetrics: yield* fetchSessionHealthMap(read, []),
+            sessionLoc: yield* computeSessionLoc(read, ["parent"]),
+            sessionMetrics: yield* fetchSessionHealthMap(read, ["parent"]),
             projectHarness: { observedTooling, mainBranchGraph },
             directiveNgrams: yield* fetchDirectiveLift(read, { sinceDays: 14 }),
             dispatchAnalytics: yield* fetchDispatchCandidates(read, { sinceDays: 14 }),
@@ -254,6 +254,17 @@ const assertParity = async (key: keyof LiveResults): Promise<void> => {
         return;
     }
     expect(snapshot[key]).toEqual(fixture.live[key]);
+    if (key === "sessionLoc" || key === "sessionMetrics") {
+        expect((snapshot[key] as ReadonlyMap<string, unknown>).size).toBeGreaterThan(0);
+    }
+    if (key === "telemetryRollup") {
+        const rollup = snapshot[key] as {
+            readonly telemetryCost: ReadonlyMap<string, unknown>;
+            readonly telemetryLatency: ReadonlyMap<string, unknown>;
+        };
+        expect(rollup.telemetryCost.size).toBeGreaterThan(0);
+        expect(rollup.telemetryLatency.size).toBeGreaterThan(0);
+    }
 };
 
 dtest("recommend reads the same live and published proposal rows", () => assertParity("recommend"));

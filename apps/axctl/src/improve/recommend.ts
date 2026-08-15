@@ -95,6 +95,9 @@ const recency = (iso: string): number => {
     return Math.max(0.1, 1 / Math.log(2 + Math.max(0, days)));
 };
 
+const safeIso = (value: Date): string =>
+    Number.isFinite(value.getTime()) ? value.toISOString() : new Date(0).toISOString();
+
 const score = (row: { confidence: string; frequency: number; updated_at: string }): number => {
     const c = CONFIDENCE_WEIGHT[row.confidence] ?? 1;
     return c * recency(row.updated_at) * (1 + Math.log1p(Math.max(0, row.frequency)));
@@ -128,8 +131,8 @@ export const recommend = (
                 hypothesis: r.hypothesis,
                 confidence: r.confidence,
                 frequency: r.frequency,
-                updatedAt: r.updated_at.toISOString(),
-                score: score({ ...r, updated_at: r.updated_at.toISOString() }),
+                updatedAt: safeIso(r.updated_at),
+                score: score({ ...r, updated_at: safeIso(r.updated_at) }),
             }))
             .sort((a, b) => b.score - a.score)
             .slice(0, input.limit);

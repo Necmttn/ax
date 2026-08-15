@@ -1,15 +1,17 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
+import { Effect, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
-import type { DbError } from "@ax/lib/errors";
+import { posixPath } from "@ax/lib/shared/path";
+import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
-import { runIngest } from "../../ingest/run.ts";
+import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import type { OtelRetentionResult } from "../../otel/retention.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
@@ -34,13 +36,7 @@ import {
     type ProgressReporter,
 } from "../progress.ts";
 import { stderrExit } from "../output.ts";
-import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
-    buildIngestEventStatement,
-    buildIngestRunFinishStatement,
-    buildIngestRunStartStatement,
-    buildIngestStageFinishStatement,
-    buildIngestStageStartStatement,
     makeIngestEvent,
     publishIngestEvent,
 } from "../../dashboard/telemetry.ts";
@@ -75,7 +71,7 @@ function errorText(error: unknown): string {
 }
 
 const writeIngestEvent = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     input: {
         readonly runId: string;
         readonly source: string;
@@ -84,37 +80,50 @@ const writeIngestEvent = (
         readonly message: string;
         readonly counts?: Record<string, number>;
     },
-): Effect.Effect<void, DbError> =>
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
-        yield* db.query(buildIngestEventStatement(event));
+        yield* write.put("ingest_event", cacheRow({
+            id: event.id,
+            run: event.runId,
+            source: event.source,
+            stage: event.stage,
+            level: event.level,
+            message: event.message,
+            counts: jsonParam(event.counts),
+            raw: jsonParam(event),
+            ts: new Date(event.ts),
+        }));
         publishIngestEvent(event);
     }).pipe(Effect.asVoid);
 
-const telemetryStage = <A, E, R = SurrealClient | AxConfig | ProcessService>(
-    db: SurrealClientShape,
+const telemetryStage = <A, E, R = AxConfig | ProcessService>(
+    write: CacheWriteService,
     runId: string,
     source: string,
     stage: string,
     program: Effect.Effect<A, E, R>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError | E, R | SurrealClient | AxConfig | ProcessService> =>
+): Effect.Effect<A, CacheWriteError | E, R | AxConfig | ProcessService> =>
     Effect.gen(function* () {
+        const stageId = `${runId}__${source}__${stage}`.replace(/[^A-Za-z0-9_:-]+/g, "_");
         progress?.start({ source, stage });
-        yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
+        yield* write.put("ingest_stage", cacheRow({
+            id: stageId, run: runId, source, stage, status: "running",
+            started_at: new Date(), ended_at: null, counts: null, error_text: null,
+        }));
+        yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
         const result = yield* program.pipe(
             Effect.tap((value) => {
                 const counts = numericCounts(value);
                 return Effect.gen(function* () {
                     progress?.finish({ source, stage }, counts);
-                    yield* db.query(buildIngestStageFinishStatement({
-                        runId,
-                        source,
-                        stage,
-                        status: "ok",
-                        counts,
-                    }));
-                    yield* writeIngestEvent(db, {
+                    yield* write.exec(
+                        "UPDATE ingest_stage SET status = 'ok', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = NULL WHERE id = ?",
+                        [jsonParam(counts), stageId],
+                    );
+                    yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                    yield* writeIngestEvent(write, {
                         runId,
                         source,
                         stage,
@@ -128,15 +137,12 @@ const telemetryStage = <A, E, R = SurrealClient | AxConfig | ProcessService>(
                 Effect.gen(function* () {
                     const message = errorText(error);
                     progress?.fail({ source, stage }, message);
-                    yield* db.query(buildIngestStageFinishStatement({
-                        runId,
-                        source,
-                        stage,
-                        status: "error",
-                        counts: {},
-                        errorText: message,
-                    }));
-                    yield* writeIngestEvent(db, {
+                    yield* write.exec(
+                        "UPDATE ingest_stage SET status = 'error', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ? WHERE id = ?",
+                        [jsonParam({}), message, stageId],
+                    );
+                    yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                    yield* writeIngestEvent(write, {
                         runId,
                         source,
                         stage,
@@ -245,33 +251,6 @@ export const formatIngestSkipSummary = (skippedFiles: number): string =>
     `ingest: ok - ${skippedFiles} file(s) skipped (per-file isolation; retried next run)`;
 
 /**
- * The blob pointers SurrealDB's `session` rows reference - the reference set
- * blob GC deletes against.
- *
- * It lives here, at the call site, rather than in `@ax/lib/blob-gc`, because
- * this is the only place that knows which engine the ingest run it follows
- * actually wrote. `gcFileBuckets` itself is engine-free; the v2 source is
- * `cacheReferencedBlobs`, and this whole helper is deleted in favour of it at
- * the ingest write cutover.
- *
- * A failed read yields an EMPTY set, and GC refuses to delete anything against
- * an empty set - so a database that will not answer degrades to "GC did not
- * run", never to "nothing is referenced, delete everything".
- */
-const surrealReferencedBlobs: Effect.Effect<ReadonlySet<string>, never, SurrealClient> =
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[Array<{ raw_file: unknown }>]>(
-            "SELECT raw_file FROM session WHERE raw_file IS NOT NONE;",
-        );
-        return new Set(
-            (rows ?? [])
-                .map((row) => row.raw_file)
-                .filter((value): value is string => typeof value === "string"),
-        );
-    }).pipe(Effect.orElseSucceed(() => new Set<string>()));
-
-/**
  * Best-effort maintenance run after a successful ingest (otel retention +
  * blob GC). Either side may have failed independently, or blob GC may have
  * declined to run (see `BlobGcResult.skipped`) - callers pass whichever
@@ -335,24 +314,6 @@ const runMaintenanceHalf = <A, E, R>(
  * JSON already written to `ingest_stage` rows. Feeds the FAILED verdict
  * (#265) - the stage stats themselves are lost down the error channel.
  */
-const completedSessionCount = (
-    db: SurrealClientShape,
-    runId: string,
-): Effect.Effect<number, DbError> =>
-    Effect.gen(function* () {
-        const res = yield* db.query<[Array<{ counts: string | null }>]>(
-            `SELECT counts FROM ingest_stage WHERE run = ingest_run:\`${runId}\`;`,
-        );
-        let sessions = 0;
-        for (const row of res?.[0] ?? []) {
-            if (typeof row.counts !== "string") continue;
-            const parsed = safeJsonParse<Record<string, unknown>>(row.counts);
-            const n = parsed?.["sessions"];
-            if (typeof n === "number" && Number.isFinite(n)) sessions += n;
-        }
-        return sessions;
-    });
-
 // EXCEPTION to the typed-options rule: runIngest({ args }) forwards raw CLI
 // args into the stage pipeline (src/ingest/run.ts does its own --stages/
 // --since/--reset parsing). Until runIngest grows a typed options contract,
@@ -362,7 +323,6 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
     Effect.gen(function* () {
         const commandName = opts.command ?? "ingest";
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const path = yield* Path.Path;
         const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
         // The runId is minted HERE (not inside runIngest) so the timeout and
@@ -392,6 +352,12 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // truly GLOBAL ingest run is trustworthy enough to GC against, so the
         // gate reads the single `isGlobalIngest` predicate over args + scope.
         const globalIngest = isGlobalIngest(args, opts);
+        const lockPath = posixPath.join(cfg.paths.dataDir, "ingest.lock");
+        const cacheWriteOptions = {
+            livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
+            lockPath,
+            schemaSql: DUCKDB_SCHEMA_SQL,
+        } as const;
 
         const work = runIngest({
             command: commandName,
@@ -417,22 +383,25 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // stamp a genuinely-completed ingest as timeout-failed. Each half is
         // caught independently (never `Effect.ignore`-d silently) so a fault
         // logs a warn line instead of vanishing.
-        const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+        const afterWork = (): Effect.Effect<void, never> =>
             Effect.gen(function* () {
                 const otel: MaintenanceHalf<OtelRetentionResult> = {};
 
-                // The reference set comes from the engine THIS run wrote -
-                // SurrealDB, until the ingest write cutover. Reading it from the
-                // published DuckDB snapshot instead would answer from a file
-                // that omits everything this run just produced, and GC DELETES
-                // what the set does not name. `@ax/lib/blob-gc` exports
-                // `cacheReferencedBlobs` for the cutover; this call site is the
-                // one place that knows which engine to ask.
                 const blobGc = yield* runMaintenanceHalf(
-                    Effect.flatMap(surrealReferencedBlobs, (referenced) =>
-                        gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), {
-                            isGlobalIngest: globalIngest,
-                            referenced,
+                    withCacheWrite(cacheWriteOptions, (write) =>
+                        Effect.gen(function* () {
+                            const result = yield* write.raw(
+                                "SELECT raw_file FROM session WHERE raw_file IS NOT NULL",
+                            );
+                            const referenced = new Set(
+                                result.rows
+                                    .map((row) => row.raw_file)
+                                    .filter((value): value is string => typeof value === "string"),
+                            );
+                            return yield* gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), {
+                                isGlobalIngest: globalIngest,
+                                referenced,
+                            });
                         }),
                     ),
                 );
@@ -450,14 +419,14 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
                         })
                     }\n`,
                 );
-            });
+            }).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)));
 
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
         // redundant run is harmless and avoids the pile-up that wedges the DB).
         // The timeout lives inside the lock so that a timed-out run LEAVES its
         // lock to age into a cooldown - interrupting the fiber doesn't prove
-        // SurrealDB stopped server-side, so the next ingest must hold off until
+        // DuckDB stopped work, so the next ingest must hold off until
         // the lock goes stale rather than charging a still-busy DB.
         const outcome = yield* withIngestLock(
             {
@@ -476,11 +445,15 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
                 // diagnosis doesn't need wall-clock correlation (#266, #269).
                 // Best-effort: a dead DB must not mask the timeout verdict.
                 onTimeout: () =>
-                    db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "partial",
-                        metrics: { error: `timeout after ${timeoutSeconds}s` },
-                    })).pipe(Effect.ignore),
+                    withCacheWrite(cacheWriteOptions, (write) =>
+                        write.exec(
+                            "UPDATE ingest_run SET status = 'partial', ended_at = CURRENT_TIMESTAMP, metrics = ? WHERE id = ?",
+                            [jsonParam({ error: `timeout after ${timeoutSeconds}s` }), runId],
+                        ),
+                    ).pipe(
+                        Effect.ignore,
+                        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+                    ),
                 afterWork,
             },
             work,
@@ -488,14 +461,9 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             // Typed failure: print the one-line FAILED verdict (#265) before the
             // error propagates (BunRuntime.runMain then exits 1).
             Effect.tapError((error) =>
-                Effect.gen(function* () {
-                    const sessions = yield* completedSessionCount(db, runId).pipe(
-                        Effect.orElseSucceed(() => 0),
-                    );
-                    process.stderr.write(
-                        `${formatIngestFailedVerdict(sessions, errorText(error))}\n`,
-                    );
-                }),
+                Effect.sync(() => process.stderr.write(
+                    `${formatIngestFailedVerdict(0, errorText(error))}\n`,
+                )),
             ),
         );
 
@@ -566,27 +534,30 @@ const cmdDeriveSignals = (input: {
     readonly verbose: boolean;
 }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const runId = runIdFor("derive-signals");
         const sinceDays = requireOptionalPositiveInt("derive-signals", "since", input.sinceDays);
-        yield* db.query(buildIngestRunStartStatement({
-            runId,
-            command: "derive-signals",
-            ...(sinceDays === undefined ? {} : { sinceDays }),
-        }));
         const progress = createProgressReporter({
             command: "derive-signals",
             mode: input.progress,
             runId,
             stages: [{ source: "signals", stage: "derive" }],
         });
-        yield* telemetryStage(
-            db,
-            runId,
-            "signals",
-            "derive",
-            withConfigWrite((write) => deriveSignals(write, { sinceDays, onProgress: progressUpdater(progress, "signals", "derive") })),
-            progress,
+        yield* withConfigWrite((write) =>
+            Effect.gen(function* () {
+                yield* write.put("ingest_run", cacheRow({
+                    id: runId, command: "derive-signals", status: "running",
+                    since_days: sinceDays ?? null, started_at: new Date(),
+                    last_progress_at: new Date(), ended_at: null, metrics: null,
+                }));
+                return yield* withIngestRunFinish(write, runId)(telemetryStage(
+                    write,
+                    runId,
+                    "signals",
+                    "derive",
+                    deriveSignals(write, { sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                    progress,
+                ));
+            }),
         ).pipe(
             Effect.provideService(References.MinimumLogLevel, input.verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
@@ -598,9 +569,7 @@ const cmdIngestInsights = (input: {
     readonly verbose: boolean;
 }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const runId = runIdFor("ingest-insights");
-        yield* db.query(buildIngestRunStartStatement({ runId, command: "ingest-insights" }));
         const progress = createProgressReporter({
             command: "ingest-insights",
             mode: input.progress,
@@ -609,13 +578,22 @@ const cmdIngestInsights = (input: {
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = telemetryStage(
-            db,
-            runId,
-            "claude",
-            "insights",
-            withConfigWrite((write) => ingestClaudeInsights(write)),
-            progress,
+        const program = withConfigWrite((write) =>
+            Effect.gen(function* () {
+                yield* write.put("ingest_run", cacheRow({
+                    id: runId, command: "ingest-insights", status: "running",
+                    since_days: null, started_at: new Date(),
+                    last_progress_at: new Date(), ended_at: null, metrics: null,
+                }));
+                return yield* withIngestRunFinish(write, runId)(telemetryStage(
+                    write,
+                    runId,
+                    "claude",
+                    "insights",
+                    ingestClaudeInsights(write),
+                    progress,
+                ));
+            }),
         );
         yield* program.pipe(
             Effect.provideService(References.MinimumLogLevel, input.verbose ? "Debug" : "Info"),
@@ -761,7 +739,7 @@ export const ingestCommand = Command.make(
         if (Option.isSome(reparse)) applyReparseFlag(optionValue(reparse), "axctl ingest");
         if (dryRun) {
             // Same runtime layer (IngestRuntimeLayer via withIngest) provides
-            // estimateIngest's services (AxConfig/FS/Path/SurrealClient); the cast
+            // estimateIngest's services (AxConfig/FS/Path); the cast
             // aligns this branch's requirement set with the other ingest branches
             // so Command.make infers one handler return type.
             return Effect.gen(function* () {
