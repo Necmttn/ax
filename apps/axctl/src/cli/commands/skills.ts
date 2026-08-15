@@ -447,8 +447,6 @@ const cmdSkillsByRole = (input: SkillsByRoleInput) =>
 
         const result = yield* fetchSkillsByRole(
             normalizeSkillsByRoleParams({ role, limit }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills by-role"),
         );
 
         if (json) {
@@ -475,9 +473,7 @@ const cmdRolesForSkill = (input: RolesForSkillInput) =>
         const skill = input.skill;
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchRolesForSkill({ skill }).pipe(
-            catchDbErrorAndExit("axctl skills roles"),
-        );
+        const result = yield* fetchRolesForSkill({ skill });
 
         if (!result.skillExists) {
             fail(`axctl skills roles: unknown skill "${skill}"`);
@@ -503,9 +499,7 @@ const cmdRoles = (input: RolesInput) =>
     Effect.gen(function* () {
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchAllRoles().pipe(
-            catchDbErrorAndExit("axctl roles"),
-        );
+        const result = yield* fetchAllRoles();
 
         if (json) {
             console.log(renderAllRolesJson(result));

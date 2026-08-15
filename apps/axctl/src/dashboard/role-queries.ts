@@ -7,9 +7,9 @@
  *   fetchAllRoles       - full role vocabulary with skill counts
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 
 // ---------------------------------------------------------------------------
 // Row types
@@ -82,29 +82,26 @@ export interface FetchSkillsByRoleResult {
 
 export const fetchSkillsByRole = (
     params: FetchSkillsByRoleParams,
-): Effect.Effect<FetchSkillsByRoleResult, DbError, SurrealClient> =>
+): Effect.Effect<FetchSkillsByRoleResult, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
         const limit = params.limit ?? SKILLS_BY_ROLE_DEFAULT_LIMIT;
 
         const sql = `
 SELECT
-    in AS skill_id,
-    in.name AS skill_name,
-    source,
-    confidence,
-    rationale,
-    (SELECT count() FROM invoked WHERE out = $parent.in)[0].count ?? 0 AS invocations
-FROM plays_role
-WHERE out.name = $role
+    sk.id AS skill_id, sk.name AS skill_name, pr.source, pr.confidence, pr.rationale,
+    count(i.id) AS invocations
+FROM plays_role pr
+JOIN skill sk ON sk.id = pr.in_id
+JOIN role r ON r.id = pr.out_id
+LEFT JOIN invoked i ON i.out_id = sk.id
+WHERE r.name = ?
+GROUP BY sk.id, sk.name, pr.source, pr.confidence, pr.rationale
 ORDER BY invocations DESC
-LIMIT ${limit};`.trim();
+LIMIT ?`.trim();
 
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql, {
-            role: params.role,
-        });
-
-        const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
+        const Row = Schema.Struct({ skill_id: Schema.String, skill_name: Schema.String, source: Schema.String, confidence: Schema.Number, rationale: Schema.NullOr(Schema.String), invocations: NumberFromBigIntColumn });
+        const rows = yield* db.rows(Row, sql, [params.role, limit]);
 
         const mapped: SkillByRoleRow[] = rows.map((r) => ({
             skill_id: String(r.skill_id ?? ""),
@@ -133,17 +130,14 @@ export interface FetchRolesForSkillResult {
 
 export const fetchRolesForSkill = (
     params: FetchRolesForSkillParams,
-): Effect.Effect<FetchRolesForSkillResult, DbError, SurrealClient> =>
+): Effect.Effect<FetchRolesForSkillResult, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
 
         // Check skill existence first (follows P3.4 pattern)
-        const existsResult = yield* db.query<[Array<unknown>]>(
-            "SELECT id FROM skill WHERE name = $name LIMIT 1;",
-            { name: params.skill },
-        );
-        const exists =
-            Array.isArray(existsResult?.[0]) && existsResult[0].length > 0;
+        const IdRow = Schema.Struct({ id: Schema.String });
+        const existsResult = yield* db.rows(IdRow, "SELECT id FROM skill WHERE name = ? LIMIT 1", [params.skill]);
+        const exists = existsResult.length > 0;
 
         if (!exists) {
             return { rows: [], skillExists: false };
@@ -151,22 +145,16 @@ export const fetchRolesForSkill = (
 
         const sql = `
 SELECT
-    out.name AS role_name,
-    out.weight AS role_weight,
-    source,
-    confidence,
-    weight AS edge_weight_override,
-    rationale,
-    since
-FROM plays_role
-WHERE in.name = $skill
+    r.name AS role_name, r.weight AS role_weight, pr.source, pr.confidence,
+    pr.weight AS edge_weight_override, pr.rationale, pr.since
+FROM plays_role pr
+JOIN skill sk ON sk.id = pr.in_id
+JOIN role r ON r.id = pr.out_id
+WHERE sk.name = ?
 ORDER BY role_name ASC;`.trim();
 
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql, {
-            skill: params.skill,
-        });
-
-        const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
+        const Row = Schema.Struct({ role_name: Schema.String, role_weight: Schema.Number, source: Schema.String, confidence: Schema.Number, edge_weight_override: Schema.NullOr(Schema.Number), rationale: Schema.NullOr(Schema.String), since: TimestampColumn });
+        const rows = yield* db.rows(Row, sql, [params.skill]);
 
         const mapped: RoleForSkillRow[] = rows.map((r) => ({
             role_name: String(r.role_name ?? ""),
@@ -178,7 +166,7 @@ ORDER BY role_name ASC;`.trim();
                     ? Number(r.edge_weight_override)
                     : null,
             rationale: r.rationale != null ? String(r.rationale) : null,
-            since: r.since != null ? String(r.since) : null,
+            since: r.since.toISOString(),
         }));
 
         return { rows: mapped, skillExists: true };
@@ -194,23 +182,22 @@ export interface FetchAllRolesResult {
 
 export const fetchAllRoles = (): Effect.Effect<
     FetchAllRolesResult,
-    DbError,
-    SurrealClient
+    CacheReadError,
+    CacheRead
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
 
         const sql = `
 SELECT
-    name,
-    weight,
-    (SELECT count() FROM plays_role WHERE out = $parent.id)[0].count ?? 0 AS skill_count
-FROM role
+    r.name, r.weight, count(pr.id) AS skill_count
+FROM role r
+LEFT JOIN plays_role pr ON pr.out_id = r.id
+GROUP BY r.id, r.name, r.weight
 ORDER BY skill_count DESC;`.trim();
 
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-
-        const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
+        const Row = Schema.Struct({ name: Schema.String, weight: Schema.Number, skill_count: NumberFromBigIntColumn });
+        const rows = yield* db.rows(Row, sql);
 
         const mapped: RoleRow[] = rows.map((r) => ({
             name: String(r.name ?? ""),
