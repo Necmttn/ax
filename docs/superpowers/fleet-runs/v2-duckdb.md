@@ -537,3 +537,9 @@ than quietly deleted.
 **Gate / review verdict:** two independent Codex passes. First pass found five issues (stale snapshot handles, non-UTC writes, residual recall/AppLayer dependency, stale lock ownership, missing recipes); all fixed. Re-review found three P2s (raw remote matching, process-probe test isolation, nondeterministic picker ties); fixed in `97685511`. Final full suite: **6128 pass, 15 skipped, 0 fail**. `typecheck`, strict `tsc`, and `check:no-node-fs` passed. The forced custom-DuckDB smoke fails locally only when pointed at the non-custom vendor dylib; ordinary full suite is green.
 
 **Evidence / reports:** builder report was captured from `w3P:pF`; fix report from `w3P:pK`; Codex review outputs are `/tmp/w1-seam-codex-review.md` and `/tmp/w1-seam-codex-rereview.md` (local run evidence). The two documented flock-class residuals remain tracked by #789; `ax serve`/`ax mcp` runtime cutover is explicitly Wave 2/3 scope.
+
+### mbp/w1-ci-fix (PR #798)
+
+CI verification completed but was invisible to the previous static monitor. The actual CI failure was not a missing dylib: CI downloaded an upstream DuckDB dylib without statically linked FTS; the fixture builder then made 36 tests fail on `LOAD fts`.
+
+The remediation is committed on `feat/v2-w1-seam-design` (`e2f6b353`, `624d33d5`, `472bb369`, `96c0acde`): CI builds/caches/air-gap-smokes the custom artifact, verify consumes it through `DUCKDB_DIST_DIR`, and FTS-dependent suites explicitly require a probed FTS capability. Local evidence: 6148 pass / 15 skipped / 0 fail, 59 formerly failing cases pass. First real confirmation remains the next GitHub Actions run.
