@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { AppLayer } from "@ax/lib/layers";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import surrealSchema from "@ax/schema/schema.surql" with { type: "text" };
 import {
     __testBuildCodexBatchStatements,
     __testExtractCodexJsonlLines,
@@ -37,6 +38,12 @@ const TEST_TIMEOUT_MS = 30_000;
 
 const SESSION_ID = "e2e_reingest_codex_session";
 const PROVIDER = "codex" as const;
+
+describe("agent_event raw payload prune", () => {
+    test("the SCHEMAFULL table does not define the removed raw field", () => {
+        expect(surrealSchema).not.toMatch(/DEFINE FIELD\s+raw\s+ON agent_event\b/);
+    });
+});
 
 const transcriptLines = [
     JSON.stringify({
@@ -128,13 +135,6 @@ const exists = (db: SurrealClientShape, recordKey: string) =>
         .query<[{ id: unknown }[]]>(`SELECT id FROM agent_event:\`${recordKey}\`;`)
         .pipe(Effect.map((rows) => (rows?.[0]?.length ?? 0) > 0));
 
-const hasRaw = (db: SurrealClientShape, recordKey: string) =>
-    db
-        .query<[{ has_raw: boolean }[]]>(
-            `SELECT raw IS NOT NONE AS has_raw FROM agent_event:\`${recordKey}\`;`,
-        )
-        .pipe(Effect.map((rows) => rows?.[0]?.[0]?.has_raw === true));
-
 const provide = <A>(eff: Effect.Effect<A, unknown, SurrealClient>): Promise<A> =>
     Effect.runPromise(eff.pipe(Effect.provide(AppLayer)) as Effect.Effect<A, unknown, never>);
 
@@ -170,22 +170,13 @@ describe(
                     yield* cleanup(db);
                     yield* ingestOnce(db);
                     const firstCount = yield* countSessionEvents(db);
-                    // Simulate a row from an older writer. CONTENT replacement
-                    // on the second ingest must remove this legacy raw field.
-                    yield* db.query(
-                        `UPDATE agent_event:\`${callEventKey}\` SET raw = "legacy";`,
-                    );
-                    expect(yield* hasRaw(db, callEventKey)).toBe(true);
-                    // Identical second ingest: must not throw, count unchanged,
-                    // and no legacy raw payload remains.
+                    // Identical second ingest: must not throw, count unchanged.
                     yield* ingestOnce(db);
                     const secondCount = yield* countSessionEvents(db);
                     const callPresent = yield* exists(db, callEventKey);
-                    const rawPresent = yield* hasRaw(db, callEventKey);
-                    return { firstCount, secondCount, callPresent, rawPresent };
+                    return { firstCount, secondCount, callPresent };
                 }));
                 expect(result.callPresent).toBe(true);
-                expect(result.rawPresent).toBe(false);
                 expect(result.firstCount).toBeGreaterThan(0);
                 expect(result.secondCount).toBe(result.firstCount);
             },
