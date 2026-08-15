@@ -409,12 +409,12 @@ const cmdSessionShow = (input: {
                 turns: input.turns,
             }),
         } as const;
-        // w2-dashboard dependency: optional insights add CacheReadError.
-        // The command runtime reports either typed store error at its boundary.
         let enriched = yield* fetchEnrichedSession({
             sessionId,
             base: viewBase,
-        });
+        }).pipe(
+            catchDbErrorAndExit("axctl session show"),
+        );
         let payload = enriched.view!;
 
         // Prefix fallback: agents paste the short ids shown in listings
@@ -430,7 +430,7 @@ const cmdSessionShow = (input: {
                 enriched = yield* fetchEnrichedSession({
                     sessionId: resolvedId,
                     base: viewBase,
-                });
+                }).pipe(catchDbErrorAndExit("axctl session show"));
                 payload = enriched.view!;
             } else if (candidates.length > 1) {
                 process.stderr.write(

@@ -68,7 +68,7 @@ const run = (opts: EnrichedSessionOptions, fetchers: EnrichedSessionFetchers) =>
         fetchEnrichedSession(opts, fetchers).pipe(
             // Satisfy the SurrealClient requirement; the stubs never touch it.
             Effect.provide(makeTestSurrealClient({ denyWrites: true }).layer),
-        ) as Effect.Effect<import("./enriched-session.ts").EnrichedSession, unknown>,
+        ),
     );
 
 // ---------------------------------------------------------------------------

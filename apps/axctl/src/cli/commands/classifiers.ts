@@ -73,9 +73,9 @@ const cmdClassifiersExplain = (input: ClassifiersExplainInput) =>
         // invocation before this handler runs.
         const turnId = input.turnId;
         const useJson = wantsJsonFlag(input.json);
-        // w2-dashboard dependency: this reader now fails with CacheReadError.
-        // The command runtime reports that typed cache failure at its boundary.
-        const payload = yield* fetchClassifierExplain(turnId);
+        const payload = yield* fetchClassifierExplain(turnId).pipe(
+            catchDbErrorAndExit("axctl classifiers explain"),
+        );
 
         if (payload.turn === null) {
             process.stderr.write(`turn ${turnId} not found\n`);
