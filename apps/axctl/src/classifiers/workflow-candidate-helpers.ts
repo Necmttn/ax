@@ -1,5 +1,6 @@
 import { posixPath } from "@ax/lib/shared/path";
 import { prettyPrint } from "@ax/lib/json";
+import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { recordRef, surrealJson, surrealJsonText, surrealJsonTextOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
@@ -437,7 +438,7 @@ export const workflowCandidateProposalTitle = (
 };
 
 export const workflowCandidateProposalKey = (title: string, sig: string): string =>
-    `guidance__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
+    stableId("proposal", ["workflow_guidance", title, sig]);
 
 export const workflowCandidateSuggestedGuidance = (
     task: WorkflowCandidatePromotionTask,
@@ -518,7 +519,8 @@ export const buildWorkflowCandidateGuidanceProposalPlan = (
         const sig = workflowCandidateProposalSig(task);
         const proposalKey = workflowCandidateProposalKey(title, sig);
         const proposalRef = recordRef("proposal", proposalKey);
-        const payloadRef = recordRef("guidance_proposal", proposalKey);
+        const payloadKey = stableId("guidance_proposal", [proposalKey]);
+        const payloadRef = recordRef("guidance_proposal", payloadKey);
         const fileTarget = opts.fileTarget ?? "AGENTS.md";
         const section = opts.section ?? "Workflow Candidate Guardrails";
         const candidateIds = task.candidate_ids ?? [task.candidate_id];
@@ -577,7 +579,7 @@ export const buildWorkflowCandidateGuidanceProposalPlan = (
             candidate_id: task.candidate_id,
             ...(task.candidate_ids === undefined ? {} : { candidate_ids: task.candidate_ids }),
             proposal_id: `proposal:${proposalKey}`,
-            guidance_payload_id: `guidance_proposal:${proposalKey}`,
+            guidance_payload_id: `guidance_proposal:${payloadKey}`,
             dedupe_sig: sig,
             title,
             file_target: fileTarget,
@@ -5978,7 +5980,7 @@ export function buildWorkflowCandidateHarnessProposalPlan(
     for (const { candidate, recommendation } of harnessCandidates) {
         const sig = workflowCandidateHarnessProposalSig(candidate, report.topic);
         const title = workflowCandidateHarnessProposalTitle(candidate, report.topic);
-        const proposalKey = `harness_check__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
+        const proposalKey = stableId("proposal", ["workflow_harness", title, sig]);
         const proposalRef = recordRef("proposal", proposalKey);
         const existing = existingSigs.has(sig);
         const baseline = prettyPrint({

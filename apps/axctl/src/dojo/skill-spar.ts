@@ -8,6 +8,7 @@
  */
 import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
@@ -543,8 +544,8 @@ export const scoreSkillSpar = (
     sinceForChurn: Date,
 ): Effect.Effect<
     { sessionA: string; sessionB: string; a: SparMetrics; b: SparMetrics; score: SparScore },
-    DbError | SparCaptureError,
-    SurrealClient | AxConfig
+    DbError | JudgmentError | SparCaptureError,
+    SurrealClient | Judgment | AxConfig
 > =>
     Effect.gen(function* () {
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);

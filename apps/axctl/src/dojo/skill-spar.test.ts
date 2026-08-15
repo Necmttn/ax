@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
@@ -872,10 +874,10 @@ describe("scoreSkillSpar", () => {
     const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
 
     const runScore = <A>(
-        eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
+        eff: Effect.Effect<A, unknown, SurrealClient | Judgment | AxConfig>,
         tcLayer: Layer.Layer<SurrealClient>,
     ): Promise<A> =>
-        Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer))));
+        Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer, EmptyJudgmentTestLayer))));
 
     const MAIN_ROOT = "/main/repo";
 
@@ -916,9 +918,6 @@ describe("scoreSkillSpar", () => {
         expect(result.a).toBeDefined();
         expect(result.b).toBeDefined();
 
-        // Both sessions got stampSparSession calls (SELECT labels + UPDATE each).
-        const stampUpdates = tc.captured.filter((s) => s.startsWith("UPDATE"));
-        expect(stampUpdates.length).toBeGreaterThanOrEqual(2);
     });
 
     // -----------------------------------------------------------------------
@@ -935,7 +934,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -958,7 +957,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -1034,7 +1033,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(badBrief, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");

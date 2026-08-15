@@ -30,8 +30,10 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { encodeJson } from "@ax/lib/decode";
 import type { DbError } from "@ax/lib/errors";
-import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { recordRef } from "@ax/lib/shared/surql";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 
 export type RetroSource =
     | "claude_stop_hook"
@@ -185,35 +187,24 @@ export const retroFromSession = (
  * re-implementing the truncation.
  */
 export const retroRecordKey = (sessionId: string): string =>
-    safeKeyPart(sessionId).slice(0, 96);
-
-export const buildRetroStatement = (input: RetroInput): string => {
-    const key = retroRecordKey(input.sessionId);
-    const sessionRef = recordRef("session", input.sessionId);
-    const retroRef = recordRef("retro", key);
-    const upsert = `UPSERT ${retroRef} MERGE ${surrealObject([
-        ["session", sessionRef],
-        ["source", surrealString(input.source)],
-        ["tried", surrealString(input.payload.tried)],
-        ["worked", surrealOptionString(input.payload.worked)],
-        ["failed", surrealOptionString(input.payload.failed)],
-        ["next", surrealOptionString(input.payload.next)],
-        ["raw", surrealJsonOption(input.raw ? { raw: input.raw } : undefined)],
-        ["repository", input.repositoryKey ? recordRef("repository", input.repositoryKey) : "NONE"],
-        ["created_at", input.createdAt ? surrealDate(input.createdAt) : "time::now()"],
-    ])};`;
-    // Idempotent edge: drop any prior `reviewed` between this session and
-    // retro pair, then RELATE fresh. UNIQUE(in, out) on `reviewed` rejects
-    // a second RELATE, and we don't want re-emit to fail.
-    const dropEdge = `DELETE reviewed WHERE in = ${sessionRef} AND out = ${retroRef};`;
-    const relate = `RELATE ${sessionRef}->reviewed->${retroRef};`;
-    return `${upsert} ${dropEdge} ${relate}`;
-};
+    stableId("retro", [sessionId.replace(/^session:/, "")]);
 
 export const upsertRetro = (
     input: RetroInput,
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* db.query(buildRetroStatement(input));
+        const judgment = yield* Judgment;
+        const session = input.sessionId.replace(/^session:/, "");
+        yield* judgment.put("retro", {
+            id: retroRecordKey(session),
+            session,
+            source: input.source,
+            tried: input.payload.tried,
+            worked: input.payload.worked,
+            failed: input.payload.failed,
+            next: input.payload.next,
+            raw: input.raw ?? null,
+            repository: input.repositoryKey ?? null,
+            created_at: input.createdAt ? new Date(input.createdAt) : new Date(),
+        });
     });

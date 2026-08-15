@@ -14,10 +14,8 @@
  * stripped in JS (mirrors verdict-pending.ts).
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { surrealDate } from "@ax/lib/shared/surql";
+import { Effect, Schema } from "effect";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 
 export interface CreatedProposalRow {
     readonly id: string;
@@ -35,38 +33,31 @@ export interface LockedVerdictRow {
 /** Oldest-first proposals minted at/after `since`. */
 export const listProposalsCreatedSince = (
     since: Date,
-): Effect.Effect<CreatedProposalRow[], DbError, SurrealClient> =>
+): Effect.Effect<CreatedProposalRow[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `SELECT
-                type::string(id) AS id,
-                title,
-                form,
-                dedupe_sig,
-                type::string(created_at) AS created_at
-            FROM proposal
-            WHERE created_at >= ${surrealDate(since)}
-            ORDER BY created_at ASC
-            LIMIT 50;`;
-        const result = yield* db.query<[Array<CreatedProposalRow & { created_at?: string }>]>(sql);
-        return (result?.[0] ?? []).map(({ id, title, form, dedupe_sig }) => ({ id, title, form, dedupe_sig }));
+        const judgment = yield* Judgment;
+        return [...yield* judgment.rows(
+            Schema.Struct({ id: TextColumn, title: TextColumn, form: TextColumn, dedupe_sig: TextColumn }),
+            `SELECT id, title, form, dedupe_sig FROM proposal
+             WHERE created_at >= ? ORDER BY created_at ASC LIMIT 50`,
+            [since],
+        )];
     });
 
 /** Oldest-first checkpoints whose `user_verdict` was locked at/after `since`. */
 export const listVerdictsLockedSince = (
     since: Date,
-): Effect.Effect<LockedVerdictRow[], DbError, SurrealClient> =>
+): Effect.Effect<LockedVerdictRow[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `SELECT
-                user_verdict AS verdict,
-                experiment.proposal.title AS title,
-                experiment.proposal.dedupe_sig AS sig,
-                type::string(observed_at) AS observed_at
-            FROM checkpoint
-            WHERE user_verdict IS NOT NONE AND observed_at >= ${surrealDate(since)}
-            ORDER BY observed_at ASC
-            LIMIT 50;`;
-        const result = yield* db.query<[Array<LockedVerdictRow & { observed_at?: string }>]>(sql);
-        return (result?.[0] ?? []).map(({ verdict, title, sig }) => ({ verdict, title, sig }));
+        const judgment = yield* Judgment;
+        return [...yield* judgment.rows(
+            Schema.Struct({ verdict: TextColumn, title: TextColumn, sig: TextColumn }),
+            `SELECT c.user_verdict AS verdict, p.title, p.dedupe_sig AS sig
+             FROM checkpoint c
+             JOIN experiment e ON e.id = c.experiment
+             JOIN proposal p ON p.id = e.proposal
+             WHERE c.user_verdict IS NOT NULL AND c.observed_at >= ?
+             ORDER BY c.observed_at ASC LIMIT 50`,
+            [since],
+        )];
     });

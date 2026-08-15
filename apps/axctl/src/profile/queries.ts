@@ -13,6 +13,7 @@ import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
@@ -173,29 +174,20 @@ export interface ProposalRow {
     readonly created_at: string | null;
 }
 
-const ACCEPTED_PROPOSALS_SQL = `
-SELECT form, title, hypothesis, confidence, frequency,
-       type::string(updated_at) AS updated_at,
-       type::string(created_at) AS created_at
-FROM proposal
-WHERE status = 'accepted'
-ORDER BY frequency DESC
-LIMIT 100;`;
-
 export const fetchAcceptedProposals = Effect.fn("profile.fetchAcceptedProposals")(
     function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(ACCEPTED_PROPOSALS_SQL)
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const rows = (yield* listStoredProposals(10_000))
+            .filter((proposal) => proposal.status === "accepted")
+            .sort((a, b) => b.frequency - a.frequency)
+            .slice(0, 100);
         return rows.map((r) => ({
-            form: String(r.form ?? ""),
-            title: String(r.title ?? ""),
-            hypothesis: String(r.hypothesis ?? ""),
-            confidence: String(r.confidence ?? ""),
-            frequency: Number(r.frequency ?? 0),
-            updated_at: r.updated_at == null ? null : String(r.updated_at),
-            created_at: r.created_at == null ? null : String(r.created_at),
+            form: r.form,
+            title: r.title,
+            hypothesis: r.hypothesis,
+            confidence: r.confidence,
+            frequency: r.frequency,
+            updated_at: r.updated_at?.toISOString() ?? null,
+            created_at: r.created_at?.toISOString() ?? null,
         })) satisfies ProposalRow[];
     },
 );
@@ -797,27 +789,20 @@ export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookE
     },
 );
 
-const GUARDRAIL_VERDICTS_SQL = (d: number) => `
-SELECT
-    user_verdict AS verdict,
-    count() AS count
-FROM checkpoint
-WHERE observed_at > time::now() - ${win(d)}
-  AND user_verdict IS NOT NONE
-GROUP BY verdict
-ORDER BY count DESC;`;
-
 export const fetchGuardrailVerdicts = Effect.fn("profile.fetchGuardrailVerdicts")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* timedQuery(
+        const cutoff = new Date(Date.now() - Math.max(1, opts.windowDays) * 86_400_000);
+        const proposals = yield* timedQuery(
             "guardrailVerdicts",
-            db.query<[Array<Record<string, unknown>>]>(GUARDRAIL_VERDICTS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            listStoredProposals(10_000),
         );
-        return rows.map((r) => ({
-            verdict: String(r.verdict ?? ""),
-            count: Number(r.count ?? 0),
-        })).filter((r) => r.verdict.length > 0) satisfies GuardrailVerdictRow[];
+        const counts = new Map<string, number>();
+        for (const checkpoint of proposals.flatMap((proposal) => proposal.experiment?.checkpoints ?? [])) {
+            if (checkpoint.observed_at <= cutoff || checkpoint.user_verdict === null) continue;
+            counts.set(checkpoint.user_verdict, (counts.get(checkpoint.user_verdict) ?? 0) + 1);
+        }
+        return [...counts.entries()]
+            .map(([verdict, count]) => ({ verdict, count }))
+            .sort((a, b) => b.count - a.count || a.verdict.localeCompare(b.verdict)) satisfies GuardrailVerdictRow[];
     },
 );

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import type {
     SessionDetailPayload,
@@ -16,6 +16,7 @@ import type {
     SessionViewPayload,
 } from "@ax/lib/shared/dashboard-types";
 import type { SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
+import { EmptyCacheReadTestLayer, EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     fetchEnrichedSession,
     type EnrichedSessionFetchers,
@@ -67,7 +68,11 @@ const run = (opts: EnrichedSessionOptions, fetchers: EnrichedSessionFetchers) =>
     Effect.runPromise(
         fetchEnrichedSession(opts, fetchers).pipe(
             // Satisfy the SurrealClient requirement; the stubs never touch it.
-            Effect.provide(makeTestSurrealClient({ denyWrites: true }).layer),
+            Effect.provide(Layer.mergeAll(
+                makeTestSurrealClient({ denyWrites: true }).layer,
+                EmptyCacheReadTestLayer,
+                EmptyJudgmentTestLayer,
+            )),
         ),
     );
 

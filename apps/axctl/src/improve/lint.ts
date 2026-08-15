@@ -14,10 +14,9 @@
 
 import { homedir } from "node:os";
 import { Effect, FileSystem, Option, type PlatformError } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import {
     parseAutomationMarkers,
@@ -25,13 +24,11 @@ import {
     parseInlineMarkers,
     parseFrontmatterMarker,
 } from "./markers.ts";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "@ax/lib/shared/surql";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import {
     EXPERIMENT_STATUS_TASK_EMITTED,
     planTaskScaffolded,
 } from "./lifecycle.ts";
+import { listStoredProposals } from "./judgment-proposals.ts";
 import { interventionFormSpec, type InterventionForm } from "./intervention-forms.ts";
 
 export type LintForm = InterventionForm;
@@ -235,6 +232,7 @@ interface ExperimentRow {
     readonly status: string;
     readonly task_path: string | null;
     readonly locked_verdict: string | null;
+    readonly created_at: Date;
 }
 
 interface IdTarget {
@@ -356,7 +354,7 @@ const collectIds = (
 
 export const lintFiles = (
     opts: LintOptions = {},
-): Effect.Effect<LintReport, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<LintReport, JudgmentError | PlatformError.PlatformError, Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const targets = yield* discoverFiles(opts);
@@ -384,7 +382,16 @@ export const lintFiles = (
             }
         }
 
-        const db = yield* SurrealClient;
+        const judgment = yield* Judgment;
+        const stored = yield* listStoredProposals(100_000);
+        const experimentRows: ExperimentRow[] = stored.flatMap((proposal) => proposal.experiment ? [{
+            id: proposal.experiment.id,
+            short_id: proposal.dedupe_sig,
+            status: proposal.experiment.status,
+            task_path: proposal.experiment.task_path,
+            locked_verdict: proposal.experiment.locked_verdict,
+            created_at: proposal.experiment.created_at,
+        }] : []);
 
         if (idToTarget.size > 0) {
             // Partition targets into two groups:
@@ -403,20 +410,11 @@ export const lintFiles = (
             // --- Query 1: exact-experiment lookup (frontmatter ax_experiment) ---
             const byExperimentId = new Map<string, ExperimentRow>();
             if (explicitEntries.length > 0) {
-                const expIdList = explicitEntries
-                    .map(([, tgt]) => tgt.experiment)
-                    .map(surrealLiteral)
-                    .join(",");
-                const expResult = yield* db.query<[ExperimentRow[]]>(`
-                    SELECT
-                        type::string(id) AS id,
-                        proposal.dedupe_sig AS short_id,
-                        status,
-                        task_path,
-                        locked_verdict
-                    FROM experiment WHERE type::string(id) IN [${expIdList}];
-                `);
-                for (const r of expResult?.[0] ?? []) byExperimentId.set(r.id, r);
+                const wanted = new Set(explicitEntries.map(([, target]) => target.experiment.replace(/^experiment:/, "")));
+                for (const row of experimentRows) {
+                    if (wanted.has(row.id)) byExperimentId.set(row.id, row);
+                    byExperimentId.set(`experiment:${row.id}`, row);
+                }
             }
 
             // --- Query 2: dedupe_sig batch (inline guidance markers) ---
@@ -426,17 +424,8 @@ export const lintFiles = (
             const byShortId = new Map<string, ExperimentRow>();
             const ambiguousShortIds = new Set<string>();
             if (dedupeIds.length > 0) {
-                const idList = dedupeIds.map(surrealLiteral).join(",");
-                const result = yield* db.query<[ExperimentRow[]]>(`
-                    SELECT
-                        type::string(id) AS id,
-                        proposal.dedupe_sig AS short_id,
-                        status,
-                        task_path,
-                        locked_verdict
-                    FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
-                `);
-                const rows: ExperimentRow[] = result?.[0] ?? [];
+                const wanted = new Set(dedupeIds);
+                const rows = experimentRows.filter((row) => wanted.has(row.short_id));
                 for (const r of rows) {
                     if (byShortId.has(r.short_id)) {
                         // Second row for the same short_id → ambiguous
@@ -454,7 +443,7 @@ export const lintFiles = (
                 nextStatus: string;
                 taskPath: string | null;
             }
-            const updates: string[] = [];
+            const updates: Array<{ readonly id: string; readonly path: string }> = [];
             const pending: PendingReconcile[] = [];
 
             const reconcileRow = (
@@ -477,14 +466,7 @@ export const lintFiles = (
                     });
                 }
                 if (plan.status === "scaffold") {
-                    // Use recordRef to build the UPDATE target consistently with
-                    // actions.ts (which always wraps record IDs via recordRef rather
-                    // than interpolating the raw type::string id).
-                    const key = recordKeyPart(row.id, "experiment");
-                    const updateTarget = key ? recordRef("experiment", key) : row.id;
-                    updates.push(
-                        `UPDATE ${updateTarget} SET status = '${plan.nextStatus}', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
-                    );
+                    updates.push({ id: row.id, path: tgt.path });
                     // existsSync probe → orAbsent(false).
                     const taskPresent = row.task_path
                         ? yield* fs.exists(row.task_path).pipe(orAbsent(false))
@@ -542,7 +524,13 @@ export const lintFiles = (
             }
 
             if (updates.length > 0) {
-                yield* db.query(updates.join("\n"));
+                const now = new Date();
+                yield* judgment.transaction((transaction) =>
+                    Effect.forEach(updates, (update) => transaction.exec(
+                        "UPDATE experiment SET status = ?, scaffolded_at = ?, artifact_path = ? WHERE id = ?",
+                        ["scaffolded", now, update.path, update.id],
+                    ), { discard: true }),
+                );
                 // DB succeeded - now safe to remove task files and record reconciliation
                 for (const p of pending) {
                     let taskDeleted: string | null = null;
@@ -576,20 +564,11 @@ export const lintFiles = (
         // The date predicate is pushed into SurrealQL so only rows older than
         // staleDays round-trip to JS (avoiding a linear statSync-per-row scan).
         const staleDays = opts.staleDays ?? 7;
-        const staleCutoff = new Date(Date.now() - staleDays * 86_400_000).toISOString();
-        const staleResult = yield* db.query<[ExperimentRow[]]>(`
-            SELECT
-                type::string(id) AS id,
-                proposal.dedupe_sig AS short_id,
-                status,
-                task_path,
-                locked_verdict
-            FROM experiment
-            WHERE status = '${EXPERIMENT_STATUS_TASK_EMITTED}'
-              AND task_path IS NOT NONE
-              AND created_at < d"${staleCutoff}";
-        `);
-        for (const row of staleResult?.[0] ?? []) {
+        const staleCutoff = new Date(Date.now() - staleDays * 86_400_000);
+        for (const row of experimentRows.filter((candidate) =>
+            candidate.status === EXPERIMENT_STATUS_TASK_EMITTED
+            && candidate.task_path !== null
+            && candidate.created_at < staleCutoff)) {
             if (idToTarget.has(row.short_id)) continue; // marker found this run → not stale
             if (!row.task_path) continue;
             // existsSync probe → orAbsent(false).

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { DigestSnapshot, type DigestItem } from "./model.ts";
 import { topForSnapshot } from "./rank.ts";
 import { improveItems, costItems, churnItems, quotaToItem } from "./sources.ts";
@@ -23,7 +24,7 @@ export const assembleSnapshot = (
 export const collectItems = (
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestItem[], DbError, SurrealClient> =>
+): Effect.Effect<DigestItem[], DbError | JudgmentError, SurrealClient | Judgment> =>
   Effect.gen(function* () {
     const out: DigestItem[] = [];
     out.push(...(yield* improveItems(now)));
@@ -53,7 +54,7 @@ export async function writeSnapshot(path: string, snap: DigestSnapshot): Promise
 export const buildAndWrite = (
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestSnapshot, DbError, SurrealClient> =>
+): Effect.Effect<DigestSnapshot, DbError | JudgmentError, SurrealClient | Judgment> =>
   Effect.gen(function* () {
     const items = yield* collectItems(now, windowDays);
     const snap = assembleSnapshot(items, { now, windowDays });

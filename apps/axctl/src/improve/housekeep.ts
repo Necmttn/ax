@@ -1,5 +1,5 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { Judgment, TextColumn, TimestampColumn } from "@ax/lib/sqlite";
 
 /**
  * Housekeeping for the improve loop - a loop that suggests cleaning up
@@ -31,27 +31,37 @@ export interface HousekeepReport {
     readonly dryRun: boolean;
 }
 
-const STALE_SELECT = (days: number): string =>
-    `SELECT id, title, dedupe_sig, form, type::string(updated_at) AS updated_at
-FROM proposal
-WHERE status = 'open'
-  AND (updated_at IS NONE OR updated_at < time::now() - ${days}d)
-  AND created_at < time::now() - ${days}d;`;
+const staleCutoff = (days: number): Date => new Date(Date.now() - days * 86_400_000);
 
 export const buildExpireStatement = (days: number): string =>
     `UPDATE proposal SET
     status = 'superseded',
     reject_reason = 'housekeeping: signal not re-observed in ${days}d - re-mined automatically if it recurs',
-    updated_at = time::now()
+    updated_at = ?
 WHERE status = 'open'
-  AND (updated_at IS NONE OR updated_at < time::now() - ${days}d)
-  AND created_at < time::now() - ${days}d;`;
+  AND (updated_at IS NULL OR updated_at < ?)
+  AND created_at < ?`;
 
 export const findStaleOpenProposals = Effect.fn("improve.findStaleOpenProposals")(
     function* (days: number) {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[StaleProposalRow[]]>(STALE_SELECT(days));
-        return result[0] ?? [];
+        const judgment = yield* Judgment;
+        const cutoff = staleCutoff(days);
+        const rows = yield* judgment.rows(
+            Schema.Struct({
+                id: TextColumn,
+                title: TextColumn,
+                dedupe_sig: TextColumn,
+                form: TextColumn,
+                updated_at: Schema.NullOr(TimestampColumn),
+            }),
+            `SELECT id, title, dedupe_sig, form, updated_at
+             FROM proposal
+             WHERE status = 'open'
+               AND (updated_at IS NULL OR updated_at < ?)
+               AND created_at < ?`,
+            [cutoff, cutoff],
+        );
+        return rows.map((row) => ({ ...row, updated_at: row.updated_at?.toISOString() ?? null }));
     },
 );
 
@@ -92,8 +102,10 @@ export const runHousekeep = Effect.fn("improve.runHousekeep")(function* (opts: {
     }
 
     if (staleProposals.length > 0) {
-        const db = yield* SurrealClient;
-        yield* db.query(buildExpireStatement(opts.days));
+        const judgment = yield* Judgment;
+        const now = new Date();
+        const cutoff = staleCutoff(opts.days);
+        yield* judgment.exec(buildExpireStatement(opts.days), [now, cutoff, cutoff]);
     }
     const removed: string[] = [];
     for (const path of staleFiles) {

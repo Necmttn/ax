@@ -4,9 +4,8 @@
  * Returns a flat list the CLI/dashboard can render however it likes.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { Judgment, NumberColumn, TextColumn, TimestampColumn, type JudgmentError } from "@ax/lib/sqlite";
 import { PROPOSAL_STATUS_OPEN } from "./lifecycle.ts";
 
 export interface RecommendInput {
@@ -92,23 +91,31 @@ const score = (row: { confidence: string; frequency: number; updated_at: string 
 
 export const recommend = (
     input: RecommendInput,
-): Effect.Effect<RecommendItem[], DbError, SurrealClient> =>
+): Effect.Effect<RecommendItem[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[ReadonlyArray<{
-            dedupe_sig: string; title: string; form: string; hypothesis: string;
-            confidence: string; frequency: number; updated_at: string;
-        }>]>(`SELECT dedupe_sig, title, form, hypothesis, confidence, frequency,
-                type::string(updated_at) AS updated_at
-            FROM proposal WHERE status = '${PROPOSAL_STATUS_OPEN}';`);
-        let rows = result?.[0] ?? [];
+        const judgment = yield* Judgment;
+        let rows = yield* judgment.rows(
+            Schema.Struct({
+                dedupe_sig: TextColumn,
+                title: TextColumn,
+                form: TextColumn,
+                hypothesis: TextColumn,
+                confidence: TextColumn,
+                frequency: NumberColumn,
+                updated_at: TimestampColumn,
+            }),
+            `SELECT dedupe_sig, title, form, hypothesis, confidence, frequency,
+                    coalesce(updated_at, created_at) AS updated_at
+             FROM proposal WHERE status = ?`,
+            [PROPOSAL_STATUS_OPEN],
+        );
         if (input.forms && input.forms.length > 0) {
             const set = new Set(input.forms);
             rows = rows.filter((r) => set.has(r.form));
         }
         if (input.sinceDays != null) {
             const cutoff = Date.now() - input.sinceDays * 86_400_000;
-            rows = rows.filter((r) => new Date(r.updated_at).getTime() >= cutoff);
+            rows = rows.filter((r) => r.updated_at.getTime() >= cutoff);
         }
         const ranked: RecommendItem[] = rows
             .map((r) => ({
@@ -118,8 +125,8 @@ export const recommend = (
                 hypothesis: r.hypothesis,
                 confidence: r.confidence,
                 frequency: r.frequency,
-                updatedAt: r.updated_at,
-                score: score(r),
+                updatedAt: r.updated_at.toISOString(),
+                score: score({ ...r, updated_at: r.updated_at.toISOString() }),
             }))
             .sort((a, b) => b.score - a.score)
             .slice(0, input.limit);

@@ -9,6 +9,7 @@ import type { Surreal } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { assembleAgenda, collectAgendaItems } from "./agenda.ts";
 import type { BudgetEnvelope, DojoItem } from "./schema.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const budget: BudgetEnvelope = {
     has_surplus: true, spendable_pct: 20, binding_window: "five_hour",
@@ -86,7 +87,7 @@ describe("collectAgendaItems", () => {
         getFile: () => Effect.succeed(""),
         raw: null as unknown as Surreal, // never touched by read-only agenda sources
     };
-    const env = Layer.mergeAll(Layer.succeed(SurrealClient, emptyClient), BunFileSystem.layer);
+    const env = Layer.mergeAll(Layer.succeed(SurrealClient, emptyClient), BunFileSystem.layer, EmptyJudgmentTestLayer);
 
     test("empty graph + missing task dir -> only the proposal-mint nudge", async () => {
         const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
@@ -111,7 +112,7 @@ describe("collectAgendaItems", () => {
             query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
                 Effect.fail("db offline") as unknown as Effect.Effect<T>,
         };
-        const failingEnv = Layer.mergeAll(Layer.succeed(SurrealClient, failingClient), BunFileSystem.layer);
+        const failingEnv = Layer.mergeAll(Layer.succeed(SurrealClient, failingClient), BunFileSystem.layer, EmptyJudgmentTestLayer);
         const collected = await Effect.runPromise(
             collectAgendaItems({
                 nowMs: Date.parse("2026-06-13T10:00:00.000Z"),
@@ -122,8 +123,6 @@ describe("collectAgendaItems", () => {
             }).pipe(Effect.provide(failingEnv)),
         );
         expect(collected.items.map((i) => i.kind)).toEqual(["proposal_mint"]);
-        expect(collected.source_failures.map((f) => f.source)).toEqual(
-            expect.arrayContaining(["verdicts", "churn", "proposals", "routing"]),
-        );
+        expect(collected.source_failures.map((f) => f.source)).toEqual(["churn", "routing"]);
     });
 });

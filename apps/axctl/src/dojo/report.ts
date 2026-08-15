@@ -9,7 +9,7 @@
  * Spec: docs/superpowers/specs/2026-06-13-dojo-report-outbox-design.md
  */
 import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Judgment } from "@ax/lib/sqlite";
 import { withAxAttribution } from "@ax/lib/shared/attribution";
 import {
     listProposalsCreatedSince,
@@ -80,7 +80,7 @@ export interface GatherReportInput {
  */
 export const gatherReport = (
     input: GatherReportInput,
-): Effect.Effect<ReportData, never, SurrealClient | FileSystem.FileSystem | QuotaEnv> =>
+): Effect.Effect<ReportData, never, Judgment | FileSystem.FileSystem | QuotaEnv> =>
     Effect.gen(function* () {
         const since = new Date(input.sinceMs);
 
