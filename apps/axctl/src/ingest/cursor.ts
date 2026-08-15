@@ -907,6 +907,8 @@ const toCursorNormalizedBatch = (
     compactions: extract.compactions,
 });
 
+export const __testToCursorNormalizedBatch = toCursorNormalizedBatch;
+
 /**
  * Narrow a whole-store extract down to ONE session - the unit of isolation
  * for SQLite-backed providers (#261). The store is re-extracted on every run,

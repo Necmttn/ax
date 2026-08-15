@@ -106,6 +106,37 @@ const seedCurrentRows = (write: import("@ax/lib/duckdb/seam").CacheWriteService)
             user_corrections: 1n,
             task_label: "Verify live reads",
         });
+        // ONE COMPLETE VERIFICATION EPISODE, so the churn parity case has
+        // something to compare. `fetchSessionChurnSummary` gates every later
+        // scan on `fetchChurnCandidateSessionIds`, which selects only sessions
+        // holding a `command_outcome` with kind 'expected_feedback' or status
+        // 'error' - with none seeded it returned empty aggregates from BOTH the
+        // live reader and the published snapshot, and the assertion compared
+        // [] to [] while proving nothing about the port.
+        //
+        // A failing check opens the episode and a same-family pass closes it;
+        // both are `bun test`, so `checkFamilyFromCommand` maps them to one
+        // family, and they sit well inside EPISODE_EXPIRY_MS (30 min).
+        yield* write.putMany("command_outcome", [
+            {
+                id: "outcome-fail",
+                session: "parent",
+                tool_call: "edit-call",
+                command_norm: "bun test",
+                kind: "check",
+                status: "error",
+                ts: RECENT,
+            },
+            {
+                id: "outcome-pass",
+                session: "parent",
+                tool_call: "edit-call",
+                command_norm: "bun test",
+                kind: "check",
+                status: "ok",
+                ts: new Date(RECENT.getTime() + 60_000),
+            },
+        ]);
         yield* write.put("fragility_cascade", {
             id: "cascade-live",
             origin: "parent",
@@ -256,6 +287,19 @@ const assertParity = async (key: keyof LiveResults): Promise<void> => {
     expect(snapshot[key]).toEqual(fixture.live[key]);
     if (key === "sessionLoc" || key === "sessionMetrics") {
         expect((snapshot[key] as ReadonlyMap<string, unknown>).size).toBeGreaterThan(0);
+    }
+    // Equality alone cannot tell "both sides agree" from "both sides are empty",
+    // and an empty answer is exactly what a broken port produces. Every key that
+    // returns a collection asserts it actually carries rows.
+    if (key === "sessionChurn") {
+        const churn = snapshot[key] as {
+            readonly aggregates: ReadonlyArray<{ readonly episodes: number }>;
+            readonly hotSessions: ReadonlyArray<unknown>;
+        };
+        expect(churn.aggregates.length).toBeGreaterThan(0);
+        expect(churn.hotSessions.length).toBeGreaterThan(0);
+        // The seeded fail -> same-family pass is one CLOSED episode.
+        expect(churn.aggregates.reduce((sum, row) => sum + row.episodes, 0)).toBe(1);
     }
     if (key === "telemetryRollup") {
         const rollup = snapshot[key] as {
