@@ -16,7 +16,7 @@ import type { PwdIdentity } from "../pwd.ts";
 import { publishCacheFixture, readFixture, runWithPlatform } from "../testing/cache-fixture.ts";
 import { repositoryLookupQueries, resolveCacheRepository } from "./repository-scope.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("repository scope");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("repository scope", { requireFts: true });
 
 const identity = (
     over: Partial<Omit<PwdIdentity, "identity">> & { readonly kind?: RepositoryIdentityKind } = {},

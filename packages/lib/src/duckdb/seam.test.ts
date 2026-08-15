@@ -19,7 +19,7 @@ import {
     type CacheWriteService,
 } from "./seam.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("duckdb seam");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("duckdb seam", { requireFts: true });
 
 const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
