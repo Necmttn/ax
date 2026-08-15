@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { Effect } from "effect";
+import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
 // Mock result order MUST match the query order in buildProfile:
@@ -20,11 +22,6 @@ const mockResults = [
     [[{ source: "claude" }, { source: "codex" }]],
     [[{ skill: "tdd", count: 88 }]],
     [[{ name: "tdd", scope: "plugin:superpowers" }]],
-    [[{
-        form: "guidance", title: "Stop edit loops early",
-        hypothesis: "3+ edits means drift", confidence: "high", frequency: 12,
-        updated_at: "2026-06-10T00:00:00Z", created_at: "2026-06-01T00:00:00Z",
-    }]],
     [[{
         model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
         cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
@@ -104,15 +101,29 @@ const mockResults = [
         { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
         { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
     ]],
-    // 29: guardrailVerdicts
-    [[
-        { verdict: "adopted", count: 4 },
-        { verdict: "regressed", count: 1 },
-        { verdict: "ignored", count: 1 },
-        { verdict: "no_longer_needed", count: 1 },
-        { verdict: "partial", count: 2 },
-    ]],
 ];
+
+const proposalRows = [{
+    form: "guidance", title: "Stop edit loops early",
+    hypothesis: "3+ edits means drift", confidence: "high", frequency: 12,
+    updated_at: new Date("2026-06-10T00:00:00Z"), created_at: new Date("2026-06-01T00:00:00Z"),
+}];
+const verdictRows = [
+    { verdict: "adopted", count: 4 },
+    { verdict: "regressed", count: 1 },
+    { verdict: "ignored", count: 1 },
+    { verdict: "no_longer_needed", count: 1 },
+    { verdict: "partial", count: 2 },
+];
+
+const runProfile = <A, E>(
+    db: TestSurrealClient,
+    effect: Effect.Effect<A, E, unknown>,
+    proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
+) => Effect.runPromise(effect.pipe(
+    Effect.provide(db.layer),
+    Effect.provide(judgmentTestLayer((sql) => sql.includes("FROM proposal") ? proposals : verdictRows)),
+) as Effect.Effect<A, E>);
 
 const env = {
     github: "necmttn",
@@ -127,7 +138,7 @@ const env = {
 describe("buildProfile", () => {
     test("assembles a valid ProfileV1", async () => {
         const db = makeMockDb(mockResults);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }));
 
         expect(p.v).toBe(1);
         expect(p.github).toBe("necmttn");
@@ -210,38 +221,37 @@ describe("buildProfile", () => {
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {
         const db = makeMockDb(mockResults);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: false, env }));
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: false, env }));
         expect(p.stats.cost_usd).toBeUndefined();
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
     test("no proposals -> taste has only the mix pattern from content types", async () => {
-        const noProposals = mockResults.map((r, i) => (i === 5 ? [[]] : r));
-        const db = makeMockDb(noProposals);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const db = makeMockDb(mockResults);
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), []);
         expect(p.taste?.patterns).toHaveLength(1);
         expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
     });
 
     test("no proposals + no content types -> taste omitted", async () => {
-        const noTaste = mockResults.map((r, i) => (i === 5 || i === 27 ? [[]] : r));
+        const noTaste = mockResults.map((r, i) => (i === 26 ? [[]] : r));
         const db = makeMockDb(noTaste);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), []);
         expect(p.taste).toBeUndefined();
     });
 
     test("empty daily + durations -> activity and insights omitted", async () => {
-        // Blank out dailyFull(sessions+tokens) and sessionDurations (indices 7, 8, 9).
-        const empty = mockResults.map((r, i) => (i >= 7 && i <= 9 ? [[]] : r));
+        // Blank out dailyFull(sessions+tokens) and sessionDurations (indices 6, 7, 8).
+        const empty = mockResults.map((r, i) => (i >= 6 && i <= 8 ? [[]] : r));
         const db = makeMockDb(empty);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }));
         expect(p.activity).toBeUndefined();
         expect(p.insights).toBeUndefined();
     });
 
     test("buildProfile attaches highlights from env", async () => {
         const db = makeMockDb(mockResults);
-        const profile = await runWithMock(db, buildProfile({
+        const profile = await runProfile(db, buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {
@@ -255,7 +265,7 @@ describe("buildProfile", () => {
 
     test("buildProfile omits highlights when env.highlights is null", async () => {
         const db = makeMockDb(mockResults);
-        const profile = await runWithMock(db, buildProfile({
+        const profile = await runProfile(db, buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {

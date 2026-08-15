@@ -464,15 +464,10 @@ export const captureBaseline = (
     });
 
 /**
- * Stamp a variant session's `labels` field with `"spar"` so behavioral
+ * Stamp a durable `session_label` judgment with `"spar"` so behavioral
  * analytics (`ax skills weighted`, `ax thinking`) can exclude it.
  *
- * Merge-union: reads the current labels JSON, adds `"spar"` if absent, and
- * writes back. Idempotent: re-stamping an already-tagged session is a no-op.
- * No-op when the session id cannot be resolved (silently returns).
- *
- * The `labels` field is `option<string>` containing a JSON-encoded string[]
- * (schema rule of thumb for SurrealDB v3: nested arrays → JSON string).
+ * The stable natural key makes repeat writes idempotent.
  */
 export const stampSparSession = (
     sessionId: string,

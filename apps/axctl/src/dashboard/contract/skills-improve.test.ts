@@ -96,23 +96,6 @@ describe("improve handlers", () => {
         await expect(res.json()).resolves.toEqual({ error: "unknown_improve_action" });
     });
 
-    test("improveList survives rows carrying class instances (RecordId regression)", async () => {
-        // Real SurrealDB rows contain RecordId class instances; Schema.Unknown's
-        // JSON codec rejects class instances on encode (empty 400) unless the
-        // handler round-trips to plain JSON - this locks the asJsonValue fix.
-        class FakeRecordId { constructor(readonly tb: string, readonly id: string) {} toJSON() { return `${this.tb}:${this.id}`; } }
-        const recordIdDb = Layer.mock(SurrealClient, {
-            query: <T extends unknown[] = unknown[]>(_sql: string, _bindings?: Record<string, unknown> | undefined) =>
-                Effect.succeed([[{ id: new FakeRecordId("proposal", "p1"), title: "x" }]] as unknown as T),
-            raw: null as never,
-        });
-        const h = makeContractWebHandler({ ingestStream: null, services: recordIdDb });
-        handlers.push(h);
-        const res = await h.handler(req("GET", "/api/improve"));
-        expect(res.status).toBe(200);
-        const body = await res.json() as { proposals: Array<{ id: string }> };
-        expect(body.proposals[0]?.id).toBe("proposal:p1");
-    });
 });
 
 describe("live handler", () => {

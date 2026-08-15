@@ -12,7 +12,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { cmdSkillsLint } from "./skills-lint.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills lint sidecar");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills lint sidecar", { requireFts: true });
 
 const deadSurreal = Layer.succeed(
     SurrealClient,

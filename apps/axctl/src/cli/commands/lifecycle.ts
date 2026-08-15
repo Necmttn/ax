@@ -108,25 +108,27 @@ export const daemonCommand = Command.make("daemon").pipe(
     ]),
 );
 
+export const collectSidecarDoctorCheck = Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    const cache = yield* CacheRead;
+    const refs = yield* collectSidecarRefs(judgment);
+    const ids = yield* fetchCacheIds(cache);
+    const result = checkSidecarRefs(refs, ids);
+    return {
+        name: "sidecar-refs",
+        ok: result.ok,
+        detail: result.ok
+            ? `${result.checked} cache reference(s) valid`
+            : `${result.dangling} of ${result.checked} cache reference(s) dangling`,
+    };
+});
+
 export const doctorCommand = Command.make(
     "doctor",
     { json: jsonFlag },
     ({ json }) => Effect.gen(function* () {
         const report = yield* collectDoctorReport();
-        const integrity = yield* Effect.gen(function* () {
-            const judgment = yield* Judgment;
-            const cache = yield* CacheRead;
-            const refs = yield* collectSidecarRefs(judgment);
-            const ids = yield* fetchCacheIds(cache);
-            const result = checkSidecarRefs(refs, ids);
-            return {
-                name: "sidecar-refs",
-                ok: result.ok,
-                detail: result.ok
-                    ? `${result.checked} cache reference(s) valid`
-                    : `${result.dangling} of ${result.checked} cache reference(s) dangling`,
-            };
-        }).pipe(Effect.catch((error) => Effect.succeed({
+        const integrity = yield* collectSidecarDoctorCheck.pipe(Effect.catch((error) => Effect.succeed({
             name: "sidecar-refs",
             ok: false,
             detail: `integrity check unavailable: ${String(error)}`,

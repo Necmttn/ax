@@ -23,9 +23,8 @@
  * relations.
  */
 
-import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, FileSystem, Option, Schema } from "effect";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import {
@@ -295,7 +294,7 @@ export const buildRetroPlanStatements = (
 
 export const cmdRetroPlan = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<void, JudgmentError, Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const parsed = parseRetroPlanArgs(args, { checkPlanPath: false });
@@ -307,23 +306,103 @@ export const cmdRetroPlan = (
         }
         const built = buildRetroPlanStatements(parsed);
 
-        const db = yield* SurrealClient;
-
-        const existing = yield* db.query<[Array<{ id: unknown; dedupe_sig: string }>]>(
-            `SELECT id, dedupe_sig FROM proposal WHERE dedupe_sig = ${surrealString(built.sig)} LIMIT 1;`,
+        const judgment = yield* Judgment;
+        const hitOption = yield* judgment.first(
+            Schema.Struct({ id: TextColumn, dedupe_sig: TextColumn }),
+            "SELECT id, dedupe_sig FROM proposal WHERE dedupe_sig = ? LIMIT 1",
+            [built.sig],
         );
-        const hit = (existing?.[0] ?? [])[0];
-        if (hit) {
-            const existingId = typeof hit.id === "string"
-                ? hit.id
-                : `proposal:${(hit.id as { id?: string })?.id ?? ""}`;
+        if (Option.isSome(hitOption)) {
+            const hit = hitOption.value;
+            const existingId = `proposal:${hit.id}`;
             console.error(
                 `ax retro plan: proposal with dedupe_sig ${built.sig} already exists (${existingId}); refusing to overwrite`,
             );
             process.exit(3);
         }
 
-        yield* db.query(built.statements.join("\n"));
+        const now = new Date();
+        const baseline = JSON.stringify({
+            source: "retro_meta_plan",
+            slug: parsed.slug,
+            plan_path: parsed.planPath,
+            evidence_retros: parsed.evidenceRetros,
+            frequency: parsed.frequency,
+        });
+        yield* judgment.transaction((tx) => Effect.gen(function* () {
+            yield* tx.put("proposal", {
+                id: built.proposalKey,
+                form: parsed.form,
+                title: parsed.title,
+                hypothesis: parsed.hypothesis,
+                dedupe_sig: built.sig,
+                frequency: parsed.frequency,
+                confidence: parsed.confidence,
+                status: built.proposalStatus,
+                origin: "agent",
+                hypothesis_template: null,
+                evidence_query: null,
+                reject_reason: null,
+                baseline,
+                created_at: now,
+                updated_at: now,
+            });
+            if (parsed.form === "skill") {
+                yield* tx.put("skill_proposal", {
+                    id: built.proposalKey,
+                    proposal: built.proposalKey,
+                    trigger_pattern: `retro_meta·slug=${parsed.slug}`,
+                    suspected_gap: parsed.hypothesis,
+                    proposed_behavior: `see plan: ${parsed.planPath}`,
+                    expected_impact: null,
+                });
+            } else if (parsed.form === "guidance") {
+                yield* tx.put("guidance_proposal", {
+                    id: built.proposalKey,
+                    proposal: built.proposalKey,
+                    file_target: "CLAUDE.md",
+                    section: null,
+                    suggested_text: `see plan: ${parsed.planPath}`,
+                });
+            } else if (parsed.form === "hook") {
+                yield* tx.put("hook_proposal", {
+                    id: built.proposalKey,
+                    proposal: built.proposalKey,
+                    event_name: "PreToolUse",
+                    target_tool: null,
+                    hook_command: `see plan: ${parsed.planPath}`,
+                    recovery_path: parsed.safety.recoveryPath ?? null,
+                    smoke_test_command: parsed.safety.smokeTestCommand ?? null,
+                    disable_command: parsed.safety.disableCommand ?? null,
+                    failure_mode: parsed.safety.failureMode ?? null,
+                });
+            } else {
+                yield* tx.put("automation_proposal", {
+                    id: built.proposalKey,
+                    proposal: built.proposalKey,
+                    trigger_signal: `retro_meta·slug=${parsed.slug}`,
+                    schedule: null,
+                    action: `see plan: ${parsed.planPath}`,
+                    recovery_path: parsed.safety.recoveryPath ?? null,
+                    smoke_test_command: parsed.safety.smokeTestCommand ?? null,
+                    disable_command: parsed.safety.disableCommand ?? null,
+                    failure_mode: parsed.safety.failureMode ?? null,
+                });
+            }
+            if (built.experimentKey !== null) {
+                yield* tx.put("experiment", {
+                    id: built.experimentKey,
+                    proposal: built.proposalKey,
+                    artifact: null,
+                    artifact_path: parsed.artifactPath ?? parsed.planPath,
+                    scaffolded_at: now,
+                    created_at: now,
+                    locked_verdict: null,
+                    status: built.experimentStatus ?? "scaffolded",
+                    task_path: null,
+                });
+            }
+        }));
 
         if (parsed.json || !process.stdout.isTTY) {
             console.log(prettyPrint({

@@ -6,6 +6,7 @@ import {
     BooleanColumn,
     Judgment,
     TextColumn,
+    TimestampColumn,
     type JudgmentError,
 } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
@@ -89,7 +90,7 @@ const SELF_IMPROVE_SCHEMA = "ax.transcript_label_mining_self_improve.v1" as cons
 const GRAPH_PROJECTION_SCHEMA = "ax.transcript_label_mining_graph_projection.v1" as const;
 const REVIEWED_SOURCE_KIND = "transcript_label_mining_reviewed" as const;
 
-/** A persisted `transcript_label_review` row (as read back from SurrealDB). */
+/** A persisted `transcript_label_review` row from the judgment sidecar. */
 export interface LabelMiningReviewTableRow {
     readonly candidate_id: string;
     readonly graph_fact_id?: string | null;
@@ -101,6 +102,7 @@ export interface LabelMiningReviewTableRow {
     readonly reviewer: string;
     readonly rationale: string;
     readonly evidence_paths_json: string;
+    readonly updated_at?: Date | null;
 }
 
 /** A persisted `classifier_graph_fact` row scoped to the reviewed source kind. */
@@ -278,7 +280,7 @@ export interface LabelMiningSelfImproveInput {
 
 export interface LabelMiningProjectInput {
     readonly out?: string;
-    /** When false, build statements but do not run them against SurrealDB. */
+    /** When false, build statements but do not write graph facts or reviews. */
     readonly apply: boolean;
 }
 
@@ -454,7 +456,7 @@ export interface LabelMiningServiceShape {
     /**
      * Project persisted reviewed rows + vector rows into classifier graph facts.
      * Only `accepted` reviews become promotion-safe. With `apply`, the idempotent
-     * UPSERT statements are run against SurrealDB.
+     * Graph statements use SurrealDB. Review decisions use the sidecar.
      */
     readonly projectReviewed: (
         input: LabelMiningProjectInput,
@@ -477,6 +479,7 @@ const ReviewTableRowSchema = Schema.Struct({
     reviewer: TextColumn,
     rationale: TextColumn,
     evidence_paths_json: TextColumn,
+    updated_at: TimestampColumn,
 });
 
 const reviewTableSql = `
@@ -490,7 +493,8 @@ SELECT
     reviewed_target,
     reviewer,
     rationale,
-    evidence_paths_json
+    evidence_paths_json,
+    updated_at
 FROM transcript_label_review;`.trim();
 
 /** Read all reviewed-source classifier graph facts. */
@@ -518,7 +522,8 @@ SELECT
     reviewed_target,
     reviewer,
     rationale,
-    evidence_paths_json
+    evidence_paths_json,
+    updated_at
 FROM transcript_label_review;`.trim();
 
 /** Read persisted vector rows for re-projection. */
@@ -570,7 +575,7 @@ const reviewRowToReviewedLabel = (row: LabelMiningReviewTableRow): TranscriptRev
     ...(row.reviewed_target != null ? { reviewed_target: row.reviewed_target } : {}),
     rationale: row.rationale,
     reviewer: row.reviewer,
-    reviewed_at: "",
+    reviewed_at: row.updated_at?.toISOString() ?? "",
 });
 
 const reviewRowToCandidate = (row: LabelMiningReviewTableRow): TranscriptLabelCandidate => ({
@@ -757,7 +762,7 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                             reviewer: row.reviewer,
                             rationale: row.rationale,
                             evidence_paths_json: JSON.stringify(row.evidence_paths),
-                            updated_at: new Date(row.reviewed_at),
+                            updated_at: row.reviewed_at ? new Date(row.reviewed_at) : new Date(),
                         }), { discard: true }),
                     );
                 }

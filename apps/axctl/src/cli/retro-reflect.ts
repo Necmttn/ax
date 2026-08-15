@@ -20,9 +20,9 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { prettyPrint } from "@ax/lib/json";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 export interface RetroReflectRow {
     readonly proposalKey: string;
@@ -43,39 +43,6 @@ export interface RetroReflectSummary {
     readonly totalRetros: number;
     readonly totalSessions: number;
 }
-
-/**
- * Build the SurrealQL that selects retro-derived proposals joined with
- * their skill_proposal payload. We filter on `string::contains(id, '...')`
- * so the marker prefix from derive-retro-proposals.ts is the only thing
- * that has to stay in sync. Status filter: 'open' by default, 'all'
- * means no filter.
- */
-export const buildRetroReflectQuery = (opts: {
-    readonly sinceDays: number;
-    readonly status: string;
-}): string => {
-    const sinceDays = Math.max(1, Math.floor(opts.sinceDays));
-    const statusClause = opts.status === "all"
-        ? ""
-        : ` AND status = '${opts.status.replace(/'/g, "")}'`;
-    return `SELECT
-        id,
-        dedupe_sig,
-        title,
-        hypothesis,
-        frequency,
-        confidence,
-        status,
-        baseline,
-        (SELECT trigger_pattern, suspected_gap, proposed_behavior
-         FROM skill_proposal
-         WHERE proposal = $parent.id LIMIT 1)[0] AS payload
-    FROM proposal
-    WHERE string::contains(<string>id, 'skill__retro__')
-      AND updated_at > time::now() - ${sinceDays}d${statusClause}
-    ORDER BY frequency DESC LIMIT 50;`;
-};
 
 /**
  * Render the 5-column ranked table. Columns: rank, freq, conf, sessions,
@@ -220,7 +187,7 @@ const flagValue = (args: string[], name: string): string | undefined => {
 
 export const cmdRetroReflect = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const sinceRaw = flagValue(args, "since");
         const sinceDays = sinceRaw !== undefined && /^\d+$/.test(sinceRaw)
@@ -231,11 +198,24 @@ export const cmdRetroReflect = (
         const yes = args.includes("--yes");
         const withAgent = process.env.AX_RETRO_REFLECT_AGENT === "1";
 
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            buildRetroReflectQuery({ sinceDays, status }),
-        );
-        const rawRows = result?.[0] ?? [];
+        const cutoff = Date.now() - sinceDays * 86_400_000;
+        const proposals = yield* listStoredProposals(500);
+        const rawRows = proposals
+            .filter((proposal) => proposal.id.includes("skill__retro__"))
+            .filter((proposal) => status === "all" || proposal.status === status)
+            .filter((proposal) => (proposal.updated_at ?? proposal.created_at).getTime() > cutoff)
+            .sort((a, b) => b.frequency - a.frequency)
+            .slice(0, 50)
+            .map((proposal) => ({
+                id: proposal.id,
+                dedupe_sig: proposal.dedupe_sig,
+                title: proposal.title,
+                hypothesis: proposal.hypothesis,
+                frequency: proposal.frequency,
+                confidence: proposal.confidence,
+                baseline: proposal.baseline,
+                payload: proposal.skill_payload ?? {},
+            }));
         const summary = summariseRows(rawRows);
 
         if (json) {
