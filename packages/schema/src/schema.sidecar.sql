@@ -212,7 +212,10 @@ CREATE TABLE IF NOT EXISTS plays_role (
 );
 CREATE INDEX IF NOT EXISTS plays_role_in ON plays_role(in_id);
 CREATE INDEX IF NOT EXISTS plays_role_out ON plays_role(out_id);
-CREATE UNIQUE INDEX IF NOT EXISTS plays_role_in_out_uq ON plays_role(in_id, out_id);
+-- Source is part of the natural key. A user tag and a mined tag can classify
+-- the same skill-role pair at the same time. Each writer removes only its own
+-- source before it writes the current value.
+CREATE UNIQUE INDEX IF NOT EXISTS plays_role_in_out_source_uq ON plays_role(in_id, out_id, source);
 
 -- ==== Retro ====
 -- A structured reflection emitted at session end: tried / worked / failed / next.

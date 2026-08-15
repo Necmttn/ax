@@ -6,7 +6,7 @@
 // an in-memory one would pass every test here while hiding all four.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { Effect, Option, Schema } from "effect";
+import { Deferred, Effect, Fiber, Option, Schema } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -233,10 +233,10 @@ describe("the judgment sidecar seam", () => {
     test("rolls the whole transaction back when the body fails", async () => {
         const rows = await run((j) =>
             Effect.gen(function* () {
-                const attempt = j.transaction(
+                const attempt = j.transaction((transaction) =>
                     Effect.gen(function* () {
-                        yield* j.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
-                        yield* j.put("plays_role", {
+                        yield* transaction.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
+                        yield* transaction.put("plays_role", {
                             id: "pr1",
                             in_id: "skill:tdd",
                             out_id: "role:reviewer",
@@ -291,17 +291,17 @@ describe("the judgment sidecar seam", () => {
         // overlap.
         const surviving = await run((j) =>
             Effect.gen(function* () {
-                const doomed = j.transaction(
+                const doomed = j.transaction((transaction) =>
                     Effect.gen(function* () {
-                        yield* j.put("role", { id: "role:doomed", name: "doomed" });
+                        yield* transaction.put("role", { id: "role:doomed", name: "doomed" });
                         yield* Effect.yieldNow;
                         return yield* Effect.fail("no" as const);
                     }),
                 );
-                const kept = j.transaction(
+                const kept = j.transaction((transaction) =>
                     Effect.gen(function* () {
                         yield* Effect.yieldNow;
-                        yield* j.put("role", { id: "role:kept", name: "kept" });
+                        yield* transaction.put("role", { id: "role:kept", name: "kept" });
                     }),
                 );
                 yield* Effect.all([Effect.ignore(doomed), kept], { concurrency: 2 });
@@ -314,12 +314,49 @@ describe("the judgment sidecar seam", () => {
         expect(surviving.map((r) => r.id)).toEqual(["role:kept"]);
     });
 
+    test("keeps ordinary statements outside another fiber's transaction", async () => {
+        const surviving = await run((j) =>
+            Effect.gen(function* () {
+                const started = yield* Deferred.make<void>();
+                const finish = yield* Deferred.make<void>();
+                const doomed = yield* Effect.forkChild(
+                    Effect.ignore(
+                        j.transaction((transaction) =>
+                            Effect.gen(function* () {
+                                yield* transaction.put("role", { id: "role:doomed", name: "doomed" });
+                                yield* Deferred.succeed(started, undefined);
+                                yield* Deferred.await(finish);
+                                return yield* Effect.fail("no" as const);
+                            }),
+                        ),
+                    ),
+                );
+
+                yield* Deferred.await(started);
+                const ordinary = yield* Effect.forkChild(
+                    j.put("role", { id: "role:kept", name: "kept" }),
+                );
+                yield* Effect.yieldNow;
+                yield* Deferred.succeed(finish, undefined);
+                yield* Fiber.join(doomed);
+                yield* Fiber.join(ordinary);
+
+                return yield* j.rows(
+                    Schema.Struct({ id: Schema.String }),
+                    "SELECT id FROM role ORDER BY id",
+                );
+            }),
+        );
+
+        expect(surviving.map((r) => r.id)).toEqual(["role:kept"]);
+    });
+
     test("commits a transaction that succeeds, visible to a SEPARATE connection", async () => {
         await run((j) =>
-            j.transaction(
+            j.transaction((transaction) =>
                 Effect.gen(function* () {
-                    yield* j.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
-                    yield* j.put("plays_role", {
+                    yield* transaction.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
+                    yield* transaction.put("plays_role", {
                         id: "pr1",
                         in_id: "skill:tdd",
                         out_id: "role:reviewer",

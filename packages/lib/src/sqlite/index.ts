@@ -31,6 +31,7 @@ export {
     sidecarPath,
     type JudgmentLayerOptions,
     type JudgmentService,
+    type JudgmentTransaction,
     type SidecarParam,
     type SidecarRow,
     type SidecarValue,

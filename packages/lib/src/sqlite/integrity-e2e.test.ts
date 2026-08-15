@@ -16,7 +16,7 @@ import { CacheRead, CacheReadLayer } from "../duckdb/seam.ts";
 import { Judgment, JudgmentLayer, type JudgmentService } from "./index.ts";
 import { checkSidecarRefs, collectSidecarRefs, fetchCacheIds } from "./integrity.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("judgment integrity e2e");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("judgment integrity e2e", { requireFts: true });
 
 const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 

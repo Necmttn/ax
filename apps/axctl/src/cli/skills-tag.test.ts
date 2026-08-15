@@ -1,274 +1,330 @@
 /**
- * Tests for `ax skills tag <skill> <role>` (P3.4).
+ * `ax skills tag <skill> <role>` across both v2 engines, with nothing stubbed.
  *
- * Mock strategy: stub SurrealClientShape so we can inspect the SQL
- * statements issued without hitting a real DB. Process.exit is captured
- * via a thrown Error so assertions remain synchronous.
+ * The old version of this file asserted the SQL TEXT of the statements the
+ * command issued against a stub. That could tell a working DELETE from a
+ * misspelled one and nothing else - in particular it could not tell whether the
+ * command was IDEMPOTENT, which is the whole contract of `skills tag`, because
+ * "issued a DELETE then a RELATE" is what you observe whether or not the row
+ * ends up singular. Every case here reads the rows back.
  */
-import { describe, test, expect, mock } from "bun:test";
-import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import {
-    makeTestSurrealClient,
-    type TestSurrealQueryCall,
-    type TestSurrealUpsertCall,
-} from "@ax/lib/testing/surreal";
+import { describe, expect, mock } from "bun:test";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { join } from "node:path";
+import { CacheReadLayer } from "@ax/lib/duckdb/seam";
+import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { publishCacheFixture } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { cmdSkillsTag } from "./skills-tag.ts";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills tag", { requireFts: true });
 
-function buildMockDb(overrides: {
-    skillExists?: boolean;
-    queryResults?: unknown[][];
-}): { db: SurrealClientShape; calls: TestSurrealQueryCall[]; upserts: TestSurrealUpsertCall[] } {
-    const queryResults = overrides.queryResults ?? [];
+const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
-    const tc = makeTestSurrealClient({
-        responses: [
-            // First call is the skill lookup: a skill row with a record id, or empty.
-            overrides.skillExists === false
-                ? []
-                : [[{ id: { tb: "skill", id: "composto" } }]],
-            // For subsequent calls, return from provided queryResults...
-            ...queryResults.map((result) => [result]),
-        ],
-        // ...or empty arrays.
-        fallback: [[]],
+const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>): Promise<A> =>
+    Effect.runPromise(effect.pipe(Effect.provide(Platform)) as Effect.Effect<A, E>);
+
+const dylibEnv = <A>(body: () => Promise<A>): Promise<A> => {
+    const previous = process.env.AX_DUCKDB_DYLIB;
+    if (dylibPath !== null) process.env.AX_DUCKDB_DYLIB = dylibPath;
+    return body().finally(() => {
+        if (previous === undefined) delete process.env.AX_DUCKDB_DYLIB;
+        else process.env.AX_DUCKDB_DYLIB = previous;
+    });
+};
+
+const TagRow = Schema.Struct({
+    in_id: Schema.String,
+    role_name: Schema.String,
+    source: Schema.String,
+    confidence: Schema.Number,
+    rationale: Schema.NullOr(Schema.String),
+});
+
+/** Every plays_role row in the sidecar, joined to its role's name. */
+const readTags = (j: JudgmentService) =>
+    j.rows(
+        TagRow,
+        `SELECT pr.in_id AS in_id, r.name AS role_name, pr.source AS source,
+                pr.confidence AS confidence, pr.rationale AS rationale
+         FROM plays_role pr JOIN role r ON r.id = pr.out_id
+         ORDER BY r.name`,
+    );
+
+interface Harness {
+    readonly tag: (opts: Parameters<typeof cmdSkillsTag>[0]) => Effect.Effect<void, unknown>;
+    readonly tags: Effect.Effect<ReadonlyArray<typeof TagRow.Type>, unknown>;
+}
+
+/** A cache holding one installed skill, plus an empty sidecar. */
+const harness = (dir: string) =>
+    Effect.gen(function* () {
+        const cache = yield* publishCacheFixture(dir, dylibPath, (write) =>
+            write.put("skill", {
+                id: "skill:content-hashed-id",
+                name: "composto",
+                scope: "user",
+                dir_path: "/tmp/skills/composto",
+                content_hash: "hash",
+            }),
+        );
+        const layers = Layer.mergeAll(
+            JudgmentLayer({ sidecarPath: join(dir, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
+            CacheReadLayer({
+                snapshotPath: cache.snapshotPath,
+                ...(dylibPath === null ? {} : { assetPath: dylibPath }),
+            }),
+        );
+        return {
+            tag: (opts) => cmdSkillsTag(opts).pipe(Effect.scoped, Effect.provide(layers)),
+            tags: Effect.gen(function* () {
+                const j = yield* Judgment;
+                return yield* readTags(j);
+            }).pipe(Effect.scoped, Effect.provide(layers)),
+        } satisfies Harness;
     });
 
-    return { db: tc.client, calls: tc.calls, upserts: tc.upserts };
-}
+/** `fail()` calls `process.exit`, which returns `never` and so must THROW here
+ *  for the effect to stop - otherwise the command would carry on and write. */
+const withExitSpy = () => {
+    const spy = mock(() => {
+        throw new Error("process.exit(2)");
+    });
+    const original = process.exit;
+    (process as { exit: unknown }).exit = spy;
+    return {
+        spy,
+        restore: () => {
+            (process as { exit: unknown }).exit = original;
+        },
+    };
+};
 
-function runTag(
-    opts: Parameters<typeof cmdSkillsTag>[0],
-    db: SurrealClientShape,
-): Promise<void> {
-    return Effect.runPromise(
-        cmdSkillsTag(opts).pipe(
-            Effect.provideService(SurrealClient, db),
-        ),
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const baseOpts = {
+    skillName: "composto",
+    roleName: "verification",
+    confidence: 1,
+    rationale: undefined,
+    remove: false,
+};
 
 describe("cmdSkillsTag", () => {
-    test("1. Tags a new role on a skill: DELETE issued, RELATE issued with source=user", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        await runTag(
-            { skillName: "composto", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-            db,
+    dtest("records the tag against the skill's CACHE id, not its name", async () => {
+        // The name is the user's handle for the skill; the id is what survives a
+        // rename in the catalogue, and what the read side joins on.
+        const dir = tempDir("ax-tag-basic-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    yield* h.tag(baseOpts);
+                    return yield* h.tags;
+                }),
+            ),
         );
-
-        const queryCalls = calls;
-        // call 0: skill lookup
-        expect(queryCalls[0]?.sql).toContain("SELECT id FROM skill WHERE name = $name");
-        // call 1: upsert role (via db.upsert, not query)
-        expect(upserts.length).toBe(1);
-        // call 2: DELETE
-        const deleteSql = queryCalls.find((c) => c.sql.includes("DELETE plays_role"));
-        expect(deleteSql?.sql).toContain(`source = "user"`);
-        expect(deleteSql?.sql).toContain(`role:\`framing\``);
-        // call 3: RELATE
-        const relateSql = queryCalls.find((c) => c.sql.includes("RELATE"));
-        expect(relateSql?.sql).toContain(`->plays_role->`);
-        expect(relateSql?.sql).toContain(`source = "user"`);
-        expect(relateSql?.sql).toContain(`role:\`framing\``);
+        expect(tags).toHaveLength(1);
+        expect(tags[0]?.in_id).toBe("skill:content-hashed-id");
+        expect(tags[0]?.role_name).toBe("verification");
+        expect(tags[0]?.source).toBe("user");
     });
 
-    test("2. --remove: DELETE issued, no RELATE", async () => {
-        const { db, calls } = buildMockDb({ skillExists: true });
-        await runTag(
-            { skillName: "composto", roleName: "framing", confidence: 1.0, rationale: undefined, remove: true },
-            db,
+    dtest("is idempotent - tagging the same pair twice leaves ONE row", async () => {
+        const dir = tempDir("ax-tag-idempotent-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    yield* h.tag({ ...baseOpts, confidence: 0.5 });
+                    yield* h.tag({ ...baseOpts, confidence: 0.9, rationale: "second thoughts" });
+                    return yield* h.tags;
+                }),
+            ),
         );
-
-        const queryCalls = calls;
-        const deleteSql = queryCalls.find((c) => c.sql.includes("DELETE plays_role"));
-        expect(deleteSql).toBeDefined();
-
-        const relateSql = queryCalls.find((c) => c.sql.includes("RELATE"));
-        expect(relateSql).toBeUndefined();
+        expect(tags).toHaveLength(1);
+        expect(tags[0]?.confidence).toBeCloseTo(0.9);
+        expect(tags[0]?.rationale).toBe("second thoughts");
     });
 
-    test("3. Unknown skill: lookup query issued, error path taken (process.exit(2))", async () => {
-        const { db, calls } = buildMockDb({ skillExists: false });
-        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
-        const origExit = process.exit;
-        process.exit = exitSpy as unknown as typeof process.exit;
+    dtest("adds a second role without disturbing the first", async () => {
+        const dir = tempDir("ax-tag-two-roles-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    yield* h.tag(baseOpts);
+                    yield* h.tag({ ...baseOpts, roleName: "framing" });
+                    return yield* h.tags;
+                }),
+            ),
+        );
+        expect(tags.map((t) => t.role_name)).toEqual(["framing", "verification"]);
+    });
 
+    dtest("--remove deletes the tag and leaves nothing behind", async () => {
+        const dir = tempDir("ax-tag-remove-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    yield* h.tag(baseOpts);
+                    yield* h.tag({ ...baseOpts, remove: true });
+                    return yield* h.tags;
+                }),
+            ),
+        );
+        expect(tags).toEqual([]);
+    });
+
+    dtest("removes only the USER's tag, never a mined one", async () => {
+        // A user removing their own tag must not silently delete the classifier's
+        // opinion of the same skill; v1 scoped its DELETE with `source = "user"`
+        // and losing that in the port would quietly erase mined classifications.
+        const dir = tempDir("ax-tag-remove-scope-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    const layers = JudgmentLayer({
+                        sidecarPath: join(dir, "judgment.sqlite"),
+                        schemaSql: SIDECAR_SCHEMA_SQL,
+                    });
+                    yield* Effect.gen(function* () {
+                        const j = yield* Judgment;
+                        yield* j.put("role", { id: "role:framing", name: "framing" });
+                        yield* j.put("plays_role", {
+                            id: "mined-1",
+                            in_id: "skill:content-hashed-id",
+                            out_id: "role:framing",
+                            source: "frontmatter",
+                            confidence: 0.7,
+                        });
+                    }).pipe(Effect.scoped, Effect.provide(layers));
+
+                    yield* h.tag({ ...baseOpts, roleName: "framing", remove: true });
+                    return yield* h.tags;
+                }),
+            ),
+        );
+        expect(tags).toHaveLength(1);
+        expect(tags[0]?.source).toBe("frontmatter");
+    });
+
+    dtest("adds a user tag without replacing a mined tag for the same skill and role", async () => {
+        const dir = tempDir("ax-tag-source-coexistence-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    const layers = JudgmentLayer({
+                        sidecarPath: join(dir, "judgment.sqlite"),
+                        schemaSql: SIDECAR_SCHEMA_SQL,
+                    });
+                    yield* Effect.gen(function* () {
+                        const j = yield* Judgment;
+                        yield* j.put("role", {
+                            id: "role:verification",
+                            name: "verification",
+                        });
+                        yield* j.put("plays_role", {
+                            id: "mined-verification",
+                            in_id: "skill:content-hashed-id",
+                            out_id: "role:verification",
+                            source: "frontmatter",
+                            confidence: 0.7,
+                        });
+                    }).pipe(Effect.scoped, Effect.provide(layers));
+
+                    yield* h.tag(baseOpts);
+                    return yield* h.tags;
+                }),
+            ),
+        );
+
+        expect(tags.map((tag) => tag.source).sort()).toEqual(["frontmatter", "user"]);
+    });
+
+    dtest("keeps the role's own weight when a second skill is tagged with it", async () => {
+        // A regression pin, not a bug report: the current write already preserves
+        // the weight (the seam's upsert writes only the columns it is given, and
+        // this one gives id + name). What it pins is that tagging a skill is not
+        // a statement about the ROLE - a future write that started naming
+        // `weight` would reset a user's tuning and silently re-rank every
+        // weighted view, and nothing else in the suite would notice.
+        const dir = tempDir("ax-tag-role-weight-");
+        const weight = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    const layers = JudgmentLayer({
+                        sidecarPath: join(dir, "judgment.sqlite"),
+                        schemaSql: SIDECAR_SCHEMA_SQL,
+                    });
+                    yield* Effect.gen(function* () {
+                        const j = yield* Judgment;
+                        yield* j.put("role", { id: "role:verification", name: "verification", weight: 3 });
+                    }).pipe(Effect.scoped, Effect.provide(layers));
+
+                    yield* h.tag(baseOpts);
+
+                    return yield* Effect.gen(function* () {
+                        const j = yield* Judgment;
+                        return yield* j.first(
+                            Schema.Struct({ weight: Schema.Number }),
+                            "SELECT weight FROM role WHERE name = 'verification'",
+                        );
+                    }).pipe(Effect.scoped, Effect.provide(layers));
+                }),
+            ),
+        );
+        expect(weight._tag === "Some" ? weight.value.weight : null).toBe(3);
+    });
+
+    dtest("lowercases and trims the role name", async () => {
+        const dir = tempDir("ax-tag-normalize-");
+        const tags = await dylibEnv(() =>
+            run(
+                Effect.gen(function* () {
+                    const h = yield* harness(dir);
+                    yield* h.tag({ ...baseOpts, roleName: "  VERIFICATION  " });
+                    return yield* h.tags;
+                }),
+            ),
+        );
+        expect(tags[0]?.role_name).toBe("verification");
+    });
+
+    dtest("exits on a skill the cache has never seen, writing nothing", async () => {
+        const dir = tempDir("ax-tag-unknown-");
+        const h = await dylibEnv(() => run(harness(dir)));
+        const exitSpy = withExitSpy();
         try {
-            await runTag(
-                { skillName: "nonexistent-skill", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-                db,
-            );
-            expect(true).toBe(false); // should not reach here
-        } catch (err) {
-            expect((err as Error).message).toBe("process.exit(2)");
+            await expect(run(h.tag({ ...baseOpts, skillName: "nope" }))).rejects.toThrow();
         } finally {
-            process.exit = origExit;
+            exitSpy.restore();
         }
-
-        // The lookup query was issued
-        const queryCalls = calls;
-        expect(queryCalls.length).toBe(1);
-        expect(queryCalls[0]?.sql).toContain("SELECT id FROM skill WHERE name = $name");
-
-        // No RELATE or DELETE issued after failed lookup
-        const relateSql = queryCalls.find((c) => c.sql.includes("RELATE"));
-        expect(relateSql).toBeUndefined();
+        expect(exitSpy.spy).toHaveBeenCalled();
+        expect(await run(h.tags)).toEqual([]);
     });
 
-    test("4. Custom confidence + rationale appear in RELATE SET clause", async () => {
-        const { db, calls } = buildMockDb({ skillExists: true });
-        await runTag(
-            {
-                skillName: "composto",
-                roleName: "execution",
-                confidence: 0.8,
-                rationale: "drives code generation loops",
-                remove: false,
-            },
-            db,
-        );
-
-        const relateSql = calls.find((c) => c.sql.includes("RELATE"));
-        expect(relateSql?.sql).toContain("0.8");
-        expect(relateSql?.sql).toContain("drives code generation loops");
-    });
-
-    test("5. Idempotent: running twice issues DELETE + RELATE both times", async () => {
-        const { db: db1, calls: calls1 } = buildMockDb({ skillExists: true });
-        await runTag(
-            { skillName: "composto", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-            db1,
-        );
-
-        const { db: db2, calls: calls2 } = buildMockDb({ skillExists: true });
-        await runTag(
-            { skillName: "composto", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-            db2,
-        );
-
-        // Both runs: DELETE issued
-        for (const qCalls of [calls1, calls2]) {
-            const deleteSql = qCalls.find((c) => c.sql.includes("DELETE plays_role"));
-            expect(deleteSql).toBeDefined();
-            const relateSql = qCalls.find((c) => c.sql.includes("RELATE"));
-            expect(relateSql).toBeDefined();
-        }
-    });
-
-    test("6. Role name normalized lowercase + trimmed", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        await runTag(
-            { skillName: "composto", roleName: "  FRAMING  ", confidence: 1.0, rationale: undefined, remove: false },
-            db,
-        );
-
-        // The upsert receives the trimmed+lowercased role name
-        const content = upserts[0]?.content;
-        expect(content?.["name"]).toBe("framing");
-
-        // The SQL uses the lowercased role literal
-        const relateSql = calls.find((c) => c.sql.includes("RELATE"));
-        expect(relateSql?.sql).toContain("role:`framing`");
-        expect(relateSql?.sql).not.toContain("FRAMING");
-    });
-
-    test("7. Invalid role name (backtick) → exit 2, no DB calls", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
-        const origExit = process.exit;
-        process.exit = exitSpy as unknown as typeof process.exit;
-
-        try {
-            await runTag(
-                { skillName: "composto", roleName: "bad`role", confidence: 1.0, rationale: undefined, remove: false },
-                db,
-            );
-            expect(true).toBe(false); // unreachable
-        } catch (err) {
-            expect((err as Error).message).toBe("process.exit(2)");
-        } finally {
-            process.exit = origExit;
-        }
-
-        // No DB queries issued (validation fires before lookup)
-        expect(calls.length + upserts.length).toBe(0);
-    });
-
-    test("8. Invalid role name (semicolon injection) → exit 2, no DB calls", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
-        const origExit = process.exit;
-        process.exit = exitSpy as unknown as typeof process.exit;
-
-        try {
-            await runTag(
-                {
-                    skillName: "composto",
-                    roleName: "framing;DROP TABLE role",
-                    confidence: 1.0,
-                    rationale: undefined,
-                    remove: false,
-                },
-                db,
-            );
-            expect(true).toBe(false); // unreachable
-        } catch (err) {
-            expect((err as Error).message).toBe("process.exit(2)");
-        } finally {
-            process.exit = origExit;
-        }
-
-        expect(calls.length + upserts.length).toBe(0);
-    });
-
-    test("9. Invalid skill name (backtick) → exit 2, no DB calls", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
-        const origExit = process.exit;
-        process.exit = exitSpy as unknown as typeof process.exit;
-
-        try {
-            await runTag(
-                { skillName: "bad`skill", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-                db,
-            );
-            expect(true).toBe(false); // unreachable
-        } catch (err) {
-            expect((err as Error).message).toBe("process.exit(2)");
-        } finally {
-            process.exit = origExit;
-        }
-
-        // Validation fires before any DB lookup
-        expect(calls.length + upserts.length).toBe(0);
-    });
-
-    test("10. Invalid skill name (spaces) → exit 2, no DB calls", async () => {
-        const { db, calls, upserts } = buildMockDb({ skillExists: true });
-        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
-        const origExit = process.exit;
-        process.exit = exitSpy as unknown as typeof process.exit;
-
-        try {
-            await runTag(
-                { skillName: "bad skill name", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
-                db,
-            );
-            expect(true).toBe(false); // unreachable
-        } catch (err) {
-            expect((err as Error).message).toBe("process.exit(2)");
-        } finally {
-            process.exit = origExit;
-        }
-
-        expect(calls.length + upserts.length).toBe(0);
-    });
+    for (const [label, opts] of [
+        ["a backticked role name", { ...baseOpts, roleName: "verif`ication" }],
+        ["a semicolon-injected role name", { ...baseOpts, roleName: "verification; DROP TABLE role" }],
+        ["a backticked skill name", { ...baseOpts, skillName: "comp`osto" }],
+        ["a spaced skill name", { ...baseOpts, skillName: "com posto" }],
+    ] as const) {
+        dtest(`refuses ${label} before touching either engine`, async () => {
+            const dir = tempDir("ax-tag-invalid-");
+            const h = await dylibEnv(() => run(harness(dir)));
+            const exitSpy = withExitSpy();
+            try {
+                await expect(run(h.tag(opts))).rejects.toThrow();
+            } finally {
+                exitSpy.restore();
+            }
+            expect(exitSpy.spy).toHaveBeenCalled();
+            expect(await run(h.tags)).toEqual([]);
+        });
+    }
 });

@@ -77,7 +77,7 @@ export type SidecarValue = string | number | bigint | Uint8Array | null;
 
 export type SidecarRow = Readonly<Record<string, SidecarValue>>;
 
-export interface JudgmentService {
+export interface JudgmentTransaction {
     /** Every row, decoded through `schema`. Use the named column codecs in
      *  `./columns.ts` so the decode contract is explicit at the call site. */
     readonly rows: <S extends Schema.Top>(
@@ -115,12 +115,15 @@ export interface JudgmentService {
         table: string,
         rows: ReadonlyArray<Readonly<Record<string, SidecarParam>>>,
     ) => Effect.Effect<void, JudgmentError>;
-    /**
-     * Run `body` inside ONE transaction: committed if it succeeds, rolled back
-     * if it fails or is interrupted.
-     */
+}
+
+export interface JudgmentService extends JudgmentTransaction {
+    /** Run `body` inside one transaction.
+     *
+     * Use the supplied service for every statement in `body`. Other operations
+     * wait until this transaction commits or rolls back. */
     readonly transaction: <A, E, R>(
-        body: Effect.Effect<A, E, R>,
+        body: (transaction: JudgmentTransaction) => Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | JudgmentError, R>;
     /** The sidecar file this service is bound to (resolved, not the spelling). */
     readonly path: string;
@@ -339,16 +342,49 @@ const serviceOver = (db: Database, path: string): JudgmentService => {
      * `onError`): an interrupted fiber that left a transaction open would hold
      * the write lock until the process exited.
      */
-    const transaction: JudgmentService["transaction"] = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+    const transactionService: JudgmentTransaction = { rows, first, raw, exec, put, putMany };
+
+    const transaction: JudgmentService["transaction"] = <A, E, R>(
+        body: (transaction: JudgmentTransaction) => Effect.Effect<A, E, R>,
+    ) =>
         txGate.withPermits(1)(
             Effect.acquireUseRelease(
                 exec("BEGIN IMMEDIATE"),
-                () => body,
-                (_, exit) => Effect.ignore(exec(exit._tag === "Success" ? "COMMIT" : "ROLLBACK")),
+                () => body(transactionService),
+                (_, exit) =>
+                    exit._tag === "Success"
+                        ? Effect.asVoid(exec("COMMIT"))
+                        : Effect.ignore(exec("ROLLBACK")),
             ),
         ) as Effect.Effect<A, E | JudgmentError, R>;
 
-    return { rows, first, raw, exec, put, putMany, transaction, path };
+    // Every operation uses the same connection. It must wait for an active
+    // transaction, or it would become part of that transaction and share its
+    // commit or rollback. Transaction bodies use `transactionService`, whose
+    // methods do not acquire the permit again.
+    const guardedRows: JudgmentService["rows"] = (schema, sql, params) =>
+        txGate.withPermits(1)(rows(schema, sql, params));
+    const guardedFirst: JudgmentService["first"] = (schema, sql, params) =>
+        txGate.withPermits(1)(first(schema, sql, params));
+    const guardedRaw: JudgmentService["raw"] = (sql, params) =>
+        txGate.withPermits(1)(raw(sql, params));
+    const guardedExec: JudgmentService["exec"] = (sql, params) =>
+        txGate.withPermits(1)(exec(sql, params));
+    const guardedPut: JudgmentService["put"] = (table, row) =>
+        txGate.withPermits(1)(put(table, row));
+    const guardedPutMany: JudgmentService["putMany"] = (table, rowsIn) =>
+        txGate.withPermits(1)(putMany(table, rowsIn));
+
+    return {
+        rows: guardedRows,
+        first: guardedFirst,
+        raw: guardedRaw,
+        exec: guardedExec,
+        put: guardedPut,
+        putMany: guardedPutMany,
+        transaction,
+        path,
+    };
 };
 
 /**
