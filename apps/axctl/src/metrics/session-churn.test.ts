@@ -433,10 +433,10 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`quiet`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`cmd-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`cmd-hot`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
             hooks: [
-                { session: "session:`hook-hot`", ts: "2026-06-11T00:02:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
+                { session: "session:`hook-hot`", ts: "2026-06-11T00:02:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test", hook_name: "PreToolUse:Bash" },
             ],
         }))));
 
@@ -473,9 +473,9 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`older-warm`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`older-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`older-hot`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "eslint" },
-                { session: "session:`older-warm`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`older-hot`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`older-hot`", ts: "2026-06-11T00:03:00.000Z", kind: "check", status: "error", command_norm: "eslint" },
+                { session: "session:`older-warm`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
         }))));
 
@@ -505,7 +505,7 @@ describe("fetchSessionChurnSummary", () => {
                 { commit: "commit:`c1`", file: "file:`f2`", path: "src/b.ts", additions: 3, deletions: 1 },
             ],
             edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
-            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" }],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" }],
         }))));
 
         expect(summary.hotSessions[0]).toMatchObject({
@@ -539,8 +539,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
         }))));
 
@@ -563,7 +563,7 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Write", input_json: JSON.stringify({ content: "a\nb\nc" }) },
                 { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", name: "exec_command", command_norm: "apply_patch", input_json: JSON.stringify({ patch: "+new\n-old\n+++ b/file\n--- a/file" }) },
             ],
-            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "bun test" }],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "check", status: "error", command_norm: "bun test" }],
         }))));
 
         expect(summary.hotSessions[0]).toMatchObject({
@@ -592,8 +592,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s1`", ts: "2026-06-11T00:05:00.000Z", kind: "check", status: "ok", command_norm: "deploy" },
             ],
             hooks: [
-                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
-                { session: "session:`s1`", ts: "2026-06-11T00:06:00.000Z", provider_status: "success", effect: "allowed", exit_code: null, command: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test", hook_name: "PreToolUse:Bash" },
+                { session: "session:`s1`", ts: "2026-06-11T00:06:00.000Z", provider_status: "success", effect: "allowed", exit_code: null, command: "bun test", hook_name: "PreToolUse:Bash" },
             ],
         }))));
 
@@ -722,8 +722,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
             otelMetrics: [
                 { session_id: "s1", metric: "claude_code.cost.usage", total: 0.042 },

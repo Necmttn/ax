@@ -86,6 +86,15 @@ export interface TestSurrealClientOptions {
      * the production call order.
      */
     readonly responses?: ReadonlyArray<TestSurrealRows>;
+    /**
+     * Ordered per-call responses for the paired CACHE stream, which runs its own
+     * call counter over its own statements. Kept separate from `responses` on
+     * purpose: positional scripts are per-stream, and a cache-seam reader rarely
+     * issues the same statements in the same order as the Surreal path beside
+     * it. Most tests want `routes` instead, which match on SQL content and are
+     * shared by both doubles.
+     */
+    readonly cacheResponses?: ReadonlyArray<TestSurrealRows>;
     /** Response when nothing else matched. Default `[[]]`. */
     readonly fallback?: TestSurrealResponder;
     /**
@@ -195,9 +204,27 @@ export const makeTestSurrealClient = (
         raw: opts.raw ?? ({} as never),
     };
 
+    /**
+     * The paired cache fixture. It shares the CONTENT-matched inputs (`routes`,
+     * `fallback`) and deliberately does NOT share `responses`.
+     *
+     * `responses` is positional - "answer the Nth query with this" - and the two
+     * doubles run independent call counters over independent query streams. A
+     * function that reads the cache seam typically issues a DIFFERENT number of
+     * statements than the Surreal path around it, so index N of one stream has
+     * no relationship to index N of the other. Sharing it fed, for example, the
+     * `agent_model` pricing query whatever rows the Surreal cost aggregate had
+     * been given; while the fixture ignored the decode schema that silently
+     * produced a wrong pricing catalog, and now it is a loud decode failure.
+     *
+     * A test that needs to drive the cache stream positionally passes
+     * `cacheResponses`, which is that stream's own script.
+     */
     const cache = makeTestCacheRead({
         routes: opts.routes as never,
-        responses: opts.responses as never,
+        ...(opts.cacheResponses === undefined
+            ? {}
+            : { responses: opts.cacheResponses as never }),
         fallback: opts.fallback as never,
     });
 

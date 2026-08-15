@@ -25,6 +25,25 @@ const db = (input: {
             }
             return input.metrics;
         } }).layer;
+/**
+ * One `session_metrics JOIN session` row with every NOT NULL column the query
+ * selects already filled, so a case only states what it is actually about.
+ *
+ * The defaults are not arbitrary: `source`, `produced_commits`, `lines_added`,
+ * `lines_removed` and `cold_start_reads` are all NOT NULL in schema.duckdb.sql
+ * and the join is an INNER JOIN, so the database can never hand back a row
+ * missing them. `durability_ratio`, `time_to_land_ms`, `time_to_first_edit_ms`
+ * and `delegation_ratio` ARE nullable and are left to fill in as null.
+ */
+const metricsRow = (over: Record<string, unknown>): Record<string, unknown> => ({
+    source: "claude",
+    produced_commits: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    cold_start_reads: 0,
+    ...over,
+});
+
 const fetchSessionMetrics = (input: Parameters<typeof fetchSessionMetricsWithRead>[1]) => Effect.gen(function* () {
     return yield* fetchSessionMetricsWithRead(yield* CacheRead, input);
 });
@@ -35,11 +54,11 @@ const fetchSessionHealthMap = (ids: readonly string[] | null) => Effect.gen(func
 describe("fetchSessionMetrics", () => {
     test("maps joined rows into typed SessionMetricsRow[] (stored cost preserved)", async () => {
         const out = await Effect.runPromise(fetchSessionMetrics({ since: null, limit: 50 }).pipe(Effect.provide(db({
-            metrics: [{
-                session: "session:`s1`", source: "claude",
+            metrics: [metricsRow({
+                session: "session:`s1`",
                 durability_ratio: 0.75, produced_commits: 4, time_to_land_ms: 3600000,
                 lines_added: 120, lines_removed: 30,
-            }],
+            })],
             health: [{ session: "session:`s1`", task_label: "add login", user_corrections: 1 }],
             usage: [{
                 session: "session:`s1`", model: "gpt-5-codex",
@@ -57,7 +76,7 @@ describe("fetchSessionMetrics", () => {
 
     test("null/missing numeric fields map to null (durability/ttl/cost) or 0 (counts)", async () => {
         const out = await Effect.runPromise(fetchSessionMetrics({ since: null, limit: 50 }).pipe(Effect.provide(db({
-            metrics: [{ session: "session:`s2`", durability_ratio: null, time_to_land_ms: null, produced_commits: 0, lines_added: 0, lines_removed: 0 }],
+            metrics: [metricsRow({ session: "session:`s2`", durability_ratio: null, time_to_land_ms: null })],
         }))));
         expect(out[0].durabilityRatio).toBe(null);
         expect(out[0].timeToLandMs).toBe(null);
@@ -68,7 +87,7 @@ describe("fetchSessionMetrics", () => {
 
     test("unpriced Claude byte-estimate row gets a read-time cost estimate (#175)", async () => {
         const out = await Effect.runPromise(fetchSessionMetrics({ since: null, limit: 50 }).pipe(Effect.provide(db({
-            metrics: [{ session: "session:`s3`", source: "claude", produced_commits: 1, lines_added: 0, lines_removed: 0 }],
+            metrics: [metricsRow({ session: "session:`s3`", produced_commits: 1 })],
             usage: [{
                 session: "session:`s3`", model: "claude-haiku-4-5-20251001",
                 prompt_tokens: null, completion_tokens: null,
@@ -87,7 +106,7 @@ describe("fetchSessionMetrics", () => {
     test("health is a batch lookup bounded to the returned sessions (no correlated subqueries)", async () => {
         const seenSql: string[] = [];
         await Effect.runPromise(fetchSessionMetrics({ since: null, limit: 50 }).pipe(Effect.provide(db({
-            metrics: [{ session: "session:`s1`", produced_commits: 0, lines_added: 0, lines_removed: 0 }],
+            metrics: [metricsRow({ session: "session:`s1`" })],
             seenSql,
         }))));
         const metricsSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
@@ -100,7 +119,7 @@ describe("fetchSessionMetrics", () => {
 
     test("unknown model leaves cost null (unknown ≠ $0)", async () => {
         const out = await Effect.runPromise(fetchSessionMetrics({ since: null, limit: 50 }).pipe(Effect.provide(db({
-            metrics: [{ session: "session:`s4`", produced_commits: 0, lines_added: 0, lines_removed: 0 }],
+            metrics: [metricsRow({ session: "session:`s4`" })],
             usage: [{
                 session: "session:`s4`", model: "mystery-model-9000",
                 estimated_tokens: 500, estimated_cost_usd: null, pricing_source: null,

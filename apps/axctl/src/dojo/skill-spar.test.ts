@@ -994,8 +994,8 @@ describe("scoreSkillSpar", () => {
                 "spar-arm-b": [[{ id: "session:arm-b" }]],
                 // cost: arm-a = $2.00 (baseline), arm-b = $0.80 (variant, cheaper)
                 "FROM session_token_usage": [[
-                    { session: "session:arm-a", model: "claude", estimated_cost_usd: 2.0 },
-                    { session: "session:arm-b", model: "claude", estimated_cost_usd: 0.8 },
+                    { session: "session:arm-a", model: "claude", estimated_tokens: 2_000, estimated_cost_usd: 2.0 },
+                    { session: "session:arm-b", model: "claude", estimated_tokens: 800, estimated_cost_usd: 0.8 },
                 ]],
                 // both arms produced a commit → landed = true for both
                 "FROM produced": [[

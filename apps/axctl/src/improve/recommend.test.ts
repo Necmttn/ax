@@ -48,19 +48,32 @@ describe("recommend", () => {
         expect(out.map((r) => r.shortId)).toEqual(["b"]);
     });
 
-    test("treats malformed updated_at as fully stale (no NaN sort)", async () => {
+    /**
+     * REPLACES a case that fed `updated_at: ""` and called it "malformed".
+     * That input cannot occur against DuckDB: `updated_at` is a TIMESTAMP, so
+     * the engine returns a Date or NULL and never a string, and the query reads
+     * `coalesce(updated_at, created_at)` where `created_at` is NOT NULL - so the
+     * value is a valid Date on every row. The old case only passed because the
+     * test double ignored the decode schema; with the schema enforced it fails
+     * as "Expected a valid date", which is the honest answer.
+     *
+     * What IS reachable is an ANCIENT timestamp, and that is the boundary the
+     * recency floor exists for: it must score finite (never NaN, which would
+     * scramble the sort) and rank below a fresh row despite far higher
+     * confidence and frequency.
+     */
+    test("an ancient updated_at scores at the recency floor, finite and ranked last", async () => {
         const rows = [
-            { dedupe_sig: "bad", title: "t", form: "guidance", hypothesis: "h",
-              confidence: "high", frequency: 5, updated_at: "" },
-            { dedupe_sig: "good", title: "t", form: "guidance", hypothesis: "h",
+            { dedupe_sig: "ancient", title: "t", form: "guidance", hypothesis: "h",
+              confidence: "high", frequency: 5, updated_at: new Date(0).toISOString() },
+            { dedupe_sig: "fresh", title: "t", form: "guidance", hypothesis: "h",
               confidence: "low", frequency: 1, updated_at: new Date().toISOString() },
         ];
         const out = await Effect.runPromise(
             recommend({ limit: 5 }).pipe(Effect.provide(layerWith(rows))),
         );
-        // Sanity: both rows should appear, neither should produce NaN score.
         expect(out.every((r) => Number.isFinite(r.score))).toBe(true);
-        expect(out.length).toBe(2);
+        expect(out.map((r) => r.shortId)).toEqual(["fresh", "ancient"]);
     });
 
     test("high-confidence freq=0 outranks low-confidence freq=2 with same recency", async () => {

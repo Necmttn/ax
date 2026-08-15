@@ -160,7 +160,7 @@ describe("fetchSessionMetrics", () => {
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
-                    { session: "session:`s1`", model: "claude", estimated_cost_usd: 1.5 },
+                    { session: "session:`s1`", model: "claude", estimated_tokens: 1_000, estimated_cost_usd: 1.5 },
                 ]],
                 // churn base session scan (selects id AS session, source)
                 "AS session, source\nFROM session": [[
@@ -179,8 +179,8 @@ describe("fetchSessionMetrics", () => {
                 // failure opens an episode; the later pass closes it so the
                 // edit between them is classified as repair.
                 "FROM command_outcome": [[
-                    { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                    { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", status: "ok", command_norm: "tsc" },
+                    { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                    { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "check", status: "ok", command_norm: "tsc" },
                 ]],
                 // focused turn/wall lookup: `FROM ONLY` returns the bare object,
                 // so the statement result is `[ {turn_count, s, e} ]` (NOT
@@ -209,7 +209,7 @@ describe("fetchSessionMetrics", () => {
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
-                    { session: "session:`clean`", model: "claude", estimated_cost_usd: 0.7 },
+                    { session: "session:`clean`", model: "claude", estimated_tokens: 500, estimated_cost_usd: 0.7 },
                 ]],
                 // churn base scan: clean session has NO verification signal, so
                 // it never appears here (and thus never in hotSessions).
