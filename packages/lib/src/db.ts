@@ -142,17 +142,6 @@ export interface SurrealClientShape {
     readonly raw: Surreal;
 }
 
-/**
- * Format a stored file-pointer string for record fields. We persist the bare
- * `bucket:/path` form (without the SurrealQL `f"..."` literal wrapper) so
- * downstream code can split on `:/` without parsing.
- *
- * Re-exported from `./blob-pointer.ts`, where the format now lives: it has no
- * engine in it, and every reader of it was importing this module - and the
- * `surrealdb` SDK with it - to compare two strings.
- */
-export { filePointer } from "./blob-pointer.ts";
-
 export class SurrealClient extends Context.Service<
     SurrealClient,
     SurrealClientShape

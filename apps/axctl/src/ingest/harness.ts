@@ -1,16 +1,10 @@
 import { Effect, FileSystem, Path } from "effect";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
-import { buildProjectHarnessReport } from "../project/harness.ts";
-import type {
-    GuidanceRevision,
-    GuidanceSource,
-    ProjectHarnessReport,
-    StackSignal,
-} from "../project/types.ts";
+import { buildHarnessGrounding, type HarnessGrounding } from "../project/harness.ts";
+import type { GuidanceRevision, GuidanceSource, StackSignal } from "../project/types.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -69,7 +63,17 @@ function stackStatement(signal: StackSignal): string {
     ])};`;
 }
 
-export function buildHarnessIngestStatements(report: ProjectHarnessReport): string[] {
+/**
+ * The three collections this stage persists - and the ONLY thing it reads from
+ * the harness module. `HarnessGrounding` is deliberately narrower than the full
+ * report: the report's other half comes from the published DuckDB snapshot, and
+ * this stage writes SurrealDB, so reaching for it would make one ingest
+ * operation span both engines and answer from a snapshot that omits everything
+ * the run in progress has written.
+ */
+export function buildHarnessIngestStatements(
+    report: Pick<HarnessGrounding, "guidanceSources" | "guidanceRevisions" | "stacks">,
+): string[] {
     return [
         ...report.guidanceSources.map(guidanceSourceStatement),
         ...report.guidanceRevisions.map(guidanceRevisionStatement),
@@ -77,10 +81,10 @@ export function buildHarnessIngestStatements(report: ProjectHarnessReport): stri
     ];
 }
 
-export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
+export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const report = yield* buildProjectHarnessReport();
+        const report = yield* buildHarnessGrounding();
         const statements = buildHarnessIngestStatements(report);
         yield* executeStatementsWith(db, statements);
         return {
@@ -121,7 +125,7 @@ export class HarnessStageStats extends BaseStageStats.extend<HarnessStageStats>(
     stacks: Schema.Number,
 }) {}
 
-export const harnessStage: StageDef<HarnessStageStats, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> = {
+export const harnessStage: StageDef<HarnessStageStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "harness", deps: ["outcomes", "session-health", "closure"], tags: ["derive", "health"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

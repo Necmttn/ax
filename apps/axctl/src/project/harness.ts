@@ -11,6 +11,7 @@ import { posixPath } from "@ax/lib/shared/path";
 import { getGitState } from "./git.ts";
 import {
     defaultHarnessDoctorReportBuilder,
+    mainBranchLearning,
     type HarnessDoctorReportBuilder,
     type MainBranchGraphEvidence,
 } from "./harness-doctor.ts";
@@ -19,6 +20,7 @@ import { queryLiveDiagnostics } from "./diagnostics.ts";
 import type {
     AgentToolingSignal,
     GitState,
+    HarnessLearningCandidate,
     GuidanceEvidenceStrength,
     GuidanceRevision,
     GuidanceSource,
@@ -343,6 +345,57 @@ export const fetchMainBranchGraphEvidence = (): Effect.Effect<
         };
     });
 
+/**
+ * Everything the harness report can say from the FILESYSTEM AND GIT ALONE - no
+ * database of any kind, on either engine.
+ *
+ * This exists because the two ingest stages that consume harness output do not
+ * in fact need the graph half, and reading it there would make one operation
+ * span two engines: an ingest stage writes SurrealDB, while `CacheRead` answers
+ * from the last PUBLISHED SNAPSHOT - which by construction omits everything the
+ * run currently in progress has written. `ingest/harness.ts` writes only the
+ * three collections below, and `ingest/derive-proposals.ts` reads only
+ * `learningCandidates`, which `mainBranchLearning` derives from git plus the
+ * guidance sources.
+ *
+ * So the split is not a compromise for the migration - it is where the seam
+ * always was. The graph half belongs to {@link buildProjectHarnessReport}, which
+ * only the READ command calls.
+ */
+export interface HarnessGrounding {
+    readonly git: GitState;
+    readonly guidanceSources: ReadonlyArray<GuidanceSource>;
+    readonly guidanceRevisions: ReadonlyArray<GuidanceRevision>;
+    readonly stacks: ProjectStack["signals"];
+    readonly learningCandidates: ReadonlyArray<HarnessLearningCandidate>;
+}
+
+export const buildHarnessGrounding = (
+    cwd = process.cwd(),
+): Effect.Effect<HarnessGrounding, never, ProcessService | FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const git = yield* getGitState(cwd);
+        const stack = yield* loadProjectStack(git.root);
+        yield* queryLiveDiagnostics(git.root);
+        const guidanceSources = yield* scanGuidanceSources(git.root);
+        const guidanceRevisions = yield* buildGuidanceRevisions(guidanceSources);
+        return {
+            git,
+            guidanceSources,
+            guidanceRevisions,
+            stacks: stack.signals,
+            learningCandidates: [mainBranchLearning(git, guidanceSources)],
+        };
+    });
+
+/**
+ * The full harness report: the grounding above plus the two GRAPH reads, which
+ * come from the published cache snapshot.
+ *
+ * Requires `CacheRead`, and therefore belongs to a READ command - `ax project`
+ * through `project/context.ts`. An ingest stage must call
+ * {@link buildHarnessGrounding} instead; see its note.
+ */
 export const buildProjectHarnessReport = (
     cwd = process.cwd(),
     builder: HarnessDoctorReportBuilder = defaultHarnessDoctorReportBuilder,

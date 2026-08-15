@@ -7,12 +7,19 @@
  * plausible WRONG NUMBER rather than an error, which is precisely what a
  * SQL-text assertion cannot catch.
  */
-import { describe, expect } from "bun:test";
-import { Effect } from "effect";
+import { describe, expect, test } from "bun:test";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, Layer } from "effect";
+import { ProcessServiceLive } from "@ax/lib/process";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
-import { fetchMainBranchGraphEvidence, fetchObservedTooling } from "./harness.ts";
+import {
+    buildHarnessGrounding,
+    fetchMainBranchGraphEvidence,
+    fetchObservedTooling,
+    type HarnessGrounding,
+} from "./harness.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("project harness queries", {
     requireFts: true,
@@ -116,5 +123,33 @@ describe("fetchMainBranchGraphEvidence", () => {
             commitsFromMain: 0,
             latestEditedPath: null,
         });
+    });
+});
+
+describe("buildHarnessGrounding runs on NO database engine", () => {
+    /**
+     * The P1 regression this guards: the two ingest stages that consume harness
+     * output write SurrealDB, while `CacheRead` answers from the last PUBLISHED
+     * snapshot - which omits everything the run in progress has written. If the
+     * grounding ever grows a graph read, this case stops compiling (the
+     * requirement channel widens) and stops running (no layer provides it).
+     */
+    test("resolves with only ProcessService, FileSystem and Path provided", async () => {
+        const grounding = await Effect.runPromise(
+            buildHarnessGrounding(process.cwd()).pipe(
+                Effect.provide(
+                    Layer.mergeAll(ProcessServiceLive, BunFileSystem.layer, BunPath.layer),
+                ),
+            ) as Effect.Effect<HarnessGrounding>,
+        );
+
+        // Shape only - the content is whatever this checkout happens to hold.
+        expect(Array.isArray(grounding.guidanceSources)).toBe(true);
+        expect(Array.isArray(grounding.guidanceRevisions)).toBe(true);
+        expect(Array.isArray(grounding.stacks)).toBe(true);
+        // The one field `derive-proposals` reads, and the reason the grounding
+        // has to carry it rather than the caller reaching for the full report.
+        expect(grounding.learningCandidates).toHaveLength(1);
+        expect(grounding.learningCandidates[0]?.harnessLayer).toBe("boundary");
     });
 });

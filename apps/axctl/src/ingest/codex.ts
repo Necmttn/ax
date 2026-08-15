@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
-import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
+import { RecordId, SurrealClient } from "@ax/lib/db";
+import { filePointer } from "@ax/lib/blob-pointer";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import { surrealJsonOption } from "@ax/lib/shared/surql";

@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
 import { filePointer } from "./blob-pointer.ts";
-import { gcFileBuckets } from "./blob-gc.ts";
+import { cacheReferencedBlobs, gcFileBuckets } from "./blob-gc.ts";
 import { publishCacheFixture, readFixture, runWithPlatform } from "./testing/cache-fixture.ts";
 import { duckdbTestSetup } from "./testing/duckdb-dylib.ts";
 
@@ -20,7 +20,10 @@ const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
  * the point of the port: the Surreal query filtered `IS NOT NONE`, a value that
  * does not exist in DuckDB.
  */
-const cacheWith = async (rawFiles: ReadonlyArray<string | null>, name: string) => {
+const referencedFrom = async (
+    rawFiles: ReadonlyArray<string | null>,
+    name: string,
+): Promise<ReadonlySet<string>> => {
     const fixture = await runWithPlatform(
         publishCacheFixture(tempDir(name), dylibPath, (w) =>
             rawFiles.length === 0
@@ -31,7 +34,11 @@ const cacheWith = async (rawFiles: ReadonlyArray<string | null>, name: string) =
                   ),
         ),
     );
-    return readFixture(fixture.snapshotPath, dylibPath);
+    return Effect.runPromise(
+        cacheReferencedBlobs.pipe(
+            Effect.provide(readFixture(fixture.snapshotPath, dylibPath)),
+        ) as Effect.Effect<ReadonlySet<string>>,
+    );
 };
 
 /** Wrap the real BunFileSystem, failing `remove` for exactly one path so F9
@@ -60,7 +67,7 @@ const withFailingRemove = (failPath: string): Layer.Layer<FileSystem.FileSystem>
 
 describe("gcFileBuckets", () => {
     dtest("removes unreferenced blobs (age guard disabled) and keeps referenced blobs", async () => {
-        const cache = await cacheWith(
+        const referenced = await referencedFrom(
             [
                 filePointer("transcripts", "keep.jsonl"),
                 filePointer("codex_artifacts", "keep.jsonl"),
@@ -69,7 +76,7 @@ describe("gcFileBuckets", () => {
             "ax-blobgc-basic-",
         );
 
-        const layer = Layer.mergeAll(cache, PlatformLayer);
+        const layer = PlatformLayer;
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
             const path = yield* Path.Path;
@@ -85,7 +92,7 @@ describe("gcFileBuckets", () => {
 
             // Orphans are freshly written (age ~0), so disable the young-blob
             // guard here - it's covered by its own test below.
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, minAgeMs: 0 });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, referenced, minAgeMs: 0 });
 
             expect(result).toEqual({ scanned: 4, removed: 2, failed: 0, skipped: false });
             expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
@@ -96,8 +103,11 @@ describe("gcFileBuckets", () => {
     });
 
     dtest("skips entirely for a scoped (partial) ingest run", async () => {
-        const cache = await cacheWith([filePointer("transcripts", "keep.jsonl")], "ax-blobgc-");
-        const layer = Layer.mergeAll(cache, PlatformLayer);
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl")],
+            "ax-blobgc-",
+        );
+        const layer = PlatformLayer;
 
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
@@ -107,7 +117,7 @@ describe("gcFileBuckets", () => {
             yield* fs.makeDirectory(transcripts);
             yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "remove");
 
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: false });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: false, referenced });
 
             expect(result.skipped).toBe(true);
             expect(result.skipReason).toMatch(/scoped/);
@@ -119,10 +129,11 @@ describe("gcFileBuckets", () => {
     });
 
     dtest("skips when the session reference set is empty", async () => {
-        // A cache with sessions but no raw_file pointers at all - what a fresh
-        // or partially-ingested graph looks like.
-        const cache = await cacheWith([null, null], "ax-blobgc-empty-");
-        const layer = Layer.mergeAll(cache, PlatformLayer);
+        // Sessions with no raw_file pointers at all - what a fresh or
+        // partially-ingested graph looks like, and the same shape a failed read
+        // degrades to.
+        const referenced = await referencedFrom([null, null], "ax-blobgc-empty-");
+        const layer = PlatformLayer;
 
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
@@ -132,7 +143,7 @@ describe("gcFileBuckets", () => {
             yield* fs.makeDirectory(transcripts);
             yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "remove");
 
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: true });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, referenced });
 
             expect(result.skipped).toBe(true);
             expect(result.skipReason).toMatch(/empty/);
@@ -142,8 +153,11 @@ describe("gcFileBuckets", () => {
     });
 
     dtest("spares an unreferenced blob younger than the age guard", async () => {
-        const cache = await cacheWith([filePointer("transcripts", "keep.jsonl")], "ax-blobgc-");
-        const layer = Layer.mergeAll(cache, PlatformLayer);
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl")],
+            "ax-blobgc-",
+        );
+        const layer = PlatformLayer;
 
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
@@ -155,7 +169,7 @@ describe("gcFileBuckets", () => {
             yield* fs.writeFileString(path.join(transcripts, "young-orphan.jsonl"), "remove");
 
             // Default 24h age guard, real "now" - the orphan was just written.
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: true });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, referenced });
 
             expect(result.skipped).toBe(false);
             expect(result.removed).toBe(0);
@@ -165,8 +179,11 @@ describe("gcFileBuckets", () => {
     });
 
     dtest("deletes an old unreferenced blob past the age guard", async () => {
-        const cache = await cacheWith([filePointer("transcripts", "keep.jsonl")], "ax-blobgc-");
-        const layer = Layer.mergeAll(cache, PlatformLayer);
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl")],
+            "ax-blobgc-",
+        );
+        const layer = PlatformLayer;
 
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
@@ -180,7 +197,7 @@ describe("gcFileBuckets", () => {
             // Simulate the clock 2 days ahead so the just-written orphan reads
             // as 2 days old against the 24h default guard.
             const twoDaysLater = () => Date.now() + 2 * 24 * 60 * 60 * 1000;
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, now: twoDaysLater });
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, referenced, now: twoDaysLater });
 
             expect(result).toEqual({ scanned: 2, removed: 1, failed: 0, skipped: false });
             expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
@@ -189,7 +206,10 @@ describe("gcFileBuckets", () => {
     });
 
     dtest("a per-file remove failure is counted and does not abort the rest of GC", async () => {
-        const cache = await cacheWith([filePointer("transcripts", "keep.jsonl")], "ax-blobgc-fail-");
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl")],
+            "ax-blobgc-fail-",
+        );
 
         await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
@@ -204,11 +224,8 @@ describe("gcFileBuckets", () => {
             yield* fs.writeFileString(failingOrphan, "remove");
             yield* fs.writeFileString(okOrphan, "remove");
 
-            const layer = Layer.mergeAll(
-                cache,
-                Layer.mergeAll(withFailingRemove(failingOrphan), BunPath.layer),
-            );
-            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, minAgeMs: 0 }).pipe(
+            const layer = Layer.mergeAll(withFailingRemove(failingOrphan), BunPath.layer);
+            const result = yield* gcFileBuckets(root, { isGlobalIngest: true, referenced, minAgeMs: 0 }).pipe(
                 Effect.provide(layer),
             );
 

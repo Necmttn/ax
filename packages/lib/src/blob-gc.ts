@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { filePointer } from "./blob-pointer.ts";
 import { cacheRows } from "./duckdb/query.ts";
+import type { CacheRead } from "./duckdb/seam.ts";
 import { orAbsent, skipNotFound } from "./shared/fs-error.ts";
 
 const FILE_BUCKETS = ["transcripts", "codex_artifacts"] as const;
@@ -41,6 +42,16 @@ export interface BlobGcOptions {
      * `isGlobalIngest` predicate (see cli/commands/ingest.ts) here.
      */
     readonly isGlobalIngest: boolean;
+    /**
+     * Every blob pointer the session table currently references, read from the
+     * engine THIS ingest run wrote - see {@link cacheReferencedBlobs} for why
+     * the caller supplies it rather than GC reading it.
+     *
+     * An EMPTY set is refused below rather than treated as "nothing is
+     * referenced": that is the shape a failed or unavailable read takes, and it
+     * would delete every blob.
+     */
+    readonly referenced: ReadonlySet<string>;
     /** Override the young-blob guard window (ms). Defaults to 24h. */
     readonly minAgeMs?: number;
     readonly now?: () => number;
@@ -51,6 +62,31 @@ export interface BlobGcOptions {
  *  so a NULL slipping through is a decode failure rather than a `null` quietly
  *  entering the reference set and matching no file. */
 const RawFileRow = Schema.Struct({ raw_file: Schema.String });
+
+/**
+ * The blob pointers the cache's `session` rows currently reference.
+ *
+ * THE CALLER SUPPLIES THE SET, and that is not ceremony. GC DELETES FILES, and
+ * its whole safety argument is that the reference set came from the engine the
+ * triggering ingest actually wrote. Reading it here, unconditionally, from the
+ * published DuckDB snapshot was wrong while ingest still writes SurrealDB: the
+ * snapshot omits everything the run in progress produced, so an ingest that had
+ * just written a session's blob would find that blob unreferenced. Passing the
+ * set in makes the engine a decision of the CALL SITE - the one place that knows
+ * which engine the run wrote - instead of a fact baked into a deletion pass.
+ *
+ * This is the v2 source. It becomes the only one at the ingest write cutover;
+ * until then the Surreal-era caller reads its own.
+ */
+export const cacheReferencedBlobs: Effect.Effect<ReadonlySet<string>, never, CacheRead> =
+    Effect.map(
+        cacheRows(
+            RawFileRow,
+            { sql: "SELECT raw_file FROM session WHERE raw_file IS NOT NULL", params: [] },
+            "blob gc reference set",
+        ),
+        (rows) => new Set(rows.map((row) => row.raw_file)),
+    );
 
 const skip = (reason: string): BlobGcResult => ({
     scanned: 0,
@@ -74,16 +110,7 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
 
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    // The reference set is the whole safety argument for a DELETION pass, so it
-    // is read strictly: `cacheRows`'s defensive policy degrades a failed read to
-    // `[]`, and an empty set is caught by the refusal immediately below rather
-    // than being mistaken for "nothing is referenced".
-    const rows = yield* cacheRows(
-        RawFileRow,
-        { sql: "SELECT raw_file FROM session WHERE raw_file IS NOT NULL", params: [] },
-        "blob gc reference set",
-    );
-    const referenced = new Set(rows.map((row) => row.raw_file));
+    const referenced = opts.referenced;
 
     if (referenced.size === 0) {
         return skip(
