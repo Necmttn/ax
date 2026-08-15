@@ -13,11 +13,11 @@
  * is unchanged (stranded = heartbeat past ingest timeout + grace, so a live
  * concurrent run is never touched) - only the trigger is new.
  */
-import { Duration, Effect, Schedule } from "effect";
+import { Duration, Effect, FileSystem, Path, Schedule } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import { reapStaleIngestRuns } from "../ingest/reap-runs.ts";
+import { withConfigWrite } from "../config-core/reconcile.ts";
 
 /** Default gap between sweeps. Cheap (one indexed query over
  *  `status = 'running'`, normally 0-1 rows), so 5min is generous and still
@@ -42,8 +42,8 @@ export const reapIntervalSeconds = (env: NodeJS.ProcessEnv = process.env): numbe
  */
 export const runReapLoop = (opts: {
     readonly intervalSeconds: number;
-}): Effect.Effect<void, never, SurrealClient | AxConfig> =>
-    reapStaleIngestRuns().pipe(
+}): Effect.Effect<void, never, AxConfig | FileSystem.FileSystem | Path.Path> =>
+    withConfigWrite((write) => reapStaleIngestRuns(write)).pipe(
         Effect.tap((result) =>
             result.reaped > 0
                 ? Effect.logWarning(

@@ -3,10 +3,12 @@ import { Effect, Option, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { surrealString } from "@ax/lib/shared/surreal";
 import { homedir } from "node:os";
 import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../../improve/actions.ts";
 import { lintFiles } from "../../improve/lint.ts";
@@ -157,10 +159,12 @@ const cmdImproveRecommend = (input: {
         const limit = requirePositiveInt("improve recommend", "limit", input.limit);
         const sinceDays = requireOptionalPositiveInt("improve recommend", "since", input.sinceDays);
         const forms = input.forms.flatMap((v) => parseFileHints(Option.some(v)));
+        const read = yield* CacheRead;
         // Validation (exit 2) stays here; the CLI limit default is 5 (MCP's is
         // 10), both passed into the shared normalizer so the constructed input
         // shape cannot drift between transports.
         const items = yield* recommend(
+            read,
             normalizeRecommendInput(
                 {
                     limit,
@@ -571,7 +575,7 @@ const cmdImproveCheckpoint = (input: {
     Effect.gen(function* () {
         const force = input.force;
         const json = input.json;
-        const stats = yield* deriveCheckpoints({ force });
+        const stats = yield* withConfigWrite((write) => deriveCheckpoints(write, { force }));
         if (json) {
             console.log(prettyPrint(stats));
             return;

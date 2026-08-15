@@ -1,10 +1,10 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { surrealDate } from "@ax/lib/shared/surql";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { sinceClause } from "@ax/lib/duckdb/clause";
 import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
-import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
+import { chunked, cleanSessionId, sessionIdsClause } from "./util.ts";
 import { sessionProjectClause } from "./session-filter.ts";
 
 export interface SessionMetricsRow {
@@ -38,7 +38,26 @@ export interface SessionHealthEntry {
 }
 
 const HEALTH_SELECT =
-    `SELECT type::string(session) AS session, task_label, user_corrections FROM session_health`;
+    `SELECT session, task_label, user_corrections FROM session_health`;
+
+const SessionHealthRow = Schema.Struct({
+    session: Schema.String,
+    task_label: Schema.NullOr(Schema.String),
+    user_corrections: Schema.NullOr(NumberFromBigIntColumn),
+});
+
+const SessionMetricsDbRow = Schema.Struct({
+    session: Schema.String,
+    source: Schema.String,
+    durability_ratio: Schema.NullOr(Schema.Number),
+    produced_commits: NumberFromBigIntColumn,
+    time_to_land_ms: Schema.NullOr(NumberFromBigIntColumn),
+    lines_added: NumberFromBigIntColumn,
+    lines_removed: NumberFromBigIntColumn,
+    time_to_first_edit_ms: Schema.NullOr(NumberFromBigIntColumn),
+    cold_start_reads: NumberFromBigIntColumn,
+    delegation_ratio: Schema.NullOr(Schema.Number),
+});
 
 /** Max record refs per `session IN [...]` batch (keeps query strings sane). */
 const IN_CHUNK = 500;
@@ -51,58 +70,59 @@ const IN_CHUNK = 500;
  * `cleanSessionId` - look up with the same.
  */
 export const fetchSessionHealthMap = (
+    read: CacheReadService,
     sessionIds: readonly string[] | null,
-): Effect.Effect<Map<string, SessionHealthEntry>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, SessionHealthEntry>, CacheReadError> =>
     Effect.gen(function* () {
         const out = new Map<string, SessionHealthEntry>();
         if (sessionIds !== null && sessionIds.length === 0) return out;
-        const db = yield* SurrealClient;
         const rows = sessionIds === null
-            ? (yield* db.query<[Array<Record<string, unknown>>]>(`${HEALTH_SELECT};`))?.[0] ?? []
+            ? yield* read.rows(SessionHealthRow, HEALTH_SELECT)
             : (yield* Effect.all(
-                chunked(sessionIds, IN_CHUNK).map((ids) =>
-                    db.query<[Array<Record<string, unknown>>]>(`${HEALTH_SELECT} WHERE session IN [${sessionRefList(ids)}];`)),
+                chunked(sessionIds, IN_CHUNK).map((ids) => {
+                    const sessions = sessionIdsClause("session", ids);
+                    return read.rows(SessionHealthRow, `${HEALTH_SELECT} WHERE TRUE ${sessions.sql}`, sessions.params);
+                }),
                 { concurrency: 4 },
-            )).flatMap((batch) => batch?.[0] ?? []);
+            )).flatMap((batch) => batch);
         for (const r of rows) {
-            out.set(cleanSessionId(String(r.session ?? "")), {
-                taskLabel: strOrNull(r.task_label),
-                userCorrections: numOrNull(r.user_corrections),
+            out.set(cleanSessionId(r.session), {
+                taskLabel: r.task_label,
+                userCorrections: r.user_corrections,
             });
         }
         return out;
     });
 
 export const fetchSessionMetrics = (
+    read: CacheReadService,
     input: { readonly since: Date | null; readonly limit: number; readonly project?: string | null },
-): Effect.Effect<SessionMetricsRow[], DbError, SurrealClient> =>
+): Effect.Effect<SessionMetricsRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const limit = Math.min(Math.max(input.limit, 1), 500);
-        const clauses: string[] = [];
-        if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
-        if (input.project) clauses.push(sessionProjectClause(input.project, "session."));
-        const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-        const rows = (yield* db.query<[Array<Record<string, unknown>>]>(`
+        const since = sinceClause("s.started_at", input.since);
+        const project = input.project ? sessionProjectClause(input.project, "s.") : { sql: "", params: [] };
+        const rows = yield* read.rows(SessionMetricsDbRow, `
 SELECT
-  type::string(session) AS session,
-  session.source AS source,
-  durability_ratio, produced_commits, time_to_land_ms, lines_added, lines_removed,
-  time_to_first_edit_ms, cold_start_reads, delegation_ratio
-FROM session_metrics
-${where}
+  m.session AS session,
+  s.source AS source,
+  m.durability_ratio, m.produced_commits, m.time_to_land_ms, m.lines_added, m.lines_removed,
+  m.time_to_first_edit_ms, m.cold_start_reads, m.delegation_ratio
+FROM session_metrics m
+JOIN session s ON s.id = m.session
+WHERE TRUE ${since.sql} ${project.sql}
 -- Lead with sessions that did real committing work (NONE-durability rows - 0-commit
 -- review/agent sessions - otherwise sort first under plain ASC and bury the signal),
 -- then most-fragile-first within them.
-ORDER BY produced_commits DESC, durability_ratio ASC
-LIMIT ${limit};`))?.[0] ?? [];
+ORDER BY m.produced_commits DESC, m.durability_ratio ASC
+LIMIT ?`, [...since.params, ...project.params, limit]);
         // Health + cost join only the ≤500 returned sessions, fetched as TWO
         // indexed batch lookups (not correlated per-row subqueries evaluated
         // before ORDER/LIMIT) and run concurrently - they are independent.
         const sessionIds = rows.map((r) => String(r.session ?? "")).filter((s) => s.length > 0);
         const [costs, health] = yield* Effect.all([
-            fetchSessionCostMap(sessionIds),
-            fetchSessionHealthMap(sessionIds),
+            fetchSessionCostMap(read, sessionIds),
+            fetchSessionHealthMap(read, sessionIds),
         ], { concurrency: 2 });
         return rows.map((r) => {
             const session = String(r.session ?? "");
@@ -113,14 +133,14 @@ LIMIT ${limit};`))?.[0] ?? [];
                 session,
                 taskLabel: h?.taskLabel ?? null,
                 source: nonEmptyString(r.source),
-                durabilityRatio: numOrNull(r.durability_ratio),
-                producedCommits: numOrZero(r.produced_commits),
-                timeToLandMs: numOrNull(r.time_to_land_ms),
-                linesAdded: numOrZero(r.lines_added),
-                linesRemoved: numOrZero(r.lines_removed),
-                timeToFirstEditMs: numOrNull(r.time_to_first_edit_ms),
-                coldStartReads: numOrZero(r.cold_start_reads),
-                delegationRatio: numOrNull(r.delegation_ratio),
+                durabilityRatio: r.durability_ratio,
+                producedCommits: r.produced_commits,
+                timeToLandMs: r.time_to_land_ms,
+                linesAdded: r.lines_added,
+                linesRemoved: r.lines_removed,
+                timeToFirstEditMs: r.time_to_first_edit_ms,
+                coldStartReads: r.cold_start_reads,
+                delegationRatio: r.delegation_ratio,
                 estimatedCostUsd: cost?.estimatedCostUsd ?? null,
                 costPricingSource: cost?.pricingSource ?? null,
                 userCorrections: h?.userCorrections ?? null,

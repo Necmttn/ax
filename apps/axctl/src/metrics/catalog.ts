@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { readFragilityCascade, type CascadeEdge } from "./fragility-cascade.ts";
 
@@ -29,10 +30,12 @@ export const findSignal = (id: string): SignalDescriptor | undefined =>
  *  Reads the derive-stage precompute - NO live edge derefs on this path. */
 export const runRelationSignal = (
     id: string,
-): Effect.Effect<readonly CascadeEdge[], DbError, SurrealClient> => {
+): Effect.Effect<readonly CascadeEdge[], DbError | CacheReadError, SurrealClient | CacheRead> => {
     switch (id) {
         case "fragility_cascade":
-            return readFragilityCascade();
+            return Effect.gen(function* () {
+                return yield* readFragilityCascade(yield* CacheRead);
+            });
         default:
             return Effect.succeed([]);
     }

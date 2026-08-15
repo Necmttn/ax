@@ -20,9 +20,6 @@
  * a Column DSL (kept in writer.ts).
  */
 import { Effect, Schema } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/surreal";
 import { attrMap, type KeyValue } from "./otlp-schema.ts";
 
 export type Signal = "metrics" | "traces" | "logs";
@@ -111,12 +108,6 @@ export const decodeSignal = <S extends Schema.Top>(schema: S, signal: string) =>
  * batch. `stmt` is called as `stmt(row, i)` over the post-filter emitted array,
  * so a per-payload `index` (logs) stays stable and collision-free.
  */
-export const writeRows = <Row>(
-    rows: readonly Row[],
-    stmt: (row: Row, i: number) => string,
-): Effect.Effect<void, DbError, SurrealClient> =>
-    rows.length === 0 ? Effect.void : executeStatements(rows.map((r, i) => stmt(r, i)));
-
 /** Typed decode failure. Lives here so `decodeSignal` has no import cycle. */
 export class OtelDecodeError extends Schema.TaggedErrorClass<OtelDecodeError>(
     "OtelDecodeError",

@@ -12,14 +12,14 @@
  *
  * @see scripts/extract-stage-rationale.ts for the full annotation contract.
  */
-import { Effect, FileSystem, Layer, Path, Schema } from "effect";
-import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { skillRecordKeyV2 } from "@ax/lib/ids";
-import { AppLayer } from "@ax/lib/layers";
 import { DbError } from "@ax/lib/errors";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { findGitRoot } from "../project/git.ts";
 import { reconcileByScope } from "../config-core/reconcile.ts";
-import { AgentSourceRegistry, AgentSourceRegistryLive } from "../agents/registry.ts";
+import { AgentSourceRegistry } from "../agents/registry.ts";
 import type { AgentRecord } from "../agents/source.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -29,31 +29,33 @@ export const AGENT_DEF_TABLE = "agent_def";
 /** Stable record id for an agent by name. Reuses the raw skill keying scheme
  *  (`skillRecordKeyV2`) for `:` etc. - agent names are NOT skill names, so we
  *  deliberately bypass the SkillName-branded `skillRecordKey` wrapper. */
-const agentRecordId = (name: string): RecordId =>
-    new RecordId(AGENT_DEF_TABLE, skillRecordKeyV2(name));
+const agentRecordId = (name: string): string => skillRecordKeyV2(name);
 
 /** Upsert one agent record + stamp `last_seen_at`. Dedups by name (user wins). */
 const upsertAgent = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     rec: AgentRecord,
-): Effect.Effect<void, DbError> =>
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         const id = agentRecordId(rec.name);
-        yield* db.upsert(id, {
+        yield* write.put(AGENT_DEF_TABLE, cacheRow({
+            id,
             name: rec.name,
             scope: rec.scopeTag, // repo-qualified (user | project:<repo>)
             dir_path: rec.dirPath,
-            description: rec.description ?? undefined,
-            model: rec.model ?? undefined,
+            description: rec.description ?? null,
+            model: rec.model ?? null,
             content_hash: rec.contentHash,
-            skills: [...rec.skills],
+            skills: jsonParam([...rec.skills]),
             bytes: rec.bytes,
-        });
+            last_seen_at: new Date(),
+            deleted_at: null,
+        }));
         // Touch last_seen_at via the same query reconcile uses, so a fresh row
         // gets a non-NONE last_seen_at immediately (not only on the next run).
-        yield* db.query(
-            `UPDATE ${AGENT_DEF_TABLE} SET last_seen_at = time::now() WHERE name = $name AND deleted_at IS NONE`,
-            { name: rec.name },
+        yield* write.exec(
+            `UPDATE ${AGENT_DEF_TABLE} SET last_seen_at = CURRENT_TIMESTAMP WHERE name = ? AND deleted_at IS NULL`,
+            [rec.name],
         );
     });
 
@@ -89,16 +91,15 @@ export const collectAgents = (): Effect.Effect<
         return [...byName.values()];
     });
 
-export const ingestAgentDefs = (): Effect.Effect<
+export const ingestAgentDefs = (write: CacheWriteService): Effect.Effect<
     { count: number; tombstoned: number; resurrected: number },
-    DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
+    DbError | CacheWriteError,
+    FileSystem.FileSystem | Path.Path | AgentSourceRegistry
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const agents = yield* collectAgents();
 
-        yield* Effect.forEach(agents, (rec) => upsertAgent(db, rec), {
+        yield* Effect.forEach(agents, (rec) => upsertAgent(write, rec), {
             concurrency: 8,
             discard: true,
         });
@@ -111,7 +112,7 @@ export const ingestAgentDefs = (): Effect.Effect<
             arr.push(a.name);
             byScope.set(a.scopeTag, arr);
         }
-        const report = yield* reconcileByScope(AGENT_DEF_TABLE, byScope);
+        const report = yield* reconcileByScope(write, AGENT_DEF_TABLE, byScope);
 
         yield* Effect.logDebug("agent_def upserted", {
             count: agents.length,
@@ -124,17 +125,6 @@ export const ingestAgentDefs = (): Effect.Effect<
             resurrected: report.resurrected,
         };
     });
-
-if (import.meta.main) {
-    // NOTE: needs Bun fs/path layers too; see INTEGRATION NOTES. AppLayer alone
-    // is insufficient for a standalone run - this main is illustrative.
-    await Effect.runPromise(
-        ingestAgentDefs().pipe(
-            Effect.provide(Layer.mergeAll(AppLayer, AgentSourceRegistryLive)),
-            Effect.scoped,
-        ) as Effect.Effect<{ count: number; tombstoned: number; resurrected: number }>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -161,13 +151,14 @@ export class AgentDefStats extends BaseStageStats.extend<AgentDefStats>("AgentDe
  */
 export const agentDefStage: StageDef<
     AgentDefStats,
-    SurrealClient | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
+    FileSystem.FileSystem | Path.Path | AgentSourceRegistry,
+    DbError | CacheWriteError
 > = {
     meta: StageMeta.make({ key: "agent-def", deps: [], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const { count, tombstoned, resurrected } = yield* ingestAgentDefs();
+            const { count, tombstoned, resurrected } = yield* ingestAgentDefs(write);
             return AgentDefStats.make({
                 durationMs: Date.now() - t0,
                 summary: `upserted ${count} agent_def rows (${tombstoned} tombstoned, ${resurrected} resurrected)`,

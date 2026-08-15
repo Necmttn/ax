@@ -6,7 +6,7 @@
  * keep new rules here, not in the stage wiring.
  */
 import type { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { edgeRowId, skillRowId } from "@ax/lib/stable-id";
 import {
     isoTimestamp,
     nonEmptyString,
@@ -84,8 +84,7 @@ export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     toKey: string;
 } {
     const [lo, hi] = skillKeyA < skillKeyB ? [skillKeyA, skillKeyB] : [skillKeyB, skillKeyA];
-    const hash = Bun.hash(`${lo}__${hi}`).toString(16).slice(0, 12);
-    return { edgeId: `${lo.slice(0, 24)}__${hi.slice(0, 24)}__${hash}`, fromKey: lo, toKey: hi };
+    return { edgeId: edgeRowId("skill_paired", lo, hi), fromKey: lo, toKey: hi };
 }
 
 const PAIR_WINDOW = 3;
@@ -385,7 +384,7 @@ export function deriveProposed(
             const end = Math.min(text.length, idx + name.length + 40);
             out.push({
                 fromTurnKey: rawTurnKey(turn.id),
-                skillKey: skillRecordKey(name),
+                skillKey: skillRowId(name),
                 skillName: name,
                 ts: tsToIso(turn.ts),
                 contextExcerpt: text.slice(start, end),
@@ -425,8 +424,8 @@ export function deriveSkillPairs(
                     if (sa === sb) continue;
                     // Same turn pair: avoid double-counting the unordered pair.
                     if (i === j && sa > sb) continue;
-                    const keyA = skillRecordKey(sa);
-                    const keyB = skillRecordKey(sb);
+                    const keyA = skillRowId(sa);
+                    const keyB = skillRowId(sb);
                     const { edgeId, fromKey, toKey } = skillPairedEdgeId(keyA, keyB);
                     const ts = tsToIso(b.ts);
                     const existing = accum.get(edgeId);
@@ -470,7 +469,7 @@ export function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
             for (const name of skills) {
                 out.push({
                     fromTurnKey: errorTurnKey,
-                    skillKey: skillRecordKey(name),
+                    skillKey: skillRowId(name),
                     skillName: name,
                     ts: tsToIso(next.ts),
                     errorExcerpt: excerpt,

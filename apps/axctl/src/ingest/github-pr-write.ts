@@ -9,12 +9,10 @@
  * and batches the resulting UPSERT statements.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral, stableDigest } from "@ax/lib/ids";
-import { surrealDate, surrealJson, surrealOptionDate, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { Effect, Schema } from "effect";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import {
     aggregateReviewPain,
     normalizeCheckRun,
@@ -43,28 +41,14 @@ export interface WritePullRequestsStats {
     readonly deliveryOutcomes: number;
 }
 
-/**
- * Turn a `type::string(id)` query result back into an embeddable record literal.
- * Strips a leading `table:` prefix and surrounding backticks / ⟨⟩ brackets, then
- * rebuilds via `recordLiteral`. Copied from `dashboard/cost-query.ts`.
- */
-const toRecordRef = (table: string, id: string): string => {
-    let key = id.trim().replace(new RegExp(`^${table}:`), "");
-    if (key.startsWith("⟨") && key.endsWith("⟩")) key = key.slice(1, -1);
-    if (key.startsWith("`") && key.endsWith("`")) key = key.slice(1, -1);
-    return recordLiteral(table, key);
-};
-
 const asRecord = (value: unknown): Record<string, unknown> =>
     value && typeof value === "object" ? value as Record<string, unknown> : {};
 
 export const writePullRequests = (
+    write: CacheWriteService,
     input: WritePullRequestsInput,
-): Effect.Effect<WritePullRequestsStats, DbError, SurrealClient> =>
+): Effect.Effect<WritePullRequestsStats, CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const statements: string[] = [];
-
         let pullRequests = 0;
         let reviews = 0;
         let checks = 0;
@@ -74,35 +58,19 @@ export const writePullRequests = (
             const np = normalizePullRequest(raw);
             if (np.number === null) continue; // can't key it
 
-            const prKey = stableDigest(`${input.repositoryKey}|${np.number}`);
-            const prId = recordLiteral("pull_request", prKey);
+            const prId = stableId("pull_request", [input.repositoryKey, np.number]);
             const prRaw = asRecord(raw);
 
-            statements.push(
-                `UPSERT ${prId} CONTENT { ` +
-                    `repository: ${input.repositoryId}, ` +
-                    `provider: "github", ` +
-                    `number: ${np.number}, ` +
-                    `title: ${surrealString(np.title ?? "(untitled)")}, ` +
-                    `state: ${surrealString(np.state)}, ` +
-                    `base_branch: ${np.baseBranch === null ? "NONE" : surrealString(np.baseBranch)}, ` +
-                    `head_branch: ${np.headBranch === null ? "NONE" : surrealString(np.headBranch)}, ` +
-                    `head_sha: ${np.headSha === null ? "NONE" : surrealString(np.headSha)}, ` +
-                    `merge_sha: ${np.mergeSha === null ? "NONE" : surrealString(np.mergeSha)}, ` +
-                    `author: ${np.author === null ? "NONE" : surrealString(np.author)}, ` +
-                    `url: ${np.url === null ? "NONE" : surrealString(np.url)}, ` +
-                    `opened_at: ${surrealOptionDate(np.openedAt)}, ` +
-                    `closed_at: ${surrealOptionDate(np.closedAt)}, ` +
-                    `merged_at: ${surrealOptionDate(np.mergedAt)}, ` +
-                    `updated_at: time::now(), ` +
-                    `additions: ${np.additions}, ` +
-                    `deletions: ${np.deletions}, ` +
-                    `changed_files: ${np.changedFiles}, ` +
-                    `commit_count: ${np.commitCount}, ` +
-                    `labels: ${surrealJson(np.labels)}, ` +
-                    `raw: ${surrealJson(np.raw)} ` +
-                    `};`,
-            );
+            yield* write.put("pull_request", cacheRow({
+                id: prId, repository: input.repositoryId, provider: "github", number: np.number,
+                title: np.title ?? "(untitled)", state: np.state, base_branch: np.baseBranch,
+                head_branch: np.headBranch, head_sha: np.headSha, merge_sha: np.mergeSha,
+                author: np.author, url: np.url, opened_at: tsParam(np.openedAt),
+                closed_at: tsParam(np.closedAt), merged_at: tsParam(np.mergedAt),
+                updated_at: new Date(), additions: np.additions, deletions: np.deletions,
+                changed_files: np.changedFiles, commit_count: np.commitCount,
+                labels: jsonParam(np.labels), raw: jsonParam(np.raw),
+            }));
             pullRequests++;
 
             // Reviews. Key on review content (reviewer/ts/state) rather than
@@ -114,25 +82,13 @@ export const writePullRequests = (
                     const ne = normalizeReviewEvent(review);
                     if (ne.state === null) continue; // state is required
 
-                    const reviewId = recordLiteral(
-                        "review_event",
-                        stableDigest(`${prKey}|review|${ne.reviewer ?? ""}|${ne.ts ?? ""}|${ne.state}`),
-                    );
-                    statements.push(
-                        `UPSERT ${reviewId} CONTENT { ` +
-                            `pull_request: ${prId}, ` +
-                            `repository: ${input.repositoryId}, ` +
-                            `reviewer: ${ne.reviewer === null ? "NONE" : surrealString(ne.reviewer)}, ` +
-                            `reviewer_kind: ${surrealString(ne.reviewerKind)}, ` +
-                            `state: ${surrealString(ne.state)}, ` +
-                            `body_excerpt: ${ne.bodyExcerpt.length === 0 ? "NONE" : surrealString(ne.bodyExcerpt)}, ` +
-                            `severity: ${surrealString(ne.severity)}, ` +
-                            `category: ${surrealString(ne.category)}, ` +
-                            `unresolved: false, ` +
-                            `raw: ${surrealJson(ne.raw)}, ` +
-                            `ts: ${ne.ts ? surrealDate(ne.ts) : "time::now()"} ` +
-                            `};`,
-                    );
+                    const reviewId = stableId("review_event", [prId, ne.reviewer, ne.ts, ne.state]);
+                    yield* write.put("review_event", cacheRow({
+                        id: reviewId, pull_request: prId, repository: input.repositoryId,
+                        reviewer: ne.reviewer, reviewer_kind: ne.reviewerKind, state: ne.state,
+                        body_excerpt: ne.bodyExcerpt || null, severity: ne.severity, category: ne.category,
+                        unresolved: false, raw: jsonParam(ne.raw), ts: tsParam(ne.ts) ?? new Date(),
+                    }));
                     reviews++;
                 }
             }
@@ -141,11 +97,9 @@ export const writePullRequests = (
             const sha = np.mergeSha ?? np.headSha;
             let commitRef: string | null = null;
             if (sha !== null) {
-                const rows = yield* db.query<[string[]]>(
-                    `SELECT VALUE type::string(id) FROM commit WHERE repository = ${input.repositoryId} AND sha = ${surrealString(sha)} LIMIT 1;`,
-                );
-                const commitIdStr = rows?.[0]?.[0] ?? null;
-                commitRef = commitIdStr ? toRecordRef("commit", commitIdStr) : null;
+                const rows = yield* write.rows(Schema.Struct({ id: Schema.String }),
+                    "SELECT id FROM commit WHERE repository = ? AND sha = ? LIMIT 1", [input.repositoryId, sha]);
+                commitRef = rows[0]?.id ?? null;
             }
 
             // Checks. Key on check content (name/startedAt) rather than array
@@ -157,25 +111,13 @@ export const writePullRequests = (
                     const nc = normalizeCheckRun(entry);
                     if (nc.name === null && nc.status === null) continue;
 
-                    const checkId = recordLiteral(
-                        "check_run",
-                        stableDigest(`${prKey}|check|${nc.name ?? ""}|${nc.startedAt ?? ""}`),
-                    );
-                    statements.push(
-                        `UPSERT ${checkId} CONTENT { ` +
-                            `pull_request: ${prId}, ` +
-                            `commit: ${commitRef ?? "NONE"}, ` +
-                            `repository: ${input.repositoryId}, ` +
-                            `provider: "github", ` +
-                            `name: ${surrealString(nc.name ?? "(unknown)")}, ` +
-                            `status: ${surrealString(nc.status ?? "unknown")}, ` +
-                            `conclusion: ${nc.conclusion === null ? "NONE" : surrealString(nc.conclusion)}, ` +
-                            `url: ${nc.url === null ? "NONE" : surrealString(nc.url)}, ` +
-                            `raw: ${surrealJson(nc.raw)}, ` +
-                            `started_at: ${surrealOptionDate(nc.startedAt)}, ` +
-                            `completed_at: ${surrealOptionDate(nc.completedAt)} ` +
-                            `};`,
-                    );
+                    const checkId = stableId("check_run", [prId, nc.name, nc.startedAt]);
+                    yield* write.put("check_run", cacheRow({
+                        id: checkId, pull_request: prId, commit: commitRef,
+                        repository: input.repositoryId, provider: "github", name: nc.name ?? "(unknown)",
+                        status: nc.status ?? "unknown", conclusion: nc.conclusion, url: nc.url,
+                        raw: jsonParam(nc.raw), started_at: tsParam(nc.startedAt), completed_at: tsParam(nc.completedAt),
+                    }));
                     checks++;
                 }
             }
@@ -187,10 +129,9 @@ export const writePullRequests = (
                 // default branch.
                 const reachedMain = np.mergeSha !== null && commitRef !== null;
 
-                const srows = yield* db.query<[string[]]>(
-                    `SELECT VALUE type::string(in) FROM produced WHERE out = ${commitRef};`,
-                );
-                const sessionIds = srows?.[0] ?? [];
+                const srows = yield* write.rows(Schema.Struct({ session: Schema.String }),
+                    "SELECT in_id AS session FROM produced WHERE out_id = ?", [commitRef]);
+                const sessionIds = srows.map((row) => row.session);
 
                 const prSize = scorePrSize({
                     additions: np.additions,
@@ -209,40 +150,23 @@ export const writePullRequests = (
                 });
 
                 for (const sidStr of sessionIds) {
-                    const sessionRef = toRecordRef("session", sidStr);
                     // delivery_outcome.session is UNIQUE → one outcome per
                     // session; if a session maps to multiple PRs, last write
                     // wins (v0 accepted limitation). Keying by the session id
                     // is required: a different id with the same session would
                     // violate the UNIQUE index.
-                    const deliveryId = recordLiteral(
-                        "delivery_outcome",
-                        stableDigest(sidStr),
-                    );
-                    statements.push(
-                        `UPSERT ${deliveryId} CONTENT { ` +
-                            `session: ${sessionRef}, ` +
-                            `repository: ${input.repositoryId}, ` +
-                            `pull_request: ${prId}, ` +
-                            `status: ${surrealString(status)}, ` +
-                            // promotion_path is `string DEFAULT 'unknown'` but
-                            // SurrealDB v3 doesn't apply the DEFAULT on CONTENT
-                            // upserts (the field coerces NONE → error). This
-                            // writer only links a PR, so the path is "pr".
-                            `promotion_path: "pr", ` +
-                            `pr_size: ${surrealJson(prSize)}, ` +
-                            `review_pain: ${surrealJson(reviewPain)}, ` +
-                            `confidence: "medium", ` +
-                            `created_at: time::now(), ` +
-                            `updated_at: time::now() ` +
-                            `};`,
-                    );
+                    const deliveryId = stableId("delivery_outcome", [sidStr]);
+                    yield* write.put("delivery_outcome", cacheRow({
+                        id: deliveryId, session: sidStr, repository: input.repositoryId,
+                        checkout: null, pull_request: prId, status, promotion_path: "pr",
+                        main_branch: null, produced_commits: null, promoted_commits: null,
+                        pr_size: jsonParam(prSize), review_pain: jsonParam(reviewPain), phase_metrics: null,
+                        confidence: "medium", evidence: null, created_at: new Date(), updated_at: new Date(),
+                    }));
                     deliveryOutcomes++;
                 }
             }
         }
-
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
 
         return { pullRequests, reviews, checks, deliveryOutcomes };
     });

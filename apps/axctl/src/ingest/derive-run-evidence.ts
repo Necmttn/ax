@@ -26,15 +26,14 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "@ax/lib/ids";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
-import { executeStatementsWith } from "@ax/lib/shared/surreal";
 import { checkFamilyFromCommand } from "./check-family.ts";
 import {
-    buildRunEvidenceStatements,
     runEvidenceEventRecordKey,
+    runEvidenceRefRecordKey,
     type RunEvidenceEventWrite,
     type RunEvidenceKind,
     type RunEvidenceRefWrite,
@@ -42,7 +41,6 @@ import {
 import {
     BaseStageStats,
     IngestContext,
-    sinceAndClause,
     sinceDaysFromCtx,
     StageMeta,
 } from "./stage/types.ts";
@@ -510,104 +508,101 @@ export const buildLineage = (
 // Stage (thin DB layer: fetch deref-free, map pure, write idempotent).
 // ---------------------------------------------------------------------------
 
-const SESSION_PROVIDER_SQL = `SELECT record::id(id) AS id, source FROM session;`;
+const SESSION_PROVIDER_SQL = `SELECT id, source FROM session`;
+
+const sinceAnd = (since: number | undefined, field = "ts"): string =>
+    since && since > 0 ? `AND ${field} > CURRENT_TIMESTAMP - INTERVAL '${Math.trunc(since)} days'` : "";
 
 const toolCallSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts,
-            name, has_error AS hasError, command_norm AS commandNorm
-     FROM tool_call WHERE session != NONE ${sinceAndClause(since)};`;
+    `SELECT id, session, CAST(ts AS VARCHAR) AS ts, name, has_error AS hasError, command_norm AS commandNorm
+     FROM tool_call WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 export const commandOutcomeSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, (IF tool_call != NONE THEN record::id(tool_call) ELSE NONE END) AS toolCall,
-            type::string(ts) AS ts, kind, status, command_norm AS commandNorm
-     FROM command_outcome WHERE session != NONE ${sinceAndClause(since)};`;
+    `SELECT id, session, tool_call AS toolCall, CAST(ts AS VARCHAR) AS ts, kind, status, command_norm AS commandNorm
+     FROM command_outcome WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 const compactionSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts,
+    `SELECT id, session, CAST(ts AS VARCHAR) AS ts,
             trigger, strategy, tokens_before AS tokensBefore, summary
-     FROM compaction WHERE session != NONE ${sinceAndClause(since)};`;
+     FROM compaction WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 const planSnapshotSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts, summary
-     FROM plan_snapshot WHERE session != NONE ${sinceAndClause(since)};`;
+    `SELECT id, session, CAST(ts AS VARCHAR) AS ts, summary
+     FROM plan_snapshot WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 // read_file / searched_file are RELATION FROM tool_call TO file; `in.session` is
 // a single-hop deref to anchor the ref's session.
 const fileEvidenceSql = (edge: "read_file" | "searched_file", access: string, since: number | undefined): string =>
-    `SELECT record::id(in) AS toolCall, record::id(out) AS file, record::id(in.session) AS session,
-            type::string(ts) AS ts, path_seen AS pathSeen, '${access}' AS access
-     FROM ${edge} WHERE ts != NONE ${sinceAndClause(since)};`;
+    `SELECT e.in_id AS toolCall, e.out_id AS file, tc.session,
+            CAST(e.ts AS VARCHAR) AS ts, e.path_seen AS pathSeen, '${access}' AS access
+     FROM ${edge} e JOIN tool_call tc ON tc.id = e.in_id WHERE e.ts IS NOT NULL ${sinceAnd(since, "e.ts")}`;
 
 // `edited` is RELATION FROM turn TO file; bridged to the turn's edit tool_call.
 const editedSql = (since: number | undefined): string =>
-    `SELECT record::id(in) AS turn, record::id(out) AS file, record::id(in.session) AS session,
-            type::string(ts) AS ts, path_seen AS pathSeen, tool
-     FROM edited WHERE ts != NONE ${sinceAndClause(since)};`;
+    `SELECT e.in_id AS turn, e.out_id AS file, t.session,
+            CAST(e.ts AS VARCHAR) AS ts, e.path_seen AS pathSeen, e.tool
+     FROM edited e JOIN turn t ON t.id = e.in_id WHERE e.ts IS NOT NULL ${sinceAnd(since, "e.ts")}`;
 
 // Edit tool_calls with their turn, for the edited bridge. Filtered to edit tool
 // names (lowercased) so the JS turn-map only holds edit candidates.
 const editToolCallSql = (since: number | undefined): string => {
-    const names = [...EDIT_TOOL_NAMES].map((n) => `"${n}"`).join(", ");
-    return `SELECT record::id(id) AS toolCall, record::id(turn) AS turn
-            FROM tool_call WHERE turn != NONE AND string::lowercase(name) IN [${names}] ${sinceAndClause(since)};`;
+    const names = [...EDIT_TOOL_NAMES].map((n) => `'${n.toLowerCase()}'`).join(", ");
+    return `SELECT id AS toolCall, turn FROM tool_call
+            WHERE turn IS NOT NULL AND lower(name) IN (${names}) ${sinceAnd(since)}`;
 };
 
 // Objective: the run's stated goal. `task`-kind user turns only (real prompts,
 // not context/control wrappers); earliest-per-session is picked in JS by seq.
 const objectiveSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, type::string(ts) AS ts,
+    `SELECT id, session, CAST(ts AS VARCHAR) AS ts,
             seq, text_excerpt AS textExcerpt
-     FROM turn WHERE session != NONE AND role = "user" AND message_kind = "task" ${sinceAndClause(since)};`;
+     FROM turn WHERE session IS NOT NULL AND role = 'user' AND message_kind = 'task' ${sinceAnd(since)}`;
 
 // Policy decisions: hook invocations whose effect is a real intervention.
 export const policyDecisionSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS id, record::id(session) AS session, (IF tool_call != NONE THEN record::id(tool_call) ELSE NONE END) AS toolCall,
-            type::string(ts) AS ts, hook_name AS hookName, effect, provider_status AS providerStatus
+    `SELECT id, session, tool_call AS toolCall,
+            CAST(ts AS VARCHAR) AS ts, hook_name AS hookName, effect, provider_status AS providerStatus
      FROM hook_command_invocation
-     WHERE session != NONE AND effect IN ["blocked", "injected_context", "modified_input", "notified"] ${sinceAndClause(since)};`;
+     WHERE session IS NOT NULL AND effect IN ('blocked', 'injected_context', 'modified_input', 'notified') ${sinceAnd(since)}`;
 
 // Repo state: each session's checkout (single-hop derefs for repo identity).
 // NOTE: dirty is intentionally not read - the git ingest writes it always-false.
 const repoStateSql = (since: number | undefined): string =>
-    `SELECT record::id(id) AS session, record::id(checkout) AS checkout,
-            type::string(started_at) AS ts, checkout.branch AS branch,
-            checkout.head_sha AS headSha, record::id(checkout.repository) AS repository
-     FROM session WHERE checkout != NONE ${sinceAndClause(since).replace("ts >", "started_at >")};`;
+    `SELECT s.id AS session, s.checkout, CAST(s.started_at AS VARCHAR) AS ts, c.branch,
+            c.head_sha AS headSha, c.repository
+     FROM session s JOIN checkout c ON c.id = s.checkout
+     WHERE s.checkout IS NOT NULL ${sinceAnd(since, "s.started_at")}`;
 
 // spawned is RELATION FROM parent_session TO child_session - parent/root lineage.
-const SPAWNED_SQL = `SELECT record::id(in) AS parent, record::id(out) AS child FROM spawned;`;
+const SPAWNED_SQL = `SELECT in_id AS parent, out_id AS child FROM spawned`;
 
 export interface DeriveRunEvidenceStats {
     readonly written: number;
     readonly refsWritten: number;
 }
 
-export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
+export const deriveRunEvidence = (write: CacheWriteService, sinceDays?: number): Effect.Effect<
     DeriveRunEvidenceStats,
-    DbError,
-    SurrealClient
+    CacheWriteError
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-
-        const [providers] = yield* db.query<[Array<{ id: string; source?: string | null }>]>(SESSION_PROVIDER_SQL);
+        const query = <T>(sql: string) => write.raw(sql).pipe(Effect.map((result) => result.rows as unknown as T[]));
+        const providers = yield* query<{ id: string; source?: string | null }>(SESSION_PROVIDER_SQL);
         const sessionProvider = new Map<string, string>();
         for (const p of providers ?? []) {
             if (p.id) sessionProvider.set(p.id, p.source ?? "unknown");
         }
 
-        const [toolCalls] = yield* db.query<[Array<ToolCallRow>]>(toolCallSql(sinceDays));
-        const [commandOutcomes] = yield* db.query<[Array<CommandOutcomeRow>]>(commandOutcomeSql(sinceDays));
-        const [compactions] = yield* db.query<[Array<CompactionRow>]>(compactionSql(sinceDays));
-        const [planSnapshots] = yield* db.query<[Array<PlanSnapshotRow>]>(planSnapshotSql(sinceDays));
-        const [reads] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("read_file", "read", sinceDays));
-        const [searches] = yield* db.query<[Array<FileEvidenceRow>]>(fileEvidenceSql("searched_file", "search", sinceDays));
-        const [edited] = yield* db.query<[Array<EditedRow>]>(editedSql(sinceDays));
-        const [editCalls] = yield* db.query<[Array<{ turn?: string | null; toolCall?: string | null }>]>(editToolCallSql(sinceDays));
-        const [objectiveTurns] = yield* db.query<[Array<ObjectiveRow>]>(objectiveSql(sinceDays));
-        const [policyDecisions] = yield* db.query<[Array<PolicyDecisionRow>]>(policyDecisionSql(sinceDays));
-        const [repoStates] = yield* db.query<[Array<RepoStateRow>]>(repoStateSql(sinceDays));
-        const [spawnEdges] = yield* db.query<[Array<{ parent?: string | null; child?: string | null }>]>(SPAWNED_SQL);
+        const [toolCalls, commandOutcomes, compactions, planSnapshots, reads, searches, edited, editCalls,
+            objectiveTurns, policyDecisions, repoStates, spawnEdges] = yield* Effect.all([
+            query<ToolCallRow>(toolCallSql(sinceDays)), query<CommandOutcomeRow>(commandOutcomeSql(sinceDays)),
+            query<CompactionRow>(compactionSql(sinceDays)), query<PlanSnapshotRow>(planSnapshotSql(sinceDays)),
+            query<FileEvidenceRow>(fileEvidenceSql("read_file", "read", sinceDays)),
+            query<FileEvidenceRow>(fileEvidenceSql("searched_file", "search", sinceDays)),
+            query<EditedRow>(editedSql(sinceDays)), query<{ turn?: string | null; toolCall?: string | null }>(editToolCallSql(sinceDays)),
+            query<ObjectiveRow>(objectiveSql(sinceDays)), query<PolicyDecisionRow>(policyDecisionSql(sinceDays)),
+            query<RepoStateRow>(repoStateSql(sinceDays)), query<{ parent?: string | null; child?: string | null }>(SPAWNED_SQL),
+        ], { concurrency: 12 });
 
         // turn -> edit tool_call keys (the edited bridge anchors only when a turn
         // has exactly one edit tool_call).
@@ -642,8 +637,25 @@ export const deriveRunEvidence = (sinceDays?: number): Effect.Effect<
         const events = buildRunEvidenceEvents(rows);
         const refs = buildRunEvidenceRefs(rows);
 
-        const stmts = buildRunEvidenceStatements({ events, refs });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 250, label: "runEvidence" });
+        yield* write.putMany("run_evidence_event", events.map((event) => cacheRow({
+            id: runEvidenceEventRecordKey(event), session: event.sessionId,
+            root_session: event.rootSessionId ?? null, parent_session: event.parentSessionId ?? null,
+            ts: tsParam(event.ts) ?? new Date(), provider: event.provider, kind: event.kind, backing: event.backing,
+            turn: event.turnKey ?? null, tool_call: event.toolCallKey ?? null, agent_event: event.agentEventKey ?? null,
+            compaction: event.compactionKey ?? null, plan_snapshot: event.planSnapshotKey ?? null,
+            command_outcome: event.commandOutcomeKey ?? null, hook_invocation: event.hookInvocationKey ?? null,
+            artifact: event.artifactKey ?? null, file: event.fileKey ?? null, checkout: event.checkoutKey ?? null,
+            commit: event.commitKey ?? null, source_table: event.sourceTable, source_id: event.sourceId,
+            summary: event.summary ?? null, content_hash: event.contentHash ?? null,
+            input_hash: event.inputHash ?? null, output_hash: event.outputHash ?? null,
+            attrs: jsonParam(event.attrs),
+        })));
+        yield* write.putMany("run_evidence_ref", refs.map((ref) => cacheRow({
+            id: runEvidenceRefRecordKey(ref), event: ref.eventKey, session: ref.sessionId,
+            ts: tsParam(ref.ts) ?? new Date(), ref_kind: ref.refKind, target_table: ref.targetTable ?? null,
+            target_id: ref.targetId ?? null, path_hash: ref.pathHash ?? null, uri_hash: ref.uriHash ?? null,
+            content_hash: ref.contentHash ?? null, privacy_level: ref.privacyLevel ?? "ref_only", attrs: jsonParam(ref.attrs),
+        })));
         return { written: events.length, refsWritten: refs.length } satisfies DeriveRunEvidenceStats;
     });
 
@@ -657,16 +669,16 @@ export class RunEvidenceStats extends BaseStageStats.extend<RunEvidenceStats>("R
  * `run_evidence_event` ledger (#578). Incremental by the ingest since-window;
  * idempotent UPSERTs keyed by (session, source_table, source_id). Tags: derive.
  */
-export const runEvidenceStage: StageDef<RunEvidenceStats, SurrealClient> = {
+export const runEvidenceStage: StageDef<RunEvidenceStats, never, CacheWriteError> = {
     meta: StageMeta.make({
         key: "run-evidence",
         deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes", "git", "spawned"],
         tags: ["derive"],
     }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveRunEvidence(sinceDaysFromCtx(ctx));
+            const result = yield* deriveRunEvidence(write, sinceDaysFromCtx(ctx));
             return RunEvidenceStats.make({
                 durationMs: Date.now() - t0,
                 summary: `derived ${result.written} run-evidence events, ${result.refsWritten} refs`,

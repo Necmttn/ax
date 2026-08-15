@@ -10,6 +10,7 @@ import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { recordLiteral } from "@ax/lib/ids";
 import { posixPath } from "@ax/lib/shared/path";
 import { surrealString, refListSource, recordKeyPart } from "@ax/lib/shared/surreal";
@@ -543,8 +544,8 @@ export const scoreSkillSpar = (
     sinceForChurn: Date,
 ): Effect.Effect<
     { sessionA: string; sessionB: string; a: SparMetrics; b: SparMetrics; score: SparScore },
-    DbError | SparCaptureError,
-    SurrealClient | AxConfig
+    DbError | CacheReadError | SparCaptureError,
+    SurrealClient | CacheRead | AxConfig
 > =>
     Effect.gen(function* () {
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);

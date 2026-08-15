@@ -66,7 +66,6 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
-import { correlateOrphanOtel } from "../otel/correlate.ts";
 import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
@@ -307,9 +306,6 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         CacheReadLive,
     );
     return runCli(args).pipe(
-        // After ingest completes successfully, link orphan OTLP rows to their
-        // sessions via telemetry_of edges. Best-effort: never fails the ingest.
-        Effect.tap(() => Effect.ignore(correlateOrphanOtel())),
         Effect.provide(layer),
         Effect.scoped,
     );

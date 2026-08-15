@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { optionValue } from "../config-core/cli-util.ts";
-import { formatReconcileScoped } from "../config-core/reconcile.ts";
+import { formatReconcileScoped, withConfigWrite } from "../config-core/reconcile.ts";
 import { reconcileSkills } from "./reconcile.ts";
 import { SkillSourceRegistryLive } from "./sources/registry.ts";
 import {
@@ -68,7 +68,7 @@ const reconcileCommand = Command.make(
     "reconcile",
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
-        reconcileSkills({ dryRun }).pipe(
+        withConfigWrite((write) => reconcileSkills(write, { dryRun })).pipe(
             Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcileScoped(report))),
             Effect.provide(SkillSourceRegistryLive),
         ),

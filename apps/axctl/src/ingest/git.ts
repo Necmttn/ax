@@ -1,17 +1,15 @@
 import { homedir } from "node:os";
 import { Effect, FileSystem, Path, type PlatformError, Schema } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { runCommand } from "@ax/lib/process";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { watermarkRow } from "@ax/lib/duckdb/watermark";
+import { commitRowId, edgeRowId, stableId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     checkoutRecordKey,
-    commitRecordKey,
-    fileRecordKey,
 } from "./record-keys.ts";
-import { recordLiteral, stableDigest } from "@ax/lib/ids";
 import {
     chooseIdentity,
     classifyCheckoutKind,
@@ -19,9 +17,7 @@ import {
     type CheckoutKind,
     type RepositoryIdentityKind,
 } from "./repository-identity.ts";
-import { surrealString } from "@ax/lib/shared/surql";
 import { pathToProjectSlug } from "@ax/lib/shared/project-slug";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 
@@ -121,18 +117,15 @@ const findRepoRoot = Effect.fn("git.findRepoRoot")(function* (cwd: string) {
     return null;
 });
 
-const deriveReposFromSessions = (): Effect.Effect<
+const deriveReposFromSessions = (write: CacheWriteService): Effect.Effect<
     string[],
-    DbError | PlatformError.PlatformError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheWriteError | PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // GROUP ALL collapses everything; array::distinct dedupes.
-        const result = yield* db.query<[Array<{ cwds: string[] }>]>(
-            "SELECT array::distinct(cwd) AS cwds FROM session WHERE cwd IS NOT NONE GROUP ALL;",
-        );
-        const cwds = result?.[0]?.[0]?.cwds ?? [];
+        const result = yield* write.rows(Schema.Struct({ cwd: Schema.String }),
+            "SELECT DISTINCT cwd FROM session WHERE cwd IS NOT NULL");
+        const cwds = result.map((row) => row.cwd);
         const seen = new Set<string>();
         const out: string[] = [];
         for (const cwd of cwds) {
@@ -146,10 +139,10 @@ const deriveReposFromSessions = (): Effect.Effect<
         return out;
     });
 
-const discoverRepos = (): Effect.Effect<
+const discoverRepos = (write: CacheWriteService): Effect.Effect<
     RepoInfo[],
-    DbError | PlatformError.PlatformError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheWriteError | PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const fromFile = yield* readRepoListFile();
@@ -162,7 +155,7 @@ const discoverRepos = (): Effect.Effect<
             }
         }
         if (candidates.length === 0) {
-            const fromSessions = yield* deriveReposFromSessions();
+            const fromSessions = yield* deriveReposFromSessions(write);
             candidates.push(...fromSessions);
         }
         const seen = new Set<string>();
@@ -342,10 +335,7 @@ const fetchCommits = Effect.fn("git.fetchCommits")(
 
 // ---------- DB writers ----------
 
-const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string): string => {
-    if (id === null || id === undefined) return recordLiteral(fallbackTable, fallbackKey);
-    return typeof id === "string" ? id : String(id);
-};
+const sqlString = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
 interface CommitLookupInput {
     repositoryId: string;
@@ -380,28 +370,28 @@ interface FileUpsertInput {
 
 export function buildCommitLookupQueries(input: CommitLookupInput): string[] {
     return [
-        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND repo = ${surrealString(input.stableRepo)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repo = ${surrealString(input.stableRepo)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repo = ${surrealString(input.checkoutPath)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM "commit" WHERE repository = ${sqlString(input.repositoryId)} AND repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM "commit" WHERE repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM "commit" WHERE repository = ${sqlString(input.repositoryId)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM "commit" WHERE repo = ${sqlString(input.checkoutPath)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
     ];
 }
 
 export function buildFileLookupQueries(input: FileLookupInput): string[] {
     return [
-        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND repo = ${surrealString(input.stableRepo)} AND path = ${surrealString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${surrealString(input.stableRepo)} AND path = ${surrealString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND path = ${surrealString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${surrealString(input.checkoutPath)} AND path = ${surrealString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repository = ${sqlString(input.repositoryId)} AND repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repository = ${sqlString(input.repositoryId)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${sqlString(input.checkoutPath)} AND path = ${sqlString(input.path)} LIMIT 1;`,
     ];
 }
 
 export function buildCommitUpsertStatement(input: CommitUpsertInput): string {
-    return `UPSERT ${input.id} CONTENT { sha: ${surrealString(input.sha)}, repo: ${surrealString(input.stableRepo)}, message: ${surrealString(input.message)}, author: ${surrealString(input.author)}, ts: d"${input.ts}", repository: ${input.repositoryId} };`;
+    return `INSERT INTO "commit" (id, sha, repo, message, author, ts, repository) VALUES (${sqlString(input.id)}, ${sqlString(input.sha)}, ${sqlString(input.stableRepo)}, ${sqlString(input.message)}, ${sqlString(input.author)}, ${sqlString(input.ts)}, ${sqlString(input.repositoryId)});`;
 }
 
 export function buildFileUpsertStatement(input: FileUpsertInput): string {
-    return `UPSERT ${input.id} CONTENT { repo: ${surrealString(input.stableRepo)}, path: ${surrealString(input.path)}, repository: ${input.repositoryId}, identity_scope: "repository" };`;
+    return `INSERT INTO file (id, repo, path, repository, identity_scope) VALUES (${sqlString(input.id)}, ${sqlString(input.stableRepo)}, ${sqlString(input.path)}, ${sqlString(input.repositoryId)}, 'repository');`;
 }
 
 interface TouchedRelationFile {
@@ -463,19 +453,6 @@ export function buildProducedRelationStatements(input: {
     });
 }
 
-const findExistingRecord = (
-    db: SurrealClientShape,
-    queries: string[],
-): Effect.Effect<unknown | null, DbError> =>
-    Effect.gen(function* () {
-        for (const query of queries) {
-            const result = yield* db.query<[Array<{ id: unknown }>]>(query);
-            const id = result?.[0]?.[0]?.id;
-            if (id !== null && id !== undefined) return id;
-        }
-        return null;
-    });
-
 interface WriteStats {
     commits: number;
     files: number;
@@ -485,9 +462,9 @@ interface WriteStats {
 }
 
 export function buildSessionRepoWhere(repoPath: string): string {
-    const repoLit = surrealString(repoPath);
-    const prefixLit = surrealString(repoPath.endsWith("/") ? repoPath : `${repoPath}/`);
-    return `(cwd = ${repoLit} OR string::starts_with(cwd ?? "", ${prefixLit}))`;
+    const repoLit = sqlString(repoPath);
+    const prefixLit = sqlString(`${repoPath.endsWith("/") ? repoPath : `${repoPath}/`}%`);
+    return `(cwd = ${repoLit} OR cwd LIKE ${prefixLit})`;
 }
 
 export function nestedCheckoutPaths(
@@ -535,8 +512,8 @@ export function buildCanonicalProjectUpdate(
     repositoryId: string,
     canonicalSlug: string,
 ): string {
-    const slugLit = surrealString(canonicalSlug);
-    return `UPDATE session SET project = ${slugLit} WHERE repository = ${repositoryId} AND (project IS NONE OR project != ${slugLit}) RETURN NONE;`;
+    const slugLit = sqlString(canonicalSlug);
+    return `UPDATE session SET project = ${slugLit} WHERE repository = ${sqlString(repositoryId)} AND (project IS NULL OR project != ${slugLit});`;
 }
 
 /**
@@ -561,37 +538,32 @@ function canonicalRootFromGroup(group: readonly RepoInfo[]): string | null {
  * worktree-scoped run converges onto the main checkout's slug.
  */
 const canonicalizeGroupProject = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     group: readonly RepoInfo[],
-): Effect.Effect<void, DbError> =>
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         const first = group[0];
         if (!first) return;
-        const repositoryId = recordLiteral("repository", first.repositoryKey);
-        const rootResult = yield* db.query<[Array<{ root_path?: unknown }>]>(
-            `SELECT root_path FROM ${repositoryId};`,
-        );
-        const persisted = rootResult?.[0]?.[0]?.root_path;
+        const repositoryId = first.repositoryKey;
+        const rootResult = yield* write.raw("SELECT root_path FROM repository WHERE id = ?", [repositoryId]);
+        const persisted = (rootResult.rows[0] as Record<string, unknown> | undefined)?.root_path;
         const rootPath =
             typeof persisted === "string" && persisted.length > 0
                 ? persisted
                 : canonicalRootFromGroup(group);
         if (!rootPath) return;
-        yield* db.query(
-            buildCanonicalProjectUpdate(repositoryId, pathToProjectSlug(rootPath)),
-        );
+        yield* write.exec("UPDATE session SET project = ? WHERE repository = ? AND (project IS NULL OR project != ?)",
+            [pathToProjectSlug(rootPath), repositoryId, pathToProjectSlug(rootPath)]);
     });
 
 const linkedSessionCount = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     repoPath: string,
     excludedRepoPaths: readonly string[],
-): Effect.Effect<number, DbError> =>
+): Effect.Effect<number, CacheWriteError> =>
     Effect.gen(function* () {
-        const result = yield* db.query<[Array<{ count?: unknown }>]>(
-            `SELECT count() AS count FROM session WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)} GROUP ALL;`,
-        );
-        const count = Number(result?.[0]?.[0]?.count ?? 0);
+        const result = yield* write.raw(`SELECT count(*) AS count FROM session WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)}`);
+        const count = Number((result.rows[0] as Record<string, unknown> | undefined)?.count ?? 0);
         return Number.isFinite(count) ? count : 0;
     });
 
@@ -605,53 +577,32 @@ export function deriveRepositoryDisplayName(
 
 const writeRepo = Effect.fn("git.writeRepo")(
     function* (
+        write: CacheWriteService,
         repo: RepoInfo,
         commits: CommitWithFiles[],
         allRepoPaths: readonly string[],
     ) {
-        const db = yield* SurrealClient;
-        const repositoryId = recordLiteral("repository", repo.repositoryKey);
-        const checkoutId = recordLiteral("checkout", repo.checkoutKey);
+        const repositoryId = repo.repositoryKey;
+        const checkoutId = repo.checkoutKey;
         const stableRepo = repo.repositoryKey;
         const excludedSessionPaths = nestedCheckoutPaths(repo.path, allRepoPaths);
 
         const repositoryName = deriveRepositoryDisplayName(repo.remoteUrlNormalized, repo.path);
-        const shouldUpdateRepositoryRoot =
-            repo.worktreeKind === "normal" ? "true" : "root_path IS NONE";
-        yield* db.query(
-            [
-                `UPSERT ${repositoryId} MERGE {`,
-                `name: ${surrealString(repositoryName)},`,
-                `remote_url: ${repo.remoteUrl === null ? "NONE" : surrealString(repo.remoteUrl)},`,
-                `initial_commit: ${repo.initialCommit === null ? "NONE" : surrealString(repo.initialCommit)},`,
-                "updated_at: time::now()",
-                "};",
-                `UPDATE ${repositoryId} SET root_path = ${surrealString(repo.path)} WHERE ${shouldUpdateRepositoryRoot} RETURN NONE;`,
-                repo.worktreeKind === "normal" && repo.branch !== null
-                    ? `UPDATE ${repositoryId} SET default_branch = ${surrealString(repo.branch)} RETURN NONE;`
-                    : "",
-                `UPSERT ${checkoutId} MERGE {`,
-                `repository: ${repositoryId},`,
-                `path: ${surrealString(repo.path)},`,
-                `branch: ${repo.branch === null ? "NONE" : surrealString(repo.branch)},`,
-                `head_sha: ${repo.headSha === null ? "NONE" : surrealString(repo.headSha)},`,
-                `worktree_name: ${repo.worktreeKind === "worktree" ? surrealString(posixPath.basename(repo.path)) : "NONE"},`,
-                "dirty: false,",
-                "updated_at: time::now()",
-                "};",
-                `DELETE has_checkout WHERE in = ${repositoryId} AND out = ${checkoutId};`,
-                `RELATE ${repositoryId}->has_checkout->${checkoutId} SET ts = time::now();`,
-            ].join(""),
-        );
-        const linkedSessions = yield* linkedSessionCount(db, repo.path, excludedSessionPaths);
-        yield* db.query(
-            buildSessionCheckoutUpdateStatement(
-                repo.path,
-                repositoryId,
-                checkoutId,
-                excludedSessionPaths,
-            ),
-        );
+        const existingRepo = yield* write.raw("SELECT root_path, default_branch, created_at FROM repository WHERE id = ?", [repositoryId]);
+        const existing = existingRepo.rows[0] as Record<string, unknown> | undefined;
+        yield* write.put("repository", cacheRow({ id: repositoryId, name: repositoryName,
+            remote_url: repo.remoteUrl, root_path: repo.worktreeKind === "normal" ? repo.path : (existing?.root_path as string | null | undefined) ?? repo.path,
+            initial_commit: repo.initialCommit, default_branch: repo.worktreeKind === "normal" ? repo.branch : (existing?.default_branch as string | null | undefined) ?? null,
+            created_at: existing?.created_at instanceof Date ? existing.created_at : new Date(), updated_at: new Date() }));
+        yield* write.put("checkout", cacheRow({ id: checkoutId, repository: repositoryId, path: repo.path,
+            branch: repo.branch, head_sha: repo.headSha,
+            worktree_name: repo.worktreeKind === "worktree" ? posixPath.basename(repo.path) : null,
+            dirty: false, updated_at: new Date() }));
+        yield* write.put("has_checkout", cacheRow({ id: edgeRowId("has_checkout", repositoryId, checkoutId),
+            in_id: repositoryId, out_id: checkoutId, ts: new Date() }));
+        const linkedSessions = yield* linkedSessionCount(write, repo.path, excludedSessionPaths);
+        yield* write.exec(`UPDATE session SET repository = ?, checkout = ? WHERE ${buildSessionCheckoutWhere(repo.path, excludedSessionPaths)}`,
+            [repositoryId, checkoutId]);
 
         if (commits.length === 0)
             return {
@@ -666,61 +617,32 @@ const writeRepo = Effect.fn("git.writeRepo")(
         // under the legacy local key, reuse that record id to satisfy the
         // existing unique index while adding repository links.
         const commitIds = new Map<string, string>();
-        const commitStmts: string[] = [];
+        const commitRows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
         for (const c of commits) {
-            const fallbackKey = commitRecordKey(repo.repositoryKey, c.sha);
-            const existing = yield* findExistingRecord(
-                db,
-                buildCommitLookupQueries({
-                    repositoryId,
-                    stableRepo,
-                    checkoutPath: repo.path,
-                    sha: c.sha,
-                }),
-            );
-            const id = dbRecordLiteral("commit", existing, fallbackKey);
+            const id = commitRowId(repo.repositoryKey, c.sha);
             commitIds.set(c.sha, id);
-            commitStmts.push(buildCommitUpsertStatement({
-                id,
-                stableRepo,
-                repositoryId,
-                sha: c.sha,
-                message: c.message,
-                author: c.author,
-                ts: c.ts,
-            }));
+            commitRows.push(cacheRow({ id, sha: c.sha, repo: stableRepo, message: c.message,
+                author: c.author, ts: tsParam(c.ts) ?? new Date(), repository: repositoryId,
+                checkout: checkoutId, reverted: null }));
         }
-        yield* executeStatementsWith(db, commitStmts, { chunkSize: 500 });
+        yield* write.putMany("commit", commitRows);
 
         // 2. Bulk-upsert files (deduped by path).
         const seenFiles = new Set<string>();
         const fileIds = new Map<string, string>();
-        const fileStmts: string[] = [];
+        const fileRows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
         for (const c of commits) {
             for (const f of c.files) {
                 if (seenFiles.has(f.path)) continue;
                 seenFiles.add(f.path);
-                const fallbackKey = fileRecordKey(repo.repositoryKey, f.path);
-                const existing = yield* findExistingRecord(
-                    db,
-                    buildFileLookupQueries({
-                        repositoryId,
-                        stableRepo,
-                        checkoutPath: repo.path,
-                        path: f.path,
-                    }),
-                );
-                const id = dbRecordLiteral("file", existing, fallbackKey);
+                const id = stableId("file", [repo.repositoryKey, f.path]);
                 fileIds.set(f.path, id);
-                fileStmts.push(buildFileUpsertStatement({
-                    id,
-                    stableRepo,
-                    repositoryId,
-                    path: f.path,
-                }));
+                fileRows.push(cacheRow({ id, repo: stableRepo, path: f.path, lang: null,
+                    repository: repositoryId, checkout: null, workspace: null, kind: null,
+                    identity_scope: "repository" }));
             }
         }
-        yield* executeStatementsWith(db, fileStmts, { chunkSize: 500 });
+        yield* write.putMany("file", fileRows);
 
         // 3. Bulk-RELATE commit -> touched -> file. Touched is checkout-scoped
         //    edge evidence, so re-runs delete only this checkout's rows before
@@ -728,22 +650,16 @@ const writeRepo = Effect.fn("git.writeRepo")(
         let touchedCount = 0;
         for (const c of commits) {
             if (c.files.length === 0) continue;
-            const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
-            const stmts = buildTouchedRelationStatements({
-                commitId: cid,
-                files: c.files.map((f) => ({
-                    fileId:
-                        fileIds.get(f.path) ??
-                        recordLiteral("file", fileRecordKey(repo.repositoryKey, f.path)),
-                    additions: f.additions,
-                    deletions: f.deletions,
-                })),
-                repositoryId,
-                checkoutId,
-                ts: c.ts,
+            const cid = commitIds.get(c.sha) ?? commitRowId(repo.repositoryKey, c.sha);
+            const rows = c.files.map((f) => {
+                const fileId = fileIds.get(f.path) ?? stableId("file", [repo.repositoryKey, f.path]);
+                return cacheRow({ id: edgeRowId("touched", cid, fileId, checkoutId), in_id: cid,
+                    out_id: fileId, additions: f.additions, deletions: f.deletions, status: null,
+                    old_path: null, new_path: null, repository: repositoryId, checkout: checkoutId,
+                    ts: tsParam(c.ts) });
             });
             touchedCount += c.files.length;
-            yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+            yield* write.putMany("touched", rows);
         }
 
         // 4. session -> produced -> commit. For each commit, find sessions whose
@@ -752,27 +668,16 @@ const writeRepo = Effect.fn("git.writeRepo")(
         //    don't pull the session table to JS.
         let producedCount = 0;
         for (const c of commits) {
-            const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
-            const sel = yield* db.query<[Array<{ id: unknown }>]>(
-                `SELECT id FROM session WHERE checkout = ${checkoutId} AND started_at <= d"${c.ts}" AND (ended_at IS NONE OR ended_at >= d"${c.ts}");`,
-            );
-            const sessions = sel?.[0] ?? [];
+            const cid = commitIds.get(c.sha) ?? commitRowId(repo.repositoryKey, c.sha);
+            const sel = yield* write.rows(Schema.Struct({ id: Schema.String }),
+                "SELECT id FROM session WHERE checkout = ? AND started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)",
+                [checkoutId, new Date(c.ts), new Date(c.ts)]);
+            const sessions = sel;
             if (sessions.length > 0) {
-                const sessionIds = sessions.map((s) => {
-                    // SurrealDB SDK returns RecordId instances; toString()
-                    // gives the canonical `table:⟨id⟩` literal (escapes UUIDs
-                    // with angle brackets when needed). Strings are accepted
-                    // verbatim for completeness but in practice never occur.
-                    return typeof s.id === "string" ? s.id : String(s.id);
-                });
-                const stmts = buildProducedRelationStatements({
-                    sessionIds,
-                    commitId: cid,
-                    repositoryId,
-                    checkoutId,
-                    ts: c.ts,
-                });
-                yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+                yield* write.putMany("produced", sessions.map((s) => cacheRow({
+                    id: edgeRowId("produced", s.id, cid), in_id: s.id, out_id: cid,
+                    repository: repositoryId, checkout: checkoutId, ts: tsParam(c.ts), source: "git", kind: "commit",
+                })));
             }
             producedCount += sessions.length;
         }
@@ -808,42 +713,32 @@ interface GitWatermark {
     sinceDays: number;
 }
 
-const gitWatermarkId = (repoPath: string): string =>
-    recordLiteral("ingest_file_state", stableDigest(`git_repo|${repoPath}`));
-
 const loadGitWatermarks = (
-    db: SurrealClientShape,
-): Effect.Effect<Map<string, GitWatermark>, DbError> =>
+    write: CacheWriteService,
+): Effect.Effect<Map<string, GitWatermark>, CacheWriteError> =>
     Effect.gen(function* () {
-        const rows = (yield* db.query<[Array<{ path?: string; sha?: string; since_days?: number }>]>(
-            `SELECT path, sha, since_days FROM ingest_file_state WHERE source_kind = ${surrealString(GIT_WATERMARK_SOURCE)};`,
-        ))?.[0] ?? [];
+        const result = yield* write.raw("SELECT path, sha, since_days FROM ingest_file_state WHERE source_kind = ?", [GIT_WATERMARK_SOURCE]);
+        const rows = result.rows as Array<{ path?: string; sha?: string; since_days?: number | bigint }>;
         const out = new Map<string, GitWatermark>();
         for (const row of rows) {
             if (
                 typeof row.path === "string" &&
                 typeof row.sha === "string" &&
-                typeof row.since_days === "number"
+                (typeof row.since_days === "number" || typeof row.since_days === "bigint")
             ) {
-                out.set(row.path, { sha: row.sha, sinceDays: row.since_days });
+                out.set(row.path, { sha: row.sha, sinceDays: Number(row.since_days) });
             }
         }
         return out;
     });
 
 const upsertGitWatermark = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     repoPath: string,
     sha: string,
     sinceDays: number,
-): Effect.Effect<void, DbError> =>
-    executeStatementsWith(
-        db,
-        [
-            `UPSERT ${gitWatermarkId(repoPath)} CONTENT { path: ${surrealString(repoPath)}, source_kind: ${surrealString(GIT_WATERMARK_SOURCE)}, sha: ${surrealString(sha)}, since_days: ${Math.trunc(sinceDays)}, ingested_at: time::now() };`,
-        ],
-        { chunkSize: 1 },
-    );
+): Effect.Effect<void, CacheWriteError> =>
+    write.put("ingest_file_state", watermarkRow(GIT_WATERMARK_SOURCE, repoPath, { sha, sinceDays }));
 
 // ---------- public API ----------
 
@@ -870,14 +765,14 @@ export interface GitStats {
 }
 
 export const ingestGit = Effect.fn("git.ingest")(
-    function* (opts: Partial<GitIngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<GitIngestOpts> = {}) {
         const requested = opts.sinceDays ?? DEFAULT_SINCE_DAYS;
         const sinceDays = Math.min(Math.max(requested, 1), MAX_SINCE_DAYS);
 
         // When repoPaths is provided, bypass discovery entirely.
         const repos: RepoInfo[] = opts.repoPaths && opts.repoPaths.length > 0
             ? yield* Effect.forEach(opts.repoPaths, (p) => buildRepoInfo(p), { concurrency: 4 })
-            : yield* discoverRepos();
+            : yield* discoverRepos(write);
 
         if (repos.length === 0) {
             yield* Effect.logDebug("git ingest found no repositories");
@@ -891,10 +786,9 @@ export const ingestGit = Effect.fn("git.ingest")(
         // watermark is unchanged ⇒ its commits/files already persist ⇒ skip the
         // (expensive) history walk. `AX_REDERIVE_GIT=1` forces a full walk.
         const forceRederive = process.env.AX_REDERIVE_GIT === "1";
-        const db0 = yield* SurrealClient;
         const watermarks = forceRederive
             ? new Map<string, GitWatermark>()
-            : yield* loadGitWatermarks(db0);
+            : yield* loadGitWatermarks(write);
 
         // Collect per-repo work. Different logical repositories can run in
         // parallel, but checkouts/worktrees of the same repo are serialized.
@@ -929,12 +823,12 @@ export const ingestGit = Effect.fn("git.ingest")(
                             const commits = unchanged
                                 ? []
                                 : yield* fetchCommits(repo, sinceDays);
-                            const stats = yield* writeRepo(repo, commits, allRepoPaths);
+                            const stats = yield* writeRepo(write, repo, commits, allRepoPaths);
                             // Record the watermark only after a real walk
                             // succeeded; a skipped repo's marker is already
                             // current. Requires a concrete HEAD sha.
                             if (!unchanged && repo.headSha) {
-                                yield* upsertGitWatermark(db0, repo.path, repo.headSha, sinceDays);
+                                yield* upsertGitWatermark(write, repo.path, repo.headSha, sinceDays);
                             }
                             yield* Effect.logDebug("git repository ingested", {
                                 path: repo.path,
@@ -961,7 +855,7 @@ export const ingestGit = Effect.fn("git.ingest")(
                     // its sessions are linked to the repository edge, fold all
                     // their project keys (claude slug, codex/pi/opencode raw
                     // cwd, per-worktree slugs) onto one canonical slug.
-                    yield* canonicalizeGroupProject(db0, group);
+                    yield* canonicalizeGroupProject(write, group);
                     return groupStats;
                 }),
             { concurrency: 4 },
@@ -983,17 +877,6 @@ export const ingestGit = Effect.fn("git.ingest")(
         return out;
     },
 );
-
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        ingestGit({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<GitStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -1017,14 +900,15 @@ export class GitStageStats extends BaseStageStats.extend<GitStageStats>("GitStag
 
 export const gitStage: StageDef<
     GitStageStats,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    FileSystem.FileSystem | Path.Path,
+    CacheWriteError
 > = {
     meta: StageMeta.make({ key: "git", deps: [], tags: ["ingest"] }),
     // Unnamed Effect.fn: stack-frame boundary only. The stage runner already
     // wraps each run in a LiveTrace.step span named by the stage key, so a
     // named span here would double-wrap.
     run: Effect.fn(
-        function* (ctx: IngestContext) {
+        function* (ctx: IngestContext, write: CacheWriteService) {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
             // Repo discovery tolerates a vanished override file / missing `.git`
@@ -1032,7 +916,7 @@ export const gitStage: StageDef<
             // escapes here is a genuine FS fault (unreadable repo-list file or a
             // non-NotFound stat error), so it dies as a defect rather than
             // masquerading as a recoverable DbError.
-            const result = yield* ingestGit({
+            const result = yield* ingestGit(write, {
                 ...(sinceDays === undefined ? {} : { sinceDays }),
                 ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
             }).pipe(Effect.catchTag("PlatformError", (e) => Effect.die(e)));

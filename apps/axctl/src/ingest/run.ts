@@ -1,23 +1,25 @@
 import { Cause, Effect, Exit, Option, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
+import { posixPath } from "@ax/lib/shared/path";
+import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import type { FileSystem } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { ProcessService } from "@ax/lib/process";
 import {
-    buildIngestEventStatement,
-    buildIngestRunFinishStatement,
-    buildIngestRunStartStatement,
-    buildIngestStageFinishStatement,
-    buildIngestStageStartStatement,
     makeIngestEvent,
     publishIngestEvent,
 } from "../dashboard/telemetry.ts";
 import { runPipeline } from "./stage/runner.ts";
 import { selectByKeys, selectByTag } from "./stage/select.ts";
-import { StageRegistry, type StageRegistryShape } from "./stage/registry.ts";
+import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
 import { BaseStageStats, IngestContext, type StageDef } from "./stage/types.ts";
+import { reapStaleIngestRuns } from "./reap-runs.ts";
+import { correlateOrphanOtel } from "../otel/correlate.ts";
+import { retainRecentOtel } from "../otel/retention.ts";
 
 export interface StageEventName {
     readonly source: string;
@@ -99,38 +101,30 @@ const errorText = (error: unknown): string =>
  * cli/index.ts. A hard kill (SIGKILL/power loss) runs no finalizer at all;
  * `ax doctor`'s stale-run check catches those rows.
  */
-export const withIngestRunFinish = (db: SurrealClientShape, runId: string) =>
-    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | DbError, R> =>
-        Effect.onExit(effect, (exit): Effect.Effect<void, DbError> => {
+export const withIngestRunFinish = (write: CacheWriteService, runId: string) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | CacheWriteError, R> =>
+        Effect.onExit(effect, (exit): Effect.Effect<void, CacheWriteError> => {
+            const finish = (status: "ok" | "error" | "partial", metrics: unknown = {}) =>
+                write.exec(
+                    "UPDATE ingest_run SET status = ?, ended_at = CURRENT_TIMESTAMP, metrics = ? WHERE id = ?",
+                    [status, jsonParam(metrics), runId],
+                ).pipe(Effect.asVoid);
             if (Exit.isSuccess(exit)) {
-                return db.query(buildIngestRunFinishStatement({ runId, status: "ok" }))
-                    .pipe(Effect.asVoid);
+                return finish("ok");
             }
             // Read the cause before the `hasInterrupts` guard: its negative
             // branch would otherwise narrow `exit` to `never`.
             const cause = exit.cause;
             if (Exit.hasInterrupts(exit)) {
-                return db.query(buildIngestRunFinishStatement({
-                    runId,
-                    status: "partial",
-                    metrics: { error: "interrupted" },
-                })).pipe(Effect.ignore);
+                return finish("partial", { error: "interrupted" }).pipe(Effect.ignore);
             }
             const failure = Cause.findErrorOption(cause);
             if (Option.isSome(failure)) {
-                return db.query(buildIngestRunFinishStatement({
-                    runId,
-                    status: "error",
-                    metrics: { error: errorText(failure.value) },
-                })).pipe(Effect.asVoid);
+                return finish("error", { error: errorText(failure.value) });
             }
             // Defect: still settle the row (never leave "running"), best
             // effort; the defect itself propagates past this finalizer.
-            return db.query(buildIngestRunFinishStatement({
-                runId,
-                status: "error",
-                metrics: { error: errorText(Cause.squash(cause)) },
-            })).pipe(Effect.ignore);
+            return finish("error", { error: errorText(Cause.squash(cause)) }).pipe(Effect.ignore);
         });
 
 const numericCounts = (value: unknown): Record<string, number> => {
@@ -145,7 +139,7 @@ const numericCounts = (value: unknown): Record<string, number> => {
 const resolveStages = (
     registry: StageRegistryShape,
     args: readonly string[],
-): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
+): ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> => {
     const hasStagesArg = args.some((a) => a.startsWith("--stages="));
     const hasDeriveOnly = args.includes("--derive-only");
     if (hasStagesArg && hasDeriveOnly) {
@@ -167,7 +161,7 @@ const resolveStages = (
 };
 
 const writeIngestEvent = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     input: {
         readonly runId: string;
         readonly source: string;
@@ -176,41 +170,56 @@ const writeIngestEvent = (
         readonly message: string;
         readonly counts?: Record<string, number>;
     },
-): Effect.Effect<void, DbError> =>
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
-        yield* db.query(buildIngestEventStatement(event));
+        yield* write.put("ingest_event", cacheRow({
+            id: event.id,
+            run: event.runId,
+            source: event.source,
+            stage: event.stage,
+            level: event.level,
+            message: event.message,
+            counts: jsonParam(event.counts),
+            raw: jsonParam(event),
+            ts: new Date(event.ts),
+        }));
         publishIngestEvent(event);
     }).pipe(Effect.asVoid);
 
 const wrapStage = (
-    db: SurrealClientShape,
     runId: string,
-    stageDef: StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>,
-): StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService> => {
+    stageDef: StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>,
+): StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError> => {
     const eventName = stageEventName(stageDef.meta.key);
+    const stageId = `${runId}__${eventName.source}__${eventName.stage}`.replace(/[^A-Za-z0-9_:-]+/g, "_");
     return {
         ...stageDef,
-        run: (ctx: IngestContext) =>
+        run: (ctx: IngestContext, write: CacheWriteService) =>
             Effect.gen(function* () {
-                yield* db.query(buildIngestStageStartStatement({
-                    runId,
+                yield* write.put("ingest_stage", cacheRow({
+                    id: stageId,
+                    run: runId,
                     source: eventName.source,
                     stage: eventName.stage,
+                    status: "running",
+                    started_at: new Date(),
+                    ended_at: null,
+                    counts: null,
+                    error_text: null,
                 }));
+                yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
 
-                return yield* stageDef.run(ctx).pipe(
+                return yield* stageDef.run(ctx, write).pipe(
                     Effect.tap((value) => {
                         const counts = numericCounts(value);
                         return Effect.gen(function* () {
-                            yield* db.query(buildIngestStageFinishStatement({
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                status: "ok",
-                                counts,
-                            }));
-                            yield* writeIngestEvent(db, {
+                            yield* write.exec(
+                                "UPDATE ingest_stage SET status = 'ok', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = NULL WHERE id = ?",
+                                [jsonParam(counts), stageId],
+                            );
+                            yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                            yield* writeIngestEvent(write, {
                                 runId,
                                 source: eventName.source,
                                 stage: eventName.stage,
@@ -223,15 +232,12 @@ const wrapStage = (
                     Effect.catch((error) =>
                         Effect.gen(function* () {
                             const message = errorText(error);
-                            yield* db.query(buildIngestStageFinishStatement({
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                status: "error",
-                                counts: {},
-                                errorText: message,
-                            }));
-                            yield* writeIngestEvent(db, {
+                            yield* write.exec(
+                                "UPDATE ingest_stage SET status = 'error', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ? WHERE id = ?",
+                                [jsonParam({}), message, stageId],
+                            );
+                            yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                            yield* writeIngestEvent(write, {
                                 runId,
                                 source: eventName.source,
                                 stage: eventName.stage,
@@ -292,10 +298,22 @@ const defaultRunId = (command: string): string =>
 
 export const runIngest = (
     opts: RunIngestOptions,
-): Effect.Effect<RunIngestResult, DbError, SurrealClient | AxConfig | ProcessService | StageRegistry | TraceSink> =>
+): Effect.Effect<
+    RunIngestResult,
+    IngestStageError | CacheWriteError,
+    AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cfg = yield* AxConfig;
         const registry = yield* StageRegistry;
+        return yield* withCacheWrite(
+            {
+                livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
+                lockPath: posixPath.join(cfg.paths.dataDir, "ingest.lock"),
+                schemaSql: DUCKDB_SCHEMA_SQL,
+            },
+            (write) => Effect.gen(function* () {
+        yield* reapStaleIngestRuns(write).pipe(Effect.ignore);
         // Deadline ownership lives with the CALLER (see RunIngestOptions.deadlineMs)
         // - forward it as-is, or apply none.
         const deadlineMs = opts.deadlineMs;
@@ -309,14 +327,21 @@ export const runIngest = (
         const runId = opts.runId?.() ?? defaultRunId(opts.command);
         const now = opts.now?.() ?? new Date();
 
-        yield* db.query(buildIngestRunStartStatement({
-            runId,
+        yield* write.put("ingest_run", cacheRow({
+            id: runId,
             command: opts.command,
-            ...(sinceDays === undefined ? {} : { sinceDays }),
+            status: "running",
+            since_days: sinceDays ?? null,
+            started_at: new Date(),
+            last_progress_at: new Date(),
+            ended_at: null,
+            metrics: null,
         }));
 
         if (opts.args.includes("--reset")) {
-            yield* db.query("DELETE invoked; DELETE loaded; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;");
+            for (const table of ["invoked", "loaded", "proposed", "concerns", "recovered_by", "skill_paired", "skill"]) {
+                yield* write.exec(`DELETE FROM "${table}"`);
+            }
         }
 
         const ctx = IngestContext.make({
@@ -329,16 +354,13 @@ export const runIngest = (
         });
 
         const wrappedStages = selectedStages.map((stageDef) =>
-            wrapStage(
-                db,
-                runId,
-                stageDef as StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>,
-            )
+            wrapStage(runId, stageDef as StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>)
         );
 
         const stageStats = yield* runPipeline(
             wrappedStages,
             ctx,
+            write,
             deadlineMs === undefined ? {} : { deadlineMs },
         ).pipe(
             LiveTrace.withTrace({
@@ -346,7 +368,7 @@ export const runIngest = (
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
                 scope: { type: "user", id: process.env.USER ?? "local" },
             }),
-            withIngestRunFinish(db, runId),
+            withIngestRunFinish(write, runId),
             Effect.provideService(References.MinimumLogLevel, opts.verbose ? "Debug" : "Info"),
         );
 
@@ -358,10 +380,15 @@ export const runIngest = (
             }
         }
 
+        yield* correlateOrphanOtel(write).pipe(Effect.ignore);
+        yield* retainRecentOtel(write).pipe(Effect.ignore);
+        yield* buildFtsIndexes(write);
         return {
             runId,
             selectedStages: selectedStages.map((s) => s.meta.key),
             status: "ok" as const,
             totals,
         };
+            }),
+        );
     });

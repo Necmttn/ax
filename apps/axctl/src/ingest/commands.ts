@@ -2,12 +2,10 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
 import { orAbsent } from "@ax/lib/shared/fs-error";
@@ -269,13 +267,12 @@ const collectCommands = (): Effect.Effect<
         return [...byName.values()];
     });
 
-export const ingestCommands = (): Effect.Effect<
+export const ingestCommands = (write: CacheWriteService): Effect.Effect<
     { count: number },
-    DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheWriteError,
+    FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const items = yield* collectCommands();
 
         yield* Effect.forEach(
@@ -287,7 +284,7 @@ export const ingestCommands = (): Effect.Effect<
                     .slice(0, 16);
                 // Schema is `option<string>` for description and bytes, so
                 // coalesce to `undefined` (NONE) instead of leaving JS null.
-                return upsertSkillByName(db, {
+                return upsertSkillByName(write, {
                     // Commands are catalog entries too - brand at the on-disk
                     // source like ingestSkills does.
                     name: SkillName.make(item.parsed.name),
@@ -305,14 +302,6 @@ export const ingestCommands = (): Effect.Effect<
         yield* Effect.logDebug("commands upserted", { count });
         return { count };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        ingestCommands().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<
-            { count: number }
-        >,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -334,13 +323,14 @@ export class CommandsStats extends BaseStageStats.extend<CommandsStats>("Command
 
 export const commandsStage: StageDef<
     CommandsStats,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    FileSystem.FileSystem | Path.Path,
+    CacheWriteError
 > = {
     meta: StageMeta.make({ key: "commands", deps: [], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const { count } = yield* ingestCommands();
+            const { count } = yield* ingestCommands(write);
             return CommandsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `upserted ${count} command rows`,

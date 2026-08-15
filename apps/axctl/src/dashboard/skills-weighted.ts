@@ -9,6 +9,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
 import { enrichRowsWithTelemetryLatency } from "../queries/telemetry-rollup.ts";
@@ -202,9 +203,10 @@ const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synt
 
 export const fetchSkillsWeighted = (
     params: SkillsWeightedParams = {},
-): Effect.Effect<SkillsWeightedResult, DbError, SurrealClient> =>
+): Effect.Effect<SkillsWeightedResult, DbError | CacheReadError, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const limit = params.limit ?? SKILLS_WEIGHTED_DEFAULT_LIMIT;
         const doctorThreshold =
             params.doctorThreshold ?? SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD;
@@ -379,6 +381,7 @@ export const fetchSkillsWeighted = (
         )];
 
         const latencyRows = yield* enrichRowsWithTelemetryLatency(
+            read,
             allRecoverySessions,
             (sid) => sid,
             (session, latency) => ({ session, duration_ms: latency?.duration_ms ?? null }),

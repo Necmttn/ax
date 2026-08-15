@@ -13,6 +13,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import {
     sessionCompareTurnsQuery,
@@ -161,8 +162,9 @@ const buildTurns = (params: { recordRef: string }) =>
 export const fetchSessionCompare = (
     sessionIds: ReadonlyArray<string>,
     options: SessionCompareOptions = {},
-): Effect.Effect<SessionComparePayload, DbError, SurrealClient> =>
+): Effect.Effect<SessionComparePayload, DbError | CacheReadError, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
+        const read = yield* CacheRead;
         const notFound: string[] = [];
         const entries: SessionCompareEntry[] = [];
 
@@ -209,6 +211,7 @@ export const fetchSessionCompare = (
         // `estimated:` prefix) so "cheapest" compares real numbers - and stays
         // undecided when a session genuinely cannot be priced.
         const catalog = yield* loadPricingCatalogForModels(
+            read,
             entries.map((e) => e.token_usage?.model ?? e.model),
         );
         const priced = entries.map((entry) => {

@@ -2,6 +2,7 @@ import { Deferred, Effect, Fiber, Option, Semaphore } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
 import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
@@ -143,6 +144,7 @@ export const topoLayers = <S extends BaseStageStats, R, E>(
 export const runPipeline = <S extends BaseStageStats, R, E>(
     stages: ReadonlyArray<StageDef<S, R, E>>,
     ctx: IngestContext,
+    write: CacheWriteService,
     opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
 ): Effect.Effect<ReadonlyArray<S>, E, R> =>
     Effect.gen(function* () {
@@ -167,7 +169,7 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                     const d = deferreds.get(dep);
                     if (d) yield* Deferred.await(d);
                 }
-                const body = s.run(ctx).pipe(
+                const body = s.run(ctx, write).pipe(
                     // Annotate the stage span with its result counts (inside the
                     // span, before LiveTrace.step ends it) so progress reporters
                     // can show rows/speed. Emitted as `attribute:ingest.*`

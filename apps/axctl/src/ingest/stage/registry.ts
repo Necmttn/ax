@@ -1,6 +1,8 @@
 import { Context, Layer } from "effect";
 import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
+import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError } from "@ax/lib/duckdb/seam";
 import { skillsStage } from "../skills.ts";
 import { commandsStage } from "../commands.ts";
 import { agentDefStage } from "../agent-def.ts";
@@ -46,10 +48,12 @@ export type { StageDef } from "./types.ts";
  *  enforced at test time in registry.test.ts. */
 export type IngestStageKey = (typeof ALL_STAGES)[number]["meta"]["key"];
 
+export type IngestStageError = DbError | CacheWriteError;
+
 export interface StageRegistryShape {
-    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
-    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown> | undefined;
-    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
+    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
+    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown, IngestStageError> | undefined;
+    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
 }
 
 export class StageRegistry extends Context.Service<StageRegistry, StageRegistryShape>()(
@@ -58,7 +62,7 @@ export class StageRegistry extends Context.Service<StageRegistry, StageRegistryS
 
 /** Provide a registry by passing the typed list of co-located stage definitions. */
 export const StageRegistryLive = (
-    stages: ReadonlyArray<StageDef<BaseStageStats, unknown>>,
+    stages: ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>,
 ): Layer.Layer<StageRegistry> =>
     Layer.succeed(StageRegistry, {
         all: () => stages,

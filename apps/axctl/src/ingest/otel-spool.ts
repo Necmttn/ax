@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { defaultOtlpSpoolDir } from "../otel/spool-server.ts";
 import { SIGNALS } from "../otel/signals.ts";
@@ -81,11 +81,12 @@ export interface OtelSpoolIngestResult {
 
 /** Tail changed daily spool files and write decoded payloads with OtelWriter. */
 export const ingestOtelSpool = (
+    write: CacheWriteService,
     opts: IngestOtelSpoolOptions = {},
 ): Effect.Effect<
     OtelSpoolIngestResult,
-    DbError | PlatformError.PlatformError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    DbError | CacheWriteError | PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -96,10 +97,10 @@ export const ingestOtelSpool = (
         let malformed = 0;
 
         const result = yield* runJsonlProviderFiles<
-            DbError | PlatformError.PlatformError,
+            CacheWriteError | PlatformError.PlatformError,
             OtelWriter,
             JsonlFileCandidate
-        >({
+        >(write, {
             candidates,
             sourceKind: "otel_spool",
             forceEnv: "AX_REDERIVE_OTEL_SPOOL",
@@ -146,7 +147,7 @@ export const ingestOtelSpool = (
                     }
                     return true;
                 }),
-        }).pipe(Effect.provide(OtelWriterLive));
+        }).pipe(Effect.provide(OtelWriterLive(write)));
 
         return {
             files: result.files,
@@ -173,12 +174,13 @@ export class OtelSpoolStageStats extends BaseStageStats.extend<OtelSpoolStageSta
 
 export const otelSpoolStage: StageDef<
     OtelSpoolStageStats,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    FileSystem.FileSystem | Path.Path,
+    DbError | CacheWriteError
 > = {
     meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"] }),
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
-        const result = yield* ingestOtelSpool({
+        const result = yield* ingestOtelSpool(write, {
             ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
         }).pipe(Effect.catchTag("PlatformError", (error) => Effect.die(error)));
         return OtelSpoolStageStats.make({

@@ -10,6 +10,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { reprice, MODEL_ALIASES, type RepriceUsage } from "./reprice.ts";
 import type { ModelPricing } from "../ingest/model-pricing.ts";
 import { fetchDispatches } from "./dispatch-analytics.ts";
@@ -142,7 +143,8 @@ export const runRoutingBacktest = Effect.fn("queries.runRoutingBacktest")(
         const sinceDays = Math.max(1, Math.trunc(payload.days ?? 14));
 
         // Fetch dispatch rows (includes per-dispatch token usage).
-        const result = yield* fetchDispatches({ sinceDays, limit: 2000 });
+        const read = yield* CacheRead;
+        const result = yield* fetchDispatches(read, { sinceDays, limit: 2000 });
 
         // Build pricingCatalog from agent_model - same pattern as
         // fetchDispatchCandidates in dispatch-analytics.ts.

@@ -23,17 +23,11 @@
  */
 
 import { Effect, FileSystem, Path, Schema } from "effect";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import {
-    recordRef,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { edgeRowId } from "@ax/lib/stable-id";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
@@ -70,6 +64,23 @@ export interface GuidanceProposalRow {
     readonly sig: string;
     readonly evidenceSummary: ReadonlyArray<string>;
 }
+
+interface ProposalWrite {
+    readonly table: string;
+    readonly row: Record<string, import("@ax/lib/duckdb/types").DuckDbParam>;
+}
+
+const proposalWrite = (
+    row: { readonly proposalKey: string; readonly title: string; readonly hypothesis: string;
+        readonly sig: string; readonly frequency: number; readonly confidence: string },
+    form: string,
+    baseline: unknown,
+): ProposalWrite => ({ table: "proposal", row: cacheRow({
+    id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis, dedupe_sig: row.sig,
+    frequency: row.frequency, confidence: row.confidence, status: "open", origin: "mined",
+    hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: jsonParam(baseline),
+    created_at: new Date(), updated_at: new Date(),
+}) });
 
 export const deriveGuidanceProposalRows = (
     candidates: ReadonlyArray<HarnessLearningCandidate>,
@@ -245,54 +256,16 @@ export const deriveWorkflowProposalRows = (
 
 export const buildGuidanceProposalStatements = (
     rows: readonly GuidanceProposalRow[],
-    existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
+    _existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => {
+    const writes: ProposalWrite[] = [];
     for (const row of rows) {
-        const proposalRef = recordRef("proposal", row.proposalKey);
-        const payloadRef = recordRef("guidance_proposal", row.proposalKey);
-        const baseline = JSON.stringify({
-            frequency: row.frequency,
-            evidence: row.evidenceSummary,
-        });
-        const isNew = !existingSigs.has(row.sig);
-
-        if (isNew) {
-            stmts.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("guidance")],
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["dedupe_sig", surrealString(row.sig)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        } else {
-            stmts.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
-            );
-        }
-
-        stmts.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString(row.fileTarget)],
-                ["section", surrealOptionString(row.section)],
-                ["suggested_text", surrealString(row.suggestedText)],
-            ])};`,
-        );
+        writes.push(proposalWrite(row, "guidance", { frequency: row.frequency, evidence: row.evidenceSummary }));
+        writes.push({ table: "guidance_proposal", row: cacheRow({ id: row.proposalKey,
+            proposal: row.proposalKey, file_target: row.fileTarget, section: row.section,
+            suggested_text: row.suggestedText }) });
     }
-    return stmts;
+    return writes;
 };
 
 // ---------------------------------------------------------------------------
@@ -363,40 +336,8 @@ export const deriveRoutingProposalRow = (input: {
  */
 export const buildRoutingProposalStatements = (
     row: RoutingProposalRow,
-    existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
-    const proposalRef = recordRef("proposal", row.proposalKey);
-    const baseline = JSON.stringify({ frequency: row.frequency });
-    const isNew = !existingSigs.has(row.sig);
-
-    if (isNew) {
-        stmts.push(
-            `CREATE ${proposalRef} CONTENT ${surrealObject([
-                ["form", surrealString("hook")],
-                ["title", surrealString(row.title)],
-                ["hypothesis", surrealString(row.hypothesis)],
-                ["dedupe_sig", surrealString(row.sig)],
-                ["frequency", String(row.frequency)],
-                ["confidence", surrealString(row.confidence)],
-                ["status", surrealString("open")],
-                ["baseline", surrealOptionString(baseline)],
-                ["updated_at", "time::now()"],
-            ])};`,
-        );
-    } else {
-        stmts.push(
-            `UPDATE ${proposalRef} SET ${[
-                ["hypothesis", surrealString(row.hypothesis)],
-                ["frequency", String(row.frequency)],
-                ["confidence", surrealString(row.confidence)],
-                ["updated_at", "time::now()"],
-            ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
-        );
-    }
-
-    return stmts;
-};
+    _existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => [proposalWrite(row, "hook", { frequency: row.frequency })];
 
 // ---------------------------------------------------------------------------
 // Image context proposal (form='subagent') - isolate heavy visual context signal
@@ -465,40 +406,8 @@ export const deriveImageContextProposalRow = (
  */
 export const buildImageContextProposalStatements = (
     row: ImageContextProposalRow,
-    existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
-    const proposalRef = recordRef("proposal", row.proposalKey);
-    const baseline = JSON.stringify({ frequency: row.frequency });
-    const isNew = !existingSigs.has(row.sig);
-
-    if (isNew) {
-        stmts.push(
-            `CREATE ${proposalRef} CONTENT ${surrealObject([
-                ["form", surrealString("subagent")],
-                ["title", surrealString(row.title)],
-                ["hypothesis", surrealString(row.hypothesis)],
-                ["dedupe_sig", surrealString(row.sig)],
-                ["frequency", String(row.frequency)],
-                ["confidence", surrealString(row.confidence)],
-                ["status", surrealString("open")],
-                ["baseline", surrealOptionString(baseline)],
-                ["updated_at", "time::now()"],
-            ])};`,
-        );
-    } else {
-        stmts.push(
-            `UPDATE ${proposalRef} SET ${[
-                ["hypothesis", surrealString(row.hypothesis)],
-                ["frequency", String(row.frequency)],
-                ["confidence", surrealString(row.confidence)],
-                ["updated_at", "time::now()"],
-            ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
-        );
-    }
-
-    return stmts;
-};
+    _existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => [proposalWrite(row, "subagent", { frequency: row.frequency })];
 
 export interface DeriveProposalsOpts {
     readonly minFrequency: number;
@@ -514,10 +423,6 @@ interface SkillCandidateRow {
     readonly confidence: string;
     readonly expected_impact?: string | null;
     readonly metrics?: Record<string, unknown> | string | null;
-}
-
-interface SkillRow {
-    readonly name: string;
 }
 
 export const normalizeTitle = (raw: string): string =>
@@ -620,70 +525,41 @@ export const deriveSkillProposalRows = (
  */
 export const buildSkillProposalStatements = (
     rows: readonly SkillProposalRow[],
-    existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
+    _existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => {
+    const writes: ProposalWrite[] = [];
     for (const row of rows) {
-        const proposalRef = recordRef("proposal", row.proposalKey);
-        const payloadRef = recordRef("skill_proposal", row.proposalKey);
-        const candidateRef = recordRef("skill_candidate", row.candidateKey);
-        const edgeKey = `${row.proposalKey}__${row.candidateKey}`;
-        const baseline = JSON.stringify({ frequency: row.frequency, metrics: row.metrics });
-        const isNew = !existingSigs.has(row.sig);
-
-        if (isNew) {
-            stmts.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("skill")],
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["dedupe_sig", surrealString(row.sig)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        } else {
-            // Refresh mutable fields. Intentionally omits status + baseline.
-            stmts.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        }
-
-        stmts.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_pattern", surrealString(row.triggerPattern)],
-                ["suspected_gap", surrealString(row.suspectedGap)],
-                ["proposed_behavior", surrealString(row.proposedBehavior)],
-                ["expected_impact", surrealOptionString(row.expectedImpact)],
-            ])};`,
-            `DELETE ${recordRef("cites_evidence", edgeKey)};`,
-            `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${candidateRef} SET count = ${String(Number(row.metrics.fix_chain_count ?? row.frequency))}, ts = time::now();`,
-        );
+        writes.push(proposalWrite(row, "skill", { frequency: row.frequency, metrics: row.metrics }));
+        writes.push({ table: "skill_proposal", row: cacheRow({ id: row.proposalKey,
+            proposal: row.proposalKey, trigger_pattern: row.triggerPattern, suspected_gap: row.suspectedGap,
+            proposed_behavior: row.proposedBehavior, expected_impact: row.expectedImpact }) });
+        writes.push({ table: "cites_evidence", row: cacheRow({
+            id: edgeRowId("cites_evidence", row.proposalKey, row.candidateKey, "skill_candidate"),
+            in_id: row.proposalKey, out_id: row.candidateKey, in_table: "proposal",
+            out_table: "skill_candidate", count: Number(row.metrics.fix_chain_count ?? row.frequency),
+            kind: null, ts: new Date(),
+        }) });
     }
-    return stmts;
+    return writes;
 };
 
 export const deriveProposals = (
+    write: CacheWriteService,
     opts: DeriveProposalsOpts = { minFrequency: 3 },
-): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("@ax/lib/process").ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<DeriveProposalsStats, CacheWriteError, import("@ax/lib/process").ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const [candidates, skills, existingProposals] = yield* Effect.all([
-            db.query<[SkillCandidateRow[]]>(`
+            write.rows(Schema.Struct({
+                id: Schema.String, name: Schema.String, trigger_pattern: Schema.String,
+                suspected_gap: Schema.String, proposed_behavior: Schema.String, confidence: Schema.String,
+                expected_impact: Schema.NullOr(Schema.String), metrics: Schema.NullOr(Schema.String),
+            }), `
 SELECT id, name, trigger_pattern, suspected_gap, proposed_behavior, confidence, expected_impact, metrics
-FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[SkillRow[]]>(`SELECT name FROM skill;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[Array<{ dedupe_sig: string }>]>(`SELECT dedupe_sig FROM proposal;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+FROM skill_candidate`),
+            write.rows(Schema.Struct({ name: Schema.String }), "SELECT name FROM skill"),
+            write.rows(Schema.Struct({ id: Schema.String, dedupe_sig: Schema.String, status: Schema.String,
+                baseline: Schema.NullOr(Schema.String), created_at: Schema.NullOr(TimestampColumn) }),
+                "SELECT id, dedupe_sig, status, baseline, created_at FROM proposal"),
         ], { concurrency: 3 });
 
         const existingSkillNames = new Set(skills.map((s) => normalizeTitle(s.name)));
@@ -716,7 +592,7 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
         // still writes skill + guidance proposals successfully.
         const sinceDays = opts.sinceDays ?? 14;
         const dispatchResult = yield* Effect.orElseSucceed(
-            fetchDispatchCandidates({ sinceDays }).pipe(
+            fetchDispatchCandidates(write, { sinceDays }).pipe(
                 Effect.map((r) => ({
                     candidateCount: r.candidates.length,
                     totalEstSavingsUsd: r.total_est_savings_usd,
@@ -748,7 +624,7 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
         // Image context proposal (form='subagent'): derive from image-read analytics.
         // Query failure is tolerated - same pattern as the routing proposal.
         const imageContextResult = yield* Effect.orElseSucceed(
-            fetchImageContext({ sinceDays, limit: 0 }),
+            fetchImageContext(write, { sinceDays, limit: 0 }),
             () => null as ImageContextResult | null,
         );
         const imageContextRow = imageContextResult
@@ -767,12 +643,11 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
         // the dispatch PROMPT ("You are implementing ONE task..."), not a user
         // directive - the other dominant false-positive class from the smoke.
         const directiveTurns = yield* Effect.orElseSucceed(
-            db.query<[DirectiveTurnRow[]]>(`
-SELECT type::string(id) AS id, type::string(session) AS session, text_excerpt, type::string(ts) AS ts
-FROM turn
-WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
-  AND ts > time::now() - 90d AND session.source != "claude-subagent";`)
-                .pipe(Effect.map((rows) => rows?.[0] ?? [])),
+            write.rows(Schema.Struct({ id: Schema.String, session: Schema.String, text_excerpt: Schema.String, ts: Schema.String }), `
+SELECT t.id, t.session, t.text_excerpt, CAST(t.ts AS VARCHAR) AS ts
+FROM turn t JOIN session s ON s.id = t.session
+WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
+  AND t.ts > CURRENT_TIMESTAMP - INTERVAL '90 days' AND s.source != 'claude-subagent'`),
             () => [] as DirectiveTurnRow[],
         );
         const directiveCandidates = deriveDirectiveCandidates(directiveTurns);
@@ -782,11 +657,11 @@ WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
         // keeps the highest-signal ones. Tolerant: if the table is empty or the
         // query fails, scoring falls back to seed order (v1 ordering preserved).
         const directiveLiftMap = yield* Effect.orElseSucceed(
-            db.query<[Array<{ ngram: string; lift: number }>]>(`
-SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
+            write.rows(Schema.Struct({ ngram: Schema.String, lift: Schema.Number }),
+                "SELECT ngram, lift FROM directive_ngram WHERE lift > 0")
                 .pipe(Effect.map((rows) => {
                     const map = new Map<string, number>();
-                    for (const r of rows?.[0] ?? []) {
+                    for (const r of rows) {
                         map.set(r.ngram, r.lift);
                     }
                     return map as ReadonlyMap<string, number>;
@@ -803,7 +678,7 @@ SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
         // skill-arc patterns into codification suggestions (milestone B, #588).
         // Query failure is tolerated - other proposal forms are unaffected.
         const workflowArcs = yield* Effect.orElseSucceed(
-            fetchWorkflowArcs(),
+            fetchWorkflowArcs(write),
             () => [] as ArcCandidate[],
         );
         const { rows: workflowRows, skipped: workflowSkipped } =
@@ -812,7 +687,21 @@ SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
             ? buildGuidanceProposalStatements(workflowRows, existingSigs)
             : [];
 
-        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts, ...workflowStmts], { chunkSize: 500 });
+        const existingBySig = new Map(existingProposals.map((row) => [row.dedupe_sig, row]));
+        const writes = [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts, ...directiveStmts, ...workflowStmts];
+        for (const item of writes) {
+            if (item.table === "proposal") {
+                const sig = String(item.row.dedupe_sig);
+                const existing = existingBySig.get(sig);
+                if (existing) {
+                    yield* write.put(item.table, cacheRow({ ...item.row, id: existing.id,
+                        status: existing.status, baseline: existing.baseline,
+                        created_at: existing.created_at ?? new Date() }));
+                    continue;
+                }
+            }
+            yield* write.put(item.table, item.row);
+        }
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
@@ -823,15 +712,6 @@ SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`)
             skipped: skillSkipped + guidanceSkipped + directiveSkipped + workflowSkipped,
         };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        deriveProposals().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<DeriveProposalsStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -857,13 +737,13 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     workflowProposals: Schema.Number,
 }) {}
 
-export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
+export const proposalsStage: StageDef<ProposalsStats, ProcessService | FileSystem.FileSystem | Path.Path, CacheWriteError> = {
     meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveProposals({ minFrequency: 3, sinceDays });
+            const result = yield* deriveProposals(write, { minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals, ${result.workflowProposals} workflow proposals`,

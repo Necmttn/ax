@@ -9,7 +9,7 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import type {
     NextActionCard,
     NextActionKind,
@@ -434,6 +434,7 @@ export const nextActionSourceTimeoutMs = (
 export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* (
     opts?: { readonly sourceTimeoutMs?: number },
 ) {
+    const read = yield* CacheRead;
     // Mutated from concurrent legs; safe because JS fibers interleave only at
     // yield points - the push inside Effect.sync runs atomically.
     const notes: Array<NextActionsSourceNote> = [];
@@ -449,11 +450,11 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
      * sources - including tool_failure which normally swallows DB errors
      * internally - will add a note when the DB hangs.
      */
-    const guarded = <A>(
+    const guarded = <A, R>(
         source: NextActionKind,
-        eff: Effect.Effect<A, unknown, SurrealClient>,
+        eff: Effect.Effect<A, unknown, R>,
         empty: A,
-    ): Effect.Effect<A, never, SurrealClient> => {
+    ): Effect.Effect<A, never, R> => {
         const timeoutMs = nextActionSourceTimeoutMs(source, opts?.sourceTimeoutMs);
         return eff.pipe(
 	            Effect.timeoutOrElse({
@@ -482,13 +483,13 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
             guarded("tool_failure", fetchToolFailures(), null as ToolFailuresResponse | null),
             guarded(
                 "churn",
-                fetchSessionChurnSummary({
+                fetchSessionChurnSummary(read, {
                     since: new Date(Date.now() - CHURN_WINDOW_DAYS * 86_400_000),
                     limit: 20,
                 }),
                 null as SessionChurnSummary | null,
             ),
-            guarded("routing", fetchDispatchCandidates({ sinceDays: ROUTING_WINDOW_DAYS }), null as CandidatesResult | null),
+            guarded("routing", fetchDispatchCandidates(read, { sinceDays: ROUTING_WINDOW_DAYS }), null as CandidatesResult | null),
             guarded("skill_hygiene", fetchSkillHygiene({ minInvocations: 3, limit: 10 }), [] as ReadonlyArray<SkillHygieneRow>),
             guarded("housekeeping", findStaleOpenProposals(HOUSEKEEP_DAYS), [] as ReadonlyArray<StaleProposalRow>),
         ] as const,

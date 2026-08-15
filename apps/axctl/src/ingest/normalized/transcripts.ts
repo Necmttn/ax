@@ -1,7 +1,6 @@
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
     recordRef,
     surrealDate,
@@ -19,6 +18,8 @@ import {
     type AgentProviderName,
     type AgentProviderWrite,
     type AgentSessionWrite,
+    writeAgentEvents,
+    writeAgentProviders,
 } from "../provider-events.ts";
 import {
     buildPlanSnapshotStatements,
@@ -29,6 +30,10 @@ import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
     type ToolFileEvidenceWrite,
+    relateToolCallSkill,
+    writePlanSnapshot,
+    writeToolCalls,
+    writeToolFileEvidence,
 } from "../evidence-writers.ts";
 import { buildCompactionStatements, type CompactionWrite } from "../compaction.ts";
 import type { SkillName } from "@ax/lib/brands";
@@ -136,11 +141,6 @@ export interface BuildNormalizedTranscriptStatementsOptions {
     readonly clearExisting?: boolean;
 }
 
-const optionalDate = (value: string | Date | null | undefined): Date | undefined => {
-    if (value === null || value === undefined) return undefined;
-    return value instanceof Date ? value : new Date(value);
-};
-
 const toAgentSession = (session: NormalizedSessionWrite): AgentSessionWrite => ({
     provider: session.provider,
     providerSessionId: session.providerSessionId ?? session.id,
@@ -160,25 +160,24 @@ const toAgentSession = (session: NormalizedSessionWrite): AgentSessionWrite => (
 });
 
 export const upsertNormalizedSessions = (
+    write: CacheWriteService,
     sessions: readonly NormalizedSessionWrite[],
-): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* Effect.forEach(
-            sessions,
-            (session) =>
-                db.upsert(new RecordId("session", session.id), {
-                    project: session.project ?? undefined,
-                    cwd: session.cwd ?? undefined,
-                    model: session.model ?? undefined,
-                    source: session.provider,
-                    started_at: optionalDate(session.startedAt),
-                    ended_at: optionalDate(session.endedAt),
-                    raw_file: session.rawFile ?? session.sourcePath ?? undefined,
-                }),
-            { concurrency: 4, discard: true },
-        );
-    });
+): Effect.Effect<void, CacheWriteError> =>
+    write.putMany("session", sessions.map((session) => cacheRow({
+        id: session.id,
+        project: session.project ?? null,
+        cwd: session.cwd ?? null,
+        model: session.model ?? null,
+        reasoning_effort: null,
+        source: session.provider,
+        started_at: tsParam(session.startedAt),
+        ended_at: tsParam(session.endedAt),
+        raw_file: session.rawFile ?? session.sourcePath ?? null,
+        labels: jsonParam(session.labels),
+        repository: null,
+        checkout: null,
+        workspace: null,
+    })));
 
 export const buildNormalizedTurnStatements = (
     turns: readonly NormalizedTurnWrite[],
@@ -263,12 +262,96 @@ export const buildNormalizedTranscriptStatements = (
 ];
 
 export const writeNormalizedTranscriptBatch = (
+    write: CacheWriteService,
     batch: NormalizedTranscriptBatch,
     options?: BuildNormalizedTranscriptStatementsOptions,
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
-        yield* upsertNormalizedSessions(batch.sessions);
-        yield* executeStatements(buildNormalizedTranscriptStatements(batch, options), {
-            chunkSize: 500,
-        });
+        yield* upsertNormalizedSessions(write, batch.sessions);
+        yield* writeAgentProviders(write, batch.providers);
+        yield* writeAgentEvents(
+            write,
+            { sessions: batch.sessions.map(toAgentSession), events: batch.events },
+            { clearExisting: options?.clearExisting ?? true },
+        );
+        yield* write.putMany("turn", batch.turns.map((turn) => cacheRow({
+            id: turnRecordKey(turn.sessionId, turn.seq),
+            session: turn.sessionId,
+            agent_event: turn.agentEvent ? agentEventRecordKey(turn.agentEvent) : null,
+            seq: turn.seq,
+            ts: tsParam(turn.ts),
+            role: turn.role,
+            message_kind: turn.messageKind,
+            intent_kind: turn.intentKind,
+            text: turn.text,
+            text_excerpt: turn.textExcerpt,
+            has_tool_use: turn.hasToolUse,
+            has_error: turn.hasError,
+            thinking_blocks: turn.thinkingBlocks ?? null,
+            thinking_tokens: turn.thinkingTokens ?? null,
+        })));
+        yield* writeToolCalls(write, batch.toolCalls);
+        yield* writeToolFileEvidence(write, batch.toolFileEvidence);
+        for (const edge of batch.agentEventParentEdges) {
+            yield* write.put("agent_event_child", cacheRow({
+                id: Bun.hash(`${edge.parentEventKey}|${edge.childEventKey}|${edge.kind}`).toString(16),
+                in_id: edge.parentEventKey,
+                out_id: edge.childEventKey,
+                agent_session: `${edge.provider}__${edge.providerSessionId}`,
+                provider: edge.provider,
+                kind: edge.kind,
+                ts: tsParam(edge.ts),
+            }));
+        }
+        for (const invocation of batch.syntheticSkillInvocations) {
+            const skillKey = skillRecordKey(invocation.skillName);
+            if (invocation.skillUpsert === "if_missing") {
+                yield* write.exec(
+                    "INSERT INTO skill (id, name, scope, dir_path, content_hash) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    [skillKey, invocation.skillName, invocation.skillScope ?? "unknown", invocation.skillDirPath ?? "(synthetic)", invocation.skillContentHash ?? "synthetic"],
+                );
+            } else {
+                yield* write.put("skill", cacheRow({
+                    id: skillKey,
+                    name: invocation.skillName,
+                    scope: invocation.skillScope ?? "unknown",
+                    dir_path: invocation.skillDirPath ?? "(synthetic)",
+                    content_hash: invocation.skillContentHash ?? "synthetic",
+                }));
+            }
+            const turnKey = turnRecordKey(invocation.sessionId, invocation.seq);
+            const args = JSON.stringify(invocation.args ?? {});
+            yield* write.put("invoked", cacheRow({
+                id: invokedRelationRecordKey({ turnKey, skillKey, args }),
+                in_id: turnKey,
+                out_id: skillKey,
+                args,
+                ts: tsParam(invocation.ts),
+                session: invocation.sessionId,
+                turn_has_error: invocation.turnHasError ?? false,
+                was_corrected: false,
+                turn_index: invocation.turnIndex ?? invocation.seq,
+                total_turns: null,
+                is_first: null,
+            }));
+        }
+        for (const relation of batch.toolCallSkillRelations) yield* relateToolCallSkill(write, relation);
+        for (const snapshot of batch.planSnapshots) yield* writePlanSnapshot(write, snapshot);
+        yield* write.putMany("compaction", batch.compactions.map((compaction) => cacheRow({
+            id: compaction.compactionKey,
+            session: compaction.sessionId,
+            agent_event: compaction.agentEventKey ?? null,
+            harness: compaction.harness,
+            ts: tsParam(compaction.ts),
+            trigger: compaction.trigger ?? null,
+            strategy: compaction.strategy,
+            source_confidence: compaction.sourceConfidence,
+            summary: compaction.summary ?? null,
+            tokens_before: compaction.tokensBefore ?? null,
+            boundary_ref: compaction.boundaryRef ?? null,
+            kept_count: compaction.keptCount ?? null,
+            read_files: jsonParam(compaction.readFiles),
+            modified_files: jsonParam(compaction.modifiedFiles),
+            raw: jsonParam(compaction.raw),
+        })));
     });

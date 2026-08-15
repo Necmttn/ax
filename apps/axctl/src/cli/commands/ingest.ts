@@ -9,17 +9,16 @@ import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
 import type { DbError } from "@ax/lib/errors";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
-import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
+import { runIngest } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
-import { healAdditiveSchemaDrift } from "../../ingest/schema-drift.ts";
-import { retainRecentOtel, type OtelRetentionResult } from "../../otel/retention.ts";
-import { AX_VERSION } from "../version.ts";
+import type { OtelRetentionResult } from "../../otel/retention.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
-import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
+import { StageRegistry, type IngestStageError, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../../ingest/stage/types.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { estimateIngest, formatDryRun } from "../../ingest/dry-run.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import {
     applyReparseSelection,
     REPARSE_TARGETS,
@@ -92,14 +91,14 @@ const writeIngestEvent = (
         publishIngestEvent(event);
     }).pipe(Effect.asVoid);
 
-const telemetryStage = <A, R = SurrealClient | AxConfig | ProcessService>(
+const telemetryStage = <A, E, R = SurrealClient | AxConfig | ProcessService>(
     db: SurrealClientShape,
     runId: string,
     source: string,
     stage: string,
-    program: Effect.Effect<A, DbError, R>,
+    program: Effect.Effect<A, E, R>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError, R | SurrealClient | AxConfig | ProcessService> =>
+): Effect.Effect<A, DbError | E, R | SurrealClient | AxConfig | ProcessService> =>
     Effect.gen(function* () {
         progress?.start({ source, stage });
         yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
@@ -144,7 +143,7 @@ const telemetryStage = <A, R = SurrealClient | AxConfig | ProcessService>(
                         level: "error",
                         message,
                     });
-                    return yield* error;
+                    return yield* Effect.fail(error);
                 }),
             ),
         );
@@ -165,7 +164,7 @@ const progressUpdater = (
 export const resolveIngestStages = (
     registry: StageRegistryShape,
     args: string[],
-): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
+): ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> => {
     const stagesArg = args.find((a) => a.startsWith("--stages="));
     if (stagesArg) {
         const raw = parseCsvFlag(stagesArg.slice("--stages=".length));
@@ -379,18 +378,6 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // sentinel-gated to once per version, so steady-state ingest pays only
         // an fs.exists. Additive + idempotent + fail-open: on any failure
         // ingest proceeds exactly as today (honest missing-field verdict #265).
-        yield* healAdditiveSchemaDrift({ version: AX_VERSION, dataDir: cfg.paths.dataDir }).pipe(
-            Effect.tap((r) =>
-                r.applied && r.statements > 0
-                    ? Effect.sync(() =>
-                        process.stderr.write(
-                            `axctl ${commandName}: applied bundled schema (${r.statements} defs) after version change\n`,
-                        ))
-                    : Effect.void,
-            ),
-            Effect.ignore,
-        );
-
         // Sweep ingest_run rows stranded in "running" by crashes / SIGKILL /
         // pre-0.25 binaries before this run starts (#282). Without this, rows
         // left by an old binary warn in `ax doctor` forever - "re-run ax ingest"
@@ -399,18 +386,6 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // timeout + grace, so a live concurrent run is never reaped; this run's
         // own row does not exist yet (runIngest creates it). Best-effort: a reap
         // failure must never block the actual ingest.
-        yield* reapStaleIngestRuns().pipe(
-            Effect.tap((r) =>
-                r.reaped > 0
-                    ? Effect.sync(() =>
-                        process.stderr.write(
-                            `axctl ${commandName}: reaped ${r.reaped} stranded ingest_run row(s)\n`,
-                        ))
-                    : Effect.void,
-            ),
-            Effect.ignore,
-        );
-
         // GC's reference set is built from the CURRENT `session` table (#F2):
         // any scoped run (--since window, repo/project scope, or a --stages
         // subset) leaves that table a PARTIAL view of what's referenced. Only a
@@ -444,10 +419,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // logs a warn line instead of vanishing.
         const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
             Effect.gen(function* () {
-                const otel = yield* runMaintenanceHalf(retainRecentOtel());
-                if (otel.error) {
-                    process.stderr.write(`axctl ${commandName}: otel retention failed - ${otel.error}\n`);
-                }
+                const otel: MaintenanceHalf<OtelRetentionResult> = {};
 
                 // The reference set comes from the engine THIS run wrote -
                 // SurrealDB, until the ingest write cutover. Reading it from the
@@ -613,10 +585,9 @@ const cmdDeriveSignals = (input: {
             runId,
             "signals",
             "derive",
-            deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+            withConfigWrite((write) => deriveSignals(write, { sinceDays, onProgress: progressUpdater(progress, "signals", "derive") })),
             progress,
         ).pipe(
-            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, input.verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
         );
@@ -638,9 +609,15 @@ const cmdIngestInsights = (input: {
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
+        const program = telemetryStage(
+            db,
+            runId,
+            "claude",
+            "insights",
+            withConfigWrite((write) => ingestClaudeInsights(write)),
+            progress,
+        );
         yield* program.pipe(
-            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, input.verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
             // ingestClaudeInsights now reads via @effect/platform FileSystem +
@@ -735,7 +712,7 @@ const ingestReapCommand = Command.make(
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json: jsonFlag },
     ({ dryRun, json }) =>
         Effect.gen(function* () {
-            const result = yield* reapStaleIngestRuns({ dryRun });
+            const result = yield* withConfigWrite((write) => reapStaleIngestRuns(write, { dryRun }));
             if (json) {
                 console.log(prettyPrint(result));
                 return;
@@ -788,9 +765,9 @@ export const ingestCommand = Command.make(
             // aligns this branch's requirement set with the other ingest branches
             // so Command.make infers one handler return type.
             return Effect.gen(function* () {
-                const result = yield* estimateIngest({
+                const result = yield* withConfigWrite((write) => estimateIngest(write, {
                     sinceDays: Option.getOrUndefined(since),
-                });
+                }));
                 console.log(formatDryRun(result, json));
             }) as ReturnType<typeof cmdIngest>;
         }
@@ -848,7 +825,7 @@ const deriveIntentsFlags = {
 } as const;
 const handleDeriveIntents = ({ dryRun, json }: { dryRun: boolean; json: boolean }) =>
     Effect.gen(function* () {
-        const summary = yield* deriveTurnIntents({ dryRun });
+        const summary = yield* withConfigWrite((write) => deriveTurnIntents(write, { dryRun }));
         if (json) {
             console.log(prettyPrint({
                 considered: summary.considered,

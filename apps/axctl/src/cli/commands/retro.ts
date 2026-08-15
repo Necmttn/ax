@@ -1,5 +1,5 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
@@ -7,6 +7,7 @@ import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { recordRef } from "@ax/lib/shared/surql";
 import { retroFromSession, retroRecordKey, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
 import { proposalKey, runPropose } from "../../improve/propose.ts";
 import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
@@ -41,7 +42,7 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * not turn a successful emit into a non-zero exit. It returns the number of
  * proposals derived so the caller can report it.
  */
-const runInlineRetroDerive = deriveRetroProposals().pipe(
+const runInlineRetroDerive = () => withConfigWrite((write) => deriveRetroProposals(write)).pipe(
     Effect.map((stats) =>
         stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
     ),
@@ -63,15 +64,16 @@ const cmdRetroEmit = (input: {
 
         let sessionRecordId = sessionFlag;
         if (!sessionRecordId) {
-            const latest = yield* db.query<[Array<{ id: string | { tb: string; id: string } }>]>(
-                "SELECT id, started_at FROM session ORDER BY started_at DESC LIMIT 1;",
+            const row = yield* withConfigWrite((write) =>
+                write.rows(Schema.Struct({ id: Schema.String }),
+                    "SELECT id FROM session ORDER BY started_at DESC LIMIT 1").pipe(
+                    Effect.map((rows) => rows[0]),
+                ),
             );
-            const row = (latest?.[0] ?? [])[0];
             if (!row) {
                 fail("ax retro emit: no session to retro on (no --session and no rows in DB)");
             }
-            const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
-            sessionRecordId = idStr;
+            sessionRecordId = row.id;
         }
         if (!sessionRecordId.includes(":")) sessionRecordId = `session:${sessionRecordId}`;
 
@@ -97,7 +99,7 @@ const cmdRetroEmit = (input: {
                 ),
             );
             const sessionKey = sessionRecordId.split(":").slice(1).join(":").replace(/`/g, "");
-            yield* upsertRetro({
+            yield* withConfigWrite((write) => upsertRetro(write, {
                 sessionId: sessionKey,
                 source: sourceFlag,
                 payload: {
@@ -107,7 +109,7 @@ const cmdRetroEmit = (input: {
                     next: parsed.next ?? null,
                 },
                 raw,
-            });
+            }));
 
             // The retro -> proposal loop (#742). Proposals filed in the payload
             // go through the SAME writer as `ax improve propose`, then cite the
@@ -124,7 +126,7 @@ const cmdRetroEmit = (input: {
                 filed.push({ status: result.status, title: result.title, sig: result.sig });
             }
 
-            const derived = yield* runInlineRetroDerive;
+            const derived = yield* runInlineRetroDerive();
 
             if (json) {
                 console.log(prettyPrint({
@@ -156,12 +158,12 @@ const cmdRetroEmit = (input: {
             return;
         }
 
-        const retroInput = yield* retroFromSession(sessionRecordId);
+        const retroInput = yield* withConfigWrite((write) => retroFromSession(write, sessionRecordId));
         if (!retroInput) {
             fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
-        yield* upsertRetro(retroInput);
-        const derived = yield* runInlineRetroDerive;
+        yield* withConfigWrite((write) => upsertRetro(write, retroInput));
+        const derived = yield* runInlineRetroDerive();
         if (json) {
             console.log(prettyPrint({
                 session: sessionRecordId,

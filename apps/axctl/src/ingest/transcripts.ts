@@ -1,22 +1,21 @@
 import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
-import { RecordId, SurrealClient } from "@ax/lib/db";
-import { filePointer } from "@ax/lib/blob-pointer";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { DbError } from "@ax/lib/errors";
 import { AxConfig } from "@ax/lib/config";
-import { surrealLiteral } from "@ax/lib/json";
 import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
-import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
+    relateToolCallSkill as relateToolCallSkillRow,
+    writePlanSnapshot as writePlanSnapshotRow,
+    writeToolCalls as writeToolCallRows,
+    writeToolFileEvidence as writeToolFileEvidenceRows,
 } from "./evidence-writers.ts";
 import {
     agentEventRecordKey,
@@ -43,10 +42,9 @@ import {
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { computeBurnBuckets } from "./burn-buckets.ts";
 import {
-    buildNormalizedTranscriptStatements,
-    buildNormalizedTurnStatements,
     type NormalizedTranscriptBatch,
     type NormalizedTurnWrite,
+    writeNormalizedTranscriptBatch,
 } from "./normalized/transcripts.ts";
 import {
     CLAUDE_TEXT_TYPES,
@@ -66,8 +64,6 @@ import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
 import { parseHookBlocksFromText } from "./hook-block-text.ts";
 import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
-import { selectByIds } from "@ax/lib/shared/record-select";
-import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import {
@@ -1303,9 +1299,8 @@ export {
     writePlanSnapshots as writePlanSnapshotsForSubagents,
 };
 
-const upsertSessions = (sessions: Session[]) =>
+const upsertSessions = (write: CacheWriteService, sessions: Session[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         // Claude effort level is global (settings.json), not in transcripts -
         // stamped only on sessions active within the freshness window, so the
         // current setting never gets attributed to historical sessions.
@@ -1316,16 +1311,21 @@ const upsertSessions = (sessions: Session[]) =>
             (s) =>
                 // SurrealDB v3 rejects JS `null` for `option<T>` fields - the
                 // JS client must see `undefined` to encode NONE. See issue #37.
-                db.upsert(new RecordId("session", s.id), {
-                    project: s.project ?? undefined,
-                    cwd: s.cwd ?? undefined,
-                    model: s.model ?? undefined,
+                write.put("session", cacheRow({
+                    id: s.id,
+                    project: s.project ?? null,
+                    cwd: s.cwd ?? null,
+                    model: s.model ?? null,
                     reasoning_effort: claudeEffortStamp(effortLevel, s.ended_at, nowMs),
                     source: "claude",
-                    started_at: s.started_at ? new Date(s.started_at) : undefined,
-                    ended_at: s.ended_at ? new Date(s.ended_at) : undefined,
-                    raw_file: s.raw_file ?? undefined,
-                }),
+                    started_at: tsParam(s.started_at),
+                    ended_at: tsParam(s.ended_at),
+                    raw_file: s.raw_file ?? null,
+                    labels: null,
+                    repository: null,
+                    checkout: null,
+                    workspace: null,
+                })),
             { concurrency: 4, discard: true },
         );
     }).pipe(Effect.withSpan("transcripts.upsertSessions", {
@@ -1337,34 +1337,7 @@ const upsertSessions = (sessions: Session[]) =>
  * return the file pointer string to persist on `session.raw_file`. Failures
  * are logged but do not abort ingest - the bucket is best-effort cold storage.
  */
-const snapshotTranscript = (sessionId: string, filePath: string) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const content = yield* Effect.promise(async () => {
-            try {
-                return await Bun.file(filePath).text();
-            } catch {
-                return null;
-            }
-        });
-        if (content === null) return null;
-        const bucketPath = `${sessionId}.jsonl`;
-        const result = yield* db
-            .putFile("transcripts", bucketPath, content)
-            .pipe(
-                Effect.map(() => filePointer("transcripts", bucketPath)),
-                Effect.catch((err) =>
-                    Effect.logDebug("transcript snapshot failed", {
-                        sessionId,
-                        message: err.message,
-                    }).pipe(Effect.as(null as string | null)),
-                ),
-                Effect.withSpan("transcripts.snapshot", {
-                    attributes: { "snapshot.bytes": content.length, "snapshot.session": sessionId },
-                }),
-            );
-        return result;
-    });
+const snapshotTranscript = (_sessionId: string, filePath: string) => Effect.succeed(filePath);
 
 // Claude turn rows are NEVER agent_event-linked (the transcript
 // extractor keys provider events by tool/turn uuid, not by turn seq), so the
@@ -1386,14 +1359,26 @@ const toNormalizedClaudeTurn = (turn: Turn): NormalizedTurnWrite => ({
     agentEvent: null,
 });
 
-const upsertTurns = (turns: Turn[]) =>
-    Effect.gen(function* () {
-        if (turns.length === 0) return;
-        yield* queryTranscriptStatements(
-            buildNormalizedTurnStatements(turns.map(toNormalizedClaudeTurn)),
-            "upsertTurns",
-        );
-    });
+const upsertTurns = (write: CacheWriteService, turns: Turn[]) =>
+    write.putMany("turn", turns.map((turn) => {
+        const row = toNormalizedClaudeTurn(turn);
+        return cacheRow({
+            id: turnRecordKey(row.sessionId, row.seq),
+            session: row.sessionId,
+            agent_event: null,
+            seq: row.seq,
+            ts: tsParam(row.ts),
+            role: row.role,
+            message_kind: row.messageKind,
+            intent_kind: row.intentKind,
+            text: row.text,
+            text_excerpt: row.textExcerpt,
+            has_tool_use: row.hasToolUse,
+            has_error: row.hasError,
+            thinking_blocks: row.thinkingBlocks ?? null,
+            thinking_tokens: row.thinkingTokens ?? null,
+        });
+    }));
 
 const escapeRecordKey = (key: string): string =>
     key
@@ -1406,32 +1391,9 @@ const escapeRecordKey = (key: string): string =>
 const recordRef = (table: string, key: string): string =>
     `${table}:\`${escapeRecordKey(key)}\``;
 
-const optionRecordRef = (table: string, key: string | null): string =>
-    key === null ? "NONE" : recordRef(table, key);
-
-const optionString = (value: string | null): string =>
-    value === null ? "NONE" : surrealLiteral(value);
-
-const optionInt = (value: number | null): string =>
-    value === null ? "NONE" : String(Math.trunc(value));
-
-const buildHarnessHookEventStatements = (events: readonly HarnessHookEventWrite[]): string[] =>
-    events.map((event) =>
-        `UPSERT ${recordRef("harness_hook_event", event.key)} CONTENT { session: ${recordRef("session", event.session)}, ts: d"${event.ts}", harness: ${surrealLiteral(event.harness)}, event_name: ${surrealLiteral(event.event_name)}, hook_name: ${surrealLiteral(event.hook_name)}, tool_call_id: ${optionString(event.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", event.tool_call_key)}, cwd: ${optionString(event.cwd)}, transcript_uuid: ${optionString(event.transcript_uuid)}, source_type: ${surrealLiteral(event.source_type)} };`,
-    );
-
-const buildHookCommandInvocationStatements = (invocations: readonly HookCommandInvocationWrite[]): string[] =>
-    invocations.map((invocation) =>
-        `UPSERT ${recordRef("hook_command_invocation", invocation.key)} CONTENT { hook_event: ${recordRef("harness_hook_event", invocation.hook_event_key)}, session: ${recordRef("session", invocation.session)}, ts: d"${invocation.ts}", harness: ${surrealLiteral(invocation.harness)}, event_name: ${surrealLiteral(invocation.event_name)}, hook_name: ${surrealLiteral(invocation.hook_name)}, tool_call_id: ${optionString(invocation.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", invocation.tool_call_key)}, command: ${surrealLiteral(invocation.command)}, command_hash: ${surrealLiteral(invocation.command_hash)}, provider_status: ${surrealLiteral(invocation.provider_status)}, effect: ${surrealLiteral(invocation.effect)}, exit_code: ${optionInt(invocation.exit_code)}, duration_ms: ${optionInt(invocation.duration_ms)}, stdout_excerpt: ${optionString(invocation.stdout_excerpt)}, stderr_excerpt: ${optionString(invocation.stderr_excerpt)}, content_excerpt: ${optionString(invocation.content_excerpt)}, blocking_error_excerpt: ${optionString(invocation.blocking_error_excerpt)} };`,
-    );
-
-const queryTranscriptStatements = (statements: readonly string[], label?: string) =>
-    executeStatements(statements, { chunkSize: 500, ...(label === undefined ? {} : { label }) });
-
-const relateInvocations = (invocations: Invocation[]) =>
+const relateInvocations = (write: CacheWriteService, invocations: Invocation[]) =>
     Effect.gen(function* () {
         if (invocations.length === 0) return;
-        const db = yield* SurrealClient;
 
         // Backstop for issues #41 / #42: any Skill-tool invocation whose
         // target isn't on disk (e.g. a slash command vendored by a plugin we
@@ -1442,82 +1404,87 @@ const relateInvocations = (invocations: Invocation[]) =>
         // unique invoked target. ingestSkills + ingestCommands run before
         // this, so a real record (if one exists) already won the row, and
         // our `MERGE` only touches the field set we own here.
-        const uniqueSkills = new Set(invocations.map((i) => i.skill));
-        if (uniqueSkills.size > 0) {
-            // Look up which skill rows already exist so we don't overwrite
-            // the proper scope/dir_path/description on known skills with
-            // our 'unknown' placeholder. Idempotent re-runs of ingest stay
-            // a no-op for everything that has a real on-disk source.
-            // Materialized record-list selection via selectByIds, NEVER
-            // `FROM skill WHERE id IN [...]` (silently matches NOTHING on the
-            // skill table, which made this lookup return empty and clobbered
-            // real skill rows with the 'unknown' placeholder MERGE below) and
-            // NEVER bare `FROM [refs]` (throws "Specify a database to use" on
-            // SurrealDB 3.0.x - issue #251, aborted every Claude/Codex ingest
-            // on fresh installs). Both invariants are documented + verified
-            // in @ax/lib/shared/record-select.
-            const existing = (yield* db.query<[Array<{ name?: string }>]>(
-                selectByIds("name", "skill", [...uniqueSkills].map(skillRecordKey)),
-            )) as [Array<{ name?: string }>];
-            const knownNames = new Set(
-                (existing[0] ?? [])
-                    .map((r) => r.name)
-                    .filter((n): n is string => typeof n === "string" && n.length > 0),
-            );
-            const missing = [...uniqueSkills].filter((n) => !knownNames.has(n));
-            if (missing.length > 0) {
-                const placeholders = missing.map(
-                    (n) =>
-                        `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${surrealLiteral(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
-                );
-                yield* executeStatementsWith(db, placeholders, { chunkSize: 500, label: "skillPlaceholders" });
-            }
-        }
-
-        const stmts = invocations.flatMap((inv) => {
+        for (const inv of invocations) {
             const turnKey = turnRecordKey(inv.session, inv.seq);
             const skillKey = skillRecordKey(inv.skill);
             const args = JSON.stringify(inv.args);
             const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-            return [
-                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", inv.session)}, ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error}, turn_index = ${inv.seq};`,
-            ];
-        });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500, label: "invokedEdges" });
+            yield* write.exec(
+                "INSERT INTO skill (id, name, scope, dir_path, content_hash) VALUES (?, ?, 'unknown', '(unknown)', 'unknown') ON CONFLICT DO NOTHING",
+                [skillKey, inv.skill],
+            );
+            yield* write.put("invoked", cacheRow({
+                id: edgeKey,
+                in_id: turnKey,
+                out_id: skillKey,
+                args,
+                ts: tsParam(inv.ts),
+                session: inv.session,
+                turn_has_error: inv.turn_has_error,
+                was_corrected: false,
+                turn_index: inv.seq,
+                total_turns: null,
+                is_first: null,
+            }));
+        }
     });
 
-const writeToolFileEvidence = (toolCalls: readonly ToolCallWrite[]) =>
-    queryTranscriptStatements(buildToolFileEvidenceStatements(
-        extractToolFileEvidence(toolCalls),
-    ), "toolFileEvidence");
+const writeToolFileEvidence = (write: CacheWriteService, toolCalls: readonly ToolCallWrite[]) =>
+    writeToolFileEvidenceRows(write, extractToolFileEvidence(toolCalls));
 
-const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
+const relateToolCallSkills = (write: CacheWriteService, relations: ToolCallSkillRelationWrite[]) =>
     Effect.gen(function* () {
-        if (relations.length === 0) return;
-        yield* queryTranscriptStatements(relations.flatMap((relation) =>
-            buildRelateToolCallSkillStatements(relation),
-        ), "toolCallSkills");
+        for (const relation of relations) yield* relateToolCallSkillRow(write, relation);
     });
 
-const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
+const writePlanSnapshots = (write: CacheWriteService, snapshots: PlanSnapshotWrite[]) =>
     Effect.gen(function* () {
-        if (snapshots.length === 0) return;
-        yield* queryTranscriptStatements(snapshots.flatMap((snapshot) =>
-            buildPlanSnapshotStatements(snapshot),
-        ), "planSnapshots");
+        for (const snapshot of snapshots) yield* writePlanSnapshotRow(write, snapshot);
     });
 
-const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
-    queryTranscriptStatements(buildToolCallStatements(toolCalls), "toolCalls");
+const writeToolCallStatements = (write: CacheWriteService, toolCalls: readonly ToolCallWrite[]) =>
+    writeToolCallRows(write, toolCalls);
 
 const writeHookEvidence = (
+    write: CacheWriteService,
     events: readonly HarnessHookEventWrite[],
     invocations: readonly HookCommandInvocationWrite[],
-) =>
-    queryTranscriptStatements([
-        ...buildHarnessHookEventStatements(events),
-        ...buildHookCommandInvocationStatements(invocations),
-    ], "hookEvidence");
+) => Effect.gen(function* () {
+    yield* write.putMany("harness_hook_event", events.map((event) => cacheRow({
+        id: event.key,
+        session: event.session,
+        ts: tsParam(event.ts),
+        harness: event.harness,
+        event_name: event.event_name,
+        hook_name: event.hook_name,
+        tool_call_id: event.tool_call_id,
+        tool_call: event.tool_call_key,
+        cwd: event.cwd,
+        transcript_uuid: event.transcript_uuid,
+        source_type: event.source_type,
+    })));
+    yield* write.putMany("hook_command_invocation", invocations.map((invocation) => cacheRow({
+        id: invocation.key,
+        hook_event: invocation.hook_event_key,
+        session: invocation.session,
+        ts: tsParam(invocation.ts),
+        harness: invocation.harness,
+        event_name: invocation.event_name,
+        hook_name: invocation.hook_name,
+        tool_call_id: invocation.tool_call_id,
+        tool_call: invocation.tool_call_key,
+        command: invocation.command,
+        command_hash: invocation.command_hash,
+        provider_status: invocation.provider_status,
+        effect: invocation.effect,
+        exit_code: invocation.exit_code,
+        duration_ms: invocation.duration_ms,
+        stdout_excerpt: invocation.stdout_excerpt,
+        stderr_excerpt: invocation.stderr_excerpt,
+        content_excerpt: invocation.content_excerpt,
+        blocking_error_excerpt: invocation.blocking_error_excerpt,
+    })));
+});
 
 /**
  * Adapter onto the parser-normalization seam: one FileExtract (= one claude
@@ -1543,6 +1510,7 @@ const writeHookEvidence = (
 export const toClaudeNormalizedBatch = (
     extracted: FileExtract,
     skillRelations: readonly ToolCallSkillRelationWrite[],
+    invocations: readonly Invocation[] = [],
 ): NormalizedTranscriptBatch => ({
     providers: [{
         name: "claude",
@@ -1585,7 +1553,16 @@ export const toClaudeNormalizedBatch = (
     agentEventParentEdges: [],
     // Real claude skill invocations flow through the effectful
     // relateInvocations path (catalog-resolved), never the synthetic builder.
-    syntheticSkillInvocations: [],
+    syntheticSkillInvocations: invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        turnHasError: invocation.turn_has_error,
+        turnIndex: invocation.seq,
+        skillUpsert: "if_missing" as const,
+    })),
     toolCallSkillRelations: skillRelations,
     planSnapshots: extracted.planSnapshots,
     compactions: extracted.compactions,
@@ -1694,15 +1671,95 @@ export const buildClaudeTurnTokenUsageStatements = (
     });
 };
 
-const writeClaudeTokenUsage = (extracted: FileExtract) => {
-    const statements = [
-        ...buildClaudeTokenUsageStatements(extracted),
-        ...buildClaudeTurnTokenUsageStatements(extracted),
-    ];
-    return statements.length === 0
-        ? Effect.void
-        : queryTranscriptStatements(statements);
-};
+const writeClaudeTokenUsageRows = (
+    write: CacheWriteService,
+    extracted: FileExtract,
+    source: "claude" | "claude-subagent",
+) => Effect.gen(function* () {
+    const usage = extracted.tokenUsage;
+    if (usage !== null) {
+        const modelKey = normalizeModelName(usage.model);
+        const cost = estimateCost({
+            modelKey,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            aggregated: true,
+        });
+        const burnBuckets = computeBurnBuckets(
+            [...extracted.turnTokenUsages].sort((a, b) => a.seq - b.seq).map((t) => t.estimatedTokens),
+        );
+        yield* write.put("session_token_usage", cacheRow({
+            id: extracted.session.id,
+            session: extracted.session.id,
+            source,
+            workflow_epoch: null,
+            model: usage.model,
+            prompt_tokens: usage.promptTokens,
+            completion_tokens: usage.completionTokens,
+            cache_creation_input_tokens: usage.cacheCreationInputTokens,
+            cache_read_input_tokens: usage.cacheReadInputTokens,
+            reasoning_output_tokens: null,
+            estimated_tokens: usage.estimatedTokens,
+            transcript_bytes: 0,
+            context_window: null,
+            model_ref: modelKey,
+            estimated_input_cost_usd: cost.inputUsd,
+            estimated_output_cost_usd: cost.outputUsd,
+            estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+            estimated_cache_read_cost_usd: cost.cacheReadUsd,
+            estimated_cost_usd: cost.totalUsd,
+            pricing_source: cost.pricingSource,
+            labels: jsonParam({ source: "claude_transcript", token_source: "transcript_usage" }),
+            metrics: null,
+            burn_buckets: burnBuckets.length > 0 ? jsonParam(burnBuckets) : null,
+            ts: tsParam(usage.ts),
+        }));
+    }
+    yield* write.putMany("turn_token_usage", extracted.turnTokenUsages.map((turnUsage) => {
+        const modelKey = normalizeModelName(turnUsage.model);
+        const cost = estimateCost({
+            modelKey,
+            promptTokens: turnUsage.promptTokens,
+            completionTokens: turnUsage.completionTokens,
+            cacheCreationInputTokens: turnUsage.cacheCreationInputTokens,
+            cacheReadInputTokens: turnUsage.cacheReadInputTokens,
+            estimatedTokens: turnUsage.estimatedTokens,
+        });
+        const turn = turnRecordKey(extracted.session.id, turnUsage.seq);
+        return cacheRow({
+            id: turn,
+            session: extracted.session.id,
+            turn,
+            seq: turnUsage.seq,
+            source,
+            model: turnUsage.model,
+            prompt_tokens: turnUsage.promptTokens,
+            completion_tokens: turnUsage.completionTokens,
+            cache_creation_input_tokens: turnUsage.cacheCreationInputTokens,
+            cache_read_input_tokens: turnUsage.cacheReadInputTokens,
+            reasoning_output_tokens: null,
+            fresh_input_tokens: turnUsage.freshInputTokens,
+            estimated_tokens: turnUsage.estimatedTokens,
+            model_ref: modelKey,
+            estimated_input_cost_usd: cost.inputUsd,
+            estimated_output_cost_usd: cost.outputUsd,
+            estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+            estimated_cache_read_cost_usd: cost.cacheReadUsd,
+            estimated_cost_usd: cost.totalUsd,
+            pricing_source: cost.pricingSource,
+            usage_source: "claude_transcript.message_usage",
+            usage_quality: "provider_turn",
+            raw: null,
+            ts: tsParam(turnUsage.ts),
+        });
+    }));
+});
+
+const writeClaudeTokenUsage = (write: CacheWriteService, extracted: FileExtract) =>
+    writeClaudeTokenUsageRows(write, extracted, "claude");
 
 /**
  * Subagent variant: identical rows, but `source = "claude-subagent"` so
@@ -1710,15 +1767,8 @@ const writeClaudeTokenUsage = (extracted: FileExtract) => {
  * dispatched-agent spend. The session-health pass writes the same value from
  * `session.source`; without this the last writer would flip the field.
  */
-export const writeTokenUsageForSubagents = (extracted: FileExtract) => {
-    const statements = [
-        ...buildClaudeTokenUsageStatements(extracted, "claude-subagent"),
-        ...buildClaudeTurnTokenUsageStatements(extracted, "claude-subagent"),
-    ];
-    return statements.length === 0
-        ? Effect.void
-        : queryTranscriptStatements(statements);
-};
+export const writeTokenUsageForSubagents = (write: CacheWriteService, extracted: FileExtract) =>
+    writeClaudeTokenUsageRows(write, extracted, "claude-subagent");
 
 interface IngestOpts {
     sinceDays: number | undefined;
@@ -1756,7 +1806,7 @@ export interface TranscriptStats {
 }
 
 export const ingestTranscripts = Effect.fn("transcripts.ingest")(
-    function* (opts: Partial<IngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<IngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -1862,14 +1912,14 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         // `resolveSkillName` maps each invoked name back onto it so plugin
         // skills invoked under a bare name attach to the real row instead of
         // minting a ghost `scope='unknown'` placeholder.
-        const db = yield* SurrealClient;
-        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
-            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
-        ))?.[0] ?? [];
+        const catalogRows = yield* write.rows(
+            Schema.Struct({ name: Schema.String }),
+            "SELECT name FROM skill WHERE dir_path <> '(unknown)'",
+        );
         const skillCatalog: ReadonlySet<string> = new Set(
             catalogRows
                 .map((row) => row.name)
-                .filter((name): name is string => typeof name === "string" && name.length > 0),
+                .filter((name) => name.length > 0),
         );
 
         // Skip-unchanged watermark + per-file failure isolation + deadline +
@@ -1878,7 +1928,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         // and the per-file parse/write below. A candidate whose (mtime,size)
         // still matches a prior run is output-equivalent and skipped without
         // re-parsing. `AX_REDERIVE_CLAUDE=1` forces a full re-parse.
-        const result = yield* runJsonlProviderFiles({
+        const result = yield* runJsonlProviderFiles(write, {
             candidates,
             sourceKind: "claude_transcript",
             forceEnv: "AX_REDERIVE_CLAUDE",
@@ -1927,9 +1977,9 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                     candidate.path,
                 );
                 extracted.session.raw_file = pointer;
-                yield* upsertSessions([extracted.session]);
+                yield* upsertSessions(write, [extracted.session]);
                 sessions += 1;
-                yield* writeClaudeTokenUsage(extracted);
+                yield* writeClaudeTokenUsage(write, extracted);
                 // Resolve invoked names onto the catalog before writing so the
                 // `invoked` and `concerns` edges land on the real skill row.
                 const resolvedInvocations = extracted.invocations.map((inv) => ({
@@ -1945,18 +1995,15 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 // for the normalized provider/session/event/turn/tool/plan rows;
                 // token usage above and invoked-edges/hooks below stay separate
                 // per the gap analysis.
-                yield* queryTranscriptStatements(
-                    buildNormalizedTranscriptStatements(
-                        toClaudeNormalizedBatch(extracted, resolvedSkillRelations),
-                    ),
-                    "normalizedBatch",
+                yield* writeNormalizedTranscriptBatch(
+                    write,
+                    toClaudeNormalizedBatch(extracted, resolvedSkillRelations, resolvedInvocations),
                 );
                 turnCount += extracted.turns.length;
                 toolCallCount += extracted.toolCalls.length;
                 planSnapshotCount += extracted.planSnapshots.length;
-                yield* relateInvocations(resolvedInvocations);
                 invCount += resolvedInvocations.length;
-                yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
+                yield* writeHookEvidence(write, extracted.hookEvents, extracted.hookCommandInvocations);
                 hookEventCount += extracted.hookEvents.length;
                 hookCommandInvocationCount += extracted.hookCommandInvocations.length;
                 editCount += extracted.edits.length;
@@ -2035,17 +2082,6 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
     },
 );
 
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        ingestTranscripts({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<TranscriptStats>,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
@@ -2070,11 +2106,11 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
     failedFiles: Schema.Number,
 }) {}
 
-export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const claudeStage: StageDef<ClaudeStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
     meta: StageMeta.make({ key: "claude", deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
         // Capture the stage span HERE (current span = the runner's
@@ -2086,7 +2122,7 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
         // genuine FS failure (e.g. an unreadable transcripts root or a
         // non-NotFound stat/stream error) so it dies as a defect rather
         // than masquerading as a recoverable DbError.
-        const result = yield* ingestTranscripts({
+        const result = yield* ingestTranscripts(write, {
             sinceDays,
             project: ctx.claudeProject,
             runId: ctx.runId,

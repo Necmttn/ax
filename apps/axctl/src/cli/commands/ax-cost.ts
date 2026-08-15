@@ -7,6 +7,7 @@
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { printNextLinks } from "../next-format.ts";
 import {
     COST_DEFAULT_WINDOW_DAYS,
@@ -395,7 +396,8 @@ const cmdCostImages = (input: {
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
-        const result = yield* fetchImageContext({ sinceDays: input.sinceDays, limit: input.limit });
+        const read = yield* CacheRead;
+        const result = yield* fetchImageContext(read, { sinceDays: input.sinceDays, limit: input.limit });
 
         if (input.json) {
             console.log(prettyPrint(result));

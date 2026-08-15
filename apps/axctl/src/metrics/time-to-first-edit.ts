@@ -1,8 +1,16 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { editToolSqlFilter, isEditTool, toolClassInputOf } from "@ax/lib/shared/tool-classes";
-import { isoMs, sessionRecordSource, sessionRefList } from "./util.ts";
+import { Effect, Schema } from "effect";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { isEditTool, toolClassInputOf } from "@ax/lib/shared/tool-classes";
+import { isoMs, sessionIdsClause } from "./util.ts";
+
+const EditRow = Schema.Struct({
+    session: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+const SessionStartRow = Schema.Struct({ session: Schema.String, started_at: Schema.NullOr(TimestampColumn) });
 
 /**
  * Time from a session's `started_at` to its first edit, in ms. null when the
@@ -18,28 +26,31 @@ import { isoMs, sessionRecordSource, sessionRefList } from "./util.ts";
  * first-edit min is folded in JS over the (per-session bounded) edit rows.
  */
 export const computeTimeToFirstEdit = (
+    read: CacheReadService,
     sessionIds: readonly string[],
-): Effect.Effect<Map<string, number | null>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, number | null>, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const map = new Map<string, number | null>();
         if (sessionIds.length === 0) return map;
         for (const id of sessionIds) map.set(id, null);
 
-        const refs = sessionRefList(sessionIds);
+        const toolSessions = sessionIdsClause("session", sessionIds);
 
         // Edit-class tool_call rows (bounded; deref-free; classified in JS).
-        const editRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(session) AS session, name, command_norm, type::string(ts) AS ts`
-            + ` FROM tool_call WHERE session IN [${refs}] AND ${editToolSqlFilter};`,
-        ))?.[0] ?? [];
+        const editRows = yield* read.rows(
+            EditRow,
+            `SELECT session, name, command_norm, ts FROM tool_call WHERE TRUE ${toolSessions.sql}`,
+            toolSessions.params,
+        );
         // Session start times. Record-list selection, NOT `FROM session WHERE
         // id IN [...]` - the id IN-list form silently matches nothing on some
         // tables (invariant + live verification: @ax/lib/shared/record-select).
-        const starts = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(id) AS session, type::string(started_at) AS started_at`
-            + ` FROM ${sessionRecordSource(sessionIds)};`,
-        ))?.[0] ?? [];
+        const sessionRows = sessionIdsClause("id", sessionIds);
+        const starts = yield* read.rows(
+            SessionStartRow,
+            `SELECT id AS session, started_at FROM session WHERE TRUE ${sessionRows.sql}`,
+            sessionRows.params,
+        );
 
         const firstEdit = new Map<string, number>();
         for (const r of editRows) {

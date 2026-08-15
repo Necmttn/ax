@@ -38,13 +38,11 @@
  * (experiment, kind) unique index keys on the kind string.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 
 export type CheckpointKind = "+3s" | "+10s" | "+30s";
@@ -67,12 +65,12 @@ export interface DeriveCheckpointsOpts {
 }
 
 interface CheckpointExperimentRow {
-    readonly id: string | { tb: string; id: string };
-    readonly created_at: string;
+    readonly id: string;
+    readonly created_at: Date;
     readonly opportunities: number;
     readonly addressed: number;
     readonly artifact_path: string | null;
-    readonly existing_kinds: ReadonlyArray<string>;
+    readonly existing_kinds: string | null;
     readonly current_frequency?: number | null;
     readonly baseline_json?: string | null;
     /** Sessions created after this experiment's accept time. Drives window cadence. */
@@ -128,15 +126,15 @@ export const dueCheckpointKinds = (
 };
 
 export const checkpointKey = (experimentKey: string, kind: CheckpointKind): string =>
-    `${safeKeyPart(experimentKey).slice(0, 64)}__${kind.replace("+", "_plus_")}`;
+    stableId("checkpoint", [experimentKey, kind]);
 
-export const buildCheckpointStatement = (params: {
+export const buildCheckpointRow = (params: {
     readonly experimentKey: string;
     readonly kind: CheckpointKind;
     readonly measured: CheckpointMeasured;
     readonly suggested: CheckpointVerdict;
     readonly observedAt: Date;
-}): string => {
+}) => {
     const key = checkpointKey(params.experimentKey, params.kind);
     // Map camelCase TS fields to the snake_case schema fields. Optional
     // current/baseline frequency are emitted only when defined so the
@@ -154,39 +152,57 @@ export const buildCheckpointStatement = (params: {
     if (typeof m.baselineFrequency === "number") {
         measuredJson.baseline_frequency = m.baselineFrequency;
     }
-    return `UPSERT ${recordRef("checkpoint", key)} CONTENT { experiment: ${recordRef("experiment", params.experimentKey)}, kind: ${surrealString(params.kind)}, measured: ${JSON.stringify(measuredJson)}, suggested: ${surrealString(params.suggested)}, user_verdict: NONE, observed_at: ${surrealDate(params.observedAt)} };`;
+    return cacheRow({
+        id: key,
+        experiment: params.experimentKey,
+        kind: params.kind,
+        measured: jsonParam(measuredJson),
+        suggested: params.suggested,
+        user_verdict: null,
+        observed_at: tsParam(params.observedAt),
+    });
 };
 
+const CheckpointExperimentDbRow = Schema.Struct({
+    id: Schema.String,
+    created_at: TimestampColumn,
+    opportunities: NumberFromBigIntColumn,
+    addressed: NumberFromBigIntColumn,
+    artifact_path: Schema.NullOr(Schema.String),
+    existing_kinds: Schema.NullOr(Schema.String),
+    current_frequency: Schema.NullOr(NumberFromBigIntColumn),
+    baseline_json: Schema.NullOr(Schema.String),
+    sessions_since_created: NumberFromBigIntColumn,
+});
+
 export const deriveCheckpoints = (
+    write: CacheWriteService,
     opts: DeriveCheckpointsOpts = {},
-): Effect.Effect<DeriveCheckpointsStats, DbError, SurrealClient> =>
+): Effect.Effect<DeriveCheckpointsStats, CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const now = opts.now ?? new Date();
 
-        const result = yield* db.query<[CheckpointExperimentRow[]]>(`
+        const experiments: readonly CheckpointExperimentRow[] = yield* write.rows(CheckpointExperimentDbRow, `
             SELECT
-                id,
-                type::string(created_at) AS created_at,
-                artifact_path,
-                (SELECT count() FROM opportunity WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS opportunities,
-                (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed,
-                (SELECT VALUE kind FROM checkpoint WHERE experiment = $parent.id) AS existing_kinds,
-                proposal.frequency AS current_frequency,
-                proposal.baseline AS baseline_json,
-                (SELECT count() FROM session WHERE created_at > $parent.created_at GROUP ALL)[0].count ?? 0 AS sessions_since_created
-            FROM experiment
-            WHERE locked_verdict IS NONE;
+                e.id, e.created_at, e.artifact_path,
+                (SELECT count(*) FROM opportunity o WHERE o.in_id = e.id) AS opportunities,
+                (SELECT count(*) FROM opportunity o WHERE o.in_id = e.id AND o.was_addressed) AS addressed,
+                (SELECT string_agg(c.kind, ',') FROM checkpoint c WHERE c.experiment = e.id) AS existing_kinds,
+                p.frequency AS current_frequency,
+                p.baseline AS baseline_json,
+                (SELECT count(*) FROM session s WHERE s.created_at > e.created_at) AS sessions_since_created
+            FROM experiment e
+            LEFT JOIN proposal p ON p.id = e.proposal
+            WHERE e.locked_verdict IS NULL
         `);
-        const experiments = result?.[0] ?? [];
 
         let inserted = 0;
         let skipped = 0;
-        const statements: string[] = [];
+        const rows = [];
         for (const exp of experiments) {
-            const experimentKey = recordKeyPart(exp.id, "experiment");
-            if (!experimentKey) continue;
-            const existing = new Set(opts.force ? [] : (exp.existing_kinds ?? []));
+            const experimentKey = exp.id;
+            const actualExisting = new Set(exp.existing_kinds?.split(",").filter(Boolean) ?? []);
+            const existing = new Set(opts.force ? [] : actualExisting);
             const sessionsSince = Number(exp.sessions_since_created ?? 0);
             const due = dueCheckpointKinds(sessionsSince, existing);
             if (due.length === 0) continue;
@@ -223,10 +239,10 @@ export const deriveCheckpoints = (
             const suggested = computeSuggestedVerdict(measured);
 
             for (const kind of due) {
-                if (opts.force && existing.has(kind)) {
-                    statements.push(`DELETE ${recordRef("checkpoint", checkpointKey(experimentKey, kind))};`);
+                if (opts.force && actualExisting.has(kind)) {
+                    yield* write.exec("DELETE FROM checkpoint WHERE id = ?", [checkpointKey(experimentKey, kind)]);
                 }
-                statements.push(buildCheckpointStatement({
+                rows.push(buildCheckpointRow({
                     experimentKey,
                     kind,
                     measured,
@@ -238,19 +254,10 @@ export const deriveCheckpoints = (
             skipped += (CHECKPOINT_WINDOWS_SESSIONS.length - due.length);
         }
 
-        yield* executeStatementsWith(db, statements, { chunkSize: 200 });
+        yield* write.putMany("checkpoint", rows);
         return {
             experimentsScanned: experiments.length,
             checkpointsInserted: inserted,
             checkpointsSkipped: skipped,
         };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        deriveCheckpoints().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<DeriveCheckpointsStats>,
-    );
-}

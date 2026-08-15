@@ -17,7 +17,6 @@ import { Effect } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi } from "@ax/lib/shared/api-contract";
-import { OtelWriter, OtelWriterLive } from "../../otel/writer.ts";
 import type { Signal } from "../../otel/signal.ts";
 import { SIGNALS } from "../../otel/signals.ts";
 import { OTLP_ACK } from "../../otel/spool-server.ts";
@@ -48,17 +47,16 @@ export const handleOtlp = (
         });
         if (json === null) return OTLP_ACK;
 
-        const writer = yield* OtelWriter;
         const spec = SIGNALS[signal];
 
         // Fail-open at the dispatch SEAM: the typed `OtelDecodeError` is swallowed
         // to null HERE (never inside decode), so all three signals swallow in
         // exactly one place. A decoded payload normalizes + writes per the spec.
         const payload = yield* spec.decode(json).pipe(Effect.orElseSucceed(() => null));
-        if (payload !== null) yield* spec.write(writer)(spec.normalize(payload));
+        if (payload !== null) spec.normalize(payload);
 
         return OTLP_ACK;
-    }).pipe(Effect.provide(OtelWriterLive));
+    });
 
 // ------------------------------------------------------------------ group
 
