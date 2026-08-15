@@ -613,17 +613,21 @@ passing a reader explicitly is named as work.
   - `packages/lib/src/testing/surreal.ts`
   - `packages/lib/src/transcript-locator.ts`
   - `packages/lib/src/transcript-staleness.ts`
-  - `scripts/benchmark-turn-fts.ts`
   - `scripts/classifier-smoke.ts`
   - `scripts/classifier-window-export.ts`
-  - `scripts/experiment-turn-fts.ts`
-  - `scripts/prototypes/ax-hook-report.ts`
-  - `scripts/prototypes/churn-gate-probe.ts`
-  - `scripts/prototypes/dupe-probe.ts`
-  - `scripts/prototypes/loaded-skills-run.ts`
-  - `scripts/prototypes/skillrev-backfill-probe.ts`
-  - `scripts/repair-agent-event-index.ts`
-  - `scripts/test-getfile.ts`
+  - ~~9 one-off Surreal probes and FTS benchmarks~~ - DELETED by w2-lib-core
+    (`benchmark-turn-fts`, `experiment-turn-fts`, `repair-agent-event-index`, `test-getfile`,
+    and the five `prototypes/`). Each measured or repaired something that does not exist in v2:
+    two were SurrealDB FTS benchmarks superseded by `scripts/bench/`, one repaired SurrealDB
+    `UNIQUE` index drift (a defect of that engine), and the rest were concluded probes whose
+    experiments have shipped or been abandoned.
+
+  **Carried forward from w2-lib-core, for whoever ports `queries/insights.ts` (w2-read-queries):**
+  the two classifier scripts above are the only lib-core files it could not port. They execute
+  `classifierThemesSql` / `harnessCandidatesSql` from `apps/axctl/src/queries/insights.ts` against a
+  raw `Surreal` client, so porting them before that module means duplicating its SQL. Port them in
+  the same change that ports `insights.ts`; both are wired into `package.json`
+  (`classifiers:smoke`, `classifiers:export-windows`), so neither can simply be dropped.
 
   SUPPORT (not in the 248; the Surreal DIALECT itself - every other chunk imports these, so they
   are the "sequence it FIRST" half of this chunk):
