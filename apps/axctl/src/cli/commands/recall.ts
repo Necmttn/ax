@@ -10,7 +10,8 @@ import {
 } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
-import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../../queries/recall.ts";
+import type { Clause } from "@ax/lib/duckdb/clause";
+import { PickerRow, projectPickerQuery, skillPickerQuery } from "../../queries/recall.ts";
 import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
 import { resolveCacheRepository } from "../../queries/repository-scope.ts";
 import { resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
