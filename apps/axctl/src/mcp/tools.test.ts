@@ -54,6 +54,18 @@ describe("axMcpTools advertised surface", () => {
             expect(typeof tool.register).toBe("function");
         }
     });
+
+    it("keeps each tool's exact runtime need in the registry", () => {
+        const runtimeOf = (name: string) => axMcpTools.find((tool) => tool.name === name)?.runtime;
+
+        expect(runtimeOf("recall")).toBe("cache");
+        expect(runtimeOf("roles")).toBe("judgment");
+        expect(runtimeOf("improve_list")).toBe("judgment");
+        expect(runtimeOf("skills_by_role")).toBe("cache-judgment");
+        expect(runtimeOf("skills_roles")).toBe("cache-judgment");
+        expect(runtimeOf("sessions_around")).toBe("legacy");
+        expect(runtimeOf("dojo_agenda")).toBe("legacy");
+    });
 });
 
 describe("dojo_agenda MCP tool", () => {
@@ -71,6 +83,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         let seen: unknown;
         const tool = defineMcpTool({
             name: "echo",
+            runtime: "legacy",
             description: "echo",
             inputSchema: { n: z.number(), s: z.string().optional() },
             run: async (args) => {
@@ -87,6 +100,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         let seen: Record<string, unknown> = { sentinel: true };
         const tool = defineMcpTool({
             name: "opt",
+            runtime: "legacy",
             description: "opt",
             inputSchema: { a: z.string().optional() },
             run: async (args) => {
@@ -101,6 +115,7 @@ describe("defineMcpTool (typed zod factory)", () => {
     it("rejects args that violate the shape at the parse boundary", async () => {
         const tool = defineMcpTool({
             name: "strict",
+            runtime: "legacy",
             description: "strict",
             inputSchema: { n: z.number() },
             run: async () => "unreachable",
@@ -115,6 +130,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         });
         const tool = defineMcpTool({
             name: "cache-failure",
+            runtime: "legacy",
             description: "cache failure",
             inputSchema: {},
             run: async () => Promise.reject(cause),
@@ -134,6 +150,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         const shape = { x: z.string() };
         const tool = defineMcpTool({
             name: "meta",
+            runtime: "legacy",
             description: "the-desc",
             inputSchema: shape,
             run: async () => null,

@@ -12,15 +12,11 @@
  * IMPORTANT: stdio MCP servers communicate JSON-RPC over stdout. Any log MUST
  * go to stderr (`console.error`) - a stray stdout write corrupts the stream.
  */
-import { ManagedRuntime } from "effect";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { Layer } from "effect";
-import { AppLayer } from "@ax/lib/layers";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
-import { JudgmentLive } from "../judgment.ts";
 import { AX_VERSION } from "../cli/version.ts";
-import { axMcpTools, type AxRuntime } from "./tools.ts";
+import { axMcpTools } from "./tools.ts";
+import { makeMcpRuntimePool, type McpRuntimePool } from "./runtime.ts";
 
 // Re-exported for callers (and the smoke test) that import the envelope helpers
 // from the server module. They live in `./wrap.ts` to avoid a server<->tools
@@ -34,10 +30,10 @@ export { wrapToolResult, wrapToolError } from "./wrap.ts";
  * shape stays a deferred generic inside the factory, there is no longer a
  * TS2589 cast here - registration is a plain typed call.
  */
-export const buildServer = (rt: AxRuntime): McpServer => {
+export const buildServer = (runtimes: McpRuntimePool): McpServer => {
     const server = new McpServer({ name: "ax", version: AX_VERSION });
     for (const tool of axMcpTools) {
-        tool.register(server, rt);
+        tool.register(server, runtimes);
     }
     return server;
 };
@@ -54,9 +50,9 @@ export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
     // CacheReadLive opens nothing until a query arrives, so a server whose
     // client never calls `recall` pays nothing for it - and one that starts
     // before the first ingest picks the snapshot up when it appears.
-    const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive));
+    const runtimes = makeMcpRuntimePool();
 
-    const server = buildServer(runtime);
+    const server = buildServer(runtimes);
     const transport = new StdioServerTransport();
 
     let shuttingDown = false;
@@ -64,7 +60,7 @@ export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
         if (shuttingDown) return;
         shuttingDown = true;
         await server.close().catch(() => undefined);
-        await runtime.dispose().catch(() => undefined);
+        await runtimes.dispose().catch(() => undefined);
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onSigterm);
         process.kill(process.pid, signal);
@@ -77,7 +73,7 @@ export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
     try {
         await server.connect(transport);
     } catch (err) {
-        await runtime.dispose().catch(() => undefined);
+        await runtimes.dispose().catch(() => undefined);
         throw err;
     }
 
