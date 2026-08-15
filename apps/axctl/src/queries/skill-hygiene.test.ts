@@ -7,6 +7,8 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Judgment } from "@ax/lib/sqlite";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { fetchSkillHygiene } from "./skill-hygiene.ts";
 
 // ---------------------------------------------------------------------------
@@ -17,19 +19,22 @@ import { fetchSkillHygiene } from "./skill-hygiene.ts";
 // the normal Record<string,unknown>[] statement results.
 type QueryResult = Array<unknown>;
 
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
+const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient | Judgment> => {
     const stub: SurrealClientShape = {
         query: (_sql: string) => {
             return Effect.succeed(results as unknown as [QueryResult, ...QueryResult[]]);
         },
         // biome-ignore lint: other methods not needed
     } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
+    return Layer.merge(
+        Layer.succeed(SurrealClient, stub),
+        judgmentTestLayer(() => (results[2] ?? []).map((skill_id) => ({ skill_id }))),
+    );
 };
 
 const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | Judgment>,
+    layer: Layer.Layer<SurrealClient | Judgment>,
 ) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 // ---------------------------------------------------------------------------

@@ -599,7 +599,6 @@ const classifiersLabelMiningCommand = Command.make(
                     process.exit(1);
                 }),
             ),
-            catchDbErrorAndExit("axctl classifiers label-mining"),
         );
     },
 ).pipe(

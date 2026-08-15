@@ -1,20 +1,35 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { showExperiment, formatShow } from "./show.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
-const layerWith = (...fixtures: unknown[][]) => {
-    let i = 0;
-    return Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.succeed([(fixtures[i++] ?? [])] as unknown as T),
-    } as never);
-};
+const layerWith = (found: boolean) => judgmentTestLayer((sql) => {
+    if (sql.includes("FROM proposal WHERE") || sql.includes("FROM proposal\n")) return found ? [{
+        id: "abc", dedupe_sig: "e7f3", title: "T", form: "guidance", hypothesis: "h",
+        status: "accepted", confidence: "high", frequency: 3, origin: "agent",
+        hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: null,
+        created_at: new Date("2026-05-20T00:00:00Z"), updated_at: new Date("2026-05-20T00:00:00Z"),
+    }] : [];
+    if (sql.includes("FROM guidance_proposal")) return found ? [{
+        proposal: "abc", file_target: "CLAUDE.md", section: null, suggested_text: "text",
+    }] : [];
+    if (sql.includes("FROM experiment")) return found ? [{
+        id: "exp", proposal: "abc", artifact: null, artifact_path: "/x/CLAUDE.md",
+        scaffolded_at: new Date("2026-05-20T00:00:00Z"), created_at: new Date("2026-05-20T00:00:00Z"),
+        locked_verdict: null, status: "scaffolded", task_path: null,
+    }] : [];
+    if (sql.includes("FROM checkpoint")) return found ? [{
+        id: "cp", experiment: "exp", kind: "early", measured: { ratio: 0.5 },
+        suggested: "adopted", user_verdict: null, observed_at: new Date("2026-05-25T00:00:00Z"),
+    }] : [];
+    return [];
+});
 
 describe("showExperiment", () => {
     test("returns null when nothing matches", async () => {
         const out = await Effect.runPromise(
             showExperiment({ sigOrId: "missing" })
-                .pipe(Effect.provide(layerWith([], [], []))),
+                .pipe(Effect.provide(layerWith(false))),
         );
         expect(out).toBeNull();
     });
@@ -22,18 +37,10 @@ describe("showExperiment", () => {
     test("returns proposal + experiment + checkpoints when found", async () => {
         const out = await Effect.runPromise(
             showExperiment({ sigOrId: "e7f3" })
-                .pipe(Effect.provide(layerWith(
-                    [{ dedupe_sig: "e7f3", title: "T", form: "guidance", hypothesis: "h",
-                        status: "accepted", confidence: "high", frequency: 3,
-                        updated_at: "2026-05-20T00:00:00Z", hook_payload: null, automation_payload: null }],
-                    [{ id: "experiment:abc", status: "scaffolded",
-                        artifact_path: "/x/CLAUDE.md", task_path: null, locked_verdict: null }],
-                    [{ kind: "early", observed_at: "2026-05-25T00:00:00Z",
-                        measured: { ratio: 0.5 }, suggested: "adopted", user_verdict: null }],
-                ))),
+                .pipe(Effect.provide(layerWith(true))),
         );
         expect(out?.proposal.shortId).toBe("e7f3");
-        expect(out?.experiment?.id).toBe("experiment:abc");
+        expect(out?.experiment?.id).toBe("exp");
         expect(out?.checkpoints).toHaveLength(1);
     });
 

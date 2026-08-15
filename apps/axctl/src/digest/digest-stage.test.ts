@@ -4,6 +4,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
 import { IngestContext } from "../ingest/stage/types.ts";
 import { digestStage, DigestStats } from "./digest-stage.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const ctx = IngestContext.make({
   cwd: "/tmp",
@@ -27,7 +28,7 @@ const dyingDb = Layer.succeed(SurrealClient, {
 describe("digestStage failure isolation", () => {
   it("a typed DB failure yields Success with 0 items (never aborts ingest)", async () => {
     const exit = await Effect.runPromiseExit(
-      digestStage.run(ctx).pipe(Effect.provide(failingDb)),
+      digestStage.run(ctx).pipe(Effect.provide(failingDb), Effect.provide(EmptyJudgmentTestLayer)),
     );
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
@@ -39,7 +40,7 @@ describe("digestStage failure isolation", () => {
 
   it("a DB defect (die) is also swallowed - Success with 0 items", async () => {
     const exit = await Effect.runPromiseExit(
-      digestStage.run(ctx).pipe(Effect.provide(dyingDb)),
+      digestStage.run(ctx).pipe(Effect.provide(dyingDb), Effect.provide(EmptyJudgmentTestLayer)),
     );
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {

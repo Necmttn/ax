@@ -5,7 +5,9 @@
 
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import type {
     SessionCompaction,
     SessionDetailPayload,
@@ -16,16 +18,14 @@ import type {
     SessionViewTurn,
 } from "@ax/lib/shared/dashboard-types";
 import { runQuery } from "@ax/lib/shared/graph-query";
-import {
-    sessionSkillRolesQuery,
-    type SessionSkillRoleEdge,
-} from "../queries/session-view.ts";
+import type { SessionSkillRoleEdge } from "../queries/session-view.ts";
 import {
     sessionCompactionsQuery,
     sessionShareTurnsQuery,
 } from "../queries/session-detail.ts";
 import type { ShareTurn } from "../share/artifact.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
+import { fetchSkillRoleEdgesByNames } from "./role-queries.ts";
 
 // Accepts both real UUIDs and our synthetic prefixed ids. Mirrors the
 // validation in fetchSessionDetail so we can safely inline the record id.
@@ -205,13 +205,10 @@ export const groupSessionSkillsByRole = (
 
 const fetchSessionSkillRoleGroups = (
     topSkills: ReadonlyArray<SessionTopSkill>,
-): Effect.Effect<ReadonlyArray<SessionSkillRoleGroup>, never, SurrealClient> =>
+): Effect.Effect<ReadonlyArray<SessionSkillRoleGroup>, CacheReadError | JudgmentError, CacheRead | Judgment> =>
     Effect.gen(function* () {
         const skillNames = topSkills.map((s) => s.skill);
-        const roleEdgesRaw = yield* runQuery(sessionSkillRolesQuery, { skillNames });
-        const roleEdges = roleEdgesRaw.filter(
-            (edge): edge is SessionSkillRoleEdge => edge !== null,
-        );
+        const roleEdges = yield* fetchSkillRoleEdgesByNames(skillNames);
         return groupSessionSkillsByRole(topSkills, roleEdges);
     });
 
@@ -222,7 +219,7 @@ const fetchSessionSkillRoleGroups = (
  */
 export const fetchSessionView: (
     opts: FetchSessionViewOptions,
-) => Effect.Effect<SessionViewPayload, DbError, SurrealClient> = Effect.fn(
+) => Effect.Effect<SessionViewPayload, DbError | CacheReadError | JudgmentError, SurrealClient | CacheRead | Judgment> = Effect.fn(
     "fetchSessionView",
 )(function* (opts) {
     const primary = yield* fetchSessionDetail(opts.sessionId);

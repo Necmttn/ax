@@ -38,14 +38,13 @@
  * (experiment, kind) unique index keys on the kind string.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { Judgment, NumberColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
 import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 export type CheckpointKind = "+3s" | "+10s" | "+30s";
 export type CheckpointVerdict =
@@ -64,19 +63,6 @@ export interface DeriveCheckpointsStats {
 export interface DeriveCheckpointsOpts {
     readonly now?: Date;
     readonly force?: boolean;
-}
-
-interface CheckpointExperimentRow {
-    readonly id: string | { tb: string; id: string };
-    readonly created_at: string;
-    readonly opportunities: number;
-    readonly addressed: number;
-    readonly artifact_path: string | null;
-    readonly existing_kinds: ReadonlyArray<string>;
-    readonly current_frequency?: number | null;
-    readonly baseline_json?: string | null;
-    /** Sessions created after this experiment's accept time. Drives window cadence. */
-    readonly sessions_since_created: number;
 }
 
 export interface CheckpointMeasured {
@@ -159,40 +145,34 @@ export const buildCheckpointStatement = (params: {
 
 export const deriveCheckpoints = (
     opts: DeriveCheckpointsOpts = {},
-): Effect.Effect<DeriveCheckpointsStats, DbError, SurrealClient> =>
+): Effect.Effect<DeriveCheckpointsStats, CacheReadError | JudgmentError, CacheRead | Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cache = yield* CacheRead;
+        const judgment = yield* Judgment;
         const now = opts.now ?? new Date();
-
-        const result = yield* db.query<[CheckpointExperimentRow[]]>(`
-            SELECT
-                id,
-                type::string(created_at) AS created_at,
-                artifact_path,
-                (SELECT count() FROM opportunity WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS opportunities,
-                (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed,
-                (SELECT VALUE kind FROM checkpoint WHERE experiment = $parent.id) AS existing_kinds,
-                proposal.frequency AS current_frequency,
-                proposal.baseline AS baseline_json,
-                (SELECT count() FROM session WHERE created_at > $parent.created_at GROUP ALL)[0].count ?? 0 AS sessions_since_created
-            FROM experiment
-            WHERE locked_verdict IS NONE;
-        `);
-        const experiments = result?.[0] ?? [];
+        const proposals = yield* listStoredProposals(100_000);
+        const experiments = proposals.filter((proposal) =>
+            proposal.experiment !== null && proposal.experiment.locked_verdict === null);
+        const CountRow = Schema.Struct({ count: NumberColumn });
 
         let inserted = 0;
         let skipped = 0;
-        const statements: string[] = [];
-        for (const exp of experiments) {
-            const experimentKey = recordKeyPart(exp.id, "experiment");
-            if (!experimentKey) continue;
-            const existing = new Set(opts.force ? [] : (exp.existing_kinds ?? []));
-            const sessionsSince = Number(exp.sessions_since_created ?? 0);
+        const writes: Array<Readonly<Record<string, SidecarParam>>> = [];
+        for (const proposal of experiments) {
+            const exp = proposal.experiment!;
+            const experimentKey = exp.id;
+            const existing = new Set(opts.force ? [] : exp.checkpoints.map((checkpoint) => checkpoint.kind));
+            const [opportunityRows, addressedRows, sessionRows] = yield* Effect.all([
+                cache.rows(CountRow, "SELECT count(*) AS count FROM opportunity WHERE in_id = ?", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*) AS count FROM opportunity WHERE in_id = ? AND was_addressed = true", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*) AS count FROM session WHERE created_at > ?", [exp.created_at]),
+            ], { concurrency: 3 });
+            const sessionsSince = sessionRows[0]?.count ?? 0;
             const due = dueCheckpointKinds(sessionsSince, existing);
             if (due.length === 0) continue;
 
-            const opportunities = Number(exp.opportunities ?? 0);
-            const addressed = Number(exp.addressed ?? 0);
+            const opportunities = opportunityRows[0]?.count ?? 0;
+            const addressed = addressedRows[0]?.count ?? 0;
             const ratio = opportunities === 0 ? 0 : addressed / opportunities;
 
             // proposal.baseline is stored as a JSON string (schema rule:
@@ -200,13 +180,13 @@ export const deriveCheckpoints = (
             // older proposals predating the frequency snapshot won't have
             // baseline.frequency and we just leave it undefined.
             let baselineFrequency: number | undefined;
-            const rawBaseline = exp.baseline_json;
+            const rawBaseline = proposal.baseline;
             if (typeof rawBaseline === "string" && rawBaseline.length > 0) {
                 const parsed = safeJsonParse<{ frequency?: number }>(rawBaseline);
                 if (parsed && typeof parsed.frequency === "number") baselineFrequency = parsed.frequency;
                 // non-JSON baseline (legacy) - null parse is ignored.
             }
-            const rawCurrent = exp.current_frequency;
+            const rawCurrent = proposal.frequency;
             const currentFrequency =
                 typeof rawCurrent === "number" && Number.isFinite(rawCurrent)
                     ? rawCurrent
@@ -223,34 +203,31 @@ export const deriveCheckpoints = (
             const suggested = computeSuggestedVerdict(measured);
 
             for (const kind of due) {
-                if (opts.force && existing.has(kind)) {
-                    statements.push(`DELETE ${recordRef("checkpoint", checkpointKey(experimentKey, kind))};`);
-                }
-                statements.push(buildCheckpointStatement({
-                    experimentKey,
+                writes.push({
+                    id: checkpointKey(experimentKey, kind),
+                    experiment: experimentKey,
                     kind,
-                    measured,
+                    measured: JSON.stringify({
+                        opportunities: measured.opportunities,
+                        addressed: measured.addressed,
+                        ratio: measured.ratio,
+                        built: measured.built,
+                        ...(measured.currentFrequency === undefined ? {} : { current_frequency: measured.currentFrequency }),
+                        ...(measured.baselineFrequency === undefined ? {} : { baseline_frequency: measured.baselineFrequency }),
+                    }),
                     suggested,
-                    observedAt: now,
-                }));
+                    user_verdict: null,
+                    observed_at: now,
+                });
                 inserted += 1;
             }
             skipped += (CHECKPOINT_WINDOWS_SESSIONS.length - due.length);
         }
 
-        yield* executeStatementsWith(db, statements, { chunkSize: 200 });
+        yield* judgment.transaction((transaction) => transaction.putMany("checkpoint", writes));
         return {
             experimentsScanned: experiments.length,
             checkpointsInserted: inserted,
             checkpointsSkipped: skipped,
         };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        deriveCheckpoints().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<DeriveCheckpointsStats>,
-    );
-}

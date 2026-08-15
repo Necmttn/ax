@@ -8,10 +8,9 @@
  *
  * Spec: docs/superpowers/specs/2026-06-15-spar-exclusion-tag-design.md
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 
 /**
  * RecordIds of sessions tagged as spar variants (behavioral-analytics
@@ -32,17 +31,15 @@ import type { DbError } from "@ax/lib/errors";
  */
 export const fetchSparSessionIds = (): Effect.Effect<
     readonly RecordId[],
-    DbError,
-    SurrealClient
+    JudgmentError,
+    Judgment
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // SELECT VALUE id returns the raw RecordId values (the surreal SDK's
-        // record-id form), NOT a string projection - so NOT IN against this
-        // array is a record-vs-record comparison.
-        const result = yield* db.query<[Array<unknown>]>(
-            `SELECT VALUE id FROM session WHERE labels != NONE AND string::contains(labels, 'spar');`,
+        const judgment = yield* Judgment;
+        const rows = yield* judgment.rows(
+            Schema.Struct({ session_id: TextColumn }),
+            "SELECT session_id FROM session_label WHERE label = ? ORDER BY session_id",
+            ["spar"],
         );
-        const rows = result?.[0] ?? [];
-        return rows.filter((r): r is RecordId => r instanceof RecordId);
+        return rows.map((row) => new RecordId("session", row.session_id));
     });

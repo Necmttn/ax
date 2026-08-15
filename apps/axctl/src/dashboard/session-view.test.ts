@@ -1,14 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import type {
     SessionLink,
     SessionTopSkill,
 } from "@ax/lib/shared/dashboard-types";
-import {
-    SESSION_SKILL_ROLES_SQL,
-    sessionSkillRolesQuery,
-} from "../queries/session-view.ts";
+import { cacheReadTestLayer, EmptyCacheReadTestLayer, EmptyJudgmentTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     fetchSessionView,
     groupSessionSkillsByRole,
@@ -63,31 +60,8 @@ describe("Session View shape helpers", () => {
     });
 });
 
-describe("session view role query", () => {
-    it("keeps skill names in bindings instead of interpolating them", () => {
-        const sql = sessionSkillRolesQuery.sql({
-            skillNames: ["debug-skill"],
-        });
-
-        expect(sql).toBe(SESSION_SKILL_ROLES_SQL.trim());
-        expect(sql).toContain("IN $skills");
-        expect(sql).not.toContain("debug-skill");
-        expect(sessionSkillRolesQuery.bindings?.({ skillNames: ["debug-skill"] }))
-            .toEqual({ skills: ["debug-skill"] });
-    });
-
-    it("maps invalid role rows to null at the typed query seam", () => {
-        expect(
-            sessionSkillRolesQuery.mapRow(
-                { skill_name: "debug-skill", role_name: "debugging" },
-                0,
-            ),
-        ).toEqual({ skill_name: "debug-skill", role_name: "debugging" });
-        expect(
-            sessionSkillRolesQuery.mapRow({ skill_name: "debug-skill" }, 0),
-        ).toBeNull();
-    });
-});
+const viewLayer = (surreal: ReturnType<typeof makeTestSurrealClient>["layer"]) =>
+    Layer.mergeAll(surreal, EmptyCacheReadTestLayer, EmptyJudgmentTestLayer);
 
 describe("fetchSessionView", () => {
     it("includes ordered normalized turns in the requested text mode", async () => {
@@ -145,7 +119,7 @@ describe("fetchSessionView", () => {
                 expand: new Set(),
                 expandAll: false,
                 turns: "excerpt",
-            }).pipe(Effect.provide(tc.layer)),
+            }).pipe(Effect.provide(viewLayer(tc.layer))),
         );
 
         expect(turnQueries).toBe(1);
@@ -176,7 +150,7 @@ describe("fetchSessionView", () => {
                 expand: new Set(),
                 expandAll: false,
                 turns: "full",
-            }).pipe(Effect.provide(tc.layer)),
+            }).pipe(Effect.provide(viewLayer(tc.layer))),
         );
 
         expect(turnQueries).toBe(2);
@@ -199,20 +173,10 @@ describe("fetchSessionView", () => {
 
         const tc = makeTestSurrealClient({
             denyWrites: true,
-            fallback: (sql, bindings) => {
+            fallback: (sql) => {
                 if (sql.includes("FROM turn")) {
                     turnQueries += 1;
                     return [[]];
-                }
-
-                if (sql.includes("FROM plays_role")) {
-                    seenRoleBindings.push(bindings);
-                    return [
-                        [
-                            { skill_name: "plan-skill", role_name: "planning" },
-                            { skill_name: "debug-skill", role_name: "debugging" },
-                        ],
-                    ];
                 }
 
                 const isChild = sql.includes(`session:⟨${childId}⟩`);
@@ -273,7 +237,24 @@ describe("fetchSessionView", () => {
                 expandAll: false,
                 byRole: true,
             }).pipe(
-                Effect.provide(tc.layer),
+                Effect.provide(Layer.mergeAll(
+                    tc.layer,
+                    cacheReadTestLayer((_sql, params) => {
+                        seenRoleBindings.push(params);
+                        return [
+                            { id: "skill:plan", name: "plan-skill" },
+                            { id: "skill:debug", name: "debug-skill" },
+                            { id: "skill:raw", name: "raw-skill" },
+                        ];
+                    }),
+                    judgmentTestLayer((_sql, params) => {
+                        seenRoleBindings.push(params);
+                        return [
+                            { skill_id: "skill:plan", role_name: "planning" },
+                            { skill_id: "skill:debug", role_name: "debugging" },
+                        ];
+                    }),
+                )),
             ),
         );
 
@@ -286,7 +267,8 @@ describe("fetchSessionView", () => {
             { role: null, skills: [{ skill: "raw-skill", count: 2 }] },
         ]);
         expect(seenRoleBindings).toEqual([
-            { skills: ["plan-skill", "debug-skill", "raw-skill"] },
+            ["plan-skill", "debug-skill", "raw-skill"],
+            ["skill:plan", "skill:debug", "skill:raw"],
         ]);
         expect(turnQueries).toBe(0);
         expect("turns" in result).toBe(false);

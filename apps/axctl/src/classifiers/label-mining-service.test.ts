@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 import {
     EXPORT_REVIEW_LIMIT,
     LabelMiningService,
@@ -41,7 +43,7 @@ const runWithDb = <A>(
     effect: Effect.Effect<
         A,
         unknown,
-        LabelMiningService | SurrealClient | FileSystem.FileSystem | Path.Path
+        LabelMiningService | SurrealClient | Judgment | FileSystem.FileSystem | Path.Path
     >,
     client: SurrealClientShape,
 ): Promise<A> =>
@@ -49,6 +51,7 @@ const runWithDb = <A>(
         effect.pipe(
             Effect.provide(LabelMiningServiceLive),
             Effect.provideService(SurrealClient, client),
+            Effect.provide(EmptyJudgmentTestLayer),
             Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
         ),
     );

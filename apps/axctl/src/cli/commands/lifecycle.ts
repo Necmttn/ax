@@ -1,9 +1,12 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
+import { Effect } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { Judgment, checkSidecarRefs, collectSidecarRefs, fetchCacheIds } from "@ax/lib/sqlite";
 import {
     cmdDaemon,
-    cmdDoctor,
+    collectDoctorReport,
+    formatDoctorReport,
     cmdInstall,
     cmdSetup,
     cmdUninstall,
@@ -108,7 +111,28 @@ export const daemonCommand = Command.make("daemon").pipe(
 export const doctorCommand = Command.make(
     "doctor",
     { json: jsonFlag },
-    ({ json }) => cmdDoctor(boolArg("json", json)),
+    ({ json }) => Effect.gen(function* () {
+        const report = yield* collectDoctorReport();
+        const integrity = yield* Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            const cache = yield* CacheRead;
+            const refs = yield* collectSidecarRefs(judgment);
+            const ids = yield* fetchCacheIds(cache);
+            const result = checkSidecarRefs(refs, ids);
+            return {
+                name: "sidecar-refs",
+                ok: result.ok,
+                detail: result.ok
+                    ? `${result.checked} cache reference(s) valid`
+                    : `${result.dangling} of ${result.checked} cache reference(s) dangling`,
+            };
+        }).pipe(Effect.catch((error) => Effect.succeed({
+            name: "sidecar-refs",
+            ok: false,
+            detail: `integrity check unavailable: ${String(error)}`,
+        })));
+        console.log(formatDoctorReport({ ...report, checks: [...report.checks, integrity] }, json));
+    }),
 ).pipe(Command.withDescription("Check local installation health"));
 
 export const uninstallCommand = Command.make(
@@ -127,6 +151,6 @@ export const lifecycleRuntime: RuntimeManifest = {
     install: "none",
     setup: "none",
     daemon: { runtime: "none", hidden: true },
-    doctor: { runtime: "none", hidden: true },
+    doctor: { runtime: "cache", hidden: true },
     uninstall: { runtime: "none", hidden: true },
 };

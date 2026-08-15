@@ -6,12 +6,14 @@ import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 
 import { fetchThinking, reasoningCostUsd, rollupThinkingByModel } from "./thinking-analytics.ts";
 
 type QueryResult = Array<Record<string, unknown>>;
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
+const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient | Judgment>, layer: Layer.Layer<SurrealClient | Judgment>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 /**
@@ -27,7 +29,7 @@ const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Laye
 const makeThinkingMock = (
     batchResults: QueryResult[],
     sparRids: RecordId[] = [],
-): Layer.Layer<SurrealClient> => {
+): Layer.Layer<SurrealClient | Judgment> => {
     const tc = makeTestSurrealClient({
         denyWrites: true,
         routes: {
@@ -38,7 +40,9 @@ const makeThinkingMock = (
         // fallback: the batched 5-statement query returns batchResults tuple
         fallback: batchResults as unknown as Array<unknown[]>,
     });
-    return tc.layer;
+    return Layer.merge(tc.layer, judgmentTestLayer(() => sparRids.map((id) => ({
+        session_id: String(id).replace(/^session:[`⟨]?/, "").replace(/[`⟩]$/, ""),
+    }))));
 };
 
 describe("rollupThinkingByModel", () => {

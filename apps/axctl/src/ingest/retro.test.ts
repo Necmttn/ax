@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildRetroStatement, composeHeuristicRetro } from "./retro.ts";
+import { composeHeuristicRetro, retroRecordKey } from "./retro.ts";
 
 const baseStat = {
     id: "session:abc",
@@ -78,36 +78,8 @@ describe("composeHeuristicRetro", () => {
     });
 });
 
-describe("buildRetroStatement", () => {
-    test("upserts the retro table with session ref + frontmatter-style fields", () => {
-        const sql = buildRetroStatement({
-            sessionId: "02dd635c-5ae9-4aed-b6c9-7823e2125683",
-            source: "heuristic",
-            payload: {
-                tried: "60 turn(s) · top tool: Bash ×15",
-                worked: "1 commit(s) landed",
-                failed: "Bash failed ×3",
-                next: "package a pre-Bash guard",
-            },
-            raw: '{"hello":1}',
-            createdAt: "2026-05-26T07:20:00.000Z",
-        });
-        expect(sql).toContain("UPSERT retro:");
-        expect(sql).toContain("session: session:");
-        expect(sql).toContain("source: \"heuristic\"");
-        expect(sql).toContain("tried: \"60 turn(s)");
-        expect(sql).toContain("worked: \"1 commit(s) landed\"");
-        expect(sql).toContain("next: \"package a pre-Bash guard\"");
-    });
-
-    test("null worked/failed/next serialize as NONE", () => {
-        const sql = buildRetroStatement({
-            sessionId: "abc",
-            source: "manual",
-            payload: { tried: "x", worked: null, failed: null, next: null },
-        });
-        expect(sql).toContain("worked: NONE");
-        expect(sql).toContain("failed: NONE");
-        expect(sql).toContain("next: NONE");
+describe("retroRecordKey", () => {
+    test("is stable for bare and prefixed session ids", () => {
+        expect(retroRecordKey("session:abc")).toBe(retroRecordKey("abc"));
     });
 });

@@ -33,6 +33,75 @@ import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 /** Everything these fetchers can fail with: one engine's errors or the other's. */
 export type RoleQueryError = CacheReadError | JudgmentError;
 
+const ClassifiedSkillIdRow = Schema.Struct({ skill_id: Schema.String });
+const SkillRoleWeightRow = Schema.Struct({
+    skill_id: Schema.String,
+    role_name: Schema.String,
+    effective_weight: Schema.Number,
+});
+
+export const fetchClassifiedSkillIds = (): Effect.Effect<readonly string[], JudgmentError, Judgment> =>
+    Effect.gen(function* () {
+        const judgment = yield* Judgment;
+        const rows = yield* judgment.rows(
+            ClassifiedSkillIdRow,
+            `SELECT DISTINCT in_id AS skill_id FROM plays_role
+             WHERE source IN ('frontmatter', 'brief', 'user')`,
+        );
+        return rows.map((row) => row.skill_id);
+    });
+
+export const fetchSkillRoleWeights = (): Effect.Effect<
+    ReadonlyArray<typeof SkillRoleWeightRow.Type>,
+    JudgmentError,
+    Judgment
+> => Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    return yield* judgment.rows(
+        SkillRoleWeightRow,
+        `SELECT pr.in_id AS skill_id, r.name AS role_name,
+                max(coalesce(pr.weight, r.weight, 1.0), 1.0) AS effective_weight
+         FROM plays_role pr JOIN role r ON r.id = pr.out_id
+         WHERE pr.source IN ('frontmatter', 'brief', 'user')`,
+    );
+});
+
+const NamedSkillRow = Schema.Struct({ id: Schema.String, name: Schema.String });
+const NamedRoleEdgeRow = Schema.Struct({ skill_id: Schema.String, role_name: Schema.String });
+
+/** Resolve role decisions for skill names without copying sidecar SQL into callers. */
+export const fetchSkillRoleEdgesByNames = (
+    skillNames: ReadonlyArray<string>,
+): Effect.Effect<
+    ReadonlyArray<{ readonly skill_name: string; readonly role_name: string }>,
+    RoleQueryError,
+    CacheRead | Judgment
+> => Effect.gen(function* () {
+    if (skillNames.length === 0) return [];
+    const read = yield* CacheRead;
+    const judgment = yield* Judgment;
+    const skills = yield* read.rows(
+        NamedSkillRow,
+        `SELECT id, name FROM skill WHERE name IN (${placeholders(skillNames.length)})`,
+        [...skillNames],
+    );
+    if (skills.length === 0) return [];
+    const ids = skills.map((skill) => skill.id);
+    const roles = yield* judgment.rows(
+        NamedRoleEdgeRow,
+        `SELECT pr.in_id AS skill_id, r.name AS role_name
+         FROM plays_role pr JOIN role r ON r.id = pr.out_id
+         WHERE pr.in_id IN (${placeholders(ids.length)})
+           AND pr.source IN ('frontmatter', 'brief', 'user')`,
+        ids,
+    );
+    const names = new Map(skills.map((skill) => [skill.id, skill.name] as const));
+    return roles.flatMap((role) => {
+        const skillName = names.get(role.skill_id);
+        return skillName ? [{ skill_name: skillName, role_name: role.role_name }] : [];
+    });
+});
+
 // ---------------------------------------------------------------------------
 // Row types
 // ---------------------------------------------------------------------------

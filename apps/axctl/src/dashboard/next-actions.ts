@@ -9,7 +9,6 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import type {
     NextActionCard,
     NextActionKind,
@@ -449,11 +448,11 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
      * sources - including tool_failure which normally swallows DB errors
      * internally - will add a note when the DB hangs.
      */
-    const guarded = <A>(
+    const guarded = <A, R>(
         source: NextActionKind,
-        eff: Effect.Effect<A, unknown, SurrealClient>,
+        eff: Effect.Effect<A, unknown, R>,
         empty: A,
-    ): Effect.Effect<A, never, SurrealClient> => {
+    ): Effect.Effect<A, never, R> => {
         const timeoutMs = nextActionSourceTimeoutMs(source, opts?.sourceTimeoutMs);
         return eff.pipe(
 	            Effect.timeoutOrElse({

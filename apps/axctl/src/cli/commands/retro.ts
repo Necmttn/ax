@@ -1,14 +1,15 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { Judgment, TextColumn, TimestampColumn } from "@ax/lib/sqlite";
 import { recordRef } from "@ax/lib/shared/surql";
-import { retroFromSession, retroRecordKey, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
+import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
 import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
-import { proposalKey, runPropose } from "../../improve/propose.ts";
+import { runPropose } from "../../improve/propose.ts";
 import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
 import { cmdRetroReflect } from "../retro-reflect.ts";
 import { cmdRetroMeta } from "../retro-meta.ts";
@@ -116,11 +117,6 @@ const cmdRetroEmit = (input: {
             const filed: Array<{ status: string; title: string; sig: string }> = [];
             for (const proposal of parsed.proposals ?? []) {
                 const result = yield* runPropose(proposal);
-                yield* db.query(
-                    `RELATE ${recordRef("proposal", proposalKey(result.sig))}->cites_evidence->${
-                        recordRef("retro", retroRecordKey(sessionKey))
-                    } SET kind = "retro";`,
-                );
                 filed.push({ status: result.status, title: result.title, sig: result.sig });
             }
 
@@ -191,18 +187,27 @@ const cmdRetroList = (input: {
         const json = input.json;
         const limit = requirePositiveInt("retro list", "limit", input.limit);
         const since = input.since;
-        const db = yield* SurrealClient;
-        const where = since ? `WHERE created_at > time::now() - ${parseInt(since, 10) || 7}d` : "";
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, session, source, tried, failed, next, type::string(created_at) AS created_at
-             FROM retro ${where} ORDER BY created_at DESC LIMIT ${limit};`,
+        const judgment = yield* Judgment;
+        const RetroListRow = Schema.Struct({
+            id: TextColumn,
+            session: TextColumn,
+            source: TextColumn,
+            tried: TextColumn,
+            failed: Schema.NullOr(TextColumn),
+            next: Schema.NullOr(TextColumn),
+            created_at: TimestampColumn,
+        });
+        const cutoff = since ? new Date(Date.now() - (parseInt(since, 10) || 7) * 86_400_000) : null;
+        const list = yield* judgment.rows(
+            RetroListRow,
+            `SELECT id, session, source, tried, failed, next, created_at FROM retro ${cutoff ? "WHERE created_at > ?" : ""} ORDER BY created_at DESC LIMIT ?`,
+            cutoff ? [cutoff, limit] : [limit],
         );
-        const list = rows?.[0] ?? [];
         if (json) { console.log(prettyPrint(list)); return; }
         if (list.length === 0) { console.log("(no retros yet - try `ax retro emit`)"); return; }
         for (const row of list) {
             const tried = String(row.tried ?? "").slice(0, 60);
-            console.log(`${String(row.created_at ?? "?")}  [${String(row.source ?? "?")}]  ${String(row.session ?? "?")}`);
+            console.log(`${row.created_at.toISOString()}  [${row.source}]  session:${row.session}`);
             console.log(`  ${tried}${tried.length >= 60 ? "…" : ""}`);
             if (row.failed) console.log(`  ! ${String(row.failed).slice(0, 60)}`);
             if (row.next) console.log(`  → ${String(row.next).slice(0, 60)}`);
@@ -673,5 +678,17 @@ export const retroCommand = Command.make("retro").pipe(
 );
 
 export const retroRuntime: RuntimeManifest = {
-    retro: "db",
+    retro: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            emit: "db",
+            list: "cache",
+            pending: "db",
+            brief: "db",
+            reflect: "db",
+            meta: "db",
+            plan: "db",
+        },
+    },
 };

@@ -411,8 +411,6 @@ const cmdSkillsWeighted = (input: SkillsWeightedInput) =>
                 doctorThreshold,
                 includeTools,
             }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills weighted"),
         );
 
         if (json) {

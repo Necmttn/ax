@@ -1,17 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { listProposals, type ProposalRow } from "./list.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 // Capture the SQL the function builds while returning seeded rows.
 const capturing = (rows: ReadonlyArray<unknown>) => {
     const seen: string[] = [];
-    const layer = Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+    const layer = judgmentTestLayer((sql) => {
             seen.push(sql);
-            return Effect.succeed([rows] as unknown as T);
-        },
-    } as never);
+            return rows.map((value) => ({
+                ...(value as Record<string, unknown>),
+                created_at: new Date(String((value as Record<string, unknown>).created_at)),
+            }));
+        });
     return { seen, layer };
 };
 
@@ -35,9 +36,9 @@ describe("listProposals", () => {
             listProposals({}).pipe(Effect.provide(layer)),
         );
         expect(out).toHaveLength(1);
-        expect(seen[0]).toContain("WHERE status = \"open\"");
+        expect(seen[0]).toContain("WHERE status = ?");
         expect(seen[0]).toContain("ORDER BY frequency DESC, created_at DESC");
-        expect(seen[0]).toContain("LIMIT 30");
+        expect(seen[0]).toContain("LIMIT ?");
         expect(seen[0]).toContain("FROM proposal");
     });
 
@@ -55,7 +56,7 @@ describe("listProposals", () => {
         await Effect.runPromise(
             listProposals({ status: "accepted", form: "hook" }).pipe(Effect.provide(layer)),
         );
-        expect(seen[0]).toContain("WHERE status = \"accepted\" AND form = \"hook\"");
+        expect(seen[0]).toContain("WHERE status = ? AND form = ?");
     });
 
     test("form filter alone (status all) yields WHERE form only", async () => {
@@ -63,7 +64,7 @@ describe("listProposals", () => {
         await Effect.runPromise(
             listProposals({ status: "all", form: "guidance" }).pipe(Effect.provide(layer)),
         );
-        expect(seen[0]).toContain("WHERE form = \"guidance\"");
+        expect(seen[0]).toContain("WHERE form = ?");
         expect(seen[0]).not.toContain("status =");
     });
 
@@ -72,7 +73,7 @@ describe("listProposals", () => {
         await Effect.runPromise(
             listProposals({ limit: 5 }).pipe(Effect.provide(layer)),
         );
-        expect(seen[0]).toContain("LIMIT 5");
+        expect(seen[0]).toContain("LIMIT ?");
     });
 
     test("returns the first result page or empty array", async () => {
