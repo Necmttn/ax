@@ -13,8 +13,9 @@
  * Plugin-namespace twins are collapsed by content_hash (same SKILL.md = two
  * skill rows), summing activations and keeping the canonical (bare) name.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 export interface SkillLoadedRow {
@@ -30,26 +31,39 @@ interface LoadedRowWithHash extends SkillLoadedRow {
     readonly contentHash: string | null;
 }
 
-const SQL = `
-SELECT type::string(out) AS sid, count() AS activations FROM loaded GROUP BY sid;
-SELECT type::string(id) AS id, name, content_hash FROM skill;
-`;
+const LoadedCountRow = Schema.Struct({
+    sid: Schema.String,
+    activations: NumberFromBigIntColumn,
+});
+
+const LoadedSkillRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    content_hash: Schema.NullOr(Schema.String),
+});
 
 export const fetchSkillLoaded = Effect.fn("queries.fetchSkillLoaded")(function* (
     input: SkillLoadedInput,
 ) {
-    const db = yield* SurrealClient;
-    const [counts, skills] = yield* db.query<[
-        Array<{ sid: string; activations: number }>,
-        Array<{ id: string; name: string; content_hash: string | null }>,
-    ]>(SQL);
+    const [counts, skills] = yield* Effect.all([
+        cacheRows(
+            LoadedCountRow,
+            { sql: "SELECT out_id AS sid, count(*) AS activations FROM loaded GROUP BY out_id", params: [] },
+            "skills loaded counts",
+        ),
+        cacheRows(
+            LoadedSkillRow,
+            { sql: "SELECT id, name, content_hash FROM skill", params: [] },
+            "skills loaded catalog",
+        ),
+    ]);
 
     const byId = new Map(
-        (skills ?? []).map((s) => [s.id, s]),
+        skills.map((s) => [s.id, s]),
     );
 
     const rows: LoadedRowWithHash[] = [];
-    for (const c of counts ?? []) {
+    for (const c of counts) {
         const skill = byId.get(c.sid);
         if (!skill) continue;
         rows.push({

@@ -5,8 +5,7 @@
  * to exercise deref-free join logic, filtering, sorting, and limit.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import { fetchSkillHygiene } from "./skill-hygiene.ts";
 
 // ---------------------------------------------------------------------------
@@ -15,22 +14,8 @@ import { fetchSkillHygiene } from "./skill-hygiene.ts";
 
 // Allow unknown[] so SELECT VALUE results (bare strings) typecheck alongside
 // the normal Record<string,unknown>[] statement results.
-type QueryResult = Array<unknown>;
-
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => {
-            return Effect.succeed(results as unknown as [QueryResult, ...QueryResult[]]);
-        },
-        // biome-ignore lint: other methods not needed
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
-
-const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
-) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+const makeMockDb = cacheReadResults;
+const run = runWithCacheRead;
 
 // ---------------------------------------------------------------------------
 // fetchSkillHygiene
@@ -56,7 +41,7 @@ describe("fetchSkillHygiene", () => {
                     { id: "skill:rare", name: "rare", dir_path: "/skills/rare" },
                 ],
                 // statement 3: classified skill ids (SELECT VALUE -> bare values)
-                ["skill:tagged"],
+                [{ id: "skill:tagged" }],
             ]),
         );
         expect(rows).toEqual([{ name: "composto", invocations: 41, sessions: 12 }]);
@@ -130,7 +115,7 @@ describe("fetchSkillHygiene", () => {
             makeMockDb([
                 [{ sid: "skill:foo", invocations: 10, sessions: 4 }],
                 [{ id: "skill:foo", name: "foo", dir_path: "/skills/foo" }],
-                ["skill:foo"],
+                [{ id: "skill:foo" }],
             ]),
         );
         expect(rows).toEqual([]);
@@ -179,7 +164,7 @@ describe("fetchSkillHygiene", () => {
                     { id: "skill:bare", name: "foo", dir_path: "/s/foo", content_hash: "h1" },
                     { id: "skill:ns", name: "necmttn:foo", dir_path: "/s/foo", content_hash: "h1" },
                 ],
-                ["skill:ns"], // only the namespaced twin is classified
+                [{ id: "skill:ns" }], // only the namespaced twin is classified
             ]),
         );
         // collapsed -> classified -> dropped entirely

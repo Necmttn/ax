@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import {
     UNUSED_RECENT_SQL,
     UNUSED_SUMMARY_SQL,
@@ -12,10 +12,10 @@ import {
 } from "./unused-skills.ts";
 
 describe("unused-skills SQL", () => {
-    test("recent scan splices a validated day window and groups by out", () => {
+    test("recent scan binds a validated day window and groups by out_id", () => {
         const sql = UNUSED_RECENT_SQL(7);
-        expect(sql).toContain("time::now() - 7d");
-        expect(sql).toContain("GROUP BY out");
+        expect(sql).toContain("CURRENT_TIMESTAMP - (? * INTERVAL '1 day')");
+        expect(sql).toContain("GROUP BY out_id");
         expect(sql).toContain("FROM invoked");
     });
 
@@ -31,13 +31,13 @@ describe("unused-skills SQL", () => {
     });
 
     test("never-invoked scan excludes tombstoned skills", () => {
-        expect(UNUSED_NEVER_INVOKED_SQL).toContain("array::len(<-invoked) = 0");
-        expect(UNUSED_NEVER_INVOKED_SQL).toContain("deleted_at IS NONE");
+        expect(UNUSED_NEVER_INVOKED_SQL).toContain("NOT EXISTS");
+        expect(UNUSED_NEVER_INVOKED_SQL).toContain("deleted_at IS NULL");
     });
 
     test("skill rows query is a cheap projection that excludes tombstones", () => {
         expect(UNUSED_SKILL_ROWS_SQL).toContain("SELECT id, name, scope FROM skill");
-        expect(UNUSED_SKILL_ROWS_SQL).toContain("deleted_at IS NONE");
+        expect(UNUSED_SKILL_ROWS_SQL).toContain("deleted_at IS NULL");
     });
 });
 
@@ -137,19 +137,19 @@ describe("mergeUnusedRows", () => {
 
 describe("fetchUnusedSkills", () => {
     test("runs the 4 scans and merges", async () => {
-        const db = makeMockDb([
-            [[{ skill_id: "skill:a", recent: 3 }]],                                            // recent
-            [[
+        const db = cacheReadResults([
+            [{ skill_id: "skill:a", recent: 3 }],                                            // recent
+            [
                 { skill_id: "skill:a", total_inv: 50, last_used: "2026-06-09T00:00:00.000Z" },
                 { skill_id: "skill:b", total_inv: 9, last_used: "2026-04-01T00:00:00.000Z" },
-            ]],                                                                                 // summary
-            [[
+            ],                                                                                 // summary
+            [
                 { id: "skill:a", name: "alpha", scope: "user" },
                 { id: "skill:b", name: "beta", scope: "plugin" },
-            ]],                                                                                 // skill rows
-            [[{ name: "delta", scope: "user" }]],                                               // never invoked
+            ],                                                                                 // skill rows
+            [{ name: "delta", scope: "user" }],                                               // never invoked
         ]);
-        const rows = await runWithMock(db, fetchUnusedSkills({ days: 7 }));
+        const rows = await runWithCacheRead(fetchUnusedSkills({ days: 7 }), db);
         expect(rows.map((r) => r.name)).toEqual(["delta", "beta"]);
         expect(rows[0]).toEqual({ name: "delta", scope: "user", total_inv: 0, last_used: null });
     });

@@ -13,8 +13,9 @@
  * 17 MB single line. So we aggregate over the edge table only and look up
  * skill rows by id in a separate cheap query, merging in TS.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { dateField } from "@ax/lib/shared/row-fields";
 
 const checkedDays = (days: number): number => {
@@ -25,32 +26,41 @@ const checkedDays = (days: number): number => {
 };
 
 /** Skills with ≥1 invocation inside the window - the "still active" set. */
-export const UNUSED_RECENT_SQL = (days: number): string => `
-SELECT out AS skill_id, count() AS recent
+export const UNUSED_RECENT_SQL = (days: number): string => {
+checkedDays(days);
+return `
+SELECT out_id AS skill_id, count(*) AS recent
 FROM invoked
-WHERE ts > time::now() - ${checkedDays(days)}d
-GROUP BY out;`;
+WHERE ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+GROUP BY out_id;`;
+};
 
 /** Bulk per-skill totals + last_used over the whole edge table. */
 export const UNUSED_SUMMARY_SQL = `
 SELECT
-    out AS skill_id,
-    count() AS total_inv,
-    math::max(ts) AS last_used
+    out_id AS skill_id,
+    count(*) AS total_inv,
+    max(ts) AS last_used
 FROM invoked
-GROUP BY out;`;
+GROUP BY out_id;`;
 
 /** Cheap id → (name, scope) lookup, merged in TS. Tombstoned skills
  *  (deleted_at set) are excluded here - their old `invoked` edges survive
  *  deletion, so without this filter they'd resurface in the unused listing.
  *  Mirrors the never-invoked branch below. */
-export const UNUSED_SKILL_ROWS_SQL = `SELECT id, name, scope FROM skill WHERE deleted_at IS NONE;`;
+export const UNUSED_SKILL_ROWS_SQL = `SELECT id, name, scope FROM skill WHERE deleted_at IS NULL;`;
 
 /** Skills with literally zero invocations don't show up in the GROUP BY
  *  scan; pull them straight from the skill table so the "never used" rows
  *  still appear. */
 export const UNUSED_NEVER_INVOKED_SQL = `
-SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS NONE;`;
+SELECT s.name, s.scope FROM skill s
+WHERE s.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM invoked i WHERE i.out_id = s.id);`;
+
+const RecentRow = Schema.Struct({ skill_id: Schema.String, recent: NumberFromBigIntColumn });
+const SummaryRow = Schema.Struct({ skill_id: Schema.String, total_inv: NumberFromBigIntColumn, last_used: TimestampColumn });
+const SkillRow = Schema.Struct({ id: Schema.String, name: Schema.String, scope: Schema.String });
+const NeverRow = Schema.Struct({ name: Schema.String, scope: Schema.String });
 
 export interface UnusedSkillRow {
     readonly name: string;
@@ -130,21 +140,20 @@ export interface UnusedSkillsParams {
 
 export const fetchUnusedSkills = Effect.fn("queries.fetchUnusedSkills")(
     function* (params: UnusedSkillsParams) {
-        const db = yield* SurrealClient;
-        const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
+        const [recent, summary, skills, neverInvoked] = yield* Effect.all(
             [
-                db.query<[Array<Record<string, unknown>>]>(UNUSED_RECENT_SQL(params.days)),
-                db.query<[Array<Record<string, unknown>>]>(UNUSED_SUMMARY_SQL),
-                db.query<[Array<Record<string, unknown>>]>(UNUSED_SKILL_ROWS_SQL),
-                db.query<[Array<Record<string, unknown>>]>(UNUSED_NEVER_INVOKED_SQL),
+                cacheRows(RecentRow, { sql: UNUSED_RECENT_SQL(params.days), params: [checkedDays(params.days)] }, "unused skills recent"),
+                cacheRows(SummaryRow, { sql: UNUSED_SUMMARY_SQL, params: [] }, "unused skills summary"),
+                cacheRows(SkillRow, { sql: UNUSED_SKILL_ROWS_SQL, params: [] }, "unused skills catalog"),
+                cacheRows(NeverRow, { sql: UNUSED_NEVER_INVOKED_SQL, params: [] }, "unused skills never"),
             ],
             { concurrency: 4 },
         );
         return mergeUnusedRows({
-            recent: recentRes?.[0] ?? [],
-            summary: summaryRes?.[0] ?? [],
-            skills: skillRes?.[0] ?? [],
-            neverInvoked: noInvRes?.[0] ?? [],
+            recent,
+            summary,
+            skills,
+            neverInvoked,
         });
     },
 );

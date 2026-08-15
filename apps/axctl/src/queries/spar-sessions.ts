@@ -8,10 +8,9 @@
  *
  * Spec: docs/superpowers/specs/2026-06-15-spar-exclusion-tag-design.md
  */
-import { Effect } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 
 /**
  * RecordIds of sessions tagged as spar variants (behavioral-analytics
@@ -30,19 +29,19 @@ import type { DbError } from "@ax/lib/errors";
  * Deref-free: no graph traversal. Safe against the 87k-edge invoked hang
  * (memory `weighted-query-per-edge-deref-hang`).
  */
-export const fetchSparSessionIds = (): Effect.Effect<
-    readonly RecordId[],
-    DbError,
-    SurrealClient
-> =>
+const SparSessionRow = Schema.Struct({ id: Schema.String });
+
+export const fetchSparSessionIds = (): Effect.Effect<readonly string[], never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // SELECT VALUE id returns the raw RecordId values (the surreal SDK's
-        // record-id form), NOT a string projection - so NOT IN against this
-        // array is a record-vs-record comparison.
-        const result = yield* db.query<[Array<unknown>]>(
-            `SELECT VALUE id FROM session WHERE labels != NONE AND string::contains(labels, 'spar');`,
+        const rows = yield* cacheRows(
+            SparSessionRow,
+            {
+                sql: `SELECT id FROM session
+                      WHERE labels IS NOT NULL
+                        AND json_contains(labels, '"spar"')`,
+                params: [],
+            },
+            "spar sessions",
         );
-        const rows = result?.[0] ?? [];
-        return rows.filter((r): r is RecordId => r instanceof RecordId);
+        return rows.map((row) => row.id);
     });

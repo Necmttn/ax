@@ -29,8 +29,9 @@
  * false - for unclassified skills, silently excluding every one of them, so
  * classify reported "none found" while weighted reported a positive count).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
@@ -74,11 +75,9 @@ export interface SkillHygieneInput {
 // SurrealDB 3 instance (127.0.0.1:8521) on 2026-06-12.
 // Invocation counts are deliberately ALL-TIME (lifetime hygiene signal; no
 // sinceDays window).
-const SQL = `
-SELECT type::string(out) AS sid, count() AS invocations, array::len(array::distinct(in.session)) AS sessions FROM invoked GROUP BY sid;
-SELECT type::string(id) AS id, name, dir_path, content_hash FROM skill;
-SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
-`;
+const HygieneCountRow = Schema.Struct({ sid: Schema.String, invocations: NumberFromBigIntColumn, sessions: NumberFromBigIntColumn });
+const HygieneSkillRow = Schema.Struct({ id: Schema.String, name: Schema.String, dir_path: Schema.NullOr(Schema.String), content_hash: Schema.NullOr(Schema.String) });
+const ClassifiedSkillRow = Schema.Struct({ id: Schema.String });
 
 // ---------------------------------------------------------------------------
 // Query
@@ -87,17 +86,16 @@ SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "b
 export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function* (
     input: SkillHygieneInput,
 ) {
-    const db = yield* SurrealClient;
-    const [counts, skills, classified] = yield* db.query<[
-        Array<{ sid: string; invocations: number; sessions: number }>,
-        Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
-        Array<string>,
-    ]>(SQL);
+    const [counts, skills, classifiedRows] = yield* Effect.all([
+        cacheRows(HygieneCountRow, { sql: "SELECT out_id AS sid, count(*) AS invocations, count(DISTINCT session) AS sessions FROM invoked GROUP BY out_id", params: [] }, "skill hygiene counts"),
+        cacheRows(HygieneSkillRow, { sql: "SELECT id, name, dir_path, content_hash FROM skill", params: [] }, "skill hygiene catalog"),
+        cacheRows(ClassifiedSkillRow, { sql: "SELECT DISTINCT in_id AS id FROM plays_role WHERE source IN ('frontmatter', 'brief', 'user')", params: [] }, "skill hygiene roles"),
+    ]);
 
     // Build lookup structures from the flat result sets
-    const classifiedIds = new Set(classified ?? []);
+    const classifiedIds = new Set(classifiedRows.map((row) => row.id));
     const byId = new Map(
-        (skills ?? []).map((s) => [s.id, s]),
+        skills.map((s) => [s.id, s]),
     );
 
     // Join each count row to its skill metadata (drop synthetic shims here unless
@@ -108,7 +106,7 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
         readonly classified: boolean;
     }
     const cand: Cand[] = [];
-    for (const c of counts ?? []) {
+    for (const c of counts) {
         const skill = byId.get(c.sid);
         if (!skill) continue;                                  // no matching skill row
         if (!input.includeSynthetic && skill.dir_path === "(synthetic)") continue; // tool shims, not real skills
