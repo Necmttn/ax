@@ -917,7 +917,6 @@ const skillsLintCommand = Command.make(
             Effect.catchTag("PlatformError", (e) =>
                 stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
-            catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(
     Command.withDescription(
@@ -1058,7 +1057,33 @@ export const rolesCommand = Command.make(
 );
 
 export const skillsRuntime: RuntimeManifest = {
-    skills: "db",
+    skills: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            search: "db",
+            stats: "db",
+            recent: "db",
+            unused: "db",
+            taste: "db",
+            weighted: "db",
+            pairs: "db",
+            recovery: "db",
+            classify: "db",
+            tag: "cache",
+            lint: "cache",
+            bloat: "db",
+            loaded: "db",
+            "by-role": "cache",
+            roles: "cache",
+            config: "none",
+            reconcile: "none",
+            scope: "none",
+            park: "none",
+            unpark: "none",
+            rm: "none",
+        },
+    },
     // PORTED (c-sidecar-sqlite). `ax roles` is PURE JUDGMENT - the role
     // vocabulary and the tag counts both live in the SQLite sidecar - so it needs
     // neither SurrealDB nor a published snapshot, and answers on a machine that
@@ -1067,9 +1092,7 @@ export const skillsRuntime: RuntimeManifest = {
     // CLI with `AX_DB_URL` on a dead port AND a snapshot path that does not exist,
     // which an in-process test cannot check.
     //
-    // The rest of the `skills` family stays on `"db"`: `skills tag`,
-    // `skills roles` and `skills by-role` are ported (they reach only `Judgment`
-    // and `CacheRead`, both of which `withDb` already provides), but their many
-    // siblings under that command are not, and a family flips as ONE step.
+    // Ported subcommands route through the cache runtime above. The remaining
+    // query subcommands stay on SurrealDB until their own wave-2 ports land.
     roles: "cache",
 };
