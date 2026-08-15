@@ -17,6 +17,15 @@ export {
     type JudgmentError,
 } from "./errors.ts";
 export {
+    checkSidecarRefs,
+    collectSidecarRefs,
+    fetchCacheIds,
+    SIDECAR_CACHE_REFS,
+    SIDECAR_REF_TARGET_TABLES,
+    type CacheIdReader,
+    type SidecarCacheRefSpec,
+} from "./integrity.ts";
+export {
     Judgment,
     JudgmentLayer,
     sidecarPath,
