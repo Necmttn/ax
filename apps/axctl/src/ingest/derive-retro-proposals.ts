@@ -20,7 +20,7 @@
  * so they bypass `skill_candidate` and write directly to `proposal` +
  * `skill_proposal`. The cluster -> proposal map is captured in
  * `proposal.baseline` JSON (tool + retroKeys + sessionKeys) since
- * `cites_evidence` doesn't yet support `retro` in its TO union.
+ * this stage does not create `cites_evidence` rows for retro records.
  */
 
 import { Effect, Schema } from "effect";
@@ -392,13 +392,12 @@ export const deriveRetroProposalRows = (
 /**
  * Build cache writes for a batch of derived rows.
  *
- * Mirrors {@link buildSkillProposalStatements} in derive-proposals.ts:
+ * Mirrors {@link buildSkillProposalWrites} in derive-proposals.ts:
  * a fresh dedupe_sig gets a frozen baseline and open status. An existing sig
  * gets only mutable field updates. Both paths write the skill proposal payload.
  *
  * Unlike the skill_candidate-sourced version, this writer does NOT emit
- * `cites_evidence` edges - the `retro` table isn't in the
- * `cites_evidence TO` union yet. Provenance is captured in the
+ * `cites_evidence` rows for retro records. Provenance is captured in the
  * `baseline` JSON instead (`tool`, `retroKeys`, `sessionKeys`).
  */
 export const buildRetroSkillProposalWrites = (

@@ -994,12 +994,6 @@ const partitionCursorExtract = (
 
 export const __testPartitionCursorExtract = partitionCursorExtract;
 
-/** Statement-count budget per batched `executeStatements` call: aligned with
- *  the write chunkSize so a batch is ~one round trip. The fixed per-call
- *  commit cost dominated the old per-session path (~540ms/chat on a 1,838-chat
- *  store - "28 statements cost the same as 236"), so batches amortize it. */
-export const CURSOR_BATCH_STATEMENT_BUDGET = 500;
-
 const CURSOR_WATERMARK_SOURCE_KIND = "cursor_session";
 
 const cursorSessionFingerprint = (batch: NormalizedTranscriptBatch): number =>

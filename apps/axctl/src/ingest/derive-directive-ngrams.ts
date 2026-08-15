@@ -1,7 +1,7 @@
 /**
  * derive-directive-ngrams: Lift-refit ingest stage (Milestone A, Task A4 #587).
  *
- * Calls fetchDirectiveLift with a FIXED 90d window, then UPSERTs per-ngram
+ * Calls fetchDirectiveLift with a FIXED 90d window, then writes per-ngram
  * lift rows into the `directive_ngram` table so the table stays fresh across
  * incremental ingests regardless of `--since`.
  */

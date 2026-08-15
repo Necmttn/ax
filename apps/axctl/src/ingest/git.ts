@@ -508,9 +508,9 @@ const writeRepo = Effect.fn("git.writeRepo")(
         }
         yield* write.putMany("file", fileRows);
 
-        // 3. Bulk-RELATE commit -> touched -> file. Touched is checkout-scoped
-        //    edge evidence, so re-runs delete only this checkout's rows before
-        //    relating fresh rows. Sibling worktree evidence is preserved.
+        // 3. Write commit -> touched -> file rows. Touched is checkout-scoped
+        //    evidence, so re-runs delete only this checkout's rows before they
+        //    write fresh rows. Sibling worktree evidence is preserved.
         let touchedCount = 0;
         for (const c of commits) {
             if (c.files.length === 0) continue;

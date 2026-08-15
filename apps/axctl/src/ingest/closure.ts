@@ -234,20 +234,20 @@ const closureRows = (rows: ReturnType<typeof deriveClosureRows>) => ({
 
 // ---------- skip-unchanged watermark (hypothesis 008) ----------
 //
-// The closure stage blanket-DELETEs and fully re-derives its output
+// The closure stage deletes all prior rows and fully re-derives its output
 // (commit_classification + later_fixed_by + suggests_skill + skill_candidate)
-// on every run - the dominant warm cost (the later_fixed_by DELETE + RELATE of
+// on every run - the dominant warm cost (the later_fixed_by row replacement for
 // thousands of edges). But the closure output is a deterministic function of
 // its inputs (commit + touched + session_health) and `sinceDays`. On the warm
 // path those inputs are unchanged (git skip-unchanged means no new commits), so
 // the re-derive reproduces identical rows. We cache a single fingerprint of the
 // loaded inputs in the shared `ingest_file_state` table (source_kind='closure',
 // fixed sentinel path). On the next run, if the fingerprint matches the stored
-// digest the output already persists ⇒ skip the blanket DELETE + write entirely
+// digest the output already persists ⇒ skip the full delete and write entirely
 // (output-equivalent). Any input change (or a wider sinceDays) yields a new
 // digest, forcing a full re-derive. The reads still run (they are the cheap
-// part); only the costly DELETE + RELATE writes are skipped. NEVER `NOT IN`:
-// the watermark is one indexed read. `AX_REDERIVE_CLOSURE=1` forces a full
+// part); only the costly replacement writes are skipped. The watermark uses
+// one indexed read. `AX_REDERIVE_CLOSURE=1` forces a full
 // re-derive (ignores the watermark).
 
 const CLOSURE_WATERMARK_SOURCE = "closure";
