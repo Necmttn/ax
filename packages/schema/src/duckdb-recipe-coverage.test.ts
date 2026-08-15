@@ -66,9 +66,19 @@ describe("natural-key recipe coverage (P2-4)", () => {
     test("no table with a wired writer is still in the todo set", () => {
         // Wave 1 wires real writers for the recall vertical's six tables (the
         // fixture in apps/axctl/src/dashboard/recall.test.ts writes every one of
-        // them through the seam), and the standing rule is that a table whose
-        // writer you wire leaves the todo set WITH a concrete recipe.
-        const written = ["session", "turn", "commit", "skill", "invoked", "has_content"];
+        // them through the seam), and w2-lib-core wires the shared watermark
+        // writer over `ingest_file_state` (@ax/lib/duckdb/watermark). The
+        // standing rule is that a table whose writer you wire leaves the todo
+        // set WITH a concrete recipe.
+        const written = [
+            "session",
+            "turn",
+            "commit",
+            "skill",
+            "invoked",
+            "has_content",
+            "ingest_file_state",
+        ];
         expect(written.filter((table) => recipeTodo.has(table))).toEqual([]);
     });
 
