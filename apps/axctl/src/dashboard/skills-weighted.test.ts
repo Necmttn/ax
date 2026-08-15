@@ -20,7 +20,7 @@
  *   6 → otel_log_event latency (from sessionTelemetryLatency, when sessions found)
  */
 import { describe, it, expect } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
 import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
@@ -32,14 +32,14 @@ const runWithMock = <A, E>(
     db: TestSurrealClient,
     effect: Effect.Effect<A, E, SurrealClient | Judgment>,
     sparSessions: readonly string[] = [],
-) => Effect.runPromise(effect.pipe(
-    Effect.provide(db.layer),
-    Effect.provide(judgmentTestLayer((sql) => {
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(
+    db.layer,
+    judgmentTestLayer((sql) => {
         if (sql.includes("FROM session_label")) return sparSessions.map((session_id) => ({ session_id }));
         if (sql.includes("JOIN role")) return mockRoleRows[0];
         return [];
-    })),
-));
+    }),
+))));
 
 // ---------------------------------------------------------------------------
 // Fixtures

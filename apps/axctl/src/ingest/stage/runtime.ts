@@ -3,8 +3,6 @@ import { AppLayer, appLayerWithTransport } from "@ax/lib/layers";
 import type { TraceTransportTag } from "@ax/lib/live-traces/Sink";
 import { StageRegistryDefault } from "./registry.ts";
 import { AgentSourceRegistryLive } from "../../agents/registry.ts";
-import { JudgmentLive } from "../../judgment.ts";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
 
 /** Stage-source registries some stages depend on (e.g. agentDefStage needs AgentSourceRegistry). */
 const StageSourceLayers = AgentSourceRegistryLive;
@@ -15,7 +13,7 @@ const StageSourceLayers = AgentSourceRegistryLive;
  * points should consume this; library code that does not need the stage
  * registry should keep consuming `AppLayer` directly.
  */
-export const IngestRuntimeLayer = Layer.mergeAll(AppLayer, CacheReadLive, StageRegistryDefault, StageSourceLayers, JudgmentLive);
+export const IngestRuntimeLayer = Layer.mergeAll(AppLayer, StageRegistryDefault, StageSourceLayers);
 
 /**
  * Ingest runtime whose `TraceSink` flushes to `transport` (e.g. the progress
@@ -23,4 +21,4 @@ export const IngestRuntimeLayer = Layer.mergeAll(AppLayer, CacheReadLive, StageR
  * unless the transport is wired beneath the sink - see `appLayerWithTransport`.
  */
 export const ingestRuntimeLayerWith = (transport: Layer.Layer<TraceTransportTag>) =>
-    Layer.mergeAll(appLayerWithTransport(transport), CacheReadLive, StageRegistryDefault, StageSourceLayers, JudgmentLive);
+    Layer.mergeAll(appLayerWithTransport(transport), StageRegistryDefault, StageSourceLayers);

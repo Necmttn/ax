@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Judgment, JudgmentLayer, NumberColumn } from "@ax/lib/sqlite";
@@ -61,5 +61,30 @@ describe("judgment commands without SurrealDB", () => {
         expect(improve.stdout).toContain("use-rg");
         expect(retro.stdout).toContain("manual");
         expect(dogfood.stdout).toContain("run-1");
+    });
+
+    test("manual retro emit uses SQLite when the session and file are explicit", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-retro-emit-no-surreal-"));
+        const sidecarPath = join(root, "judgment.sqlite");
+        const payloadPath = join(root, "retro.json");
+        writeFileSync(payloadPath, JSON.stringify({ tried: "port judgments", worked: "SQLite" }));
+
+        const result = await runCli(sidecarPath, [
+            "retro", "emit", "--session=session-manual", `--from-file=${payloadPath}`, "--json",
+        ]);
+        expect(result.exitCode, `${result.stderr}\n${result.stdout}`).toBe(0);
+        expect(result.stderr).not.toContain("127.0.0.1:1");
+        expect(result.stdout).toContain("session:session-manual");
+
+        const count = await Effect.runPromise(Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            const rows = yield* judgment.rows(
+                Schema.Struct({ count: NumberColumn }),
+                "SELECT count(*) AS count FROM retro WHERE session = ?",
+                ["session-manual"],
+            );
+            return rows[0]?.count ?? 0;
+        }).pipe(Effect.provide(JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL })), Effect.scoped));
+        expect(count).toBe(1);
     });
 });

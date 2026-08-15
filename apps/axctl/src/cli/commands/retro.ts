@@ -39,10 +39,10 @@ const cmdRetroEmit = (input: {
         const sessionFlag = input.session ?? process.env.AX_SESSION_ID;
         const sourceFlag = (input.source ?? (fromFile ? "claude_stop_hook" : "heuristic")) as RetroSource;
         const json = input.json;
-        const db = yield* SurrealClient;
 
         let sessionRecordId = sessionFlag;
         if (!sessionRecordId) {
+            const db = yield* SurrealClient;
             const latest = yield* db.query<[Array<{ id: string | { tb: string; id: string } }>]>(
                 "SELECT id, started_at FROM session ORDER BY started_at DESC LIMIT 1;",
             );
@@ -650,7 +650,12 @@ export const retroRuntime: RuntimeManifest = {
         kind: "db-conditional",
         fallback: "db",
         subcommands: {
-            emit: "db",
+            emit: (args) => {
+                const hasFile = args.some((arg) => arg === "--from-file" || arg.startsWith("--from-file="));
+                const hasSession = args.some((arg) => arg === "--session" || arg.startsWith("--session="))
+                    || Boolean(process.env.AX_SESSION_ID);
+                return hasFile && hasSession ? "cache" : "db";
+            },
             list: "cache",
             pending: "db",
             brief: "db",

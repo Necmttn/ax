@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient } from "@ax/lib/db";
@@ -14,12 +14,17 @@ import { LabelMiningService, LabelMiningServiceLive } from "./classifiers/label-
 
 const makeSidecar = () => {
     const root = mkdtempSync(join(tmpdir(), "ax-judgment-cutover-"));
-    return JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL });
+    return Layer.mergeAll(
+        JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
+        BunFileSystem.layer,
+        BunPath.layer,
+    );
 };
 
 describe("judgment cutover sidecar", () => {
     test("stores retro, dogfood, and spar judgments in real SQLite", async () => {
-        const counts = await Effect.runPromise(Effect.gen(function* () {
+        const artifactInputDir = mkdtempSync(join(tmpdir(), "ax-dogfood-input-"));
+        const stored = await Effect.runPromise(Effect.gen(function* () {
             const judgment = yield* Judgment;
             yield* upsertRetro({
                 sessionId: "session-a", source: "manual",
@@ -31,20 +36,29 @@ describe("judgment cutover sidecar", () => {
                 startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:00:01Z",
                 cwd: "/tmp", markerFound: true, persisted: false, transport: "process",
                 requestedTransport: "process", command: "true", commandSource: "override", timedOut: false,
-            });
-            return yield* judgment.rows(
+            }, { artifactInputDir });
+            const counts = yield* judgment.rows(
                 Schema.Struct({ table_name: TextColumn, count: NumberColumn }),
                 `SELECT 'retro' AS table_name, count(*) AS count FROM retro
                  UNION ALL SELECT 'dogfood_run', count(*) FROM dogfood_run
                  UNION ALL SELECT 'session_label', count(*) FROM session_label
                  ORDER BY table_name`,
             );
+            const artifact = yield* judgment.rows(
+                Schema.Struct({ transcript_artifact: TextColumn }),
+                "SELECT transcript_artifact FROM dogfood_run LIMIT 1",
+            );
+            return { counts, artifact: artifact[0]!.transcript_artifact };
         }).pipe(Effect.provide(makeSidecar()), Effect.scoped));
-        expect(Object.fromEntries(counts.map((row) => [row.table_name, row.count]))).toEqual({
+        expect(Object.fromEntries(stored.counts.map((row) => [row.table_name, row.count]))).toEqual({
             dogfood_run: 1,
             retro: 1,
             session_label: 1,
         });
+        const artifactPath = join(artifactInputDir, `${stored.artifact}.json`);
+        expect(existsSync(artifactPath)).toBe(true);
+        const artifactInput = JSON.parse(readFileSync(artifactPath, "utf8")) as { raw: string };
+        expect(JSON.parse(artifactInput.raw)).toMatchObject({ transcript: "ok" });
     });
 
     test("reads transcript reviews from SQLite while facts remain in the graph store", async () => {
@@ -52,6 +66,7 @@ describe("judgment cutover sidecar", () => {
         const graph = Layer.succeed(SurrealClient, {
             query: () => Effect.succeed([[]]),
         } as never);
+        const deps = Layer.mergeAll(sidecar, graph, BunFileSystem.layer, BunPath.layer);
         const result = await Effect.runPromise(Effect.gen(function* () {
             const judgment = yield* Judgment;
             yield* judgment.put("transcript_label_review", {
@@ -63,8 +78,7 @@ describe("judgment cutover sidecar", () => {
             const service = yield* LabelMiningService;
             return yield* service.selfImproveQuery({});
         }).pipe(
-            Effect.provide(LabelMiningServiceLive),
-            Effect.provide(Layer.mergeAll(sidecar, graph, BunFileSystem.layer, BunPath.layer)),
+            Effect.provide(LabelMiningServiceLive.pipe(Layer.provideMerge(deps))),
             Effect.scoped,
         ));
         expect(result.weak_advisory_candidate_count).toBe(1);

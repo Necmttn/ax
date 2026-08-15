@@ -3,6 +3,7 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { Judgment } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
+import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { recordRef, surrealString } from "@ax/lib/shared/surql";
@@ -102,15 +103,12 @@ const loadWorkflowProposalRows = (input: {
     readonly status: string;
     readonly search?: string;
     readonly limit: number;
-}) => listStoredProposals(1_000).pipe(Effect.map((proposals) => proposals
-    .filter((proposal) => WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.some((prefix) => proposal.dedupe_sig.startsWith(prefix)))
-    .filter((proposal) => input.status === "all" || proposal.status === input.status)
-    .filter((proposal) => {
-        const search = input.search?.trim().toLowerCase();
-        return !search || proposal.title.toLowerCase().includes(search) || proposal.hypothesis.toLowerCase().includes(search);
-    })
-    .sort((a, b) => (b.updated_at ?? b.created_at).getTime() - (a.updated_at ?? a.created_at).getTime() || b.frequency - a.frequency)
-    .slice(0, Math.max(1, input.limit))
+}) => listStoredProposals({
+    status: input.status,
+    dedupePrefixes: WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES,
+    ...(input.search === undefined ? {} : { search: input.search }),
+    limit: Math.max(1, input.limit),
+}).pipe(Effect.map((proposals) => proposals
     .map((proposal): WorkflowCandidateProposalListRow => ({
         proposal_id: `proposal:${proposal.id}`,
         dedupe_sig: proposal.dedupe_sig,
@@ -142,7 +140,7 @@ const persistGuidanceProposalPlan = (
             const task = report.promotion?.tasks.find((item) => item.candidate_id === promoted.candidate_id);
             if (!task) continue;
             const existing = bySig.get(promoted.dedupe_sig);
-            const id = promoted.proposal_id.replace(/^proposal:/, "");
+            const id = existing?.id ?? stableId("proposal", [promoted.dedupe_sig]);
             const candidateIds = task.candidate_ids ?? [task.candidate_id];
             yield* tx.put("proposal", {
                 id,
@@ -162,7 +160,7 @@ const persistGuidanceProposalPlan = (
                 updated_at: now,
             });
             yield* tx.put("guidance_proposal", {
-                id,
+                id: stableId("guidance_proposal", [id]),
                 proposal: id,
                 file_target: promoted.file_target,
                 section: promoted.section,
@@ -186,7 +184,7 @@ const persistHarnessProposalPlan = (
             const candidate = report.candidates.candidates.find((item) => item.group_id === promoted.candidate_id);
             if (!candidate) continue;
             const existing = bySig.get(promoted.dedupe_sig);
-            const id = promoted.proposal_id.replace(/^proposal:/, "");
+            const id = existing?.id ?? stableId("proposal", [promoted.dedupe_sig]);
             yield* tx.put("proposal", {
                 id,
                 form: "harness_check",

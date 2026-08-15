@@ -520,7 +520,7 @@ const cmdImproveReset = (input: { readonly yes: boolean }) =>
     Effect.gen(function* () {
         if (!input.yes) {
             fail(
-                "axctl improve reset: refusing to wipe without --yes\n" +
+                "ax improve reset: refusing to wipe without --yes\n" +
                 "  drops: checkpoint, experiment, skill_proposal,\n" +
                 "         subagent_proposal, hook_proposal,\n" +
                 "         guidance_proposal, automation_proposal, proposal",

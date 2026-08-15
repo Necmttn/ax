@@ -41,8 +41,7 @@
 import { Effect, Schema } from "effect";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { Judgment, NumberColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
-import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { stableId } from "@ax/lib/stable-id";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
@@ -114,34 +113,7 @@ export const dueCheckpointKinds = (
 };
 
 export const checkpointKey = (experimentKey: string, kind: CheckpointKind): string =>
-    `${safeKeyPart(experimentKey).slice(0, 64)}__${kind.replace("+", "_plus_")}`;
-
-export const buildCheckpointStatement = (params: {
-    readonly experimentKey: string;
-    readonly kind: CheckpointKind;
-    readonly measured: CheckpointMeasured;
-    readonly suggested: CheckpointVerdict;
-    readonly observedAt: Date;
-}): string => {
-    const key = checkpointKey(params.experimentKey, params.kind);
-    // Map camelCase TS fields to the snake_case schema fields. Optional
-    // current/baseline frequency are emitted only when defined so the
-    // option<int> columns stay NONE for older rows.
-    const m = params.measured;
-    const measuredJson: Record<string, number | boolean> = {
-        opportunities: m.opportunities,
-        addressed: m.addressed,
-        ratio: m.ratio,
-        built: m.built,
-    };
-    if (typeof m.currentFrequency === "number") {
-        measuredJson.current_frequency = m.currentFrequency;
-    }
-    if (typeof m.baselineFrequency === "number") {
-        measuredJson.baseline_frequency = m.baselineFrequency;
-    }
-    return `UPSERT ${recordRef("checkpoint", key)} CONTENT { experiment: ${recordRef("experiment", params.experimentKey)}, kind: ${surrealString(params.kind)}, measured: ${JSON.stringify(measuredJson)}, suggested: ${surrealString(params.suggested)}, user_verdict: NONE, observed_at: ${surrealDate(params.observedAt)} };`;
-};
+    stableId("checkpoint", [experimentKey, kind]);
 
 export const deriveCheckpoints = (
     opts: DeriveCheckpointsOpts = {},
@@ -163,9 +135,9 @@ export const deriveCheckpoints = (
             const experimentKey = exp.id;
             const existing = new Set(opts.force ? [] : exp.checkpoints.map((checkpoint) => checkpoint.kind));
             const [opportunityRows, addressedRows, sessionRows] = yield* Effect.all([
-                cache.rows(CountRow, "SELECT count(*) AS count FROM opportunity WHERE in_id = ?", [experimentKey]),
-                cache.rows(CountRow, "SELECT count(*) AS count FROM opportunity WHERE in_id = ? AND was_addressed = true", [experimentKey]),
-                cache.rows(CountRow, "SELECT count(*) AS count FROM session WHERE created_at > ?", [exp.created_at]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ?", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ? AND was_addressed = true", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM session WHERE created_at > ?", [exp.created_at]),
             ], { concurrency: 3 });
             const sessionsSince = sessionRows[0]?.count ?? 0;
             const due = dueCheckpointKinds(sessionsSince, existing);

@@ -104,7 +104,9 @@ export const recommend = (
                 frequency: NumberColumn,
                 updated_at: TimestampColumn,
             }),
-            "SELECT dedupe_sig, title, form, hypothesis, confidence, frequency, updated_at FROM proposal WHERE status = ?",
+            `SELECT dedupe_sig, title, form, hypothesis, confidence, frequency,
+                    coalesce(updated_at, created_at) AS updated_at
+             FROM proposal WHERE status = ?`,
             [PROPOSAL_STATUS_OPEN],
         );
         if (input.forms && input.forms.length > 0) {

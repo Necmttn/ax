@@ -47,14 +47,14 @@ const runWithDb = <A>(
     >,
     client: SurrealClientShape,
 ): Promise<A> =>
-    Effect.runPromise(
-        effect.pipe(
-            Effect.provide(LabelMiningServiceLive),
-            Effect.provideService(SurrealClient, client),
-            Effect.provide(EmptyJudgmentTestLayer),
-            Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
-        ),
-    );
+    Effect.runPromise(effect.pipe(Effect.provide(LabelMiningServiceLive.pipe(
+        Layer.provideMerge(Layer.mergeAll(
+            Layer.succeed(SurrealClient, client),
+            EmptyJudgmentTestLayer,
+            BunFileSystem.layer,
+            BunPath.layer,
+        )),
+    ))));
 
 const correctionWindow = (n: number): FakeWindowRow => ({
     window_key: `w-corr-${n}`,

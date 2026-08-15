@@ -511,21 +511,6 @@ SELECT
 FROM classifier_graph_fact
 WHERE source_kind = '${REVIEWED_SOURCE_KIND}';`.trim();
 
-/** Read persisted reviewed rows + their candidate evidence for re-projection. */
-const reviewProjectionSql = `
-SELECT
-    candidate_id,
-    label_family,
-    review_status,
-    promotion_safe,
-    reviewed_label,
-    reviewed_target,
-    reviewer,
-    rationale,
-    evidence_paths_json,
-    updated_at
-FROM transcript_label_review;`.trim();
-
 /** Read persisted vector rows for re-projection. */
 const vectorProjectionSql = `
 SELECT
@@ -738,7 +723,7 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
             const projectReviewed = Effect.fn("LabelMiningService.projectReviewed")(function* (
                 input: LabelMiningProjectInput,
             ) {
-                const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewProjectionSql);
+                const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewTableSql);
                 const [vectorRows] = yield* db.query<[VectorTableRow[]]>(vectorProjectionSql);
                 const reviews = reviewRows.map(reviewRowToReviewedLabel);
                 const candidates = reviewRows.map(reviewRowToCandidate);

@@ -1,5 +1,6 @@
-import { Effect, FileSystem } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { homedir } from "node:os";
 import type { ServerWebSocket } from "bun";
 import { Judgment } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
@@ -9,7 +10,7 @@ import { posixPath } from "@ax/lib/shared/path";
 
 /** Bun-backed FS + Path layer for the standalone fs Effects this module runs
  *  via `Effect.runPromise` (the dogfood server is plain async, not Effect). */
-const WtermFsLayer = BunFileSystem.layer;
+const WtermFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 /** Probe a path for existence, recovering ANY failure to `false` (the original
  *  `existsSync` probes treated every fault as "absent"). */
@@ -95,8 +96,54 @@ export interface DogfoodResult {
     readonly transportFallbackReason?: string;
 }
 
-export const writeDogfoodResult = (result: DogfoodResult) => Effect.gen(function* () {
+export const dogfoodArtifactInputDir = (): string =>
+    process.env.AX_DOGFOOD_INPUT_DIR
+    ?? posixPath.join(
+        process.env.AX_DATA_DIR ?? posixPath.join(homedir(), ".local", "share", "ax"),
+        "inputs",
+        "dogfood-artifacts",
+    );
+
+const writeDogfoodArtifactInput = (result: DogfoodResult, artifactId: string, inputDir = dogfoodArtifactInputDir()) =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = inputDir;
+        const target = path.join(dir, `${artifactId}.json`);
+        const staged = `${target}.tmp.${process.pid}`;
+        const now = new Date(result.endedAt);
+        const row = {
+            id: artifactId,
+            kind: "dogfood_wterm_transcript",
+            title: `wterm ${result.scenario} dogfood transcript`,
+            uri: `dogfood://wterm/${result.runId}/transcript`,
+            path: null,
+            content_hash: shortHash(result.transcript),
+            raw: JSON.stringify({
+                scenario: result.scenario,
+                transcript: result.transcript,
+                transport: result.transport,
+                requested_transport: result.requestedTransport,
+            }),
+            created_at: now.toISOString(),
+            updated_at: now.toISOString(),
+        };
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(staged, `${JSON.stringify(row)}\n`);
+        yield* fs.rename(staged, target);
+    });
+
+export const writeDogfoodResult = (
+    result: DogfoodResult,
+    options: { readonly artifactInputDir?: string } = {},
+) => Effect.gen(function* () {
     const judgment = yield* Judgment;
+    const transcriptArtifact = stableId("artifact", [result.runId, "transcript"]);
+    yield* writeDogfoodArtifactInput(
+        result,
+        transcriptArtifact,
+        options.artifactInputDir ?? dogfoodArtifactInputDir(),
+    );
     yield* judgment.put("dogfood_run", {
         id: stableId("dogfood_run", [result.runId]),
         run_id: result.runId,
@@ -113,7 +160,7 @@ export const writeDogfoodResult = (result: DogfoodResult) => Effect.gen(function
         marker_found: result.markerFound,
         timed_out: result.timedOut,
         timeout_seconds: result.timeoutSeconds ?? null,
-        transcript_artifact: null,
+        transcript_artifact: transcriptArtifact,
         cwd: result.cwd,
         started_at: new Date(result.startedAt),
         ended_at: new Date(result.endedAt),
@@ -400,7 +447,10 @@ window.__axctlDogfood = { term, transport };
 export async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     try {
         await Effect.runPromise(
-            writeDogfoodResult(result).pipe(Effect.provide(JudgmentLive), Effect.scoped),
+            writeDogfoodResult(result).pipe(
+                Effect.provide(Layer.mergeAll(JudgmentLive, BunFileSystem.layer, BunPath.layer)),
+                Effect.scoped,
+            ),
         );
         return true;
     } catch {

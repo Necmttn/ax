@@ -109,6 +109,13 @@ export type StoredProposal = typeof ProposalRow.Type & {
     readonly experiment: StoredExperiment | null;
 };
 
+export interface ListStoredProposalOptions {
+    readonly limit?: number;
+    readonly status?: string;
+    readonly dedupePrefixes?: ReadonlyArray<string>;
+    readonly search?: string;
+}
+
 const withoutProposal = <T extends { readonly proposal: string }>(row: T): Omit<T, "proposal"> => {
     const { proposal: _proposal, ...payload } = row;
     return payload;
@@ -180,14 +187,34 @@ const BASE_COLUMNS = `id, form, title, hypothesis, dedupe_sig, frequency, confid
     created_at, updated_at`;
 
 export const listStoredProposals = (
-    limit = 100,
+    input: number | ListStoredProposalOptions = 100,
 ): Effect.Effect<ReadonlyArray<StoredProposal>, JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const judgment = yield* Judgment;
+        const options = typeof input === "number" ? { limit: input } : input;
+        const clauses: string[] = [];
+        const params: Array<string | number> = [];
+        if (options.status !== undefined && options.status !== "all") {
+            clauses.push("status = ?");
+            params.push(options.status);
+        }
+        if (options.dedupePrefixes && options.dedupePrefixes.length > 0) {
+            clauses.push(`(${options.dedupePrefixes.map(() => "dedupe_sig LIKE ?").join(" OR ")})`);
+            params.push(...options.dedupePrefixes.map((prefix) => `${prefix}%`));
+        }
+        const search = options.search?.trim().toLowerCase();
+        if (search) {
+            clauses.push("(lower(title) LIKE ? OR lower(hypothesis) LIKE ?)");
+            params.push(`%${search}%`, `%${search}%`);
+        }
+        const limit = Math.max(1, options.limit ?? 100);
+        params.push(limit);
         const proposals = yield* judgment.rows(
             ProposalRow,
-            `SELECT ${BASE_COLUMNS} FROM proposal ORDER BY frequency DESC, created_at DESC LIMIT ?`,
-            [limit],
+            `SELECT ${BASE_COLUMNS} FROM proposal
+             ${clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`}
+             ORDER BY coalesce(updated_at, created_at) DESC, frequency DESC LIMIT ?`,
+            params,
         );
         return yield* loadDetails(judgment, proposals);
     });

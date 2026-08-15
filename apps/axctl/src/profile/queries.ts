@@ -7,13 +7,13 @@
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
  */
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { Judgment, NumberColumn, TextColumn, TimestampColumn } from "@ax/lib/sqlite";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
@@ -176,17 +176,10 @@ export interface ProposalRow {
 
 export const fetchAcceptedProposals = Effect.fn("profile.fetchAcceptedProposals")(
     function* () {
-        const judgment = yield* Judgment;
-        const rows = yield* judgment.rows(Schema.Struct({
-            form: TextColumn,
-            title: TextColumn,
-            hypothesis: TextColumn,
-            confidence: TextColumn,
-            frequency: NumberColumn,
-            updated_at: Schema.NullOr(TimestampColumn),
-            created_at: Schema.NullOr(TimestampColumn),
-        }), `SELECT form, title, hypothesis, confidence, frequency, updated_at, created_at
-            FROM proposal WHERE status = 'accepted' ORDER BY frequency DESC LIMIT 100`);
+        const rows = (yield* listStoredProposals(10_000))
+            .filter((proposal) => proposal.status === "accepted")
+            .sort((a, b) => b.frequency - a.frequency)
+            .slice(0, 100);
         return rows.map((r) => ({
             form: r.form,
             title: r.title,
@@ -798,21 +791,18 @@ export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookE
 
 export const fetchGuardrailVerdicts = Effect.fn("profile.fetchGuardrailVerdicts")(
     function* (opts: { readonly windowDays: number }) {
-        const judgment = yield* Judgment;
         const cutoff = new Date(Date.now() - Math.max(1, opts.windowDays) * 86_400_000);
-        const rows = yield* timedQuery(
+        const proposals = yield* timedQuery(
             "guardrailVerdicts",
-            judgment.rows(
-                Schema.Struct({ verdict: TextColumn, count: NumberColumn }),
-                `SELECT user_verdict AS verdict, count(*) AS count FROM checkpoint
-                 WHERE observed_at > ? AND user_verdict IS NOT NULL
-                 GROUP BY user_verdict ORDER BY count DESC`,
-                [cutoff],
-            ),
+            listStoredProposals(10_000),
         );
-        return rows.map((r) => ({
-            verdict: String(r.verdict ?? ""),
-            count: Number(r.count ?? 0),
-        })).filter((r) => r.verdict.length > 0) satisfies GuardrailVerdictRow[];
+        const counts = new Map<string, number>();
+        for (const checkpoint of proposals.flatMap((proposal) => proposal.experiment?.checkpoints ?? [])) {
+            if (checkpoint.observed_at <= cutoff || checkpoint.user_verdict === null) continue;
+            counts.set(checkpoint.user_verdict, (counts.get(checkpoint.user_verdict) ?? 0) + 1);
+        }
+        return [...counts.entries()]
+            .map(([verdict, count]) => ({ verdict, count }))
+            .sort((a, b) => b.count - a.count || a.verdict.localeCompare(b.verdict)) satisfies GuardrailVerdictRow[];
     },
 );

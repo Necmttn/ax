@@ -84,21 +84,29 @@ describe("fetchAcceptedProposals", () => {
     test("returns accepted proposals with fields the taste deriver needs", async () => {
         const rows = [
             {
+                id: "p1",
                 form: "guidance",
                 title: "Stop edit loops early",
                 hypothesis: "3+ edits same file means requirements drift",
                 confidence: "high",
                 frequency: 12,
+                dedupe_sig: "sig",
+                status: "accepted",
+                origin: "agent",
+                hypothesis_template: null,
+                evidence_query: null,
+                reject_reason: null,
+                baseline: null,
                 updated_at: "2026-06-10T00:00:00Z",
                 created_at: "2026-06-01T00:00:00Z",
             },
         ];
         const r = await Effect.runPromise(fetchAcceptedProposals().pipe(
-            Effect.provide(judgmentTestLayer(() => rows.map((row) => ({
+            Effect.provide(judgmentTestLayer((sql) => sql.includes("FROM proposal") ? rows.map((row) => ({
                 ...row,
                 updated_at: new Date(row.updated_at),
                 created_at: new Date(row.created_at),
-            })))),
+            })) : [])),
         ));
         expect(r[0]!.title).toBe("Stop edit loops early");
     });
@@ -355,13 +363,27 @@ describe("fetchGuardrailHookEvidence", () => {
 
 describe("fetchGuardrailVerdicts", () => {
     test("returns locked verdict counts from windowed checkpoint rows", async () => {
-        const sidecarRows = [
-            { verdict: "adopted", count: 4 },
-            { verdict: "ignored", count: 2 },
-            { verdict: "no_longer_needed", count: 1 },
-        ];
+        const now = new Date();
         const rows = await Effect.runPromise(fetchGuardrailVerdicts({ windowDays: 30 }).pipe(
-            Effect.provide(judgmentTestLayer(() => sidecarRows)),
+            Effect.provide(judgmentTestLayer((sql) => {
+                if (sql.includes("FROM proposal")) return [{
+                    id: "p1", form: "guidance", title: "x", hypothesis: "y", dedupe_sig: "sig",
+                    frequency: 1, confidence: "high", status: "accepted", origin: "agent",
+                    hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: null,
+                    created_at: now, updated_at: now,
+                }];
+                if (sql.includes("FROM experiment")) return [{
+                    id: "e1", proposal: "p1", artifact: null, artifact_path: null,
+                    scaffolded_at: now, created_at: now, locked_verdict: null,
+                    status: "scaffolded", task_path: null,
+                }];
+                if (sql.includes("FROM checkpoint")) return [
+                    ...Array.from({ length: 4 }, (_, i) => ({ id: `a${i}`, experiment: "e1", kind: "+3s", measured: {}, suggested: null, user_verdict: "adopted", observed_at: now })),
+                    ...Array.from({ length: 2 }, (_, i) => ({ id: `i${i}`, experiment: "e1", kind: "+3s", measured: {}, suggested: null, user_verdict: "ignored", observed_at: now })),
+                    { id: "n1", experiment: "e1", kind: "+3s", measured: {}, suggested: null, user_verdict: "no_longer_needed", observed_at: now },
+                ];
+                return [];
+            })),
         ));
         expect(rows).toEqual([
             { verdict: "adopted", count: 4 },

@@ -281,11 +281,13 @@ describe("buildRetroPlanStatements SQL shape", () => {
         expect(expStmt).toContain("/tmp/skill.md");
     });
 
-    test("proposal key + experiment key share the same slug-derived prefix", () => {
-        const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        // Default (leaveOpen=false) always materialises an experiment key.
-        expect(built.experimentKey).not.toBeNull();
-        expect(built.experimentKey!.startsWith(built.proposalKey)).toBe(true);
+    test("proposal and experiment keys are stable content hashes", () => {
+        const first = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
+        const second = buildRetroPlanStatements(baseArgs(), 1_800_000_000_000);
+        expect(first.proposalKey).toMatch(/^[0-9a-f]{32}$/);
+        expect(first.experimentKey).toMatch(/^[0-9a-f]{32}$/);
+        expect(second.proposalKey).toBe(first.proposalKey);
+        expect(second.experimentKey).toBe(first.experimentKey);
     });
 
     test("--leave-open: proposal status is 'open' (not 'accepted')", () => {

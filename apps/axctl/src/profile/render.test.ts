@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
@@ -104,8 +104,10 @@ const mockResults = [
 ];
 
 const proposalRows = [{
-    form: "guidance", title: "Stop edit loops early",
+    id: "p1", form: "guidance", title: "Stop edit loops early",
     hypothesis: "3+ edits means drift", confidence: "high", frequency: 12,
+    dedupe_sig: "sig", status: "accepted", origin: "agent",
+    hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: null,
     updated_at: new Date("2026-06-10T00:00:00Z"), created_at: new Date("2026-06-01T00:00:00Z"),
 }];
 const verdictRows = [
@@ -120,10 +122,26 @@ const runProfile = <A, E>(
     db: TestSurrealClient,
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
-) => Effect.runPromise(effect.pipe(
-    Effect.provide(db.layer),
-    Effect.provide(judgmentTestLayer((sql) => sql.includes("FROM proposal") ? proposals : verdictRows)),
-) as Effect.Effect<A, E>);
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(
+    db.layer,
+    judgmentTestLayer((sql) => {
+        const now = new Date();
+        if (sql.includes("FROM proposal")) return proposals;
+        if (proposals.length === 0) return [];
+        if (sql.includes("FROM experiment")) return [{
+            id: "e1", proposal: "p1", artifact: null, artifact_path: null,
+            scaffolded_at: now, created_at: now, locked_verdict: null,
+            status: "scaffolded", task_path: null,
+        }];
+        if (sql.includes("FROM checkpoint")) return verdictRows.flatMap(({ verdict, count }) =>
+            Array.from({ length: count }, (_, index) => ({
+                id: `${verdict}-${index}`, experiment: "e1", kind: "+3s", measured: {},
+                suggested: null, user_verdict: verdict, observed_at: now,
+            }))
+        );
+        return [];
+    }),
+))) as Effect.Effect<A, E>);
 
 const env = {
     github: "necmttn",
