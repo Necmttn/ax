@@ -334,7 +334,7 @@ export const deriveRoutingProposalRow = (input: {
 };
 
 /**
- * Build SurrealQL statements for a routing proposal row. Mirrors
+ * Build cache write rows for a routing proposal. Mirrors
  * buildGuidanceProposalWrites: insert on first sight, update mutable
  * fields on re-derive. No typed payload table (hook form is self-contained).
  */
@@ -404,7 +404,7 @@ export const deriveImageContextProposalRow = (
 };
 
 /**
- * Build SurrealQL statements for an image-context proposal row. Mirrors
+ * Build cache write rows for an image-context proposal. Mirrors
  * buildRoutingProposalWrites: insert on first sight, update mutable
  * fields on re-derive. No typed payload table (subagent form is self-contained).
  */
@@ -518,7 +518,7 @@ export const deriveSkillProposalRows = (
 };
 
 /**
- * Build the SurrealQL statements for a batch of derived rows. The proposal
+ * Build cache writes for a batch of derived rows. The proposal
  * row is partitioned by whether its dedupe_sig already exists in the DB:
  *  - new sig  : insert a fresh proposal row (baseline captured here).
  *  - existing : refresh the mutable fields; baseline and status untouched.

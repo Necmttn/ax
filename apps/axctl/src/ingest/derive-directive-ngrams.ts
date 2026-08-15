@@ -35,12 +35,10 @@ export class DirectiveNgramsStats extends BaseStageStats.extend<DirectiveNgramsS
 // ---------------------------------------------------------------------------
 
 /**
- * Build one `UPSERT directive_ngram:<safe-id> SET ...` statement per row.
+ * Build one directive n-gram cache row per result.
  *
- * The record ID is derived from the ngram string via `safeKeyPart` so spaces
- * and special characters are safe for SurrealQL. The raw ngram text is stored
- * in the `ngram` field. `first_seen` is left to the schema default (never
- * overwritten on subsequent refits).
+ * The stable ID derives from the n-gram string. The raw text stays in `ngram`.
+ * The schema supplies `first_seen` when the row is first inserted.
  */
 export const buildNgramRows = (rows: readonly LiftRow[], now = new Date()) =>
     rows.map((row) => ({

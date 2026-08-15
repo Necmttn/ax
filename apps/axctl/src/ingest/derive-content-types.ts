@@ -99,12 +99,11 @@ export const contentTypeRows = () =>
     ALL_CONTENT_CATEGORIES.map((category) => cacheRow({ id: category, category, label: category }));
 
 /**
- * Render one `has_content` RELATE statement. The edge is keyed by a stable
+ * Build one `has_content` edge row. The edge uses a stable
  * digest of the full tool_call id, ensuring collision-free keys even for long
  * cursor/opencode ids that share a 96+ char common prefix.
  *
- * Returns `null` when the tool_call id cannot be decomposed into a valid
- * SurrealDB key (empty string, unrecognised shape).
+ * The function returns `null` for an empty or invalid tool call ID.
  */
 export const contentEdgeRow = (edge: ContentEdgeSpec) => cacheRow({
     id: stableId("has_content", [edge.toolCallId]),

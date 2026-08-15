@@ -109,7 +109,7 @@ function candidateForPath(path: string): Omit<SkillCandidate, "key" | "evidenceC
             triggerPattern: "fix commits overlap graph query files",
             suspectedGap: "Query builders can pass string tests while returning slow or low-signal output.",
             proposedBehavior: "After query edits, run the live insight view and tune ranking against real rows before commit.",
-            expectedImpact: "More useful insight output and fewer slow SurrealQL reads.",
+            expectedImpact: "More useful insight output and fewer slow cache reads.",
         };
     }
     return {

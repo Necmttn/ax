@@ -2,11 +2,10 @@
  * github-pr-write: persist normalized GitHub PRs + link them to the sessions
  * that produced the PR's merge/head commit.
  *
- * Given a repository record literal and an array of raw `gh pr list --json`
+ * Given a repository ID and an array of raw `gh pr list --json`
  * objects, this writes `pull_request`, `review_event`, `check_run`, and
  * `delivery_outcome` rows. Normalization lives in `github-pr.ts`; scoring +
- * classification in `delivery.ts`; this module only formats SurrealQL literals
- * and batches the resulting UPSERT statements.
+ * classification in `delivery.ts`; this module writes normalized cache rows.
  */
 
 import { Effect, Schema } from "effect";
@@ -26,7 +25,7 @@ import {
 } from "./delivery.ts";
 
 export interface WritePullRequestsInput {
-    /** Already a record literal, e.g. recordLiteral("repository", key). */
+    /** Repository row ID. */
     readonly repositoryId: string;
     /** The raw repository key (for deterministic child ids). */
     readonly repositoryKey: string;

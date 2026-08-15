@@ -34,9 +34,6 @@ export const relateSkillRoles = (
             cleaned.push(norm);
         }
 
-        // Inline record id literal - bypasses SDK RecordId binding which
-        // silently produces empty results against live SurrealDB (see
-        // src/lib/shared/graph-query.ts:132 and src/dashboard/session-detail.ts:33).
         // Sweep ALL frontmatter-sourced edges for this skill before writing
         // the current set. This handles role shrinkage (e.g. [framing,execution]
         // → [framing]) and the empty-roles case in one pass.

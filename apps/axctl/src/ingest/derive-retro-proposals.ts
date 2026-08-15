@@ -390,12 +390,11 @@ export const deriveRetroProposalRows = (
 };
 
 /**
- * Build the SurrealQL statements for a batch of derived rows.
+ * Build cache writes for a batch of derived rows.
  *
  * Mirrors {@link buildSkillProposalStatements} in derive-proposals.ts:
- * a fresh dedupe_sig becomes a `CREATE proposal` with frozen baseline +
- * status='open'; an existing sig becomes a minimal `UPDATE` of mutable
- * fields only. The `skill_proposal` payload is UPSERT-ed in both paths.
+ * a fresh dedupe_sig gets a frozen baseline and open status. An existing sig
+ * gets only mutable field updates. Both paths write the skill proposal payload.
  *
  * Unlike the skill_candidate-sourced version, this writer does NOT emit
  * `cites_evidence` edges - the `retro` table isn't in the

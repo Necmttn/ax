@@ -24,10 +24,8 @@ export const stackKey = (signal: Pick<StackSignal, "name">): string =>
 /**
  * The three collections this stage persists - and the ONLY thing it reads from
  * the harness module. `HarnessGrounding` is deliberately narrower than the full
- * report: the report's other half comes from the published DuckDB snapshot, and
- * this stage writes SurrealDB, so reaching for it would make one ingest
- * operation span both engines and answer from a snapshot that omits everything
- * the run in progress has written.
+ * report: the report's other half comes from the published DuckDB snapshot.
+ * This stage writes the live cache. A snapshot read would omit current writes.
  */
 export function buildHarnessIngestRows(
     report: Pick<import("../project/types.ts").ProjectHarnessReport, "guidanceSources" | "guidanceRevisions" | "stacks">,

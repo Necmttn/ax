@@ -4,8 +4,8 @@
  * All three signals return `{ partialSuccess: {} }` (the OTLP/HTTP ack).
  * The database-free receiver owns durable spool writes.
  *
- * `handleOtlp` is a plain Effect (no HTTP layer) so the test suite can drive
- * it directly with a stub DB layer. `OtelGroupLive` wires it into the contract
+ * `handleOtlp` is a plain Effect (no HTTP layer) so tests can call it directly.
+ * `OtelGroupLive` wires it into the contract
  * via `handleRaw` so each handler can read the raw `ArrayBuffer` body from
  * `HttpServerRequest.arrayBuffer`.
  */

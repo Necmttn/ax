@@ -528,8 +528,8 @@ const writeRepo = Effect.fn("git.writeRepo")(
 
         // 4. session -> produced -> commit. For each commit, find sessions whose
         //    cwd starts with the repo path AND whose [started_at, ended_at]
-        //    range covers the commit ts. Done per-commit in SurrealQL so we
-        //    don't pull the session table to JS.
+        //    range covers the commit ts. The per-commit query avoids loading
+        //    the session table into JavaScript.
         let producedCount = 0;
         for (const c of commits) {
             const cid = commitIds.get(c.sha) ?? commitRowId(repo.repositoryKey, c.sha);
