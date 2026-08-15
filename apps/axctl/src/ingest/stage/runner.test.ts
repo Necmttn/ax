@@ -46,6 +46,19 @@ describe("topoLayers", () => {
 });
 
 describe("runPipeline", () => {
+    it("propagates a stage error outside the legacy database error channel", async () => {
+        const cacheFailure = "cache-read-failed" as const;
+        const cacheStage: StageDef<BaseStageStats, never, typeof cacheFailure> = {
+            meta: StageMeta.make({ key: "cache", deps: [], tags: ["derive"] }),
+            run: () => Effect.fail(cacheFailure),
+        };
+        const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+
+        const error = await Effect.runPromise(Effect.flip(runPipeline([cacheStage], ctx)));
+
+        expect(error).toBe(cacheFailure);
+    });
+
     it("runs every stage exactly once and respects deps", async () => {
         const order: string[] = [];
         const make = (key: string, deps: string[]): StageDef => ({

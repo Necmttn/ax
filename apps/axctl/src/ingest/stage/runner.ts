@@ -1,5 +1,4 @@
 import { Deferred, Effect, Fiber, Option, Semaphore } from "effect";
-import type { DbError } from "@ax/lib/errors";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
@@ -106,13 +105,13 @@ export const stageFileFailureAnnotator: Effect.Effect<
 
 /** Kahn's algorithm; throws on cycle. Layers are useful for diagnostics, but
  *  `runPipeline` uses Deferreds for tighter scheduling (no layer barriers). */
-export const topoLayers = <S extends BaseStageStats, R>(
-    stages: ReadonlyArray<StageDef<S, R>>,
+export const topoLayers = <S extends BaseStageStats, R, E>(
+    stages: ReadonlyArray<StageDef<S, R, E>>,
 ): string[][] => {
     const keys = new Set(stages.map((s) => s.meta.key));
     const done = new Set<string>();
     const layers: string[][] = [];
-    let remaining: ReadonlyArray<StageDef<S, R>> = stages;
+    let remaining: ReadonlyArray<StageDef<S, R, E>> = stages;
     while (remaining.length > 0) {
         const ready = remaining.filter((s) =>
             s.meta.deps.filter((d) => keys.has(d)).every((d) => done.has(d)),
@@ -141,17 +140,17 @@ export const topoLayers = <S extends BaseStageStats, R>(
  *  the outer ingest timeout (#697); omit it and derives keep only their static
  *  `AX_STAGE_TIMEOUT_SECONDS` cap. `opts.reserveMs` overrides the finalization
  *  reserve (env default) - tests pass 0. */
-export const runPipeline = <S extends BaseStageStats, R>(
-    stages: ReadonlyArray<StageDef<S, R>>,
+export const runPipeline = <S extends BaseStageStats, R, E>(
+    stages: ReadonlyArray<StageDef<S, R, E>>,
     ctx: IngestContext,
     opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
-): Effect.Effect<ReadonlyArray<S>, DbError, R> =>
+): Effect.Effect<ReadonlyArray<S>, E, R> =>
     Effect.gen(function* () {
         topoLayers(stages); // cycle check
 
-        const deferreds = new Map<string, Deferred.Deferred<S, DbError>>();
+        const deferreds = new Map<string, Deferred.Deferred<S, E>>();
         for (const s of stages) {
-            deferreds.set(s.meta.key, yield* Deferred.make<S, DbError>());
+            deferreds.set(s.meta.key, yield* Deferred.make<S, E>());
         }
         const sem = yield* Semaphore.make(PIPELINE_CONCURRENCY);
 
@@ -162,7 +161,7 @@ export const runPipeline = <S extends BaseStageStats, R>(
         const deadlineMs = opts.deadlineMs ?? null;
         const reserveMs = opts.reserveMs ?? deriveReserveMs();
 
-        const runStage = (s: StageDef<S, R>) =>
+        const runStage = (s: StageDef<S, R, E>) =>
             Effect.gen(function* () {
                 for (const dep of s.meta.deps) {
                     const d = deferreds.get(dep);
