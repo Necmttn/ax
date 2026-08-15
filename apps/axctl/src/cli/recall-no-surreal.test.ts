@@ -82,6 +82,14 @@ const CORPUS = (w: CacheWriteService) =>
             top_prior_sessions: "[]",
             injected_titles: '["Earlier fix"]',
         });
+        yield* w.put("tool_call", {
+            id: "call-one",
+            session: "session-a",
+            name: "Bash",
+            ts: T("2026-08-15T10:05:00.000Z"),
+            input_json: '{"command":"bun test"}',
+            has_error: false,
+        });
     });
 
 interface CliRun {
@@ -183,5 +191,20 @@ describe("ported hook CLI on the cache runtime", () => {
         const rows = JSON.parse(run.stdout) as ReadonlyArray<{ reason: string; latency_ms: number }>;
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ reason: "high_signal", latency_ms: 7 });
+    }, 60_000);
+
+    dtest("runs hook backtest with no SurrealDB reachable", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-hook-backtest-nodb-"), dylibPath, CORPUS),
+        );
+        const hook = new URL("../../../../packages/hooks-sdk/src/hooks/enforce-worktree.ts", import.meta.url).pathname;
+
+        const run = runCli(["hooks", "backtest", hook, "--days=30", "--json"], fixture.snapshotPath);
+
+        expect(run.stderr).not.toContain("SurrealClient");
+        if (run.exitCode !== 0) throw new Error(run.stderr);
+        const summary = JSON.parse(run.stdout) as { total: number; providers: ReadonlyArray<string> };
+        expect(summary.total).toBe(1);
+        expect(summary.providers).toEqual(["claude"]);
     }, 60_000);
 });

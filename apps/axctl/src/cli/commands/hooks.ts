@@ -276,5 +276,13 @@ export const hooksRuntime: RuntimeManifest = {
         },
         hidden: true,
     },
-    hooks: "db",
+    hooks: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            config: "db", add: "db", remove: "db", edit: "db", disable: "db", enable: "db",
+            init: "db", install: "db", backtest: "cache", bench: "db", latency: "db",
+            summary: "db", invocations: "db", session: "db", cases: "db",
+        },
+    },
 };
