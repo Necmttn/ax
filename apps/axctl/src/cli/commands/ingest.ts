@@ -11,7 +11,7 @@ import { prettyPrint } from "@ax/lib/json";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
-import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
+import { runIngest, withIngestRunFinish, type RunIngestResult } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import type { OtelRetentionResult } from "../../otel/retention.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
@@ -263,6 +263,39 @@ export interface MaintenanceSummary {
     readonly blobGcError?: string;
 }
 
+/**
+ * Write options for the ingest MAINTENANCE writes - the blob GC in `afterWork`
+ * and the timeout stamp in `onTimeout`. Never for the ingest itself, which
+ * builds its own inside `runIngest`.
+ *
+ * `publish: false` is the whole reason this is a named function rather than an
+ * object literal at the call site. `withCacheWrite` publishes a snapshot when
+ * its `body` succeeds, and both of these bodies are one-statement writes that
+ * succeed regardless of how the ingest they report on ENDED. With the default
+ * they publish the live database as a timed-out run left it - partial rows,
+ * derives computed over half-written base tables, no FTS index - as the
+ * authoritative snapshot every CLI, MCP and dashboard read then answers from.
+ * Ingest holds no transaction, so those partial rows are committed and there is
+ * no rollback behind them.
+ *
+ * Exported so the choice is covered by a test instead of a comment; the seam
+ * mechanism itself is regression-tested in packages/lib/src/duckdb/seam.test.ts.
+ */
+export const maintenanceCacheWriteOptions = (
+    dataDir: string,
+    lockPath: string,
+): {
+    readonly livePath: string;
+    readonly lockPath: string;
+    readonly schemaSql: string;
+    readonly publish: false;
+} => ({
+    livePath: posixPath.join(dataDir, "ax-live.duckdb"),
+    lockPath,
+    schemaSql: DUCKDB_SCHEMA_SQL,
+    publish: false,
+});
+
 /** One-line maintenance summary (F5/F6): reports pruned/deleted counts (or
  *  the failure reason) for otel retention + blob GC so a slow-but-successful
  *  ingest's aftermath is legible without grepping the DB. Exported for tests. */
@@ -353,11 +386,10 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // gate reads the single `isGlobalIngest` predicate over args + scope.
         const globalIngest = isGlobalIngest(args, opts);
         const lockPath = posixPath.join(cfg.paths.dataDir, "ingest.lock");
-        const cacheWriteOptions = {
-            livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
-            lockPath,
-            schemaSql: DUCKDB_SCHEMA_SQL,
-        } as const;
+        // MAINTENANCE-ONLY (never the ingest itself - `runIngest` owns its own
+        // write scope and its own publish). See `maintenanceCacheWriteOptions`
+        // for why these must not publish a snapshot.
+        const cacheWriteOptions = maintenanceCacheWriteOptions(cfg.paths.dataDir, lockPath);
 
         const work = runIngest({
             command: commandName,
@@ -377,15 +409,23 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
         });
 
-        // Best-effort maintenance (otel retention + blob GC), still under the
-        // lock, but NOT subject to `timeoutSeconds` (F5/F6) - passed as
-        // `afterWork` so slow-but-harmless maintenance can never retroactively
-        // stamp a genuinely-completed ingest as timeout-failed. Each half is
-        // caught independently (never `Effect.ignore`-d silently) so a fault
-        // logs a warn line instead of vanishing.
-        const afterWork = (): Effect.Effect<void, never> =>
+        // Best-effort maintenance, still under the lock, but NOT subject to
+        // `timeoutSeconds` (F5/F6) - passed as `afterWork` so slow-but-harmless
+        // maintenance can never retroactively stamp a genuinely-completed ingest
+        // as timeout-failed. Each half is caught independently (never
+        // `Effect.ignore`-d silently) so a fault logs a warn line instead of
+        // vanishing.
+        //
+        // The two halves now run in different places, and the split is
+        // deliberate. OTLP retention runs INSIDE `runIngest` so its DELETEs land
+        // in the snapshot that run publishes; it reports back through
+        // `RunIngestResult.otelRetention`, which `withIngestLock` hands to
+        // `afterWork` as `completed`. Blob GC touches the bucket directory, not
+        // the database, so it stays here - and its write scope must not publish
+        // (see `maintenanceCacheWriteOptions`).
+        const afterWork = (completed: RunIngestResult): Effect.Effect<void, never> =>
             Effect.gen(function* () {
-                const otel: MaintenanceHalf<OtelRetentionResult> = {};
+                const otel = completed.otelRetention;
 
                 const blobGc = yield* runMaintenanceHalf(
                     withCacheWrite(cacheWriteOptions, (write) =>

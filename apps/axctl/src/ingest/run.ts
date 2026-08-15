@@ -19,7 +19,7 @@ import { StageRegistry, type IngestStageError, type StageRegistryShape } from ".
 import { BaseStageStats, IngestContext, type StageDef } from "./stage/types.ts";
 import { reapStaleIngestRuns } from "./reap-runs.ts";
 import { correlateOrphanOtel } from "../otel/correlate.ts";
-import { retainRecentOtel } from "../otel/retention.ts";
+import { retainRecentOtel, type OtelRetentionResult } from "../otel/retention.ts";
 
 export interface StageEventName {
     readonly source: string;
@@ -283,6 +283,25 @@ export interface RunIngestOptions {
     readonly deadlineMs?: number;
 }
 
+/**
+ * The outcome of OTLP retention, carried OUT of the run rather than swallowed.
+ *
+ * Retention runs inside `runIngest` (not in the CLI's `afterWork`) because its
+ * DELETEs have to land in the snapshot this run publishes - housekeeping that
+ * only reaches the live database would be invisible to every reader until the
+ * next ingest. But "runs inside the run" must not mean "reports nowhere": an
+ * `Effect.ignore` here is a silent, recurring data-retention failure, and the
+ * CLI already owns a maintenance summary line built for exactly this. So the
+ * result (or the failure text) rides back on `RunIngestResult` and the caller
+ * prints it - `withIngestLock` hands the completed value to `afterWork`.
+ *
+ * Exactly one of the two fields is set.
+ */
+export interface OtelRetentionOutcome {
+    readonly result?: OtelRetentionResult;
+    readonly error?: string;
+}
+
 export interface RunIngestResult {
     readonly runId: string;
     readonly selectedStages: readonly string[];
@@ -291,6 +310,8 @@ export interface RunIngestResult {
      *  `failedFiles` from the per-file isolation guards). `durationMs` is
      *  excluded - summing wall-clocks across concurrent stages is noise. */
     readonly totals: Record<string, number>;
+    /** OTLP retention's outcome, for the caller's maintenance summary. */
+    readonly otelRetention: OtelRetentionOutcome;
 }
 
 const defaultRunId = (command: string): string =>
@@ -380,14 +401,25 @@ export const runIngest = (
             }
         }
 
+        // Correlation is best-effort by design (idempotent, re-drawn every run,
+        // and a miss only costs one run's telemetry edges), so it stays ignored.
         yield* correlateOrphanOtel(write).pipe(Effect.ignore);
-        yield* retainRecentOtel(write).pipe(Effect.ignore);
+        // Retention is NOT: a failure here means OTLP rows accumulate forever.
+        // Captured and reported through the caller's maintenance summary rather
+        // than ignored, while still running inside the run so its DELETEs are in
+        // the snapshot this run publishes.
+        const otelRetention: OtelRetentionOutcome = yield* retainRecentOtel(write).pipe(
+            Effect.map((result): OtelRetentionOutcome => ({ result })),
+            Effect.catch((error): Effect.Effect<OtelRetentionOutcome> =>
+                Effect.succeed({ error: errorText(error) })),
+        );
         yield* buildFtsIndexes(write);
         return {
             runId,
             selectedStages: selectedStages.map((s) => s.meta.key),
             status: "ok" as const,
             totals,
+            otelRetention,
         };
             }),
         );
