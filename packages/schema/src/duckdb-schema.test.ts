@@ -9,15 +9,28 @@ import {
     parseDuckdbTables,
     parseSurrealTables,
 } from "./duckdb-ddl.ts";
-import { DUCKDB_SCHEMA_TABLES, SIDECAR_JUDGMENT_TABLES } from "./duckdb-tables.ts";
+import { DUCKDB_SCHEMA_TABLES } from "./duckdb-tables.ts";
+import { SIDECAR_SCHEMA_SQL, parseSqliteColumns, parseSqliteTables } from "./sidecar-ddl.ts";
+import { SIDECAR_JUDGMENT_TABLES, SIDECAR_SCHEMA_TABLES } from "./sidecar-tables.ts";
 const surrealTables = parseSurrealTables(surql);
 const duckTables = parseDuckdbTables();
 const duckTableSet = new Set(duckTables);
+// v2 keeps the Surreal schema whole across TWO engines - the rebuildable
+// DuckDB cache and the SQLite judgment sidecar. Coverage assertions below ask
+// "does this table have a home", not "is it in this one file".
+const sidecarTableSet = new Set(parseSqliteTables());
+const ownedTableSet = new Set([...duckTables, ...sidecarTableSet]);
+const columnsOf = (table: string): readonly string[] =>
+    SIDECAR_JUDGMENT_TABLES.has(table) ? parseSqliteColumns(table) : parseDuckdbColumns(table);
 
 describe("coverage of the Surreal schema", () => {
-    test("every Surreal table has a DuckDB table of the same name", () => {
-        const missing = surrealTables.map((t) => t.table).filter((t) => !duckTableSet.has(t));
+    test("every Surreal table has a table of the same name in the engine that owns it", () => {
+        const missing = surrealTables.map((t) => t.table).filter((t) => !ownedTableSet.has(t));
         expect(missing).toEqual([]);
+        // ...and no table has BOTH homes, which would let a reader answer from
+        // whichever it opened, one of them empty.
+        const both = [...sidecarTableSet].filter((t) => duckTableSet.has(t));
+        expect(both).toEqual([]);
     });
 
     test("the DDL adds no table the Surreal schema never had", () => {
@@ -59,7 +72,7 @@ describe("edge tables", () => {
 
     test("every relation table becomes (id, in_id, out_id, …)", () => {
         for (const table of relationTables) {
-            const cols = parseDuckdbColumns(table);
+            const cols = columnsOf(table);
             expect(cols.slice(0, 3)).toEqual(["id", "in_id", "out_id"]);
         }
     });
@@ -74,6 +87,11 @@ describe("edge tables", () => {
         // actually served, so require one per side.
         const indexes = parseDuckdbIndexes();
         const uncovered = relationTables
+            // `plays_role` is a relation that moved to the sidecar; SQLite serves
+            // a leftmost-prefix seek off a composite index, so the single-column
+            // rule measured on DuckDB does not transfer. Its own indexes are
+            // asserted in sidecar-schema.test.ts against a live database.
+            .filter((table) => !SIDECAR_JUDGMENT_TABLES.has(table))
             .map((table) => {
                 const onTable = indexes.filter((i) => i.table === table);
                 return {
@@ -170,9 +188,14 @@ describe("arrays (P2-3, reverted)", () => {
             { table: "subagent_proposal", column: "example_task_patterns" },
             { table: "wrapped_card", column: "series" },
         ];
-        for (const { column } of scalarArrayColumns) {
-            expect(DUCKDB_SCHEMA_SQL).toMatch(new RegExp(`^\\s*${column}\\s+VARCHAR\\b`, "m"));
-            expect(DUCKDB_SCHEMA_SQL).not.toMatch(new RegExp(`^\\s*${column}\\s+\\w+\\[\\]`, "m"));
+        for (const { table, column } of scalarArrayColumns) {
+            // `subagent_proposal` moved to the sidecar, where the same rule holds
+            // with SQLite's spelling: JSON text, never a native list.
+            const inSidecar = SIDECAR_JUDGMENT_TABLES.has(table);
+            const sql = inSidecar ? SIDECAR_SCHEMA_SQL : DUCKDB_SCHEMA_SQL;
+            const scalarType = inSidecar ? "TEXT" : "VARCHAR";
+            expect(sql).toMatch(new RegExp(`^\\s*${column}\\s+${scalarType}\\b`, "m"));
+            expect(sql).not.toMatch(new RegExp(`^\\s*${column}\\s+\\w+\\[\\]`, "m"));
         }
     });
 
@@ -217,42 +240,24 @@ describe("manifest", () => {
     test("every entry carries a non-empty note and a known stage and kind", () => {
         for (const entry of DUCKDB_SCHEMA_TABLES) {
             expect(entry.note.length).toBeGreaterThan(0);
-            expect(["active", "conditional", "staged", "sidecar"]).toContain(entry.stage);
+            expect(["active", "conditional", "staged"]).toContain(entry.stage);
             expect(["node", "edge"]).toContain(entry.kind);
         }
     });
 
-    // Wave-0 finding P1-2: the DDL header says durable judgment lives in the
-    // SQLite sidecar and the DuckDB cache is REBUILDABLE, but the manifest had
-    // these tables marked `active` - a cache rebuild would erase user decisions.
-    // Every durable judgment table (proposals, verdicts, role tags + weights,
-    // retros, triage/label-review decisions, dogfood runs) must be `sidecar`.
-    test("every judgment table is marked stage: sidecar (durable, never rebuilt)", () => {
-        const JUDGMENT_TABLES = [
-            "proposal",
-            "skill_proposal",
-            "subagent_proposal",
-            "hook_proposal",
-            "guidance_proposal",
-            "automation_proposal",
-            "experiment",
-            "checkpoint",
-            "role",
-            "plays_role",
-            "retro",
-            "skill_triage_decision",
-            "transcript_label_review",
-            "dogfood_run",
-        ] as const;
-        const stageOf = new Map(DUCKDB_SCHEMA_TABLES.map((t) => [t.table, t.stage] as const));
-        for (const table of JUDGMENT_TABLES) {
-            expect(stageOf.get(table)).toBe("sidecar");
+    // Wave-0 finding P1-2 asked for a `stage: "sidecar"` FLAG on these fourteen
+    // tables, because the DDL header said durable judgment lives in the SQLite
+    // sidecar while the manifest still called them `active` - a cache rebuild
+    // would erase user decisions. `c-sidecar-sqlite` finishes that job: the flag
+    // is gone because the TABLES are gone, into schema.sidecar.sql. This is the
+    // stronger form of the same assertion - a table cannot be re-added to the
+    // cache DDL under a corrected flag, because there is no flag to correct.
+    test("the cache DDL defines no judgment table at all", () => {
+        const alsoInCache = [...SIDECAR_JUDGMENT_TABLES].filter((t) => duckTables.includes(t));
+        expect(alsoInCache).toEqual([]);
+        for (const entry of DUCKDB_SCHEMA_TABLES) {
+            expect(SIDECAR_JUDGMENT_TABLES.has(entry.table)).toBe(false);
         }
-        // The exported set and this explicit list must agree, and no OTHER table
-        // may be silently marked sidecar without being enumerated here.
-        expect([...SIDECAR_JUDGMENT_TABLES].sort()).toEqual([...JUDGMENT_TABLES].sort());
-        const sidecarInManifest = DUCKDB_SCHEMA_TABLES.filter((t) => t.stage === "sidecar").map((t) => t.table);
-        expect(sidecarInManifest.sort()).toEqual([...JUDGMENT_TABLES].sort());
     });
 
     test("kind matches the Surreal relation flag", () => {
@@ -270,7 +275,12 @@ describe("manifest", () => {
         const block = insights.slice(insights.indexOf("export const SCHEMA_TABLES"));
         const listed = [...block.matchAll(/\{\s*table:\s*"([\w]+)"/g)].map((m) => m[1]!);
         expect(listed.length).toBeGreaterThan(50);
-        const manifest = new Set(DUCKDB_SCHEMA_TABLES.map((t) => t.table));
+        // The union of the two manifests: `SCHEMA_TABLES` predates the split and
+        // still lists judgment tables, which now answer from the sidecar.
+        const manifest = new Set([
+            ...DUCKDB_SCHEMA_TABLES.map((t) => t.table),
+            ...SIDECAR_SCHEMA_TABLES.map((t) => t.table),
+        ]);
         expect(listed.filter((t) => !manifest.has(t))).toEqual([]);
     });
 });

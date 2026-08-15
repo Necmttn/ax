@@ -1,10 +1,18 @@
 // packages/schema/src/duckdb-parity.test.ts
 //
-// Pins the Surreal -> DuckDB translation property: every `DEFINE FIELD` in
-// schema.surql must appear as a DuckDB column in schema.duckdb.sql with the
-// mapped type and matching nullability. This is a port of two throwaway
-// verification scripts (fidelity.ts / types.ts) that were both CLEAN over
-// all 138 tables / 1219 columns - the wave-2 seam port assumes this holds.
+// Pins the Surreal -> v2 translation property: every `DEFINE FIELD` in
+// schema.surql must appear as a column in the DDL of the engine that OWNS its
+// table, with the mapped type and matching nullability. This is a port of two
+// throwaway verification scripts (fidelity.ts / types.ts) that were both CLEAN
+// over all 138 tables / 1219 columns - the wave-2 seam port assumes this holds.
+//
+// TWO ENGINES, ONE PROPERTY. v1 had one destination; v2 has two - the
+// rebuildable DuckDB cache and the SQLite judgment sidecar (schema.sidecar.sql,
+// `c-sidecar-sqlite`). Fourteen tables moved to the sidecar, and the honest way
+// to keep the property is to follow them: each table is compared against ITS
+// engine's parser and ITS engine's type mapping, so the counts below stay at the
+// full 138/1218 rather than shrinking by the tables that changed home. Exempting
+// them instead would have quietly stopped checking a tenth of the schema.
 import { describe, expect, test } from "bun:test";
 import surql from "./schema.surql" with { type: "text" };
 import { accessorFor } from "@ax/lib/duckdb/row-decode";
@@ -16,10 +24,14 @@ import {
     parseDuckdbTables,
     parseSurrealTables,
 } from "./parse-duckdb-schema.ts";
+import { parseSqliteColumnDefs, parseSqliteColumns, parseSqliteTables } from "./sidecar-ddl.ts";
+import { SIDECAR_JUDGMENT_TABLES } from "./sidecar-tables.ts";
 
 // Expected table/column counts. Asserted explicitly so the property can never
 // silently shrink to comparing zero (or a handful of) tables/columns.
 const EXPECTED_TABLES_COMPARED = 138;
+/** Of those, how many the DuckDB cache still defines (138 - 14 judgment tables). */
+const EXPECTED_DUCKDB_TABLES = 124;
 // A7 (agent_event.raw prune): schema.surql's `agent_event.raw` field was
 // removed (ax never wrote it - buildAgentEventStatement already omitted it
 // from the CONTENT it upserts). schema.duckdb.sql's `agent_event.raw` column
@@ -102,6 +114,34 @@ function expectedDuckType(t: string): string {
     }
 }
 
+/** Maps a Surreal DEFINE FIELD TYPE to the SQLite type the sidecar must use.
+ *
+ *  SQLite has no BOOLEAN and no TIMESTAMP: a bool is an INTEGER holding 0 or 1,
+ *  and a datetime is TEXT holding an ISO-8601 UTC instant (see the TYPES block in
+ *  schema.sidecar.sql). Everything else follows the same JSON-in-text rule the
+ *  cache uses for arrays and objects. */
+function expectedSqliteType(t: string): string {
+    if (t.startsWith("record<")) return "TEXT";
+    if (t.startsWith("array<")) return "TEXT";
+    if (t === "object") return "TEXT";
+    switch (t) {
+        case "string":
+            return "TEXT";
+        case "int":
+            return "INTEGER";
+        case "float":
+            return "REAL";
+        case "number":
+            return "REAL";
+        case "bool":
+            return "INTEGER";
+        case "datetime":
+            return "TEXT";
+        default:
+            return `?${t}`;
+    }
+}
+
 /** `in` -> `in_id`, `out` -> `out_id`, everything else unchanged. */
 function renamedColumn(field: string): string {
     if (field === "in") return "in_id";
@@ -111,7 +151,35 @@ function renamedColumn(field: string): string {
 
 const relationByTable = new Map(parseSurrealTables(surql).map((t) => [t.table, t.relation] as const));
 const duckTables = parseDuckdbTables();
-const duckTableSet = new Set(duckTables);
+const sidecarTableSet = new Set(parseSqliteTables());
+/** Every table with a home in v2, whichever engine owns it. */
+const ownedTableSet = new Set([...duckTables, ...sidecarTableSet]);
+
+/** Which DDL owns `table`, and how to read it. One lookup, so no assertion below
+ *  can accidentally compare a moved table against the engine it LEFT. */
+interface OwningEngine {
+    readonly engine: "duckdb" | "sqlite";
+    readonly columns: (table: string) => readonly string[];
+    readonly columnDefs: (table: string) => readonly { name: string; type: string; notNull: boolean }[];
+    readonly expectedType: (surrealType: string) => string;
+}
+
+const DUCKDB_ENGINE: OwningEngine = {
+    engine: "duckdb",
+    columns: (t) => parseDuckdbColumns(t),
+    columnDefs: (t) => parseDuckdbColumnDefs(t),
+    expectedType: expectedDuckType,
+};
+
+const SQLITE_ENGINE: OwningEngine = {
+    engine: "sqlite",
+    columns: (t) => parseSqliteColumns(t),
+    columnDefs: (t) => parseSqliteColumnDefs(t),
+    expectedType: expectedSqliteType,
+};
+
+const engineFor = (table: string): OwningEngine =>
+    SIDECAR_JUDGMENT_TABLES.has(table) ? SQLITE_ENGINE : DUCKDB_ENGINE;
 
 // P1-1: Surreal `TYPE RELATION SCHEMAFULL` edges with no FROM/TO are untyped -
 // Surreal's own record id carries the endpoint table name inline, which a bare
@@ -131,20 +199,20 @@ const POLYMORPHIC_EDGE_EXTRA_COLUMNS: Readonly<Record<string, readonly string[]>
     telemetry_of: ["out_table"],
 };
 
-describe("column-set parity (Surreal field set == DuckDB column set)", () => {
+describe("column-set parity (Surreal field set == owning engine's column set)", () => {
     const surrealFields = surrealFieldsByTable();
 
-    test("every Surreal table's fields map exactly onto its DuckDB columns", () => {
+    test("every Surreal table's fields map exactly onto its owning engine's columns", () => {
         const problems: string[] = [];
         let checked = 0;
 
         for (const [table, fields] of surrealFields) {
-            if (!duckTableSet.has(table)) {
+            if (!ownedTableSet.has(table)) {
                 problems.push(`${table}: MISSING TABLE`);
                 continue;
             }
             checked += 1;
-            const cols = new Set(parseDuckdbColumns(table));
+            const cols = new Set(engineFor(table).columns(table));
             const expected = new Set<string>(["id"]);
             if (relationByTable.get(table) === true) {
                 expected.add("in_id");
@@ -164,12 +232,12 @@ describe("column-set parity (Surreal field set == DuckDB column set)", () => {
         // Fieldless relation tables (no DEFINE FIELD at all) still need id/in_id/out_id.
         for (const [table, isRel] of relationByTable) {
             if (!isRel || surrealFields.has(table)) continue;
-            if (!duckTableSet.has(table)) {
+            if (!ownedTableSet.has(table)) {
                 problems.push(`${table}: MISSING TABLE`);
                 continue;
             }
             checked += 1;
-            const cols = new Set(parseDuckdbColumns(table));
+            const cols = new Set(engineFor(table).columns(table));
             for (const want of ["id", "in_id", "out_id"]) {
                 if (!cols.has(want)) problems.push(`${table}.${want}: MISSING column`);
             }
@@ -180,24 +248,25 @@ describe("column-set parity (Surreal field set == DuckDB column set)", () => {
     });
 });
 
-describe("type + nullability parity (Surreal DEFINE FIELD TYPE == DuckDB column type/NOT NULL)", () => {
+describe("type + nullability parity (Surreal DEFINE FIELD TYPE == owning engine's column type/NOT NULL)", () => {
     const surrealTypes = surrealTypesByTable();
 
-    test("every column's DuckDB type matches its mapped Surreal type", () => {
+    test("every column's type matches its mapped Surreal type in the engine that owns it", () => {
         const problems: string[] = [];
         let checked = 0;
 
         for (const [table, inner] of surrealTypes) {
-            const defs = new Map(parseDuckdbColumnDefs(table).map((d) => [d.name, d] as const));
+            const engine = engineFor(table);
+            const defs = new Map(engine.columnDefs(table).map((d) => [d.name, d] as const));
             for (const [field, { t }] of inner) {
                 const want = renamedColumn(field);
                 const def = defs.get(want);
                 if (def === undefined) {
-                    problems.push(`${table}.${want}: no column`);
+                    problems.push(`${table}.${want}: no column in the ${engine.engine} DDL`);
                     continue;
                 }
                 checked += 1;
-                const exp = expectedDuckType(t);
+                const exp = engine.expectedType(t);
                 if (def.type !== exp) {
                     problems.push(`${table}.${want}: type ${def.type}, expected ${exp} (surreal ${t})`);
                 }
@@ -213,12 +282,13 @@ describe("type + nullability parity (Surreal DEFINE FIELD TYPE == DuckDB column 
         let checked = 0;
 
         for (const [table, inner] of surrealTypes) {
-            const defs = new Map(parseDuckdbColumnDefs(table).map((d) => [d.name, d] as const));
+            const engine = engineFor(table);
+            const defs = new Map(engine.columnDefs(table).map((d) => [d.name, d] as const));
             for (const [field, { opt }] of inner) {
                 const want = renamedColumn(field);
                 const def = defs.get(want);
                 if (def === undefined) {
-                    problems.push(`${table}.${want}: no column`);
+                    problems.push(`${table}.${want}: no column in the ${engine.engine} DDL`);
                     continue;
                 }
                 checked += 1;
@@ -349,6 +419,10 @@ describe("banned-type guard (FFI client compatibility)", () => {
 describe("parser sanity", () => {
     test("the DuckDB DDL is non-trivial and the parsers found real tables/columns", () => {
         expect(DUCKDB_SCHEMA_SQL.length).toBeGreaterThan(1000);
-        expect(duckTables.length).toBe(EXPECTED_TABLES_COMPARED);
+        expect(duckTables.length).toBe(EXPECTED_DUCKDB_TABLES);
+        // ...and the fourteen the cache gave up are all in the sidecar, so the
+        // 138 tables the property compares are still 138 tables that EXIST.
+        expect(ownedTableSet.size).toBeGreaterThanOrEqual(EXPECTED_TABLES_COMPARED);
+        expect([...SIDECAR_JUDGMENT_TABLES].filter((t) => !sidecarTableSet.has(t))).toEqual([]);
     });
 });
