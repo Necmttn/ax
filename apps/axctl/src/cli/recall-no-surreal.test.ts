@@ -21,7 +21,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, runWithPlatform } from "../testing/cache-fixture.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall (no surreal)");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall (no surreal)", { requireFts: true });
 
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
 const CLI = new URL("./index.ts", import.meta.url).pathname;

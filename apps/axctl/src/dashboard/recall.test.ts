@@ -29,7 +29,7 @@ import type { RecallResponse } from "@ax/lib/shared/dashboard-types";
 import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../queries/recall.ts";
 import { fetchRecall, type RecallParams } from "./recall.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall", { requireFts: true });
 
 const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
