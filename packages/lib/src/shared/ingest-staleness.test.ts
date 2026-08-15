@@ -83,3 +83,40 @@ describe("formatStaleIngestWarning", () => {
         expect(formatStaleIngestWarning({ lastOkMs: 0, nowMs: now, thresholdMs: 0 })).toBeNull();
     });
 });
+
+describe("isStrandedRun accepts what each engine hands it", () => {
+    const staleAfterMs = 60_000;
+    const now = Date.parse("2026-08-15T12:00:00.123Z");
+
+    test("a Date heartbeat keeps its MILLISECONDS", () => {
+        // The DuckDB seam decodes a TIMESTAMP to a Date. The old
+        // `Date.parse(String(date))` went through "Sat Aug 15 2026 12:00:00
+        // GMT+0000", which parses only to whole seconds - so a run whose last
+        // heartbeat was 999ms inside the budget could read as 1ms outside it.
+        const justInside = new Date(now - staleAfterMs + 1);
+        const justOutside = new Date(now - staleAfterMs - 1);
+
+        expect(isStrandedRun({ last_progress_at: justInside }, now, staleAfterMs)).toBe(false);
+        expect(isStrandedRun({ last_progress_at: justOutside }, now, staleAfterMs)).toBe(true);
+    });
+
+    test("an ISO string still works - doctor's raw HTTP probe never sees a Date", () => {
+        expect(
+            isStrandedRun({ last_progress_at: new Date(now - 1000).toISOString() }, now, staleAfterMs),
+        ).toBe(false);
+    });
+
+    test("started_at is used only when last_progress_at is ABSENT", () => {
+        const fresh = new Date(now - 1000);
+        expect(isStrandedRun({ started_at: fresh }, now, staleAfterMs)).toBe(false);
+        // Present but unreadable: unreadable residue stays stranded rather than
+        // falling back to a recent started_at and reading as live.
+        expect(
+            isStrandedRun({ last_progress_at: "not a date", started_at: fresh }, now, staleAfterMs),
+        ).toBe(true);
+    });
+
+    test("a row with no heartbeat at all is stranded", () => {
+        expect(isStrandedRun({}, now, staleAfterMs)).toBe(true);
+    });
+});

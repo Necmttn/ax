@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, FileSystem, Path, Schema } from "effect";
+import type { Clause } from "@ax/lib/duckdb/clause";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheFirst, cacheRows } from "@ax/lib/duckdb/query";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import type { DbError } from "@ax/lib/errors";
 import { getGitState } from "./git.ts";
 import {
     defaultHarnessDoctorReportBuilder,
@@ -46,11 +48,8 @@ const GLOBAL_GUIDANCE = [
     ".dotfiles/claude/.claude",
 ] as const;
 
-interface ObservedToolCallRow {
-    readonly name?: string | null;
-    readonly command_norm?: string | null;
-    readonly calls?: number | null;
-}
+/** How far back the observed-tooling signal looks. */
+const OBSERVED_WINDOW_DAYS = 30;
 
 const hashText = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
@@ -233,57 +232,121 @@ function layerForObservedTool(name: string): AgentToolingSignal["layer"] {
     return "representation";
 }
 
-const fetchObservedTooling = (): Effect.Effect<ReadonlyArray<AgentToolingSignal>, DbError, SurrealClient> =>
+const ObservedToolRow = Schema.Struct({
+    tool_name: Schema.String,
+    calls: NumberFromBigIntColumn,
+});
+
+/**
+ * The 25 most-used tools of the last 30 days.
+ *
+ * `command_norm ?? name` moved from JS into `coalesce` in SQL, because it is
+ * what the rows are GROUPED BY: grouping on the pair and collapsing afterwards
+ * (what the Surreal version did) splits one tool's calls across two rows
+ * whenever some of its invocations normalized and others did not, and then
+ * ranks the halves separately.
+ *
+ * `time::now() - 30d` becomes a bound cutoff computed here. DuckDB would spell
+ * it `now() - INTERVAL 30 DAY`, but a bound parameter keeps the window testable
+ * without a clock, and the seam pins the connection to UTC either way.
+ */
+export const fetchObservedTooling = (): Effect.Effect<
+    ReadonlyArray<AgentToolingSignal>,
+    never,
+    CacheRead
+> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `
-SELECT
-    command_norm,
-    name,
-    count() AS calls
-FROM tool_call
-WHERE ts > time::now() - 30d
-        GROUP BY command_norm, name
-ORDER BY calls DESC
-LIMIT 25;`;
-        const result = yield* db.query<[ObservedToolCallRow[]]>(sql);
-        const signals: AgentToolingSignal[] = [];
-        for (const row of result?.[0] ?? []) {
-            const name = row.command_norm ?? row.name ?? null;
-            const calls = Number(row.calls ?? 0);
-            if (!name || calls <= 0) continue;
-            signals.push({
-                    name,
-                    layer: layerForObservedTool(name),
-                    source: "observed",
-                    evidence: `${calls} observed calls in 30d`,
-            });
-        }
-        return signals;
+        const cutoff = new Date(Date.now() - OBSERVED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const rows = yield* cacheRows(
+            ObservedToolRow,
+            {
+                // The alias is `tool_name`, not `tool`: `tool_call` HAS a column
+                // called `tool` (its ref to the tool row), so `GROUP BY tool`
+                // binds to that column rather than to the alias, and DuckDB
+                // then rejects the statement. Measured, not guessed.
+                sql: `SELECT coalesce(command_norm, name) AS tool_name, count(*) AS calls
+                      FROM tool_call
+                      WHERE ts > ? AND coalesce(command_norm, name) IS NOT NULL
+                      GROUP BY tool_name
+                      ORDER BY calls DESC
+                      LIMIT 25`,
+                params: [cutoff],
+            },
+            "project harness observed tooling",
+        );
+
+        return rows
+            .filter((row) => row.tool_name.length > 0 && row.calls > 0)
+            .map((row) => ({
+                name: row.tool_name,
+                layer: layerForObservedTool(row.tool_name),
+                source: "observed" as const,
+                evidence: `${row.calls} observed calls in ${OBSERVED_WINDOW_DAYS}d`,
+            }));
     });
 
-const fetchMainBranchGraphEvidence = (): Effect.Effect<MainBranchGraphEvidence, DbError, SurrealClient> =>
+const MainBranchCountRow = Schema.Struct({ count: NumberFromBigIntColumn });
+const LatestEditRow = Schema.Struct({ path_seen: Schema.NullOr(Schema.String) });
+
+/** The branches this treats as "the shared trunk" for the worktree-guard advice. */
+const MAIN_BRANCHES = ["main", "master"];
+const MAIN_BRANCH_PLACEHOLDERS = MAIN_BRANCHES.map(() => "?").join(", ");
+
+/**
+ * Did work happen directly on the trunk?
+ *
+ * `checkout.branch` was a Surreal record deref; `edited.checkout` and
+ * `produced.checkout` are plain VARCHARs holding the checkout row id, so this is
+ * an ordinary JOIN. Three statements rather than one `RETURN { … }` object,
+ * which has no DuckDB equivalent - each is an indexed aggregate and the
+ * combination happens here, where it is legible.
+ */
+const onMainCount = (table: "edited" | "produced"): Clause => ({
+    sql: `SELECT count(*) AS count FROM ${table} e
+          JOIN checkout c ON c.id = e.checkout
+          WHERE c.branch IN (${MAIN_BRANCH_PLACEHOLDERS})`,
+    params: MAIN_BRANCHES,
+});
+
+export const fetchMainBranchGraphEvidence = (): Effect.Effect<
+    MainBranchGraphEvidence,
+    never,
+    CacheRead
+> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `
-RETURN {
-    editedOnMain: ((SELECT count() AS count FROM edited WHERE checkout.branch IN ["main", "master"] GROUP ALL)[0].count ?? 0),
-    commitsFromMain: ((SELECT count() AS count FROM produced WHERE checkout.branch IN ["main", "master"] GROUP ALL)[0].count ?? 0),
-    latestEditedPath: (SELECT path_seen, ts FROM edited WHERE checkout.branch IN ["main", "master"] ORDER BY ts DESC LIMIT 1)[0].path_seen
-};`;
-        const result = yield* db.query<[MainBranchGraphEvidence]>(sql);
-        const row = result?.[0] ?? { editedOnMain: 0, commitsFromMain: 0, latestEditedPath: null };
+        const edited = yield* cacheFirst(
+            MainBranchCountRow,
+            onMainCount("edited"),
+            "project harness edits on main",
+        );
+        const produced = yield* cacheFirst(
+            MainBranchCountRow,
+            onMainCount("produced"),
+            "project harness commits from main",
+        );
+        const latest = yield* cacheFirst(
+            LatestEditRow,
+            {
+                sql: `SELECT e.path_seen AS path_seen FROM edited e
+                      JOIN checkout c ON c.id = e.checkout
+                      WHERE c.branch IN (${MAIN_BRANCH_PLACEHOLDERS})
+                      ORDER BY e.ts DESC LIMIT 1`,
+                params: MAIN_BRANCHES,
+            },
+            "project harness latest edit on main",
+        );
+
         return {
-            editedOnMain: Number(row.editedOnMain ?? 0),
-            commitsFromMain: Number(row.commitsFromMain ?? 0),
-            latestEditedPath: typeof row.latestEditedPath === "string" ? row.latestEditedPath : null,
+            editedOnMain: edited?.count ?? 0,
+            commitsFromMain: produced?.count ?? 0,
+            latestEditedPath: latest?.path_seen ?? null,
         };
     });
 
 export const buildProjectHarnessReport = (
     cwd = process.cwd(),
     builder: HarnessDoctorReportBuilder = defaultHarnessDoctorReportBuilder,
-): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<ProjectHarnessReport, never, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
