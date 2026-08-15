@@ -52,7 +52,16 @@
  */
 import { BunFileSystem } from "@effect/platform-bun";
 import { Database } from "bun:sqlite";
-import { Context, Effect, FileSystem, Layer, Option, Schema, Semaphore } from "effect";
+import {
+    Context,
+    Effect,
+    Exit,
+    FileSystem,
+    Layer,
+    Option,
+    Schema,
+    Semaphore,
+} from "effect";
 import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
 import {
@@ -197,7 +206,7 @@ const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
 
 /** Build the service over an open database. Split out from the layer so the
  *  service's behaviour is testable without the lazy-open machinery around it. */
-const serviceOver = (db: Database, path: string): JudgmentService => {
+const serviceOver = (db: Database, path: string, invalidate: () => void): JudgmentService => {
     // ONE permit, held for the whole of a transaction. SQLite transactions are a
     // property of the CONNECTION, not of a call: two fibers interleaving
     // BEGIN/COMMIT on this shared handle would commit each other's work and roll
@@ -338,11 +347,27 @@ const serviceOver = (db: Database, path: string): JudgmentService => {
      * front, where `busy_timeout` DOES apply, so contention costs a wait instead
      * of an error.
      *
-     * Rollback runs on interruption as well as on failure (`onExit`, not
-     * `onError`): an interrupted fiber that left a transaction open would hold
-     * the write lock until the process exited.
+     * Rollback runs on interruption as well as on failure. A failed COMMIT also
+     * starts rollback. A failed rollback invalidates the shared connection
+     * before the semaphore releases its permit.
      */
     const transactionService: JudgmentTransaction = { rows, first, raw, exec, put, putMany };
+
+    const rollbackOrInvalidate = (): Effect.Effect<void, JudgmentError> =>
+        Effect.asVoid(exec("ROLLBACK")).pipe(
+            Effect.catch((rollbackError) =>
+                Effect.try({
+                    try: invalidate,
+                    catch: (closeError) =>
+                        new SidecarQueryError({
+                            sql: "ROLLBACK",
+                            message:
+                                `rollback failed (${rollbackError.message}); the connection was invalidated, ` +
+                                `but closing it also failed (${errorMessage(closeError)})`,
+                        }),
+                }),
+            ),
+        );
 
     const transaction: JudgmentService["transaction"] = <A, E, R>(
         body: (transaction: JudgmentTransaction) => Effect.Effect<A, E, R>,
@@ -352,9 +377,15 @@ const serviceOver = (db: Database, path: string): JudgmentService => {
                 exec("BEGIN IMMEDIATE"),
                 () => body(transactionService),
                 (_, exit) =>
-                    exit._tag === "Success"
-                        ? Effect.asVoid(exec("COMMIT"))
-                        : Effect.ignore(exec("ROLLBACK")),
+                    Exit.isSuccess(exit)
+                        ? Effect.asVoid(exec("COMMIT")).pipe(
+                              Effect.catch((commitError) =>
+                                  rollbackOrInvalidate().pipe(
+                                      Effect.flatMap(() => Effect.fail(commitError)),
+                                  ),
+                              ),
+                          )
+                        : Effect.ignore(rollbackOrInvalidate()),
             ),
         ) as Effect.Effect<A, E | JudgmentError, R>;
 
@@ -438,21 +469,32 @@ export const JudgmentLayer = (options: JudgmentLayerOptions): Layer.Layer<Judgme
                               const db = yield* Effect.try({
                                   try: () => {
                                       const database = new Database(path, { create: true });
-                                      // WAL first: `journal_mode` is persistent
-                                      // in the FILE, so this is a no-op after the
-                                      // first ever open, and it is what lets the
-                                      // daemon read while the CLI writes.
-                                      database.exec("PRAGMA journal_mode = WAL");
-                                      database.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
-                                      // NORMAL is the documented companion of WAL:
-                                      // a commit is durable across a process
-                                      // crash, and can lose only the last commits
-                                      // in a power loss. The sidecar is a local
-                                      // decision log, not a ledger; FULL would
-                                      // fsync on every judgment write.
-                                      database.exec("PRAGMA synchronous = NORMAL");
-                                      if (schemaSql !== null) database.exec(schemaSql);
-                                      return database;
+                                      try {
+                                          // WAL first: `journal_mode` is persistent
+                                          // in the FILE, so this is a no-op after the
+                                          // first ever open, and it is what lets the
+                                          // daemon read while the CLI writes.
+                                          database.exec("PRAGMA journal_mode = WAL");
+                                          database.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
+                                          // NORMAL is the documented companion of WAL:
+                                          // a commit is durable across a process
+                                          // crash, and can lose only the last commits
+                                          // in a power loss. The sidecar is a local
+                                          // decision log, not a ledger; FULL would
+                                          // fsync on every judgment write.
+                                          database.exec("PRAGMA synchronous = NORMAL");
+                                          if (schemaSql !== null) database.exec(schemaSql);
+                                          return database;
+                                      } catch (setupError) {
+                                          try {
+                                              database.close();
+                                          } catch (closeError) {
+                                              throw new Error(
+                                                  `sidecar setup failed (${errorMessage(setupError)}), and closing the local handle also failed (${errorMessage(closeError)})`,
+                                              );
+                                          }
+                                          throw setupError;
+                                      }
                                   },
                                   catch: (err) =>
                                       new SidecarUnavailableError({
@@ -461,7 +503,13 @@ export const JudgmentLayer = (options: JudgmentLayerOptions): Layer.Layer<Judgme
                                       }),
                               });
                               handle = db;
-                              opened = serviceOver(db, path);
+                              opened = serviceOver(db, path, () => {
+                                  if (handle === db) {
+                                      handle = null;
+                                      opened = null;
+                                  }
+                                  db.close();
+                              });
                               return opened;
                           }),
                       ),

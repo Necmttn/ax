@@ -22,7 +22,7 @@
  * cannot leave the pair tagless after having deleted the old tag.
  */
 import { Effect } from "effect";
-import { edgeRowId } from "@ax/lib/stable-id";
+import { edgeRowId, roleRowId } from "@ax/lib/stable-id";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
@@ -67,10 +67,6 @@ const SkillIdRow = Schema.Struct({ id: Schema.String });
 const tagId = (skillId: string, role: string): string =>
     edgeRowId("plays_role", skillId, role, "user");
 
-/** A role's row id is its name - roles are a small, user-authored vocabulary
- *  keyed by exactly the thing a user types. */
-const roleId = (roleName: string): string => `role:${roleName}`;
-
 export const cmdSkillsTag = (
     opts: SkillsTagOptions,
 ): Effect.Effect<void, CacheReadError | JudgmentError, CacheRead | Judgment> =>
@@ -107,7 +103,7 @@ export const cmdSkillsTag = (
             fail(`axctl skills tag: unknown skill "${trimmedSkill}"`);
         }
         const skillId = skill.value.id;
-        const role = roleId(roleName);
+        const role = roleRowId(roleName);
 
         yield* judgment.transaction((transaction) =>
             Effect.gen(function* () {

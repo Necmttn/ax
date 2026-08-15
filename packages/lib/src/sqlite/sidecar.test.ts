@@ -6,11 +6,12 @@
 // an in-memory one would pass every test here while hiding all four.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { Deferred, Effect, Fiber, Option, Schema } from "effect";
-import { mkdtempSync, rmSync } from "node:fs";
+import { Deferred, Effect, Exit, Fiber, Option, Schema } from "effect";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
+import { roleRowId } from "../stable-id.ts";
 import {
     BooleanColumn,
     Judgment,
@@ -235,11 +236,11 @@ describe("the judgment sidecar seam", () => {
             Effect.gen(function* () {
                 const attempt = j.transaction((transaction) =>
                     Effect.gen(function* () {
-                        yield* transaction.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
+                        yield* transaction.put("role", { id: roleRowId("reviewer"), name: "reviewer", weight: 2 });
                         yield* transaction.put("plays_role", {
                             id: "pr1",
                             in_id: "skill:tdd",
-                            out_id: "role:reviewer",
+                            out_id: roleRowId("reviewer"),
                             source: "user",
                         });
                         return yield* Effect.fail("the scaffold step failed" as const);
@@ -283,6 +284,26 @@ describe("the judgment sidecar seam", () => {
         expect(Option.getOrNull(n)?.n).toBe(0);
     });
 
+    test("closes each local database handle when setup fails before ownership transfer", async () => {
+        const before = readdirSync("/dev/fd").length;
+        await Effect.runPromise(
+            Effect.gen(function* () {
+                const j = yield* Judgment;
+                for (let attempt = 0; attempt < 20; attempt += 1) {
+                    yield* Effect.ignore(j.exec("SELECT 1"));
+                }
+            }).pipe(
+                Effect.scoped,
+                Effect.provide(JudgmentLayer({ sidecarPath, schemaSql: "INVALID SQL" })),
+            ),
+        );
+        const after = readdirSync("/dev/fd").length;
+
+        // Opening one failed SQLite database can allocate the database and WAL
+        // descriptors. Repeated retries must not retain one pair per attempt.
+        expect(after).toBeLessThanOrEqual(before + 2);
+    });
+
     test("serialises concurrent transactions instead of interleaving them on one connection", async () => {
         // A SQLite transaction belongs to the CONNECTION. Two fibers issuing
         // BEGIN/COMMIT against this shared handle would commit each other's work
@@ -293,7 +314,7 @@ describe("the judgment sidecar seam", () => {
             Effect.gen(function* () {
                 const doomed = j.transaction((transaction) =>
                     Effect.gen(function* () {
-                        yield* transaction.put("role", { id: "role:doomed", name: "doomed" });
+                        yield* transaction.put("role", { id: roleRowId("doomed"), name: "doomed" });
                         yield* Effect.yieldNow;
                         return yield* Effect.fail("no" as const);
                     }),
@@ -301,7 +322,7 @@ describe("the judgment sidecar seam", () => {
                 const kept = j.transaction((transaction) =>
                     Effect.gen(function* () {
                         yield* Effect.yieldNow;
-                        yield* transaction.put("role", { id: "role:kept", name: "kept" });
+                        yield* transaction.put("role", { id: roleRowId("kept"), name: "kept" });
                     }),
                 );
                 yield* Effect.all([Effect.ignore(doomed), kept], { concurrency: 2 });
@@ -311,7 +332,7 @@ describe("the judgment sidecar seam", () => {
                 );
             }),
         );
-        expect(surviving.map((r) => r.id)).toEqual(["role:kept"]);
+        expect(surviving.map((r) => r.id)).toEqual([roleRowId("kept")]);
     });
 
     test("keeps ordinary statements outside another fiber's transaction", async () => {
@@ -323,7 +344,7 @@ describe("the judgment sidecar seam", () => {
                     Effect.ignore(
                         j.transaction((transaction) =>
                             Effect.gen(function* () {
-                                yield* transaction.put("role", { id: "role:doomed", name: "doomed" });
+                                yield* transaction.put("role", { id: roleRowId("doomed"), name: "doomed" });
                                 yield* Deferred.succeed(started, undefined);
                                 yield* Deferred.await(finish);
                                 return yield* Effect.fail("no" as const);
@@ -334,7 +355,7 @@ describe("the judgment sidecar seam", () => {
 
                 yield* Deferred.await(started);
                 const ordinary = yield* Effect.forkChild(
-                    j.put("role", { id: "role:kept", name: "kept" }),
+                    j.put("role", { id: roleRowId("kept"), name: "kept" }),
                 );
                 yield* Effect.yieldNow;
                 yield* Deferred.succeed(finish, undefined);
@@ -348,18 +369,18 @@ describe("the judgment sidecar seam", () => {
             }),
         );
 
-        expect(surviving.map((r) => r.id)).toEqual(["role:kept"]);
+        expect(surviving.map((r) => r.id)).toEqual([roleRowId("kept")]);
     });
 
     test("commits a transaction that succeeds, visible to a SEPARATE connection", async () => {
         await run((j) =>
             j.transaction((transaction) =>
                 Effect.gen(function* () {
-                    yield* transaction.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
+                    yield* transaction.put("role", { id: roleRowId("reviewer"), name: "reviewer", weight: 2 });
                     yield* transaction.put("plays_role", {
                         id: "pr1",
                         in_id: "skill:tdd",
-                        out_id: "role:reviewer",
+                        out_id: roleRowId("reviewer"),
                         source: "user",
                     });
                 }),
@@ -372,5 +393,71 @@ describe("the judgment sidecar seam", () => {
         const n = other.query<{ n: number }, []>("SELECT count(*) AS n FROM plays_role").get()?.n;
         other.close();
         expect(n).toBe(1);
+    });
+
+    test("rolls back a deferred constraint failure before the next operation uses the connection", async () => {
+        const result = await run((j) =>
+            Effect.gen(function* () {
+                yield* j.exec("PRAGMA foreign_keys = ON");
+                yield* j.exec("CREATE TABLE parent (id TEXT PRIMARY KEY)");
+                yield* j.exec(
+                    "CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, " +
+                        "FOREIGN KEY(parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)",
+                );
+
+                const failedCommit = yield* Effect.exit(
+                    j.transaction((transaction) =>
+                        transaction.exec("INSERT INTO child (id, parent_id) VALUES (?, ?)", ["child-1", "missing"]),
+                    ),
+                );
+
+                const childCount = yield* j.first(
+                    Schema.Struct({ n: Schema.Number }),
+                    "SELECT count(*) AS n FROM child",
+                );
+                yield* j.transaction((transaction) =>
+                    transaction.exec("INSERT INTO parent (id) VALUES (?)", ["parent-1"]),
+                );
+                return { failedCommit, childCount };
+            }),
+        );
+
+        expect(Exit.isFailure(result.failedCommit)).toBe(true);
+        expect(Option.getOrNull(result.childCount)?.n).toBe(0);
+
+        const other = new Database(sidecarPath, { readonly: true });
+        const parentCount = other.query<{ n: number }, []>("SELECT count(*) AS n FROM parent").get()?.n;
+        other.close();
+        expect(parentCount).toBe(1);
+    });
+
+    test("closes and replaces the connection when rollback itself fails", async () => {
+        const result = await run((j) =>
+            Effect.gen(function* () {
+                yield* j.exec("CREATE TEMP TABLE connection_marker (id INTEGER)");
+
+                // The body ends the transaction early. The release action then
+                // gets a real COMMIT failure followed by a real ROLLBACK failure.
+                const failedCleanup = yield* Effect.exit(
+                    j.transaction((transaction) => transaction.exec("ROLLBACK")),
+                );
+                const oldConnectionMarker = yield* Effect.exit(
+                    j.raw("SELECT id FROM connection_marker"),
+                );
+
+                yield* j.transaction((transaction) =>
+                    transaction.put("role", { id: roleRowId("after-reopen"), name: "after-reopen" }),
+                );
+                return { failedCleanup, oldConnectionMarker };
+            }),
+        );
+
+        expect(Exit.isFailure(result.failedCleanup)).toBe(true);
+        expect(Exit.isFailure(result.oldConnectionMarker)).toBe(true);
+
+        const other = new Database(sidecarPath, { readonly: true });
+        const roleCount = other.query<{ n: number }, []>("SELECT count(*) AS n FROM role").get()?.n;
+        other.close();
+        expect(roleCount).toBe(1);
     });
 });

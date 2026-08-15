@@ -25,6 +25,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { roleRowId } from "@ax/lib/stable-id";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
@@ -66,14 +67,16 @@ const runCli = (args: ReadonlyArray<string>, sidecarPath: string, dir: string): 
 const seedSidecar = (sidecarPath: string): void => {
     const db = new Database(sidecarPath, { create: true });
     db.exec(SIDECAR_SCHEMA_SQL);
+    const verification = roleRowId("verification");
+    const framing = roleRowId("framing");
     db.exec(`
         INSERT INTO role (id, name, weight) VALUES
-            ('role:verification', 'verification', 2.0),
-            ('role:framing', 'framing', 1.0);
+            ('${verification}', 'verification', 2.0),
+            ('${framing}', 'framing', 1.0);
         INSERT INTO plays_role (id, in_id, out_id, source, confidence) VALUES
-            ('pr1', 'skill:tdd', 'role:verification', 'user', 1.0),
-            ('pr2', 'skill:brainstorming', 'role:verification', 'frontmatter', 0.4),
-            ('pr3', 'skill:brainstorming', 'role:framing', 'user', 1.0);
+            ('pr1', 'skill:tdd', '${verification}', 'user', 1.0),
+            ('pr2', 'skill:brainstorming', '${verification}', 'frontmatter', 0.4),
+            ('pr3', 'skill:brainstorming', '${framing}', 'user', 1.0);
     `);
     db.close();
 };

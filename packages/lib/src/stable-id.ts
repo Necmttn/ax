@@ -173,6 +173,18 @@ export function skillRowId(name: string): string {
     return stableId("skill", [name]);
 }
 
+/**
+ * A durable role, keyed on its normalized name.
+ *
+ * Role rows live in the SQLite judgment sidecar, but they use the same
+ * content-hash contract as cache rows. Every role writer must use this helper,
+ * so `plays_role.out_id` has one stable form across user, frontmatter and brief
+ * sources.
+ */
+export function roleRowId(name: string): string {
+    return stableId("role", [name]);
+}
+
 /** The provider-native row this derived row was built from: an existing
  *  graph row's own (already provider-native, already append-stable) id -
  *  never a file identity. */

@@ -14,6 +14,7 @@ import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { join } from "node:path";
 import { CacheReadLayer } from "@ax/lib/duckdb/seam";
 import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { roleRowId } from "@ax/lib/stable-id";
 import { publishCacheFixture } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
@@ -37,6 +38,7 @@ const dylibEnv = <A>(body: () => Promise<A>): Promise<A> => {
 
 const TagRow = Schema.Struct({
     in_id: Schema.String,
+    role_id: Schema.String,
     role_name: Schema.String,
     source: Schema.String,
     confidence: Schema.Number,
@@ -47,7 +49,7 @@ const TagRow = Schema.Struct({
 const readTags = (j: JudgmentService) =>
     j.rows(
         TagRow,
-        `SELECT pr.in_id AS in_id, r.name AS role_name, pr.source AS source,
+        `SELECT pr.in_id AS in_id, r.id AS role_id, r.name AS role_name, pr.source AS source,
                 pr.confidence AS confidence, pr.rationale AS rationale
          FROM plays_role pr JOIN role r ON r.id = pr.out_id
          ORDER BY r.name`,
@@ -126,6 +128,7 @@ describe("cmdSkillsTag", () => {
         );
         expect(tags).toHaveLength(1);
         expect(tags[0]?.in_id).toBe("skill:content-hashed-id");
+        expect(tags[0]?.role_id).toBe(roleRowId("verification"));
         expect(tags[0]?.role_name).toBe("verification");
         expect(tags[0]?.source).toBe("user");
     });
@@ -192,11 +195,11 @@ describe("cmdSkillsTag", () => {
                     });
                     yield* Effect.gen(function* () {
                         const j = yield* Judgment;
-                        yield* j.put("role", { id: "role:framing", name: "framing" });
+                        yield* j.put("role", { id: roleRowId("framing"), name: "framing" });
                         yield* j.put("plays_role", {
                             id: "mined-1",
                             in_id: "skill:content-hashed-id",
-                            out_id: "role:framing",
+                            out_id: roleRowId("framing"),
                             source: "frontmatter",
                             confidence: 0.7,
                         });
@@ -224,13 +227,13 @@ describe("cmdSkillsTag", () => {
                     yield* Effect.gen(function* () {
                         const j = yield* Judgment;
                         yield* j.put("role", {
-                            id: "role:verification",
+                            id: roleRowId("verification"),
                             name: "verification",
                         });
                         yield* j.put("plays_role", {
                             id: "mined-verification",
                             in_id: "skill:content-hashed-id",
-                            out_id: "role:verification",
+                            out_id: roleRowId("verification"),
                             source: "frontmatter",
                             confidence: 0.7,
                         });
@@ -263,7 +266,7 @@ describe("cmdSkillsTag", () => {
                     });
                     yield* Effect.gen(function* () {
                         const j = yield* Judgment;
-                        yield* j.put("role", { id: "role:verification", name: "verification", weight: 3 });
+                        yield* j.put("role", { id: roleRowId("verification"), name: "verification", weight: 3 });
                     }).pipe(Effect.scoped, Effect.provide(layers));
 
                     yield* h.tag(baseOpts);

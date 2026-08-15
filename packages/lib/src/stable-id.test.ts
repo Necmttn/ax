@@ -8,6 +8,7 @@ import {
     derivedRowId,
     edgeRowId,
     encodeNaturalKey,
+    roleRowId,
     sessionRowId,
     skillRowId,
     stableId,
@@ -164,6 +165,12 @@ describe("determinism property", () => {
         // session is the carve-out - its id is the raw provider id, so it does
         // NOT delegate to stableId. turn (composite key) still does.
         expect(turnRowId("s1", 7)).toBe(stableId("turn", ["s1", 7]));
+        expect(roleRowId("verification")).toBe(stableId("role", ["verification"]));
+    });
+
+    test("roleRowId is a content hash, not a legacy record-id spelling", () => {
+        expect(roleRowId("verification")).toBe("2dccb07b2ef66960034bea9051444aba");
+        expect(roleRowId("verification")).not.toBe("role:verification");
     });
 
     test("sessionRowId is the provider session id verbatim, ignoring provider (P1-3)", () => {

@@ -15,6 +15,7 @@ import { Effect, FileSystem, Layer, Path } from "effect";
 import { join } from "node:path";
 import { CacheReadLayer } from "@ax/lib/duckdb/seam";
 import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { roleRowId } from "@ax/lib/stable-id";
 import { publishCacheFixture } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
@@ -68,14 +69,14 @@ const fixture = (dir: string) =>
         yield* Effect.gen(function* () {
             const j: JudgmentService = yield* Judgment;
             yield* j.putMany("role", [
-                { id: "role:verification", name: "verification", weight: 2 },
-                { id: "role:framing", name: "framing", weight: 1 },
+                { id: roleRowId("verification"), name: "verification", weight: 2 },
+                { id: roleRowId("framing"), name: "framing", weight: 1 },
             ]);
             yield* j.putMany("plays_role", [
                 {
                     id: "pr1",
                     in_id: "skill:tdd",
-                    out_id: "role:verification",
+                    out_id: roleRowId("verification"),
                     source: "user",
                     confidence: 0.9,
                     rationale: "the whole point of it",
@@ -84,7 +85,7 @@ const fixture = (dir: string) =>
                 {
                     id: "pr2",
                     in_id: "skill:brainstorming",
-                    out_id: "role:verification",
+                    out_id: roleRowId("verification"),
                     source: "frontmatter",
                     confidence: 0.4,
                     rationale: null,
@@ -93,7 +94,7 @@ const fixture = (dir: string) =>
                 {
                     id: "pr3",
                     in_id: "skill:brainstorming",
-                    out_id: "role:framing",
+                    out_id: roleRowId("framing"),
                     source: "user",
                     confidence: 1,
                     rationale: null,
@@ -186,11 +187,11 @@ describe("fetchSkillsByRole", () => {
                     const judgmentLayer = JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL });
                     yield* Effect.gen(function* () {
                         const j: JudgmentService = yield* Judgment;
-                        yield* j.put("role", { id: "role:verification", name: "verification" });
+                        yield* j.put("role", { id: roleRowId("verification"), name: "verification" });
                         yield* j.put("plays_role", {
                             id: "pr1",
                             in_id: "skill:gone",
-                            out_id: "role:verification",
+                            out_id: roleRowId("verification"),
                             source: "user",
                         });
                     }).pipe(Effect.scoped, Effect.provide(judgmentLayer));
@@ -287,7 +288,7 @@ describe("fetchAllRoles", () => {
                     const judgmentLayer = JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL });
                     return yield* Effect.gen(function* () {
                         const j: JudgmentService = yield* Judgment;
-                        yield* j.put("role", { id: "role:orphan", name: "orphan", weight: 1.5 });
+                        yield* j.put("role", { id: roleRowId("orphan"), name: "orphan", weight: 1.5 });
                         return yield* fetchAllRoles();
                     }).pipe(Effect.scoped, Effect.provide(judgmentLayer));
                 }),
@@ -307,7 +308,7 @@ describe("fetchAllRoles", () => {
                         yield* judgment.put("plays_role", {
                             id: "pr-user-and-mined",
                             in_id: "skill:tdd",
-                            out_id: "role:verification",
+                            out_id: roleRowId("verification"),
                             source: "frontmatter",
                             confidence: 0.8,
                         });

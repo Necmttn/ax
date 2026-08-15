@@ -13,6 +13,7 @@ import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { publishCacheFixture } from "../testing/cache-fixture.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { CacheRead, CacheReadLayer } from "../duckdb/seam.ts";
+import { roleRowId } from "../stable-id.ts";
 import { Judgment, JudgmentLayer, type JudgmentService } from "./index.ts";
 import { checkSidecarRefs, collectSidecarRefs, fetchCacheIds } from "./integrity.ts";
 
@@ -45,11 +46,11 @@ const skillRow = (id: string) => ({
 /** A role tag on `skillId`, plus the role it points at. */
 const tagSkill = (j: JudgmentService, skillId: string) =>
     Effect.gen(function* () {
-        yield* j.put("role", { id: "role:reviewer", name: "reviewer", weight: 2 });
+        yield* j.put("role", { id: roleRowId("reviewer"), name: "reviewer", weight: 2 });
         yield* j.put("plays_role", {
             id: "pr1",
             in_id: skillId,
-            out_id: "role:reviewer",
+            out_id: roleRowId("reviewer"),
             source: "user",
         });
     });

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { buildCacheIdIndex } from "../cache-integrity.ts";
+import { roleRowId } from "../stable-id.ts";
 import { Judgment, JudgmentLayer, type JudgmentService } from "./index.ts";
 import { collectSidecarRefs, SIDECAR_CACHE_REFS, checkSidecarRefs } from "./integrity.ts";
 
@@ -49,11 +50,11 @@ const seedJudgment = (j: JudgmentService) =>
             confidence: "high",
         });
         yield* j.put("experiment", { id: "e1", proposal: "p1", artifact: "skill:tdd" });
-        yield* j.put("role", { id: "role:reviewer", name: "reviewer" });
+        yield* j.put("role", { id: roleRowId("reviewer"), name: "reviewer" });
         yield* j.put("plays_role", {
             id: "pr1",
             in_id: "skill:tdd",
-            out_id: "role:reviewer",
+            out_id: roleRowId("reviewer"),
             source: "user",
         });
         yield* j.put("retro", {
