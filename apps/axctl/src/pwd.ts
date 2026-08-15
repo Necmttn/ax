@@ -5,9 +5,10 @@
  * stage's responsibility. This is purely a "given a directory, what repository
  * record does it correspond to?" resolver.
  */
-import { Effect, FileSystem, Schema } from "effect";
+import { Effect, FileSystem, Option, Schema } from "effect";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -17,6 +18,7 @@ import {
     normalizeGitRemoteUrl,
     type RepositoryIdentity,
 } from "./ingest/repository-identity.ts";
+import { resolveCacheRepository } from "./queries/repository-scope.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -73,6 +75,31 @@ export interface PwdResolution extends PwdIdentity {
     readonly repositoryRecordId: RecordId;
     /** true iff a row at that id already exists in the DB. */
     readonly existsInDb: boolean;
+}
+
+/**
+ * What `$PWD` resolves to against the DuckDB cache - the v2 counterpart of
+ * {@link PwdResolution}, and what every `--here` / `--scope=here` caller ports
+ * to.
+ *
+ * There is no `repositoryRecordId` and no `existsInDb`, because in v2 those are
+ * one question with one answer. Surreal keyed the row by the git-derived key, so
+ * a caller could BUILD the id from git alone and then ask separately whether it
+ * existed. DuckDB row ids are content-hashed by their writer, so a reader
+ * constructing one would be guessing at a recipe - the row is looked UP by the
+ * identity columns instead (see `queries/repository-scope.ts`), and either it is
+ * there or it is not.
+ */
+export interface PwdCacheResolution extends PwdIdentity {
+    /**
+     * The cache's `repository` ROW id, or `null` when the cache has never seen
+     * this repository.
+     *
+     * This is the value `session.repository` and `commit.repository` actually
+     * hold - NOT `identity.repositoryKey`, which is the git-derived Surreal key
+     * and matches nothing in a v2 cache.
+     */
+    readonly repositoryId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,12 +200,44 @@ export const resolvePwdIdentity = (
     });
 
 /**
+ * Resolve the current working directory (or the provided `cwd`) to the
+ * repository ROW the DuckDB cache holds for it.
+ *
+ * The composition of the two halves w1 split apart: {@link resolvePwdIdentity}
+ * (git only, no engine) and `resolveCacheRepository` (the lookup by identity
+ * columns). Callers want this one - the identity alone cannot filter a query,
+ * and the lookup alone does not know what to look for.
+ *
+ * A repository the cache has never seen yields `repositoryId: null` rather than
+ * a failure: nothing has been ingested for it yet, so scoping to "here" honestly
+ * finds zero rows, and failing would make `--here` unusable on a fresh repo.
+ */
+export const resolvePwdCacheRepository = (
+    cwd?: string,
+): Effect.Effect<
+    PwdCacheResolution,
+    NotAGitRepoError | ProcessError | CacheReadError,
+    CacheRead | ProcessService | FileSystem.FileSystem
+> =>
+    Effect.gen(function* () {
+        const resolved = yield* resolvePwdIdentity(cwd);
+        const found = yield* resolveCacheRepository(resolved);
+        return {
+            ...resolved,
+            repositoryId: Option.getOrNull(found),
+        } satisfies PwdCacheResolution;
+    });
+
+/**
  * Resolve the current working directory (or the provided `cwd`) to a
  * `repository` record identity and check whether the record exists in DB.
  *
- * Requires: SurrealClient + ProcessService in the Effect environment. Callers
- * that only need the git-derived identity (or that run without `AppLayer`) want
- * {@link resolvePwdIdentity} instead - it is this function minus the DB lookup.
+ * SURREAL-ERA, and doomed: it dies with the client in wave 3. A v2 caller wants
+ * {@link resolvePwdCacheRepository}; a caller that needs only the git-derived
+ * identity wants {@link resolvePwdIdentity}, which is this function minus any
+ * database at all.
+ *
+ * Requires: SurrealClient + ProcessService in the Effect environment.
  */
 export const resolvePwdRepository = (
     cwd?: string,
