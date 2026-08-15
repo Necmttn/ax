@@ -4,9 +4,8 @@ import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
 import { buildProjectHarnessReport } from "./harness.ts";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
-import type { DbError } from "@ax/lib/errors";
 import type { ProjectContext, ProjectHarnessReport, ProjectVerification } from "./types.ts";
 
 interface ProjectGrounding {
@@ -65,5 +64,5 @@ export const buildProjectVerification = (
 
 export const buildProjectHarness = (
     cwd = process.cwd(),
-): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<ProjectHarnessReport, never, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
     buildProjectHarnessReport(cwd);

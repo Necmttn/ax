@@ -1,4 +1,5 @@
 import { Effect, FileSystem, Path } from "effect";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
@@ -76,7 +77,7 @@ export function buildHarnessIngestStatements(report: ProjectHarnessReport): stri
     ];
 }
 
-export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
+export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const report = yield* buildProjectHarnessReport();
@@ -120,7 +121,7 @@ export class HarnessStageStats extends BaseStageStats.extend<HarnessStageStats>(
     stacks: Schema.Number,
 }) {}
 
-export const harnessStage: StageDef<HarnessStageStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
+export const harnessStage: StageDef<HarnessStageStats, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "harness", deps: ["outcomes", "session-health", "closure"], tags: ["derive", "health"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

@@ -1,12 +1,13 @@
 /**
- * State + DB IO for `ax routing impact`. State lives at
+ * State + cache IO for `ax routing impact`. State lives at
  * `~/.ax/routing-impact.json` and is read/written with Bun.file/Bun.write (no
  * node:fs, no Effect FS layer) so begin/end stay light. The windowed metrics
- * come from the same SurrealDB the rest of ax analytics use.
+ * come from the published DuckDB cache through the read seam.
  */
-import { Effect, Option } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Option, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheFirst } from "@ax/lib/duckdb/query";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { prettyPrint } from "@ax/lib/json";
 import { decodeState, EMPTY_STATE, type RoutingImpactState } from "./state.ts";
 
@@ -40,30 +41,45 @@ export interface WindowMetrics {
     readonly turns: number;
 }
 
+const CostRow = Schema.Struct({ c: Schema.NullOr(Schema.Number) });
+const TurnCountRow = Schema.Struct({ n: NumberFromBigIntColumn });
+
 /**
- * Sum token-equivalent cost and count assistant turns in [startIso, endIso].
- * Datetime bindings are JS Date objects (SurrealDB SDK requirement). GROUP ALL
- * makes the aggregates return a single row.
+ * Sum token-equivalent cost and count assistant turns in `(startIso, endIso]`.
+ *
+ * HALF-OPEN ON PURPOSE, and unchanged by the port: `ax routing impact` diffs an
+ * OFF block against an ON block, so a row exactly on the shared boundary must
+ * belong to precisely one of them. `>` on the low edge and `<=` on the high edge
+ * is what makes two adjacent blocks partition the timeline.
+ *
+ * Both bounds bind as `Date`s - the client encodes them for the TIMESTAMP
+ * comparison. No `GROUP ALL`: DuckDB's bare aggregates already return one row,
+ * and `count(*)` returns a BIGINT, which is why the count decodes through the
+ * bigint contract rather than as a plain number.
  */
 export const fetchWindowMetrics = (
     startIso: string,
     endIso: string,
-): Effect.Effect<WindowMetrics, DbError, SurrealClient> =>
+): Effect.Effect<WindowMetrics, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const bindings = { start: new Date(startIso), end: new Date(endIso) };
+        const window = [new Date(startIso), new Date(endIso)];
 
-        const [costRows] = yield* db.query<[ReadonlyArray<{ c: number | null }>]>(
-            "SELECT math::sum(estimated_cost_usd) AS c FROM session_token_usage WHERE ts > $start AND ts <= $end GROUP ALL;",
-            bindings,
+        const cost = yield* cacheFirst(
+            CostRow,
+            {
+                sql: "SELECT sum(estimated_cost_usd) AS c FROM session_token_usage WHERE ts > ? AND ts <= ?",
+                params: window,
+            },
+            "routing impact cost",
         );
-        const [turnRows] = yield* db.query<[ReadonlyArray<{ n: number | null }>]>(
-            "SELECT count() AS n FROM turn WHERE role = 'assistant' AND ts > $start AND ts <= $end GROUP ALL;",
-            bindings,
+        const turns = yield* cacheFirst(
+            TurnCountRow,
+            {
+                sql: "SELECT count(*) AS n FROM turn WHERE role = 'assistant' AND ts > ? AND ts <= ?",
+                params: window,
+            },
+            "routing impact turns",
         );
 
-        return {
-            tokenCostUsd: Number(costRows?.[0]?.c ?? 0),
-            turns: Number(turnRows?.[0]?.n ?? 0),
-        };
+        return { tokenCostUsd: cost?.c ?? 0, turns: turns?.n ?? 0 };
     });

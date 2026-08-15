@@ -1,5 +1,6 @@
-import { Effect, FileSystem, Option, Path } from "effect";
-import { filePointer, SurrealClient } from "./db.ts";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { filePointer } from "./blob-pointer.ts";
+import { cacheRows } from "./duckdb/query.ts";
 import { orAbsent, skipNotFound } from "./shared/fs-error.ts";
 
 const FILE_BUCKETS = ["transcripts", "codex_artifacts"] as const;
@@ -45,6 +46,12 @@ export interface BlobGcOptions {
     readonly now?: () => number;
 }
 
+/** The one column GC reads. `WHERE raw_file IS NOT NULL` (the Surreal query said
+ *  `IS NOT NONE`, a value DuckDB does not have) keeps the schema non-nullable,
+ *  so a NULL slipping through is a decode failure rather than a `null` quietly
+ *  entering the reference set and matching no file. */
+const RawFileRow = Schema.Struct({ raw_file: Schema.String });
+
 const skip = (reason: string): BlobGcResult => ({
     scanned: 0,
     removed: 0,
@@ -65,17 +72,18 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
         );
     }
 
-    const db = yield* SurrealClient;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const [rows] = yield* db.query<[Array<{ raw_file: unknown }>]>(
-        "SELECT raw_file FROM session WHERE raw_file IS NOT NONE;",
+    // The reference set is the whole safety argument for a DELETION pass, so it
+    // is read strictly: `cacheRows`'s defensive policy degrades a failed read to
+    // `[]`, and an empty set is caught by the refusal immediately below rather
+    // than being mistaken for "nothing is referenced".
+    const rows = yield* cacheRows(
+        RawFileRow,
+        { sql: "SELECT raw_file FROM session WHERE raw_file IS NOT NULL", params: [] },
+        "blob gc reference set",
     );
-    const referenced = new Set(
-        (rows ?? [])
-            .map((row) => row.raw_file)
-            .filter((value): value is string => typeof value === "string"),
-    );
+    const referenced = new Set(rows.map((row) => row.raw_file));
 
     if (referenced.size === 0) {
         return skip(
