@@ -112,11 +112,8 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // multi-statement query: the shared SurrealDB websocket interleaves
         // independent .query() calls badly, so issuing both in one round-trip
         // keeps the response framing aligned.
-        // Stash the raw record-id `<string>id` value during the page mapper
-        // so the second-step spawned-counts query has the keys it needs
-        // without re-running the SELECT. `<string>id` returns the wrapped
-        // form (`session:\`uuid\``) which is exactly what `<string>in` from
-        // the spawned table also returns - matching keys.
+        // Keep the cache row id during mapping for the batched edge and
+        // aggregate queries. Only the bare id crosses the HTTP boundary.
         const [pageRows, countRows] = yield* Effect.all([
             db.rows(RawRowSchema, `
             SELECT
@@ -143,12 +140,6 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             };
         });
         const paged = { items: baseItems, total: countRows[0]?.total ?? 0 };
-        /*
-            SELECT count(*) AS total
-            FROM session s
-            ${whereClause}
-        */
-
         // Single grouped query against `spawned` gives us the direct-child
         // count per visible root. Lets the SPA render the expand toggle +
         // "K with subagents" metric without per-row fan-out fetches.
