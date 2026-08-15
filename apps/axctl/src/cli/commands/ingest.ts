@@ -2,7 +2,6 @@
 import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
@@ -247,6 +246,33 @@ export const formatIngestSkipSummary = (skippedFiles: number): string =>
     `ingest: ok - ${skippedFiles} file(s) skipped (per-file isolation; retried next run)`;
 
 /**
+ * The blob pointers SurrealDB's `session` rows reference - the reference set
+ * blob GC deletes against.
+ *
+ * It lives here, at the call site, rather than in `@ax/lib/blob-gc`, because
+ * this is the only place that knows which engine the ingest run it follows
+ * actually wrote. `gcFileBuckets` itself is engine-free; the v2 source is
+ * `cacheReferencedBlobs`, and this whole helper is deleted in favour of it at
+ * the ingest write cutover.
+ *
+ * A failed read yields an EMPTY set, and GC refuses to delete anything against
+ * an empty set - so a database that will not answer degrades to "GC did not
+ * run", never to "nothing is referenced, delete everything".
+ */
+const surrealReferencedBlobs: Effect.Effect<ReadonlySet<string>, never, SurrealClient> =
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const [rows] = yield* db.query<[Array<{ raw_file: unknown }>]>(
+            "SELECT raw_file FROM session WHERE raw_file IS NOT NONE;",
+        );
+        return new Set(
+            (rows ?? [])
+                .map((row) => row.raw_file)
+                .filter((value): value is string => typeof value === "string"),
+        );
+    }).pipe(Effect.orElseSucceed(() => new Set<string>()));
+
+/**
  * Best-effort maintenance run after a successful ingest (otel retention +
  * blob GC). Either side may have failed independently, or blob GC may have
  * declined to run (see `BlobGcResult.skipped`) - callers pass whichever
@@ -416,15 +442,27 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // stamp a genuinely-completed ingest as timeout-failed. Each half is
         // caught independently (never `Effect.ignore`-d silently) so a fault
         // logs a warn line instead of vanishing.
-        const afterWork = (): Effect.Effect<void, never, SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path> =>
+        const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
             Effect.gen(function* () {
                 const otel = yield* runMaintenanceHalf(retainRecentOtel());
                 if (otel.error) {
                     process.stderr.write(`axctl ${commandName}: otel retention failed - ${otel.error}\n`);
                 }
 
+                // The reference set comes from the engine THIS run wrote -
+                // SurrealDB, until the ingest write cutover. Reading it from the
+                // published DuckDB snapshot instead would answer from a file
+                // that omits everything this run just produced, and GC DELETES
+                // what the set does not name. `@ax/lib/blob-gc` exports
+                // `cacheReferencedBlobs` for the cutover; this call site is the
+                // one place that knows which engine to ask.
                 const blobGc = yield* runMaintenanceHalf(
-                    gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), { isGlobalIngest: globalIngest }),
+                    Effect.flatMap(surrealReferencedBlobs, (referenced) =>
+                        gcFileBuckets(path.join(cfg.paths.dataDir, "buckets"), {
+                            isGlobalIngest: globalIngest,
+                            referenced,
+                        }),
+                    ),
                 );
                 if (blobGc.error) {
                     process.stderr.write(`axctl ${commandName}: blob gc failed - ${blobGc.error}\n`);
