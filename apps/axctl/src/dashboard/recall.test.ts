@@ -26,7 +26,8 @@ import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
 import { CacheRead, CacheReadLayer, withCacheWrite, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { RecallResponse } from "@ax/lib/shared/dashboard-types";
-import { PickerRow, projectPickerQuery, skillPickerQuery, type Clause } from "../queries/recall.ts";
+import type { Clause } from "@ax/lib/duckdb/clause";
+import { PickerRow, projectPickerQuery, skillPickerQuery } from "../queries/recall.ts";
 import { fetchRecall, type RecallParams } from "./recall.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall", { requireFts: true });

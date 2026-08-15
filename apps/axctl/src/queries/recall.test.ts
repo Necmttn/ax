@@ -17,11 +17,8 @@ import { describe, expect, test } from "bun:test";
 import {
     commitCountQuery,
     commitPageQuery,
-    eqClause,
-    inClause,
     likePattern,
     sessionsForContentTypesQuery,
-    sinceClause,
     skillCountQuery,
     skillPageQuery,
     truncate,
@@ -40,31 +37,9 @@ const ALL_FILTERS: TurnFilters = {
     repositoryId: "repository:ax",
 };
 
-describe("clause builders bind every value", () => {
-    test("inClause emits one placeholder per value, and the values as params", () => {
-        const clause = inClause("t.session", ["a", "b", "c"]);
-        expect(clause.sql).toBe("AND t.session IN (?, ?, ?)");
-        expect(clause.params).toEqual(["a", "b", "c"]);
-    });
-
-    test("inClause on an empty set emits NOTHING", () => {
-        // `IN ()` is a syntax error, and "no ids" is handled by the caller
-        // short-circuiting - so the clause must vanish rather than degrade.
-        expect(inClause("t.session", [])).toEqual({ sql: "", params: [] });
-    });
-
-    test("eqClause and sinceClause vanish on null, undefined and empty string", () => {
-        for (const absent of [null, undefined, ""]) {
-            expect(eqClause("s.project", absent).sql).toBe("");
-            expect(sinceClause("t.ts", absent).sql).toBe("");
-        }
-        expect(eqClause("s.project", "ax")).toEqual({ sql: "AND s.project = ?", params: ["ax"] });
-        expect(sinceClause("t.ts", "2026-08-01")).toEqual({
-            sql: "AND t.ts >= ?",
-            params: ["2026-08-01"],
-        });
-    });
-});
+// The clause builders themselves moved to `@ax/lib/duckdb/clause` (wave 2 needs
+// them in every chunk) and are covered by `duckdb/clause.test.ts`. What stays
+// here is what is specific to recall: that its QUERIES bind through them.
 
 describe("no query carries a literal value", () => {
     const NASTY = "'; DROP TABLE turn; --";

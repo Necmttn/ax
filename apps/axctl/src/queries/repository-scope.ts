@@ -32,7 +32,7 @@ import { Effect, Option, Schema } from "effect";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DuckDbParam } from "@ax/lib/duckdb";
 import type { PwdIdentity } from "../pwd.ts";
-import type { Clause } from "./recall.ts";
+import type { Clause } from "@ax/lib/duckdb/clause";
 
 export const RepositoryIdRow = Schema.Struct({ id: Schema.String });
 

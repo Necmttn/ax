@@ -33,9 +33,16 @@
  * a wrong answer rather than an error.
  */
 import { Schema } from "effect";
+import {
+    andAll,
+    eqClause,
+    inClause,
+    NO_CLAUSE,
+    sinceClause,
+    type Clause,
+} from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { matchBm25Sql, type FtsTarget } from "@ax/lib/duckdb/fts";
-import type { DuckDbParam } from "@ax/lib/duckdb";
 
 export const TURN_FTS: FtsTarget = { table: "turn", idColumn: "id", textColumn: "text_excerpt" };
 export const COMMIT_FTS: FtsTarget = { table: "commit", idColumn: "id", textColumn: "message" };
@@ -45,40 +52,6 @@ export const SNIPPET_MAX = 240;
 
 export const truncate = (text: string, max: number = SNIPPET_MAX): string =>
     text.length <= max ? text : `${text.slice(0, max)}…`;
-
-/** A SQL fragment plus the parameters it binds, kept together so they cannot
- *  drift apart as clauses are composed. */
-export interface Clause {
-    readonly sql: string;
-    readonly params: ReadonlyArray<DuckDbParam>;
-}
-
-const NO_CLAUSE: Clause = { sql: "", params: [] };
-
-const andAll = (clauses: ReadonlyArray<Clause>): Clause => {
-    const live = clauses.filter((c) => c.sql.length > 0);
-    return {
-        sql: live.map((c) => c.sql).join(" "),
-        params: live.flatMap((c) => [...c.params]),
-    };
-};
-
-/** `AND <column> IN (?, ?, …)`, or nothing when `values` is empty. Callers treat
- *  an empty id set as "no possible hits" and short-circuit before reaching here. */
-export const inClause = (column: string, values: ReadonlyArray<string>): Clause =>
-    values.length === 0
-        ? NO_CLAUSE
-        : { sql: `AND ${column} IN (${values.map(() => "?").join(", ")})`, params: values };
-
-export const eqClause = (column: string, value: string | null | undefined): Clause =>
-    value === null || value === undefined || value.length === 0
-        ? NO_CLAUSE
-        : { sql: `AND ${column} = ?`, params: [value] };
-
-export const sinceClause = (column: string, since: string | null | undefined): Clause =>
-    since === null || since === undefined || since.length === 0
-        ? NO_CLAUSE
-        : { sql: `AND ${column} >= ?`, params: [since] };
 
 // ---------------------------------------------------------------------------
 // Turns
