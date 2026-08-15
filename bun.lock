@@ -234,12 +234,12 @@
       "version": "0.0.0",
       "dependencies": {
         "@ax/onboarding-prompt": "workspace:*",
-        "@ax/schema": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "effect": "catalog:",
         "surrealdb": "^2.0.0",
       },
       "devDependencies": {
+        "@ax/schema": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
       },

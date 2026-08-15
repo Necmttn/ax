@@ -142,14 +142,6 @@ export interface SurrealClientShape {
     readonly raw: Surreal;
 }
 
-/**
- * Format a stored file-pointer string for record fields. We persist the bare
- * `bucket:/path` form (without the SurrealQL `f"..."` literal wrapper) so
- * downstream code can split on `:/` without parsing.
- */
-export const filePointer = (bucket: string, path: string): string =>
-    `${bucket}:/${path}`;
-
 export class SurrealClient extends Context.Service<
     SurrealClient,
     SurrealClientShape

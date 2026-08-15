@@ -12,7 +12,11 @@ import { BunFileSystem } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { ProcessServiceLive } from "@ax/lib/process";
-import { resolvePwdRepository } from "./pwd.ts";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { resolvePwdCacheRepository, resolvePwdRepository, type PwdCacheResolution } from "./pwd.ts";
+
+const { dylibPath, dtest } = await duckdbTestSetup("pwd cache resolver", { requireFts: true });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -212,5 +216,94 @@ describe("resolvePwdRepository", () => {
         expect(["ok=true", "NotAGitRepoError"]).toContain(
             out.ok ? "ok=true" : (out as { tag: string }).tag,
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The cache-side resolver (v2)
+// ---------------------------------------------------------------------------
+
+/**
+ * `resolvePwdCacheRepository` is what the five CLI callers of the Surreal
+ * resolver above port to. It resolves against a REAL published cache, because
+ * the whole point is the LOOKUP - a constructed id would be guessing at a
+ * content-hash recipe, and a mock would just confirm the guess.
+ */
+describe("resolvePwdCacheRepository", () => {
+    const runOnCache = (cwd: string, snapshotPath: string) =>
+        Effect.runPromise(
+            resolvePwdCacheRepository(cwd).pipe(
+                Effect.provide(
+                    Layer.mergeAll(
+                        ProcessServiceLive,
+                        BunFileSystem.layer,
+                        readFixture(snapshotPath, dylibPath),
+                    ),
+                ),
+            ) as Effect.Effect<PwdCacheResolution, unknown>,
+        );
+
+    dtest("returns the cached repository ROW id, and the git identity with it", async () => {
+        const dir = await makeTempDir();
+        const initialCommit = await initRepoWithCommit(dir);
+        const fixture = await runWithPlatform(
+            publishCacheFixture(await makeTempDir(), dylibPath, (w) =>
+                w.put("repository", {
+                    id: "repo-row-fixture",
+                    name: "fixture",
+                    root_path: dir,
+                    initial_commit: initialCommit,
+                }),
+            ),
+        );
+
+        const res = await runOnCache(dir, fixture.snapshotPath);
+
+        expect(res.repositoryId).toBe("repo-row-fixture");
+        // The git half is carried through untouched - callers need both.
+        expect(res.repoRoot).toBe(dir);
+        expect(res.initialCommit).toBe(initialCommit);
+        expect(res.identity.kind).toBe("initial_commit");
+    });
+
+    dtest("a repository the cache has never seen is null, NOT a failure", async () => {
+        // A caller scoping to "here" then honestly has zero rows to find, which
+        // is what `--scope=all` exists for. Failing would make `ax <cmd> --here`
+        // unusable on a repo that simply has not been ingested yet.
+        const dir = await makeTempDir();
+        await initRepoWithCommit(dir);
+        const fixture = await runWithPlatform(
+            publishCacheFixture(await makeTempDir(), dylibPath, () => Effect.void),
+        );
+
+        const res = await runOnCache(dir, fixture.snapshotPath);
+
+        expect(res.repositoryId).toBeNull();
+        expect(res.repoRoot).toBe(dir);
+    });
+
+    dtest("a directory outside any git repo still fails as NotAGitRepoError", async () => {
+        const dir = await makeTempDir();
+        const fixture = await runWithPlatform(
+            publishCacheFixture(await makeTempDir(), dylibPath, () => Effect.void),
+        );
+
+        const out = await Effect.runPromise(
+            resolvePwdCacheRepository(dir).pipe(
+                Effect.match({
+                    onSuccess: () => "resolved",
+                    onFailure: (e) => (e as { _tag: string })._tag,
+                }),
+                Effect.provide(
+                    Layer.mergeAll(
+                        ProcessServiceLive,
+                        BunFileSystem.layer,
+                        readFixture(fixture.snapshotPath, dylibPath),
+                    ),
+                ),
+            ) as Effect.Effect<string>,
+        );
+
+        expect(out).toBe("NotAGitRepoError");
     });
 });

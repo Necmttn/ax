@@ -223,6 +223,8 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
     agent_event: "agent_session row id + seq + provider event id (when present)",
     commit: "repo slug + commit sha (the commit_sha_uq unique index) - see commitRowId; NEVER the commit ts",
     skill: "the skill name alone (the skill_name_uq unique index) - see skillRowId; NEVER dir_path (absolute path)",
+    ingest_file_state:
+        "source_kind + the watched path - see watermarkRowId (@ax/lib/duckdb/watermark). The absolute path IS the key here, the one place that is right: a watermark is a statement about one file on THIS machine, in a per-machine rebuildable cache, so it has no path-independent identity",
     invoked: "edgeRowId('invoked', turn row id, skill row id, JSON.stringify(args)) - args discriminates two invocations of the same skill in one turn",
     has_content: "edgeRowId('has_content', tool_call row id, content_type row id) - one classification per (tool_call, content_type) pair, so no discriminator",
     "<edge>": "edgeRowId: edge table + in_id + out_id + optional discriminator",
