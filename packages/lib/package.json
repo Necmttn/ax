@@ -20,7 +20,8 @@
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"
-    }
+    },
+    "./testing/cache-fixture": "./src/testing/cache-fixture.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@types/bun": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@ax/schema": "workspace:*"
   }
 }

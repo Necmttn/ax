@@ -13,7 +13,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { RepositoryIdentityKind } from "../ingest/repository-identity.ts";
 import type { PwdIdentity } from "../pwd.ts";
-import { publishCacheFixture, readFixture, runWithPlatform } from "../testing/cache-fixture.ts";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { repositoryLookupQueries, resolveCacheRepository } from "./repository-scope.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("repository scope", { requireFts: true });

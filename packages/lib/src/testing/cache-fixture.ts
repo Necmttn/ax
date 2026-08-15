@@ -9,11 +9,17 @@
  * publishes a snapshot. Readers then get the same `CacheRead` service the CLI,
  * the HTTP handler and the MCP tools resolve.
  *
- * Lives under `src/` rather than in a single `.test.ts` because three suites
- * need it (`queries/repository-scope`, `cli/recall-no-surreal`, and any wave-2
- * port that follows the same template), and `check:no-node-fs` scans this tree -
- * so paths go through `Path.Path` and the caller supplies the temp directory
- * (test helpers own `mkdtemp`; see `@ax/lib/testing/duckdb-dylib`).
+ * Lives under `src/` rather than in a single `.test.ts` because every wave-2
+ * port that follows the recall template needs it, and `check:no-node-fs` scans
+ * this tree - so paths go through `Path.Path` and the caller supplies the temp
+ * directory (test helpers own `mkdtemp`; see `@ax/lib/testing/duckdb-dylib`).
+ *
+ * It sits in `@ax/lib` beside the seam it exercises, rather than in `apps/axctl`
+ * where w1 first wrote it, because the seam's OWN suites need it too and
+ * `packages/lib` cannot import from `apps/*`. `@ax/schema` is a DEV dependency
+ * of this package for exactly this file: `@ax/lib` stays free of a runtime
+ * dependency on the DDL text (see the note in `stable-id.ts`), and nothing but
+ * a test ever imports this module.
  */
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path } from "effect";
