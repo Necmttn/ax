@@ -56,6 +56,16 @@ describe("ci.yml provisions the custom DuckDB", () => {
         expect(runScripts("duckdb")).toContain("scripts/smoke-duckdb-dylib.ts");
     });
 
+    test("installs workspace dependencies before the build runs its library smoke", () => {
+        const steps = stepsOf("duckdb");
+        const install = steps.findIndex((s) =>
+            (s.run ?? "").includes("bun install --frozen-lockfile"),
+        );
+        const build = steps.findIndex((s) => (s.run ?? "").trim() === "scripts/build-duckdb.sh");
+        expect(install).toBeGreaterThanOrEqual(0);
+        expect(build).toBeGreaterThan(install);
+    });
+
     test("the build is cached, and saved only after the smoke passes", () => {
         const steps = stepsOf("duckdb");
         const restore = steps.findIndex((s) => s.uses?.startsWith("actions/cache/restore"));

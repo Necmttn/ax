@@ -33,6 +33,11 @@ jobs:
         with:
           bun-version: "1.3.10"
 
+      # The dynamic library smoke imports @ax/lib through the workspace link.
+      # Install before both the build path and the cache-hit smoke path.
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
       - name: Compute cache key
         id: key
         run: |
