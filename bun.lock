@@ -239,6 +239,7 @@
         "surrealdb": "^2.0.0",
       },
       "devDependencies": {
+        "@ax/schema": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
       },

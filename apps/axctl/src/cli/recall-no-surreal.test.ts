@@ -19,7 +19,7 @@ import { describe, expect } from "bun:test";
 import { Effect } from "effect";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
-import { publishCacheFixture, runWithPlatform } from "../testing/cache-fixture.ts";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall (no surreal)", { requireFts: true });
 
