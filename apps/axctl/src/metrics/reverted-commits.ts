@@ -15,13 +15,11 @@
  * ingest window. Renderers should show "fix outside ingest window" rather than
  * pretending the commit was never fixed.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { Effect, Schema } from "effect";
+import { inClause } from "@ax/lib/duckdb/clause";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
-import { recordLiteral } from "@ax/lib/ids";
-import { numOrNull, strOrNull } from "./util.ts";
 
 /** Cap on produced edges read per session (matches the timeline query cap). */
 const MAX_COMMITS = 200;
@@ -65,23 +63,8 @@ const sessionRecordRef = (sessionId: string): string | null => {
     return SESSION_ID_RE.test(uuid) ? `session:⟨${uuid}⟩` : null;
 };
 
-interface ProducedRow {
-    readonly commit?: unknown;
-    readonly sha?: unknown;
-    readonly message?: unknown;
-    readonly ts?: unknown;
-    readonly reverted?: unknown;
-}
-
-interface FixRow {
-    readonly feature?: unknown;
-    readonly fix?: unknown;
-    readonly fix_sha?: unknown;
-    readonly fix_message?: unknown;
-    readonly fix_ts?: unknown;
-    readonly days_between?: unknown;
-    readonly confidence?: unknown;
-}
+const ProducedRow = Schema.Struct({ commit: Schema.String, sha: Schema.NullOr(Schema.String), message: Schema.NullOr(Schema.String), ts: TimestampColumn, reverted: Schema.NullOr(Schema.Boolean) });
+const FixRow = Schema.Struct({ feature: Schema.String, fix: Schema.String, fix_sha: Schema.NullOr(Schema.String), fix_message: Schema.NullOr(Schema.String), fix_ts: TimestampColumn, days_between: Schema.NullOr(Schema.Number), confidence: Schema.NullOr(Schema.String) });
 
 /**
  * Fetch the durability drill-down for one session. Returns null when the
@@ -90,28 +73,31 @@ interface FixRow {
  */
 export const fetchSessionDurabilityDetail = (
     sessionId: string,
-): Effect.Effect<SessionDurabilityDetail | null, DbError, SurrealClient> =>
+): Effect.Effect<SessionDurabilityDetail | null, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const ref = sessionRecordRef(sessionId);
-        if (ref === null) return null;
-        const db = yield* SurrealClient;
+        const legacyRef = sessionRecordRef(sessionId);
+        if (legacyRef === null) return null;
+        const ref = `session:${toBareSessionId(sessionId)}`;
+        const cache = yield* CacheRead;
 
         // 1. The session's produced commits (indexed produced_in_ts, capped).
-        const produced = (yield* db.query<[ProducedRow[]]>(
-            `SELECT type::string(out) AS commit, out.sha AS sha, out.message AS message,`
-            + ` type::string(out.ts) AS ts, out.reverted AS reverted`
-            + ` FROM produced WHERE in = ${ref} ORDER BY ts ASC LIMIT ${MAX_COMMITS};`,
-        ))?.[0] ?? [];
+        const produced = yield* cache.rows(
+            ProducedRow,
+            `SELECT c.id AS commit, c.sha, c.message, c.ts, c.reverted
+             FROM produced p JOIN "commit" c ON c.id = p.out_id
+             WHERE p.in_id = ? ORDER BY c.ts ASC LIMIT ?`,
+            [ref, MAX_COMMITS],
+        );
 
         // De-dup (a commit can carry multiple produced edges across re-ingests).
         const byCommit = new Map<string, { sha: string | null; message: string | null; ts: string | null; reverted: boolean }>();
         for (const row of produced) {
-            const commitId = strOrNull(row.commit);
-            if (!commitId || byCommit.has(commitId)) continue;
+            const commitId = row.commit;
+            if (byCommit.has(commitId)) continue;
             byCommit.set(commitId, {
-                sha: strOrNull(row.sha),
-                message: strOrNull(row.message),
-                ts: strOrNull(row.ts),
+                sha: row.sha,
+                message: row.message,
+                ts: row.ts.toISOString(),
                 reverted: row.reverted === true,
             });
         }
@@ -123,30 +109,27 @@ export const fetchSessionDurabilityDetail = (
         //    matched edges).
         const fixesByFeature = new Map<string, FixingCommit[]>();
         if (revertedIds.length > 0) {
-            const refs = revertedIds
-                .map((id) => recordKeyPart(id, "commit"))
-                .filter((k): k is string => k !== null)
-                .map((k) => recordLiteral("commit", k))
-                .join(", ");
-            const fixRows = refs.length === 0 ? [] : (yield* db.query<[FixRow[]]>(
-                `SELECT type::string(in) AS feature, type::string(out) AS fix,`
-                + ` out.sha AS fix_sha, out.message AS fix_message, type::string(out.ts) AS fix_ts,`
-                + ` days_between, confidence`
-                + ` FROM later_fixed_by WHERE in IN [${refs}];`,
-            ))?.[0] ?? [];
+            const clause = inClause("l.in_id", revertedIds);
+            const fixRows = yield* cache.rows(
+                FixRow,
+                `SELECT l.in_id AS feature, l.out_id AS fix, c.sha AS fix_sha,
+                        c.message AS fix_message, c.ts AS fix_ts, l.days_between, l.confidence
+                 FROM later_fixed_by l JOIN "commit" c ON c.id = l.out_id
+                 WHERE TRUE ${clause.sql}`,
+                clause.params,
+            );
             for (const row of fixRows) {
-                const feature = strOrNull(row.feature);
-                const fix = strOrNull(row.fix);
-                if (!feature || !fix) continue;
+                const feature = row.feature;
+                const fix = row.fix;
                 const list = fixesByFeature.get(feature) ?? [];
                 if (list.some((f) => f.commitId === fix)) continue;
                 list.push({
                     commitId: fix,
-                    sha: strOrNull(row.fix_sha),
-                    message: strOrNull(row.fix_message),
-                    ts: strOrNull(row.fix_ts),
-                    daysBetween: numOrNull(row.days_between),
-                    confidence: strOrNull(row.confidence),
+                    sha: row.fix_sha,
+                    message: row.fix_message,
+                    ts: row.fix_ts.toISOString(),
+                    daysBetween: row.days_between,
+                    confidence: row.confidence,
                 });
                 fixesByFeature.set(feature, list);
             }

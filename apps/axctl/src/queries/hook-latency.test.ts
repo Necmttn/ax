@@ -2,10 +2,7 @@
  * Tests for hook-latency.ts: regression lens over hook_command_invocation.duration_ms.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
-import type { Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 
 import {
     fetchHookLatencyRegression,
@@ -19,16 +16,11 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
-    Effect.runPromise(eff.pipe(Effect.provide(layer)));
+const run = runWithCacheRead;
 
 /** Build a test layer routing the hook latency query to given rows. */
 const makeLatencyMock = (rawRows: unknown[]) => {
-    const tc = makeTestSurrealClient({
-        denyWrites: true,
-        fallback: [rawRows],
-    });
-    return tc;
+    return { layer: cacheReadResults([rawRows]) };
 };
 
 /**

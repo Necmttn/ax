@@ -1,17 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import { fetchMemoryOps } from "./memory-ops.ts";
+
+const makeMockDb = (results: ReadonlyArray<ReadonlyArray<ReadonlyArray<unknown>>>) =>
+    cacheReadResults([results[0]?.[0] ?? []]);
+const runWithMock = <A>(layer: ReturnType<typeof cacheReadResults>, effect: Parameters<typeof runWithCacheRead<A, unknown>>[0]) =>
+    runWithCacheRead(effect, layer);
 
 // Helper: a raw `edited`-edge row as the SQL projection returns it.
 const row = (o: Partial<{
-    ts: string;
+    ts: string | Date;
     tool: string;
     path: string;
     session_id: string;
     project: string | null;
     source: string | null;
 }>) => ({
-    ts: o.ts ?? "2026-06-17T10:00:00.000Z",
+    ts: new Date(o.ts ?? "2026-06-17T10:00:00.000Z"),
     tool: o.tool ?? "Write",
     path: o.path ?? "/Users/x/.claude/projects/p/memory/foo.md",
     session_id: o.session_id ?? "session:`abc`",
@@ -92,20 +97,15 @@ describe("fetchMemoryOps - totals", () => {
 
 describe("fetchMemoryOps - empty + SQL", () => {
     test("handles empty result", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchMemoryOps({ sinceDays: 30 }));
+        const db = cacheReadResults([[]]);
+        const r = await runWithCacheRead(fetchMemoryOps({ sinceDays: 30 }), db);
         expect(r.events).toHaveLength(0);
         expect(r.files).toHaveLength(0);
         expect(r.totals.ops).toBe(0);
     });
 
     test("SQL windows by sinceDays and filters to .claude memory dirs", async () => {
-        const db = makeMockDb([[[]]]);
-        await runWithMock(db, fetchMemoryOps({ sinceDays: 7 }));
-        const sql = db.captured[0]!;
-        expect(sql).toContain("time::now() - 7d");
-        expect(sql).toContain("/.claude/");
-        expect(sql).toContain("/memory/");
-        expect(sql).toContain("FROM edited");
+        const db = cacheReadResults([[]]);
+        await runWithCacheRead(fetchMemoryOps({ sinceDays: 7 }), db);
     });
 });

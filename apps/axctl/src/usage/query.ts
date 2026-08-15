@@ -1,6 +1,6 @@
-import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 
 export interface InvocationRow {
   readonly ts: string;
@@ -87,11 +87,20 @@ export const rollup = (rows: ReadonlyArray<InvocationRow>, visibleCommands: Read
   };
 };
 
-export const fetchInvocations = (windowDays: number): Effect.Effect<InvocationRow[], DbError, SurrealClient> =>
+const InvocationDbRow = Schema.Struct({
+  ts: TimestampColumn,
+  command: Schema.String,
+  origin: Schema.Literals(["tty", "agent"]),
+  exit_code: Schema.Number,
+});
+
+export const fetchInvocations = (windowDays: number): Effect.Effect<InvocationRow[], CacheReadError, CacheRead> =>
   Effect.gen(function* () {
-    const db = yield* SurrealClient;
-    const result = yield* db.query<[InvocationRow[]]>(
-      `SELECT type::string(ts) AS ts, command, origin, exit_code FROM ax_invocation WHERE ts > time::now() - ${Math.max(1, Math.trunc(windowDays))}d;`,
+    const cache = yield* CacheRead;
+    const rows = yield* cache.rows(
+      InvocationDbRow,
+      "SELECT ts, command, origin, exit_code FROM ax_invocation WHERE ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')",
+      [Math.max(1, Math.trunc(windowDays))],
     );
-    return result?.[0] ?? [];
+    return rows.map((row) => ({ ...row, ts: row.ts.toISOString() }));
   });

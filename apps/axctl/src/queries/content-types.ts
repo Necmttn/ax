@@ -4,8 +4,9 @@
  * house idiom - record derefs inside aggregates over large edge tables hang
  * production). Shared by context-budget, cost split, and the profile facet.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -63,24 +64,36 @@ export const rollupContentTypes = (raw: ReadonlyArray<RawCtRow>): ContentTypeBre
 // SQL - deref-free flat GROUP BY (no record derefs inside aggregates)
 // ---------------------------------------------------------------------------
 
+const ContentTypeAggregateRow = Schema.Struct({
+  ct: Schema.String,
+  calls: NumberFromBigIntColumn,
+  bytes: NumberFromBigIntColumn,
+});
+
+const SessionContentTypeAggregateRow = Schema.Struct({
+  sid: Schema.String,
+  ct: Schema.String,
+  calls: NumberFromBigIntColumn,
+  bytes: NumberFromBigIntColumn,
+});
+
 const DISTRIBUTION_SQL = `
-SELECT type::string(out) AS ct, count() AS calls, math::sum(bytes) AS bytes
+SELECT out_id AS ct, count(*) AS calls, coalesce(sum(bytes), 0)::BIGINT AS bytes
 FROM has_content GROUP BY ct;
 `;
 
 /** Global content-type distribution. */
 export const fetchContentTypeBreakdown = Effect.fn("queries.fetchContentTypeBreakdown")(
   function* () {
-    const db = yield* SurrealClient;
-    const [raw] = yield* db.query<[Array<RawCtRow>]>(DISTRIBUTION_SQL);
-    return rollupContentTypes(raw ?? []);
+    const raw = yield* cacheRows(ContentTypeAggregateRow, { sql: DISTRIBUTION_SQL, params: [] }, "content types");
+    return rollupContentTypes(raw);
   },
 );
 
 const PER_SESSION_SQL = `
-SELECT type::string(session) AS sid, type::string(out) AS ct,
-       count() AS calls, math::sum(bytes) AS bytes
-FROM has_content WHERE session != NONE GROUP BY sid, ct;
+SELECT session AS sid, out_id AS ct,
+       count(*) AS calls, coalesce(sum(bytes), 0)::BIGINT AS bytes
+FROM has_content WHERE session IS NOT NULL GROUP BY sid, ct;
 `;
 
 export interface SessionContentMix {
@@ -91,12 +104,9 @@ export interface SessionContentMix {
 /** Per-session content-type mix (token-weighted). */
 export const fetchSessionContentMix = Effect.fn("queries.fetchSessionContentMix")(
   function* () {
-    const db = yield* SurrealClient;
-    const [raw] = yield* db.query<[Array<{ sid: string; ct: string; calls: number; bytes: number }>]>(
-      PER_SESSION_SQL,
-    );
+    const raw = yield* cacheRows(SessionContentTypeAggregateRow, { sql: PER_SESSION_SQL, params: [] }, "session content types");
     const bySession = new Map<string, RawCtRow[]>();
-    for (const r of raw ?? []) {
+    for (const r of raw) {
       const arr = bySession.get(r.sid) ?? [];
       arr.push({ ct: r.ct, calls: r.calls, bytes: r.bytes });
       bySession.set(r.sid, arr);

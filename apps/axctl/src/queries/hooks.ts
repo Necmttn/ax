@@ -1,5 +1,7 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import type { Clause } from "@ax/lib/duckdb/clause";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 
 export interface HookSummaryRow {
     readonly command: string;
@@ -7,9 +9,9 @@ export interface HookSummaryRow {
     readonly provider_status: string;
     readonly effect: string;
     readonly count: number;
-    readonly avg_duration_ms?: number;
-    readonly max_duration_ms?: number;
-    readonly last_seen?: Date | string;
+    readonly avg_duration_ms?: number | null;
+    readonly max_duration_ms?: number | null;
+    readonly last_seen?: Date | string | null;
 }
 
 export interface HookInvocationRow {
@@ -20,15 +22,15 @@ export interface HookInvocationRow {
     readonly command: string;
     readonly provider_status: string;
     readonly effect: string;
-    readonly duration_ms?: number;
-    readonly exit_code?: number;
-    readonly stdout_excerpt?: string;
-    readonly stderr_excerpt?: string;
-    readonly blocking_error_excerpt?: string;
+    readonly duration_ms?: number | null;
+    readonly exit_code?: number | null;
+    readonly stdout_excerpt?: string | null;
+    readonly stderr_excerpt?: string | null;
+    readonly blocking_error_excerpt?: string | null;
 }
 
 export interface HookSessionRow extends HookInvocationRow {
-    readonly tool_call_id?: string;
+    readonly tool_call_id?: string | null;
 }
 
 export interface HookQueryOptions {
@@ -38,89 +40,79 @@ export interface HookQueryOptions {
     readonly sessionId?: string | undefined;
 }
 
-function safeLiteral(value: string): string {
-    if (value.includes("'")) {
-        throw new Error(`hook query value contains a single quote and would unsafely escape SQL: ${value}`);
-    }
-    return `'${value}'`;
-}
-
-function sessionRecordRef(sessionId: string): string {
-    const id = sessionId.replace(/^session:/, "");
-    return `session:\`${id.replace(/`/g, "\\`")}\``;
-}
-
-function whereClause(opts: Pick<HookQueryOptions, "sinceDays" | "command" | "sessionId">): string {
+function whereClause(opts: Pick<HookQueryOptions, "sinceDays" | "command" | "sessionId">): Clause {
     const where: string[] = [];
+    const params: Array<string | number> = [];
     if (opts.sinceDays !== undefined) {
         if (!Number.isFinite(opts.sinceDays) || opts.sinceDays <= 0) {
             throw new Error(`--since must be a positive integer, got ${opts.sinceDays}`);
         }
-        where.push(`ts >= time::now() - ${Math.trunc(opts.sinceDays)}d`);
+        where.push("ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')");
+        params.push(Math.trunc(opts.sinceDays));
     }
     if (opts.command !== undefined) {
-        where.push(`string::contains(command, ${safeLiteral(opts.command)})`);
+        where.push("contains(command, ?)");
+        params.push(opts.command);
     }
     if (opts.sessionId !== undefined) {
-        where.push(`session = ${sessionRecordRef(opts.sessionId)}`);
+        where.push("session = ?");
+        params.push(opts.sessionId.startsWith("session:") ? opts.sessionId : `session:${opts.sessionId}`);
     }
-    return where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`;
+    return { sql: where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`, params };
 }
 
-export function buildHookSummaryQuery(opts: HookQueryOptions): string {
+export function buildHookSummaryQuery(opts: HookQueryOptions): Clause {
     const where = whereClause(opts);
-    return [
-        "SELECT command, hook_name, provider_status, effect, count() AS count,",
-        "       math::mean(duration_ms) AS avg_duration_ms, math::max(duration_ms) AS max_duration_ms,",
-        "       time::max(ts) AS last_seen",
-        `FROM hook_command_invocation${where}`,
+    return { sql: [
+        "SELECT command, hook_name, provider_status, effect, count(*) AS count,",
+        "       avg(duration_ms) AS avg_duration_ms, max(duration_ms) AS max_duration_ms,",
+        "       max(ts) AS last_seen",
+        `FROM hook_command_invocation${where.sql}`,
         "GROUP BY command, hook_name, provider_status, effect",
         "ORDER BY count DESC",
-        `LIMIT ${Math.max(1, Math.trunc(opts.tail ?? 20))}`,
-    ].join("\n");
+        "LIMIT ?",
+    ].join("\n"), params: [...where.params, Math.max(1, Math.trunc(opts.tail ?? 20))] };
 }
 
-export function buildHookInvocationsQuery(opts: HookQueryOptions): string {
+export function buildHookInvocationsQuery(opts: HookQueryOptions): Clause {
     const where = whereClause(opts);
-    return [
-        "SELECT ts, <string>session AS session, event_name, hook_name, command, provider_status, effect, duration_ms, exit_code, stdout_excerpt, stderr_excerpt, blocking_error_excerpt",
-        `FROM hook_command_invocation${where}`,
+    return { sql: [
+        "SELECT ts, session, event_name, hook_name, command, provider_status, effect, duration_ms, exit_code, stdout_excerpt, stderr_excerpt, blocking_error_excerpt",
+        `FROM hook_command_invocation${where.sql}`,
         "ORDER BY ts DESC",
-        `LIMIT ${Math.max(1, Math.trunc(opts.tail ?? 50))}`,
-    ].join("\n");
+        "LIMIT ?",
+    ].join("\n"), params: [...where.params, Math.max(1, Math.trunc(opts.tail ?? 50))] };
 }
 
-export function buildHookSessionQuery(sessionId: string): string {
-    return [
-        "SELECT ts, <string>session AS session, event_name, hook_name, tool_call_id, command, provider_status, effect, duration_ms, exit_code, stdout_excerpt, stderr_excerpt, blocking_error_excerpt",
+export function buildHookSessionQuery(sessionId: string): Clause {
+    return { sql: [
+        "SELECT ts, session, event_name, hook_name, tool_call_id, command, provider_status, effect, duration_ms, exit_code, stdout_excerpt, stderr_excerpt, blocking_error_excerpt",
         "FROM hook_command_invocation",
-        `WHERE session = ${sessionRecordRef(sessionId)}`,
+        "WHERE session = ?",
         "ORDER BY ts ASC",
         "LIMIT 500",
-    ].join("\n");
+    ].join("\n"), params: [sessionId.startsWith("session:") ? sessionId : `session:${sessionId}`] };
 }
+
+const HookSummaryDbRow = Schema.Struct({ command: Schema.String, hook_name: Schema.String, provider_status: Schema.String, effect: Schema.String, count: NumberFromBigIntColumn, avg_duration_ms: Schema.NullOr(Schema.Number), max_duration_ms: Schema.NullOr(Schema.Number), last_seen: Schema.NullOr(TimestampColumn) });
+const HookInvocationDbRow = Schema.Struct({ ts: TimestampColumn, session: Schema.String, event_name: Schema.String, hook_name: Schema.String, command: Schema.String, provider_status: Schema.String, effect: Schema.String, duration_ms: Schema.NullOr(Schema.Number), exit_code: Schema.NullOr(Schema.Number), stdout_excerpt: Schema.NullOr(Schema.String), stderr_excerpt: Schema.NullOr(Schema.String), blocking_error_excerpt: Schema.NullOr(Schema.String) });
+const HookSessionDbRow = Schema.Struct({ ...HookInvocationDbRow.fields, tool_call_id: Schema.NullOr(Schema.String) });
 
 export const queryHookSummary = Effect.fn("queries.queryHookSummary")(
     function* (opts: HookQueryOptions) {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[HookSummaryRow[]]>(buildHookSummaryQuery(opts));
-        return rows as readonly HookSummaryRow[];
+        return yield* cacheRows(HookSummaryDbRow, buildHookSummaryQuery(opts), "hook summary");
     },
 );
 
 export const queryHookInvocations = Effect.fn("queries.queryHookInvocations")(
     function* (opts: HookQueryOptions) {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[HookInvocationRow[]]>(buildHookInvocationsQuery(opts));
-        return rows as readonly HookInvocationRow[];
+        return yield* cacheRows(HookInvocationDbRow, buildHookInvocationsQuery(opts), "hook invocations");
     },
 );
 
 export const queryHookSession = Effect.fn("queries.queryHookSession")(
     function* (sessionId: string) {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[HookSessionRow[]]>(buildHookSessionQuery(sessionId));
-        return rows as readonly HookSessionRow[];
+        return yield* cacheRows(HookSessionDbRow, buildHookSessionQuery(sessionId), "hook session");
     },
 );
 

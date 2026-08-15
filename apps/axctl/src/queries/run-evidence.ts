@@ -13,10 +13,9 @@
  * timeline. The full backing/kind taxonomy is shown even at count 0 (honest
  * zeros - e.g. `model_claim 0` makes explicit that claims are not mined yet).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "@ax/lib/shared/surreal";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import {
     RUN_EVIDENCE_BACKINGS,
@@ -86,6 +85,11 @@ interface GroupRow {
     readonly n?: number | null;
 }
 
+const GroupDbRow = Schema.Struct({ kind: Schema.String, backing: Schema.String, n: NumberFromBigIntColumn });
+const TimelineDbRow = Schema.Struct({ ts: TimestampColumn, kind: Schema.String, backing: Schema.String, source_table: Schema.String, summary: Schema.NullOr(Schema.String) });
+const RefGroupDbRow = Schema.Struct({ ref_kind: Schema.String, n: NumberFromBigIntColumn });
+const HeadDbRow = Schema.Struct({ kind: Schema.String, summary: Schema.NullOr(Schema.String) });
+
 const tallyByTaxonomy = (
     rows: ReadonlyArray<GroupRow>,
     field: "kind" | "backing",
@@ -103,43 +107,46 @@ const tallyByTaxonomy = (
 
 export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
     RunEvidenceResult,
-    DbError,
-    SurrealClient
+    CacheReadError,
+    CacheRead
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cache = yield* CacheRead;
         const bareId = toBareSessionId(input.sessionId);
-        const sessionRef = recordRef("session", bareId);
+        const sessionRef = `session:${bareId}`;
         const limit = Math.max(1, Math.floor(input.timelineLimit ?? RUN_EVIDENCE_TIMELINE_LIMIT));
 
-        const [groups] = yield* db.query<[Array<GroupRow>]>(
-            `SELECT kind, backing, count() AS n FROM run_evidence_event WHERE session = ${sessionRef} GROUP BY kind, backing;`,
+        const groups = yield* cache.rows(
+            GroupDbRow,
+            "SELECT kind, backing, count(*) AS n FROM run_evidence_event WHERE session = ? GROUP BY kind, backing",
+            [sessionRef],
         );
-        const [timeline] = yield* db.query<[Array<RunEvidenceTimelineRow>]>(
-            `SELECT type::string(ts) AS ts, kind, backing, source_table, summary
-             FROM run_evidence_event WHERE session = ${sessionRef} ORDER BY ts DESC LIMIT ${limit};`,
+        const timelineRows = yield* cache.rows(
+            TimelineDbRow,
+            "SELECT ts, kind, backing, source_table, summary FROM run_evidence_event WHERE session = ? ORDER BY ts DESC LIMIT ?",
+            [sessionRef, limit],
         );
-        const [refGroups] = yield* db.query<[Array<{ ref_kind?: string | null; n?: number | null }>]>(
-            `SELECT ref_kind, count() AS n FROM run_evidence_ref WHERE session = ${sessionRef} GROUP BY ref_kind;`,
+        const refGroups = yield* cache.rows(
+            RefGroupDbRow,
+            "SELECT ref_kind, count(*) AS n FROM run_evidence_ref WHERE session = ? GROUP BY ref_kind",
+            [sessionRef],
         );
         // Headline kinds: the run's objective + repo identity (latest of each).
-        const [heads] = yield* db.query<[Array<{ kind?: string | null; summary?: string | null }>]>(
-            // `ts` must appear in the projection: SurrealDB rejects ORDER BY on an
-            // idiom that isn't selected ("Missing order idiom `ts`"). Harmless extra
-            // column - the consumer below reads only kind + summary.
-            `SELECT kind, summary, ts FROM run_evidence_event
-             WHERE session = ${sessionRef} AND kind IN ["objective", "repo_state"] ORDER BY ts DESC;`,
+        const heads = yield* cache.rows(
+            HeadDbRow,
+            "SELECT kind, summary FROM run_evidence_event WHERE session = ? AND kind IN ('objective', 'repo_state') ORDER BY ts DESC",
+            [sessionRef],
         );
         const headOf = (kind: string): string | null =>
-            (heads ?? []).find((h) => h.kind === kind)?.summary ?? null;
+            heads.find((h) => h.kind === kind)?.summary ?? null;
 
-        const rows = groups ?? [];
+        const rows = groups;
         const total = rows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
         const byKind = tallyByTaxonomy(rows, "kind", RUN_EVIDENCE_KINDS)
             .sort((a, b) => b.count - a.count);
         const byBacking = tallyByTaxonomy(rows, "backing", RUN_EVIDENCE_BACKINGS);
 
-        const refRows = refGroups ?? [];
+        const refRows = refGroups;
         const refTotal = refRows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
         const byRefKind = refRows
             .filter((r): r is { ref_kind: string; n: number } => typeof r.ref_kind === "string")
@@ -154,7 +161,7 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
             total,
             by_kind: byKind,
             by_backing: byBacking,
-            timeline: timeline ?? [],
+            timeline: timelineRows.map((row) => ({ ...row, ts: row.ts.toISOString() })),
             ref_total: refTotal,
             by_ref_kind: byRefKind,
             covered_kinds: [...RUN_EVIDENCE_COVERED_KINDS],

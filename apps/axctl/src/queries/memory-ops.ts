@@ -18,9 +18,9 @@
  * Filter is tightened to `/.claude/` AND `/memory/` so a repo's own `src/memory/`
  * never counts.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { countField, stringField, stringFieldOr } from "@ax/lib/shared/surreal";
+import { Effect, Schema } from "effect";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -72,19 +72,19 @@ export interface MemoryOpsInput {
 // SQL - flat select over `edited`, single bounded deref of in.session
 // ---------------------------------------------------------------------------
 
-const buildSql = (sinceDays: number): string => `
+const MemoryOpRow = Schema.Struct({ ts: TimestampColumn, tool: Schema.String, path: Schema.String, session_id: Schema.String, project: Schema.NullOr(Schema.String), source: Schema.NullOr(Schema.String) });
+
+const buildSql = (): string => `
 SELECT
-    ts,
-    tool,
-    absolute_path_seen AS path,
-    type::string(in.session) AS session_id,
-    in.session.project AS project,
-    in.session.source AS source
-FROM edited
-WHERE absolute_path_seen CONTAINS '/.claude/'
-    AND absolute_path_seen CONTAINS '/memory/'
-    AND ts >= time::now() - ${sinceDays}d
-ORDER BY ts DESC;
+    e.ts, e.tool, f.path, t.session AS session_id, s.project, s.source
+FROM edited e
+JOIN file f ON f.id = e.out_id
+JOIN turn t ON t.id = e.in_id
+JOIN session s ON s.id = t.session
+WHERE contains(f.path, '/.claude/')
+    AND contains(f.path, '/memory/')
+    AND e.ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+ORDER BY e.ts DESC;
 `;
 
 // ---------------------------------------------------------------------------
@@ -103,25 +103,26 @@ const basename = (path: string): string => path.split("/").pop() ?? path;
 export const fetchMemoryOps = Effect.fn("queries.fetchMemoryOps")(function* (
     input: MemoryOpsInput,
 ) {
-    const db = yield* SurrealClient;
-    const [rows] = yield* db.query<[Array<Record<string, unknown>>]>(
-        buildSql(input.sinceDays),
+    const rows = yield* cacheRows(
+        MemoryOpRow,
+        { sql: buildSql(), params: [Math.max(1, Math.trunc(input.sinceDays))] },
+        "memory operations",
     );
 
-    const events: MemoryOpEvent[] = (rows ?? []).map((row) => {
-        const path = stringFieldOr(row, "path", "");
+    const events: MemoryOpEvent[] = rows.map((row) => {
+        const path = row.path;
         const file = basename(path);
-        const tool = stringFieldOr(row, "tool", "");
+        const tool = row.tool;
         return {
-            ts: stringFieldOr(row, "ts", ""),
+            ts: row.ts.toISOString(),
             tool,
             op: tool === "Write" ? "create" : "update",
             slug: file.replace(/\.md$/i, ""),
             kind: file === "MEMORY.md" ? "index" : "note",
             path,
-            session_id: cleanSessionId(stringFieldOr(row, "session_id", "")),
-            project: stringField(row, "project"),
-            source: stringField(row, "source"),
+            session_id: cleanSessionId(row.session_id),
+            project: row.project,
+            source: row.source,
         };
     });
 
@@ -171,15 +172,14 @@ export const fetchMemoryOps = Effect.fn("queries.fetchMemoryOps")(function* (
         sessions: allSessions.size,
     };
 
-    // countField guards against any NaN sneaking into the rendered totals.
     return {
         events,
         files,
         totals: {
-            ops: countField(totals, "ops"),
-            notes: countField(totals, "notes"),
-            index_ops: countField(totals, "index_ops"),
-            sessions: countField(totals, "sessions"),
+            ops: totals.ops,
+            notes: totals.notes,
+            index_ops: totals.index_ops,
+            sessions: totals.sessions,
         },
         since_days: input.sinceDays,
     } satisfies MemoryOpsResult;
