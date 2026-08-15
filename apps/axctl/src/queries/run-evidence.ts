@@ -113,7 +113,7 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
     Effect.gen(function* () {
         const cache = yield* CacheRead;
         const bareId = toBareSessionId(input.sessionId);
-        const sessionRef = `session:${bareId}`;
+        const sessionRef = bareId;
         const limit = Math.max(1, Math.floor(input.timelineLimit ?? RUN_EVIDENCE_TIMELINE_LIMIT));
 
         const groups = yield* cache.rows(

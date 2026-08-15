@@ -52,15 +52,13 @@ export interface SessionDurabilityDetail {
     readonly reverted: ReadonlyArray<RevertedCommitDetail>;
 }
 
-// Mirrors the session-id validation in dashboard/session-view.ts so the
-// record ref can be safely inlined. Normalization is the shared
-// `toBareSessionId` (@ax/lib/shared/session-id); the charset gate stays local
-// because it doubles as the inline-SQL safety check.
+// Mirrors the session-id validation in dashboard/session-view.ts.
+// DuckDB stores the bare provider session id.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 
-const sessionRecordRef = (sessionId: string): string | null => {
+const validatedSessionId = (sessionId: string): string | null => {
     const uuid = toBareSessionId(sessionId);
-    return SESSION_ID_RE.test(uuid) ? `session:⟨${uuid}⟩` : null;
+    return SESSION_ID_RE.test(uuid) ? uuid : null;
 };
 
 const ProducedRow = Schema.Struct({ commit: Schema.String, sha: Schema.NullOr(Schema.String), message: Schema.NullOr(Schema.String), ts: TimestampColumn, reverted: Schema.NullOr(Schema.Boolean) });
@@ -75,9 +73,8 @@ export const fetchSessionDurabilityDetail = (
     sessionId: string,
 ): Effect.Effect<SessionDurabilityDetail | null, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const legacyRef = sessionRecordRef(sessionId);
-        if (legacyRef === null) return null;
-        const ref = `session:${toBareSessionId(sessionId)}`;
+        const ref = validatedSessionId(sessionId);
+        if (ref === null) return null;
         const cache = yield* CacheRead;
 
         // 1. The session's produced commits (indexed produced_in_ts, capped).

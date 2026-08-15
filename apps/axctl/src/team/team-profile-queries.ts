@@ -9,11 +9,11 @@
  * fanned out per-session literal (hits tool_call_session_ts, ~1ms each,
  * same pattern as sessions-query.ts enrichSessions).
  */
-import { Effect, Schema } from "effect";
-import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
-import { cacheRows } from "@ax/lib/duckdb/query";
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { recordLiteral } from "@ax/lib/ids";
 
-const win = (d: number) => Math.max(1, Math.trunc(d));
+const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
 // --- repo session set --------------------------------------------------------
 
@@ -24,25 +24,33 @@ export interface TeamSessionRow {
     readonly source: string;
 }
 
-const TeamSessionDbRow = Schema.Struct({ id: Schema.String, started_at: TimestampColumn, source: Schema.String });
-const TEAM_REPO_SESSIONS_SQL = `
-SELECT id, started_at, source
+const TEAM_REPO_SESSIONS_SQL = (repoKey: string, d: number) => `
+SELECT
+    type::string(id) AS id,
+    type::string(started_at) AS started_at,
+    source
 FROM session
-WHERE repository = ?
-  AND started_at > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
-  AND started_at IS NOT NULL;`;
+WHERE repository = ${recordLiteral("repository", repoKey)}
+  AND started_at > time::now() - ${win(d)}
+  AND started_at IS NOT NONE;`;
 
 export const fetchTeamRepoSessions = Effect.fn("team.fetchTeamRepoSessions")(
     function* (opts: { readonly repoKey: string; readonly windowDays: number }) {
-        const rows = yield* cacheRows(TeamSessionDbRow, { sql: TEAM_REPO_SESSIONS_SQL, params: [opts.repoKey, win(opts.windowDays)] }, "team sessions");
-        return rows.map((r) => ({
-                id: r.id,
-                started_at: r.started_at.toISOString(),
-                source: r.source,
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(
+                TEAM_REPO_SESSIONS_SQL(opts.repoKey, opts.windowDays),
+            )
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .filter((r) => r.id != null && r.started_at != null)
+            .map((r) => ({
+                id: String(r.id),
+                started_at: String(r.started_at),
+                source: String(r.source ?? "claude"),
             })) satisfies TeamSessionRow[];
     },
 );
-
 // --- per-session token usage (machine window; repo-filtered in JS) -----------
 // One row per session (session_token_usage_session UNIQUE index), so a
 // whole-window scan is a few thousand rows at most - cheaper and simpler
@@ -56,26 +64,30 @@ export interface SessionUsageRow {
     readonly cost_usd: number | null;
 }
 
-const SessionUsageDbRow = Schema.Struct({ session: Schema.String, model: Schema.NullOr(Schema.String), prompt_tokens: NumberFromBigIntColumn, completion_tokens: NumberFromBigIntColumn, cost_usd: Schema.NullOr(Schema.Number) });
-const SESSION_USAGE_SQL = `
+const SESSION_USAGE_SQL = (d: number) => `
 SELECT
-    session,
+    type::string(session) AS session,
     model,
-    coalesce(prompt_tokens, 0)::BIGINT AS prompt_tokens,
-    coalesce(completion_tokens, 0)::BIGINT AS completion_tokens,
+    prompt_tokens ?? 0 AS prompt_tokens,
+    completion_tokens ?? 0 AS completion_tokens,
     estimated_cost_usd AS cost_usd
 FROM session_token_usage
-WHERE ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day');`;
+WHERE ts > time::now() - ${win(d)};`;
 
 export const fetchSessionUsageRows = Effect.fn("team.fetchSessionUsageRows")(
     function* (opts: { readonly windowDays: number }) {
-        const rows = yield* cacheRows(SessionUsageDbRow, { sql: SESSION_USAGE_SQL, params: [win(opts.windowDays)] }, "team usage");
-        return rows.map((r) => ({
-                session: r.session,
-                model: r.model,
-                prompt_tokens: r.prompt_tokens,
-                completion_tokens: r.completion_tokens,
-                cost_usd: r.cost_usd,
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(SESSION_USAGE_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .filter((r) => r.session != null)
+            .map((r) => ({
+                session: String(r.session),
+                model: r.model == null ? null : String(r.model),
+                prompt_tokens: Number(r.prompt_tokens ?? 0),
+                completion_tokens: Number(r.completion_tokens ?? 0),
+                cost_usd: r.cost_usd == null ? null : Number(r.cost_usd),
             })) satisfies SessionUsageRow[];
     },
 );
@@ -92,26 +104,36 @@ export interface ToolCmdRow {
     readonly failures: number;
 }
 
-const ToolAggDbRow = Schema.Struct({ cmd: Schema.String, count: NumberFromBigIntColumn, failures: NumberFromBigIntColumn });
-const TOOL_AGG_FOR_SESSION_SQL = `
+const TOOL_AGG_FOR_SESSION_SQL = (sessionLit: string) => `
 SELECT
-    coalesce(command_text, command_norm, name) AS cmd,
-    count(*) AS count,
-    count(*) FILTER (WHERE has_error = true) AS failures
+    (command_text ?? command_norm ?? name) AS cmd,
+    count() AS count,
+    math::sum(IF has_error = true THEN 1 ELSE 0 END) AS failures
 FROM tool_call
-WHERE session = ?
-  AND coalesce(command_text, command_norm, name) IS NOT NULL
+WHERE session = ${sessionLit}
+  AND (command_text ?? command_norm ?? name) IS NOT NONE
 GROUP BY cmd;`;
+
+/** `type::string(id)` output → clean backtick record literal (sessions-query.ts idiom). */
+const sessionLiteral = (id: string): string => {
+    let k = id.replace(/^session:/, "");
+    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
+    else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
+    return `session:\`${k}\``;
+};
 
 const TOOL_AGG_CONCURRENCY = 8;
 
 export const fetchToolCallAggBySession = Effect.fn("team.fetchToolCallAggBySession")(
     function* (opts: { readonly sessionIds: ReadonlyArray<string> }) {
         if (opts.sessionIds.length === 0) return [] as ToolCmdRow[];
+        const db = yield* SurrealClient;
         const perSession = yield* Effect.forEach(
             opts.sessionIds,
             (id) =>
-                cacheRows(ToolAggDbRow, { sql: TOOL_AGG_FOR_SESSION_SQL, params: [id] }, "team tool calls"),
+                db.query<[Array<Record<string, unknown>>]>(
+                    TOOL_AGG_FOR_SESSION_SQL(sessionLiteral(id)),
+                ).pipe(Effect.map((r) => r?.[0] ?? [])),
             { concurrency: TOOL_AGG_CONCURRENCY },
         );
         // Merge per-session command rows into one cmd -> counts map.

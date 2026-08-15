@@ -68,11 +68,7 @@ export interface SkillHygieneInput {
 // SQL - deref-free, three flat statements
 // ---------------------------------------------------------------------------
 
-// Record ids are coerced to strings IN SQL via type::string() (sibling idiom,
-// dispatch-analytics.ts) - the SDK can return RecordId objects, and String()
-// on those yields garbage that misses every JS map lookup.
-// GROUP BY on the function-aliased field (sid) verified against the live
-// SurrealDB 3 instance (127.0.0.1:8521) on 2026-06-12.
+// DuckDB stores ids as strings, so each result joins directly in JavaScript.
 // Invocation counts are deliberately ALL-TIME (lifetime hygiene signal; no
 // sinceDays window).
 const HygieneCountRow = Schema.Struct({ sid: Schema.String, invocations: NumberFromBigIntColumn, sessions: NumberFromBigIntColumn });

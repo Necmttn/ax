@@ -6,9 +6,9 @@ describe("fetchSparSessionIds", () => {
     test("returns DuckDB string ids", async () => {
         const ids = await runWithCacheRead(
             fetchSparSessionIds(),
-            cacheReadResults([[{ id: "session:spar-a" }, { id: "session:spar-b" }]]),
+            cacheReadResults([[{ id: "spar-a" }, { id: "spar-b" }]]),
         );
-        expect(ids).toEqual(["session:spar-a", "session:spar-b"]);
+        expect(ids).toEqual(["spar-a", "spar-b"]);
     });
 
     test("returns an empty list when no rows match", async () => {

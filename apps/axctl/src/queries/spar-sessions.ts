@@ -13,21 +13,11 @@ import { cacheRows } from "@ax/lib/duckdb/query";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 
 /**
- * RecordIds of sessions tagged as spar variants (behavioral-analytics
- * exclusion). Returns a flat array of `RecordId` values (NOT strings).
+ * Session ids tagged as spar variants for behavioral analytics exclusion.
+ * Returns a flat array of bare provider session ids.
  * Returns `[]` when no spar sessions exist.
  *
- * IMPORTANT: the ids are RAW `record<session>` values, not `type::string(id)`
- * strings. `invoked.session` / `session.id` are record links, and SurrealDB
- * compares `record<session> NOT IN [<string>...]` as ALWAYS-TRUE (the string
- * IN-list silently matches nothing - documented rule, see
- * @ax/lib/shared/record-select). The exclusion at the
- * weighted aggregate binds these RecordIds so the comparison is
- * record-vs-record and actually fires. Verified empirically on the live DB:
- * a string[] param excludes 0 rows; a RecordId[] param excludes correctly.
- *
- * Deref-free: no graph traversal. Safe against the 87k-edge invoked hang
- * (memory `weighted-query-per-edge-deref-hang`).
+ * DuckDB stores the bare id in `session.id` and related edge columns.
  */
 const SparSessionRow = Schema.Struct({ id: Schema.String });
 

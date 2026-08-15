@@ -19,13 +19,13 @@ export interface SidecarUsageSummary {
 }
 
 export const SIDECAR_ARTIFACT_SUMMARY_SQL = `
-SELECT kind, count() AS artifacts
+SELECT kind, count(*) AS artifacts
 FROM claude_sidecar_artifact
 GROUP BY kind
 ORDER BY artifacts DESC`;
 
 export const SIDECAR_EDGE_SUMMARY_SQL = `
-SELECT action, sidecar_kind, count() AS edges
+SELECT action, sidecar_kind, count(*) AS edges
 FROM used_sidecar_artifact
 GROUP BY action, sidecar_kind
 ORDER BY edges DESC`;
