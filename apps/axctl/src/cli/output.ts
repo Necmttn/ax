@@ -2,6 +2,7 @@
  * Shared CLI output helpers used across axctl subcommands.
  */
 import { Effect } from "effect";
+import type { CacheReadError } from "@ax/lib/duckdb/seam";
 
 /**
  * Detect if a command's output should be JSON.
@@ -35,6 +36,26 @@ export const catchDbErrorAndExit =
                 }),
             ),
         ) as Effect.Effect<A, never, R>;
+
+/** Report a typed DuckDB cache read failure at a CLI handler boundary. */
+export const catchCacheReadErrorAndExit =
+    (prefix: string) =>
+    <A, R>(eff: Effect.Effect<A, CacheReadError, R>): Effect.Effect<A, never, R> =>
+        eff.pipe(
+            Effect.catch((error) =>
+                stderrExit(`${prefix}: cache error - ${error.message}\n`, 1),
+            ),
+        );
+
+/** Report a typed DuckDB cache read failure at a CLI handler boundary. */
+export const catchCacheReadErrorAndExit =
+    (prefix: string) =>
+    <A, R>(eff: Effect.Effect<A, CacheReadError, R>): Effect.Effect<A, never, R> =>
+        eff.pipe(
+            Effect.catch((error) =>
+                stderrExit(`${prefix}: cache error - ${error.message}\n`, 1),
+            ),
+        );
 
 /**
  * Write `message` to stderr and terminate the process with `code`.

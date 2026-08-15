@@ -3,49 +3,57 @@ import { buildHookLogQuery, formatHookLogRowsTsv, type HookLogRow } from "./log.
 
 describe("buildHookLogQuery", () => {
     test("default query orders by ts desc and limits to tail", () => {
-        const sql = buildHookLogQuery({ tail: 20 });
+        const { sql, params } = buildHookLogQuery({ tail: 20 });
         expect(sql).toContain("FROM hook_fire");
         expect(sql).toContain("ORDER BY ts DESC");
         expect(sql).toContain("LIMIT 20");
         // No WHERE clause when no filters provided.
         expect(sql).not.toContain("WHERE");
+        expect(params).toEqual([]);
     });
 
     test("since adds a time::now() lower bound on ts", () => {
-        const sql = buildHookLogQuery({ tail: 5, sinceHours: 2 });
-        expect(sql).toMatch(/WHERE.*ts >= time::now\(\) - 2h/);
+        const { sql, params } = buildHookLogQuery({ tail: 5, sinceHours: 2 });
+        expect(sql).toContain("ts >= CURRENT_TIMESTAMP");
+        expect(params).toEqual([2]);
     });
 
     test("reason filter is escaped as a string literal", () => {
-        const sql = buildHookLogQuery({ tail: 10, reason: "suppressed_path" });
-        expect(sql).toContain("reason = 'suppressed_path'");
+        const { sql, params } = buildHookLogQuery({ tail: 10, reason: "suppressed_path" });
+        expect(sql).toContain("reason = ?");
+        expect(params).toEqual(["suppressed_path"]);
     });
 
     test("file filter targets file_path", () => {
-        const sql = buildHookLogQuery({ tail: 10, file: "src/a.ts" });
-        expect(sql).toContain("file_path = 'src/a.ts'");
+        const { sql, params } = buildHookLogQuery({ tail: 10, file: "src/a.ts" });
+        expect(sql).toContain("file_path = ?");
+        expect(params).toEqual(["src/a.ts"]);
     });
 
     test("inject filter accepts true and false", () => {
-        expect(buildHookLogQuery({ tail: 5, inject: true })).toContain("inject = true");
-        expect(buildHookLogQuery({ tail: 5, inject: false })).toContain("inject = false");
+        expect(buildHookLogQuery({ tail: 5, inject: true }).params).toEqual([true]);
+        expect(buildHookLogQuery({ tail: 5, inject: false }).params).toEqual([false]);
     });
 
     test("harness filter is a string literal", () => {
-        const sql = buildHookLogQuery({ tail: 5, harness: "claude" });
-        expect(sql).toContain("harness = 'claude'");
+        const { sql, params } = buildHookLogQuery({ tail: 5, harness: "claude" });
+        expect(sql).toContain("harness = ?");
+        expect(params).toEqual(["claude"]);
     });
 
     test("combines multiple filters with AND", () => {
-        const sql = buildHookLogQuery({ tail: 5, sinceHours: 1, harness: "codex", inject: false });
-        expect(sql).toContain("ts >= time::now() - 1h");
-        expect(sql).toContain("harness = 'codex'");
-        expect(sql).toContain("inject = false");
+        const { sql, params } = buildHookLogQuery({ tail: 5, sinceHours: 1, harness: "codex", inject: false });
+        expect(sql).toContain("ts >= CURRENT_TIMESTAMP");
+        expect(sql).toContain("harness = ?");
+        expect(sql).toContain("inject = ?");
         expect((sql.match(/ AND /g) ?? []).length).toBeGreaterThanOrEqual(2);
+        expect(params).toEqual([1, false, "codex"]);
     });
 
-    test("rejects single quotes in literal values to prevent injection", () => {
-        expect(() => buildHookLogQuery({ tail: 5, reason: "no'malicious" })).toThrow();
+    test("binds single quotes instead of putting them in SQL", () => {
+        const query = buildHookLogQuery({ tail: 5, reason: "no'malicious" });
+        expect(query.sql).not.toContain("no'malicious");
+        expect(query.params).toEqual(["no'malicious"]);
     });
 });
 

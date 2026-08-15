@@ -1,6 +1,6 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { JsonArrayColumn, NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 
 export interface HookLogRow {
     readonly ts: Date;
@@ -22,34 +22,46 @@ export interface HookLogQueryOptions {
     readonly harness?: string | undefined;
 }
 
-function safeLiteral(value: string): string {
-    if (value.includes("'")) {
-        throw new Error(`hook log filter value contains a single quote and would unsafely escape the SQL string: ${value}`);
-    }
-    return `'${value}'`;
+export interface HookLogQuery {
+    readonly sql: string;
+    readonly params: ReadonlyArray<string | number | boolean>;
 }
 
-export function buildHookLogQuery(opts: HookLogQueryOptions): string {
+export function buildHookLogQuery(opts: HookLogQueryOptions): HookLogQuery {
     const where: string[] = [];
+    const params: Array<string | number | boolean> = [];
     if (opts.sinceHours !== undefined) {
         if (!Number.isFinite(opts.sinceHours) || opts.sinceHours <= 0) {
             throw new Error(`hook log --since must be a positive integer, got ${opts.sinceHours}`);
         }
-        where.push(`ts >= time::now() - ${Math.trunc(opts.sinceHours)}h`);
+        where.push("ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 hour')");
+        params.push(Math.trunc(opts.sinceHours));
     }
-    if (opts.reason !== undefined) where.push(`reason = ${safeLiteral(opts.reason)}`);
-    if (opts.file !== undefined) where.push(`file_path = ${safeLiteral(opts.file)}`);
-    if (opts.inject !== undefined) where.push(`inject = ${opts.inject ? "true" : "false"}`);
-    if (opts.harness !== undefined) where.push(`harness = ${safeLiteral(opts.harness)}`);
+    if (opts.reason !== undefined) { where.push("reason = ?"); params.push(opts.reason); }
+    if (opts.file !== undefined) { where.push("file_path = ?"); params.push(opts.file); }
+    if (opts.inject !== undefined) { where.push("inject = ?"); params.push(opts.inject); }
+    if (opts.harness !== undefined) { where.push("harness = ?"); params.push(opts.harness); }
 
     const whereClause = where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`;
-    return [
+    const sql = [
         "SELECT ts, harness, event, file_path, inject, reason, latency_ms, injected_titles",
         `FROM hook_fire${whereClause}`,
         "ORDER BY ts DESC",
         `LIMIT ${Math.max(1, Math.trunc(opts.tail))}`,
     ].join("\n");
+    return { sql, params };
 }
+
+const HookLogRowSchema = Schema.Struct({
+    ts: TimestampColumn,
+    harness: Schema.String,
+    event: Schema.String,
+    file_path: Schema.String,
+    inject: Schema.Boolean,
+    reason: Schema.String,
+    latency_ms: NumberFromBigIntColumn,
+    injected_titles: JsonArrayColumn(Schema.String),
+});
 
 const TSV_HEADERS = ["ts", "harness", "event", "file", "inject", "reason", "latency_ms", "injected"];
 
@@ -80,13 +92,9 @@ export function formatHookLogRowsTsv(rows: readonly HookLogRow[]): string {
     return lines.join("\n");
 }
 
-export const queryHookLog = (opts: HookLogQueryOptions): Effect.Effect<readonly HookLogRow[], DbError, SurrealClient> =>
+export const queryHookLog = (opts: HookLogQueryOptions): Effect.Effect<readonly HookLogRow[], CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = buildHookLogQuery(opts);
-        const [rows] = yield* db.query<[HookLogRow[]]>(sql);
-        return rows.map((row) => ({
-            ...row,
-            ts: row.ts instanceof Date ? row.ts : new Date(row.ts as unknown as string),
-        }));
+        const cache = yield* CacheRead;
+        const query = buildHookLogQuery(opts);
+        return yield* cache.rows(HookLogRowSchema, query.sql, query.params);
     });

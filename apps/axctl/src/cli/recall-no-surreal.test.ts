@@ -64,6 +64,24 @@ const CORPUS = (w: CacheWriteService) =>
                 has_error: false,
             },
         ]);
+        yield* w.put("hook_fire", {
+            id: "hook-one",
+            ts: T("2026-08-15T10:00:00.000Z"),
+            kind: "hook_fire",
+            session: "session-a",
+            file: null,
+            file_path: "src/a.ts",
+            harness: "claude",
+            ok: true,
+            latency_ms: 7,
+            event: "read",
+            inject: true,
+            reason: "high_signal",
+            prior_sessions_considered: 1,
+            task_excerpt: "read a file",
+            top_prior_sessions: "[]",
+            injected_titles: '["Earlier fix"]',
+        });
     });
 
 interface CliRun {
@@ -140,5 +158,30 @@ describe("ax recall on the cache runtime", () => {
         expect(run.stderr).toContain("nothing ingested for");
         const body = JSON.parse(run.stdout) as { hits: ReadonlyArray<unknown> };
         expect(body.hits).toEqual([]);
+    }, 60_000);
+});
+
+describe("ported hook CLI on the cache runtime", () => {
+    dtest("reports a typed cache failure at the CLI boundary", () => {
+        const missingSnapshot = `${tempDir("ax-hook-log-missing-")}/snapshot.duckdb`;
+        const run = runCli(["hook", "log", "--json"], missingSnapshot);
+
+        expect(run.exitCode).toBe(1);
+        expect(run.stderr).toContain("ax hook log: cache error -");
+        expect(run.stderr).not.toContain("SurrealClient");
+    }, 60_000);
+
+    dtest("reads hook log rows with no SurrealDB reachable", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-hook-log-nodb-"), dylibPath, CORPUS),
+        );
+
+        const run = runCli(["hook", "log", "--json"], fixture.snapshotPath);
+
+        expect(run.stderr).not.toContain("SurrealClient");
+        expect(run.exitCode).toBe(0);
+        const rows = JSON.parse(run.stdout) as ReadonlyArray<{ reason: string; latency_ms: number }>;
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ reason: "high_signal", latency_ms: 7 });
     }, 60_000);
 });

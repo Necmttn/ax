@@ -13,6 +13,7 @@ import {
 import { recordHookFire } from "../../hooks/telemetry.ts";
 import { hooksConfigSubcommands } from "../../hooks/cli.ts";
 import { formatHookLogRowsTsv, queryHookLog } from "../../hooks/log.ts";
+import { catchCacheReadErrorAndExit } from "../output.ts";
 import {
     formatHookInvocationRows,
     formatHookSummaryRows,
@@ -144,7 +145,7 @@ const hookLogCommand = Command.make(
                 file: optionValue(file),
                 inject: injectStr === undefined ? undefined : injectStr === "true",
                 harness: optionValue(harness),
-            });
+            }).pipe(catchCacheReadErrorAndExit("ax hook log"));
             if (json) {
                 console.log(prettyPrint(rows));
                 return;
@@ -267,6 +268,13 @@ export const hooksCommand = Command.make("hooks").pipe(
 
 export const hooksRuntime: RuntimeManifest = {
     // `hook` is harness plumbing (invoked by hook configs), not for humans.
-    hook: { runtime: "db", hidden: true },
+    hook: {
+        runtime: {
+            kind: "db-conditional",
+            fallback: "db",
+            subcommands: { "file-context": "db", log: "cache" },
+        },
+        hidden: true,
+    },
     hooks: "db",
 };
