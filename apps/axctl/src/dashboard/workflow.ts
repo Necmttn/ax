@@ -1,25 +1,16 @@
 import { Effect } from "effect";
 import { encodeJson, jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient } from "@ax/lib/db";
 import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
 import {
     CacheRead,
     type CacheReadError,
+    type CacheReadService,
     type CacheWriteError,
     type CacheWriteService,
 } from "@ax/lib/duckdb/seam";
-import type { DbError } from "@ax/lib/errors";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
-import {
-    WEEKS_LOOKBACK,
-    WORKFLOW_EPISODES_SQL,
-    WORKFLOW_EPISODE_PAIRS_SQL,
-    WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL,
-    WORKFLOW_SESSION_SEQUENCES_SQL,
-    WORKFLOW_SESSION_SHAPE_SQL,
-    WORKFLOW_WEEKLY_SKILLS_SQL,
-    WORKFLOW_WEEKLY_TOOLS_SQL,
-} from "../queries/workflow.ts";
 import {
     classifyPhase,
     compressPhaseSequence,
@@ -341,13 +332,124 @@ const parseSnapshotPayload = (rows: ReadonlyArray<Record<string, unknown>>): Wor
     return parsed === null ? null : (parsed as unknown as WorkflowResponse);
 };
 
-export const computeWorkflow = (): Effect.Effect<
-    WorkflowResponse,
-    DbError,
-    SurrealClient
-> =>
+/**
+ * Weeks lookback for the three weekly-bucket queries below - kept bounded so a
+ * cold scan on a large `invoked`/`tool_call`/`session` table stays cheap.
+ * Ported from `queries/workflow.ts` (SurrealDB `time::now() - 12w`); DuckDB has
+ * no week-interval literal, so the bound param is expressed in DAYS.
+ */
+const WEEKS_LOOKBACK = 12;
+const LOOKBACK_DAYS = WEEKS_LOOKBACK * 7;
+
+// Local DuckDB translations of `queries/workflow.ts`'s SurrealQL constants -
+// that file is unported (2b's ownership); copy the shape, never import the
+// SurrealQL text. `strftime(ts, '%G-W%V')` is DuckDB's equivalent of
+// SurrealDB's `time::format(ts, "%G-W%V")` (verified: both produce ISO
+// year-week, e.g. 2025-12-29 -> "2026-W01").
+
+const WORKFLOW_WEEKLY_SKILLS_SQL = `
+    SELECT strftime(iv.ts, '%G-W%V') AS week, sk.name AS skill, count(*) AS count
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    WHERE iv.ts > ${daysAgoExpr} AND sk.name IS NOT NULL
+    GROUP BY week, skill
+    ORDER BY week ASC, count DESC
+`;
+
+const WORKFLOW_WEEKLY_TOOLS_SQL = `
+    SELECT strftime(tc.ts, '%G-W%V') AS week, COALESCE(tc.command_norm, tc.name) AS label, count(*) AS count
+    FROM tool_call tc
+    WHERE tc.ts > ${daysAgoExpr} AND COALESCE(tc.command_norm, tc.name) IS NOT NULL
+    GROUP BY week, label
+    ORDER BY week ASC, count DESC
+`;
+
+const WORKFLOW_SESSION_SHAPE_SQL = `
+    SELECT strftime(started_at, '%G-W%V') AS week, count(*) AS session_count
+    FROM session
+    WHERE started_at > ${daysAgoExpr}
+    GROUP BY week
+    ORDER BY week ASC
+`;
+
+// SurrealDB's `GROUP BY parent, project, started_at` collects the
+// non-aggregate columns (SurrealQL semantics differ from standard SQL); the
+// DuckDB equivalent groups on the real key (`sp.in_id`) and joins `session`
+// for the two descriptive columns, which are single-valued per parent.
+const WORKFLOW_EPISODES_SQL = `
+    SELECT
+        sp.in_id AS parent,
+        s.project AS project,
+        s.started_at AS started_at,
+        count(*) AS child_count,
+        count(DISTINCT sp.nickname) AS distinct_nicknames
+    FROM spawned sp
+    LEFT JOIN session s ON s.id = sp.in_id
+    GROUP BY sp.in_id, s.project, s.started_at
+    ORDER BY child_count DESC
+    LIMIT 25
+`;
+
+const WORKFLOW_EPISODE_PAIRS_SQL = "SELECT in_id AS parent, out_id AS child FROM spawned";
+
+// `invoked.session`/`turn_index`/`is_first` are denormalized directly onto the
+// edge row (see packages/schema/src/schema.duckdb.sql), so no turn deref is
+// needed here - only a join to `skill` (name) and `session` (source filter).
+const WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL = `
+    SELECT iv.session AS session, sk.name AS skill, iv.turn_index AS turn_index, iv.ts AS ts
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    JOIN session s ON s.id = iv.session
+    WHERE iv.is_first = true
+      AND iv.session IS NOT NULL
+      AND sk.name IS NOT NULL
+      AND s.source = 'claude-subagent'
+    LIMIT 100000
+`;
+
+const WORKFLOW_SESSION_SEQUENCES_SQL = `
+    SELECT iv.session AS session, sk.name AS skill, iv.turn_index AS turn_index, iv.ts AS ts
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    JOIN session s ON s.id = iv.session
+    WHERE iv.ts > ${daysAgoExpr}
+      AND iv.is_first = true
+      AND iv.session IS NOT NULL
+      AND sk.name IS NOT NULL
+      AND s.source NOT IN ('claude-subagent', 'codex-subagent')
+    ORDER BY session ASC, turn_index ASC
+    LIMIT 50000
+`;
+
+/**
+ * Defensive raw-row reader: a failed query degrades to `[]` (matches the
+ * `cacheRows` contract), so one bad query in the batch below never sinks the
+ * whole rollup. Mirrors the identical helper in session-canvas.ts / triage.ts.
+ */
+const rawRows = (
+    read: CacheReadService,
+    sql: string,
+    params?: ReadonlyArray<DuckDbParam>,
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, never> =>
+    read.raw(sql, params).pipe(
+        Effect.map((result) => result.rows),
+        Effect.catch((error) => {
+            console.error(`workflow query failed: ${sql.slice(0, 60)}...`, error);
+            return Effect.succeed<ReadonlyArray<Record<string, unknown>>>([]);
+        }),
+    );
+
+/**
+ * `read` is an explicit parameter, not resolved via `yield* CacheRead`,
+ * because `refreshWorkflowSnapshot` below calls this DURING ingest (under the
+ * write lock) and must read the live database being written to - not the
+ * previously-published snapshot the `CacheRead` service tag would otherwise
+ * answer from. Same dual-module discipline as the rest of the DuckDB seam.
+ */
+export const computeWorkflow = (
+    read: CacheReadService,
+): Effect.Effect<WorkflowResponse, never> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const [
             skillRows,
             toolRows,
@@ -357,17 +459,17 @@ export const computeWorkflow = (): Effect.Effect<
             episodePairRows,
             episodeInvocationRows,
         ] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_WEEKLY_SKILLS_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_WEEKLY_TOOLS_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_SESSION_SHAPE_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_SESSION_SEQUENCES_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_EPISODES_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_EPISODE_PAIRS_SQL),
-            db.query<[Array<Record<string, unknown>>]>(WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL),
+            rawRows(read, WORKFLOW_WEEKLY_SKILLS_SQL, [LOOKBACK_DAYS]),
+            rawRows(read, WORKFLOW_WEEKLY_TOOLS_SQL, [LOOKBACK_DAYS]),
+            rawRows(read, WORKFLOW_SESSION_SHAPE_SQL, [LOOKBACK_DAYS]),
+            rawRows(read, WORKFLOW_SESSION_SEQUENCES_SQL, [LOOKBACK_DAYS]),
+            rawRows(read, WORKFLOW_EPISODES_SQL),
+            rawRows(read, WORKFLOW_EPISODE_PAIRS_SQL),
+            rawRows(read, WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL),
         ]);
-        const skills = bucketByWeek(skillRows?.[0] ?? [], "skill");
-        const tools = bucketByWeek(toolRows?.[0] ?? [], "label");
-        const sessionShape: WorkflowSessionShape[] = (sessionRows?.[0] ?? [])
+        const skills = bucketByWeek(skillRows, "skill");
+        const tools = bucketByWeek(toolRows, "label");
+        const sessionShape: WorkflowSessionShape[] = sessionRows
             .map((raw) => {
                 const week = stringField(raw, "week");
                 if (!week) return null;
@@ -376,26 +478,19 @@ export const computeWorkflow = (): Effect.Effect<
             .filter((r): r is WorkflowSessionShape => r !== null)
             .sort((a, b) => a.week.localeCompare(b.week));
         const convergence = computeConvergence(skills);
-        const { shapes, total: shapesTotal } = aggregateShapes(sequenceRows?.[0] ?? []);
+        const { shapes, total: shapesTotal } = aggregateShapes(sequenceRows);
         const { shapes: episode_shapes, total: episode_shapes_total } =
-            aggregateEpisodeShapes(
-                episodePairRows?.[0] ?? [],
-                episodeInvocationRows?.[0] ?? [],
-            );
-        const episodes: WorkflowEpisode[] = (episodeRows?.[0] ?? [])
+            aggregateEpisodeShapes(episodePairRows, episodeInvocationRows);
+        const episodes: WorkflowEpisode[] = episodeRows
             .map((raw): WorkflowEpisode | null => {
                 const parent = stringFieldOrId(raw, "parent");
                 if (!parent) return null;
-                // SurrealDB GROUP BY collects non-aggregate cols into arrays;
-                // they're all the same value within one group, so take [0].
-                const projectRaw = raw.project;
-                const project = Array.isArray(projectRaw)
-                    ? typeof projectRaw[0] === "string" ? projectRaw[0] : null
-                    : typeof projectRaw === "string" ? projectRaw : null;
-                const startedRaw = raw.started_at;
-                const started = Array.isArray(startedRaw)
-                    ? dateField({ x: startedRaw[0] }, "x")
-                    : dateField(raw, "started_at");
+                // Plain single-valued columns under DuckDB (real GROUP BY
+                // keys/joins, not SurrealQL's array-collecting semantics) -
+                // the array-unwrap branches from the old SurrealQL port are
+                // gone; stringField/dateField read the scalar directly.
+                const project = stringField(raw, "project");
+                const started = dateField(raw, "started_at");
                 return {
                     // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
                     parent_session_id: toBareSessionId(parent),
@@ -442,14 +537,15 @@ const DUCKDB_WORKFLOW_SNAPSHOT_SQL =
  * below no longer calls it - a dashboard READ must not take the ingest lock out
  * from under a running ingest just because its cache was cold.
  *
- * `computeWorkflow` itself is still SurrealQL; it is claimed by
- * `c-read-dashboard`. This function is the WRITE half only.
+ * `computeWorkflow` now reads through the `write` service passed in (a
+ * `CacheWriteService` extends `CacheReadService`), so this stays a single
+ * connection under the ingest lock - no separate `CacheRead` resolution.
  */
 export const refreshWorkflowSnapshot = (
     write: CacheWriteService,
-): Effect.Effect<WorkflowResponse, DbError | CacheWriteError, SurrealClient> =>
+): Effect.Effect<WorkflowResponse, CacheWriteError> =>
     Effect.gen(function* () {
-        const payload = yield* computeWorkflow();
+        const payload = yield* computeWorkflow(write);
         yield* write.put("workflow_snapshot", cacheRow({
             id: WORKFLOW_SNAPSHOT_ID,
             generated_at: tsParam(payload.generatedAt),
@@ -472,13 +568,13 @@ export const refreshWorkflowSnapshot = (
  */
 export const fetchWorkflow = (): Effect.Effect<
     WorkflowResponse,
-    DbError | CacheReadError,
-    SurrealClient | CacheRead
+    CacheReadError,
+    CacheRead
 > =>
     Effect.gen(function* () {
         const read = yield* CacheRead;
         const stored = yield* read.raw(DUCKDB_WORKFLOW_SNAPSHOT_SQL, [WORKFLOW_SNAPSHOT_ID]);
         const snapshot = parseSnapshotPayload(stored.rows);
         if (snapshot) return snapshot;
-        return yield* computeWorkflow();
+        return yield* computeWorkflow(read);
     });

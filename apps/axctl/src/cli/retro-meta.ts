@@ -17,15 +17,15 @@
  * Sibling of `retro emit` / `retro list` / `retro reflect`.
  */
 
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 import { encodeJson } from "@ax/lib/decode";
 import { homedir } from "node:os";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
-import { recordRef } from "@ax/lib/shared/surql";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import { listStoredRetros } from "../queries/judgment-retros.ts";
 import {
@@ -180,15 +180,16 @@ export const coerceDaysSinceAccepted = (
     return 0;
 };
 
-const idToString = (raw: unknown): string => {
-    if (raw === null || raw === undefined) return "";
-    if (typeof raw === "string") return raw;
-    if (typeof raw === "object" && raw !== null && "tb" in raw && "id" in raw) {
-        const r = raw as { tb: unknown; id: unknown };
-        return `${String(r.tb ?? "")}:${String(r.id ?? "")}`;
-    }
-    return String(raw);
-};
+const MetaSkillRow = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+});
+const OpportunityAggRow = Schema.Struct({
+    experiment_id: Schema.String,
+    opportunities_count: NumberFromBigIntColumn,
+    addressed_count: NumberFromBigIntColumn,
+});
 
 const flagValue = (args: string[], name: string): string | undefined => {
     const hit = args.find((a) => a.startsWith(`--${name}=`));
@@ -327,7 +328,7 @@ export const buildMetaSnapshot = (input: {
 
 export const cmdRetroMeta = (
     args: string[],
-): Effect.Effect<void, DbError | JudgmentError, SurrealClient | Judgment | FileSystem.FileSystem> =>
+): Effect.Effect<void, JudgmentError, CacheRead | Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const sinceRaw = flagValue(args, "since");
@@ -342,14 +343,13 @@ export const cmdRetroMeta = (
         // / `--pretty` are not supported; the CLI is always-JSON for now.
         const pretty = args.includes("--pretty");
 
-        const db = yield* SurrealClient;
-
         const cutoff = new Date(Date.now() - sinceDays * 86_400_000);
-        const [storedRetros, skillsRes, proposals] = yield* Effect.all([
+        const [storedRetros, skillRows, proposals] = yield* Effect.all([
             listStoredRetros({ since: cutoff, limit: limitRetros }),
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT name, scope, description FROM skill ORDER BY name;`,
-            ),
+            cacheRows(MetaSkillRow, {
+                sql: "SELECT name, scope, description FROM skill ORDER BY name",
+                params: [],
+            }, "retro meta skills"),
             listStoredProposals(1_000),
         ], { concurrency: 3 });
 
@@ -364,10 +364,10 @@ export const cmdRetroMeta = (
             created_at: r.created_at.toISOString(),
         }));
 
-        const skills: SkillRow[] = (skillsRes?.[0] ?? []).map((s) => ({
-            name: String(s.name ?? ""),
-            scope: String(s.scope ?? ""),
-            description: String(s.description ?? ""),
+        const skills: SkillRow[] = skillRows.map((s) => ({
+            name: s.name,
+            scope: s.scope,
+            description: s.description ?? "",
         }));
 
         const openProposals: OpenProposalRow[] = proposals
@@ -396,15 +396,17 @@ export const cmdRetroMeta = (
                 locked_verdict: experiment.locked_verdict,
             }));
 
-        const refs = experiments.map(({ experiment }) => recordRef("experiment", experiment.id));
-        const opportunityRows = refs.length === 0 ? [] : (yield* db.query<[Array<Record<string, unknown>>]>(`
-            SELECT type::string(in) AS experiment_id, count() AS opportunities_count,
-                   math::sum(IF was_addressed = true THEN 1 ELSE 0 END) AS addressed_count
-            FROM opportunity WHERE in IN [${refs.join(", ")}] GROUP BY experiment_id;
-        `))?.[0] ?? [];
+        const experimentIds = experiments.map(({ experiment }) => experiment.id);
+        const opportunityRows = experimentIds.length === 0 ? [] : yield* cacheRows(OpportunityAggRow, {
+            sql: `SELECT in_id AS experiment_id, count(*) AS opportunities_count,
+                         count(*) FILTER (WHERE was_addressed) AS addressed_count
+                  FROM opportunity WHERE in_id IN (${experimentIds.map(() => "?").join(", ")})
+                  GROUP BY in_id`,
+            params: experimentIds,
+        }, "retro meta opportunities");
         const opportunityByExperiment = new Map(opportunityRows.map((row) => [
-            idToString(row.experiment_id).replace(/^experiment:/, ""),
-            { opportunities: Number(row.opportunities_count ?? 0), addressed: Number(row.addressed_count ?? 0) },
+            row.experiment_id,
+            { opportunities: row.opportunities_count, addressed: row.addressed_count },
         ] as const));
 
         const experimentStatus: ExperimentStatusRow[] = experiments.map(({ proposal, experiment }) => {

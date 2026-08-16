@@ -61,7 +61,7 @@ import {
 import { defaultPublishStatePath } from "../../profile/publish-state.ts";
 import type { GitHubApiError } from "../../profile/github-env.ts";
 import { HookProviderRegistryDefault } from "../../hooks/providers/registry.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolvePwdCacheRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 
 // ---------------------------------------------------------------------------
@@ -580,7 +580,7 @@ const experimentCommand = Command.make("experiment").pipe(
 // ---------------------------------------------------------------------------
 
 const resolveCurrentTeamRepo = (command: "join" | "leave" | "push") =>
-    resolvePwdRepository().pipe(
+    resolvePwdCacheRepository().pipe(
         Effect.map(teamRepositoryContext),
         Effect.catchTag("NotAGitRepoError", (error) =>
             Effect.sync(() => {
@@ -641,7 +641,7 @@ export const joinCommand = Command.make(
 
 export const statusCommand = Command.make("status", {}, () =>
     Effect.gen(function* () {
-        const currentRepo = yield* resolvePwdRepository().pipe(
+        const currentRepo = yield* resolvePwdCacheRepository().pipe(
             Effect.map(teamRepositoryContext),
             Effect.catchTag("NotAGitRepoError", () => Effect.succeed(null)),
         );
@@ -679,6 +679,7 @@ export const pushCommand = Command.make("push", {}, () =>
         if (currentRepo === null) return;
         const result = yield* pushCurrentTeamProfile({
             repoKey: currentRepo.repoKey,
+            repositoryId: currentRepo.repositoryId,
             bindingsPath: defaultTeamBindingsPath(),
             publishStatePath: defaultPublishStatePath(),
             windowDays: 30,
