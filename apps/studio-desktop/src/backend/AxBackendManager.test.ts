@@ -1,7 +1,5 @@
 import { expect, test } from "bun:test";
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
-
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,7 +16,6 @@ import type { ArbitrationDecision } from "./AxDaemonArbitration.ts";
 import type {
     SupervisedProcess,
     SupervisedProcessConfig,
-    SupervisedProcessHooks,
     SupervisedProcessSnapshot,
 } from "./SupervisedProcess.ts";
 
@@ -32,19 +29,14 @@ interface FakeProcessEvent {
 }
 
 /**
- * Build a stub `makeProcess` factory that records start/stop ordering across
- * every supervised process it vends, and never touches a real OS process. Also
- * captures the lifecycle `hooks` passed for each process so a test can fire
- * them (e.g. simulate surreal's `onExit` -> ax-serve bounce).
+ * Build a stub `makeProcess` factory that records start/stop ordering and
+ * never touches a real OS process.
  */
 const makeFakeProcessFactory = Effect.gen(function* () {
     const events = yield* Ref.make<ReadonlyArray<FakeProcessEvent>>([]);
     const configs = yield* Ref.make<ReadonlyArray<SupervisedProcessConfig>>([]);
-    const hooksByName = yield* Ref.make<
-        Readonly<Record<string, SupervisedProcessHooks | undefined>>
-    >({});
 
-    const factory: AxBackendManager.MakeSupervisedProcess = (config, hooks) =>
+    const factory: AxBackendManager.MakeSupervisedProcess = (config) =>
         Effect.sync(() => {
             const proc: SupervisedProcess = {
                 start: Ref.update(events, (xs) => [
@@ -63,26 +55,12 @@ const makeFakeProcessFactory = Effect.gen(function* () {
                 } satisfies SupervisedProcessSnapshot),
             };
             return proc;
-        }).pipe(
-            Effect.tap(() => Ref.update(configs, (xs) => [...xs, config])),
-            Effect.tap(() =>
-                Ref.update(hooksByName, (m) => ({ ...m, [config.name]: hooks })),
-            ),
-        );
-
-    /** Fire the captured `onExit` hook for a process, if any (simulates crash). */
-    const fireExit = (name: string) =>
-        Ref.get(hooksByName).pipe(
-            Effect.flatMap((m) =>
-                m[name]?.onExit?.({ pid: 1234, reason: "code=1" }) ?? Effect.void,
-            ),
-        );
+        }).pipe(Effect.tap(() => Ref.update(configs, (xs) => [...xs, config])));
 
     return {
         factory,
         events: Ref.get(events),
         configs: Ref.get(configs),
-        fireExit,
     } as const;
 });
 
@@ -113,21 +91,19 @@ const makeFakeWindow = Effect.gen(function* () {
 
 const arbitrationLayer = (
     decision: ArbitrationDecision,
-    probeDaemon: Effect.Effect<boolean> = Effect.succeed(true),
+    probeStudio: Effect.Effect<boolean> = Effect.succeed(true),
 ) =>
     Layer.succeed(
         AxBackendManager.AxArbitration,
         AxBackendManager.AxArbitration.of({
             probe: Effect.succeed(decision),
-            probeDaemon,
+            probeStudio,
         }),
     );
 
 const testEnv = {
-    surrealBinaryPath: "/opt/ax/surreal",
     bunBinaryPath: "/opt/ax/bun",
     axSourceEntry: "/repo/apps/axctl/src/cli/index.ts",
-    axDataDir: "/data/ax",
     axSourceRoot: "/repo",
 } satisfies AxBackendManager.AxBackendEnvironment;
 
@@ -155,16 +131,13 @@ const platformStubLayer = Layer.mergeAll(
         ),
     ),
     backendOutputLogNoopLayer,
-    // FileSystem + Path: the manager now references DesktopSchema.applySchema
-    // (a no-op in these tests, but its type surfaces FS/Path requirements).
-    NodeServices.layer,
 );
 
 // ---------------------------------------------------------------------------
-// (a) spawn: surreal readiness gates ax-serve start (ordering)
+// (a) spawn: starts ax-studio and opens the window
 // ---------------------------------------------------------------------------
 
-test("spawn mode starts surreal before ax serve (ordering)", async () => {
+test("spawn mode starts ax studio and opens the window", async () => {
     const program = Effect.gen(function* () {
         const fakeProc = yield* makeFakeProcessFactory;
         const fakeWindow = yield* makeFakeWindow;
@@ -198,35 +171,25 @@ test("spawn mode starts surreal before ax serve (ordering)", async () => {
     const startOrder = out.events
         .filter((e) => e.action === "start")
         .map((e) => e.name);
-    expect(startOrder).toEqual(["surreal", "ax-serve"]);
+    expect(startOrder).toEqual(["ax-studio"]);
     expect(out.opened).toBe(1);
 
-    // surreal config sanity
-    const surrealCfg = out.configs.find((c) => c.name === "surreal");
-    expect(surrealCfg?.executablePath).toBe("/opt/ax/surreal");
-    expect(surrealCfg?.args).toContain("rocksdb:///data/ax/db");
-    expect(surrealCfg?.readiness.url.href).toBe("http://127.0.0.1:8521/health");
-
-    // ax-serve config sanity
-    const axCfg = out.configs.find((c) => c.name === "ax-serve");
-    expect(axCfg?.executablePath).toBe("/opt/ax/bun");
-    expect(axCfg?.args).toEqual([
+    const studioCfg = out.configs.find((c) => c.name === "ax-studio");
+    expect(studioCfg?.executablePath).toBe("/opt/ax/bun");
+    expect(studioCfg?.args).toEqual([
         "/repo/apps/axctl/src/cli/index.ts",
-        "serve",
+        "studio",
         "--port=1738",
     ]);
-    expect(axCfg?.cwd).toBe("/repo");
-    expect(axCfg?.env.AX_DB_URL).toBe("ws://127.0.0.1:8521");
-    expect(axCfg?.env.AX_DB_NS).toBe("ax");
-    expect(axCfg?.env.AX_DB_DB).toBe("main");
-    expect(axCfg?.readiness.url.href).toBe("http://127.0.0.1:1738/api/version");
+    expect(studioCfg?.cwd).toBe("/repo");
+    expect(studioCfg?.readiness.url.href).toBe("http://127.0.0.1:1738/api/version");
 });
 
 // ---------------------------------------------------------------------------
 // (b) attach mode opens the window without spawning
 // ---------------------------------------------------------------------------
 
-test("attach mode opens window without spawning processes", async () => {
+test("attach mode opens window without spawning a process", async () => {
     const program = Effect.gen(function* () {
         const fakeProc = yield* makeFakeProcessFactory;
         const fakeWindow = yield* makeFakeWindow;
@@ -267,10 +230,10 @@ test("attach mode opens window without spawning processes", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// (c) stop tears down in reverse order (ax serve before surreal)
+// (c) stop tears down the spawned process
 // ---------------------------------------------------------------------------
 
-test("stop tears down ax serve before surreal (reverse order)", async () => {
+test("stop tears down the spawned ax studio process", async () => {
     const program = Effect.gen(function* () {
         const fakeProc = yield* makeFakeProcessFactory;
         const fakeWindow = yield* makeFakeWindow;
@@ -301,227 +264,14 @@ test("stop tears down ax serve before surreal (reverse order)", async () => {
     const stopOrder = out.events
         .filter((e) => e.action === "stop")
         .map((e) => e.name);
-    expect(stopOrder).toEqual(["ax-serve", "surreal"]);
+    expect(stopOrder).toEqual(["ax-studio"]);
 });
 
 // ---------------------------------------------------------------------------
-// (d) spawn-ax-only skips surreal, still starts ax serve + opens window
+// (d) attach mode: poller stays quiet while the attached process stays healthy
 // ---------------------------------------------------------------------------
 
-test("spawn-ax-only skips surreal but starts ax serve", async () => {
-    const program = Effect.gen(function* () {
-        const fakeProc = yield* makeFakeProcessFactory;
-        const fakeWindow = yield* makeFakeWindow;
-
-        yield* Effect.scoped(
-            Effect.gen(function* () {
-                const manager = yield* AxBackendManager.AxBackendManager;
-                yield* manager.start;
-            }).pipe(
-                Effect.provide(
-                    AxBackendManager.layer(fakeProc.factory).pipe(
-                        Layer.provide(arbitrationLayer({ mode: "spawn-ax-only" })),
-                        Layer.provide(fakeWindow.layer),
-                        Layer.provide(DesktopState.layer),
-                        Layer.provide(envLayer),
-                        Layer.provide(platformStubLayer),
-                    ),
-                ),
-            ),
-        );
-
-        return {
-            events: yield* fakeProc.events,
-            opened: yield* fakeWindow.openCount,
-        };
-    });
-
-    const out = await Effect.runPromise(program);
-
-    const startOrder = out.events
-        .filter((e) => e.action === "start")
-        .map((e) => e.name);
-    expect(startOrder).toEqual(["ax-serve"]);
-    expect(out.opened).toBe(1);
-});
-
-// ---------------------------------------------------------------------------
-// (e) conflict mode does NOT start or open the window
-// ---------------------------------------------------------------------------
-
-test("conflict mode neither spawns nor opens the window", async () => {
-    const program = Effect.gen(function* () {
-        const fakeProc = yield* makeFakeProcessFactory;
-        const fakeWindow = yield* makeFakeWindow;
-
-        yield* Effect.scoped(
-            Effect.gen(function* () {
-                const manager = yield* AxBackendManager.AxBackendManager;
-                yield* manager.start;
-            }).pipe(
-                Effect.provide(
-                    AxBackendManager.layer(fakeProc.factory).pipe(
-                        Layer.provide(arbitrationLayer({ mode: "conflict" })),
-                        Layer.provide(fakeWindow.layer),
-                        Layer.provide(DesktopState.layer),
-                        Layer.provide(envLayer),
-                        Layer.provide(platformStubLayer),
-                    ),
-                ),
-            ),
-        );
-
-        return {
-            events: yield* fakeProc.events,
-            opened: yield* fakeWindow.openCount,
-        };
-    });
-
-    const out = await Effect.runPromise(program);
-
-    expect(out.events).toEqual([]);
-    expect(out.opened).toBe(0);
-});
-
-// ---------------------------------------------------------------------------
-// (f) surreal restart (onExit) after both running bounces ax-serve
-// ---------------------------------------------------------------------------
-
-test("surreal restart bounces ax serve (stop then start)", async () => {
-    const program = Effect.gen(function* () {
-        const fakeProc = yield* makeFakeProcessFactory;
-        const fakeWindow = yield* makeFakeWindow;
-
-        // Read events INSIDE the scope: the scope-close finalizer (stop) appends
-        // its own stop events, which would otherwise pollute the assertion.
-        const events = yield* Effect.scoped(
-            Effect.gen(function* () {
-                const manager = yield* AxBackendManager.AxBackendManager;
-                yield* manager.start;
-                // Both processes are up. Simulate surreal crashing/exiting (the
-                // supervisor would self-restart); the manager's onExit hook
-                // should bounce ax-serve.
-                yield* fakeProc.fireExit("surreal");
-                return yield* fakeProc.events;
-            }).pipe(
-                Effect.provide(
-                    AxBackendManager.layer(fakeProc.factory).pipe(
-                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
-                        Layer.provide(fakeWindow.layer),
-                        Layer.provide(DesktopState.layer),
-                        Layer.provide(envLayer),
-                        Layer.provide(platformStubLayer),
-                    ),
-                ),
-            ),
-        );
-
-        return { events };
-    });
-
-    const out = await Effect.runPromise(program);
-
-    // Initial: surreal start, ax-serve start. Then bounce: ax-serve stop + start.
-    expect(out.events).toEqual([
-        { name: "surreal", action: "start" },
-        { name: "ax-serve", action: "start" },
-        { name: "ax-serve", action: "stop" },
-        { name: "ax-serve", action: "start" },
-    ]);
-});
-
-// ---------------------------------------------------------------------------
-// (g) NO bounce when surreal exit happens during/after manager stop (teardown)
-// ---------------------------------------------------------------------------
-
-test("surreal exit during teardown does NOT respawn ax serve", async () => {
-    const program = Effect.gen(function* () {
-        const fakeProc = yield* makeFakeProcessFactory;
-        const fakeWindow = yield* makeFakeWindow;
-
-        const events = yield* Effect.scoped(
-            Effect.gen(function* () {
-                const manager = yield* AxBackendManager.AxBackendManager;
-                yield* manager.start;
-                // Tear down, THEN fire surreal's exit hook (mirrors a surreal
-                // SIGTERM landing as the manager shuts down). The bounce must
-                // bail: no ax-serve respawn after teardown.
-                yield* manager.stop();
-                yield* fakeProc.fireExit("surreal");
-                return yield* fakeProc.events;
-            }).pipe(
-                Effect.provide(
-                    AxBackendManager.layer(fakeProc.factory).pipe(
-                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
-                        Layer.provide(fakeWindow.layer),
-                        Layer.provide(DesktopState.layer),
-                        Layer.provide(envLayer),
-                        Layer.provide(platformStubLayer),
-                    ),
-                ),
-            ),
-        );
-
-        return { events };
-    });
-
-    const out = await Effect.runPromise(program);
-
-    // start surreal, start ax-serve, then reverse-order teardown. No further
-    // ax-serve start after the teardown stops.
-    expect(out.events).toEqual([
-        { name: "surreal", action: "start" },
-        { name: "ax-serve", action: "start" },
-        { name: "ax-serve", action: "stop" },
-        { name: "surreal", action: "stop" },
-    ]);
-});
-
-// ---------------------------------------------------------------------------
-// (h) NO bounce on surreal's initial boot (only onExit, never onReady)
-// ---------------------------------------------------------------------------
-
-test("surreal initial boot does not bounce ax serve", async () => {
-    const program = Effect.gen(function* () {
-        const fakeProc = yield* makeFakeProcessFactory;
-        const fakeWindow = yield* makeFakeWindow;
-
-        const events = yield* Effect.scoped(
-            Effect.gen(function* () {
-                const manager = yield* AxBackendManager.AxBackendManager;
-                yield* manager.start;
-                // No exit fired: the manager only reacts to surreal `onExit`, so
-                // a clean initial boot must leave ax-serve untouched (one start).
-                return yield* fakeProc.events;
-            }).pipe(
-                Effect.provide(
-                    AxBackendManager.layer(fakeProc.factory).pipe(
-                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
-                        Layer.provide(fakeWindow.layer),
-                        Layer.provide(DesktopState.layer),
-                        Layer.provide(envLayer),
-                        Layer.provide(platformStubLayer),
-                    ),
-                ),
-            ),
-        );
-
-        return { events };
-    });
-
-    const out = await Effect.runPromise(program);
-
-    expect(out.events).toEqual([
-        { name: "surreal", action: "start" },
-        { name: "ax-serve", action: "start" },
-    ]);
-});
-
-// ---------------------------------------------------------------------------
-// (i) attach mode: poller stays quiet while the external daemon stays healthy
-// ---------------------------------------------------------------------------
-
-test("attach mode does NOT transition while the attached daemon stays healthy", async () => {
+test("attach mode does NOT transition while the attached process stays healthy", async () => {
     const program = Effect.gen(function* () {
         const fakeProc = yield* makeFakeProcessFactory;
         const fakeWindow = yield* makeFakeWindow;
@@ -560,10 +310,10 @@ test("attach mode does NOT transition while the attached daemon stays healthy", 
 });
 
 // ---------------------------------------------------------------------------
-// (j) attach mode: sustained probe failure transitions attach -> spawn
+// (e) attach mode: sustained probe failure transitions attach -> spawn
 // ---------------------------------------------------------------------------
 
-test("attach mode transitions to spawn after the attached daemon dies", async () => {
+test("attach mode transitions to spawn after the attached process dies", async () => {
     const program = Effect.gen(function* () {
         const fakeProc = yield* makeFakeProcessFactory;
         const fakeWindow = yield* makeFakeWindow;
@@ -574,12 +324,12 @@ test("attach mode transitions to spawn after the attached daemon dies", async ()
             Effect.gen(function* () {
                 const manager = yield* AxBackendManager.AxBackendManager;
                 yield* manager.start;
-                // Window opened against the external daemon; nothing spawned yet.
+                // Window opened against the external process; nothing spawned yet.
                 expect(yield* fakeProc.events).toEqual([]);
                 expect(yield* fakeWindow.openCount).toBe(1);
 
-                // Daemon dies. The next two consecutive probes fail (threshold 2),
-                // triggering the attach -> spawn takeover.
+                // The attached process dies. The next two consecutive probes
+                // fail (threshold 2), triggering the attach -> spawn takeover.
                 yield* Ref.set(healthy, false);
                 // grace -> first failing tick (failures=1)
                 yield* TestClock.adjust(Duration.seconds(5));
@@ -608,15 +358,15 @@ test("attach mode transitions to spawn after the attached daemon dies", async ()
 
     const out = await Effect.runPromise(program);
 
-    // The takeover ran the spawn path: surreal then ax-serve.
+    // The takeover ran the spawn path.
     const startOrder = out.events
         .filter((e) => e.action === "start")
         .map((e) => e.name);
-    expect(startOrder).toEqual(["surreal", "ax-serve"]);
+    expect(startOrder).toEqual(["ax-studio"]);
 });
 
 // ---------------------------------------------------------------------------
-// (k) attach mode: poller torn down by stop -> no transition after stop
+// (f) attach mode: poller torn down by stop -> no transition after stop
 // ---------------------------------------------------------------------------
 
 test("attach mode poller does NOT transition after stop (torn down)", async () => {
@@ -630,7 +380,7 @@ test("attach mode poller does NOT transition after stop (torn down)", async () =
                 const manager = yield* AxBackendManager.AxBackendManager;
                 yield* manager.start;
                 // Stop the manager FIRST (latches `stopping`), then make the
-                // daemon die and advance well past the failure threshold. The
+                // process die and advance well past the failure threshold. The
                 // poller must bail without spawning anything.
                 yield* manager.stop();
                 yield* Ref.set(healthy, false);
