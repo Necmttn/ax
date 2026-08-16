@@ -209,8 +209,12 @@ SELECT
     r.updated_at AS updated_at,
     COALESCE(r.updated_at, r.created_at) AS last_seen,
     COUNT(c.id) AS checkout_count,
-    array_agg(c.path) FILTER (WHERE c.path IS NOT NULL) AS checkout_paths,
-    array_agg(c.branch) FILTER (WHERE c.branch IS NOT NULL) AS checkout_branches
+    -- LIST columns are not decodable by the CacheRead wrapper (row-decode.ts
+    -- unsupportedColumns) - to_json() renders them as JSON-array VARCHAR
+    -- instead. SHAPE CHANGE from the original native array: callers must
+    -- JSON.parse checkout_paths/checkout_branches.
+    to_json(array_agg(c.path) FILTER (WHERE c.path IS NOT NULL)) AS checkout_paths,
+    to_json(array_agg(c.branch) FILTER (WHERE c.branch IS NOT NULL)) AS checkout_branches
 FROM repository r
 LEFT JOIN has_checkout hc ON hc.in_id = r.id
 LEFT JOIN checkout c ON c.id = hc.out_id
@@ -475,8 +479,10 @@ SELECT
     (SELECT COUNT(*) FROM expresses e JOIN turn t ON t.id = e.in_id WHERE e.out_id = ss.id AND t.role = 'user') AS turns,
     (SELECT COUNT(DISTINCT e.session) FROM expresses e JOIN turn t ON t.id = e.in_id WHERE e.out_id = ss.id AND t.role = 'user') AS sessions,
     ss.last_seen AS last_seen,
+    -- LIST<STRUCT> is not decodable by the CacheRead wrapper - to_json()
+    -- renders it as JSON-array VARCHAR. SHAPE CHANGE: callers JSON.parse.
     (
-        SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+        SELECT to_json(array_agg(x ORDER BY x.ts DESC)) FROM (
             SELECT t.id AS turn, e.session AS session, t.seq AS seq, t.text_excerpt AS text, e.ts AS ts
             FROM expresses e
             JOIN turn t ON t.id = e.in_id
@@ -504,8 +510,10 @@ SELECT
     (SELECT COUNT(*) FROM turn_analysis ta WHERE ta.turn IN (SELECT e.in_id FROM expresses e WHERE e.out_id = ss.id)) AS analyses,
     (SELECT AVG(e.confidence) FROM expresses e WHERE e.out_id = ss.id) AS avg_confidence,
     ss.last_seen AS last_seen,
+    -- LIST<STRUCT> is not decodable by the CacheRead wrapper - to_json()
+    -- renders it as JSON-array VARCHAR. SHAPE CHANGE: callers JSON.parse.
     (
-        SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+        SELECT to_json(array_agg(x ORDER BY x.ts DESC)) FROM (
             SELECT t.id AS turn, e.session AS session, t.role AS role, t.seq AS seq, t.text_excerpt AS text, e.ts AS ts
             FROM expresses e
             JOIN turn t ON t.id = e.in_id
@@ -533,13 +541,13 @@ SELECT
     ut.seq AS user_seq,
     ut.text_excerpt AS user_text,
     rt.out_id AS assistant_turn,
-    at.seq AS assistant_seq,
-    at.text_excerpt AS assistant_text,
+    atn.seq AS assistant_seq,
+    atn.text_excerpt AS assistant_text,
     rt.ts AS ts
 FROM reacts_to rt
 LEFT JOIN semantic_signal ss ON ss.id = rt.signal
 LEFT JOIN turn ut ON ut.id = rt.in_id
-LEFT JOIN turn at ON at.id = rt.out_id
+LEFT JOIN turn atn ON atn.id = rt.out_id
 ORDER BY rt.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -560,8 +568,10 @@ FROM (
         (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id AND rt.polarity = 'revise') AS revise,
         (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id AND rt.polarity = 'reject') AS reject,
         (SELECT MAX(rt.ts) FROM reacts_to rt WHERE rt.signal = ss.id) AS last_seen,
+        -- LIST<STRUCT> is not decodable by the CacheRead wrapper - to_json()
+        -- renders it as JSON-array VARCHAR. SHAPE CHANGE: callers JSON.parse.
         (
-            SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+            SELECT to_json(array_agg(x ORDER BY x.ts DESC)) FROM (
                 SELECT
                     rt.polarity AS polarity,
                     rt.act AS act,
@@ -569,12 +579,12 @@ FROM (
                     ut.seq AS user_seq,
                     ut.text_excerpt AS user_text,
                     rt.out_id AS assistant_turn,
-                    at.seq AS assistant_seq,
-                    at.text_excerpt AS assistant_text,
+                    atn.seq AS assistant_seq,
+                    atn.text_excerpt AS assistant_text,
                     rt.ts AS ts
                 FROM reacts_to rt
                 LEFT JOIN turn ut ON ut.id = rt.in_id
-                LEFT JOIN turn at ON at.id = rt.out_id
+                LEFT JOIN turn atn ON atn.id = rt.out_id
                 WHERE rt.signal = ss.id
                 ORDER BY rt.ts DESC
                 LIMIT 3
@@ -765,10 +775,13 @@ LIMIT ${safeLimit};`.trim();
 
 export function harnessCandidatesSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
+    // LIST columns are not decodable by the CacheRead wrapper - to_json()
+    // renders them as JSON-array VARCHAR. SHAPE CHANGE from the original
+    // native arrays: callers JSON.parse candidate_id/dedupe_signature.
     return `
 SELECT
-    ['classifier_harness_candidate', g.classifier_key, g.label, g.target, g.durability] AS candidate_id,
-    [g.classifier_key, g.label, g.target, g.durability] AS dedupe_signature,
+    to_json(['classifier_harness_candidate', g.classifier_key, g.label, g.target, g.durability]) AS candidate_id,
+    to_json([g.classifier_key, g.label, g.target, g.durability]) AS dedupe_signature,
     g.classifier_key AS classifier_key,
     g.label AS label,
     g.target AS target,
@@ -791,8 +804,11 @@ SELECT
         WHEN g.durability IN ('repo_preference', 'global_preference') OR g.label = 'direction' THEN 'record_guidance'
         ELSE 'review_pattern'
     END AS proposed_action,
+    -- LIST<STRUCT> is not decodable by the CacheRead wrapper - to_json()
+    -- renders it as JSON-array VARCHAR. SHAPE CHANGE: callers JSON.parse
+    -- examples (and, nested inside each example, evidence).
     (
-        SELECT array_agg(ex ORDER BY ex.ts DESC) FROM (
+        SELECT to_json(array_agg(ex ORDER BY ex.ts DESC)) FROM (
             SELECT
                 cr2.id AS id,
                 cr2.classifier_key AS classifier_key,
@@ -806,7 +822,7 @@ SELECT
                 cr2.session AS session,
                 cr2.ts AS ts,
                 (
-                    SELECT array_agg(ev ORDER BY ev.ts DESC) FROM (
+                    SELECT to_json(array_agg(ev ORDER BY ev.ts DESC)) FROM (
                         SELECT ce.kind AS kind, ce.out_id AS evidence, ce.ts AS ts
                         FROM cites_evidence ce
                         WHERE ce.in_id = cr2.id
@@ -994,6 +1010,33 @@ LIMIT ${safeLimit};`.trim();
 const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
 /**
+ * SCHEMA_TABLES entries with no DuckDB DDL yet, discovered by cross-checking
+ * every `SCHEMA_TABLES` name against `packages/schema/src/schema.duckdb.sql`
+ * (owned by not-yet-ported subsystems - improve/proposal/experiment/retro/
+ * dogfood, the skill role-weighting edge). `schemaCoverageSql` degrades their
+ * count to a literal 0 instead of a live subquery: DuckDB errors the WHOLE
+ * UNION ALL statement on one nonexistent-table reference (unlike SurrealDB,
+ * which returns 0 rows for an undefined table under SCHEMAFULL). Re-check
+ * this list each time a chunk lands its own schema.duckdb.sql tables.
+ */
+const TABLES_PENDING_DUCKDB_SCHEMA = new Set<string>([
+    "role",
+    "transcript_label_review",
+    "proposal",
+    "skill_proposal",
+    "subagent_proposal",
+    "hook_proposal",
+    "guidance_proposal",
+    "automation_proposal",
+    "experiment",
+    "checkpoint",
+    "retro",
+    "skill_triage_decision",
+    "dogfood_run",
+    "plays_role",
+]);
+
+/**
  * SurrealDB's original was one `RETURN [{table, stage, note, count: (...)}]`
  * statement building ~140 inline correlated-subquery counts. DuckDB has no
  * equivalent literal-array-of-objects construction; this UNIONs one
@@ -1003,10 +1046,12 @@ const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
  * (harmless for the rest).
  */
 export function schemaCoverageSql(): string {
-    const rows = SCHEMA_TABLES.map(
-        (spec) =>
-            `SELECT ${sqlString(spec.table)} AS table_name, ${sqlString(spec.stage)} AS stage, ${sqlString(spec.note)} AS note, (SELECT COUNT(*) FROM "${spec.table}") AS count`,
-    ).join("\nUNION ALL\n");
+    const rows = SCHEMA_TABLES.map((spec) => {
+        const countExpr = TABLES_PENDING_DUCKDB_SCHEMA.has(spec.table)
+            ? "0"
+            : `(SELECT COUNT(*) FROM "${spec.table}")`;
+        return `SELECT ${sqlString(spec.table)} AS table_name, ${sqlString(spec.stage)} AS stage, ${sqlString(spec.note)} AS note, ${countExpr} AS count`;
+    }).join("\nUNION ALL\n");
     return `${rows};`;
 }
 
