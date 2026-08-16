@@ -53,7 +53,6 @@ describe("effect cli", () => {
             "update",
             "tui",
             "install",
-            "daemon",
             "doctor",
             "uninstall",
         ]));
@@ -62,7 +61,9 @@ describe("effect cli", () => {
     test("retired top-level commands are gone", () => {
         const names = topLevelNames();
 
-        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve", "dashboard", "interventions"]) {
+        // "daemon" retired in wave 3 (daemon subtraction): embedded DuckDB
+        // needs no background LaunchAgent lifecycle to manage.
+        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve", "dashboard", "interventions", "daemon"]) {
             expect(names).not.toContain(removed);
         }
     });
@@ -119,7 +120,7 @@ describe("effect cli", () => {
             expect(byName.get(name)?.hidden).toBe(false);
         }
         // Mutating / maintenance / plumbing verbs stay hidden (but callable).
-        for (const name of ["derive-signals", "derive-intents", "insights", "hook", "daemon", "uninstall"]) {
+        for (const name of ["derive-signals", "derive-intents", "insights", "hook", "uninstall"]) {
             expect(byName.get(name)?.hidden).toBe(true);
         }
     });

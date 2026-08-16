@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { Judgment, checkSidecarRefs, collectSidecarRefs, fetchCacheIds } from "@ax/lib/sqlite";
 import {
-    cmdDaemon,
     collectDoctorReport,
     formatDoctorReport,
     cmdInstall,
@@ -58,7 +57,7 @@ export const installCommand = Command.make("install", {
     const conflict = telemetryConsentConflict(telemetry, noTelemetry);
     if (conflict !== null) fail(conflict);
     return cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry) });
-}).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
+}).pipe(Command.withDescription("One-shot setup: symlink, optional OTLP receiver (then runs `ax setup`)"));
 
 export const setupCommand = Command.make(
     "setup",
@@ -78,34 +77,6 @@ export const setupCommand = Command.make(
         "Install the agent skills and verify; hands ingest to your agent via the onboarding brief. " +
         "--agents=claude-code,codex  --yes  --agent-prompt (print just the paste-to-agent block)",
     ),
-);
-
-const daemonStatusCommand = Command.make(
-    "status",
-    { json: jsonFlag },
-    ({ json }) => cmdDaemon(["status", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Show daemon and watcher status"));
-
-const daemonStartCommand = Command.make("start", {}, () =>
-    cmdDaemon(["start"]),
-).pipe(Command.withDescription("Start the daemon and watcher"));
-
-const daemonStopCommand = Command.make("stop", {}, () =>
-    cmdDaemon(["stop"]),
-).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
-
-const daemonRestartCommand = Command.make("restart", {}, () =>
-    cmdDaemon(["restart"]),
-).pipe(Command.withDescription("Restart the daemon and watcher"));
-
-export const daemonCommand = Command.make("daemon").pipe(
-    Command.withDescription("Manage local launchd services"),
-    Command.withSubcommands([
-        daemonStatusCommand,
-        daemonStartCommand,
-        daemonStopCommand,
-        daemonRestartCommand,
-    ]),
 );
 
 export const collectSidecarDoctorCheck = Effect.gen(function* () {
@@ -143,7 +114,7 @@ export const uninstallCommand = Command.make(
     ({ purge }) => cmdUninstall(purge),
 ).pipe(
     Command.withDescription(
-        "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
+        "Remove the otlpd LaunchAgent and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
     ),
 );
 
@@ -152,7 +123,6 @@ export const lifecycleRuntime: RuntimeManifest = {
     update: { runtime: "none", hidden: true },
     install: "none",
     setup: "none",
-    daemon: { runtime: "none", hidden: true },
     doctor: { runtime: "cache", hidden: true },
     uninstall: { runtime: "none", hidden: true },
 };

@@ -59,7 +59,6 @@ import {
     updateCommand,
     installCommand,
     setupCommand,
-    daemonCommand,
     doctorCommand,
     uninstallCommand,
     lifecycleRuntime,
@@ -181,7 +180,6 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     timelineCommand,
     versionCommand,
     updateCommand,
-    daemonCommand,
     doctorCommand,
     uninstallCommand,
     starCommand,
@@ -353,12 +351,12 @@ const throwingSurrealClient = (): SurrealClientShape =>
 
 /**
  * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
- * commands (install/daemon/doctor/uninstall/version/update) and unknown
+ * commands (install/doctor/uninstall/version/update) and unknown
  * commands / typos - none of these should reach the DB, so accidental
  * access is a bug worth surfacing loudly.
  */
 const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
-    // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
+    // Lifecycle commands (install/setup/doctor/uninstall) are now
     // @effect/platform-native and require FileSystem + Path. Provide the real
     // Bun-backed layers here (no DB), so they run without dragging in LegacySurrealAppLayer's
     // SurrealClient connect path.
