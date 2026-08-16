@@ -1,10 +1,11 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
-import { stringOrNull } from "@ax/lib/shared/surreal";
+import { andAll, eqClause, inClause, NO_CLAUSE, sinceClause, type Clause } from "@ax/lib/duckdb/clause";
+import { matchBm25Sql } from "@ax/lib/duckdb/fts";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { TURN_FTS } from "../queries/recall.ts";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 // ---------------------------------------------------------------------------
 // Lines-of-code metric (analog of Claude Code OTEL `claude_code.lines_of_code.count`).
@@ -14,7 +15,15 @@ import { stringOrNull } from "@ax/lib/shared/surreal";
 // an ESTIMATE: we count whole lines in each edit's before/after strings rather
 // than running a real line diff, matching CC's added/removed framing closely
 // enough for rollups. The durable version stores `lines_added`/`lines_removed`
-// on `tool_call` at ingest time so this becomes a pure `math::sum`.
+// on `tool_call` at ingest time so this becomes a pure `sum`.
+//
+// PORT NOTES (Surreal -> DuckDB):
+//  - `session.source` deref became a `JOIN session s ON s.id = tc.session`.
+//  - The "query" selector's turn-text OR-of-terms became one `match_bm25` call
+//    over the terms joined with a space (see `cost-query.ts` for the same
+//    translation, and `queries/recall.ts` for the established pattern).
+//  - `name IN [...]` stays an IN list, now bound rather than spliced.
+//  - Defensive read policy: a DB failure degrades to an empty summary.
 // ---------------------------------------------------------------------------
 
 /** Edit-bearing tools we know how to score. */
@@ -57,15 +66,6 @@ export type LocSelector =
           readonly project?: string | null;
           readonly repositoryKey?: string | null;
       };
-
-// stringOrNull imported from @ax/lib/shared/surreal - local definition removed.
-
-const toRecordRef = (table: string, id: string): string => {
-    let key = id.trim().replace(new RegExp(`^${table}:`), "");
-    if (key.startsWith("⟨") && key.endsWith("⟩")) key = key.slice(1, -1);
-    if (key.startsWith("`") && key.endsWith("`")) key = key.slice(1, -1);
-    return recordLiteral(table, key);
-};
 
 /** Whole-line count of a string. Empty string contributes nothing. */
 const lineCount = (value: unknown): number =>
@@ -179,70 +179,85 @@ const summarize = (
     };
 };
 
-const editToolList = EDIT_TOOLS.map((t) => surrealString(t)).join(", ");
+const EditRow = Schema.Struct({
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    name: Schema.String,
+    input_json: Schema.NullOr(Schema.String),
+});
 
-const mapRows = (rows: ReadonlyArray<Record<string, unknown>>): RawEditRow[] =>
+const toRawRows = (rows: ReadonlyArray<typeof EditRow.Type>): RawEditRow[] =>
     rows.map((row) => ({
-        session: String(row.session ?? ""),
-        source: String(row.source ?? ""),
-        name: String(row.name ?? ""),
-        input_json: stringOrNull(row.input_json),
+        session: row.session,
+        source: row.source ?? "",
+        name: row.name,
+        input_json: row.input_json,
     }));
-
-const querySessionClauses = (selector: Extract<LocSelector, { kind: "query" }>): string[] => {
-    const clauses: string[] = [];
-    if (selector.since) clauses.push(`session.started_at >= ${surrealDate(selector.since)}`);
-    if (selector.project) clauses.push(`(session.project = ${surrealString(selector.project)} OR session.cwd = ${surrealString(selector.project)})`);
-    if (selector.repositoryKey) {
-        clauses.push(`session.repository = ${recordLiteral("repository", selector.repositoryKey)}`);
-    }
-    return clauses;
-};
 
 const queryTerms = (selector: Extract<LocSelector, { kind: "query" }>): string[] =>
     [...new Set((selector.terms ?? []).map((term) => term.trim()).filter((term) => term.length > 0))];
 
+const fetchEditRows = (where: Clause): Effect.Effect<RawEditRow[], never, CacheRead> =>
+    Effect.map(
+        cacheRows(
+            EditRow,
+            {
+                sql: `SELECT tc.session AS session, s.source AS source, tc.name AS name, tc.input_json AS input_json
+                      FROM tool_call tc JOIN session s ON s.id = tc.session
+                      WHERE ${inClause("tc.name", [...EDIT_TOOLS]).sql.replace(/^AND /, "")}
+                      ${where.sql}
+                      LIMIT 50000`,
+                params: [...inClause("tc.name", [...EDIT_TOOLS]).params, ...where.params],
+            },
+            "loc-query.rows",
+        ),
+        toRawRows,
+    );
+
 export const fetchLocSummary = (
     selector: LocSelector,
-): Effect.Effect<LocSummary, DbError, SurrealClient> =>
+): Effect.Effect<LocSummary, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-
         if (selector.kind === "session") {
-            const sessionRef = toRecordRef("session", selector.sessionId);
-            const result = yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(session) AS session, session.source AS source, name, input_json
-FROM tool_call
-WHERE session = ${sessionRef} AND name IN [${editToolList}];`);
+            const rows = yield* fetchEditRows(andAll([eqClause("tc.session", toBareSessionId(selector.sessionId))]));
             return summarize(
                 `session:${selector.sessionId}`,
                 "tool_call Edit/Write rows for the session",
-                mapRows(result?.[0] ?? []),
+                rows,
             );
         }
 
         const limit = Math.min(Math.max(selector.limit, 1), 200);
         const terms = queryTerms(selector);
-        const clauses = querySessionClauses(selector);
-        const sessionWhere = clauses.length > 0 ? `${clauses.join("\n  AND ")}\n  AND ` : "";
-        const sessionFilter =
+        const projectClause: Clause = selector.project
+            ? { sql: "AND (s.project = ? OR s.cwd = ?)", params: [selector.project, selector.project] }
+            : NO_CLAUSE;
+        const where = andAll([
+            projectClause,
+            eqClause("s.repository", selector.repositoryKey),
+            selector.since ? sinceClause("s.started_at", selector.since) : NO_CLAUSE,
+        ]);
+        const textFilter: Clause =
             terms.length === 0
-                ? ""
-                : `\n  AND session IN (
-    SELECT VALUE session FROM turn
-    WHERE ${terms.map((term) => `text_excerpt @0@ ${surrealString(term)}`).join("\n       OR ")}
-    GROUP BY session
-    LIMIT ${limit}
-  )`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(session) AS session, session.source AS source, name, input_json
-FROM tool_call
-WHERE name IN [${editToolList}]
-  AND ${sessionWhere}true${sessionFilter}
-LIMIT 50000;`);
+                ? NO_CLAUSE
+                : {
+                      sql: `AND tc.session IN (
+                          SELECT DISTINCT session_id FROM (
+                              SELECT t.session AS session_id, ${matchBm25Sql(TURN_FTS, "t")} AS score
+                              FROM turn t
+                          ) matches
+                          WHERE score IS NOT NULL
+                          LIMIT ?
+                      )`,
+                      params: [terms.join(" "), limit],
+                  };
+        const rows = yield* fetchEditRows({
+            sql: `${where.sql} ${textFilter.sql}`,
+            params: [...where.params, ...textFilter.params],
+        });
         return summarize(
             `query:${terms.join("|")}`,
             terms.length === 0 ? "edits across selected sessions" : "edits in sessions with matching turn text",
-            mapRows(result?.[0] ?? []),
+            rows,
         );
     });
