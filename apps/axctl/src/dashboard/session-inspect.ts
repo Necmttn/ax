@@ -680,6 +680,19 @@ const resolveGraphTurnWindow = (
     );
 };
 
+/** Same projection as `queries/session-detail.ts`'s (chunk 2b's)
+ *  SESSION_SHARE_TURN_TOOLCALLS_SQL / sessionShareTurnToolCallsQuery - defined
+ *  locally so this module's DuckDB read path never depends on queries/. */
+const GraphTurnToolCallDbRow = Schema.Struct({
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    command_text: Schema.NullOr(Schema.String),
+    input_json: Schema.NullOr(Schema.String),
+    output_excerpt: Schema.NullOr(Schema.String),
+    has_error: Schema.Boolean,
+});
+
 /** Per-turn tool calls for this session, keyed by the (1-based DB) turn seq the
  *  calls ran in - exactly the `tool_call.seq` written at ingest, which equals
  *  the issuing assistant turn's `turn.seq`. Mirrors the share exporter's
@@ -687,18 +700,34 @@ const resolveGraphTurnWindow = (
  *  identical tool cards. `ToolCallDto.seq` is set to 0 here and rewritten with
  *  the turn's display seq at assembly (matching the JSONL path).
  *
- *  Defensive: a failed query degrades to an empty map - turns still render,
+ *  Defensive: cacheRows degrades a failed query to [] - turns still render,
  *  just without their tool cards (never crashes the inspector). */
 const resolveGraphTurnToolCalls = (
     sessionId: string,
-): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, SurrealClient> =>
-    runQuery(sessionShareTurnToolCallsQuery, { recordRef: toSessionRid(toBareSessionId(sessionId)) }).pipe(
+): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, CacheRead> =>
+    cacheRows(
+        GraphTurnToolCallDbRow,
+        {
+            sql: `SELECT seq, name, command_norm, command_text, input_json, output_excerpt, has_error
+                  FROM tool_call WHERE session = ? AND seq IS NOT NULL ORDER BY seq ASC LIMIT 4000`,
+            params: [sessionId],
+        },
+        "session-inspect.graph_turn_tool_calls",
+    ).pipe(
         Effect.map((rows) => {
             const bySeq = new Map<number, ToolCallDto[]>();
             for (const row of rows) {
-                if (row === null) continue;
+                if (row.seq === null) continue;
+                const dto = shareTurnToolCallToDto({
+                    seq: row.seq,
+                    name: row.name,
+                    command: row.command_norm ?? row.command_text,
+                    input_json: row.input_json,
+                    output: row.output_excerpt,
+                    has_error: row.has_error,
+                });
                 const list = bySeq.get(row.seq) ?? [];
-                list.push(shareTurnToolCallToDto(row));
+                list.push(dto);
                 bySeq.set(row.seq, list);
             }
             return bySeq;
@@ -707,11 +736,11 @@ const resolveGraphTurnToolCalls = (
 
 const resolveGraphSessionHealth = (
     sessionId: string,
-): Effect.Effect<GraphSessionHealthRow | null, never, SurrealClient> =>
-    queryOptional<GraphSessionHealthRow, GraphSessionHealthRow>(
-        `SELECT turns FROM ${recordRef("session_health", safeKeyPart(toBareSessionId(sessionId)))} LIMIT 1;`,
-        (row) => row,
-        "session-inspect resolveGraphSessionHealth",
+): Effect.Effect<GraphSessionHealthRow | null, never, CacheRead> =>
+    cacheFirst(
+        GraphSessionHealthDbRow,
+        { sql: `SELECT turns FROM session_health WHERE session = ? LIMIT 1`, params: [sessionId] },
+        "session-inspect.graph_session_health",
     );
 
 function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
