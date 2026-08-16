@@ -3,7 +3,6 @@ import { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
-import { refListSource } from "@ax/lib/shared/record-select";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 import { numeric, durationMs, rankToolEvidence } from "./file-evidence-rank.ts";
@@ -467,85 +466,91 @@ export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
  * Prior sessions that edited the target files, with per-session summary stats.
  *
  * Two-stage aggregation: run the cheap inner aggregation first (one indexed
- * query), then issue batched `IN [sessions]` reads in parallel plus per-session
- * INDEXED turn reads, aggregating client-side. `turn WHERE session IN [<sids>]`
- * is a membership scan over the 560k-row turn table (~3s for 50 sessions);
- * `session = <lit>` hits `turn_session_seq` (~1ms), so the turn reads fan out.
- * The other reads stay batched (session/produced/delivery_outcome/
- * session_health are tiny). This is the single loader both adapters share;
- * the old per-row-subquery variant cost ~3.5s per high-signal session and its
- * only extra output (`hands_free_ms`) had no consumer.
+ * query), then issue batched `session IN (...)` reads through CacheRead,
+ * aggregating client-side. Ported off the SurrealDB-specific "N per-session
+ * queries beat one IN-list scan" tuning (Surreal's `session = <lit>` hit a
+ * point index the `IN [...]` form didn't); DuckDB's turn_session_seq index
+ * serves an IN-list scan directly, so this is one batched query per shape
+ * instead of a fanned-out per-session loop.
  */
-const CONTEXT_TURN_FANOUT = 16;
-
 export const loadPriorFileSessions = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as PriorFileSession[];
         const cappedLimit = Math.max(1, Math.min(limit, 50));
-        const [aggRows] = yield* db.query<[
-            Array<{
-                session: string;
-                file: string;
-                weight: number;
-                last_seen: string;
-            }>
-        ]>(`
-            SELECT <string>in.session AS session, out.path AS file, count() AS weight, time::max(ts) AS last_seen
-            FROM edited
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            GROUP BY session, file
+        const aggRows = yield* read.rows(Schema.Struct({
+            session: Schema.String,
+            file: Schema.String,
+            weight: NumberFromBigIntColumn,
+            last_seen: TimestampColumn,
+        }), `
+            SELECT t.session AS session, f.path AS file, count(*) AS weight, max(e.ts) AS last_seen
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN session s ON s.id = t.session
+            JOIN file f ON f.id = e.out_id
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            GROUP BY t.session, f.path
             ORDER BY weight DESC, last_seen DESC
-            LIMIT ${cappedLimit};
-        `);
+            LIMIT ?
+        `, [...fileIds, cappedLimit]);
         if (aggRows.length === 0) return [] as PriorFileSession[];
 
         const sessionIds = Array.from(new Set(aggRows.map((r) => r.session)));
-        const sidLiteral = sessionIds.join(", ");
+        const sidPlaceholders = sessionIds.map(() => "?").join(", ");
 
-        const perSessionTurns = <Row>(sqlFor: (sid: string) => string) =>
-            Effect.forEach(
-                sessionIds,
-                (sid) => db.query<[Row[]]>(sqlFor(sid)).pipe(Effect.map(([rows]) => rows ?? [])),
-                { concurrency: CONTEXT_TURN_FANOUT },
-            ).pipe(Effect.map((chunks) => chunks.flat()));
-
-        const [sessionsResult, producedResult, deliveryResult, healthResult] =
+        const [sessionsRows, producedRows, deliveryRows, healthRows, turnsRows, titleRows] =
             yield* Effect.all([
-                // Record-list selection for the by-id fetch - `FROM session
-                // WHERE id IN [...]` happens to work on `session` today, but
-                // the id IN-list form silently matches nothing on other tables
-                // (see @ax/lib/shared/record-select); don't rely on it. The
-                // non-id field IN-lists below are fine.
-                db.query<[Array<{ id: string; project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>]>(
-                    `SELECT <string>id AS id, project, source, started_at, ended_at FROM ${refListSource(sessionIds)};`,
-                ),
-                db.query<[Array<{ in: string }>]>(
-                    `SELECT <string>in AS in FROM produced WHERE in IN [${sidLiteral}];`,
-                ),
-                db.query<[Array<{ session: string; status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>]>(
-                    `SELECT <string>session AS session, status, review_pain, pr_size, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
-                ),
-                db.query<[Array<{ session: string; interruptions: number }>]>(
-                    `SELECT <string>session AS session, interruptions FROM session_health WHERE session IN [${sidLiteral}];`,
-                ),
+                read.rows(Schema.Struct({
+                    id: Schema.String,
+                    project: Schema.NullOr(Schema.String),
+                    source: Schema.NullOr(Schema.String),
+                    started_at: Schema.NullOr(TimestampColumn),
+                    ended_at: Schema.NullOr(TimestampColumn),
+                }), `SELECT id, project, source, started_at, ended_at FROM session WHERE id IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({ session_id: Schema.String }),
+                    `SELECT in_id AS session_id FROM produced WHERE in_id IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({
+                    session: Schema.NullOr(Schema.String),
+                    status: Schema.NullOr(Schema.String),
+                    review_pain: Schema.NullOr(Schema.String),
+                    pr_size: Schema.NullOr(Schema.String),
+                    pr_title: Schema.NullOr(Schema.String),
+                }), `
+                    SELECT d.session AS session, d.status AS status, d.review_pain AS review_pain,
+                           d.pr_size AS pr_size, pr.title AS pr_title
+                    FROM delivery_outcome d
+                    LEFT JOIN pull_request pr ON pr.id = d.pull_request
+                    WHERE d.session IN (${sidPlaceholders})
+                `, sessionIds),
+                read.rows(Schema.Struct({ session: Schema.String, interruptions: NumberFromBigIntColumn }),
+                    `SELECT session, interruptions FROM session_health WHERE session IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({ session: Schema.String, role: Schema.String, intent_kind: Schema.NullOr(Schema.String) }),
+                    `SELECT session, role, intent_kind FROM turn WHERE session IN (${sidPlaceholders}) AND role IN ('user', 'assistant')`, sessionIds),
+                read.rows(Schema.Struct({
+                    session: Schema.String,
+                    text_excerpt: Schema.String,
+                    seq: NumberFromBigIntColumn,
+                    intent_kind: Schema.NullOr(Schema.String),
+                }), `
+                    SELECT session, text_excerpt, seq, intent_kind FROM turn
+                    WHERE session IN (${sidPlaceholders}) AND role = 'user' AND message_kind = 'task'
+                      AND intent_kind IN ('organic_task', 'preference', 'correction')
+                      AND text_excerpt IS NOT NULL
+                    ORDER BY seq ASC
+                `, sessionIds),
             ], { concurrency: "unbounded" });
 
-        const turnsRows = yield* perSessionTurns<{ session: string; role: string; intent_kind: string | null }>(
-            (sid) => `SELECT <string>session AS session, role, intent_kind FROM turn WHERE session = ${sid} AND role IN ['user','assistant'];`,
-        );
-        const titleRows = yield* perSessionTurns<{ session: string; text_excerpt: string; seq: number; intent_kind: string | null }>(
-            (sid) => `SELECT <string>session AS session, text_excerpt, seq, intent_kind FROM turn WHERE session = ${sid} AND role = 'user' AND message_kind = 'task' AND intent_kind IN ['organic_task','preference','correction'] AND text_excerpt IS NOT NONE ORDER BY seq ASC;`,
-        );
-
-        const [sessionsRows] = sessionsResult;
-        const [producedRows] = producedResult;
-        const [deliveryRows] = deliveryResult;
-        const [healthRows] = healthResult;
-
         const sessionMeta = new Map<string, { project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>();
-        for (const row of sessionsRows) sessionMeta.set(row.id, row);
+        for (const row of sessionsRows) {
+            sessionMeta.set(row.id, {
+                project: row.project,
+                source: row.source,
+                started_at: row.started_at?.toISOString() ?? null,
+                ended_at: row.ended_at?.toISOString() ?? null,
+            });
+        }
 
         const turnCounts = new Map<string, { user: number; assistant: number; corrections: number }>();
         for (const row of turnsRows) {
@@ -560,11 +565,11 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
         }
 
         const producedCounts = new Map<string, number>();
-        for (const row of producedRows) producedCounts.set(row.in, (producedCounts.get(row.in) ?? 0) + 1);
+        for (const row of producedRows) producedCounts.set(row.session_id, (producedCounts.get(row.session_id) ?? 0) + 1);
 
         const deliveryBySession = new Map<string, { status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>();
         for (const row of deliveryRows) {
-            if (!deliveryBySession.has(row.session)) deliveryBySession.set(row.session, row);
+            if (row.session && !deliveryBySession.has(row.session)) deliveryBySession.set(row.session, row);
         }
 
         const interruptionsBySession = new Map<string, number>();
@@ -623,7 +628,7 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
                 interruptions: interruptionsBySession.get(row.session) ?? 0,
                 duration_ms: durationMs(meta?.started_at, meta?.ended_at),
                 hands_free_ms: null,
-                last_seen: row.last_seen ?? null,
+                last_seen: row.last_seen.toISOString(),
                 fileWeights: new Map(),
             };
             base.weight += weight;
