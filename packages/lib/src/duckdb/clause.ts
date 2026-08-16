@@ -115,12 +115,6 @@ export const untilClause = (
  */
 export const daysAgoExpr = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')";
 
-/** `AND <column> >= <N days ago>` - the windowed form of {@link daysAgoExpr}. */
-export const withinDaysClause = (column: string, days: number): Clause => ({
-    sql: `AND ${column} >= ${daysAgoExpr}`,
-    params: [Math.max(1, Math.trunc(days))],
-});
-
 const requireCount = (name: string, value: number): void => {
     if (!Number.isInteger(value) || value < 0) {
         throw new RangeError(

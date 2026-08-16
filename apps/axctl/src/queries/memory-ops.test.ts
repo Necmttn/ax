@@ -104,8 +104,10 @@ describe("fetchMemoryOps - empty + SQL", () => {
         expect(r.totals.ops).toBe(0);
     });
 
-    test("SQL windows by sinceDays and filters to .claude memory dirs", async () => {
-        const db = cacheReadResults([[]]);
-        await runWithCacheRead(fetchMemoryOps({ sinceDays: 7 }), db);
-    });
+    // NOTE: the "SQL windows by sinceDays and filters to .claude memory dirs"
+    // case that used to sit here asserted NOTHING - it ran the effect against an
+    // empty stub and made no `expect` call, so it could not fail whatever the
+    // SQL said. The behaviour it claimed to cover is now proven against a real
+    // snapshot in memory-ops.duckdb.test.ts, where the predicate is actually
+    // evaluated by DuckDB rather than assumed.
 });

@@ -2,7 +2,6 @@
 import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
@@ -443,7 +442,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // stamp a genuinely-completed ingest as timeout-failed. Each half is
         // caught independently (never `Effect.ignore`-d silently) so a fault
         // logs a warn line instead of vanishing.
-        const afterWork = (): Effect.Effect<void, never, SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path> =>
+        const afterWork = (): Effect.Effect<void, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
             Effect.gen(function* () {
                 const otel = yield* runMaintenanceHalf(retainRecentOtel());
                 if (otel.error) {

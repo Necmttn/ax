@@ -23,7 +23,6 @@
  */
 
 import { Effect, FileSystem, Path, Schema } from "effect";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
@@ -676,7 +675,7 @@ export const buildSkillProposalStatements = (
 
 export const deriveProposals = (
     opts: DeriveProposalsOpts = { minFrequency: 3 },
-): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | CacheRead | import("@ax/lib/process").ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("@ax/lib/process").ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const [candidates, skills, existingProposals] = yield* Effect.all([
@@ -858,7 +857,7 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     workflowProposals: Schema.Number,
 }) {}
 
-export const proposalsStage: StageDef<ProposalsStats, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> = {
+export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {

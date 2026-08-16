@@ -75,15 +75,33 @@ export interface MemoryOpsInput {
 
 const MemoryOpRow = Schema.Struct({ ts: TimestampColumn, tool: Schema.String, path: Schema.String, session_id: Schema.String, project: Schema.NullOr(Schema.String), source: Schema.NullOr(Schema.String) });
 
+/**
+ * The path predicate reads `edited.absolute_path_seen`, NOT `file.path`.
+ *
+ * `file` is keyed `(repo, path)` (`file_path_uq`), so `file.path` is
+ * repo-RELATIVE in the general case - a `/.claude/` + `/memory/` match against
+ * it silently drops every memory edit whose file row is stored relative, which
+ * is a shrinking result set rather than an error. `absolute_path_seen` is the
+ * absolute path the tool call actually reported, which is the value this filter
+ * was written against and the one the v1 query used.
+ *
+ * The `file` join is kept only so a row with no `absolute_path_seen` still
+ * resolves a path; the FILTER never depends on it.
+ */
 const buildSql = (): string => `
 SELECT
-    e.ts, e.tool, f.path, t.session AS session_id, s.project, s.source
+    e.ts,
+    e.tool,
+    coalesce(e.absolute_path_seen, f.path) AS path,
+    t.session AS session_id,
+    s.project,
+    s.source
 FROM edited e
 JOIN file f ON f.id = e.out_id
 JOIN turn t ON t.id = e.in_id
 JOIN session s ON s.id = t.session
-WHERE contains(f.path, '/.claude/')
-    AND contains(f.path, '/memory/')
+WHERE contains(e.absolute_path_seen, '/.claude/')
+    AND contains(e.absolute_path_seen, '/memory/')
     AND e.ts >= ${daysAgoExpr}
 ORDER BY e.ts DESC;
 `;

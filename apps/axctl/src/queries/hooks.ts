@@ -2,6 +2,13 @@ import { Effect, Schema } from "effect";
 import { daysAgoExpr, type Clause } from "@ax/lib/duckdb/clause";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
+// `hook_command_invocation.session` refs `session.id`, and `sessionRowId` keeps
+// the provider's id VERBATIM - there is no `session:` prefix in the cache. A
+// caller may still hand over a Surreal-shaped id (the CLI flag, an older link),
+// so every session-scoped read normalizes DOWN to bare, the same way
+// `run-evidence.ts` and `metrics/reverted-commits.ts` do. Prefixing instead
+// matches no row and returns [], which the defensive read policy makes silent.
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 export interface HookSummaryRow {
     readonly command: string;
@@ -56,7 +63,7 @@ function whereClause(opts: Pick<HookQueryOptions, "sinceDays" | "command" | "ses
     }
     if (opts.sessionId !== undefined) {
         where.push("session = ?");
-        params.push(opts.sessionId.startsWith("session:") ? opts.sessionId : `session:${opts.sessionId}`);
+        params.push(toBareSessionId(opts.sessionId));
     }
     return { sql: where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`, params };
 }
@@ -91,7 +98,7 @@ export function buildHookSessionQuery(sessionId: string): Clause {
         "WHERE session = ?",
         "ORDER BY ts ASC",
         "LIMIT 500",
-    ].join("\n"), params: [sessionId.startsWith("session:") ? sessionId : `session:${sessionId}`] };
+    ].join("\n"), params: [toBareSessionId(sessionId)] };
 }
 
 const HookSummaryDbRow = Schema.Struct({ command: Schema.String, hook_name: Schema.String, provider_status: Schema.String, effect: Schema.String, count: NumberFromBigIntColumn, avg_duration_ms: Schema.NullOr(Schema.Number), max_duration_ms: Schema.NullOr(NumberFromBigIntColumn), last_seen: Schema.NullOr(TimestampColumn) });
