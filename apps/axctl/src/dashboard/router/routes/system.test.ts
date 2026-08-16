@@ -31,6 +31,8 @@ describe("systemRoutes", () => {
         const body = await res.json() as { live_ingest: boolean; otlp_receiver: boolean; capabilities: string[] };
         expect(body.live_ingest).toBe(false);
         expect(body.otlp_receiver).toBe(false);
-        expect(body.capabilities).toContain("ingest");
+        expect(body.capabilities).toContain("sessions");
+        // Retired alongside the live-ingest trigger (studio ephemeral, wave 3).
+        expect(body.capabilities).not.toContain("ingest");
     });
 });

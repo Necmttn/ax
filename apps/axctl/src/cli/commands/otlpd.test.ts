@@ -7,10 +7,10 @@ import { Effect, Layer } from "effect";
 import { formatOtlpdPortBusy, runOtlpd } from "./otlpd.ts";
 
 describe("formatOtlpdPortBusy", () => {
-    it("names the port and hints ax serve may own it - no stack trace", () => {
+    it("names the port and hints ax studio may own it - no stack trace", () => {
         const msg = formatOtlpdPortBusy(1738);
         expect(msg).toContain("1738");
-        expect(msg).toContain("ax serve");
+        expect(msg).toContain("ax studio");
         expect(msg).not.toContain("Error:");
         expect(msg).not.toContain("    at ");
     });

@@ -40,7 +40,7 @@ describe("effect cli", () => {
             "improve",
             "costs",
             "pricing",
-            "serve",
+            "studio",
             "otlpd",
             "report",
             "recall",

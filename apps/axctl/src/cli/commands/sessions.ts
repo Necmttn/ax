@@ -42,7 +42,7 @@ import { fetchSessionChurnSummary, formatSessionChurnSummary } from "../../metri
 import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
-import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
+import { resolveStudioTarget } from "../banner.ts";
 import { resolvePwdRepository, type PwdResolution } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";

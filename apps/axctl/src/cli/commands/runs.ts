@@ -13,7 +13,7 @@ import { Effect } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { studioSessionLink } from "../../nav/next-links.ts";
-import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
+import { resolveStudioTarget } from "../banner.ts";
 import { fetchRunEvidence, renderRunEvidence } from "../../queries/run-evidence.ts";
 import { printNextLinks } from "../next-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
