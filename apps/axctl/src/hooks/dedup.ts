@@ -9,19 +9,25 @@ export interface RecentInjectsQueryParams {
 
 export function buildRecentInjectsQuery(params: RecentInjectsQueryParams): {
     readonly sql: string;
-    readonly params: ReadonlyArray<string | number>;
+    readonly params: ReadonlyArray<string | Date>;
 } {
     const placeholders = params.filePaths.map(() => "?").join(", ");
     const win = Math.max(1, Math.trunc(params.windowMinutes));
+    // The window cutoff is computed here, in JS, and bound as a plain
+    // timestamp parameter - `CURRENT_TIMESTAMP - (? * INTERVAL '1 minute')`
+    // fails to bind in DuckDB (no `-(TIMESTAMPTZ, INTERVAL)` overload resolves
+    // for an untyped placeholder multiplied into an INTERVAL), and every
+    // value should bind as itself rather than as an expression anyway.
+    const since = new Date(Date.now() - win * 60_000);
     const sql = [
         "SELECT file_path FROM hook_fire",
         "WHERE session = ?",
         "  AND inject = true",
         `  AND file_path IN (${placeholders})`,
-        "  AND ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 minute')",
+        "  AND ts >= ?",
         "LIMIT 100;",
     ].join("\n");
-    return { sql, params: [params.sessionRid, ...params.filePaths, win] };
+    return { sql, params: [params.sessionRid, ...params.filePaths, since] };
 }
 
 export interface FindRecentInjectsParams {

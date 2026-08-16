@@ -8,16 +8,27 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("hook dedup", { requ
 
 describe("buildRecentInjectsQuery", () => {
     test("includes the session, inject=true, file_path IN list, and window", () => {
+        const before = Date.now();
         const query = buildRecentInjectsQuery({
             sessionRid: "session:abc",
             filePaths: ["src/a.ts", "src/b.ts"],
             windowMinutes: 30,
         });
+        const after = Date.now();
         expect(query.sql).toContain("session = ?");
         expect(query.sql).toContain("inject = true");
         expect(query.sql).toContain("file_path IN (?, ?)");
-        expect(query.sql).toContain("CURRENT_TIMESTAMP");
-        expect(query.params).toEqual(["session:abc", "src/a.ts", "src/b.ts", 30]);
+        expect(query.sql).toContain("ts >= ?");
+        expect(query.params).toHaveLength(4);
+        expect(query.params.slice(0, 3)).toEqual(["session:abc", "src/a.ts", "src/b.ts"]);
+        // The window cutoff is computed in JS and bound as a plain timestamp
+        // (not an INTERVAL expression - DuckDB has no `-(TIMESTAMPTZ, INTERVAL)`
+        // overload for an untyped placeholder multiplied into an INTERVAL).
+        const since = query.params[3];
+        expect(since).toBeInstanceOf(Date);
+        const sinceMs = (since as Date).getTime();
+        expect(sinceMs).toBeGreaterThanOrEqual(before - 30 * 60_000);
+        expect(sinceMs).toBeLessThanOrEqual(after - 30 * 60_000);
     });
 
     test("binds file paths that contain single quotes", () => {

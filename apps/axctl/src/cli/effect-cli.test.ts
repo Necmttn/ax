@@ -273,24 +273,49 @@ describe("effect cli", () => {
         expect(DB_COMMANDS.has("context")).toBe(true);
     });
 
-    test("hook group exposes file-context and is a DB command", () => {
+    test("hook group exposes file-context and log, declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
         const hook = rootCommand.subcommands
             .flatMap((g) => g.commands)
             .find((c) => c.name === "hook");
         expect(hook).toBeDefined();
         const subNames = hook!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
-        expect(subNames).toEqual(expect.arrayContaining(["file-context"]));
-        expect(DB_COMMANDS.has("hook")).toBe(true);
+        expect(subNames).toEqual(expect.arrayContaining(["file-context", "log"]));
+        // "hook" (harness plumbing) is db-conditional since `hook log` was
+        // ported to the v2 cache runtime while `hook file-context` still
+        // needs SurrealDB - see commands/hooks.ts's routing table.
+        expect(DB_COMMANDS.has("hook")).toBe(false);
+        const declared = RUNTIME_BY_COMMAND["hook"]!;
+        expect(entryRuntime(declared)).toEqual(
+            expect.objectContaining({ kind: "db-conditional" }),
+        );
+        expect(resolveRuntime(declared, ["hook", "file-context"])).toBe("db");
+        expect(resolveRuntime(declared, ["hook", "log"])).toBe("cache");
+        // Bare family / unknown subcommand fall back to db (harness plumbing
+        // invokes `hook` directly with no dispatch help/typo path).
+        expect(resolveRuntime(declared, ["hook"])).toBe("db");
     });
 
-    test("hooks group exposes native hook inspection commands", () => {
+    test("hooks group exposes native hook inspection commands, declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
         const hooks = rootCommand.subcommands
             .flatMap((g) => g.commands)
             .find((c) => c.name === "hooks");
         expect(hooks).toBeDefined();
         const subNames = hooks!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["summary", "invocations", "session", "backtest"]));
-        expect(DB_COMMANDS.has("hooks")).toBe(true);
+        // "hooks" is db-conditional since `hooks backtest` was ported to the
+        // v2 cache runtime while its siblings (summary/config/install/...)
+        // still need SurrealDB - see commands/hooks.ts's routing table.
+        expect(DB_COMMANDS.has("hooks")).toBe(false);
+        const declared = RUNTIME_BY_COMMAND["hooks"]!;
+        expect(entryRuntime(declared)).toEqual(
+            expect.objectContaining({ kind: "db-conditional" }),
+        );
+        expect(resolveRuntime(declared, ["hooks", "backtest"])).toBe("cache");
+        expect(resolveRuntime(declared, ["hooks", "summary"])).toBe("db");
+        expect(resolveRuntime(declared, ["hooks", "install"])).toBe("db");
+        // Bare family / unknown subcommand falls back to db (old behavior:
+        // fell through to DB_COMMANDS which contained "hooks").
+        expect(resolveRuntime(declared, ["hooks"])).toBe("db");
     });
 
     test("cost and pricing commands are routed through DB", () => {
