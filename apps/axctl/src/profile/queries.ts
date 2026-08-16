@@ -11,11 +11,30 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
+
+/**
+ * Unwrap `CacheReadService.raw`'s `{ columns, rows }` to just the rows - the
+ * DuckDB-side equivalent of the old `db.query(...).pipe(Effect.map(r => r?.[0]
+ * ?? []))` SurrealDB multi-statement-result unwrap. Schema-free on purpose:
+ * every function here already coerces each field with `Number(...)`/
+ * `String(...)` at the call site (its pre-existing style), and `Number(...)`
+ * on a native BIGINT is a safe widening (unlike `JSON.stringify`, which is
+ * never called on these raw rows before that coercion happens).
+ */
+const rawRows = (
+    read: CacheReadService,
+    sql: string,
+    params?: ReadonlyArray<DuckDbParam>,
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, CacheReadError> =>
+    read.raw(sql, params).pipe(Effect.map((r) => r.rows));
 
 // ---------------------------------------------------------------------------
 // Per-query slow-query diagnostics
@@ -51,22 +70,21 @@ export interface TokenTotals {
     readonly sessions: number;
 }
 
-const TOKEN_TOTALS_SQL = (d: number) => `
+const TOKEN_TOTALS_SQL = `
 SELECT
-    math::sum(prompt_tokens ?? 0) AS prompt_tokens,
-    math::sum(completion_tokens ?? 0) AS completion_tokens,
-    count() AS sessions
+    SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens,
+    SUM(COALESCE(completion_tokens, 0)) AS completion_tokens,
+    count(*) AS sessions
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
 
 export const fetchTokenTotals = Effect.fn("profile.fetchTokenTotals")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
         const rows = yield* timedQuery(
             "tokenTotals",
-            db.query<[Array<Record<string, unknown>>]>(TOKEN_TOTALS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(read, `${TOKEN_TOTALS_SQL} ${within.sql}`, within.params),
         );
         const row = rows[0] ?? {};
         return {
@@ -82,19 +100,22 @@ export const fetchTokenTotals = Effect.fn("profile.fetchTokenTotals")(
 // users who accumulate millions of turn rows). The streak only needs distinct
 // active days, and session.started_at is indexed.
 
-const DAILY_ACTIVITY_SQL = (d: number) => `
-SELECT time::format(started_at, "%Y-%m-%d") AS date
+const DAILY_ACTIVITY_SQL = `
+SELECT strftime(started_at, '%Y-%m-%d') AS date
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND started_at IS NOT NONE
-GROUP BY date ORDER BY date ASC;`;
+WHERE started_at IS NOT NULL`;
 
 export const fetchDailyActivity = Effect.fn("profile.fetchDailyActivity")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
         const rows = yield* timedQuery(
             "dailyActivity",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_ACTIVITY_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_ACTIVITY_SQL} ${within.sql} GROUP BY date ORDER BY date ASC`,
+                within.params,
+            ),
         );
         return rows
             .map((r) => String(r.date))
@@ -104,19 +125,20 @@ export const fetchDailyActivity = Effect.fn("profile.fetchDailyActivity")(
 
 // --- harnesses --------------------------------------------------------------
 
-const HARNESSES_SQL = (d: number) => `
-SELECT source, count() AS count
+const HARNESSES_SQL = `
+SELECT source, count(*) AS count
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND source IS NOT NONE
-GROUP BY source
-ORDER BY count DESC;`;
+WHERE source IS NOT NULL`;
 
 export const fetchHarnesses = Effect.fn("profile.fetchHarnesses")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(HARNESSES_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* rawRows(
+            read,
+            `${HARNESSES_SQL} ${within.sql} GROUP BY source ORDER BY count DESC`,
+            within.params,
+        );
         return rows.map((r) => String(r.source));
     },
 );

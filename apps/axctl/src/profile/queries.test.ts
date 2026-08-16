@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, type Layer } from "effect";
 import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     fetchAcceptedProposals,
@@ -21,40 +23,49 @@ import {
     fetchWrappedCounts,
 } from "./queries.ts";
 
+/** A real-decode CacheRead fake (@ax/lib/testing/cache). */
+const cacheRead = (routes: TestCacheOptions["routes"] = {}) => makeTestCacheRead({ routes });
+const runCache = <A>(
+    eff: Effect.Effect<A, CacheReadError, CacheRead>,
+    layer: Layer.Layer<CacheRead>,
+): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+
 describe("fetchTokenTotals", () => {
     test("sums tokens and sessions over the window", async () => {
-        const db = makeMockDb([[[{ prompt_tokens: 100, completion_tokens: 40, sessions: 3 }]]]);
-        const r = await runWithMock(db, fetchTokenTotals({ windowDays: 30 }));
+        const cache = cacheRead({
+            "FROM session_token_usage": [{ prompt_tokens: 100, completion_tokens: 40, sessions: 3 }],
+        });
+        const r = await runCache(fetchTokenTotals({ windowDays: 30 }), cache.layer);
         expect(r).toEqual({ prompt_tokens: 100, completion_tokens: 40, sessions: 3 });
-        expect(db.captured[0]).toContain("time::now() - 30d");
-        expect(db.captured[0]).toContain("session_token_usage");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+        expect(cache.captured[0]).toContain("session_token_usage");
     });
 
     test("empty window -> zeros", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchTokenTotals({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchTokenTotals({ windowDays: 30 }), cache.layer);
         expect(r).toEqual({ prompt_tokens: 0, completion_tokens: 0, sessions: 0 });
     });
 });
 
 describe("fetchDailyActivity", () => {
     test("returns day keys from session table (not turn)", async () => {
-        const db = makeMockDb([[[{ date: "2026-06-11" }, { date: "2026-06-12" }]]]);
-        const r = await runWithMock(db, fetchDailyActivity({ windowDays: 30 }));
+        const cache = cacheRead({ "FROM session": [{ date: "2026-06-11" }, { date: "2026-06-12" }] });
+        const r = await runCache(fetchDailyActivity({ windowDays: 30 }), cache.layer);
         expect(r).toEqual(["2026-06-11", "2026-06-12"]);
         // Fix 1a: must use session.started_at (fast) not turn.ts (full-scan)
-        expect(db.captured[0]).toContain('time::format(started_at, "%Y-%m-%d")');
-        expect(db.captured[0]).toContain("FROM session");
-        expect(db.captured[0]).not.toContain("FROM turn");
+        expect(cache.captured[0]).toContain("strftime(started_at, '%Y-%m-%d')");
+        expect(cache.captured[0]).toContain("FROM session");
+        expect(cache.captured[0]).not.toContain("FROM turn");
     });
 });
 
 describe("fetchHarnesses", () => {
     test("returns distinct sources", async () => {
-        const db = makeMockDb([[[{ source: "claude" }, { source: "codex" }]]]);
-        const r = await runWithMock(db, fetchHarnesses({ windowDays: 30 }));
+        const cache = cacheRead({ "FROM session": [{ source: "claude" }, { source: "codex" }] });
+        const r = await runCache(fetchHarnesses({ windowDays: 30 }), cache.layer);
         expect(r).toEqual(["claude", "codex"]);
-        expect(db.captured[0]).toContain("GROUP BY source");
+        expect(cache.captured[0]).toContain("GROUP BY source");
     });
 });
 
