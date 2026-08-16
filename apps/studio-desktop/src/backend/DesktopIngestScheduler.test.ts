@@ -78,6 +78,9 @@ test("triggerIngest spawns `bun <axSourceEntry> ingest --since=<sinceDays>`", as
         "--since=7",
     ]);
     expect(command.options.cwd).toBe("/repo");
+    // Without extendEnv:true the child gets NO environment at all (not even
+    // PATH/HOME) - see the comment in DesktopIngestScheduler.ts.
+    expect(command.options.extendEnv).toBe(true);
 });
 
 test("triggerIngest does not throw on a non-zero exit (logs and swallows)", async () => {

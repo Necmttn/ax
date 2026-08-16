@@ -24,12 +24,6 @@ export interface MakeDesktopEnvironmentInput {
     /** `process.arch`. */
     readonly processArch: string;
     /**
-     * Dev fallback for `surreal` (e.g. `"surreal"` for a PATH lookup). When
-     * packaged this is ignored - the path resolves to the vendored per-arch
-     * binary under `<resourcesPath>/bin/<arch>/surreal`.
-     */
-    readonly surrealBinaryPath: string;
-    /**
      * Dev fallback for `bun` (e.g. `process.execPath` or `"bun"`). When packaged
      * this is ignored - the path resolves to the vendored per-arch binary under
      * `<resourcesPath>/bin/<arch>/bun`.
@@ -57,7 +51,6 @@ export interface DesktopEnvironmentShape {
     readonly appRoot: string;
     readonly userDataDir: string;
     readonly logsDir: string;
-    readonly surrealBinaryPath: string;
     readonly bunBinaryPath: string;
     /**
      * Absolute path to the bundled preload script. Sits beside the bundled
@@ -81,12 +74,11 @@ export interface DesktopEnvironmentShape {
      */
     readonly trayIconPath: string;
     /**
-     * Canonical ax data dir, authoritative across desktop + CLI daemon.
-     * Resolution mirrors `@ax/lib` config (`packages/lib/src/config.ts`) and the
-     * daemon install scripts (`scripts/install-daemon.sh`, `db-start.sh`):
-     * `$AX_DATA_DIR ?? $HOME/.local/share/ax`. The plist's rocksdb URL is
-     * `rocksdb://<axDataDir>/db` - the surreal arg appends `/db`, so `axDataDir`
-     * is the parent dir, not the rocksdb path itself.
+     * Canonical ax data dir, authoritative across desktop + CLI. Resolution
+     * mirrors `@ax/lib` config (`packages/lib/src/config.ts`):
+     * `$AX_DATA_DIR ?? $HOME/.local/share/ax`. The DuckDB seam derives its
+     * live-db and published-snapshot paths from this dir (see
+     * `packages/lib/src/duckdb/client.ts`).
      */
     readonly axDataDir: string;
 }
@@ -117,16 +109,17 @@ export const binArchDir = (processArch: string): string => {
 /**
  * Resolve the absolute path to a vendored binary. Packaged builds use the
  * per-arch binary bundled under `<resourcesPath>/bin/<arch>/` by
- * `fetch-binaries.ts` (staged into Electron resources at build time). Dev builds
- * fall back to the supplied PATH-lookup placeholder (e.g. `"surreal"`, or
- * `process.execPath` for bun).
+ * `fetch-binaries.ts` (staged into Electron resources at build time). Dev
+ * builds fall back to the supplied PATH-lookup placeholder (e.g.
+ * `process.execPath` for bun - NOT the real `bun` binary, but a placeholder
+ * `main.ts` overrides via `AX_BUN_PATH`; see its comment).
  */
 export const resolveBinaryPath = (
     args: {
         readonly isDevelopment: boolean;
         readonly resourcesPath: string;
         readonly processArch: string;
-        readonly name: "surreal" | "bun";
+        readonly name: "bun";
         readonly devFallback: string;
     },
     path: Path.Path,
@@ -171,16 +164,6 @@ export const make = (
         appRoot,
         userDataDir: input.userDataDir,
         logsDir: path.join(input.userDataDir, "logs"),
-        surrealBinaryPath: resolveBinaryPath(
-            {
-                isDevelopment: input.isDevelopment,
-                resourcesPath: input.resourcesPath,
-                processArch: input.processArch,
-                name: "surreal",
-                devFallback: input.surrealBinaryPath,
-            },
-            path,
-        ),
         bunBinaryPath: resolveBinaryPath(
             {
                 isDevelopment: input.isDevelopment,

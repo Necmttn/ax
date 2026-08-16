@@ -51,6 +51,13 @@ export const triggerIngest = (
             [env.axSourceEntry, "ingest", `--since=${sinceDays}`],
             {
                 cwd: env.axSourceRoot,
+                // Without this the child gets NO environment at all (not even
+                // PATH/HOME) - `extendEnv` defaults to false, so an omitted
+                // `env` resolves to nothing, not "inherit". `ax ingest` needs
+                // the parent's env to find `AX_DATA_DIR`/`HOME` (matches
+                // SupervisedProcess.ts's `runChildProcess`, which sets this
+                // for the same reason).
+                extendEnv: true,
                 stdin: "ignore",
                 stdout: "ignore",
                 stderr: "ignore",
