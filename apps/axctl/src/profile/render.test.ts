@@ -5,15 +5,14 @@ import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-
 import { buildProfile } from "./render.ts";
 
 // buildProfile's own queries.ts fetch* calls are now served by CacheRead (see
-// the wave-3 queries.ts port history). Only 4 statements still resolve
+// the wave-3 queries.ts port history). Only 3 statements still resolve
 // SurrealClient: fetchCostModels' main query (queries/cost-analytics.ts - a
 // different wave-3 chunk's file, only its OPTIONAL pricing-catalog lookup
 // reads CacheRead, skipped here since no fixture row needs repricing) and
-// three queries.ts functions not yet ported (fetchWindowedInvocations -
-// deliberately left, porting it breaks apps/axctl/src/team/team-profile.ts
-// which is out of this chunk's ownership; fetchWindowedSessions,
-// fetchGuardrailHookEvidence - not yet reached). `surrealResults` replays
-// ONLY those four, in call order (see buildProfile's own ordering comment).
+// fetchWindowedInvocations (deliberately left unported - porting it breaks
+// apps/axctl/src/team/team-profile.ts, out of this chunk's ownership) and
+// fetchGuardrailHookEvidence (not yet reached). `surrealResults` replays
+// ONLY those three, in call order (see buildProfile's own ordering comment).
 const surrealResults = [
     // fetchCostModels (queries/cost-analytics.ts COST_MODELS_SQL)
     [[{
@@ -28,11 +27,6 @@ const surrealResults = [
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
         { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
-    ]],
-    // fetchWindowedSessions (WINDOWED_SESSIONS_SQL)
-    [[
-        { id: "session:1", s: "2026-06-12T10:00:00Z", e: "2026-06-12T12:30:00Z" },
-        { id: "session:2", s: "2026-06-12T09:00:00Z", e: "2026-06-12T10:30:00Z" },
     ]],
     // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
     [[
@@ -137,6 +131,19 @@ const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown
     // fetchDeepSessionCount landed LOC per commit (COMMIT_LANDED_LOC_SQL) -
     // commit:def landed nothing -> not deep
     "FROM touched t": [{ commit: "commit:abc", loc: 120 }, { commit: "commit:def", loc: 0 }],
+    // fetchWindowedSessions (WINDOWED_SESSIONS_SQL) - real Dates, see header note.
+    "id, started_at AS s, ended_at AS e": [
+        {
+            id: "session:1",
+            s: new Date("2026-06-12T10:00:00Z"),
+            e: new Date("2026-06-12T12:30:00Z"),
+        },
+        {
+            id: "session:2",
+            s: new Date("2026-06-12T09:00:00Z"),
+            e: new Date("2026-06-12T10:30:00Z"),
+        },
+    ],
 };
 
 const proposalRows = [{

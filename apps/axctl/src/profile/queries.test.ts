@@ -24,6 +24,7 @@ import {
     fetchTokenTotals,
     fetchTopTools,
     fetchWindowedInvocations,
+    fetchWindowedSessions,
     fetchWrappedCounts,
 } from "./queries.ts";
 
@@ -460,6 +461,36 @@ describe("fetchWindowedInvocations", () => {
     test("empty invocations -> empty array", async () => {
         const db = makeMockDb([[[]]]);
         const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 7 }));
+        expect(r).toHaveLength(0);
+    });
+});
+
+describe("fetchWindowedSessions", () => {
+    test("returns id+s+e as ISO strings, ended_at required", async () => {
+        // "s"/"e" aren't `_at`-suffixed, so the fixture helper's auto Date
+        // conversion doesn't apply here - pass real Dates directly.
+        const cache = cacheRead({
+            "id, started_at AS s, ended_at AS e": [
+                {
+                    id: "sess-1",
+                    s: new Date("2026-06-12T10:00:00.000Z"),
+                    e: new Date("2026-06-12T12:30:00.000Z"),
+                },
+                { id: "sess-2", s: new Date("2026-06-12T09:00:00.000Z"), e: null },
+            ],
+        });
+        const r = await runCache(fetchWindowedSessions({ windowDays: 30 }), cache.layer);
+        // sess-2 has no ended_at -> filtered out
+        expect(r).toEqual([
+            { id: "sess-1", s: "2026-06-12T10:00:00.000Z", e: "2026-06-12T12:30:00.000Z" },
+        ]);
+        expect(cache.captured[0]).toContain("AND ended_at IS NOT NULL");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+    });
+
+    test("empty -> empty array", async () => {
+        const cache = cacheRead({});
+        const r = await runCache(fetchWindowedSessions({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });

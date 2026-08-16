@@ -803,26 +803,32 @@ export interface WindowedSessionRow {
     readonly e: string;
 }
 
-const WINDOWED_SESSIONS_SQL = (d: number) => `
-SELECT
-    type::string(id) AS id,
-    type::string(started_at) AS s,
-    type::string(ended_at) AS e
+const WINDOWED_SESSIONS_SQL = `
+SELECT id, started_at AS s, ended_at AS e
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND ended_at IS NOT NONE;`;
+WHERE TRUE`;
+
+const WindowedSessionDbRow = Schema.Struct({
+    id: Schema.String,
+    s: Schema.NullOr(TimestampColumn),
+    e: Schema.NullOr(TimestampColumn),
+});
 
 export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(WINDOWED_SESSIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            WindowedSessionDbRow,
+            `${WINDOWED_SESSIONS_SQL} ${within.sql} AND ended_at IS NOT NULL`,
+            within.params,
+        );
         return rows
-            .filter((r) => r.id != null && r.s != null && r.e != null)
+            .filter((r): r is { id: string; s: Date; e: Date } => r.s !== null && r.e !== null)
             .map((r) => ({
-                id: String(r.id),
-                s: String(r.s),
-                e: String(r.e),
+                id: r.id,
+                s: r.s.toISOString(),
+                e: r.e.toISOString(),
             })) satisfies WindowedSessionRow[];
     },
 );
