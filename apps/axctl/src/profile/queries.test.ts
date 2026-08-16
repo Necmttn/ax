@@ -9,6 +9,7 @@ import {
     fetchCommitCount,
     fetchDailyActivity,
     fetchDailyActivityFull,
+    fetchDailyCommits,
     fetchDailyModels,
     fetchDailyToolCalls,
     fetchDeepSessionCount,
@@ -409,6 +410,31 @@ describe("fetchDailyToolCalls", () => {
     test("empty -> empty array", async () => {
         const cache = cacheRead({});
         const r = await runCache(fetchDailyToolCalls({ windowDays: 30 }), cache.layer);
+        expect(r).toHaveLength(0);
+    });
+});
+
+describe("fetchDailyCommits", () => {
+    test("returns per-day commit counts", async () => {
+        const cache = cacheRead({
+            'FROM "commit"': [
+                { date: "2026-06-11", commits: 3 },
+                { date: "2026-06-12", commits: 1 },
+            ],
+        });
+        const r = await runCache(fetchDailyCommits({ windowDays: 30 }), cache.layer);
+        expect(r).toEqual([
+            { date: "2026-06-11", commits: 3 },
+            { date: "2026-06-12", commits: 1 },
+        ]);
+        expect(cache.captured[0]).toContain("strftime(ts, '%Y-%m-%d')");
+        expect(cache.captured[0]).toContain('FROM "commit"');
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+    });
+
+    test("empty -> empty array", async () => {
+        const cache = cacheRead({});
+        const r = await runCache(fetchDailyCommits({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });

@@ -729,26 +729,26 @@ export interface DailyCommitRow {
     readonly commits: number;
 }
 
-const DAILY_COMMITS_SQL = (d: number) => `
+const DAILY_COMMITS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    count() AS commits
-FROM commit
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+    strftime(ts, '%Y-%m-%d') AS date,
+    count(*) AS commits
+FROM "commit"
+WHERE TRUE`;
+
+const DailyCommitDbRow = Schema.Struct({ date: Schema.String, commits: NumberFromBigIntColumn });
 
 export const fetchDailyCommits = Effect.fn("profile.fetchDailyCommits")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_COMMITS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyCommitDbRow,
+            `${DAILY_COMMITS_SQL} ${within.sql} AND ts IS NOT NULL GROUP BY date ORDER BY date ASC`,
+            within.params,
+        );
         return rows
-            .map((r) => ({
-                date: String(r.date),
-                commits: Number(r.commits ?? 0),
-            }))
+            .map((r) => ({ date: r.date, commits: r.commits }))
             .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyCommitRow[];
     },
 );
