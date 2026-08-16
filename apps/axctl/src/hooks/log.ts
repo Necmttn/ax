@@ -39,7 +39,7 @@ export function buildHookLogQuery(opts: HookLogQueryOptions): HookLogQuery {
         // casts: CURRENT_TIMESTAMP is a TIMESTAMPTZ (no ICU in this build, so
         // TIMESTAMPTZ-minus-INTERVAL has no overload) and the placeholder
         // needs an explicit INTEGER cast to resolve the multiplication.
-        where.push(`ts >= ${hoursAgoExpr()}`);
+        where.push(`ts >= ${hoursAgoExpr}`);
         params.push(Math.trunc(opts.sinceHours));
     }
     if (opts.reason !== undefined) { where.push("reason = ?"); params.push(opts.reason); }

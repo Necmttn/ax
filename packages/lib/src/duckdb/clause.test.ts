@@ -136,26 +136,26 @@ describe("andAll", () => {
 
 describe("daysAgoExpr / hoursAgoExpr / withinDaysClause / withinHoursClause", () => {
     test("daysAgoExpr double-casts: TIMESTAMPTZ->TIMESTAMP and the placeholder->INTEGER", () => {
-        expect(daysAgoExpr()).toBe(
+        expect(daysAgoExpr).toBe(
             "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')",
         );
     });
 
     test("hoursAgoExpr is the same shape with the hour unit", () => {
-        expect(hoursAgoExpr()).toBe(
+        expect(hoursAgoExpr).toBe(
             "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 hour')",
         );
     });
 
     test("withinDaysClause binds the count and embeds daysAgoExpr", () => {
         const clause = withinDaysClause("t.ts", 7);
-        expect(clause.sql).toBe(`AND t.ts >= ${daysAgoExpr()}`);
+        expect(clause.sql).toBe(`AND t.ts >= ${daysAgoExpr}`);
         expect(clause.params).toEqual([7]);
     });
 
     test("withinHoursClause binds the count and embeds hoursAgoExpr", () => {
         const clause = withinHoursClause("t.ts", 12);
-        expect(clause.sql).toBe(`AND t.ts >= ${hoursAgoExpr()}`);
+        expect(clause.sql).toBe(`AND t.ts >= ${hoursAgoExpr}`);
         expect(clause.params).toEqual([12]);
     });
 
@@ -187,8 +187,8 @@ describe("daysAgoExpr / hoursAgoExpr / withinDaysClause / withinHoursClause", ()
                 }).pipe(Effect.provide(readFixture(fixture.snapshotPath, dylibPath)), Effect.scoped),
             );
 
-        const daysRow = await run<{ cutoff: unknown }>(daysAgoExpr(), [7]);
-        const hoursRow = await run<{ cutoff: unknown }>(hoursAgoExpr(), [12]);
+        const daysRow = await run<{ cutoff: unknown }>(daysAgoExpr, [7]);
+        const hoursRow = await run<{ cutoff: unknown }>(hoursAgoExpr, [12]);
 
         // Both must resolve to a value strictly before now (an executable
         // expression that silently no-ops would pass a "did it throw" check

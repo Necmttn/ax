@@ -144,20 +144,17 @@ export const limitOffset = (limit: number, offset = 0): Clause => {
  * when the expression needs to be embedded in a larger hand-built statement
  * (see `hooks/log.ts`'s `--since` window, which manages its own WHERE array).
  */
-const agoExpr = (unit: "day" | "hour"): string =>
-    `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 ${unit}')`;
-
-export const daysAgoExpr = (): string => agoExpr("day");
-export const hoursAgoExpr = (): string => agoExpr("hour");
+export const daysAgoExpr = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')";
+export const hoursAgoExpr = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 hour')";
 
 /** `AND <column> >= now - N days`, bound. */
 export const withinDaysClause = (column: string, days: number): Clause => {
     requireCount("days", days);
-    return { sql: `AND ${column} >= ${daysAgoExpr()}`, params: [days] };
+    return { sql: `AND ${column} >= ${daysAgoExpr}`, params: [days] };
 };
 
 /** `AND <column> >= now - N hours`, bound. */
 export const withinHoursClause = (column: string, hours: number): Clause => {
     requireCount("hours", hours);
-    return { sql: `AND ${column} >= ${hoursAgoExpr()}`, params: [hours] };
+    return { sql: `AND ${column} >= ${hoursAgoExpr}`, params: [hours] };
 };
