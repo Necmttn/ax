@@ -1,13 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
 import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-inspect");
+
+// resolveTurnContentForSourceRefs (queries/session-turn-content.ts, chunk 2b's)
+// is not yet ported off SurrealClient - see the module-doc note in
+// session-inspect.ts. An empty deny-writes fake is the honest interim stand-in
+// (mirrors report.test.ts's makeEmptyDb): every other resolver this test
+// exercises reads a real published DuckDB fixture below.
+function makeEmptySurrealLayer() {
+    return makeTestSurrealClient({ denyWrites: true }).layer;
+}
 
 describe("graph tool_calls mapping (shareTurnToolCallToDto)", () => {
     test("maps a recorded Bash tool_call row to a ToolCallDto, parsing input_json + carrying output", () => {
@@ -150,83 +160,56 @@ describe("jsonlBlockToInspectorText", () => {
     });
 });
 
-function makeInspectDb(): { readonly db: SurrealClientShape; readonly sql: string[] } {
-    const tc = makeTestSurrealClient({
-        denyWrites: true,
-        fallback: (statement) => {
-            if (statement.includes("FROM spawned") && statement.includes("WHERE out")) {
-                return [[ ]];
-            }
-            if (statement.includes("SELECT project, cwd, raw_file, source FROM session")) {
-                return [[
-                    { project: "repo", cwd: "/repo", raw_file: "/slow/transcript.jsonl", source: "codex" },
-                ]];
-            }
-            if (statement.includes("FROM spawned") && statement.includes("WHERE in")) {
-                return [[ ]];
-            }
-            if (statement.includes("FROM hook_fire")) {
-                return [[ ]];
-            }
-            if (statement.includes("FROM session_token_usage")) {
-                return [[ ]];
-            }
-            if (statement.includes("FROM turn_token_usage")) {
-                return [[ ]];
-            }
-            if (statement.includes("SELECT source_ref, type::string(id) AS document_id")) {
-                return [[ ]];
-            }
-            if (statement.includes("FROM session_health:")) {
-                return [[
-                    { turns: 2 },
-                ]];
-            }
-            if (statement.includes("FROM [turn:")) {
-                return [[
-                    {
-                        seq: 1,
-                        role: "user",
-                        ts: "2026-06-09T00:00:00.000Z",
-                        text: "hello inspect",
-                    },
-                    {
-                        seq: 2,
-                        role: "assistant",
-                        ts: "2026-06-09T00:00:01.000Z",
-                        text: "done",
-                    },
-                ]];
-            }
-            return [[ ]];
-        },
-    });
-    return { db: tc.client, sql: tc.captured };
-}
-
 describe("fetchSessionInspect graph-backed paging", () => {
-    test("returns a paged inspect payload without locating or reading the transcript", async () => {
-        const { db, sql } = makeInspectDb();
-
-        const payload = await Effect.runPromise(
-            fetchSessionInspect("session-a", { turnOffset: 0, turnLimit: 100 }).pipe(
-                Effect.provideService(SurrealClient, db),
-                // The graph-backed path never asks for the raw_file hint (the
-                // assertion below pins that), so an empty cache is the right
-                // stand-in; session-inspect's own port is chunk 2c.
-                Effect.provide(Layer.merge(makeTestCacheRead({ fallback: [] }).layer, BunFsLayer)),
+    dtest("returns a paged inspect payload without locating or reading the transcript", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-session-inspect-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [
+                        { id: "session-a", project: "repo", cwd: "/repo", source: "codex" },
+                    ]);
+                    yield* w.putMany("session_health", [
+                        { id: "sh1", session: "session-a", source: "codex", turns: 2 },
+                    ]);
+                    yield* w.putMany("turn", [
+                        {
+                            id: "t1",
+                            session: "session-a",
+                            seq: 1,
+                            role: "user",
+                            ts: new Date("2026-06-09T00:00:00.000Z"),
+                            text: "hello inspect",
+                        },
+                        {
+                            id: "t2",
+                            session: "session-a",
+                            seq: 2,
+                            role: "assistant",
+                            ts: new Date("2026-06-09T00:00:01.000Z"),
+                            text: "done",
+                        },
+                    ]);
+                }),
             ),
         );
 
-        expect(payload.source_path).toBe("/slow/transcript.jsonl");
+        const payload = await Effect.runPromise(
+            fetchSessionInspect("session-a", { turnOffset: 0, turnLimit: 100 }).pipe(
+                Effect.provide(
+                    Layer.mergeAll(makeEmptySurrealLayer(), readFixture(fixture.snapshotPath, dylibPath), BunFsLayer),
+                ),
+            ),
+        );
+
+        // The graph-backed path is taken: source_path is the graph placeholder,
+        // never the JSONL transcript path (there is no raw_file to fall back to
+        // and no on-disk transcript for this test's fake session id).
+        expect(payload.source_path).toBe("graph:session-a");
         expect(payload.total_turns).toBe(2);
         expect(payload.total_chars).toBe(17);
         expect(payload.turns.map((turn) => [turn.seq, turn.role, turn.raw_text])).toEqual([
             [0, "user", "hello inspect"],
             [1, "assistant", "done"],
         ]);
-        expect(sql.some((statement) => statement.includes("SELECT raw_file FROM"))).toBe(false);
-        expect(sql.some((statement) => statement.includes("GROUP ALL"))).toBe(false);
-        expect(sql.some((statement) => statement.includes("START $offset LIMIT $limit"))).toBe(false);
     });
 });
