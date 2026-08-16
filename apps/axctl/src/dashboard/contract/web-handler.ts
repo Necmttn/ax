@@ -17,7 +17,7 @@
  * routes recover once the DB comes up (mirrors serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
- * (serve-runtime.ts), so AppLayer's services - the SurrealDB connection,
+ * (serve-runtime.ts), so LegacySurrealAppLayer's services - the SurrealDB connection,
  * trace sink - are built ONCE and reused by both the contract routes and
  * the legacy routes' runner.
  */
@@ -26,7 +26,7 @@ import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
 import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
@@ -136,9 +136,9 @@ export interface MakeContractWebHandlerOptions {
     /** Durable Streams sidecar handle, or null when it could not start
      *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
     readonly ingestStream: DurableIngestStream | null;
-    /** Share with the server runtime so AppLayer builds once (see above). */
+    /** Share with the server runtime so LegacySurrealAppLayer builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
-    /** Test seam: services the handlers need (default: production AppLayer). */
+    /** Test seam: services the handlers need (default: production LegacySurrealAppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
     /**
      * Test seam for the published-snapshot reader (default: `CacheReadLive`,
@@ -171,7 +171,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
         Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
-        opts.services ?? AppLayer,
+        opts.services ?? LegacySurrealAppLayer,
         // v2: the recall vertical reads the published DuckDB snapshot, not
         // SurrealDB. The layer opens nothing until a query actually arrives
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that

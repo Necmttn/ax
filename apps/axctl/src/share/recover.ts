@@ -16,7 +16,6 @@
  */
 import { Effect, FileSystem, Option, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
@@ -77,7 +76,11 @@ export const ingestShareTranscript = (
 ): Effect.Effect<
     ShareIngestOutcome,
     never,
-    SurrealClient | AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem | Path.Path
+    // No `SurrealClient` (wave 3, `c-ingest-cutover`): `runIngest` writes DuckDB
+    // through the seam, so the client was vestigial in this Requires union -
+    // declared, never yielded, and enough on its own to force `ax share
+    // --recover` to open a SurrealDB connection it never used.
+    AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;

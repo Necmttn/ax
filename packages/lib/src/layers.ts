@@ -17,7 +17,16 @@ import { otlpTelemetryFromEnv } from "./otel.ts";
  *      CLI entrypoints layer `ConsoleTransportLayer` on top when `--debug` is set.
  *   2. TraceSinkLive - buffered sink + flush daemon over the transport
  *   3. LiveTraceLayer - Effect tracer decorator that emits to the sink
- *   4. SurrealClient, AxConfig, ProcessService - library services
+ *   4. AxConfig, ProcessService - library services
+ *
+ * NO `SurrealClient` (wave 3, `c-ingest-cutover`). It used to sit at the bottom
+ * of this stack, which meant EVERY consumer of `AppLayer` opened a SurrealDB
+ * websocket on the way in - including `ax ingest`, which by then wrote nothing
+ * but DuckDB. A command that still executes SurrealQL now merges
+ * `SurrealClientLive` (`@ax/lib/db`) explicitly at its own composition site, so
+ * "does this surface still need SurrealDB?" is answerable by reading one line
+ * rather than inferred from an ambient layer. `c-surreal-delete` (wave 3's last
+ * chunk) removes the remaining merge sites together with the client itself.
  *
  * The Ingest Stage registry is NOT included here. CLI entrypoints compose
  * `StageRegistryDefault` on top of `AppLayer` via `IngestRuntimeLayer`.
@@ -43,8 +52,7 @@ const PlatformLive = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 // `provideMerge` re-exposes them so consumers still see FileSystem + Path.
 const AxConfigProvided = AxConfigLive.pipe(Layer.provideMerge(PlatformLive));
 
-const AppLayerSansTransport = SurrealClientLive.pipe(
-    Layer.provideMerge(AxConfigProvided),
+const AppLayerSansTransport = AxConfigProvided.pipe(
     Layer.merge(ProcessServiceLive),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),
@@ -64,3 +72,19 @@ export const AppLayer = AppLayerSansTransport.pipe(Layer.provideMerge(NoopTransp
  */
 export const appLayerWithTransport = (transport: Layer.Layer<TraceTransportTag>) =>
     AppLayerSansTransport.pipe(Layer.provideMerge(transport));
+
+/**
+ * `AppLayer` PLUS a live `SurrealClient` - the transitional layer for the
+ * surfaces that still execute SurrealQL.
+ *
+ * Named for what it is so it can be found and deleted: `git grep
+ * LegacySurrealAppLayer` enumerates every remaining composition site that opens
+ * a SurrealDB websocket, which `git grep AppLayer` no longer does. Wave 3's
+ * read chunks shrink this list; `c-surreal-delete` empties it and removes this
+ * export together with `SurrealClientLive`.
+ *
+ * `SurrealClientLive` needs `AxConfig`, so it is `provideMerge`d ON TOP of
+ * `AppLayer` rather than merged beside it - `Layer.mergeAll` builds in
+ * parallel and would leave that dependency unsatisfied.
+ */
+export const LegacySurrealAppLayer = SurrealClientLive.pipe(Layer.provideMerge(AppLayer));

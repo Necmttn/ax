@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { listSessionsHere } from "./sessions-query.ts";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 
@@ -54,7 +54,7 @@ const cleanup = () =>
     });
 
 const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(AppLayer)) as Effect.Effect<A, unknown, never>);
+    Effect.runPromise(eff.pipe(Effect.provide(LegacySurrealAppLayer)) as Effect.Effect<A, unknown, never>);
 
 describe(E2E_ENABLED ? "sessions-query (live DB)" : "sessions-query (live DB - skipped, set AX_E2E_DB=1)", () => {
     if (!E2E_ENABLED) {

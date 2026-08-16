@@ -15,6 +15,7 @@ import { Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { renderWrappedGenerateBrief } from "../../dashboard/wrapped-generate-brief.ts";
 import { runPublishCards } from "../../dashboard/wrapped-cards.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag, optionValue } from "./shared.ts";
@@ -54,7 +55,12 @@ const cmdWrappedPublish = (input: { readonly file: string | undefined; readonly 
 	                    message: err instanceof Error ? err.message : String(err),
 	                }),
 	        });
-        const result = yield* runPublishCards(parsed);
+        // The deck is a WRITE, and every v2 write goes through the seam under the
+        // ingest lock - `withConfigWrite` is the same front door `ax skills lint`
+        // and the derive verbs use. It rebuilds the FTS indexes and publishes a
+        // snapshot on success, so the dashboard sees the new deck on its next
+        // fetch without waiting for an ingest.
+        const result = yield* withConfigWrite((write) => runPublishCards(write, parsed));
         if (input.json) {
             console.log(compactPrint(result));
         } else {
@@ -84,4 +90,7 @@ export const wrappedCommand = Command.make("wrapped").pipe(
     Command.withSubcommands([wrappedGenerateCommand, wrappedPublishCommand]),
 );
 
-export const wrappedRuntime: RuntimeManifest = { wrapped: "db" };
+// `"ingest"`: `wrapped publish` writes the deck through `withConfigWrite`
+// (the DuckDB seam, under the ingest lock) and `wrapped generate` only writes a
+// brief file. Neither resolves a `SurrealClient` any more.
+export const wrappedRuntime: RuntimeManifest = { wrapped: "ingest" };

@@ -33,7 +33,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
 
@@ -62,7 +62,7 @@ const AGENT_ID = "proposal:agent_row";
 const TMP_DB = `mig472_${Date.now().toString(36)}`;
 
 const run = <A, E>(eff: Effect.Effect<A, E, SurrealClient>) =>
-    Effect.runPromise(eff.pipe(Effect.provide(AppLayer)) as Effect.Effect<A, E, never>);
+    Effect.runPromise(eff.pipe(Effect.provide(LegacySurrealAppLayer)) as Effect.Effect<A, E, never>);
 
 interface Results {
     readonly reproErr: string | null;

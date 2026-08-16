@@ -1,7 +1,6 @@
 import { Cause, Effect, Exit, Option, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
-import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
@@ -11,9 +10,12 @@ import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { ProcessService } from "@ax/lib/process";
 import {
-    makeIngestEvent,
-    publishIngestEvent,
-} from "../dashboard/telemetry.ts";
+    writeIngestEvent,
+    writeIngestRunFinish,
+    writeIngestRunStart,
+    writeIngestStageFinish,
+    writeIngestStageStart,
+} from "./telemetry.ts";
 import { runPipeline } from "./stage/runner.ts";
 import { selectByKeys, selectByTag } from "./stage/select.ts";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
@@ -106,10 +108,7 @@ export const withIngestRunFinish = (write: CacheWriteService, runId: string) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | CacheWriteError, R> =>
         Effect.onExit(effect, (exit): Effect.Effect<void, CacheWriteError> => {
             const finish = (status: "ok" | "error" | "partial", metrics: unknown = {}) =>
-                write.exec(
-                    "UPDATE ingest_run SET status = ?, ended_at = CURRENT_TIMESTAMP, metrics = ? WHERE id = ?",
-                    [status, jsonParam(metrics), runId],
-                ).pipe(Effect.asVoid);
+                writeIngestRunFinish(write, { runId, status, metrics });
             if (Exit.isSuccess(exit)) {
                 return finish("ok");
             }
@@ -161,69 +160,25 @@ const resolveStages = (
     return registry.all();
 };
 
-const writeIngestEvent = (
-    write: CacheWriteService,
-    input: {
-        readonly runId: string;
-        readonly source: string;
-        readonly stage: string;
-        readonly level: "debug" | "info" | "warn" | "error";
-        readonly message: string;
-        readonly counts?: Record<string, number>;
-    },
-): Effect.Effect<void, CacheWriteError> =>
-    Effect.gen(function* () {
-        const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
-        yield* write.put("ingest_event", cacheRow({
-            id: event.id,
-            run: event.runId,
-            source: event.source,
-            stage: event.stage,
-            level: event.level,
-            message: event.message,
-            counts: jsonParam(event.counts),
-            raw: jsonParam(event),
-            ts: new Date(event.ts),
-        }));
-        publishIngestEvent(event);
-    }).pipe(Effect.asVoid);
-
 const wrapStage = (
     runId: string,
     stageDef: StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>,
 ): StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError> => {
     const eventName = stageEventName(stageDef.meta.key);
-    const stageId = `${runId}__${eventName.source}__${eventName.stage}`.replace(/[^A-Za-z0-9_:-]+/g, "_");
+    const ledgerKey = { runId, source: eventName.source, stage: eventName.stage } as const;
     return {
         ...stageDef,
         run: (ctx: IngestContext, write: CacheWriteService) =>
             Effect.gen(function* () {
-                yield* write.put("ingest_stage", cacheRow({
-                    id: stageId,
-                    run: runId,
-                    source: eventName.source,
-                    stage: eventName.stage,
-                    status: "running",
-                    started_at: new Date(),
-                    ended_at: null,
-                    counts: null,
-                    error_text: null,
-                }));
-                yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                yield* writeIngestStageStart(write, ledgerKey);
 
                 return yield* stageDef.run(ctx, write).pipe(
                     Effect.tap((value) => {
                         const counts = numericCounts(value);
                         return Effect.gen(function* () {
-                            yield* write.exec(
-                                "UPDATE ingest_stage SET status = 'ok', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = NULL WHERE id = ?",
-                                [jsonParam(counts), stageId],
-                            );
-                            yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts });
                             yield* writeIngestEvent(write, {
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
+                                ...ledgerKey,
                                 level: "info",
                                 message: `${eventName.source} ${eventName.stage} complete`,
                                 counts,
@@ -233,15 +188,13 @@ const wrapStage = (
                     Effect.catch((error) =>
                         Effect.gen(function* () {
                             const message = errorText(error);
-                            yield* write.exec(
-                                "UPDATE ingest_stage SET status = 'error', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ? WHERE id = ?",
-                                [jsonParam({}), message, stageId],
-                            );
-                            yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                            yield* writeIngestStageFinish(write, {
+                                ...ledgerKey,
+                                status: "error",
+                                errorText: message,
+                            });
                             yield* writeIngestEvent(write, {
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
+                                ...ledgerKey,
                                 level: "error",
                                 message,
                             });
@@ -350,16 +303,11 @@ export const runIngest = (
         const runId = opts.runId?.() ?? defaultRunId(opts.command);
         const now = opts.now?.() ?? new Date();
 
-        yield* write.put("ingest_run", cacheRow({
-            id: runId,
+        yield* writeIngestRunStart(write, {
+            runId,
             command: opts.command,
-            status: "running",
-            since_days: sinceDays ?? null,
-            started_at: new Date(),
-            last_progress_at: new Date(),
-            ended_at: null,
-            metrics: null,
-        }));
+            sinceDays: sinceDays ?? null,
+        });
 
         if (opts.args.includes("--reset")) {
             for (const table of ["invoked", "loaded", "proposed", "concerns", "recovered_by", "skill_paired", "skill"]) {

@@ -9,10 +9,23 @@ import { AgentSourceRegistryLive } from "../../agents/registry.ts";
 const StageSourceLayers = AgentSourceRegistryLive;
 
 /**
- * Production runtime layer for the Ingest Pipeline. Composes the library
- * `AppLayer` with the canonical `StageRegistryDefault`. CLI ingest entry
- * points should consume this; library code that does not need the stage
- * registry should keep consuming `AppLayer` directly.
+ * Production runtime layer for the Ingest Pipeline: the library `AppLayer`
+ * (`AxConfig` + `ProcessService` + platform + live traces) plus the canonical
+ * `StageRegistryDefault`. CLI ingest entry points consume this; library code
+ * that does not need the stage registry consumes `AppLayer` directly.
+ *
+ * NO `SurrealClient`, and that is the point of this file (wave 3,
+ * `c-ingest-cutover`). Every writer under `apps/axctl/src/ingest/` and
+ * `apps/axctl/src/otel/` goes through `CacheWriteService` - not one `.upsert`,
+ * `.relate` or SurrealQL statement remains - yet this layer merged `AppLayer`,
+ * which was built from `SurrealClientLive`, so every `ax ingest` still opened a
+ * SurrealDB websocket (and waited out `CONNECT_TIMEOUT_MS` when nothing was
+ * listening) before writing a single DuckDB row. `packages/lib/src/layers.ts`
+ * dropped that client from `AppLayer`, so ingest is now Surreal-free by
+ * CONSTRUCTION: a residual reader inside a stage is a compile error here rather
+ * than a silent empty answer from a write-frozen engine.
+ *
+ * NO `CacheRead` either - see {@link withoutCacheRead} for why (F1/F2).
  */
 export const IngestRuntimeLayer = Layer.mergeAll(AppLayer, StageRegistryDefault, StageSourceLayers);
 
