@@ -8,10 +8,10 @@
 # OTLP port is not already listening. Inspect with `maple traces` or the UI
 # the startup banner prints (local.maple.dev).
 #
-# Tip: pause the watcher first so samples are not contended:
-#   launchctl bootout gui/$UID/com.necmttn.ax-watch
-#   ... profile ...
-#   launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.necmttn.ax-watch.plist
+# Wave 3 (daemon subtraction): there is no background ax-watch LaunchAgent to
+# pause anymore. If the freshness drive (queries/ingest-staleness.ts) fires a
+# background ingest mid-profile, set AX_NO_AUTO_INGEST=1 to keep samples
+# uncontended.
 set -euo pipefail
 
 OTLP_URL="${AX_OTLP_URL:-http://127.0.0.1:4318}"
