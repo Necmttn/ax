@@ -696,43 +696,48 @@ export const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: rea
  *  not "any correction in a session that happened to edit this file." */
 export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCorrection[];
         const cap = Math.max(1, Math.min(limit, 20));
         // Defense-in-depth: existing turn rows still carry the old (loose)
         // intent_kind classification. Filter slash-command bodies and long
         // text at query time so the hook doesn't surface non-corrections
         // until a re-derivation pass cleans them up.
-        const [rows] = yield* db.query<[
-            Array<{
-                turn_id: string;
-                session_id: string;
-                ts: string | null;
-                text: string | null;
-            }>
-        ]>(`
+        const rows = yield* read.rows(Schema.Struct({
+            turn_id: Schema.String,
+            session_id: Schema.String,
+            ts: Schema.NullOr(TimestampColumn),
+            text: Schema.NullOr(Schema.String),
+        }), `
             SELECT
-                <string>in.id AS turn_id,
-                <string>in.session AS session_id,
-                <string>in.ts AS ts,
-                in.text_excerpt AS text
-            FROM mentioned_file
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.role = "user"
-              AND in.intent_kind = "correction"
-              AND in.session.source != "claude-subagent"
-              AND in.text_excerpt IS NOT NONE
-              AND string::len(in.text_excerpt) < 500
-            ORDER BY ts DESC
-            LIMIT ${cap * 2};
-        `);
+                t.id AS turn_id,
+                t.session AS session_id,
+                t.ts AS ts,
+                t.text_excerpt AS text
+            FROM mentioned_file mf
+            JOIN turn t ON t.id = mf.in_id
+            JOIN session s ON s.id = t.session
+            WHERE mf.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND t.role = 'user'
+              AND t.intent_kind = 'correction'
+              AND s.source <> 'claude-subagent'
+              AND t.text_excerpt IS NOT NULL
+              AND length(t.text_excerpt) < 500
+            ORDER BY t.ts DESC
+            LIMIT ?
+        `, [...fileIds, cap * 2]);
         if (rows.length === 0) return [] as FileMemoryCorrection[];
 
         // Defense-in-depth filter (TS side): existing rows still carry old
         // loose intent classification. Drop wrapper-instruction-shaped text
         // that slipped through. Once intent-kind.ts is re-derived this becomes
         // a no-op.
-        const filtered = rows.filter((r) => {
+        const filtered = rows.map((row) => ({
+            turn_id: row.turn_id,
+            session_id: row.session_id,
+            ts: row.ts?.toISOString() ?? null,
+            text: row.text,
+        })).filter((r) => {
             const t = (r.text ?? "").trimStart();
             if (t.startsWith("## Your task")) return false;
             if (t.startsWith("# /")) return false;
@@ -744,14 +749,18 @@ export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: n
         // Batch-fetch delivery_outcome for the unique sessions to surface
         // `merged_to_main` and PR titles next to each correction quote.
         const sessionIds = Array.from(new Set(filtered.map((r) => r.session_id)));
-        const sidLiteral = sessionIds.join(", ");
-        const [deliveryRows] = yield* db.query<[
-            Array<{ session: string; status: string | null; pr_title: string | null }>
-        ]>(
-            `SELECT <string>session AS session, status, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
-        );
+        const deliveryRows = yield* read.rows(Schema.Struct({
+            session: Schema.NullOr(Schema.String),
+            status: Schema.NullOr(Schema.String),
+            pr_title: Schema.NullOr(Schema.String),
+        }), `
+            SELECT d.session AS session, d.status AS status, pr.title AS pr_title
+            FROM delivery_outcome d
+            LEFT JOIN pull_request pr ON pr.id = d.pull_request
+            WHERE d.session IN (${sessionIds.map(() => "?").join(", ")})
+        `, sessionIds);
         const deliveryBySession = new Map<string, { status: string | null; pr_title: string | null }>();
-        for (const row of deliveryRows) deliveryBySession.set(row.session, row);
+        for (const row of deliveryRows) if (row.session) deliveryBySession.set(row.session, row);
 
         return filtered.map((row): FileMemoryCorrection => {
             const delivery = deliveryBySession.get(row.session_id);
