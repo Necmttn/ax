@@ -17,16 +17,16 @@
  * routes recover once the DB comes up (mirrors serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
- * (serve-runtime.ts), so LegacySurrealAppLayer's services - the SurrealDB connection,
- * trace sink - are built ONCE and reused by both the contract routes and
- * the legacy routes' runner.
+ * (serve-runtime.ts), so `AppLayer`'s services - AxConfig, the trace sink -
+ * are built ONCE and reused by both the contract routes and the legacy
+ * routes' runner. No SurrealDB connection: see {@link InertSurrealLayer}.
  */
 import { Layer } from "effect";
 import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
 import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
-import type { SurrealClient } from "@ax/lib/db";
-import { LegacySurrealAppLayer } from "@ax/lib/layers";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
@@ -46,8 +46,31 @@ import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
 import { JudgmentLive } from "../../judgment.ts";
 
-/** Everything the contract handlers reach for; widens as families join. */
+/**
+ * Everything the contract handlers reach for. Kept as `SurrealClient` for
+ * test-seam compatibility (existing per-group test files inject a
+ * `Layer.mock(SurrealClient, ...)` here) even though, as of studio ephemeral
+ * (wave 3), NO route handler in this contract still resolves the tag - the
+ * last consumer (system.ts's `graphHealth`/`query` rows) was retired. See
+ * {@link InertSurrealLayer}.
+ */
 export type ContractServices = SurrealClient;
+
+/**
+ * Studio is ephemeral now: it must serve `GET /api/sessions` etc. with zero
+ * running daemons, and building a REAL `SurrealClient` (`LegacySurrealAppLayer`,
+ * the previous default here) opens a websocket and blocks on
+ * `CONNECT_TIMEOUT_MS` (~5s) waiting for a daemon that no longer exists -
+ * every handler test that omitted `services` paid that timeout and then a 500
+ * (see `usage.test.ts`'s module doc). Nothing calls `.query()`/`.upsert()`/etc
+ * on this anymore, so the default is inert: every effectful member dies
+ * loudly if something regresses and starts reaching for it again, rather than
+ * silently opening a connection or (worse) answering `[]` from a write-frozen
+ * database - the "dead reader" trap this migration is watching for.
+ */
+const InertSurrealLayer: Layer.Layer<SurrealClient> = Layer.mock(SurrealClient, {
+    raw: null as never,
+});
 
 /** Migrated exact (method, path) pairs the contract router owns. */
 const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
@@ -171,13 +194,19 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
         Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
-        opts.services ?? LegacySurrealAppLayer,
+        opts.services ?? InertSurrealLayer,
         // v2: the recall vertical reads the published DuckDB snapshot, not
         // SurrealDB. The layer opens nothing until a query actually arrives
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that
         // never serves a recall request exactly nothing.
         opts.cacheRead ?? CacheReadLive,
         JudgmentLive,
+        // AxConfig/ProcessService/live-trace sink - Surreal-free since wave 3's
+        // `c-ingest-cutover` (see @ax/lib/layers's module doc). Some handler
+        // call chains (worktrees overview, self-improve) still reach for these
+        // transitively; merging it here is what `LegacySurrealAppLayer` used to
+        // do beneath its now-retired `SurrealClientLive` merge.
+        AppLayer,
     ).pipe(
         Layer.provide([
             SystemGroupLive,
