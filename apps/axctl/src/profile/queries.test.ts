@@ -9,6 +9,7 @@ import {
     fetchCommitCount,
     fetchDailyActivity,
     fetchDailyActivityFull,
+    fetchDeepSessionCount,
     fetchGuardrailHookEvidence,
     fetchGuardrailVerdicts,
     fetchHarnesses,
@@ -178,6 +179,36 @@ describe("fetchSessionDurations", () => {
         const cache = cacheRead({});
         const r = await runCache(fetchSessionDurations({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
+    });
+});
+
+describe("fetchDeepSessionCount", () => {
+    test("counts sessions with >=1 real (non-reverted, LOC>0) commit", async () => {
+        const cache = cacheRead({
+            "count(*) AS total FROM session": [{ total: 42 }],
+            "FROM produced p": [
+                { session: "sess-a", commit: "commit-1" },
+                { session: "sess-b", commit: "commit-2" },
+            ],
+            "FROM touched t": [
+                { commit: "commit-1", loc: 12 },
+                { commit: "commit-2", loc: 0 },
+            ],
+        });
+        const r = await runCache(fetchDeepSessionCount({ windowDays: 30 }), cache.layer);
+        expect(r).toEqual({ deep: 1, total: 42 });
+        expect(cache.captured.some((sql) => sql.includes("c.reverted IS DISTINCT FROM TRUE"))).toBe(true);
+        expect(cache.captured.some((sql) => sql.includes("s.source != 'claude-subagent'"))).toBe(true);
+        expect(cache.captured.some((sql) => sql.includes("t.in_id IN (?, ?)"))).toBe(true);
+    });
+
+    test("no produced rows -> deep 0, total preserved", async () => {
+        const cache = cacheRead({
+            "count(*) AS total FROM session": [{ total: 7 }],
+            "FROM produced p": [],
+        });
+        const r = await runCache(fetchDeepSessionCount({ windowDays: 30 }), cache.layer);
+        expect(r).toEqual({ deep: 0, total: 7 });
     });
 });
 

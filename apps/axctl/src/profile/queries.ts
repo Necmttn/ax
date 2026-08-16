@@ -9,11 +9,9 @@
  */
 import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
-import { TimestampColumn } from "@ax/lib/duckdb/columns";
-import { withinDaysClause } from "@ax/lib/duckdb/clause";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { inClause, withinDaysClause } from "@ax/lib/duckdb/clause";
 import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
@@ -326,27 +324,33 @@ export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
  * LOC floor beyond >0 - a surgical fix that ships clean is a deep outcome; size
  * lives on the SCALE axis, not here.
  */
-const DEEP_PRODUCED_SQL = (d: number) => `
-SELECT type::string(in) AS session, type::string(out) AS commit
-FROM produced
-WHERE in.started_at > time::now() - ${win(d)}
-  AND in.source != "claude-subagent"
-  AND out.reverted != true;`;
+// DuckDB is bare-ref (no `session:`/`commit:` record prefixes and no `in`/`out`
+// graph deref), so the old SurrealQL `in.started_at`/`in.source`/`out.reverted`
+// path through the `produced` edge becomes explicit JOINs against `session` and
+// `commit`, and `touched.in`/`commit` become `touched.in_id`/`"commit".id`.
+// `out.reverted != true` needs `IS DISTINCT FROM TRUE` (not `!= TRUE`) because
+// `reverted` is a nullable BOOLEAN (schema.duckdb.sql: NONE means "not known
+// reverted") and plain `!=` against NULL evaluates to NULL, which WHERE treats
+// as false and would wrongly drop every commit that has never been checked.
+const DEEP_PRODUCED_SQL = `
+SELECT p.in_id AS session, p.out_id AS commit
+FROM produced p
+JOIN session s ON s.id = p.in_id
+JOIN "commit" c ON c.id = p.out_id
+WHERE TRUE`;
 
-const COMMIT_LANDED_LOC_SQL = (refs: string) => `
-SELECT type::string(in) AS commit, math::sum((additions ?? 0) + (deletions ?? 0)) AS loc
-FROM touched WHERE in IN [${refs}] GROUP BY commit;`;
+const COMMIT_LANDED_LOC_SQL = `
+SELECT t.in_id AS commit, SUM(COALESCE(t.additions, 0) + COALESCE(t.deletions, 0)) AS loc
+FROM touched t
+WHERE TRUE`;
 
 // DEPTH denominator: own (non-subagent) session count, so the numerator's
 // subagent filter is mirrored. fetchSessionDurations (which feeds hours/longest)
 // keeps counting every session, so the two denominators differ on purpose -
 // subagent sessions roughly DOUBLE the raw count and would halve this share.
-const DEEP_SESSION_TOTAL_SQL = (d: number) => `
-SELECT count() AS total FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-  AND source != "claude-subagent"
-GROUP ALL;`;
+const DEEP_SESSION_TOTAL_SQL = `
+SELECT count(*) AS total FROM session
+WHERE TRUE`;
 
 const LOC_CHUNK = 500;
 
@@ -357,26 +361,33 @@ export interface DeepSessionCount {
     readonly total: number;
 }
 
+const DeepSessionTotalRow = Schema.Struct({ total: NumberFromBigIntColumn });
+const DeepProducedRow = Schema.Struct({ session: Schema.String, commit: Schema.String });
+const CommitLandedLocRow = Schema.Struct({ commit: Schema.String, loc: NumberFromBigIntColumn });
+
 export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const totalRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DEEP_SESSION_TOTAL_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const total = Number(totalRows[0]?.total ?? 0);
+        const read = yield* CacheRead;
 
-        const produced = yield* db
-            .query<[Array<Record<string, unknown>>]>(DEEP_PRODUCED_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const totalWithin = withinDaysClause("started_at", opts.windowDays);
+        const totalRows = yield* read.rows(
+            DeepSessionTotalRow,
+            `${DEEP_SESSION_TOTAL_SQL} ${totalWithin.sql} AND started_at IS NOT NULL AND source != 'claude-subagent'`,
+            totalWithin.params,
+        );
+        const total = totalRows[0]?.total ?? 0;
 
-        // (session, commit-key) pairs for landed, non-reverted commits.
-        const pairs = produced
-            .map((r) => ({
-                session: String(r.session ?? ""),
-                commit: recordKeyPart(String(r.commit ?? ""), "commit"),
-            }))
-            .filter((p): p is { session: string; commit: string } =>
-                p.session.length > 0 && p.commit !== null && p.commit.length > 0);
+        const producedWithin = withinDaysClause("s.started_at", opts.windowDays);
+        const produced = yield* read.rows(
+            DeepProducedRow,
+            `${DEEP_PRODUCED_SQL} ${producedWithin.sql} `
+                + "AND s.source != 'claude-subagent' AND c.reverted IS DISTINCT FROM TRUE",
+            producedWithin.params,
+        );
+
+        // (session, commit) pairs for landed, non-reverted commits. Ids are
+        // already bare strings in DuckDB, so no key-extraction step is needed.
+        const pairs = produced.filter((p) => p.session.length > 0 && p.commit.length > 0);
         if (pairs.length === 0) return { deep: 0, total } satisfies DeepSessionCount;
 
         const commitKeys = [...new Set(pairs.map((p) => p.commit))];
@@ -385,21 +396,21 @@ export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
             chunks.push(commitKeys.slice(i, i + LOC_CHUNK));
         }
         const locRows = (yield* Effect.all(
-            chunks.map((keys) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    COMMIT_LANDED_LOC_SQL(keys.map((k) => recordLiteral("commit", k)).join(", ")),
-                ).pipe(Effect.map((r) => r?.[0] ?? [])),
-            ),
+            chunks.map((keys) => {
+                const inKeys = inClause("t.in_id", keys);
+                return read.rows(
+                    CommitLandedLocRow,
+                    `${COMMIT_LANDED_LOC_SQL} ${inKeys.sql} GROUP BY t.in_id`,
+                    inKeys.params,
+                );
+            }),
             { concurrency: 4 },
         )).flat();
 
-        // Commit keys whose landed diff actually touched code.
+        // Commits whose landed diff actually touched code.
         const realCommits = new Set<string>();
         for (const row of locRows) {
-            if (Number(row.loc ?? 0) > 0) {
-                const key = recordKeyPart(String(row.commit ?? ""), "commit");
-                if (key !== null && key.length > 0) realCommits.add(key);
-            }
+            if (row.loc > 0) realCommits.add(row.commit);
         }
 
         // Distinct sessions that produced >=1 real commit.
