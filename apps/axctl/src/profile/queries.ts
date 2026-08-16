@@ -150,20 +150,23 @@ export interface SkillInvocationRow {
     readonly count: number;
 }
 
-const SKILL_INVOCATIONS_SQL = (d: number) => `
-SELECT out.name AS skill, count() AS count
-FROM invoked
-WHERE ts > time::now() - ${win(d)} AND out.name IS NOT NONE
-GROUP BY skill
-ORDER BY count DESC
-LIMIT 100;`;
+// `invoked.out_id` is a bare ref -> skill (no graph deref in DuckDB), so the
+// skill name comes from a join, not a dotted path.
+const SKILL_INVOCATIONS_SQL = `
+SELECT sk.name AS skill, count(*) AS count
+FROM invoked i
+JOIN skill sk ON sk.id = i.out_id
+WHERE TRUE`;
 
 export const fetchSkillInvocations = Effect.fn("profile.fetchSkillInvocations")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SKILL_INVOCATIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("i.ts", opts.windowDays);
+        const rows = yield* rawRows(
+            read,
+            `${SKILL_INVOCATIONS_SQL} ${within.sql} GROUP BY sk.name ORDER BY count DESC LIMIT 100`,
+            within.params,
+        );
         return rows.map((r) => ({
             skill: String(r.skill),
             count: Number(r.count ?? 0),
@@ -172,14 +175,12 @@ export const fetchSkillInvocations = Effect.fn("profile.fetchSkillInvocations")(
 );
 
 const SKILL_SCOPES_SQL = `
-SELECT name, scope FROM skill WHERE deleted_at IS NONE;`;
+SELECT name, scope FROM skill WHERE deleted_at IS NULL`;
 
 export const fetchSkillScopes = Effect.fn("profile.fetchSkillScopes")(
     function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SKILL_SCOPES_SQL)
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const rows = yield* rawRows(read, SKILL_SCOPES_SQL);
         return new Map(rows.map((r) => [String(r.name), String(r.scope)]));
     },
 );

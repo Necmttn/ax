@@ -71,23 +71,25 @@ describe("fetchHarnesses", () => {
 
 describe("fetchSkillInvocations", () => {
     test("returns name+count rows, window applied", async () => {
-        const db = makeMockDb([[[{ skill: "tdd", count: 88 }]]]);
-        const r = await runWithMock(db, fetchSkillInvocations({ windowDays: 30 }));
+        const cache = cacheRead({ "FROM invoked": [{ skill: "tdd", count: 88 }] });
+        const r = await runCache(fetchSkillInvocations({ windowDays: 30 }), cache.layer);
         expect(r).toEqual([{ skill: "tdd", count: 88 }]);
-        expect(db.captured[0]).toContain("FROM invoked");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain("FROM invoked");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 });
 
 describe("fetchSkillScopes", () => {
     test("maps name -> scope, tombstones filtered in SQL", async () => {
-        const db = makeMockDb([[ [
-            { name: "tdd", scope: "plugin:superpowers" },
-            { name: "my-local", scope: "user" },
-        ]]]);
-        const r = await runWithMock(db, fetchSkillScopes());
+        const cache = cacheRead({
+            "FROM skill": [
+                { name: "tdd", scope: "plugin:superpowers" },
+                { name: "my-local", scope: "user" },
+            ],
+        });
+        const r = await runCache(fetchSkillScopes(), cache.layer);
         expect(r.get("tdd")).toBe("plugin:superpowers");
-        expect(db.captured[0]).toContain("deleted_at IS NONE");
+        expect(cache.captured[0]).toContain("deleted_at IS NULL");
     });
 });
 
