@@ -238,7 +238,7 @@ const bigintRangeMessage = (idx: number, value: bigint): string =>
     `parameter ${idx} (${value}) is outside the range this client can bind: DuckDB binds integers as a signed 64-bit int64 (${I64_MIN} to ${I64_MAX}), and a wider value would silently wrap. Pass it as text (and store the column as VARCHAR or HUGEINT) instead.`;
 
 const nulByteMessage = (idx: number): string =>
-    `parameter ${idx} contains a NUL byte (U+0000): this client binds VARCHAR through a NUL-terminated C string, so the value would be SILENTLY TRUNCATED at the first NUL on the way in - and the length-less read accessor cannot detect the truncation on the way back out (see readResult's fix-round-2 note). Strip or escape NUL bytes upstream before binding (writer enforcement lands with wave-2 writers, #790).`;
+    `parameter ${idx} contains a NUL byte (U+0000): this client binds VARCHAR through a NUL-terminated C string, so the value would be SILENTLY TRUNCATED at the first NUL on the way in - and the length-less read accessor cannot detect the truncation on the way back out (see readResult's fix-round-2 note). Strip or escape NUL bytes upstream before binding. #790: the ax write seam (@ax/lib/duckdb/seam, writerOver) already does this for every write it issues, so reaching this message means a write path bypassed the seam - or a READ parameter carried a NUL, which the seam deliberately does not scrub.`;
 
 /** Bind one prepared-statement parameter (1-based `idx`). Returns the
  *  `duckdb_state` from the underlying bind call so the caller can check it. */

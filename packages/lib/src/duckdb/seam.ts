@@ -66,6 +66,7 @@ import {
     DuckDbUnsupportedTypeError,
     SnapshotPublishError,
 } from "./errors.ts";
+import { stripNulParams } from "./nul-strip.ts";
 import type { DuckDbParam, QueryResult } from "./types.ts";
 
 /**
@@ -142,8 +143,25 @@ export interface CacheWriteService extends CacheReadService {
         table: string,
         rows: ReadonlyArray<Readonly<Record<string, DuckDbParam>>>,
     ) => Effect.Effect<void, CacheWriteError>;
+    /**
+     * How much this writer has had to scrub so far - see {@link nulStripTotals}
+     * and `./nul-strip.ts`. Sanitising data behind a caller's back is exactly
+     * the failure class this seam exists to prevent, so the mutation is
+     * COUNTABLE: `withCacheWrite` logs a warning naming these numbers whenever
+     * either is non-zero, and a caller (an ingest run reporting on itself) can
+     * read them directly.
+     */
+    readonly nulStripped: () => NulStripTotals;
     /** The live database being written (not the snapshot). */
     readonly livePath: string;
+}
+
+/** Running totals of writer-side NUL stripping for one `withCacheWrite` body. */
+export interface NulStripTotals {
+    /** Bound text values that carried at least one U+0000 and were scrubbed. */
+    readonly values: number;
+    /** Statements at least one of those values belonged to. */
+    readonly statements: number;
 }
 
 /**
@@ -591,7 +609,14 @@ export const withCacheWrite = <A, E, R>(
                     if (options.schemaSql !== null) yield* conn.exec(options.schemaSql);
 
                     const write = writerOver(conn, options.livePath, target);
-                    const value = yield* body(write);
+                    // Reported on EVERY exit path (`ensuring`), not just a
+                    // successful one: a body that scrubbed rows and then failed
+                    // for an unrelated reason still changed data on the way
+                    // through, and that is precisely when an operator needs to
+                    // know it happened.
+                    const value = yield* body(write).pipe(
+                        Effect.ensuring(reportNulStripped(write, options.livePath)),
+                    );
 
                     // Publish LAST and only on success: a failed ingest must
                     // leave the previous snapshot exactly as it was. A
@@ -606,6 +631,26 @@ export const withCacheWrite = <A, E, R>(
                     return value;
                 }),
             (conn) => conn.close.pipe(Effect.andThen(Effect.sync(opened.close))),
+        );
+    });
+
+/**
+ * Say out loud what the writer changed. Silent sanitisation is the failure mode
+ * this whole guard exists to avoid, so a run that stripped NUL bytes says so -
+ * once, with totals, rather than a line per value (a single ingest can scrub
+ * thousands, and a warning per row would bury everything else).
+ *
+ * A no-op when nothing was scrubbed, which is the normal case.
+ */
+const reportNulStripped = (write: CacheWriteService, livePath: string): Effect.Effect<void> =>
+    Effect.suspend(() => {
+        const totals = write.nulStripped();
+        if (totals.values === 0) return Effect.void;
+        return Effect.logWarning(
+            `ax cache: stripped NUL bytes (U+0000) from ${totals.values} text value(s) across ` +
+                `${totals.statements} statement(s) while writing ${livePath}. DuckDB VARCHARs are bound ` +
+                "through a NUL-terminated C string, so such a value would otherwise be silently truncated " +
+                "at the first NUL; the rest of each value was stored intact.",
         );
     });
 
@@ -628,7 +673,38 @@ const writerOver = (
     // writer must keep reading the LIVE database it is writing.
     const reader = readerOver((use) => use(conn), target);
 
-    const exec: CacheWriteService["exec"] = (sql, params) => conn.exec(sql, params);
+    /**
+     * THE NUL CHOKE POINT (#790). Every write this seam issues - `exec`, `put`,
+     * `putMany` - funnels through here, and it is the narrowest place that can
+     * hold the rule: it is the last code that owns the parameter array before
+     * `client.ts` binds it, and it is on the writer's side of the read/write
+     * split, so the READ path (`reader` above, sharing this same connection) is
+     * untouched. Scrubbing per call site instead would mean auditing every one
+     * of the ~90 modules that hold a `CacheWriteService` and re-auditing every
+     * new one.
+     *
+     * The strip itself, and why strip rather than escape, lives in
+     * `./nul-strip.ts`. What lives here is the ACCOUNTING: a silent sanitiser
+     * is how the original defect class got here, so the counts are kept and
+     * reported (see `nulStripped` on the service and the warning in
+     * `withCacheWrite`).
+     */
+    let nulValues = 0;
+    let nulStatements = 0;
+    const execScrubbed = (
+        sql: string,
+        params?: ReadonlyArray<DuckDbParam>,
+    ): Effect.Effect<number, DuckDbQueryError | DuckDbUnsupportedTypeError> => {
+        if (params === undefined || params.length === 0) return conn.exec(sql, params);
+        const stripped = stripNulParams(params);
+        if (stripped.values > 0) {
+            nulValues += stripped.values;
+            nulStatements += 1;
+        }
+        return conn.exec(sql, stripped.params);
+    };
+
+    const exec: CacheWriteService["exec"] = (sql, params) => execScrubbed(sql, params);
 
     /**
      * One upsert covering `rows`, all of which must share `columns`.
@@ -728,11 +804,13 @@ const writerOver = (
                 const batch = rows.slice(start, start + PUT_BATCH_ROWS);
                 const sql = yield* insertStatement(table, columns, stamped, batch.length);
                 const params = batch.flatMap((row) => columns.map((column) => row[column]));
-                yield* conn.exec(sql, params);
+                yield* execScrubbed(sql, params);
             }
         });
 
     const put: CacheWriteService["put"] = (table, row) => putMany(table, [row]);
 
-    return { ...reader, exec, put, putMany, livePath };
+    const nulStripped = (): NulStripTotals => ({ values: nulValues, statements: nulStatements });
+
+    return { ...reader, exec, put, putMany, nulStripped, livePath };
 };

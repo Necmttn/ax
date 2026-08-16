@@ -45,6 +45,7 @@ export type {
     CacheWriteError,
     CacheWriteOptions,
     CacheWriteService,
+    NulStripTotals,
 } from "./seam.ts";
 
 // The row-decode contract: what a column type MEANS to a caller.

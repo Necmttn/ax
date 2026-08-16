@@ -95,8 +95,15 @@
 --
 -- NUL-BYTE CONTRACT. Text columns must never contain NUL bytes - the FFI
 -- client's CString decode truncates at the first NUL, silently dropping
--- everything after it. Ingest writers must strip or escape NUL bytes before
--- insert (enforcement lands with the wave-2 writers, not in this DDL).
+-- everything after it. This is ENFORCED, not merely asked for, and NOT by this
+-- DDL: the write seam (`packages/lib/src/duckdb/seam.ts`, `writerOver`) strips
+-- U+0000 out of every bound text value on its way to a bind, using
+-- `packages/lib/src/duckdb/nul-strip.ts`, and counts what it stripped so the
+-- run can report it. An individual ingest writer therefore does NOT need to
+-- pre-scrub its rows. The bind-time refusal in `client.ts` stays behind that as
+-- the last line of defence - if it ever fires again, a write path has found a
+-- way around the seam. Superseded when the pointer-based read path (#788) makes
+-- an embedded NUL round-trip safely.
 --
 -- SEMANTICS (P2-2): `VALUE time::now()` cannot be expressed in DDL. Surreal's
 -- `VALUE` clause OVERWRITES whatever the caller supplies, on every create AND every
