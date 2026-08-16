@@ -13,6 +13,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { surrealLiteral } from "@ax/lib/json";
 import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
@@ -159,6 +160,7 @@ ORDER BY cost_usd DESC;
 export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
     function* (opts: { readonly sinceDays: number }) {
         const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const rows = yield* db.query<[Array<Record<string, unknown>>]>(
             COST_MODELS_SQL(opts.sinceDays),
         ).pipe(Effect.map((r) => r?.[0] ?? []));
@@ -168,6 +170,7 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
         // common all-priced window skips the extra query entirely.
         const catalog = rowsNeedPricing(rows)
             ? yield* loadPricingCatalogForModels(
+                read,
                 rows.map((row) => (row.model == null ? null : String(row.model))),
             )
             : EMPTY_PRICING_CATALOG;
@@ -330,6 +333,7 @@ ORDER BY cost_usd DESC;
 export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
     function* (opts: { readonly sinceDays: number }) {
         const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const rows = yield* db.query<[Array<Record<string, unknown>>]>(
             COST_SPLIT_SQL(opts.sinceDays),
         ).pipe(Effect.map((r) => r?.[0] ?? []));
@@ -384,7 +388,7 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
         // cells since recompute operates at cell grain.
         const aggregated = [...cellMap.values()];
         const catalog = rowsNeedPricing(aggregated)
-            ? yield* loadPricingCatalogForModels(aggregated.map((cell) => cell.model))
+            ? yield* loadPricingCatalogForModels(read, aggregated.map((cell) => cell.model))
             : EMPTY_PRICING_CATALOG;
 
         // Resolve pricing per cell BEFORE totals/share so a recomputed cell's

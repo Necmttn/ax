@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import {
     normalizeKey,
     clusterRows,
     buildProposals,
-    fetchTuneProposals,
+    fetchTuneProposals as fetchTuneProposalsWithRead,
     applyProposals,
     JUDGMENT_RE,
     JUDGMENT_GUARD_RE,
@@ -18,12 +18,28 @@ import {
     type TuneProposal,
 } from "./routing-tune.ts";
 
+const fetchTuneProposals = (input: Parameters<typeof fetchTuneProposalsWithRead>[1]) =>
+    Effect.gen(function* () {
+        const read = yield* CacheRead;
+        return yield* fetchTuneProposalsWithRead(read, input);
+    });
+
 type QueryResult = Array<Record<string, unknown>>;
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => Effect.succeed(results as [QueryResult, ...QueryResult[]]),
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
+const makeMockDb = (results: QueryResult[]): Layer.Layer<CacheRead> => {
+    const rowsFor = (sql: string): QueryResult => {
+        if (sql.includes("FROM spawned")) return results[0] ?? [];
+        if (sql.includes("FROM session_token_usage")) return results[1] ?? [];
+        if (sql.includes("FROM tool_call")) return results[2] ?? [];
+        if (sql.includes("FROM session\n")) return results[3] ?? [];
+        return [];
+    };
+    const service: CacheReadService = {
+        rows: (_schema, sql) => Effect.succeed(rowsFor(sql)) as never,
+        first: (_schema, sql) => Effect.succeed(rowsFor(sql)[0] === undefined ? Option.none() : Option.some(rowsFor(sql)[0])) as never,
+        raw: (sql) => Effect.succeed({ columns: [], rows: rowsFor(sql) }) as never,
+        snapshotPath: "(test)",
+    };
+    return Layer.succeed(CacheRead, service);
 };
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -229,25 +245,25 @@ describe("fetchTuneProposals", () => {
     it("only mines inherit + expensive + unmatched rows", async () => {
         const spawned = [
             // 3x unmatched expensive inherit -> should cluster
-            { parent_id: "session:p", child_id: "session:c1", ts: "t", agent_type: "general-purpose", description: "Summarize the changelog", tool_use_id: "t1" },
-            { parent_id: "session:p", child_id: "session:c2", ts: "t", agent_type: "general-purpose", description: "Summarize the diff", tool_use_id: "t2" },
-            { parent_id: "session:p", child_id: "session:c3", ts: "t", agent_type: "general-purpose", description: "Summarize the notes", tool_use_id: "t3" },
+            { parent_id: "p", child_id: "c1", ts: new Date(), agent_type: "general-purpose", description: "Summarize the changelog", tool_use_id: "t1" },
+            { parent_id: "p", child_id: "c2", ts: new Date(), agent_type: "general-purpose", description: "Summarize the diff", tool_use_id: "t2" },
+            { parent_id: "p", child_id: "c3", ts: new Date(), agent_type: "general-purpose", description: "Summarize the notes", tool_use_id: "t3" },
             // matched by default table (well-specified-impl) -> excluded
-            { parent_id: "session:p", child_id: "session:c4", ts: "t", agent_type: "general-purpose", description: "Implement the parser", tool_use_id: "t4" },
+            { parent_id: "p", child_id: "c4", ts: new Date(), agent_type: "general-purpose", description: "Implement the parser", tool_use_id: "t4" },
             // explicit model -> excluded
-            { parent_id: "session:p", child_id: "session:c5", ts: "t", agent_type: "general-purpose", description: "Summarize the API", tool_use_id: "t5" },
+            { parent_id: "p", child_id: "c5", ts: new Date(), agent_type: "general-purpose", description: "Summarize the API", tool_use_id: "t5" },
         ];
         const usage = ["c1", "c2", "c3", "c4", "c5"].map((c) => ({
-            session_id: `session:${c}`, model: "claude-fable-5",
+            session_id: c, model: "claude-fable-5",
             prompt_tokens: 100, completion_tokens: 10,
             cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1,
         }));
         const toolCalls = [
-            { session_id: "session:p", call_id: "t1", input_json: "{}" },
-            { session_id: "session:p", call_id: "t2", input_json: "{}" },
-            { session_id: "session:p", call_id: "t3", input_json: "{}" },
-            { session_id: "session:p", call_id: "t4", input_json: "{}" },
-            { session_id: "session:p", call_id: "t5", input_json: JSON.stringify({ model: "sonnet" }) },
+            { session_id: "p", call_id: "t1", input_json: "{}" },
+            { session_id: "p", call_id: "t2", input_json: "{}" },
+            { session_id: "p", call_id: "t3", input_json: "{}" },
+            { session_id: "p", call_id: "t4", input_json: "{}" },
+            { session_id: "p", call_id: "t5", input_json: JSON.stringify({ model: "sonnet" }) },
         ];
         const layer = makeMockDb([spawned, usage, toolCalls, []]);
         const proposals = await Effect.runPromise(

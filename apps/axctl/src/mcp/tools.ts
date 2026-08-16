@@ -28,7 +28,7 @@ import { z, type ZodRawShape } from "zod";
 import { Effect } from "effect";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CacheReadError } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { wrapToolError, wrapToolResult } from "./wrap.ts";
 import {
     fetchRecall,
@@ -563,7 +563,10 @@ const sessionMetricsTool: AxMcpTool = defineMcpTool({
         const limit = args.limit ?? 50;
         const project =
             args.project !== undefined && args.project.length > 0 ? args.project : null;
-        return await rt.runPromise(fetchSessionMetrics({ since, limit, project }));
+        return await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchSessionMetrics(read, { since, limit, project });
+        }));
     },
 });
 
@@ -603,14 +606,15 @@ const sessionsChurnTool: AxMcpTool = defineMcpTool({
         const since = new Date(
             Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86_400_000,
         );
-        const summary = await rt.runPromise(
-            fetchSessionChurnSummary({
+        const summary = await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchSessionChurnSummary(read, {
                 since,
                 project: args.project ?? null,
                 source: args.source ?? null,
                 limit: args.limit ?? 20,
-            }),
-        );
+            });
+        }));
         const studio = await resolveStudioTarget();
         return buildSessionsChurnNext(summary, { studio });
     },
@@ -723,7 +727,10 @@ const costImagesTool: AxMcpTool = defineMcpTool({
     run: async (args, rt) => {
         const sinceDays = args.days ?? COST_DEFAULT_WINDOW_DAYS;
         const limit = args.limit ?? 20;
-        return await rt.runPromise(fetchImageContext({ sinceDays, limit }));
+        return await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchImageContext(read, { sinceDays, limit });
+        }));
     },
 });
 
@@ -817,14 +824,18 @@ const dispatchesTool: AxMcpTool = defineMcpTool({
             // CLI candidates path read), not the baked-in defaults.
             const result = await rt.runPromise(
                 Effect.gen(function* () {
+                    const read = yield* CacheRead;
                     const table = yield* loadEffectiveRoutingTable();
-                    return yield* fetchDispatchCandidates({ sinceDays: days, table });
+                    return yield* fetchDispatchCandidates(read, { sinceDays: days, table });
                 }),
             );
             return { ...result, next: buildCandidatesNext(result) };
         }
         const limit = args.limit ?? 30;
-        const result = await rt.runPromise(fetchDispatches({ sinceDays: days, limit }));
+        const result = await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchDispatches(read, { sinceDays: days, limit });
+        }));
         return { ...result, next: buildDispatchesNext(result) };
     },
 });

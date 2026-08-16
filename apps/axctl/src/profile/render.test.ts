@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
-import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import { EmptyCacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
 // Mock result order MUST match the query order in buildProfile:
@@ -122,8 +122,12 @@ const runProfile = <A, E>(
     db: TestSurrealClient,
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
-) => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
     db.layer,
+    // `fetchCostModels` resolves the pricing catalog through the published
+    // cache when a row stores zero cost against real tokens; none of these
+    // fixtures do, so an empty reader is enough to satisfy the requirement.
+    EmptyCacheReadTestLayer,
     judgmentTestLayer((sql) => {
         const now = new Date();
         if (sql.includes("FROM proposal")) return proposals;

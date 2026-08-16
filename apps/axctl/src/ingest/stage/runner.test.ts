@@ -8,8 +8,15 @@ import {
 } from "@ax/lib/live-traces/Sink";
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { LiveTrace } from "@ax/lib/live-traces/index";
-import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, runPipeline, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
+import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, runPipeline as runPipelineWithWrite, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+
+const runPipeline = <S extends BaseStageStats, R, E>(
+    stages: ReadonlyArray<StageDef<S, R, E>>,
+    ctx: IngestContext,
+    opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
+) => runPipelineWithWrite(stages, ctx, {} as CacheWriteService, opts);
 
 const stage = (key: string, deps: string[]): StageDef => ({
     meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
@@ -46,6 +53,19 @@ describe("topoLayers", () => {
 });
 
 describe("runPipeline", () => {
+    it("propagates a stage error outside the legacy database error channel", async () => {
+        const cacheFailure = "cache-read-failed" as const;
+        const cacheStage: StageDef<BaseStageStats, never, typeof cacheFailure> = {
+            meta: StageMeta.make({ key: "cache", deps: [], tags: ["derive"] }),
+            run: () => Effect.fail(cacheFailure),
+        };
+        const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+
+        const error = await Effect.runPromise(Effect.flip(runPipeline([cacheStage], ctx)));
+
+        expect(error).toBe(cacheFailure);
+    });
+
     it("runs every stage exactly once and respects deps", async () => {
         const order: string[] = [];
         const make = (key: string, deps: string[]): StageDef => ({

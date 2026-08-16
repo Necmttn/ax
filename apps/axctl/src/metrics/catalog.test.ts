@@ -1,16 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "./catalog.ts";
 
-// Minimal SurrealClient stub: every query returns an empty result set, so the
-// bounded fragility-cascade computation dispatches and returns [].
-const StubSurreal = Layer.succeed(SurrealClient, {
-    query: <T>() => Effect.succeed([[]] as unknown as T),
-} as never);
-
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(StubSurreal)));
+const cache = makeTestCacheRead();
+const run = <A>(eff: Effect.Effect<A, unknown, CacheRead>): Promise<A> =>
+    Effect.runPromise(eff.pipe(Effect.provide(cache.layer)));
 
 describe("SIGNAL_CATALOG", () => {
     it("contains fragility_cascade as a relation signal", () => {

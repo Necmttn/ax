@@ -27,12 +27,10 @@ import { Effect, FileSystem, Option, Schema } from "effect";
 import { jsonArrayField } from "@ax/lib/decode";
 import { homedir } from "node:os";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef, surrealDate } from "@ax/lib/shared/surql";
-import { surrealLiteral } from "@ax/lib/json";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface DeriveOpportunitiesStats {
@@ -167,7 +165,7 @@ export const overlapFilesMatch = (
     return false;
 };
 
-export const buildOpportunityStatements = (
+export const buildOpportunityRows = (
     experimentKey: string,
     matches: ReadonlyArray<{
         readonly evidenceTable: string;
@@ -175,18 +173,15 @@ export const buildOpportunityStatements = (
         readonly ts: string;
         readonly addressed?: boolean;
     }>,
-): string[] => {
-    const stmts: string[] = [];
+): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => {
+    const rows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
     for (const m of matches) {
         const edgeKey = opportunityKey(experimentKey, m.evidenceKey);
-        const expRef = recordRef("experiment", experimentKey);
-        const evRef = recordRef(m.evidenceTable, m.evidenceKey);
-        stmts.push(
-            `DELETE ${recordRef("opportunity", edgeKey)};`,
-            `RELATE ${expRef}->opportunity:\`${edgeKey}\`->${evRef} SET matched_at = ${surrealDate(m.ts)}, was_addressed = ${m.addressed ? "true" : "false"};`,
-        );
+        rows.push(cacheRow({ id: edgeKey, in_id: experimentKey, out_id: m.evidenceKey,
+            out_table: m.evidenceTable, matched_at: tsParam(m.ts) ?? new Date(),
+            was_addressed: m.addressed ?? false }));
     }
-    return stmts;
+    return rows;
 };
 
 interface SkillIdRow {
@@ -217,45 +212,85 @@ export const safeFileMtimeMs = (
         });
     });
 
-export const deriveOpportunities = (): Effect.Effect<
+/**
+ * This stage spans BOTH v2 stores, and the split is not incidental.
+ *
+ * The experiments it scans and their per-form payloads are durable JUDGMENT
+ * (SQLite sidecar); every piece of evidence it matches them against, and the
+ * `opportunity` rows it writes, are rebuildable graph data (DuckDB cache -
+ * `schema.duckdb.sql` owns `opportunity`, and `derive-checkpoints` reads it
+ * from there to compute each verdict's addressed ratio). The join between the
+ * two happens in JS, because no single engine holds both sides.
+ *
+ * The reader is the lock-held WRITER, not `CacheRead`: this runs inside ingest,
+ * before the snapshot exists, and every row it matches was written by earlier
+ * stages of THIS run (F1).
+ */
+export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
     DeriveOpportunitiesStats,
-    DbError,
-    SurrealClient | FileSystem.FileSystem
+    CacheWriteError | CacheReadError | JudgmentError,
+    Judgment | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         // Active = accepted proposal + experiment without a locked verdict.
-        // Fetch per-form payloads inline so each branch can match against
-        // its own evidence shape without a second round-trip.
-        const experimentsResult = yield* db.query<[ActiveExperimentRow[]]>(`
-            SELECT
-                id,
-                type::string(created_at) AS created_at,
-                artifact_path,
-                proposal.form AS form,
-                (SELECT out FROM cites_evidence WHERE in = $parent.proposal LIMIT 1)[0].out AS candidate_id,
-                (SELECT trigger_pattern FROM skill_proposal WHERE proposal = $parent.proposal LIMIT 1)[0].trigger_pattern AS skill_trigger,
-                (SELECT target_tool, event_name FROM hook_proposal WHERE proposal = $parent.proposal LIMIT 1)[0] AS hook_payload,
-                (SELECT file_target, suggested_text FROM guidance_proposal WHERE proposal = $parent.proposal LIMIT 1)[0] AS guidance_payload
-            FROM experiment
-            WHERE proposal.status = 'accepted'
-              AND locked_verdict IS NONE;
-        `);
-        const experiments = experimentsResult?.[0] ?? [];
+        // Both live in the sidecar, so this is the sidecar's own reader rather
+        // than a join in SQL.
+        const stored = yield* listStoredProposals({ limit: 100_000, status: "accepted" });
+        const active = stored.filter((proposal) =>
+            proposal.experiment !== null && proposal.experiment.locked_verdict === null);
+
+        // The one field that has to cross: `cites_evidence` is a MINED edge and
+        // stays in the cache, so the skill_candidate a proposal cites is looked
+        // up here and matched to its (sidecar) proposal id in JS.
+        const candidateByProposal = new Map<string, string>();
+        if (active.length > 0) {
+            const proposalIds = active.map((proposal) => proposal.id);
+            const citesRaw = yield* write.raw(
+                `SELECT in_id, out_id FROM cites_evidence
+                 WHERE out_table = 'skill_candidate' AND in_id IN (${proposalIds.map(() => "?").join(", ")})`,
+                proposalIds,
+            );
+            for (const row of citesRaw.rows as Array<Record<string, unknown>>) {
+                const owner = typeof row.in_id === "string" ? row.in_id : null;
+                const candidate = typeof row.out_id === "string" ? row.out_id : null;
+                if (owner && candidate && !candidateByProposal.has(owner)) {
+                    candidateByProposal.set(owner, candidate);
+                }
+            }
+        }
+
+        const experiments = active.map((proposal) => {
+            const experiment = proposal.experiment!;
+            return {
+                id: experiment.id,
+                created_at: experiment.created_at.toISOString(),
+                form: proposal.form,
+                artifact_path: experiment.artifact_path,
+                candidate_id: candidateByProposal.get(proposal.id) ?? null,
+                skill_trigger: proposal.skill_payload?.trigger_pattern ?? null,
+                hook_payload: {
+                    target_tool: proposal.hook_payload?.target_tool ?? null,
+                    event_name: proposal.hook_payload?.event_name ?? null,
+                },
+                guidance_payload: {
+                    file_target: proposal.guidance_payload?.file_target ?? null,
+                    suggested_text: proposal.guidance_payload?.suggested_text ?? null,
+                },
+            } satisfies ActiveExperimentRow;
+        });
 
         let totalOpportunities = 0;
         let totalAddressed = 0;
         let bySkillForm = 0;
         let byHookForm = 0;
         let byGuidanceForm = 0;
-        const allStatements: string[] = [];
+        const allRows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
 
         const home = homedir();
 
         for (const exp of experiments) {
             const experimentKey = recordKeyPart(exp.id, "experiment");
             if (!experimentKey) continue;
-            const sinceLiteral = surrealLiteral(exp.created_at);
             const form = exp.form;
 
             // -------- skill form (legacy: closure-derived via skill_candidate) --------
@@ -264,12 +299,11 @@ export const deriveOpportunities = (): Effect.Effect<
                 const tokens = triggerTokensFromCandidate(candidateKey);
                 if (tokens.length === 0) continue;
 
-                const fixesResult = yield* db.query<[LaterFixedByRow[]]>(`
-                    SELECT id, type::string(ts) AS ts, overlap_files
+                const fixesResult = yield* write.raw(`
+                    SELECT id, CAST(ts AS VARCHAR) AS ts, overlap_files
                     FROM later_fixed_by
-                    WHERE ts > d${sinceLiteral};
-                `);
-                const fixes = fixesResult?.[0] ?? [];
+                    WHERE ts > ?`, [new Date(exp.created_at)]);
+                const fixes = fixesResult.rows as unknown as LaterFixedByRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const fix of fixes) {
                     const files = parseOverlapFiles(fix.overlap_files);
@@ -284,17 +318,13 @@ export const deriveOpportunities = (): Effect.Effect<
                 const kebab = kebabNameFromArtifactPath(exp.artifact_path);
                 let invokedTimestamps: number[] = [];
                 if (kebab) {
-                    const skillResult = yield* db.query<[SkillIdRow[]]>(
-                        `SELECT id FROM skill WHERE name = ${surrealLiteral(kebab)} LIMIT 1;`,
-                    );
-                    const skillRow = (skillResult?.[0] ?? [])[0];
+                    const skillResult = yield* write.raw("SELECT id FROM skill WHERE name = ? LIMIT 1", [kebab]);
+                    const skillRow = (skillResult.rows as unknown as SkillIdRow[])[0];
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* db.query<[InvokedTsRow[]]>(
-                                `SELECT type::string(ts) AS ts FROM invoked WHERE out = ${recordRef("skill", skillKey)} AND ts > d${sinceLiteral};`,
-                            );
-                            invokedTimestamps = (invokedResult?.[0] ?? [])
+                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, new Date(exp.created_at)]);
+                            invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
                         }
@@ -311,7 +341,7 @@ export const deriveOpportunities = (): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allStatements.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -320,12 +350,11 @@ export const deriveOpportunities = (): Effect.Effect<
                 const tool = parseSkillTriggerTool(exp.skill_trigger);
                 if (!tool) continue;
 
-                const callsResult = yield* db.query<[ToolCallRow[]]>(`
-                    SELECT id, type::string(ts) AS ts
+                const callsResult = yield* write.raw(`
+                    SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ${surrealLiteral(tool)} AND has_error = true AND ts > d${sinceLiteral};
-                `);
-                const calls = callsResult?.[0] ?? [];
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(exp.created_at)]);
+                const calls = callsResult.rows as unknown as ToolCallRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const c of calls) {
                     const evidenceKey = recordKeyPart(c.id, "tool_call");
@@ -341,17 +370,13 @@ export const deriveOpportunities = (): Effect.Effect<
                 const kebab = kebabNameFromArtifactPath(exp.artifact_path);
                 let invokedTimestamps: number[] = [];
                 if (kebab) {
-                    const skillResult = yield* db.query<[SkillIdRow[]]>(
-                        `SELECT id FROM skill WHERE name = ${surrealLiteral(kebab)} LIMIT 1;`,
-                    );
-                    const skillRow = (skillResult?.[0] ?? [])[0];
+                    const skillResult = yield* write.raw("SELECT id FROM skill WHERE name = ? LIMIT 1", [kebab]);
+                    const skillRow = (skillResult.rows as unknown as SkillIdRow[])[0];
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* db.query<[InvokedTsRow[]]>(
-                                `SELECT type::string(ts) AS ts FROM invoked WHERE out = ${recordRef("skill", skillKey)} AND ts > d${sinceLiteral};`,
-                            );
-                            invokedTimestamps = (invokedResult?.[0] ?? [])
+                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, new Date(exp.created_at)]);
+                            invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
                         }
@@ -368,7 +393,7 @@ export const deriveOpportunities = (): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allStatements.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -377,12 +402,11 @@ export const deriveOpportunities = (): Effect.Effect<
                 const tool = exp.hook_payload?.target_tool ?? null;
                 if (!tool) continue;
 
-                const callsResult = yield* db.query<[ToolCallRow[]]>(`
-                    SELECT id, type::string(ts) AS ts
+                const callsResult = yield* write.raw(`
+                    SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ${surrealLiteral(tool)} AND has_error = true AND ts > d${sinceLiteral};
-                `);
-                const calls = callsResult?.[0] ?? [];
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(exp.created_at)]);
+                const calls = callsResult.rows as unknown as ToolCallRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const c of calls) {
                     const evidenceKey = recordKeyPart(c.id, "tool_call");
@@ -396,12 +420,11 @@ export const deriveOpportunities = (): Effect.Effect<
                 const basename = hookBasenameFromArtifactPath(exp.artifact_path);
                 let invocationTimestamps: number[] = [];
                 if (basename) {
-                    const invResult = yield* db.query<[HookInvocationTsRow[]]>(`
-                        SELECT type::string(ts) AS ts
+                    const invResult = yield* write.raw(`
+                        SELECT CAST(ts AS VARCHAR) AS ts
                         FROM hook_command_invocation
-                        WHERE command CONTAINS ${surrealLiteral(basename)} AND ts > d${sinceLiteral};
-                    `);
-                    invocationTimestamps = (invResult?.[0] ?? [])
+                        WHERE command LIKE ? AND ts > ?`, [`%${basename}%`, new Date(exp.created_at)]);
+                    invocationTimestamps = (invResult.rows as unknown as HookInvocationTsRow[])
                         .map((r) => new Date(r.ts).getTime())
                         .filter((t) => Number.isFinite(t));
                 }
@@ -416,7 +439,7 @@ export const deriveOpportunities = (): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 byHookForm += matches.length;
-                allStatements.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -427,12 +450,11 @@ export const deriveOpportunities = (): Effect.Effect<
 
                 // Cheap initial wedge: every recent correction friction_event
                 // is one opportunity for the guidance to have prevented.
-                const frictionResult = yield* db.query<[FrictionEventRow[]]>(`
-                    SELECT id, type::string(ts) AS ts
+                const frictionResult = yield* write.raw(`
+                    SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM friction_event
-                    WHERE kind = 'correction' AND ts > d${sinceLiteral};
-                `);
-                const events = frictionResult?.[0] ?? [];
+                    WHERE kind = 'correction' AND ts > ?`, [new Date(exp.created_at)]);
+                const events = frictionResult.rows as unknown as FrictionEventRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const ev of events) {
                     const evidenceKey = recordKeyPart(ev.id, "friction_event");
@@ -455,14 +477,14 @@ export const deriveOpportunities = (): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 byGuidanceForm += matches.length;
-                allStatements.push(...buildOpportunityStatements(experimentKey, enriched));
+                allRows.push(...buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
             // automation + subagent forms: detectors deferred to follow-up.
         }
 
-        yield* executeStatementsWith(db, allStatements, { chunkSize: 500 });
+        yield* write.putMany("opportunity", allRows);
         return {
             experimentsScanned: experiments.length,
             opportunities: totalOpportunities,
@@ -472,15 +494,6 @@ export const deriveOpportunities = (): Effect.Effect<
             byGuidanceForm,
         };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        deriveOpportunities().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<DeriveOpportunitiesStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -501,12 +514,16 @@ export class OpportunitiesStats extends BaseStageStats.extend<OpportunitiesStats
     opportunities: Schema.Number,
 }) {}
 
-export const opportunitiesStage: StageDef<OpportunitiesStats, SurrealClient | FileSystem.FileSystem> = {
+export const opportunitiesStage: StageDef<
+    OpportunitiesStats,
+    Judgment | FileSystem.FileSystem,
+    CacheWriteError | CacheReadError | JudgmentError
+> = {
     meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveOpportunities();
+            const result = yield* deriveOpportunities(write);
             return OpportunitiesStats.make({
                 durationMs: Date.now() - t0,
                 summary: `scanned ${result.experimentsScanned} experiments, derived ${result.opportunities} opportunities`,

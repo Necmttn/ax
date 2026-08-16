@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
     __testBuildSessionHealthRows,
     __testNormalizeFirstSuperpowersAt,
-    __testTokenUsageStatement,
-    __testWorkflowEpochStatements,
 } from "./session-health.ts";
 
 describe("session health derivation", () => {
@@ -92,54 +90,6 @@ describe("session health derivation", () => {
         });
     });
 
-    test("token usage statement preserves existing provider actual token fields over byte estimates", () => {
-        const statement = __testTokenUsageStatement({
-            sessionKey: "pi-session",
-            source: "pi",
-            workflowEpoch: null,
-            model: "gpt-5.5",
-            promptTokens: null,
-            completionTokens: null,
-            cacheCreationInputTokens: null,
-            cacheReadInputTokens: null,
-            estimatedTokens: 42,
-            transcriptBytes: 168,
-            contextWindow: null,
-            labels: { source: "session_health", token_source: "byte_estimate" },
-            metrics: { turn_bytes: 168 },
-            ts: "2026-05-29T07:00:00.000Z",
-        });
-
-        expect(statement).toContain("prompt_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN prompt_tokens ELSE NONE END");
-        expect(statement).toContain("completion_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN completion_tokens ELSE NONE END");
-        expect(statement).toContain("cache_creation_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_creation_input_tokens ELSE NONE END");
-        expect(statement).toContain("cache_read_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_read_input_tokens ELSE NONE END");
-        expect(statement).toContain("estimated_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN estimated_tokens ELSE 42 END");
-        expect(statement).toContain("labels: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN labels ELSE");
-        expect(statement).toContain("metrics: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN metrics ELSE");
-        expect(statement).toContain('model: "gpt-5.5"');
-    });
-
-    test("token usage statement preserves an existing model when session.model is null", () => {
-        const statement = __testTokenUsageStatement({
-            sessionKey: "claude-subagent-abc",
-            source: "claude-subagent",
-            workflowEpoch: null,
-            model: null,
-            promptTokens: null,
-            completionTokens: null,
-            cacheCreationInputTokens: null,
-            cacheReadInputTokens: null,
-            estimatedTokens: 42,
-            transcriptBytes: 168,
-            contextWindow: null,
-            labels: { source: "session_health", token_source: "byte_estimate" },
-            metrics: { turn_bytes: 168 },
-            ts: "2026-05-29T07:00:00.000Z",
-        });
-
-        expect(statement).toContain("model: IF model != NONE THEN model ELSE NONE END");
-    });
 });
 
 describe("session health NONE-safety (#680)", () => {
@@ -185,7 +135,7 @@ describe("session health NONE-safety (#680)", () => {
 });
 
 describe("session health empty superpowers invocations", () => {
-    test("rejects SurrealDB's empty-set max datetime sentinel", () => {
+    test("rejects the legacy empty-set max datetime sentinel", () => {
         const firstSuperpowersAt = __testNormalizeFirstSuperpowersAt("+262142-12-31T23:59:59.999999999Z");
 
         expect(firstSuperpowersAt).toBeNull();
@@ -207,8 +157,5 @@ describe("session health empty superpowers invocations", () => {
         });
         expect(rows.usages[0]?.workflowEpoch).toBeNull();
 
-        const statements = __testWorkflowEpochStatements(firstSuperpowersAt);
-        expect(statements[0]).toContain("ends_at: NONE");
-        expect(statements.join("\n")).not.toContain("262142");
     });
 });

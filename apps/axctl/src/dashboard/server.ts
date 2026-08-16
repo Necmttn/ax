@@ -1,5 +1,6 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import {
     isContractRequest,
     makeContractWebHandler,
@@ -315,7 +316,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
     // skill triage). Fire-and-forget - a failure just means the first
     // caller of that endpoint pays the compute instead.
     const { prewarmDashboardCaches } = await import("./prewarm.ts");
-    void handle.runner(prewarmDashboardCaches()).catch(() => undefined);
+    void handle.runner(prewarmDashboardCaches().pipe(Effect.provide(CacheReadLive))).catch(() => undefined);
 
     // Sweep ingest_run rows stranded by a crashed ingest, now and every
     // interval (#697). The ingest-start reaper (#282) can't help when nothing

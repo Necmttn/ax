@@ -12,10 +12,9 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { recordLiteral } from "@ax/lib/ids";
-import { surrealString } from "@ax/lib/shared/surql";
-import { watermarkRecordKey } from "@ax/lib/shared/watermark";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { watermarkRow } from "@ax/lib/duckdb/watermark";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { fetchPullRequests, type PrFetchInput, type PrFetchResult } from "./github-pr-fetch.ts";
@@ -90,18 +89,6 @@ export interface GithubPrIngestDeps {
     readonly now?: () => number;
 }
 
-/**
- * Strip a `table:` prefix and surrounding backticks / ⟨⟩ brackets from a
- * `type::string(id)` result, returning the bare record key. Pair with
- * `recordLiteral(table, key)` to rebuild an embeddable literal.
- */
-const stripRecordKey = (table: string, idStr: string): string => {
-    let key = idStr.trim().replace(new RegExp(`^${table}:`), "");
-    if (key.startsWith("⟨") && key.endsWith("⟩")) key = key.slice(1, -1);
-    if (key.startsWith("`") && key.endsWith("`")) key = key.slice(1, -1);
-    return key;
-};
-
 interface GithubPrTotals {
     repositoriesScanned: number;
     /** Repos whose `gh` fetch failed (timeout/auth/network) - logged as a
@@ -122,8 +109,7 @@ interface GithubPrTotals {
  * `fetchPullRequests` but is injectable for tests.
  */
 export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
-    function* (deps?: GithubPrIngestDeps) {
-        const db = yield* SurrealClient;
+    function* (write: CacheWriteService, deps?: GithubPrIngestDeps) {
         const limit = deps?.limit ?? 200;
         const fetchImpl = deps?.fetchImpl ?? fetchPullRequests;
 
@@ -135,22 +121,22 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
         // per-worktree `path` → `repository` mapping the git stage populates
         // (github-pr deps on "git", so the $PWD checkout exists by the time we run).
         const repoPaths = deps?.repoPaths ?? [];
-        const quotedPaths = repoPaths.map((p) => surrealString(p)).join(", ");
+        const pathSlots = repoPaths.map(() => "?").join(", ");
         const repoPathFilter =
             repoPaths.length > 0
-                ? ` AND (root_path IN [${quotedPaths}] OR id IN (SELECT VALUE repository FROM checkout WHERE path IN [${quotedPaths}]))`
+                ? ` AND (root_path IN (${pathSlots}) OR id IN (SELECT repository FROM checkout WHERE path IN (${pathSlots})))`
                 : "";
         // `remote_url CONTAINS "github"` keeps non-GitHub remotes (GitLab etc.)
         // out of the scan entirely - `gh` would fail on every one of them every
         // run, which is both a wasted spawn and a spurious degraded warning.
         // (GitHub Enterprise on a custom domain is excluded too; revisit if
         // that ever matters here.)
-        const repoRows = yield* db.query<
-            [Array<{ id: string; root_path: string | null; remote_url: string | null }>]
-        >(
-            `SELECT type::string(id) AS id, root_path, remote_url FROM repository WHERE remote_url != NONE AND remote_url CONTAINS "github" AND root_path != NONE${repoPathFilter};`,
+        const repoRows = yield* write.rows(
+            Schema.Struct({ id: Schema.String, root_path: Schema.NullOr(Schema.String), remote_url: Schema.NullOr(Schema.String) }),
+            `SELECT id, root_path, remote_url FROM repository WHERE remote_url IS NOT NULL AND remote_url LIKE '%github%' AND root_path IS NOT NULL${repoPathFilter}`,
+            [...repoPaths, ...repoPaths],
         );
-        const allRepos = (repoRows?.[0] ?? []).filter(
+        const allRepos = repoRows.filter(
             (r): r is typeof r & { root_path: string } =>
                 typeof r.root_path === "string" && r.root_path.length > 0,
         );
@@ -164,11 +150,11 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
         let skippedCooldown = 0;
         let repos = allRepos;
         if (cooldownMs > 0 && allRepos.length > 0) {
-            const wmRows = yield* db.query<[Array<{ path: string; mtime_ms: number | null }>]>(
-                `SELECT path, mtime_ms FROM ingest_file_state WHERE source_kind = ${surrealString(COOLDOWN_SOURCE)};`,
-            );
+            const wmRows = yield* write.rows(
+                Schema.Struct({ path: Schema.String, mtime_ms: Schema.NullOr(NumberFromBigIntColumn) }),
+                "SELECT path, mtime_ms FROM ingest_file_state WHERE source_kind = ?", [COOLDOWN_SOURCE]);
             const lastFetch = new Map<string, number>();
-            for (const row of wmRows?.[0] ?? []) {
+            for (const row of wmRows) {
                 if (typeof row.mtime_ms === "number") lastFetch.set(row.path, row.mtime_ms);
             }
             const cutoff = now() - cooldownMs;
@@ -189,8 +175,8 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
             repos,
             (repo) =>
                 Effect.gen(function* () {
-                    const key = stripRecordKey("repository", repo.id);
-                    const repositoryId = recordLiteral("repository", key);
+                    const key = repo.id;
+                    const repositoryId = key;
 
                     const fetched = yield* fetchImpl({
                         cwd: repo.root_path,
@@ -209,13 +195,11 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
                     const stats =
                         fetched.prs.length === 0
                             ? { pullRequests: 0, reviews: 0, checks: 0, deliveryOutcomes: 0 }
-                            : yield* writePullRequests({ repositoryId, repositoryKey: key, prs: fetched.prs });
+                            : yield* writePullRequests(write, { repositoryId, repositoryKey: key, prs: fetched.prs });
                     // Successful fetch (even 0 PRs - gh ran clean): advance the
                     // per-repo cooldown watermark.
                     const wmPath = cooldownPath(repo.root_path);
-                    yield* db.query(
-                        `UPSERT ${recordLiteral("ingest_file_state", watermarkRecordKey(COOLDOWN_SOURCE, wmPath))} CONTENT { path: ${surrealString(wmPath)}, source_kind: ${surrealString(COOLDOWN_SOURCE)}, mtime_ms: ${Math.trunc(now())}, ingested_at: time::now() };`,
-                    );
+                    yield* write.put("ingest_file_state", watermarkRow(COOLDOWN_SOURCE, wmPath, { mtimeMs: Math.trunc(now()) }));
                     return { degraded: false as const, ...stats };
                 }).pipe(
                     // Annotate INSIDE the span (tap runs before withSpan closes
@@ -264,11 +248,11 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
  * Depends on: {@link GitKey} (repository / commit / produced rows)
  * Tags: ingest
  */
-export const githubPrStage: StageDef<GithubPrStageStats, SurrealClient> = {
+export const githubPrStage: StageDef<GithubPrStageStats, never, CacheWriteError> = {
     meta: StageMeta.make({ key: "github-pr", deps: ["git"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         // Epoch-zero `since` is the "full re-derive" sentinel → unbounded
         // fetch; otherwise bound the gh search to the ingest window (the
@@ -277,7 +261,7 @@ export const githubPrStage: StageDef<GithubPrStageStats, SurrealClient> = {
         // Cooldown only applies to incremental runs - a forced full
         // re-ingest must always hit the network.
         const fetchCooldownMs = updatedSince === undefined ? 0 : resolveFetchCooldownMs();
-        const result = yield* ingestGithubPrs({
+        const result = yield* ingestGithubPrs(write, {
             ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
             ...(updatedSince === undefined ? {} : { updatedSince }),
             fetchCooldownMs,

@@ -1,18 +1,9 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import {
-    recordRef,
-    surrealDate,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionRecord,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ReactionEventsKey = Schema.Literal("reaction-events");
@@ -40,8 +31,8 @@ export type ReactionDurability = "one_off" | "session_preference" | "repo_prefer
 export type ReactionPolarity = "accept" | "reject" | "revise" | "explore" | "none";
 
 export interface ReactionEventInput {
-    readonly id: unknown;
-    readonly session: unknown;
+    readonly id: string;
+    readonly session: string;
     readonly seq: number;
     readonly role: string;
     readonly source?: string | null;
@@ -118,7 +109,7 @@ const clamp = (value: number): number =>
 // different "previous assistant", producing a second record and a unique-index
 // violation that aborted the whole ingest. assistantTurnKey is still stored as
 // the assistant_turn field; it just doesn't belong in the primary key.
-const eventKey = (userTurnKey: string): string => safeKeyPart(userTurnKey);
+const eventKey = (userTurnKey: string): string => stableId("reaction_event", [userTurnKey]);
 
 const baseEvent = (
     row: ReactionEventInput,
@@ -126,14 +117,14 @@ const baseEvent = (
     recentToolFailureText: string | null,
     patch: Omit<ReactionEventWrite, "key" | "userTurnKey" | "assistantTurnKey" | "sessionKey" | "method" | "userText" | "assistantText" | "context" | "ts">,
 ): ReactionEventWrite => {
-    const userTurnKey = recordKeyPart(row.id, "turn") ?? String(row.id);
+    const userTurnKey = row.id;
     const assistantTurnKey = previousAssistant?.key ?? null;
     return {
         ...patch,
         key: eventKey(userTurnKey),
         userTurnKey,
         assistantTurnKey,
-        sessionKey: recordKeyPart(row.session, "session"),
+        sessionKey: row.session,
         method: "heuristic",
         userText: textOf(row),
         assistantText: previousAssistant?.text ?? null,
@@ -228,11 +219,11 @@ export function deriveReactionEvents(rows: readonly ReactionEventInput[]): React
     const events: ReactionEventWrite[] = [];
 
     for (const row of rows) {
-        const sessionKey = recordKeyPart(row.session, "session") ?? "unknown";
+        const sessionKey = row.session;
         const text = textOf(row);
         if (isAssistant(row)) {
             previousAssistantBySession.set(sessionKey, {
-                key: recordKeyPart(row.id, "turn") ?? String(row.id),
+                key: row.id,
                 text,
             });
             continue;
@@ -253,82 +244,46 @@ export function deriveReactionEvents(rows: readonly ReactionEventInput[]): React
     return events;
 }
 
-const buildReactionEventStatement = (event: ReactionEventWrite): string =>
-    `UPSERT ${recordRef("reaction_event", event.key)} CONTENT ${surrealObject([
-        ["user_turn", recordRef("turn", event.userTurnKey)],
-        ["assistant_turn", surrealOptionRecord("turn", event.assistantTurnKey)],
-        ["session", surrealOptionRecord("session", event.sessionKey)],
-        ["reaction_type", surrealString(event.reactionType)],
-        ["target", surrealString(event.target)],
-        ["polarity", surrealString(event.polarity)],
-        ["durability", surrealString(event.durability)],
-        ["confidence", event.confidence.toString()],
-        ["method", surrealString(event.method)],
-        ["signals", surrealJsonTextOption(event.signals)],
-        ["user_text", surrealOptionString(event.userText)],
-        ["assistant_text", surrealOptionString(event.assistantText)],
-        ["context_json", surrealJsonTextOption(event.context)],
-        ["ts", surrealDate(event.ts)],
-        ["updated_at", "time::now()"],
-    ])};`;
+export const reactionEventRow = (event: ReactionEventWrite) => cacheRow({
+    id: event.key, user_turn: event.userTurnKey, assistant_turn: event.assistantTurnKey,
+    session: event.sessionKey, reaction_type: event.reactionType, target: event.target,
+    polarity: event.polarity, durability: event.durability, confidence: event.confidence,
+    method: event.method, signals: jsonParam(event.signals), user_text: event.userText,
+    assistant_text: event.assistantText, context_json: jsonParam(event.context),
+    ts: tsParam(event.ts), updated_at: new Date(),
+});
 
-export const buildReactionEventStatements = (
-    events: readonly ReactionEventWrite[],
-): string[] => events.map(buildReactionEventStatement);
-
-const REACTION_DELETE_CHUNK = 200;
-
-/**
- * Scoped deletes for an incremental re-derive: clear every reaction_event whose
- * `user_turn` is in the batch we're about to rewrite. Matching on the field
- * (not the record id) clears rows written under the OLD composite-id scheme
- * (user_turn__assistant_turn__hash) that still occupy the same user_turn under
- * the UNIQUE index - otherwise the fresh user_turn-keyed UPSERT collides with
- * them. Chunked so the IN-list stays a reasonable statement size.
- */
-export const buildReactionEventDeleteStatements = (
-    events: readonly ReactionEventWrite[],
-): string[] => {
-    const userTurns = [...new Set(events.map((event) => event.userTurnKey))];
-    const statements: string[] = [];
-    for (let i = 0; i < userTurns.length; i += REACTION_DELETE_CHUNK) {
-        const refs = userTurns
-            .slice(i, i + REACTION_DELETE_CHUNK)
-            .map((key) => recordRef("turn", key))
-            .join(", ");
-        statements.push(`DELETE reaction_event WHERE user_turn IN [${refs}];`);
-    }
-    return statements;
-};
-
-const fetchTurns = (sinceDays: number | undefined): Effect.Effect<ReactionEventInput[], DbError, SurrealClient> =>
+const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly ReactionEventInput[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceWhereClause(sinceDays);
-        const [rows] = yield* db.query<[ReactionEventInput[]]>(`
-SELECT id, session, session.source AS source, seq, role, message_kind, intent_kind, text, text_excerpt, type::string(ts) AS ts
-FROM turn
-${since}
-ORDER BY session, seq;`);
-        return rows ?? [];
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, seq: Schema.Number, role: Schema.String,
+            source: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
+            intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
+            text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn,
+        }), `SELECT t.id, t.session, CAST(t.seq AS DOUBLE) AS seq, t.role, s.source,
+                    t.message_kind, t.intent_kind, t.text, t.text_excerpt, t.ts
+             FROM turn t JOIN session s ON s.id = t.session
+             ${sinceDays === undefined ? "" : "WHERE t.ts >= current_timestamp - (? * INTERVAL '1 day')"}
+             ORDER BY t.session, t.seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
 export const deriveReactionEventRows = (
+    write: CacheWriteService,
     opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<ReactionEventsStats, DbError, SurrealClient> =>
+): Effect.Effect<ReactionEventsStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* fetchTurns(opts.sinceDays);
+        const rows = yield* fetchTurns(write, opts.sinceDays);
         const events = deriveReactionEvents(rows);
         if (opts.sinceDays === undefined) {
             // Full re-derive: wipe and rebuild.
-            yield* db.query("DELETE reaction_event;");
+            yield* write.exec("DELETE FROM reaction_event");
         } else if (events.length > 0) {
             // Incremental: delete the reaction_events for just the user_turns we
             // re-derive (idempotent + self-heals legacy composite-id rows).
-            yield* executeStatementsWith(db, buildReactionEventDeleteStatements(events), { chunkSize: 50 });
+            const userTurns = [...new Set(events.map((event) => event.userTurnKey))];
+            for (const userTurn of userTurns) yield* write.exec("DELETE FROM reaction_event WHERE user_turn = ?", [userTurn]);
         }
-        yield* executeStatementsWith(db, buildReactionEventStatements(events), { chunkSize: 500 });
+        yield* write.putMany("reaction_event", events.map(reactionEventRow));
         const clusters = new Set(events.map((event) =>
             `${event.reactionType}:${event.target}:${event.durability}`,
         )).size;
@@ -347,12 +302,12 @@ export class ReactionEventsStageStats extends BaseStageStats.extend<ReactionEven
     clusters: Schema.Number,
 }) {}
 
-export const reactionEventsStage: StageDef<ReactionEventsStageStats, SurrealClient> = {
+export const reactionEventsStage: StageDef<ReactionEventsStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "reaction-events", deps: ["turn-analysis"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveReactionEventRows({ sinceDays: sinceDaysFromCtx(ctx) });
+            const result = yield* deriveReactionEventRows(write, { sinceDays: sinceDaysFromCtx(ctx) });
             return ReactionEventsStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `derived ${result.events} context-aware reaction events across ${result.clusters} clusters`,

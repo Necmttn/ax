@@ -5,7 +5,6 @@ import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { stringOrNull } from "@ax/lib/shared/surreal";
-import { sessionProjectClause } from "../metrics/session-filter.ts";
 
 // ---------------------------------------------------------------------------
 // Lines-of-code metric (analog of Claude Code OTEL `claude_code.lines_of_code.count`).
@@ -193,7 +192,7 @@ const mapRows = (rows: ReadonlyArray<Record<string, unknown>>): RawEditRow[] =>
 const querySessionClauses = (selector: Extract<LocSelector, { kind: "query" }>): string[] => {
     const clauses: string[] = [];
     if (selector.since) clauses.push(`session.started_at >= ${surrealDate(selector.since)}`);
-    if (selector.project) clauses.push(sessionProjectClause(selector.project, "session."));
+    if (selector.project) clauses.push(`(session.project = ${surrealString(selector.project)} OR session.cwd = ${surrealString(selector.project)})`);
     if (selector.repositoryKey) {
         clauses.push(`session.repository = ${recordLiteral("repository", selector.repositoryKey)}`);
     }

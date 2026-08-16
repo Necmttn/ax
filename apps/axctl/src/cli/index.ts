@@ -6,7 +6,7 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheRead, CacheReadLive, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
@@ -67,10 +67,9 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
-import { correlateOrphanOtel } from "../otel/correlate.ts";
 import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
-import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
+import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
@@ -303,12 +302,21 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
-    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
+    // `JudgmentLive` rides along because judgment-domain ingest stages (skills'
+    // frontmatter role tags, digest's open-proposal count) resolve `Judgment`.
+    // That is safe HERE and not for `CacheRead`: the sidecar has no snapshot and
+    // no publish step, so a row a stage writes is visible to the next statement
+    // in the same run - see the note in `apps/axctl/src/judgment.ts`. The daemon
+    // ingest runtime (`dashboard/serve-runtime.ts`) already merges it.
+    const layer = Layer.merge(
+        transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
+        JudgmentLive,
+    );
     return runCli(args).pipe(
-        // After ingest completes successfully, link orphan OTLP rows to their
-        // sessions via telemetry_of edges. Best-effort: never fails the ingest.
-        Effect.tap(() => Effect.ignore(correlateOrphanOtel())),
-        Effect.provideService(CacheRead, throwingCacheRead()),
+        // OTLP correlation moved INSIDE the run (ingest/run.ts): it writes
+        // telemetry_of edges, so it needs the lock-held live writer, not a
+        // post-hoc tap on a runtime that no longer holds one.
+        withoutCacheRead,
         Effect.provide(layer),
         Effect.scoped,
     );
@@ -325,15 +333,6 @@ const throwingSurrealClient = (): SurrealClientShape =>
         get(_target, prop) {
             throw new Error(
                 `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
-            );
-        },
-    });
-
-const throwingCacheRead = (): CacheReadService =>
-    new Proxy({} as CacheReadService, {
-        get(_target, prop) {
-            throw new Error(
-                `axctl: CacheRead.${String(prop)} accessed inside the ingest runtime`,
             );
         },
     });

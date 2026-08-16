@@ -1,10 +1,8 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { inClause } from "@ax/lib/duckdb/clause";
 import { BaseStageStats, type IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
-import type { StageDef } from "./stage/registry.ts";
+import type { IngestStageError, StageDef } from "./stage/registry.ts";
 import { advanceRevertedWatermark, computeRevertedCommits } from "../metrics/commit-reverted.ts";
 import { advancePrMergeWatermark, computePrMergeDirtySessions } from "../metrics/pr-merge-dirty.ts";
 import { computeDurability } from "../metrics/durability.ts";
@@ -24,7 +22,8 @@ export interface DeriveMetricsStats {
     readonly costBackfilled: number;
 }
 
-const num = (n: number | null): string => (n === null ? "NONE" : String(n));
+const SessionIdRow = Schema.Struct({ id: Schema.String });
+const ParentRow = Schema.Struct({ parent: Schema.String });
 
 /**
  * Recompute the per-session metrics rollup.
@@ -40,8 +39,7 @@ const num = (n: number | null): string => (n === null ? "NONE" : String(n));
  * session.
  */
 export const deriveMetrics = Effect.fn("derive.metrics")(
-    function* (opts: { sinceDays: number | undefined }) {
-        const db = yield* SurrealClient;
+    function* (write: CacheWriteService, opts: { sinceDays: number | undefined }) {
 
         // 0. Stored cost backfill: price `session_token_usage` rows that were
         //    never priced at ingest and persist `estimated_cost_usd` +
@@ -50,13 +48,13 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         //    needing the read-time `fillEstimatedCost` helper. Independent of
         //    the dirty set - runs before the empty-dirty early return so daemon
         //    `--since=1` ingests heal history incrementally.
-        const costs = yield* deriveCostBackfill().pipe(
+        const costs = yield* deriveCostBackfill(write).pipe(
             Effect.tap((c) => Effect.annotateCurrentSpan("derive.cost.backfilled", c.backfilled)),
             Effect.withSpan("derive.cost-backfill"),
         );
 
         // 1. Freshness backbone - full-history commit.reverted (diff-only writes).
-        const reverted = yield* computeRevertedCommits().pipe(
+        const reverted = yield* computeRevertedCommits(write).pipe(
             Effect.tap((r) =>
                 Effect.all([
                     Effect.annotateCurrentSpan("derive.reverted.count", r.revertedCount),
@@ -71,7 +69,7 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         //     github-pr ingest. Without this, an OLD session whose PR merges
         //     LATER keeps a stale/NULL time_to_land_ms on the daemon's
         //     `--since=1` path until a full re-derive.
-        const prDirty = yield* computePrMergeDirtySessions().pipe(
+        const prDirty = yield* computePrMergeDirtySessions(write).pipe(
             Effect.withSpan("derive.pr-merge-dirty"),
         );
 
@@ -80,21 +78,24 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         //    Keying on the changed set - not "currently reverted" - is what makes
         //    a true→false flip recompute the old session's durability instead of
         //    leaving it stale-low (codex adversarial #1 / ADR-0011 dirty-set).
-        const sinceClause = opts.sinceDays
-            ? `started_at >= time::now() - ${Math.max(1, Math.trunc(opts.sinceDays))}d`
-            : "true";
-        const changedRefs = reverted.changedKeys.map((k) => recordLiteral("commit", k));
-        const changedClause = changedRefs.length > 0
-            ? ` OR id IN (SELECT VALUE in FROM produced WHERE out IN [${changedRefs.join(", ")}])`
-            : "";
-        const dirty = (yield* db.query<[string[]]>(
-            `SELECT VALUE type::string(id) FROM session WHERE ${sinceClause}${changedClause};`,
-        ).pipe(Effect.withSpan("derive.dirty-set")))?.[0] ?? [];
-        const dirtySet = new Set(
-            (dirty as unknown as unknown[]).filter(
-                (s): s is string => typeof s === "string" && s.length > 0,
-            ),
-        );
+        const conditions: string[] = [];
+        const params: Array<string | Date> = [];
+        if (opts.sinceDays !== undefined) {
+            conditions.push(`s.started_at >= ?`);
+            params.push(new Date(Date.now() - Math.max(1, Math.trunc(opts.sinceDays)) * 86_400_000));
+        }
+        if (reverted.changedKeys.length > 0) {
+            const changed = inClause("p.out_id", reverted.changedKeys);
+            conditions.push(changed.sql.replace(/^AND /, ""));
+            params.push(...changed.params as string[]);
+        }
+        const dirty = yield* write.rows(
+            SessionIdRow,
+            `SELECT DISTINCT s.id FROM session s LEFT JOIN produced p ON p.in_id = s.id`
+                + (conditions.length === 0 ? "" : ` WHERE ${conditions.join(" OR ")}`),
+            params,
+        ).pipe(Effect.withSpan("derive.dirty-set"));
+        const dirtySet = new Set(dirty.map((row) => row.id));
         // Merge the PR-driven dirty sessions (already `type::string(id)` strings).
         for (const id of prDirty.dirtySessionIds) dirtySet.add(id);
         const sessionIds = [...dirtySet];
@@ -105,18 +106,18 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
             // BEFORE the watermarks advance, so a crash re-runs it next time.
             const cascadeEdges = reverted.skipped
                 ? 0
-                : yield* deriveFragilityCascade().pipe(
+                : yield* deriveFragilityCascade(write).pipe(
                     Effect.tap((edges) => Effect.annotateCurrentSpan("derive.cascade.edges", edges)),
                     Effect.withSpan("derive.fragility-cascade", {
                         attributes: { "derive.cascade.path": "empty-dirty" },
                     }),
                 );
-            if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
+            if (!reverted.skipped) yield* advanceRevertedWatermark(write, reverted.fingerprint);
             // Safe here: prDirty.diff only carries PRs whose merge sha RESOLVED
             // locally (unresolved ones are held back to re-diff next run), so
             // "no dirty sessions" means the resolved PRs mapped to no producing
             // sessions - there are no dependent rows to write first.
-            if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
+            if (!prDirty.skipped) yield* advancePrMergeWatermark(write, prDirty.diff);
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled };
         }
 
@@ -129,26 +130,28 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         let frontier = new Set(sessionIds);
         const all = new Set(sessionIds);
         for (let depth = 0; depth < 8 && frontier.size > 0; depth++) {
-            const refs = [...frontier].map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
-            const parents = (yield* db.query<[string[]]>(
-                `SELECT VALUE type::string(in) FROM spawned WHERE out IN [${refs}];`,
+            const clause = inClause("out_id", [...frontier]);
+            const parents = yield* write.rows(
+                ParentRow,
+                `SELECT DISTINCT in_id AS parent FROM spawned WHERE true ${clause.sql}`,
+                clause.params,
             ).pipe(Effect.withSpan("derive.spawn-parents", {
                 attributes: { "derive.spawn.depth": depth, "derive.spawn.frontier": frontier.size },
-            })))?.[0] ?? [];
+            }));
             frontier = new Set();
-            for (const p of parents) if (typeof p === "string" && !all.has(p)) { all.add(p); frontier.add(p); }
+            for (const row of parents) if (!all.has(row.parent)) { all.add(row.parent); frontier.add(row.parent); }
         }
         const expandedIds = [...all];
 
         // 3. Wave-1 + wave-2 scalars for the dirty set (+ spawn parents).
         const [dur, ttl, loc, tfe, csr, del] = yield* Effect.all(
             [
-                computeDurability(expandedIds),
-                computeTimeToLand(expandedIds),
-                computeSessionLoc(expandedIds),
-                computeTimeToFirstEdit(expandedIds),
-                computeColdStartReads(expandedIds),
-                computeDelegationRatio(expandedIds),
+                computeDurability(write, expandedIds),
+                computeTimeToLand(write, expandedIds),
+                computeSessionLoc(write, expandedIds),
+                computeTimeToFirstEdit(write, expandedIds),
+                computeColdStartReads(write, expandedIds),
+                computeDelegationRatio(write, expandedIds),
             ],
             { concurrency: 6 },
         ).pipe(
@@ -160,28 +163,32 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         );
 
         // 4. One session_metrics row per dirty session (+ spawn parents).
-        const stmts = expandedIds.map((id) => {
-            const key = recordKeyPart(id, "session") ?? "";
-            const sessionRef = recordLiteral("session", key);
+        const rows = expandedIds.map((id) => {
             const d = dur.get(id) ?? { produced: 0, reverted: 0, ratio: null };
             const t = ttl.get(id) ?? null;
             const l = loc.get(id) ?? { added: 0, removed: 0 };
-            return `UPSERT ${recordLiteral("session_metrics", key)} CONTENT { `
-                + `session: ${sessionRef}, `
-                + `durability_ratio: ${num(d.ratio)}, produced_commits: ${d.produced}, reverted_commits: ${d.reverted}, `
-                + `time_to_land_ms: ${num(t)}, lines_added: ${l.added}, lines_removed: ${l.removed}, `
-                + `time_to_first_edit_ms: ${num(tfe.get(id) ?? null)}, cold_start_reads: ${csr.get(id) ?? 0}, `
-                + `delegation_ratio: ${num(del.get(id) ?? null)}, `
-                + `ts: time::now() };`;
+            return {
+                id,
+                session: id,
+                durability_ratio: d.ratio,
+                produced_commits: d.produced,
+                reverted_commits: d.reverted,
+                time_to_land_ms: t,
+                lines_added: l.added,
+                lines_removed: l.removed,
+                time_to_first_edit_ms: tfe.get(id) ?? null,
+                cold_start_reads: csr.get(id) ?? 0,
+                delegation_ratio: del.get(id) ?? null,
+            };
         });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500, label: "sessionMetrics" });
+        yield* write.putMany("session_metrics", rows);
 
         // 5. Fragility-cascade precompute (issue #171): bounded full rewrite of
         //    the `fragility_cascade` table so `ax signals show fragility_cascade`
         //    reads stored rows instead of doing live edge derefs. Runs whenever
         //    sessions were dirty (new `edited` edges can add downstream fixers)
         //    and on reverted-set changes (handled above for the empty dirty set).
-        const cascadeEdges = yield* deriveFragilityCascade().pipe(
+        const cascadeEdges = yield* deriveFragilityCascade(write).pipe(
             Effect.tap((edges) => Effect.annotateCurrentSpan("derive.cascade.edges", edges)),
             Effect.withSpan("derive.fragility-cascade", {
                 attributes: { "derive.cascade.path": "dirty" },
@@ -192,8 +199,8 @@ export const deriveMetrics = Effect.fn("derive.metrics")(
         // dependent session_metrics rows are persisted - a crash before this
         // point re-scans next run instead of silently skipping the affected
         // sessions (codex #2).
-        if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
-        if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
+        if (!reverted.skipped) yield* advanceRevertedWatermark(write, reverted.fingerprint);
+        if (!prDirty.skipped) yield* advancePrMergeWatermark(write, prDirty.diff);
         return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled } satisfies DeriveMetricsStats;
     },
 );
@@ -212,13 +219,13 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
     costBackfilled: Schema.Number,
 }) {}
 
-export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
+export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, never, IngestStageError> = {
     meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "session-health", "spawned"], tags: ["derive"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
-        const r = yield* deriveMetrics({ sinceDays: sinceDaysFromCtx(ctx) });
+        const r = yield* deriveMetrics(write, { sinceDays: sinceDaysFromCtx(ctx) });
         return DeriveMetricsStageStats.make({
             durationMs: Date.now() - t0,
             summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges; ${r.costBackfilled} costs backfilled`,

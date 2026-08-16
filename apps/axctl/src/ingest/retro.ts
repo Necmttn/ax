@@ -24,16 +24,27 @@
  * Both paths upsert the same `retro` table (UNIQUE on session). Later
  * derive stages cluster `failed` strings across sessions to surface real
  * recurring friction.
+ *
+ * The two halves sit in DIFFERENT v2 stores, and that is the point. The
+ * heuristic READER summarises graph rows - turns, tool calls, corrections,
+ * edits, commits - which are rebuildable, so it reads the DuckDB cache through a
+ * reader passed as an ARGUMENT (the CLI hands it `yield* CacheRead`; an
+ * ingest-time caller would hand it the lock-held writer). The WRITER stores a
+ * reflection, which is durable judgment nothing can re-derive, so it writes the
+ * SQLite sidecar.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import type {
+    CacheReadError,
+    CacheReadService,
+    CacheWriteError,
+    CacheWriteService,
+} from "@ax/lib/duckdb/seam";
 import { encodeJson } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "@ax/lib/shared/surql";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
-import { stableId } from "@ax/lib/stable-id";
+import { edgeRowId, stableId } from "@ax/lib/stable-id";
+import { listStoredRetros } from "../queries/judgment-retros.ts";
 
 export type RetroSource =
     | "claude_stop_hook"
@@ -62,7 +73,7 @@ export interface RetroInput {
 // ---------------------------------------------------------------------------
 
 interface SessionStatRow {
-    readonly id: string | { tb: string; id: string };
+    readonly id: string;
     readonly project: string | null;
     readonly turns: number;
     readonly tool_calls: number;
@@ -77,28 +88,45 @@ interface SessionStatRow {
     readonly top_file: string | null;
     readonly produced_commits: number;
     readonly friction_kinds: ReadonlyArray<string>;
-    readonly repository: string | { tb: string; id: string } | null;
+    readonly repository: string | null;
 }
 
-const sessionStatsSql = (sessionRef: string) => `
+const SessionStatSchema = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    turns: Schema.BigInt,
+    tool_calls: Schema.BigInt,
+    tool_errors: Schema.BigInt,
+    corrections: Schema.BigInt,
+    distinct_tools: Schema.BigInt,
+    distinct_files_edited: Schema.BigInt,
+    top_tool: Schema.NullOr(Schema.String),
+    top_tool_count: Schema.BigInt,
+    top_failed_tool: Schema.NullOr(Schema.String),
+    top_failed_tool_count: Schema.BigInt,
+    top_file: Schema.NullOr(Schema.String),
+    produced_commits: Schema.BigInt,
+    friction_kinds: Schema.String,
+    repository: Schema.NullOr(Schema.String),
+});
+
+const sessionStatsSql = `
     SELECT
-        id,
-        project,
-        repository,
-        (SELECT count() FROM turn WHERE session = $parent.id GROUP ALL)[0].count ?? 0 AS turns,
-        (SELECT count() FROM tool_call WHERE session = $parent.id GROUP ALL)[0].count ?? 0 AS tool_calls,
-        (SELECT count() FROM tool_call WHERE session = $parent.id AND has_error = true GROUP ALL)[0].count ?? 0 AS tool_errors,
-        (SELECT count() FROM corrected_by WHERE in.session = $parent.id GROUP ALL)[0].count ?? 0 AS corrections,
-        array::len(array::distinct((SELECT VALUE name FROM tool_call WHERE session = $parent.id))) AS distinct_tools,
-        array::len(array::distinct((SELECT VALUE out FROM edited WHERE in.session = $parent.id))) AS distinct_files_edited,
-        ((SELECT name, count() AS c FROM tool_call WHERE session = $parent.id GROUP BY name ORDER BY c DESC LIMIT 1)[0].name) AS top_tool,
-        ((SELECT name, count() AS c FROM tool_call WHERE session = $parent.id GROUP BY name ORDER BY c DESC LIMIT 1)[0].c ?? 0) AS top_tool_count,
-        ((SELECT name, count() AS c FROM tool_call WHERE session = $parent.id AND has_error = true GROUP BY name ORDER BY c DESC LIMIT 1)[0].name) AS top_failed_tool,
-        ((SELECT name, count() AS c FROM tool_call WHERE session = $parent.id AND has_error = true GROUP BY name ORDER BY c DESC LIMIT 1)[0].c ?? 0) AS top_failed_tool_count,
-        ((SELECT out.path AS p, count() AS c FROM edited WHERE in.session = $parent.id GROUP BY p ORDER BY c DESC LIMIT 1)[0].p) AS top_file,
-        (SELECT count() FROM produced WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS produced_commits,
-        array::distinct((SELECT VALUE kind FROM friction_event WHERE session = $parent.id)) AS friction_kinds
-    FROM ${sessionRef} LIMIT 1;
+        s.id, s.project, s.repository,
+        (SELECT count(*) FROM turn t WHERE t.session = s.id) AS turns,
+        (SELECT count(*) FROM tool_call tc WHERE tc.session = s.id) AS tool_calls,
+        (SELECT count(*) FROM tool_call tc WHERE tc.session = s.id AND tc.has_error = true) AS tool_errors,
+        (SELECT count(*) FROM corrected_by cb JOIN turn t ON t.id = cb.in_id WHERE t.session = s.id) AS corrections,
+        (SELECT count(DISTINCT tc.name) FROM tool_call tc WHERE tc.session = s.id) AS distinct_tools,
+        (SELECT count(DISTINCT e.out_id) FROM edited e JOIN turn t ON t.id = e.in_id WHERE t.session = s.id) AS distinct_files_edited,
+        (SELECT tc.name FROM tool_call tc WHERE tc.session = s.id GROUP BY tc.name ORDER BY count(*) DESC LIMIT 1) AS top_tool,
+        COALESCE((SELECT count(*) FROM tool_call tc WHERE tc.session = s.id GROUP BY tc.name ORDER BY count(*) DESC LIMIT 1), 0) AS top_tool_count,
+        (SELECT tc.name FROM tool_call tc WHERE tc.session = s.id AND tc.has_error = true GROUP BY tc.name ORDER BY count(*) DESC LIMIT 1) AS top_failed_tool,
+        COALESCE((SELECT count(*) FROM tool_call tc WHERE tc.session = s.id AND tc.has_error = true GROUP BY tc.name ORDER BY count(*) DESC LIMIT 1), 0) AS top_failed_tool_count,
+        (SELECT f.path FROM edited e JOIN turn t ON t.id = e.in_id JOIN file f ON f.id = e.out_id WHERE t.session = s.id GROUP BY f.path ORDER BY count(*) DESC LIMIT 1) AS top_file,
+        (SELECT count(*) FROM produced p WHERE p.in_id = s.id) AS produced_commits,
+        COALESCE((SELECT to_json(list(DISTINCT fe.kind))::VARCHAR FROM friction_event fe WHERE fe.session = s.id), '[]') AS friction_kinds
+    FROM session s WHERE s.id = ? LIMIT 1
 `;
 
 export const composeHeuristicRetro = (stat: SessionStatRow): RetroPayload => {
@@ -150,29 +178,31 @@ export const composeHeuristicRetro = (stat: SessionStatRow): RetroPayload => {
  * uses SurrealDB record syntax, not a string comparison.
  */
 export const retroFromSession = (
+    read: CacheReadService,
     sessionKeyOrId: string,
-): Effect.Effect<RetroInput | null, DbError, SurrealClient> =>
+): Effect.Effect<RetroInput | null, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const key = sessionKeyOrId.startsWith("session:")
             ? sessionKeyOrId.slice("session:".length).replace(/`/g, "")
             : sessionKeyOrId;
-        const sessionRef = recordRef("session", key);
-        const result = yield* db.query<[SessionStatRow[]]>(
-            sessionStatsSql(sessionRef),
-        );
-        const stat = (result?.[0] ?? [])[0];
+        const result = yield* read.rows(SessionStatSchema, sessionStatsSql, [key]);
+        const row = result[0];
+        const stat: SessionStatRow | undefined = row ? {
+            ...row,
+            turns: Number(row.turns), tool_calls: Number(row.tool_calls), tool_errors: Number(row.tool_errors),
+            corrections: Number(row.corrections), distinct_tools: Number(row.distinct_tools),
+            distinct_files_edited: Number(row.distinct_files_edited), top_tool_count: Number(row.top_tool_count),
+            top_failed_tool_count: Number(row.top_failed_tool_count), produced_commits: Number(row.produced_commits),
+            friction_kinds: JSON.parse(row.friction_kinds) as string[],
+        } : undefined;
         if (!stat) return null;
         const payload = composeHeuristicRetro(stat);
-        const sessionKey = recordKeyPart(stat.id, "session");
-        if (!sessionKey) return null;
-        const repositoryKey = stat.repository ? recordKeyPart(stat.repository, "repository") : null;
         return {
-            sessionId: sessionKey,
+            sessionId: stat.id,
             source: "heuristic",
             payload,
             raw: encodeJson({ stat }),
-            ...(repositoryKey ? { repositoryKey } : {}),
+            ...(stat.repository ? { repositoryKey: stat.repository } : {}),
         };
     });
 
@@ -188,6 +218,60 @@ export const retroFromSession = (
  */
 export const retroRecordKey = (sessionId: string): string =>
     stableId("retro", [sessionId.replace(/^session:/, "")]);
+
+/**
+ * Re-derive the cache-resident `reviewed` edge (session -> retro).
+ *
+ * The edge is a MINED row, so `schema.duckdb.sql` keeps it in the cache while
+ * the retro itself moved to the sidecar. That split leaves the edge with no
+ * request-time writer: `ax retro emit` runs OUTSIDE the ingest lock and the
+ * cache is writable only inside it. So the edge is rebuilt here, during ingest,
+ * from the sidecar retros that already exist - which is exactly the property
+ * the DDL claims for it.
+ *
+ * Only retros whose session is still IN the cache get an edge. A session the
+ * cache no longer holds is a dangling ref (`cache-integrity` counts those); an
+ * edge pointing at nothing would just be a second copy of the same dangle.
+ */
+export const syncReviewedEdges = (
+    write: CacheWriteService,
+): Effect.Effect<number, CacheWriteError | CacheReadError | JudgmentError, Judgment> =>
+    Effect.gen(function* () {
+        const retros = yield* listStoredRetros({ limit: 100_000 });
+        const retroBySession = new Map<string, string>();
+        for (const retro of retros) {
+            retroBySession.set(retro.session.replace(/^session:/, ""), retro.id);
+        }
+        if (retroBySession.size === 0) return 0;
+
+        const sessionIds = [...retroBySession.keys()];
+        const present = new Set<string>();
+        for (let offset = 0; offset < sessionIds.length; offset += SESSION_PROBE_CHUNK) {
+            const chunk = sessionIds.slice(offset, offset + SESSION_PROBE_CHUNK);
+            const rows = yield* write.rows(
+                SessionIdSchema,
+                `SELECT id FROM session WHERE id IN (${chunk.map(() => "?").join(", ")})`,
+                chunk,
+            );
+            for (const row of rows) present.add(row.id);
+        }
+
+        const edges = [...retroBySession]
+            .filter(([session]) => present.has(session))
+            .map(([session, retroId]) => ({
+                id: edgeRowId("reviewed", session, retroId),
+                in_id: session,
+                out_id: retroId,
+                created_at: new Date(),
+            }));
+        if (edges.length > 0) yield* write.putMany("reviewed", edges);
+        return edges.length;
+    });
+
+/** Max session ids per existence probe (keeps the query string sane). */
+const SESSION_PROBE_CHUNK = 500;
+
+const SessionIdSchema = Schema.Struct({ id: Schema.String });
 
 export const upsertRetro = (
     input: RetroInput,

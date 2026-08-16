@@ -17,28 +17,34 @@
  *   3 → synthetic skill ids
  *   4 → skill names
  *   5 → recovered_by edges (skill → session mapping)
- *   6 → otel_log_event latency (from sessionTelemetryLatency, when sessions found)
+ * Recovery latency comes from the DuckDB cache, not a positional response.
  */
 import { describe, it, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
 import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
-import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import type { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { Judgment } from "@ax/lib/sqlite";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
 
 const runWithMock = <A, E>(
     db: TestSurrealClient,
-    effect: Effect.Effect<A, E, SurrealClient | Judgment>,
+    effect: Effect.Effect<A, E, SurrealClient | Judgment | CacheRead>,
     sparSessions: readonly string[] = [],
-) => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(
+    // Recovery latency now comes from the published DuckDB cache
+    // (`sessionTelemetryLatency` reads `otel_log_event` through `CacheRead`),
+    // NOT from a positional SurrealDB response - hence its own stub here.
+    latencyRows: ReadonlyArray<Record<string, unknown>> = [],
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
     db.layer,
     judgmentTestLayer((sql) => {
         if (sql.includes("FROM session_label")) return sparSessions.map((session_id) => ({ session_id }));
         if (sql.includes("JOIN role")) return mockRoleRows[0];
         return [];
     }),
+    cacheReadTestLayer((sql) => sql.includes("otel_log_event") ? latencyRows : []),
 ))));
 
 // ---------------------------------------------------------------------------
@@ -312,10 +318,9 @@ describe("recovery latency (lens E)", () => {
             [[]],              // 4 - synthetic
             [[]],              // 5 - names
             mockRecoveryEdges, // 6 - recovered_by
-            mockLatencyRows,   // 7 - otel_log_event latency
         ]);
 
-        const result = await runWithMock(db, fetchSkillsWeighted());
+        const result = await runWithMock(db, fetchSkillsWeighted(), [], mockLatencyRows[0]!);
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
 
         // median of [4000, 6000] (sorted) = (4000+6000)/2 = 5000
@@ -330,10 +335,9 @@ describe("recovery latency (lens E)", () => {
             [[]],
             [[]],
             mockRecoveryEdges, // only tdd in edges; caveman absent
-            mockLatencyRows,
         ]);
 
-        const result = await runWithMock(db, fetchSkillsWeighted());
+        const result = await runWithMock(db, fetchSkillsWeighted(), [], mockLatencyRows[0]!);
         const caveman = result.rows.find((r) => r.skill_name === "caveman")!;
 
         expect(caveman.median_recovery_ms).toBeNull();
@@ -346,7 +350,7 @@ describe("recovery latency (lens E)", () => {
             [[]],
             [[]],
             [[]],
-            [[]], // empty recovered_by - sessionTelemetryLatency exits early (no call 8)
+            [[]], // empty recovered_by - sessionTelemetryLatency exits early
         ]);
 
         const result = await runWithMock(db, fetchSkillsWeighted());
@@ -378,10 +382,9 @@ describe("recovery latency (lens E)", () => {
             [[]],
             [[]],
             singleEdge,
-            singleLatency,
         ]);
 
-        const result = await runWithMock(db, fetchSkillsWeighted());
+        const result = await runWithMock(db, fetchSkillsWeighted(), [], singleLatency[0]!);
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
 
         expect(tdd.median_recovery_ms).toBe(3750);
@@ -407,10 +410,9 @@ describe("recovery latency (lens E)", () => {
             [[]],
             [[]],
             edges,
-            latency,
         ]);
 
-        const result = await runWithMock(db, fetchSkillsWeighted());
+        const result = await runWithMock(db, fetchSkillsWeighted(), [], latency[0]!);
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
 
         // median of [1000, 3000] = 2000 (s3 absent → not counted)

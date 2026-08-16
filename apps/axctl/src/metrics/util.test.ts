@@ -10,18 +10,22 @@ import {
     numOrNull,
     numOrZero,
     SESSION_METRICS_LEGEND,
-    sessionRefList,
+    sessionIdsClause,
     strOrNull,
 } from "./util.ts";
 import type { SessionMetricsRow } from "./session-metrics-query.ts";
 
-describe("sessionRefList", () => {
-    test("builds a comma-joined record-literal IN-list body", () => {
-        // Already-formed `session:`key`` ids round-trip to themselves.
-        expect(sessionRefList(["session:`a`", "session:`b`"])).toBe("session:`a`, session:`b`");
+describe("sessionIdsClause", () => {
+    test("binds every id instead of adding it to SQL text", () => {
+        const clause = sessionIdsClause("session", ["a' OR TRUE", "b"]);
+        expect(clause).toEqual({
+            sql: "AND session IN (?, ?)",
+            params: ["a' OR TRUE", "b"],
+        });
+        expect(clause.sql).not.toContain("'");
     });
-    test("empty input → empty string", () => {
-        expect(sessionRefList([])).toBe("");
+    test("empty input produces no clause", () => {
+        expect(sessionIdsClause("session", [])).toEqual({ sql: "", params: [] });
     });
 });
 
@@ -46,6 +50,9 @@ describe("isoMs", () => {
     test("parses an ISO datetime to epoch ms", () => {
         expect(isoMs("1970-01-01T00:00:00.000Z")).toBe(0);
         expect(isoMs("2020-01-01T00:00:00.000Z")).toBe(Date.UTC(2020, 0, 1));
+    });
+    test("reads the Date returned for a DuckDB TIMESTAMP", () => {
+        expect(isoMs(new Date("2020-01-01T00:00:00.000Z"))).toBe(Date.UTC(2020, 0, 1));
     });
     test("non-string → null", () => {
         expect(isoMs(null)).toBeNull();

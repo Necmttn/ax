@@ -1,129 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { sessionRowId } from "@ax/lib/stable-id";
 import { bareUuid, correlateOrphanOtel } from "./correlate.ts";
 
 const UUID = "019fbf3f-9241-40c3-b699-e1f62e7c5341";
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("OTLP correlate", { requireFts: true });
 
-// Wave-0 finding P1-3: OTLP correlation matches sessions by extracting the uuid
-// straight out of `session.id`. If sessionRowId HASHED the uuid (the earlier
-// bug), bareUuid(session.id) would return null and every telemetry_of edge
-// would silently vanish. This pins the contract: a session row id round-trips
-// back to the exact uuid this matcher looks for.
-describe("session row id <-> OTLP correlation round-trip (P1-3)", () => {
-    test("bareUuid(sessionRowId(uuid)) recovers the uuid", () => {
+describe("session row id and OTLP correlation", () => {
+    test("recovers top-level UUIDs and rejects subagent ids", () => {
         expect(bareUuid(sessionRowId("claude", UUID))).toBe(UUID);
         expect(bareUuid(sessionRowId("codex", UUID))).toBe(UUID);
-    });
-
-    test("a subagent session id (non-uuid) yields no uuid, so it is not correlated", () => {
         expect(bareUuid(sessionRowId("claude", "claude-subagent-af3f3b45c70ccf85c"))).toBeNull();
     });
-});
 
-/**
- * Stub the four query shapes the pass issues, in order:
- *   1. SELECT id FROM session            -> existing sessions (bare-uuid set)
- *   2. SELECT in FROM telemetry_of       -> already-linked sessions
- *   3..N SELECT id, session_id FROM <otel table> ... GROUP BY session_id
- * GROUP BY collapses `id` into an array, which the stub mirrors.
- */
-const makeDb = (opts: {
-    sessions?: unknown[];
-    linked?: unknown[];
-    metric?: Array<{ id: unknown; session_id: unknown }>;
-    span?: Array<{ id: unknown; session_id: unknown }>;
-    log?: Array<{ id: unknown; session_id: unknown }>;
-}) => {
-    const sql: string[] = [];
-    const layer = Layer.succeed(SurrealClient, {
-        query: <T>(q: string) => {
-            sql.push(q);
-            if (/FROM session;/.test(q)) {
-                return Effect.succeed([(opts.sessions ?? []).map((id) => ({ id }))] as unknown as T);
-            }
-            if (/FROM telemetry_of;/.test(q)) {
-                return Effect.succeed([(opts.linked ?? []).map((i) => ({ in: i }))] as unknown as T);
-            }
-            if (/otel_metric_point/.test(q)) return Effect.succeed([[...(opts.metric ?? [])]] as unknown as T);
-            if (/otel_span/.test(q)) return Effect.succeed([[...(opts.span ?? [])]] as unknown as T);
-            if (/otel_log_event/.test(q)) return Effect.succeed([[...(opts.log ?? [])]] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
-    return { layer, sql };
-};
+    dtest("writes one session-grain edge across telemetry tables", async () => {
+        let rows: ReadonlyArray<Record<string, unknown>> = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-correlate-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const now = new Date();
+                yield* write.put("session", { id: UUID, source: "claude", started_at: now });
+                yield* write.put("otel_metric_point", {
+                    id: "metric-1", harness: "claude", metric: "cost", value: 1,
+                    session_id: UUID, observed_at: now,
+                });
+                yield* write.put("otel_log_event", {
+                    id: "log-1", harness: "claude", event_name: "usage",
+                    session_id: UUID, observed_at: now,
+                });
+                yield* correlateOrphanOtel(write);
+                rows = yield* write.rows(
+                    Schema.Struct({ in_id: Schema.String, out_id: Schema.String, out_table: Schema.String }),
+                    "SELECT in_id, out_id, out_table FROM telemetry_of",
+                );
+                yield* correlateOrphanOtel(write);
+            }),
+        ));
 
-describe("correlateOrphanOtel", () => {
-    test("RELATEs a session to its representative metric row", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [`session:⟨${UUID}⟩`],
-            metric: [{ id: [`otel_metric_point:⟨a|b|${UUID}|||t⟩`], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        const all = sql.join("\n");
-        expect(all).toContain("RELATE session:");
-        expect(all).toContain("telemetry_of");
-        expect(all).toContain("otel_metric_point:");
-    });
-
-    test("handles a RecordId object id shape (real-SDK case)", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [{ tb: "session", id: UUID }],
-            metric: [{ id: [{ tb: "otel_metric_point", id: "m1" }], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        const all = sql.join("\n");
-        expect(all).toContain("RELATE session:");
-        expect(all).toContain("m1");
-    });
-
-    test("is session-grain: one RELATE even with many rows for the session", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [`session:⟨${UUID}⟩`],
-            // GROUP BY already collapses to one row per session; the id array holds all members.
-            metric: [{ id: [`otel_metric_point:r1`, `otel_metric_point:r2`], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        const relates = sql.filter((q) => q.startsWith("RELATE"));
-        expect(relates.length).toBe(1);
-    });
-
-    test("skips a session that already has a telemetry_of edge (idempotent)", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [`session:⟨${UUID}⟩`],
-            linked: [`session:⟨${UUID}⟩`],
-            metric: [{ id: [`otel_metric_point:m1`], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        expect(sql.join("\n")).not.toContain("RELATE");
-    });
-
-    test("skips otel rows whose session_id has no matching session", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [], // no sessions exist
-            metric: [{ id: [`otel_metric_point:m1`], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        expect(sql.join("\n")).not.toContain("RELATE");
-    });
-
-    test("does not relate the same session twice across tables", async () => {
-        const { layer, sql } = makeDb({
-            sessions: [`session:⟨${UUID}⟩`],
-            metric: [{ id: [`otel_metric_point:m1`], session_id: UUID }],
-            log: [{ id: [`otel_log_event:l1`], session_id: UUID }],
-        });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        const relates = sql.filter((q) => q.startsWith("RELATE"));
-        expect(relates.length).toBe(1);
-        expect(relates[0]).toContain("otel_metric_point:"); // first table wins
-    });
-
-    test("no telemetry → no RELATE", async () => {
-        const { layer, sql } = makeDb({ sessions: [`session:⟨${UUID}⟩`] });
-        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(layer)));
-        expect(sql.join("\n")).not.toContain("RELATE");
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toEqual({ in_id: UUID, out_id: "metric-1", out_table: "otel_metric_point" });
     });
 });

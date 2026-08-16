@@ -1,18 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { computeTimeToFirstEdit } from "./time-to-first-edit.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { computeTimeToFirstEdit as computeTimeToFirstEditWithRead } from "./time-to-first-edit.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 // Route the two reads: edit-class rows (FROM tool_call) and the session
 // starts (direct record access `FROM [session:...]`).
 const db = (editRows: Array<Record<string, unknown>>, starts: Array<Record<string, unknown>>) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            if (/FROM tool_call/.test(sql)) return Effect.succeed([editRows] as unknown as T);
-            if (/FROM \[session:/.test(sql)) return Effect.succeed([starts] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
+    makeTestCacheRead({ routes: [
+        { match: /FROM tool_call/, rows: editRows },
+        { match: /FROM session/, rows: starts },
+    ] }).layer;
+const computeTimeToFirstEdit = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* computeTimeToFirstEditWithRead(yield* CacheRead, ids);
+});
 
 describe("computeTimeToFirstEdit", () => {
     test("ms from started_at to first edit", async () => {

@@ -389,6 +389,119 @@ describe("CacheWrite: publish", () => {
             expect(found.map((r) => r.name)).toEqual(["good"]);
         });
     });
+
+    /**
+     * THE REGRESSION. "Publish only on success" is gated on `body` succeeding,
+     * which means "the ingest succeeded" only while ingest is the sole caller of
+     * this seam. It is not - the CLI stamps the `ingest_run` row from `onTimeout`
+     * and GCs blobs from `afterWork`, each through its own `withCacheWrite`, and
+     * each body is a one-statement write that succeeds no matter how the ingest
+     * it reports on ended.
+     *
+     * Before `publish: false` this sequence published the timed-out run's PARTIAL
+     * database over a good snapshot: the failing ingest correctly withheld its
+     * publish, and the maintenance write that followed handed the half-written
+     * rows to every reader anyway. Ingest runs in no transaction, so the partial
+     * rows are committed and there is nothing to roll back.
+     */
+    dtest("a maintenance write does NOT publish the partial database a failed ingest left behind", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-maintenance-");
+
+            // A good ingest publishes a good snapshot.
+            await run(asIngest(p, (write) => write.put("skill", { id: "s1", name: "good" })));
+            const goodSnapshot = readFileSync(p.snapshotPath);
+
+            // The real ingest writes rows, then times out. No publish - verified
+            // by the case above, and re-asserted here so the sequence is honest.
+            const failed = await Effect.runPromiseExit(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("skill", { id: "s2", name: "half-written" });
+                        return yield* Effect.fail("ingest timed out" as const);
+                    }),
+                ).pipe(Effect.provide(Platform)) as Effect.Effect<unknown, unknown>,
+            );
+            expect(failed._tag).toBe("Failure");
+            expect(readFileSync(p.snapshotPath).equals(goodSnapshot)).toBe(true);
+
+            // The onTimeout shape: a separate, SUCCEEDING maintenance write.
+            await run(
+                withIngestLock(
+                    {
+                        lockPath: p.lockPath,
+                        command: "seam-test-maintenance",
+                        staleMs: 60_000,
+                        onBusy: () => Effect.succeed("busy" as const),
+                    },
+                    withCacheWrite(
+                        {
+                            livePath: p.livePath,
+                            lockPath: p.lockPath,
+                            snapshotPath: p.snapshotPath,
+                            schemaSql: DDL,
+                            publish: false,
+                        },
+                        (write) => write.put("note", { id: "run-1", body: "status=partial" }),
+                    ),
+                ),
+            );
+
+            // The snapshot is still byte-identical to the good one, and the
+            // half-written row never became readable.
+            expect(readFileSync(p.snapshotPath).equals(goodSnapshot)).toBe(true);
+            const found = await run(
+                Effect.gen(function* () {
+                    const read = yield* CacheRead;
+                    return yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill ORDER BY id");
+                }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
+            );
+            expect(found.map((r) => r.name)).toEqual(["good"]);
+        });
+    });
+
+    dtest("the maintenance write still lands in the LIVE database it opted out of publishing", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-maintenance-live-");
+            await run(asIngest(p, (write) => write.put("skill", { id: "s1", name: "good" })));
+
+            await run(
+                withIngestLock(
+                    {
+                        lockPath: p.lockPath,
+                        command: "seam-test-maintenance",
+                        staleMs: 60_000,
+                        onBusy: () => Effect.succeed("busy" as const),
+                    },
+                    withCacheWrite(
+                        {
+                            livePath: p.livePath,
+                            lockPath: p.lockPath,
+                            snapshotPath: p.snapshotPath,
+                            schemaSql: DDL,
+                            publish: false,
+                        },
+                        (write) => write.put("note", { id: "run-1", body: "status=partial" }),
+                    ),
+                ),
+            );
+
+            // Opting out of publishing must not be mistaken for opting out of
+            // writing: the next ingest publishes this row along with its own.
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    write.rows(
+                        Schema.Struct({ id: Schema.String, body: Schema.NullOr(Schema.String) }),
+                        "SELECT id, body FROM note ORDER BY id",
+                    ),
+                ),
+            );
+            expect(outcome).toEqual({
+                _tag: "completed",
+                value: [{ id: "run-1", body: "status=partial" }],
+            });
+        });
+    });
 });
 
 describe("CacheRead", () => {

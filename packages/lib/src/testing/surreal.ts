@@ -2,6 +2,8 @@ import { Effect, Layer } from "effect";
 import type { RecordId, Surreal } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import type { DbError } from "../errors.ts";
+import type { CacheRead, CacheReadService } from "../duckdb/seam.ts";
+import { makeTestCacheRead } from "./cache.ts";
 
 /**
  * Shared in-memory `SurrealClient` test double. One factory replaces the
@@ -84,6 +86,15 @@ export interface TestSurrealClientOptions {
      * the production call order.
      */
     readonly responses?: ReadonlyArray<TestSurrealRows>;
+    /**
+     * Ordered per-call responses for the paired CACHE stream, which runs its own
+     * call counter over its own statements. Kept separate from `responses` on
+     * purpose: positional scripts are per-stream, and a cache-seam reader rarely
+     * issues the same statements in the same order as the Surreal path beside
+     * it. Most tests want `routes` instead, which match on SQL content and are
+     * shared by both doubles.
+     */
+    readonly cacheResponses?: ReadonlyArray<TestSurrealRows>;
     /** Response when nothing else matched. Default `[[]]`. */
     readonly fallback?: TestSurrealResponder;
     /**
@@ -100,6 +111,10 @@ export interface TestSurrealClient {
     readonly client: SurrealClientShape;
     /** Provide as `Effect.provide(tc.layer)`. */
     readonly layer: Layer.Layer<SurrealClient>;
+    /** Independent cache fixture that uses the same static route definitions. */
+    readonly cacheLayer: Layer.Layer<CacheRead>;
+    /** Direct reader for functions that take the cache seam as an argument. */
+    readonly cache: CacheReadService;
     /** Every issued SQL string, in call order. */
     readonly captured: string[];
     /** Every `query` call with its bindings. */
@@ -189,9 +204,35 @@ export const makeTestSurrealClient = (
         raw: opts.raw ?? ({} as never),
     };
 
+    /**
+     * The paired cache fixture. It shares the CONTENT-matched inputs (`routes`,
+     * `fallback`) and deliberately does NOT share `responses`.
+     *
+     * `responses` is positional - "answer the Nth query with this" - and the two
+     * doubles run independent call counters over independent query streams. A
+     * function that reads the cache seam typically issues a DIFFERENT number of
+     * statements than the Surreal path around it, so index N of one stream has
+     * no relationship to index N of the other. Sharing it fed, for example, the
+     * `agent_model` pricing query whatever rows the Surreal cost aggregate had
+     * been given; while the fixture ignored the decode schema that silently
+     * produced a wrong pricing catalog, and now it is a loud decode failure.
+     *
+     * A test that needs to drive the cache stream positionally passes
+     * `cacheResponses`, which is that stream's own script.
+     */
+    const cache = makeTestCacheRead({
+        routes: opts.routes as never,
+        ...(opts.cacheResponses === undefined
+            ? {}
+            : { responses: opts.cacheResponses as never }),
+        fallback: opts.fallback as never,
+    });
+
     return {
         client,
         layer: Layer.succeed(SurrealClient, client),
+        cacheLayer: cache.layer,
+        cache: cache.service,
         captured,
         calls,
         upserts,
@@ -256,8 +297,8 @@ export const makeMockDb = (
             : { responses: responses as ReadonlyArray<TestSurrealRows> }),
     });
 
-/** Run an Effect against a {@link makeMockDb} mock's `SurrealClient` layer. */
+/** Run an Effect against paired static Surreal and cache fixtures. */
 export const runWithMock = <A, E>(
     db: TestSurrealClient,
-    effect: Effect.Effect<A, E, SurrealClient>,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(db.layer)));
+    effect: Effect.Effect<A, E, SurrealClient | CacheRead>,
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(db.layer, db.cacheLayer))));

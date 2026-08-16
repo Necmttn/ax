@@ -2125,12 +2125,16 @@ CREATE INDEX IF NOT EXISTS opportunity_in ON opportunity(in_id);
 -- BY an agent, not derived from what it did, so it lives in schema.sidecar.sql.
 -- `retro.session` and `retro.repository` are refs into this cache. The
 -- `reviewed` edge below stays here: it is re-derivable from the retro rows plus
--- the sessions, and it is what `ax retro pending` traverses.
+-- the sessions.
 
 -- Graph edge: session got a retro. Lets queries traverse both directions
--- (session->reviewed->retro, retro<-reviewed<-session) and ask
--- `WHERE count(->reviewed) = 0` for the pending-retro queue powering
--- `ax retro pending`. Bidirectional + reads cleanly in English.
+-- (session->reviewed->retro, retro<-reviewed<-session).
+--
+-- WHO WRITES IT. `ingest/retro.ts` `syncReviewedEdges`, from the retro-proposals
+-- stage - NOT `ax retro emit`, which runs outside the ingest lock and so cannot
+-- write this cache at all. `ax retro pending` no longer traverses the edge: it
+-- diffs the sidecar retro rows against sessions directly, because the two live
+-- in different engines and no join spans them.
 CREATE TABLE IF NOT EXISTS reviewed (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,

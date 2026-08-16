@@ -11,6 +11,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { recordLiteral } from "@ax/lib/ids";
 import { posixPath } from "@ax/lib/shared/path";
 import { surrealString, refListSource, recordKeyPart } from "@ax/lib/shared/surreal";
@@ -544,8 +545,8 @@ export const scoreSkillSpar = (
     sinceForChurn: Date,
 ): Effect.Effect<
     { sessionA: string; sessionB: string; a: SparMetrics; b: SparMetrics; score: SparScore },
-    DbError | JudgmentError | SparCaptureError,
-    SurrealClient | Judgment | AxConfig
+    DbError | CacheReadError | JudgmentError | SparCaptureError,
+    SurrealClient | CacheRead | Judgment | AxConfig
 > =>
     Effect.gen(function* () {
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);

@@ -11,6 +11,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
@@ -313,21 +314,22 @@ interface TurnWallRow {
 export const fetchSessionMetrics = (
     sessionId: string,
     sinceForChurn: Date,
-): Effect.Effect<SparMetrics, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<SparMetrics, DbError | CacheReadError, SurrealClient | CacheRead | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const cleanId = cleanSessionId(sessionId);
 
-        const costMap = yield* fetchSessionCostMap([sessionId]);
+        const costMap = yield* fetchSessionCostMap(read, [sessionId]);
         const costUsd = costMap.get(cleanId)?.estimatedCostUsd ?? null;
 
         // landed: did this session produce a commit? Read straight off the
         // produced edge (gate-immune), keyed by clean id.
-        const landedLoc = yield* fetchLandedLocBySession([sessionId]);
+        const landedLoc = yield* fetchLandedLocBySession(read, [sessionId]);
         const landed = landedLoc.bySession.has(cleanId);
 
         const CHURN_SCAN_LIMIT = 1000;
-        const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: CHURN_SCAN_LIMIT });
+        const churn = yield* fetchSessionChurnSummary(read, { since: sinceForChurn, limit: CHURN_SCAN_LIMIT });
         const churnRow = churn.hotSessions.find((r) => r.session === cleanId);
         // A miss with a saturated scan means the session fell off the top-N by
         // churn, NOT that it was clean - recording 0 would understate the
@@ -385,8 +387,8 @@ export const captureBaseline = (
     nowIso: string,
 ): Effect.Effect<
     SparBrief,
-    DbError | ProcessError | SparCaptureError,
-    SurrealClient | AxConfig | ProcessService
+    DbError | CacheReadError | ProcessError | SparCaptureError,
+    SurrealClient | CacheRead | AxConfig | ProcessService
 > =>
     Effect.gen(function* () {
         const proc = yield* ProcessService;

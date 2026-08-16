@@ -17,15 +17,13 @@
  * stage. Ingest is merged now so that the port can land without re-wiring every
  * runtime.
  *
- * WHAT IS PORTED SO FAR - and what is NOT, because the difference is currently
- * visible to a user. `ax skills tag` writes a user's tag here at request time,
- * and the role read surface (`ax roles`, `ax skills roles|by-role`) answers from
- * here. The MINED writer has not moved yet: `ingest/skill-role.ts` still writes
- * frontmatter-sourced tags to SurrealDB through `RELATE ...->plays_role->...`,
- * and never touches this service. Until that stage is ported, frontmatter role
- * tags do not appear in the role read surface. When it lands, both writers will
- * share this one service and see each other's rows - `plays_role` already carries
- * `source` in its natural key so the two can coexist on one skill-role pair.
+ * BOTH ROLE WRITERS NOW LAND HERE. `ax skills tag` writes a user's tag at
+ * request time, `ingest/skill-role.ts` writes the MINED frontmatter tags during
+ * ingest, and the role read surface (`ax roles`, `ax skills roles|by-role`)
+ * answers from this one store - so a frontmatter tag and a hand tag see each
+ * other's rows. `plays_role` carries `source` in its natural key, so the two
+ * coexist on one skill-role pair rather than overwriting: the ingest writer
+ * scopes its delete to `source = 'frontmatter'` and never touches a user row.
  */
 import { JudgmentLayer, type Judgment } from "@ax/lib/sqlite";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";

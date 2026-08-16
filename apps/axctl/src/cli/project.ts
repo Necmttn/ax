@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Path } from "effect";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
 import type { DbError } from "@ax/lib/errors";
@@ -80,7 +80,7 @@ function printHarness(payload: ProjectHarnessReport): void {
 
 export const cmdProject = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, DbError | CacheReadError, SurrealClient | CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const [subcommand, ...rest] = args;
         if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {

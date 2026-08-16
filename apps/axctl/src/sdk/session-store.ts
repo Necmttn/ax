@@ -1,16 +1,10 @@
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
-    buildAgentEventStatements,
     type AgentEventBatchWrite,
     type AgentEventWrite,
     type AgentSessionWrite,
-} from "../ingest/provider-events.ts";
-
-import type {
-    BuildAgentEventStatementsOptions,
+    writeAgentEvents,
 } from "../ingest/provider-events.ts";
 
 type JsonInput = unknown;
@@ -289,20 +283,12 @@ export const claudeSdkAppendPayloadToAgentEventBatch = (
     };
 };
 
-export const buildClaudeSdkAppendStatements = (
-    payload: ClaudeSdkSessionAppendPayload,
-    options?: Omit<BuildAgentEventStatementsOptions, "clearExisting">,
-): string[] =>
-    buildAgentEventStatements(claudeSdkAppendPayloadToAgentEventBatch(payload), {
-        ...options,
-        clearExisting: false,
-    });
-
 export const writeClaudeSdkAppendPayload = (
+    write: CacheWriteService,
     payload: ClaudeSdkSessionAppendPayload,
-): Effect.Effect<{ sessions: number; events: number }, DbError, SurrealClient> =>
+): Effect.Effect<{ sessions: number; events: number }, CacheWriteError> =>
     Effect.gen(function* () {
         const batch = claudeSdkAppendPayloadToAgentEventBatch(payload);
-        yield* executeStatements(buildAgentEventStatements(batch, { clearExisting: false }));
+        yield* writeAgentEvents(write, batch, { clearExisting: false });
         return { sessions: batch.sessions.length, events: batch.events.length };
     });

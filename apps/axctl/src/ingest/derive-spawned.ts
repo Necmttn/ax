@@ -1,9 +1,10 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { surrealLiteral } from "@ax/lib/json";
 import { normalizeDelegationToolCall, type NormalizedDelegationSpawn } from "./delegation.ts";
 import type { AgentProviderName } from "./provider-events.ts";
 
@@ -18,7 +19,7 @@ SELECT
     output_excerpt,
     input_json
 FROM tool_call
-WHERE name = "spawn_agent" OR name = "Task"
+WHERE name = 'spawn_agent' OR name = 'Task'
 ORDER BY ts ASC;`;
 
 const stringField = (row: Record<string, unknown>, key: string): string | null => {
@@ -94,17 +95,27 @@ export interface DeriveSpawnedStats {
  * agent UUID, and RELATE parent->child via `spawned`. Idempotent: existing
  * edges are upserted by the same (in,out) pair via UNIQUE-ish dedup.
  */
-export const deriveSpawned = (): Effect.Effect<
+const SpawnSourceRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    name: Schema.String,
+    ts: TimestampColumn,
+    output_excerpt: Schema.NullOr(Schema.String),
+    input_json: Schema.NullOr(Schema.String),
+});
+
+export const deriveSpawned = (write: CacheWriteService): Effect.Effect<
     DeriveSpawnedStats,
-    DbError,
-    SurrealClient
+    CacheWriteError
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            SPAWN_SOURCES_SQL,
-        );
-        const sources = collectSources(rows?.[0] ?? []);
+        const rows = yield* write.rows(SpawnSourceRow, SPAWN_SOURCES_SQL);
+        const sources = collectSources(rows.map((row) => ({
+            ...row,
+            ts: row.ts,
+            output_excerpt: row.output_excerpt ?? undefined,
+            input_json: row.input_json ?? undefined,
+        })));
         const resolved = sources.filter((s) => s.childSessionId !== null);
         const unresolved = sources.length - resolved.length;
 
@@ -116,38 +127,28 @@ export const deriveSpawned = (): Effect.Effect<
         let missing = 0;
         for (const src of resolved) {
             if (!src.childSessionId) continue;
-            // `parent_session_id` already comes back from SurrealDB as the
-            // serialised record id `session:⟨…⟩`. Use it raw, NOT quoted.
             const parentId = src.parentSessionId;
-            const childId = `session:⟨${src.childSessionId}⟩`;
-            // Check existence before RELATE - SurrealDB strict mode rejects
-            // edges that point at non-existent records.
-            const check = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id FROM ${childId};`,
-            );
-            const exists = (check?.[0]?.length ?? 0) > 0;
+            const childId = src.childSessionId;
+            const check = yield* write.rows(Schema.Struct({ id: Schema.String }), "SELECT id FROM session WHERE id = ?", [childId]);
+            const exists = check.length > 0;
             if (!exists) {
                 missing += 1;
                 continue;
             }
-            const callId = src.toolCallId; // already in tool_call:⟨…⟩ form
-            const toolLit = surrealLiteral(src.toolName);
-            const nickLit =
-                src.nickname === null ? "NONE" : surrealLiteral(src.nickname);
-            // agent_type + description come from the spawn-call args (codex). They
-            // drive `ax dispatches` (SPAWNED_SQL filters agent_type != NONE), so
-            // without them codex dispatches never surface in the table.
-            const agentTypeLit =
-                src.agentType === null ? "NONE" : surrealLiteral(src.agentType);
-            const descriptionLit =
-                src.description === null ? "NONE" : surrealLiteral(src.description);
-            // Idempotent: dedupe by (in,out,tool_call) before inserting.
-            yield* db.query(
-                `DELETE spawned WHERE in = ${parentId} AND out = ${childId} AND tool_call = ${callId};`,
-            );
-            yield* db.query(
-                `RELATE ${parentId} -> spawned -> ${childId} SET ts = d${surrealLiteral(src.ts)}, tool = ${toolLit}, tool_call = ${callId}, nickname = ${nickLit}, agent_type = ${agentTypeLit}, description = ${descriptionLit};`,
-            );
+            const callId = src.toolCallId;
+            yield* write.put("spawned", cacheRow({
+                id: stableId("spawned", [parentId, childId, callId]),
+                in_id: parentId,
+                out_id: childId,
+                ts: tsParam(src.ts),
+                tool: src.toolName,
+                tool_call: callId,
+                nickname: src.nickname,
+                agent_type: src.agentType,
+                description: src.description,
+                agent_name: null,
+                tool_use_id: null,
+            }));
             written += 1;
         }
 
@@ -178,12 +179,12 @@ export class SpawnedStats extends BaseStageStats.extend<SpawnedStats>("SpawnedSt
     spawnEdgesWritten: Schema.Number,
 }) {}
 
-export const spawnedStage: StageDef<SpawnedStats, SurrealClient> = {
+export const spawnedStage: StageDef<SpawnedStats, never, CacheWriteError> = {
     meta: StageMeta.make({ key: "spawned", deps: ["claude", "codex"], tags: ["derive"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveSpawned();
+            const result = yield* deriveSpawned(write);
             return SpawnedStats.make({
                 durationMs: Date.now() - t0,
                 summary: `wrote ${result.written} spawn edges`,

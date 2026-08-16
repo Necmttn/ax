@@ -25,9 +25,8 @@
 
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
-import { fileWatermark } from "@ax/lib/shared/watermark";
-import { ingestRunHeartbeatStatement } from "../dashboard/telemetry.ts";
+import { fileWatermark } from "@ax/lib/duckdb/watermark";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { type FileFailureCollector, type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 import type { JsonlFileCandidate } from "./walk-jsonl.ts";
 
@@ -85,11 +84,11 @@ export interface JsonlWorkUnitResult {
 }
 
 export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileCandidate = JsonlFileCandidate>(
+    write: CacheWriteService,
     opts: RunJsonlProviderFilesOptions<E, R, C>,
-): Effect.Effect<JsonlWorkUnitResult, DbError, SurrealClient | R> =>
+): Effect.Effect<JsonlWorkUnitResult, DbError | CacheWriteError, R> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const wm = yield* fileWatermark({ sourceKind: opts.sourceKind, forceEnv: opts.forceEnv });
+        const wm = yield* fileWatermark(write, { sourceKind: opts.sourceKind, forceEnv: opts.forceEnv });
         const failures = makeFileFailureCollector({
             source: opts.source,
             ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
@@ -130,7 +129,10 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                             if (opts.runId !== undefined && shouldHeartbeatIngestRun(completedFiles)) {
                                 // Courtesy signal only: a transient heartbeat
                                 // failure must never fail or roll back ingest.
-                                yield* db.query(ingestRunHeartbeatStatement(opts.runId)).pipe(Effect.ignore);
+                                yield* write.exec(
+                                    "UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    [opts.runId],
+                                ).pipe(Effect.ignore);
                             }
                         }),
                     );

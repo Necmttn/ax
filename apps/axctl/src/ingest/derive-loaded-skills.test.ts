@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
     buildLoadedEdges,
-    renderLoadedEdge,
+    loadedEdgeRow,
     type SpawnInput,
 } from "./derive-loaded-skills.ts";
 
@@ -70,27 +70,19 @@ describe("buildLoadedEdges", () => {
     });
 });
 
-describe("renderLoadedEdge", () => {
-    it("emits a deterministic RELATE with escaped record refs", () => {
-        const sql = renderLoadedEdge({
+describe("loadedEdgeRow", () => {
+    it("builds a deterministic edge row", () => {
+        const row = loadedEdgeRow({
             child: "session:abc",
             skillId: "skill:composto",
             agent: "code-reviewer",
             ts: "2026-06-16T10:00:00.000Z",
         });
-        expect(sql).toContain("RELATE session:`abc`->loaded:`");
-        expect(sql).toContain("->skill:`composto`");
-        expect(sql).toContain('agent = "code-reviewer"');
-        expect(sql).toContain("source = 'frontmatter'");
-        expect(sql).toContain('d"2026-06-16T10:00:00.000Z"');
+        expect(row).toMatchObject({ in_id: "session:abc", out_id: "skill:composto", agent: "code-reviewer", source: "frontmatter" });
     });
 
     it("is deterministic for the same (child, skill)", () => {
         const e = { child: "session:abc", skillId: "skill:x", agent: "a", ts: "2026-06-16T10:00:00.000Z" };
-        expect(renderLoadedEdge(e)).toBe(renderLoadedEdge(e));
-    });
-
-    it("returns null when an id can't be parsed", () => {
-        expect(renderLoadedEdge({ child: "", skillId: "skill:x", agent: "a", ts: "2026-06-16T10:00:00.000Z" })).toBeNull();
+        expect(loadedEdgeRow(e)).toEqual(loadedEdgeRow(e));
     });
 });

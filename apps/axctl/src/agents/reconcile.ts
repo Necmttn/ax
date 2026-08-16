@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { findGitRoot } from "../project/git.ts";
 import {
     reconcileByScope,
@@ -16,11 +16,12 @@ import { AgentSourceRegistry } from "./registry.ts";
  * `agentDefStage` tail runs - this is the on-demand door.
  */
 export const reconcileAgents = (
+    write: CacheWriteService,
     opts?: { readonly dryRun?: boolean },
 ): Effect.Effect<
     ScopedReconcileReport,
-    DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
+    DbError | CacheWriteError,
+    FileSystem.FileSystem | Path.Path | AgentSourceRegistry
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
@@ -44,5 +45,5 @@ export const reconcileAgents = (
                 byScope.set(rec.scopeTag, arr);
             }
         }
-        return yield* reconcileByScope(AGENT_DEF_TABLE, byScope, opts);
+        return yield* reconcileByScope(write, AGENT_DEF_TABLE, byScope, opts);
     });
