@@ -668,15 +668,16 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
 
 export const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const commitIds = Array.from(new Set(touches.map((touch) => touch.commit?.id).filter((id): id is string => !!id))).slice(0, 12);
         if (commitIds.length === 0) return [] as NeighborFile[];
-        const [rows] = yield* db.query<Array<Array<{ path: string }>>>(`
-            SELECT out.path AS path
-            FROM touched
-            WHERE in IN [${commitIds.join(", ")}]
-            LIMIT 200;
-        `);
+        const rows = yield* read.rows(Schema.Struct({ path: Schema.String }), `
+            SELECT f.path AS path
+            FROM touched t
+            JOIN file f ON f.id = t.out_id
+            WHERE t.in_id IN (${commitIds.map(() => "?").join(", ")})
+            LIMIT 200
+        `, commitIds);
         const target = new Set(targetPaths);
         const counts = new Map<string, number>();
         for (const row of rows) {
