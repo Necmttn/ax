@@ -4,7 +4,7 @@ import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/li
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { fetchSessionSummary } from "./session-summary.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session summary");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session summary", { requireFts: true });
 
 describe("session summary", () => {
     dtest("reads one session summary through CacheRead", async () => {

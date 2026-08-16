@@ -4,7 +4,7 @@ import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/li
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { fetchCostSummaryRollup, fetchPricingRows } from "./cost-summary-query.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cost summary");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cost summary", { requireFts: true });
 
 describe("cost summary", () => {
     dtest("reads bound rollups and pricing rows from DuckDB", async () => {

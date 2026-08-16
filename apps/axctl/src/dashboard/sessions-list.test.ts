@@ -5,7 +5,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { _resetBaselineCacheForTests } from "./session-baselines.ts";
 import { fetchSessionChildren, fetchSessionsList } from "./sessions-list.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("sessions list");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("sessions list", { requireFts: true });
 beforeEach(_resetBaselineCacheForTests);
 
 describe("sessions list", () => {

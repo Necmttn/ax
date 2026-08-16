@@ -5,7 +5,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { _resetBaselineCacheForTests } from "./session-baselines.ts";
 import { fetchSessionInsights } from "./session-insights.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session insights");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session insights", { requireFts: true });
 const SID = "aaaaaaaa-0000-0000-0000-000000000001";
 
 beforeEach(_resetBaselineCacheForTests);

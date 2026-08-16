@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
 /**
@@ -20,9 +21,23 @@ const emptyDb = Layer.mock(SurrealClient, {
     raw: null as never,
 });
 
+/**
+ * Empty published snapshot. `/api/sessions` is DuckDB-backed in v2, and the
+ * production `CacheReadLive` needs a real libduckdb that no plain `bun test`
+ * run (or CI) has - without this seam the route answers 500 "the DuckDB library
+ * could not be loaded", which says nothing about the route.
+ *
+ * The default responder is `[]`, so every statement returns no rows: exactly
+ * the empty-data path these status assertions are about. Rows still decode
+ * through the caller's `Schema` (see @ax/lib/testing/cache), and query
+ * CORRECTNESS is asserted elsewhere against a real temp DuckDB
+ * (`duckdbTestSetup` + `publishCacheFixture`), never here.
+ */
+const emptyCache = makeTestCacheRead().layer;
+
 const handlers: ContractWebHandler[] = [];
 function make(services: Parameters<typeof makeContractWebHandler>[0]["services"] = emptyDb): ContractWebHandler {
-    const h = makeContractWebHandler({ ingestStream: null, services });
+    const h = makeContractWebHandler({ ingestStream: null, services, cacheRead: emptyCache });
     handlers.push(h);
     return h;
 }

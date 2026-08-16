@@ -4,7 +4,7 @@ import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/li
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { _resetBaselineCacheForTests, fetchSessionBaselines, median, p90 } from "./session-baselines.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session baselines");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session baselines", { requireFts: true });
 
 describe("session baseline math", () => {
     dtest("computes medians and burn p90 from real DuckDB rows", async () => {
