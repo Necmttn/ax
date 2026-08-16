@@ -6,36 +6,33 @@
  *   - jsonRoute: pure param decoder -> Effect handler -> JSON encode, with
  *     optional respond/errorStatus overrides.
  *   - rawRoute: full Request -> Response escape hatch (SSE /api/events,
- *     binary /api/image, POST /api/ingest - the IngestStreamBus seam - plus
- *     the pure responses that must never build AppLayer: /api/version and
- *     empty-q /api/recall, whose eager SurrealClient build would stall ~5s
- *     without a DB).
+ *     binary /api/image, plus the pure responses that must never build
+ *     AppLayer: /api/version and empty-q /api/recall).
  *
  * The Effect runner is injectable: production passes the server-scoped
  * runtime's runner (serve-runtime.ts), so layers are built once per server
- * lifetime; router/route unit tests pass a stub so they never build AppLayer
- * (and therefore never touch SurrealDB).
+ * lifetime; router/route unit tests pass a stub so they never build AppLayer.
  */
 import { Effect } from "effect";
 import type { Layer } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
 import type { AppLayer } from "@ax/lib/layers";
 import type { Judgment } from "@ax/lib/sqlite";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
- * Everything the serve runtime provides; the upper bound for jsonRoute handler
- * envs.
+ * Everything the studio server runtime provides; the upper bound for
+ * jsonRoute handler envs.
  *
- * `SurrealClient` is named EXPLICITLY rather than inherited from `AppLayer`
- * (wave 3, `c-ingest-cutover` dropped it from that layer). It stays in the
- * union because ~15 dashboard route handlers still execute SurrealQL - it is
- * the honest remaining bill, and `c-read-dashboard` shrinks it to nothing.
+ * NO `SurrealClient` (studio ephemeral, wave 3): `c-read-dashboard` (wave 3's
+ * earlier `c-read-completion` chunk) finished porting every dashboard route
+ * handler off SurrealQL onto `CacheRead`, so the union that used to name it
+ * "the honest remaining bill" is gone - a route handler written to require
+ * `SurrealClient` again would now fail to typecheck against this env, same
+ * enforcement the `IngestRuntimeLayer` DUAL-module rule relies on elsewhere.
  */
-export type DashboardEnv = Layer.Success<typeof AppLayer> | SurrealClient | CacheRead | Judgment;
+export type DashboardEnv = Layer.Success<typeof AppLayer> | CacheRead | Judgment;
 
 /** Runs a handler effect to a Promise. Production = ServeRuntimeHandle.runner. */
 export type EffectRunner = {
@@ -44,14 +41,13 @@ export type EffectRunner = {
 
 /**
  * Server-boot context threaded into raw routes. `null` means the request is
- * being handled WITHOUT a booted server (unit tests, direct invocation);
- * `ingestStream` is null when the Durable Streams sidecar could not start
- * (the compiled binary, which can't load native lmdb). /api/version reports
- * the second case as `live_ingest: false` and POST /api/ingest 503s on both.
+ * being handled WITHOUT a booted server (unit tests, direct invocation).
+ * Empty now that the live-ingest trigger (its Durable Streams sidecar handle
+ * used to live here) was retired in studio ephemeral (wave 3) - kept as a
+ * distinct type rather than deleted outright so a future boot-time fact has
+ * somewhere to land without re-threading every raw route's signature.
  */
-export interface ServeContext {
-    readonly ingestStream: DurableIngestStream | null;
-}
+export type ServeContext = Record<string, never>;
 
 export function jsonResponse(value: unknown, status = 200): Response {
     return new Response(JSON.stringify(value), {

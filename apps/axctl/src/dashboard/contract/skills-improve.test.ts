@@ -37,7 +37,6 @@ describe("isContractRequest - skills/improve/live routing", () => {
         expect(isContractRequest("GET", "/api/improve/analyze-brief")).toBe(true);
         expect(isContractRequest("GET", "/api/wrapped/generate-brief")).toBe(true);
         expect(isContractRequest("GET", "/api/improve/some-sig/impact")).toBe(true);
-        expect(isContractRequest("POST", "/api/ingest")).toBe(true);
     });
 
     test("skill param routes match per method", () => {
@@ -61,6 +60,10 @@ describe("isContractRequest - skills/improve/live routing", () => {
     test("SSE and image stay raw legacy routes", () => {
         expect(isContractRequest("GET", "/api/events")).toBe(false);
         expect(isContractRequest("GET", "/api/image")).toBe(false);
+    });
+
+    test("POST /api/ingest is retired (studio ephemeral, wave 3) - never routes anywhere", () => {
+        expect(isContractRequest("POST", "/api/ingest")).toBe(false);
     });
 });
 
@@ -96,14 +99,4 @@ describe("improve handlers", () => {
         await expect(res.json()).resolves.toEqual({ error: "unknown_improve_action" });
     });
 
-});
-
-describe("live handler", () => {
-    test("POST /api/ingest without a sidecar answers 503 with the compiled-binary message", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/ingest", {}));
-        expect(res.status).toBe(503);
-        const body = await res.json() as { error: string };
-        expect(body.error).toContain("live ingest unavailable");
-    });
 });

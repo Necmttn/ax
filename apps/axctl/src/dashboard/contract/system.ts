@@ -2,37 +2,35 @@
  * Handlers for the system group of the Insights Surface Contract
  * (@ax/lib/shared/api-contract). Behavior parity with the legacy
  * router/routes/system.ts rows is the contract here: same payloads, same
- * status mapping (query failures -> 400, read failures -> { error } 500).
+ * status mapping (read failures -> { error } 500).
+ *
+ * Studio ephemeral (wave 3): `POST /api/query` (the raw read-only SQL
+ * console) and `GET /api/graph-health` are RETIRED, not ported. Both were the
+ * last two things in this contract still reaching for `SurrealClient` -
+ * graph-health's `graphHealthSql` composes correlated SurrealQL sub-queries
+ * with no DuckDB equivalent, and it queries a database that is write-frozen
+ * (wave 3's `c-ingest-cutover`), so it had quietly become a dead reader:
+ * every call would answer against whatever SurrealDB happened to still hold,
+ * never the live graph. Studio ephemeral's whole point is zero required
+ * daemons; keeping either endpoint alive would mean re-opening the one
+ * dependency this chunk exists to remove for a feature (an admin SQL console,
+ * a health scan) that does not belong on a process that reads a published
+ * snapshot and exits. `GET /api/worktrees` and `GET /api/self-improve` were
+ * already ported to `CacheRead` and are unaffected.
  */
-import { Context, Effect } from "effect";
+import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
     AxApi,
     DaemonVersion,
     InternalError,
-    QueryRejected,
-    QueryResult,
     WorktreesResult,
 } from "@ax/lib/shared/api-contract";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AX_VERSION } from "../../cli/version.ts";
-import { graphHealthSql } from "../../queries/graph-health.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
 import { fetchWorktreesOverview } from "../worktrees-overview.ts";
 import { asJsonValue } from "./common.ts";
-import { isSingleReadStatement } from "./read-guard.ts";
-
-/**
- * Boot-time facts the contract handlers need from `serveDashboard`: the
- * Durable Streams sidecar handle when it came up (null on the compiled
- * binary). Provided as a layer when the web handler is built - the
- * contract module itself must stay daemon-agnostic.
- */
-export class ContractServeInfo extends Context.Service<
-    ContractServeInfo,
-    { readonly ingestStream: import("../ingest-stream-durable.ts").DurableIngestStream | null }
->()("axctl/dashboard/ContractServeInfo") {}
 
 const errorText = (err: unknown): string =>
     err instanceof Error ? err.message : String(err);
@@ -43,52 +41,19 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
     handlers
         .handle("version", () =>
             Effect.gen(function* () {
-                const info = yield* ContractServeInfo;
                 return new DaemonVersion({
                     version: AX_VERSION,
                     api_version: API_VERSION,
                     capabilities: dashboardApiCapabilities(),
-                    live_ingest: info.ingestStream !== null,
-                    // OTLP receiver is pure HTTP+JSON+SurrealDB (no native dep),
-                    // so it works in both source and compiled binary - always true.
-                    otlp_receiver: true,
+                    // Retired in studio ephemeral (wave 3): the in-browser
+                    // ingest trigger + its Durable Streams sidecar are gone.
+                    live_ingest: false,
+                    // Retired too: the OTLP receiver moved to its own
+                    // long-lived daemon (`ax otlpd`) - this router registers
+                    // zero /v1/* routes now, so answering `true` here was
+                    // stale (see router/routes/system.ts's parity fix).
+                    otlp_receiver: false,
                 });
-            }))
-        .handle("query", ({ payload }) =>
-            Effect.gen(function* () {
-                const sql = payload.sql.trim();
-                if (!sql) return yield* new QueryRejected({ error: "SQL is required" });
-                if (!isSingleReadStatement(sql)) {
-                    return yield* new QueryRejected({
-                        error: "Only a single SELECT or read-only DuckDB introspection statement is allowed",
-                    });
-                }
-                const started = performance.now();
-                const read = yield* CacheRead;
-                // Undecoded pass-through (`raw`): the console accepts caller-typed
-                // SQL with no schema to decode against - same as the old
-                // SurrealClient.query passthrough. The console's query LANGUAGE
-                // changed with the engine (DuckDB SQL, not SurrealQL) - see
-                // read-guard.ts's module doc.
-                const result = yield* read.raw(sql).pipe(
-                    Effect.mapError((err) => new QueryRejected({ error: errorText(err) })),
-                );
-                return new QueryResult({
-                    result,
-                    durationMs: Math.round(performance.now() - started),
-                });
-            }))
-        // NOT YET PORTED: graphHealthSql (queries/graph-health.ts, chunk 2b's)
-        // composes 6 sub-diagnostics (duplicate-identity scans across 7 edge
-        // tables, a backlink count, array::group aggregation) into one
-        // SurrealQL `RETURN { ... }` object literal - a genuinely complex
-        // multi-query bundle, not a mechanical single-query translation. Left
-        // on SurrealClient (write-frozen but still reachable) until 2b lands a
-        // CacheRead equivalent or this gets its own translation pass.
-        .handle("graphHealth", () =>
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                return yield* db.query(graphHealthSql(25)).pipe(Effect.mapError(internal));
             }))
         .handle("worktrees", () =>
             Effect.gen(function* () {

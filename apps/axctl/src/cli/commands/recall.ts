@@ -12,7 +12,7 @@ import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
 import type { Clause } from "@ax/lib/duckdb/clause";
 import { PickerRow, projectPickerQuery, skillPickerQuery } from "../../queries/recall.ts";
-import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
+import { resolveStudioTarget } from "../banner.ts";
 import { resolveCacheRepository } from "../../queries/repository-scope.ts";
 import { resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";

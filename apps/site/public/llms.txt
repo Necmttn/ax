@@ -77,7 +77,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax signals list | show` - relation-signal catalog (fragility cascades, etc.)
 - `ax sessions metrics`, `ax evidence weekly` - session health and weekly evidence rollups
 - `ax sessions show <id> --turns[=full] --json` - provider-neutral ordered Turn excerpts or full text for one session
-- `ax serve` - local dashboard with live ingest, session browser, and health views
+- `ax studio` - local dashboard, session browser, and health views; ephemeral, exits when the client disconnects
 - `ax otlpd` - OTLP spool receiver (telemetry micro-listener)
 - `ax tui` - terminal skills browser
 
@@ -139,7 +139,7 @@ A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 16 tool
 A: `ax share <session-id>` - sanitized share via GitHub Gist, rendered in the hosted studio viewer.
 
 **Q: I'd rather click than type.**
-A: `ax serve` - local dashboard: live ingest, session browser, health views. `ax tui` for the terminal skills browser.
+A: `ax studio` - local dashboard: session browser, health views. `ax tui` for the terminal skills browser.
 
 **Q: What should I improve in my setup right now?**
 A: Say "let's do an ax retro" - proposal triage + verdict review against your recent work. `ax improve recommend` for the raw shortlist.

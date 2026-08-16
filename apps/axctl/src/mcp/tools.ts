@@ -41,7 +41,7 @@ import {
 } from "../dashboard/sessions-query.ts";
 import { normalizeSessionViewInput } from "../dashboard/session-view.ts";
 import { fetchEnrichedSession } from "../queries/enriched-session.ts";
-import { resolveStudioTarget } from "../dashboard/serve-instance.ts";
+import { resolveStudioTarget } from "../cli/banner.ts";
 import {
     fetchSkillsWeighted,
     normalizeSkillsWeightedParams,

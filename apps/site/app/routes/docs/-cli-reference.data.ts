@@ -666,20 +666,17 @@ pattern PR: https://github.com/Necmttn/ax/pull/999`,
       "Serve the live dashboard, expose the graph to your agent over MCP, or open the terminal UI.",
     commands: [
       {
-        name: "serve",
-        sub: ["status", "stop"],
-        job: "Serve the live web dashboard locally; status/stop manage the running daemon.",
-        signature: "ax serve [--port=N] | ax serve status | ax serve stop",
+        name: "studio",
+        job: "Open the local web studio over the last published snapshot; exits on its own once the client disconnects.",
+        signature: "ax studio [--port=N]",
         flags: [
-          { flag: "--port=N", desc: "dashboard port (default 8520)" },
+          { flag: "--port=N", desc: "studio port (default 1738)" },
         ],
-        receipt: `$ ax serve status
-ax daemon: running (pid 48213)
-  dashboard  http://127.0.0.1:8520
-  studio     http://127.0.0.1:8520/studio`,
+        receipt: `$ ax studio
+  studio + api      http://localhost:1738/`,
         detail: [
-          "Re-running `ax serve` against a live daemon prints the URLs and exits 0; a foreign listener gets a clean port hint.",
-          "status/stop resolve the instance via pidfile → /api/version probe → lsof, so they find pre-pidfile daemons too; stop only kills the pid actually LISTENing on the port.",
+          "Ephemeral, not a daemon: it binds the port only while a client is connected and exits itself after an idle timeout (or a hard cap regardless of activity) - no pidfile, nothing to `status`/`stop`.",
+          "Re-running `ax studio` while another instance already answers on the port prints its URL and exits 0 instead of an EADDRINUSE stack trace; a foreign listener gets a clean port hint.",
         ],
       },
       {

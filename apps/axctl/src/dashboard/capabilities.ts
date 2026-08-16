@@ -29,8 +29,7 @@ export const baseApiCapabilities = [
     "improve-analyze", // GET /api/improve/analyze-brief - deep-analysis brief for agents
     "wrapped-generate", // GET /api/wrapped/generate-brief + agent card deck on /api/wrapped
     "improve-impact", // GET /api/improve/:sig/impact - projected impact per proposal
-    "events",      // /api/events (SSE)
-    "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
+    "events",      // /api/events (SSE) - now reads CacheRead, not a live-ingest trigger
     "image",       // GET /api/image?path= -> local on-disk image bytes
     "otlp",        // POST /v1/traces|/v1/metrics|/v1/logs OTLP/JSON receiver
 ] as const;

@@ -302,10 +302,10 @@ describe("studio deeplinks (#563)", () => {
         );
     });
 
-    test("not-live target keeps the default-port URL but nudges `ax serve`", () => {
+    test("not-live target keeps the default-port URL but nudges `ax studio`", () => {
         const link = studioSessionLink(UUID_A, { baseUrl: "http://localhost:1738", live: false });
         expect(link.url).toBe(`http://localhost:1738/sessions/${UUID_A}`);
-        expect(link.description).toContain("ax serve");
+        expect(link.description).toContain("ax studio");
     });
 
     test("buildSessionsNext attaches a per-row Studio deeplink when studio is set", () => {
