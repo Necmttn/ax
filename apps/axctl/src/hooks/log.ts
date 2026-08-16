@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { JsonArrayColumn, NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { hoursAgoExpr } from "@ax/lib/duckdb/clause";
 
 export interface HookLogRow {
     readonly ts: Date;
@@ -34,7 +35,11 @@ export function buildHookLogQuery(opts: HookLogQueryOptions): HookLogQuery {
         if (!Number.isFinite(opts.sinceHours) || opts.sinceHours <= 0) {
             throw new Error(`hook log --since must be a positive integer, got ${opts.sinceHours}`);
         }
-        where.push("ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 hour')");
+        // See @ax/lib/duckdb/clause's hoursAgoExpr for why this needs two
+        // casts: CURRENT_TIMESTAMP is a TIMESTAMPTZ (no ICU in this build, so
+        // TIMESTAMPTZ-minus-INTERVAL has no overload) and the placeholder
+        // needs an explicit INTEGER cast to resolve the multiplication.
+        where.push(`ts >= ${hoursAgoExpr()}`);
         params.push(Math.trunc(opts.sinceHours));
     }
     if (opts.reason !== undefined) { where.push("reason = ?"); params.push(opts.reason); }

@@ -14,10 +14,12 @@ export function buildRecentInjectsQuery(params: RecentInjectsQueryParams): {
     const placeholders = params.filePaths.map(() => "?").join(", ");
     const win = Math.max(1, Math.trunc(params.windowMinutes));
     // The window cutoff is computed here, in JS, and bound as a plain
-    // timestamp parameter - `CURRENT_TIMESTAMP - (? * INTERVAL '1 minute')`
-    // fails to bind in DuckDB (no `-(TIMESTAMPTZ, INTERVAL)` overload resolves
-    // for an untyped placeholder multiplied into an INTERVAL), and every
-    // value should bind as itself rather than as an expression anyway.
+    // timestamp parameter rather than as a `CURRENT_TIMESTAMP - INTERVAL`
+    // expression - see @ax/lib/duckdb/clause's `agoExpr` doc comment for why
+    // that expression needs two casts to bind at all. There is no `minutesAgoExpr`
+    // sibling there (this window is minutes, not days/hours); binding the
+    // cutoff directly sidesteps the whole cast question, and every value
+    // should bind as itself rather than as an expression anyway.
     const since = new Date(Date.now() - win * 60_000);
     const sql = [
         "SELECT file_path FROM hook_fire",

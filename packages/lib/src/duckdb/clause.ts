@@ -122,3 +122,42 @@ export const limitOffset = (limit: number, offset = 0): Clause => {
         ? { sql: "LIMIT ?", params: [limit] }
         : { sql: "LIMIT ? OFFSET ?", params: [limit, offset] };
 };
+
+/**
+ * SQL text for "N days/hours ago", as a bound expression with one `?`
+ * placeholder for the count - NOT a value spliced into the string. The naive
+ * spelling, `CURRENT_TIMESTAMP - (? * INTERVAL '1 day')`, does not bind:
+ * `CURRENT_TIMESTAMP` is a TIMESTAMPTZ, and TIMESTAMPTZ-minus-INTERVAL is
+ * resolved by DuckDB's ICU extension, which is absent from this project's
+ * static build - the binder reports `No function matches the given name and
+ * argument types '-(TIMESTAMP WITH TIME ZONE, INTERVAL)'` (confirmed against
+ * a real DuckDB connection, not inferred from the docs). Casting to a plain
+ * TIMESTAMP first sidesteps ICU - TIMESTAMP-minus-INTERVAL is a core-library
+ * overload. The placeholder is also cast explicitly to INTEGER: an unbound `?`
+ * has no declared type until DuckDB infers one from context, and multiplying
+ * it directly into an INTERVAL is exactly the kind of context an untyped
+ * placeholder can fail to resolve through - casting it removes the ambiguity
+ * rather than relying on inference to land the right way.
+ *
+ * `withinDaysClause` / `withinHoursClause` below are the usable form for a
+ * simple `AND <column> >= now - N <unit>` filter; call this directly only
+ * when the expression needs to be embedded in a larger hand-built statement
+ * (see `hooks/log.ts`'s `--since` window, which manages its own WHERE array).
+ */
+const agoExpr = (unit: "day" | "hour"): string =>
+    `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 ${unit}')`;
+
+export const daysAgoExpr = (): string => agoExpr("day");
+export const hoursAgoExpr = (): string => agoExpr("hour");
+
+/** `AND <column> >= now - N days`, bound. */
+export const withinDaysClause = (column: string, days: number): Clause => {
+    requireCount("days", days);
+    return { sql: `AND ${column} >= ${daysAgoExpr()}`, params: [days] };
+};
+
+/** `AND <column> >= now - N hours`, bound. */
+export const withinHoursClause = (column: string, hours: number): Clause => {
+    requireCount("hours", hours);
+    return { sql: `AND ${column} >= ${hoursAgoExpr()}`, params: [hours] };
+};

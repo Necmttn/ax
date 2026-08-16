@@ -1,13 +1,25 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Schema } from "effect";
+import { CacheRead } from "./seam.ts";
+import { publishCacheFixture, readFixture, runWithPlatform } from "../testing/cache-fixture.ts";
+import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import {
     andAll,
+    daysAgoExpr,
     eqClause,
+    hoursAgoExpr,
     inClause,
     limitOffset,
     NO_CLAUSE,
     sinceClause,
     untilClause,
+    withinDaysClause,
+    withinHoursClause,
 } from "./clause.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("clause ago-expressions", {
+    requireFts: false,
+});
 
 /** Every clause builder must be injection-proof by construction: values are
  *  BOUND, never spelled. A quote character anywhere in generated SQL means a
@@ -113,5 +125,74 @@ describe("andAll", () => {
         expect(combined.sql).not.toContain("'");
         expect(combined.sql).not.toContain('"');
         expect(combined.params).toHaveLength(4);
+    });
+});
+
+describe("daysAgoExpr / hoursAgoExpr / withinDaysClause / withinHoursClause", () => {
+    test("daysAgoExpr double-casts: TIMESTAMPTZ->TIMESTAMP and the placeholder->INTEGER", () => {
+        expect(daysAgoExpr()).toBe(
+            "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')",
+        );
+    });
+
+    test("hoursAgoExpr is the same shape with the hour unit", () => {
+        expect(hoursAgoExpr()).toBe(
+            "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 hour')",
+        );
+    });
+
+    test("withinDaysClause binds the count and embeds daysAgoExpr", () => {
+        const clause = withinDaysClause("t.ts", 7);
+        expect(clause.sql).toBe(`AND t.ts >= ${daysAgoExpr()}`);
+        expect(clause.params).toEqual([7]);
+    });
+
+    test("withinHoursClause binds the count and embeds hoursAgoExpr", () => {
+        const clause = withinHoursClause("t.ts", 12);
+        expect(clause.sql).toBe(`AND t.ts >= ${hoursAgoExpr()}`);
+        expect(clause.params).toEqual([12]);
+    });
+
+    test("refuse a bound that is not a non-negative integer", () => {
+        expect(() => withinDaysClause("t.ts", -1)).toThrow();
+        expect(() => withinDaysClause("t.ts", 1.5)).toThrow();
+        expect(() => withinHoursClause("t.ts", Number.NaN)).toThrow();
+    });
+
+    // The naive spelling - `CURRENT_TIMESTAMP - (? * INTERVAL '1 day')`, no
+    // casts - is SQL text that looks identical in a diff and never binds
+    // against a real DuckDB connection: `CURRENT_TIMESTAMP` is a TIMESTAMPTZ,
+    // and TIMESTAMPTZ-minus-INTERVAL has no overload without the ICU
+    // extension, which this project's static build does not link. The three
+    // string-equality tests above cannot tell that apart from a working
+    // expression - only executing it against a real connection can, which is
+    // the whole reason this suite exists.
+    dtest("daysAgoExpr and hoursAgoExpr actually execute against a real DuckDB", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-clause-ago-"), dylibPath, () => Effect.void),
+        );
+
+        const Row = Schema.Struct({ cutoff: Schema.Unknown });
+        const run = <A>(sql: string, params: ReadonlyArray<number>) =>
+            Effect.runPromise(
+                Effect.gen(function* () {
+                    const cache = yield* CacheRead;
+                    return (yield* cache.rows(Row, `SELECT ${sql} AS cutoff`, params))[0]! as A;
+                }).pipe(Effect.provide(readFixture(fixture.snapshotPath, dylibPath)), Effect.scoped),
+            );
+
+        const daysRow = await run<{ cutoff: unknown }>(daysAgoExpr(), [7]);
+        const hoursRow = await run<{ cutoff: unknown }>(hoursAgoExpr(), [12]);
+
+        // Both must resolve to a value strictly before now (an executable
+        // expression that silently no-ops would pass a "did it throw" check
+        // but fail this one).
+        const now = Date.now();
+        expect(new Date(daysRow.cutoff as string).getTime()).toBeLessThan(now);
+        expect(new Date(hoursRow.cutoff as string).getTime()).toBeLessThan(now);
+        // 7 days ago is earlier than 12 hours ago.
+        expect(new Date(daysRow.cutoff as string).getTime()).toBeLessThan(
+            new Date(hoursRow.cutoff as string).getTime(),
+        );
     });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildHookLogQuery, formatHookLogRowsTsv, type HookLogRow } from "./log.ts";
+import { Effect } from "effect";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { buildHookLogQuery, formatHookLogRowsTsv, queryHookLog, type HookLogRow } from "./log.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("hook log", { requireFts: true });
 
 describe("buildHookLogQuery", () => {
     test("default query orders by ts desc and limits to tail", () => {
@@ -12,9 +18,16 @@ describe("buildHookLogQuery", () => {
         expect(params).toEqual([]);
     });
 
-    test("since adds a time::now() lower bound on ts", () => {
+    test("since adds a now-minus-N-hours lower bound on ts, double-cast so it binds", () => {
         const { sql, params } = buildHookLogQuery({ tail: 5, sinceHours: 2 });
-        expect(sql).toContain("ts >= CURRENT_TIMESTAMP");
+        // Both casts matter and are pinned here: CURRENT_TIMESTAMP -> TIMESTAMP
+        // (a TIMESTAMPTZ has no `-(TIMESTAMPTZ, INTERVAL)` overload without the
+        // ICU extension, which this build does not have) and the placeholder ->
+        // INTEGER (an untyped `?` cannot resolve the multiplication into an
+        // INTERVAL). See @ax/lib/duckdb/clause's `agoExpr` for the full story;
+        // dtest("actually filters by the window against a real DuckDB", ...)
+        // below is the part a SQL-text assertion like this one cannot cover.
+        expect(sql).toContain("ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 hour')");
         expect(params).toEqual([2]);
     });
 
@@ -43,7 +56,7 @@ describe("buildHookLogQuery", () => {
 
     test("combines multiple filters with AND", () => {
         const { sql, params } = buildHookLogQuery({ tail: 5, sinceHours: 1, harness: "codex", inject: false });
-        expect(sql).toContain("ts >= CURRENT_TIMESTAMP");
+        expect(sql).toContain("ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP)");
         expect(sql).toContain("harness = ?");
         expect(sql).toContain("inject = ?");
         expect((sql.match(/ AND /g) ?? []).length).toBeGreaterThanOrEqual(2);
@@ -54,6 +67,79 @@ describe("buildHookLogQuery", () => {
         const query = buildHookLogQuery({ tail: 5, reason: "no'malicious" });
         expect(query.sql).not.toContain("no'malicious");
         expect(query.params).toEqual(["no'malicious"]);
+    });
+});
+
+describe("queryHookLog", () => {
+    const hookFireRow = (id: string, ts: Date) => ({
+        id,
+        ts,
+        kind: "hook_fire",
+        session: "session:abc",
+        file: null,
+        file_path: "src/a.ts",
+        harness: "claude",
+        ok: true,
+        latency_ms: 5,
+        event: "pre-edit",
+        inject: true,
+        reason: "high_signal",
+        prior_sessions_considered: 1,
+        task_excerpt: "test",
+        top_prior_sessions: "[]",
+        injected_titles: "[]",
+    });
+
+    // The bug this pins: `ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 hour')`
+    // is SQL text that LOOKS right and never binds against real DuckDB (see
+    // @ax/lib/duckdb/clause's `agoExpr` doc). A SQL-text assertion like the
+    // ones in "buildHookLogQuery" above cannot tell that apart from a query
+    // that actually filters correctly - only running it can.
+    dtest("actually filters by the --since window against a real DuckDB", async () => {
+        const now = new Date();
+        const recent = new Date(now.getTime() - 10 * 60_000); // 10 minutes ago
+        const old = new Date(now.getTime() - 5 * 60 * 60_000); // 5 hours ago
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-hook-log-since-"), dylibPath, (write: CacheWriteService) =>
+                write.putMany("hook_fire", [
+                    hookFireRow("hook-recent", recent),
+                    hookFireRow("hook-old", old),
+                ]),
+            ),
+        );
+
+        const rows = await Effect.runPromise(
+            queryHookLog({ tail: 100, sinceHours: 1 }).pipe(
+                Effect.provide(readFixture(fixture.snapshotPath, dylibPath)),
+                Effect.scoped,
+            ),
+        );
+
+        expect(rows.map((r) => r.file_path)).toEqual(["src/a.ts"]);
+        expect(rows).toHaveLength(1);
+    });
+
+    dtest("with no --since, both rows come back regardless of age", async () => {
+        const now = new Date();
+        const recent = new Date(now.getTime() - 10 * 60_000);
+        const old = new Date(now.getTime() - 5 * 60 * 60_000);
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-hook-log-nosince-"), dylibPath, (write: CacheWriteService) =>
+                write.putMany("hook_fire", [
+                    hookFireRow("hook-recent", recent),
+                    hookFireRow("hook-old", old),
+                ]),
+            ),
+        );
+
+        const rows = await Effect.runPromise(
+            queryHookLog({ tail: 100 }).pipe(
+                Effect.provide(readFixture(fixture.snapshotPath, dylibPath)),
+                Effect.scoped,
+            ),
+        );
+
+        expect(rows).toHaveLength(2);
     });
 });
 
