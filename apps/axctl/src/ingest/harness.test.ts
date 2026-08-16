@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildHarnessIngestStatements,
+    buildHarnessIngestRows,
     guidanceRevisionKey,
     guidanceSourceKey,
     stackKey,
@@ -82,20 +82,17 @@ const report: ProjectHarnessReport = {
     ],
 };
 
-describe("harness ingest statement builders", () => {
+describe("harness ingest row builders", () => {
     test("keys are deterministic and scoped by semantic identity", () => {
         expect(guidanceSourceKey(report.guidanceSources[0])).toBe(guidanceSourceKey(report.guidanceSources[0]));
-        expect(guidanceRevisionKey(report.guidanceRevisions[0])).toContain("abcdef1234567890");
-        expect(stackKey(report.stacks[0])).toBe("typescript");
+        expect(guidanceRevisionKey(report.guidanceRevisions[0])).toMatch(/^[0-9a-f]{32}$/);
+        expect(stackKey(report.stacks[0])).toMatch(/^[0-9a-f]{32}$/);
     });
 
-    test("writes guidance + stack sections", () => {
-        const sql = buildHarnessIngestStatements(report).join("\n");
-
-        expect(sql).toContain("UPSERT guidance_source:");
-        expect(sql).toContain("UPSERT guidance_revision:");
-        expect(sql).toContain("UPSERT stack:");
-        expect(sql).toContain("evidence_strength: \"tracked\"");
-        expect(sql).toContain("content_hash: \"abcdef1234567890\"");
+    test("builds guidance and stack rows", () => {
+        const rows = buildHarnessIngestRows(report);
+        expect(rows.guidanceSources[0]).toMatchObject({ evidence_strength: "tracked" });
+        expect(rows.guidanceRevisions[0]).toMatchObject({ content_hash: "abcdef1234567890" });
+        expect(rows.stacks[0]).toMatchObject({ name: "typescript" });
     });
 });

@@ -1,23 +1,41 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import {
-    enrichRowsWithTelemetryCost,
-    enrichRowsWithTelemetryLatency,
-    sessionTelemetryCost,
-    sessionTelemetryLatency,
+    enrichRowsWithTelemetryCost as enrichRowsWithTelemetryCostWithRead,
+    enrichRowsWithTelemetryLatency as enrichRowsWithTelemetryLatencyWithRead,
+    sessionTelemetryCost as sessionTelemetryCostWithRead,
+    sessionTelemetryLatency as sessionTelemetryLatencyWithRead,
+    type TelemetryCost,
+    type TelemetryLatency,
 } from "./telemetry-rollup.ts";
 
 const db = (rows: { metric?: unknown[]; log?: unknown[] }) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            if (/FROM otel_metric_point/.test(sql)) return Effect.succeed([rows.metric ?? []] as unknown as T);
-            if (/FROM otel_log_event/.test(sql)) return Effect.succeed([rows.log ?? []] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
-const run = <A>(e: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
+    makeTestCacheRead({ routes: [
+        { match: /FROM otel_metric_point/, rows: rows.metric ?? [] },
+        { match: /FROM otel_log_event/, rows: rows.log ?? [] },
+    ] }).layer;
+const run = <A>(e: Effect.Effect<A, unknown, CacheRead>, layer: Layer.Layer<CacheRead>) =>
     Effect.runPromise(e.pipe(Effect.provide(layer)));
+const sessionTelemetryCost = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* sessionTelemetryCostWithRead(yield* CacheRead, ids);
+});
+const sessionTelemetryLatency = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* sessionTelemetryLatencyWithRead(yield* CacheRead, ids);
+});
+const enrichRowsWithTelemetryCost = <Row, Out>(
+    rows: ReadonlyArray<Row>, sessionOf: (row: Row) => unknown,
+    merge: (row: Row, telemetry: TelemetryCost | null) => Out,
+) => Effect.gen(function* () {
+    return yield* enrichRowsWithTelemetryCostWithRead(yield* CacheRead, rows, sessionOf, merge);
+});
+const enrichRowsWithTelemetryLatency = <Row, Out>(
+    rows: ReadonlyArray<Row>, sessionOf: (row: Row) => unknown,
+    merge: (row: Row, telemetry: TelemetryLatency | null) => Out,
+) => Effect.gen(function* () {
+    return yield* enrichRowsWithTelemetryLatencyWithRead(yield* CacheRead, rows, sessionOf, merge);
+});
 
 describe("sessionTelemetryCost", () => {
     test("sums claude cost.usage → cost_usd and token.usage → tokens", async () => {

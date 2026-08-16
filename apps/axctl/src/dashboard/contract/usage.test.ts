@@ -48,9 +48,17 @@ const make = (): ContractWebHandler => {
 let emptySnapshot = "";
 let seededSnapshot = "";
 const originalSnapshotEnv = process.env.AX_DUCKDB_SNAPSHOT;
+const originalDylibEnv = process.env.AX_DUCKDB_DYLIB;
 
 beforeAll(async () => {
     if (dylibPath === null) return;
+    // The handler builds its OWN `CacheReadLive`, which resolves the library
+    // through `AX_DUCKDB_DYLIB` and has no other source outside a compiled
+    // binary. `duckdbTestSetup` only RETURNS the path it found - it does not
+    // export it - so without this the handler answers 500 ("no libduckdb
+    // available") and the case reads as a query defect. Same shape as
+    // `packages/lib/src/duckdb/seam.test.ts`.
+    process.env.AX_DUCKDB_DYLIB = dylibPath;
     const empty = await runWithPlatform(
         publishCacheFixture(tempDir("usage-empty"), dylibPath, () => Effect.void),
     );
@@ -71,6 +79,8 @@ afterAll(async () => {
     for (const h of handlers) await h.dispose();
     if (originalSnapshotEnv === undefined) delete process.env.AX_DUCKDB_SNAPSHOT;
     else process.env.AX_DUCKDB_SNAPSHOT = originalSnapshotEnv;
+    if (originalDylibEnv === undefined) delete process.env.AX_DUCKDB_DYLIB;
+    else process.env.AX_DUCKDB_DYLIB = originalDylibEnv;
 });
 
 const get = (path: string): Request => new Request(`http://127.0.0.1:1738${path}`);

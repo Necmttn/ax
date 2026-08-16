@@ -1,15 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import {
     ESTIMATED_PRICING_PREFIX,
-    fetchSessionCostMap,
+    fetchSessionCostMap as fetchSessionCostMapWithRead,
     fillEstimatedCost,
     isEstimatedPricingSource,
-    loadPricingCatalogForModels,
+    loadPricingCatalogForModels as loadPricingCatalogForModelsWithRead,
     type UsageCostFields,
 } from "./cost-estimate.ts";
 import { builtInPricingCatalog, type ModelPricing } from "../ingest/model-pricing.ts";
+
+const loadPricingCatalogForModels = (models: ReadonlyArray<string | null | undefined>) => Effect.gen(function* () {
+    return yield* loadPricingCatalogForModelsWithRead(yield* CacheRead, models);
+});
+const fetchSessionCostMap = (ids: readonly string[] | null) => Effect.gen(function* () {
+    return yield* fetchSessionCostMapWithRead(yield* CacheRead, ids);
+});
 
 const usage = (over: Partial<UsageCostFields> = {}): UsageCostFields => ({
     model: "claude-haiku-4-5-20251001",
@@ -143,13 +151,12 @@ describe("isEstimatedPricingSource", () => {
 });
 
 describe("loadPricingCatalogForModels", () => {
-    const db = (rows: Array<Record<string, unknown>>, capture?: { sql?: string }) =>
-        Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
+    const db = (rows: Array<Record<string, unknown>>, capture?: { sql?: string; params?: ReadonlyArray<unknown> }) =>
+        makeTestCacheRead({ fallback: (sql, params) => {
                 if (capture) capture.sql = sql;
-                return Effect.succeed([rows] as unknown as T);
-            },
-        } as never);
+                if (capture && params !== undefined) capture.params = params;
+                return rows;
+            } }).layer;
 
     test("DB rows override the built-in catalog; built-ins remain as fallback", async () => {
         const rows = [{
@@ -168,15 +175,17 @@ describe("loadPricingCatalogForModels", () => {
     });
 
     test("queries by direct agent_model record ids incl. family fallback keys", async () => {
-        const capture: { sql?: string } = {};
+        const capture: { sql?: string; params?: ReadonlyArray<unknown> } = {};
         await Effect.runPromise(
             loadPricingCatalogForModels(["Claude-Haiku-4-5-20251001", null, "<synthetic>"]).pipe(
                 Effect.provide(db([], capture)),
             ),
         );
-        expect(capture.sql).toContain("agent_model:`claude-haiku-4-5-20251001`");
-        expect(capture.sql).toContain("agent_model:`claude-opus-4`");
-        expect(capture.sql).not.toContain("synthetic");
+        expect(capture.sql).toContain("name IN (?, ?, ?, ?)");
+        expect(capture.sql).not.toContain("claude-haiku-4-5-20251001");
+        expect(capture.params).toContain("claude-haiku-4-5-20251001");
+        expect(capture.params).toContain("claude-opus-4");
+        expect(capture.params).not.toContain("synthetic");
     });
 });
 
@@ -187,13 +196,11 @@ describe("fetchSessionCostMap", () => {
         pricing?: Array<Record<string, unknown>>;
         seenSql?: string[];
     }) =>
-        Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
+        makeTestCacheRead({ fallback: (sql) => {
                 input.seenSql?.push(sql);
-                if (sql.includes("FROM session_token_usage")) return Effect.succeed([input.usage ?? []] as unknown as T);
-                return Effect.succeed([input.pricing ?? []] as unknown as T);
-            },
-        } as never);
+                if (sql.includes("FROM session_token_usage")) return input.usage ?? [];
+                return input.pricing ?? [];
+            } }).layer;
 
     test("bounded fetch keys by normalized session id; stored cost preserved, missing cost estimated (#175)", async () => {
         const seenSql: string[] = [];
@@ -220,7 +227,8 @@ describe("fetchSessionCostMap", () => {
         expect(out.get("s2")).toMatchObject({ pricingSource: "estimated:litellm", estimated: true });
         expect(out.get("s2")!.estimatedCostUsd).toBeCloseTo(1.0, 8); // 1M tokens × $1/M
         const usageSql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
-        expect(usageSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        expect(usageSql).toContain("WHERE TRUE AND session IN (?, ?)");
+        expect(usageSql).not.toContain("session:`s1`");
     });
 
     test("empty id list short-circuits without querying", async () => {

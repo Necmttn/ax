@@ -1,24 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildContentEdge, renderContentEdge, renderContentTypeNodes, rowsSql, type ContentEdgeSpec, type ToolCallRow } from "./derive-content-types.ts";
-
-// Regression (#533): the incremental rows query interpolated the
-// `sinceAndClause` continuation directly after `NONE`, producing
-// `output_json != NONEAND ts ...` - a SurrealDB parse error that crashed
-// `ax ingest --since=N` (the watcher path). Guard the token boundary.
-describe("rowsSql since-window boundary", () => {
-  test("incremental window keeps a space before AND (no NONEAND)", () => {
-    const sql = rowsSql(1);
-    expect(sql).not.toContain("NONEAND");
-    expect(sql).toContain("output_json != NONE AND ts > time::now() - 1d");
-  });
-
-  test("full re-derive (no since) emits a bare NONE predicate", () => {
-    const sql = rowsSql(undefined);
-    expect(sql).not.toContain("NONEAND");
-    expect(sql).toContain("output_json != NONE");
-    expect(sql).not.toContain("AND ts >");
-  });
-});
+import { buildContentEdge, contentEdgeRow, contentTypeRows, type ToolCallRow } from "./derive-content-types.ts";
 
 describe("buildContentEdge", () => {
   test("derives category + denormalized session/bytes from a tool_call row", () => {
@@ -42,40 +23,33 @@ describe("buildContentEdge", () => {
   });
 });
 
-describe("renderContentEdge", () => {
-  test("emits a deterministic RELATE keyed by tool_call id (idempotent re-runs)", () => {
-    const sql = renderContentEdge({
+describe("contentEdgeRow", () => {
+  test("builds a deterministic edge row", () => {
+    const row = contentEdgeRow({
       toolCallId: "tool_call:abc", category: "code", session: "session:s1",
       method: "extension", confidence: 0.95, fineLabel: "ts", bytes: 12, ts: "2026-06-17T00:00:00Z",
     });
-    expect(sql).toContain("->has_content:");
-    expect(sql).toContain("->content_type:");
-    expect(sql).toContain("bytes = 12");
-    expect(sql).toContain("confidence = 0.95");
-  });
-
-  test("returns null on an unkeyable id", () => {
-    expect(renderContentEdge({ toolCallId: "", category: "text" } as unknown as ContentEdgeSpec)).toBeNull();
+    expect(row).toMatchObject({ in_id: "tool_call:abc", out_id: "code", bytes: 12, confidence: 0.95 });
   });
 });
 
-describe("renderContentTypeNodes", () => {
-  test("upserts all 12 fixed category nodes", () => {
-    const stmts = renderContentTypeNodes();
-    expect(stmts.length).toBe(12);
-    expect(stmts[0]).toContain("UPSERT content_type:");
+describe("contentTypeRows", () => {
+  test("builds all 12 fixed category nodes", () => {
+    const rows = contentTypeRows();
+    expect(rows.length).toBe(12);
+    expect(rows[0]).toHaveProperty("category");
   });
 });
 
-describe("renderContentEdge - collision resistance", () => {
+describe("contentEdgeRow collision resistance", () => {
   // Two tool_call ids that share more than 96 chars of common prefix (the old
   // safeKeyPart truncation limit) must still produce DIFFERENT edge keys so that
   // cursor/opencode ids from the same conversation never collide.
   test("two ids sharing a 100+ char prefix produce different has_content edge keys", () => {
     const base = "tool_call:" + "x".repeat(100);
-    const spec = (id: string): ContentEdgeSpec => ({
+    const spec = (id: string) => ({
       toolCallId: id,
-      category: "text",
+      category: "text" as const,
       session: "session:s1",
       method: "fallback",
       confidence: 0.5,
@@ -83,15 +57,7 @@ describe("renderContentEdge - collision resistance", () => {
       bytes: 100,
       ts: "2026-06-17T00:00:00Z",
     });
-    const sql1 = renderContentEdge(spec(base + "a"));
-    const sql2 = renderContentEdge(spec(base + "b"));
-    expect(sql1).not.toBeNull();
-    expect(sql2).not.toBeNull();
-    const key1 = sql1!.match(/->has_content:`([^`]+)`/)?.[1];
-    const key2 = sql2!.match(/->has_content:`([^`]+)`/)?.[1];
-    expect(key1).toBeDefined();
-    expect(key2).toBeDefined();
-    expect(key1).not.toBe(key2);
+    expect(contentEdgeRow(spec(base + "a")).id).not.toBe(contentEdgeRow(spec(base + "b")).id);
   });
 
   test("same id always produces the same edge key (idempotent re-runs)", () => {
@@ -100,6 +66,6 @@ describe("renderContentEdge - collision resistance", () => {
       inputJson: null, outputExcerpt: "hello", bytes: 5, ts: "2026-06-17T00:00:00Z",
     };
     const e = buildContentEdge(row);
-    expect(renderContentEdge(e)).toBe(renderContentEdge(e));
+    expect(contentEdgeRow(e)).toEqual(contentEdgeRow(e));
   });
 });

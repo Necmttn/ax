@@ -1,6 +1,9 @@
 import { Context, Layer } from "effect";
 import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
+import type { DbError } from "@ax/lib/errors";
+import type { CacheReadError, CacheWriteError } from "@ax/lib/duckdb/seam";
+import type { JudgmentError } from "@ax/lib/sqlite";
 import { skillsStage } from "../skills.ts";
 import { commandsStage } from "../commands.ts";
 import { agentDefStage } from "../agent-def.ts";
@@ -46,10 +49,22 @@ export type { StageDef } from "./types.ts";
  *  enforced at test time in registry.test.ts. */
 export type IngestStageKey = (typeof ALL_STAGES)[number]["meta"]["key"];
 
+/**
+ * The stage error channel (F3).
+ *
+ * It is a UNION, not `DbError`, because a stage can now fail in four ways: the
+ * un-ported half still talks to SurrealDB (`DbError`), the ported half writes
+ * the lock-held cache (`CacheWriteError`) and reads live rows through the writer
+ * (`CacheReadError`), and the judgment-domain stages write the SQLite sidecar
+ * (`JudgmentError`). Widening it here rather than per stage is what lets the
+ * registry hold all of them under one type.
+ */
+export type IngestStageError = DbError | CacheWriteError | CacheReadError | JudgmentError;
+
 export interface StageRegistryShape {
-    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
-    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown> | undefined;
-    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
+    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
+    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown, IngestStageError> | undefined;
+    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
 }
 
 export class StageRegistry extends Context.Service<StageRegistry, StageRegistryShape>()(
@@ -58,7 +73,7 @@ export class StageRegistry extends Context.Service<StageRegistry, StageRegistryS
 
 /** Provide a registry by passing the typed list of co-located stage definitions. */
 export const StageRegistryLive = (
-    stages: ReadonlyArray<StageDef<BaseStageStats, unknown>>,
+    stages: ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>,
 ): Layer.Layer<StageRegistry> =>
     Layer.succeed(StageRegistry, {
         all: () => stages,

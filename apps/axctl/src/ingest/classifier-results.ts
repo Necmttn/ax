@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import {
     buildEventWindows,
     enrichEventWindowsWithToolCalls,
@@ -8,16 +9,15 @@ import {
 import { ClassifierRunnerLive, ClassifierRunner } from "../classifiers/core.ts";
 import type { ClassifierResult } from "../classifiers/core.ts";
 import {
-    buildClassifierPersistenceStatements,
+    classifierPersistenceRows,
     classifierRunKey,
     type ClassifierEvidenceRef,
 } from "../classifiers/repository.ts";
 import { builtInClassifiers } from "../classifiers/registry.ts";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ClassifierResultsKey = Schema.Literal("classifier-results");
@@ -29,9 +29,9 @@ export interface ClassifierResultsDerive {
 }
 
 export interface ClassifierEditedFileRow {
-    readonly turn: unknown;
-    readonly file: unknown;
-    readonly session?: unknown;
+    readonly turn: string;
+    readonly file: string;
+    readonly session?: string | null;
     readonly seq?: number | null;
     readonly ts: Date | string;
 }
@@ -47,13 +47,13 @@ export function classifierEvidenceRefsForWindows(
     const editedByTurn = new Map<string, Array<{ readonly fileKey: string; readonly ts: Date | string }>>();
     const editedBySession = new Map<string, Array<{ readonly fileKey: string; readonly seq: number; readonly ts: Date | string }>>();
     for (const row of editedFiles) {
-        const turnKey = recordKeyPart(row.turn, "turn");
-        const fileKey = recordKeyPart(row.file, "file");
+        const turnKey = recordKeyPart(row.turn, "turn") ?? row.turn;
+        const fileKey = recordKeyPart(row.file, "file") ?? row.file;
         if (!turnKey || !fileKey) continue;
         const files = editedByTurn.get(turnKey) ?? [];
         files.push({ fileKey, ts: row.ts });
         editedByTurn.set(turnKey, files);
-        const sessionKey = recordKeyPart(row.session, "session");
+        const sessionKey = row.session ? recordKeyPart(row.session, "session") ?? row.session : null;
         if (sessionKey && typeof row.seq === "number" && Number.isFinite(row.seq)) {
             const sessionFiles = editedBySession.get(sessionKey) ?? [];
             sessionFiles.push({ fileKey, seq: row.seq, ts: row.ts });
@@ -143,40 +143,40 @@ export async function deriveClassifierResultsFromRows(
     return Effect.runPromise(program.pipe(Effect.provide(ClassifierRunnerLive)));
 }
 
-const fetchTurns = (sinceDays: number | undefined): Effect.Effect<ClassifierTurnRow[], DbError, SurrealClient> =>
+const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly ClassifierTurnRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceWhereClause(sinceDays);
-        const [rows] = yield* db.query<[ClassifierTurnRow[]]>(`
-SELECT id, session, seq, role, message_kind, text, text_excerpt, type::string(ts) AS ts
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, seq: Schema.Number, role: Schema.String,
+            message_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
+            text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn,
+        }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, role, message_kind, text, text_excerpt, ts
 FROM turn
-${since}
-ORDER BY session, seq;`);
-        return rows ?? [];
+${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
-const fetchToolCalls = (sinceDays: number | undefined): Effect.Effect<ClassifierToolCallRow[], DbError, SurrealClient> =>
+const fetchToolCalls = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly ClassifierToolCallRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays + 1}d` : "";
-        const [rows] = yield* db.query<[ClassifierToolCallRow[]]>(`
-SELECT id, session, seq, name, command_norm, command_text, output_excerpt, error_text, has_error, type::string(ts) AS ts
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, seq: Schema.Number, name: Schema.String,
+            command_norm: Schema.NullOr(Schema.String), command_text: Schema.NullOr(Schema.String),
+            output_excerpt: Schema.NullOr(Schema.String), error_text: Schema.NullOr(Schema.String),
+            has_error: Schema.Boolean, ts: TimestampColumn,
+        }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, name, command_norm, command_text, output_excerpt, error_text, has_error, ts
 FROM tool_call
-${since}
-ORDER BY session, ts;`);
-        return rows ?? [];
+${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+ORDER BY session, ts`, sinceDays === undefined ? [] : [sinceDays + 1]);
     });
 
-const fetchEditedFiles = (sinceDays: number | undefined): Effect.Effect<ClassifierEditedFileRow[], DbError, SurrealClient> =>
+const fetchEditedFiles = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly ClassifierEditedFileRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays + 1}d` : "";
-        const [rows] = yield* db.query<[ClassifierEditedFileRow[]]>(`
-SELECT type::string(in) AS turn, type::string(out) AS file, in.session AS session, in.seq AS seq, type::string(ts) AS ts
-FROM edited
-${since}
-ORDER BY ts;`);
-        return rows ?? [];
+        return yield* write.rows(Schema.Struct({
+            turn: Schema.String, file: Schema.String, session: Schema.NullOr(Schema.String),
+            seq: Schema.NullOr(Schema.Number), ts: TimestampColumn,
+        }), `SELECT e.in_id AS turn, e.out_id AS file, e.session, CAST(t.seq AS DOUBLE) AS seq, e.ts
+             FROM edited e LEFT JOIN turn t ON t.id = e.in_id
+             ${sinceDays === undefined ? "" : `WHERE e.ts >= ${daysAgoExpr}`}
+             ORDER BY e.ts`, sinceDays === undefined ? [] : [sinceDays + 1]);
     });
 
 export interface ClassifierResultsStats {
@@ -186,23 +186,26 @@ export interface ClassifierResultsStats {
 }
 
 export const deriveAndPersistClassifierResults = (
+    write: CacheWriteService,
     opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<ClassifierResultsStats, DbError, SurrealClient> =>
+): Effect.Effect<ClassifierResultsStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const [rows, toolCalls, editedFiles] = yield* Effect.all([
-            fetchTurns(opts.sinceDays),
-            fetchToolCalls(opts.sinceDays),
-            fetchEditedFiles(opts.sinceDays),
+            fetchTurns(write, opts.sinceDays),
+            fetchToolCalls(write, opts.sinceDays),
+            fetchEditedFiles(write, opts.sinceDays),
         ], { concurrency: 2 });
         const startedAt = new Date();
         const { windows, results } = yield* Effect.promise(() => deriveClassifierResultsFromRows(rows, toolCalls));
         const finishedAt = new Date();
         const runKey = classifierRunKey(startedAt, defaultClassifiers);
         if (opts.sinceDays === undefined) {
-            yield* db.query('DELETE cites_evidence WHERE type::string(in) CONTAINS "classifier_result:"; DELETE has_classification; DELETE classifier_result; DELETE classifier_run;');
+            yield* write.exec("DELETE FROM cites_evidence WHERE in_table = 'classifier_result'");
+            yield* write.exec("DELETE FROM has_classification");
+            yield* write.exec("DELETE FROM classifier_result");
+            yield* write.exec("DELETE FROM classifier_run");
         }
-        yield* executeStatementsWith(db, buildClassifierPersistenceStatements({
+        const persisted = classifierPersistenceRows({
             runKey,
             startedAt,
             finishedAt,
@@ -210,7 +213,13 @@ export const deriveAndPersistClassifierResults = (
             results,
             evidenceRefs: classifierEvidenceRefsForWindows(windows, results, editedFiles),
             sinceDays: opts.sinceDays,
-        }), { chunkSize: 250 });
+        });
+        yield* write.putMany("classifier_definition", persisted.definitions);
+        yield* write.put("classifier_run", persisted.run);
+        for (const result of results) yield* write.exec("DELETE FROM cites_evidence WHERE in_table = 'classifier_result' AND in_id = ?", [result.key]);
+        yield* write.putMany("classifier_result", persisted.results);
+        yield* write.putMany("has_classification", persisted.classifications);
+        yield* write.putMany("cites_evidence", persisted.citations);
         return {
             windows: windows.length,
             results: results.length,
@@ -224,12 +233,12 @@ export class ClassifierResultsStageStats extends BaseStageStats.extend<Classifie
     classifiers: Schema.Number,
 }) {}
 
-export const classifierResultsStage: StageDef<ClassifierResultsStageStats, SurrealClient> = {
+export const classifierResultsStage: StageDef<ClassifierResultsStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "classifier-results", deps: ["turn-analysis"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveAndPersistClassifierResults({ sinceDays: sinceDaysFromCtx(ctx) });
+            const result = yield* deriveAndPersistClassifierResults(write, { sinceDays: sinceDaysFromCtx(ctx) });
             return ClassifierResultsStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `classified ${result.windows} event windows into ${result.results} results with ${result.classifiers} classifiers`,

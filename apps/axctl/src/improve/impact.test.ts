@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 import {
     createImpactEstimateCache,
@@ -38,8 +39,15 @@ const makeDb = (resultsPerCall: QueryResult[][]) => {
     return Layer.succeed(SurrealClient, stub);
 };
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
-    Effect.runPromise(eff.pipe(Effect.provide(layer)));
+const emptyCache: CacheReadService = {
+    rows: () => Effect.succeed([]) as never,
+    first: () => Effect.succeed(Option.none()) as never,
+    raw: () => Effect.succeed({ columns: [], rows: [] }) as never,
+    snapshotPath: "(test)",
+};
+
+const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient | CacheRead>, layer: Layer.Layer<SurrealClient>) =>
+    Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, emptyCache)))));
 
 describe("parseBaseline", () => {
     test("tolerates missing/corrupt baseline", () => {

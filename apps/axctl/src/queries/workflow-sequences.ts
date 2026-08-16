@@ -23,10 +23,9 @@
  * A global dedup set then reduces the support-count pass.
  */
 
-import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
-import { WORKFLOW_SESSION_SEQUENCES_SQL } from "./workflow.ts";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -235,17 +234,22 @@ export interface FetchArcsInput {
  * no per-call override in v1.
  */
 export const fetchWorkflowArcs: (
+    read: CacheReadService,
     input?: FetchArcsInput,
-) => Effect.Effect<ArcCandidate[], DbError, SurrealClient> = Effect.fn(
+) => Effect.Effect<ArcCandidate[], CacheReadError> = Effect.fn(
     "queries.fetchWorkflowArcs",
-)(function* (input?: FetchArcsInput) {
-    const db = yield* SurrealClient;
+)(function* (read: CacheReadService, input?: FetchArcsInput) {
+    const rawRows = yield* read.rows(WorkflowSequenceRow, `
+      SELECT i.session, sk.name AS skill, i.turn_index, i.ts
+      FROM invoked i
+      JOIN skill sk ON sk.id = i.out_id
+      JOIN session s ON s.id = i.session
+      WHERE i.ts > ? AND i.is_first = true AND i.session IS NOT NULL
+        AND s.source NOT IN ('claude-subagent', 'codex-subagent')
+      ORDER BY i.session ASC, i.turn_index ASC
+      LIMIT 50000`, [new Date(Date.now() - 12 * 7 * 86_400_000)]);
 
-    const [rawRows] = yield* db.query<[Array<Record<string, unknown>>]>(
-        WORKFLOW_SESSION_SEQUENCES_SQL,
-    );
-
-    const rows: SeqRow[] = (rawRows ?? [])
+    const rows: SeqRow[] = rawRows
         .map((row) => ({
             session: row.session == null ? "" : String(row.session),
             skill: row.skill == null ? "" : String(row.skill),
@@ -262,4 +266,11 @@ export const fetchWorkflowArcs: (
         ...(input?.minSessions !== undefined && { minSessions: input.minSessions }),
         ...(input?.limit !== undefined && { limit: input.limit }),
     });
+});
+
+const WorkflowSequenceRow = Schema.Struct({
+    session: Schema.String,
+    skill: Schema.String,
+    turn_index: NumberFromBigIntColumn,
+    ts: TimestampColumn,
 });

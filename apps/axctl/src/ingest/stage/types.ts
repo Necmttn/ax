@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { DbError } from "@ax/lib/errors";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { IngestStageTag } from "./tags.ts";
 
 /** Stable base shape every stage's stats class extends. `summary` is the
@@ -63,7 +64,8 @@ export class StageMeta extends Schema.Class<StageMeta>("StageMeta")({
 export interface StageDef<
     S extends BaseStageStats = BaseStageStats,
     R = never,
+    E = DbError,
 > {
     readonly meta: StageMeta;
-    readonly run: (ctx: IngestContext) => Effect.Effect<S, DbError, R>;
+    readonly run: (ctx: IngestContext, write: CacheWriteService) => Effect.Effect<S, E, R>;
 }

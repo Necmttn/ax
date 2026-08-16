@@ -3,9 +3,8 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName } from "@ax/lib/skill-id";
-import { RecordId, SurrealClient } from "@ax/lib/db";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -13,7 +12,7 @@ import {
 import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
@@ -1030,11 +1029,11 @@ export const resolveOpenCodeCatalogSkills = (
     };
 };
 
-const buildOpenCodeBatchStatements = (
+const toOpenCodeNormalizedBatch = (
     extract: OpenCodeExtract,
     sourcePath: string,
-): string[] =>
-    buildNormalizedTranscriptStatements({
+): NormalizedTranscriptBatch =>
+    ({
         providers: [{
             name: "opencode",
             displayName: "OpenCode",
@@ -1125,7 +1124,7 @@ const buildOpenCodeBatchStatements = (
         compactions: extract.compactions,
     });
 
-export const __testBuildOpenCodeBatchStatements = buildOpenCodeBatchStatements;
+export const __testToOpenCodeNormalizedBatch = toOpenCodeNormalizedBatch;
 
 function failedExtract(dbPath: string, error: unknown): OpenCodeExtract {
     return emptyExtract(
@@ -1175,9 +1174,8 @@ interface OpenCodeIngestOpts {
 }
 
 export const ingestOpenCode = Effect.fn("opencode.ingest")(
-    function* (opts: Partial<OpenCodeIngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<OpenCodeIngestOpts> = {}) {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const dbPaths = yield* findOpenCodeDbCandidates(cfg.paths.opencodeDir, cutoff);
 
@@ -1220,13 +1218,14 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
         // catalogued namespaced; `resolveSkillName` maps the former onto the
         // latter so the invocation attaches to the real row instead of minting
         // a ghost (#746). Same treatment the Claude parser gives Skill calls.
-        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
-            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
-        ))?.[0] ?? [];
+        const catalogRows = yield* write.rows(
+            Schema.Struct({ name: Schema.String }),
+            "SELECT name FROM skill WHERE dir_path != '(unknown)'",
+        );
         const skillCatalog: ReadonlySet<string> = new Set(
             catalogRows
                 .map((row) => row.name)
-                .filter((name): name is string => typeof name === "string" && name.length > 0),
+                .filter((name) => name.length > 0),
         );
 
         const failures = makeFileFailureCollector({ source: "opencode", unit: "session" });
@@ -1242,16 +1241,7 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
             // session skips THIS session - the store is re-read next run -
             // instead of aborting the whole stage (see file-isolation.ts).
             yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
-                yield* db.upsert(new RecordId("session", session.id), {
-                    project: session.cwd ?? undefined,
-                    cwd: session.cwd ?? undefined,
-                    model: session.model ?? undefined,
-                    source: "opencode",
-                    started_at: new Date(session.started_at),
-                    ended_at: new Date(session.ended_at),
-                    raw_file: dbPath,
-                });
-                yield* executeStatements(buildOpenCodeBatchStatements(slice, dbPath), { chunkSize: 500, label: "opencode" });
+                yield* writeNormalizedTranscriptBatch(write, toOpenCodeNormalizedBatch(slice, dbPath));
                 sessionCount += 1;
                 turnCount += slice.turns.length;
                 toolCallCount += slice.toolCalls.length;
@@ -1282,14 +1272,14 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
     failedFiles: Schema.Number,
 }) {}
 
-export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const opencodeStage: StageDef<OpenCodeStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
-        const result = yield* ingestOpenCode({ sinceDays });
+        const result = yield* ingestOpenCode(write, { sinceDays });
         return OpenCodeStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +

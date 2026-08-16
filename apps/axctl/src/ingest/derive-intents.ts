@@ -1,15 +1,5 @@
-/**
- * Re-derive `turn.intent_kind` for existing rows using the current classifier.
- *
- * The classifier in `src/ingest/intent-kind.ts` evolves; previously ingested
- * turns carry their original (often looser) classification. This pass walks
- * stored turns, re-runs the classifier, and updates rows whose label changed.
- * Idempotent - running twice produces no further updates.
- */
-
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { classifyTurnIntent, type TurnIntentKind } from "./intent-kind.ts";
 
 export interface TurnIntentRow {
@@ -20,13 +10,7 @@ export interface TurnIntentRow {
     readonly intent_kind: string | undefined;
     readonly source: string | undefined;
 }
-
-export interface IntentChange {
-    readonly id: string;
-    readonly from: string;
-    readonly to: TurnIntentKind;
-}
-
+export interface IntentChange { readonly id: string; readonly from: string; readonly to: TurnIntentKind }
 export interface DeriveIntentSummary {
     readonly considered: number;
     readonly changed: number;
@@ -34,7 +18,6 @@ export interface DeriveIntentSummary {
     readonly changes: readonly IntentChange[];
 }
 
-/** Pure: compute the changes that would be made. No DB writes. */
 export function computeIntentChanges(rows: readonly TurnIntentRow[]): DeriveIntentSummary {
     const changes: IntentChange[] = [];
     const byTransition: Record<string, number> = {};
@@ -51,57 +34,38 @@ export function computeIntentChanges(rows: readonly TurnIntentRow[]): DeriveInte
         const key = `${prev} -> ${next}`;
         byTransition[key] = (byTransition[key] ?? 0) + 1;
     }
-    return {
-        considered: rows.length,
-        changed: changes.length,
-        byTransition,
-        changes,
-    };
+    return { considered: rows.length, changed: changes.length, byTransition, changes };
 }
 
-const escapeRid = (id: string): string => {
-    // SurrealDB record-id literal: `table:identifier`. Identifiers with special
-    // chars (UUID hyphens, dots) must be backtick-wrapped. Strip backticks
-    // already present so we don't double-wrap.
-    const idx = id.indexOf(":");
-    if (idx < 0) return `\`${id}\``;
-    const table = id.slice(0, idx);
-    const key = id.slice(idx + 1).replace(/^[`⟨]|[`⟩]$/g, "");
-    if (/^[A-Za-z0-9_]+$/.test(key)) return `${table}:${key}`;
-    return `${table}:\`${key.replace(/`/g, "")}\``;
-};
+const TurnIntentDbRow = Schema.Struct({
+    id: Schema.String,
+    role: Schema.String,
+    message_kind: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+    intent_kind: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+});
 
-/**
- * Stream all turn rows in pages, classify, batch-update only the ones that
- * changed. Returns a summary regardless of whether the caller is doing a dry
- * run (the caller decides whether to skip writes).
- */
-export const deriveTurnIntents = (opts: {
-    readonly dryRun: boolean;
-    readonly batchSize?: number;
-}): Effect.Effect<DeriveIntentSummary, DbError, SurrealClient> =>
+export const deriveTurnIntents = (
+    write: CacheWriteService,
+    opts: { readonly dryRun: boolean; readonly batchSize?: number },
+): Effect.Effect<DeriveIntentSummary, CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[TurnIntentRow[]]>(`
-            SELECT
-                <string>id AS id,
-                role,
-                message_kind,
-                text_excerpt,
-                intent_kind,
-                session.source AS source
-            FROM turn;
+        const rows = yield* write.rows(TurnIntentDbRow, `
+            SELECT t.id, t.role, t.message_kind, t.text_excerpt, t.intent_kind, s.source
+            FROM turn t JOIN session s ON s.id = t.session
         `);
-        const summary = computeIntentChanges(rows);
-        if (opts.dryRun || summary.changes.length === 0) return summary;
-
-        const batchSize = opts.batchSize ?? 500;
-        for (let i = 0; i < summary.changes.length; i += batchSize) {
-            const slice = summary.changes.slice(i, i + batchSize);
-            const stmts = slice
-                .map((c) => `UPDATE ${escapeRid(c.id)} SET intent_kind = "${c.to}" RETURN NONE;`)
-                .join("\n");
-            yield* db.query(stmts);
+        const summary = computeIntentChanges(rows.map((row) => ({
+            id: row.id,
+            role: row.role,
+            message_kind: row.message_kind ?? undefined,
+            text_excerpt: row.text_excerpt ?? undefined,
+            intent_kind: row.intent_kind ?? undefined,
+            source: row.source ?? undefined,
+        })));
+        if (opts.dryRun) return summary;
+        for (const change of summary.changes) {
+            yield* write.exec("UPDATE turn SET intent_kind = ? WHERE id = ?", [change.to, change.id]);
         }
         return summary;
     });

@@ -1,4 +1,4 @@
-import type { StageRegistryShape } from "./registry.ts";
+import type { IngestStageError, StageRegistryShape } from "./registry.ts";
 import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
 
@@ -7,7 +7,7 @@ import type { BaseStageStats, StageDef } from "./types.ts";
 export const selectByKeys = (
     registry: StageRegistryShape,
     keys: ReadonlyArray<string>,
-): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
+): ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> => {
     const all = registry.all();
     const known = new Set(all.map((s) => s.meta.key));
     const bad = keys.filter((k) => !known.has(k));
@@ -25,5 +25,5 @@ export const selectByKeys = (
 export const selectByTag = (
     registry: StageRegistryShape,
     tag: IngestStageTag,
-): ReadonlyArray<StageDef<BaseStageStats, unknown>> =>
+): ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> =>
     registry.byTag(tag);

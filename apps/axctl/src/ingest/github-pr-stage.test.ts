@@ -1,77 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { GithubPrKey, githubPrStage, ingestGithubPrs, resolveFetchCooldownMs } from "./github-pr-stage.ts";
 
-/**
- * Mock SurrealClient (shared factory) capturing every issued SQL string. The
- * `repoRows` override answers the `FROM repository` discovery SELECT; the writer's
- * `FROM commit` / `FROM produced` reads get stub rows; everything else is `[[]]`.
- */
-const makeMockDb = (overrides?: {
-    repoRows?: unknown[];
-    commitRows?: unknown[];
-    producedRows?: unknown[];
-    watermarkRows?: unknown[];
-}): TestSurrealClient =>
-    makeTestSurrealClient({
-        routes: {
-            "FROM repository": overrides?.repoRows ?? [[]],
-            "FROM ingest_file_state": overrides?.watermarkRows ?? [[]],
-            "FROM commit": overrides?.commitRows ?? [["commit:`c1`"]],
-            "FROM produced": overrides?.producedRows ?? [["session:`s1`"]],
-        },
-    });
-
-const run = (
-    deps: Parameters<typeof ingestGithubPrs>[0],
-    db: TestSurrealClient,
-) =>
-    Effect.runPromise(
-        ingestGithubPrs(deps).pipe(Effect.provide(db.layer)),
-    );
-
-/** A realistic gh `pr list --json` PR object (merged, 1 review, 1 check). */
-const mergedPrFixture = {
-    number: 42,
-    title: "Add the thing",
-    state: "MERGED",
-    mergedAt: "2026-05-09T12:00:00.000Z",
-    createdAt: "2026-05-08T09:00:00.000Z",
-    baseRefName: "main",
-    headRefName: "feat/the-thing",
-    headRefOid: "head999",
-    mergeCommit: { oid: "abc123" },
-    author: { login: "necmttn", type: "User" },
-    url: "https://github.com/o/r/pull/42",
-    additions: 120,
-    deletions: 30,
-    changedFiles: 6,
-    commits: [{}, {}, {}],
-    labels: [{ name: "feature" }],
-    reviews: [
-        {
-            author: { login: "reviewer1", type: "User" },
-            state: "APPROVED",
-            body: "lgtm",
-            submittedAt: "2026-05-09T10:00:00.000Z",
-        },
-    ],
-    statusCheckRollup: [
-        {
-            __typename: "CheckRun",
-            name: "ci/test",
-            status: "COMPLETED",
-            conclusion: "FAILURE",
-            detailsUrl: "https://ci.example/1",
-            startedAt: "2026-05-09T09:30:00.000Z",
-            completedAt: "2026-05-09T09:45:00.000Z",
-        },
-    ],
-};
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("GitHub PR stage", { requireFts: true });
+const pr = { number: 42, title: "Change", state: "OPEN", createdAt: "2026-05-08T09:00:00Z" };
 
 describe("githubPrStage", () => {
-    test("declares the canonical key/deps/tags", () => {
+    test("declares the canonical key, dependencies, and tags", () => {
         expect(Schema.decodeUnknownSync(GithubPrKey)("github-pr")).toBe("github-pr");
         expect(githubPrStage.meta.key).toBe("github-pr");
         expect(githubPrStage.meta.deps).toEqual(["git"]);
@@ -79,13 +16,14 @@ describe("githubPrStage", () => {
     });
 });
 
-describe("ingestGithubPrs", () => {
-    test("returns zeros when no repositories have a remote + path", async () => {
-        const db = makeMockDb({ repoRows: [[]] });
-
-        // No deps → real fetchPullRequests, but it's never called (no repos).
-        const totals = await run(undefined, db);
-
+describe("ingestGithubPrs on real DuckDB", () => {
+    dtest("returns zeros for an empty repository table", async () => {
+        let totals: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-stage-empty-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                totals = yield* ingestGithubPrs(write);
+            }),
+        ));
         expect(totals).toEqual({
             repositoriesScanned: 0,
             repositoriesDegraded: 0,
@@ -97,207 +35,84 @@ describe("ingestGithubPrs", () => {
         });
     });
 
-    test("composes fetch → normalize → write for a discovered repo", async () => {
-        const db = makeMockDb({
-            repoRows: [
-                [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
-            ],
-            commitRows: [["commit:`c1`"]],
-            producedRows: [["session:`s1`"]],
-        });
-
-        const totals = await run(
-            { fetchImpl: () => Effect.succeed({ ok: true, prs: [mergedPrFixture] }) },
-            db,
-        );
-
-        expect(totals.repositoriesScanned).toBe(1);
-        expect(totals.repositoriesDegraded).toBe(0);
-        expect(totals.pullRequests).toBe(1);
-        expect(totals.reviews).toBe(1);
-        expect(totals.checks).toBe(1);
-        expect(totals.deliveryOutcomes).toBe(1);
-
-        // The writer ran with the resolved repository ref.
-        const prStmt = db.captured.find((s) => s.includes("UPSERT pull_request:"));
-        expect(prStmt).toBeDefined();
-        expect(prStmt!).toContain("repository: repository:`r1`");
-
-        // No repoPaths → the discovery SELECT is path-unfiltered but does
-        // exclude non-GitHub remotes (gh would fail on every one, every run).
-        const selUnscoped = db.captured.find((s) => s.includes("FROM repository"));
-        expect(selUnscoped).toBeDefined();
-        expect(selUnscoped!).not.toContain("root_path IN [");
-        expect(selUnscoped!).toContain('remote_url CONTAINS "github"');
+    dtest("fetches and writes one discovered GitHub repository", async () => {
+        const seen: unknown[] = [];
+        let totals: unknown;
+        let count = -1;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-stage-write-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("repository", [
+                    { id: "github", root_path: "/tmp/github", remote_url: "https://github.com/o/r" },
+                    { id: "gitlab", root_path: "/tmp/gitlab", remote_url: "https://gitlab.com/o/r" },
+                ]);
+                totals = yield* ingestGithubPrs(write, {
+                    updatedSince: "2026-06-09",
+                    fetchImpl: (input) => {
+                        seen.push(input);
+                        return Effect.succeed({ ok: true as const, prs: [pr] });
+                    },
+                });
+                count = (yield* write.rows(Schema.Struct({ count: Schema.Number }),
+                    "SELECT count(*)::INTEGER AS count FROM pull_request"))[0]!.count;
+            }),
+        ));
+        expect(totals).toMatchObject({ repositoriesScanned: 1, repositoriesDegraded: 0, pullRequests: 1 });
+        expect(seen).toEqual([{ cwd: "/tmp/github", limit: 200, updatedSince: "2026-06-09" }]);
+        expect(count).toBe(1);
     });
 
-    test("scopes the repository SELECT to repoPaths when provided", async () => {
-        const db = makeMockDb({
-            repoRows: [
-                [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
-            ],
-        });
-
-        await run(
-            { repoPaths: ["/tmp/x"], fetchImpl: () => Effect.succeed({ ok: true, prs: [mergedPrFixture] }) },
-            db,
-        );
-
-        const sel = db.captured.find((s) => s.includes("FROM repository"));
-        expect(sel).toBeDefined();
-        expect(sel!).toContain("root_path IN [");
-        expect(sel!).toContain('"/tmp/x"');
-        // A worktree path never equals the canonical root_path, so the filter
-        // also resolves the repository via the checkout table.
-        expect(sel!).toContain("SELECT VALUE repository FROM checkout WHERE path IN [");
+    dtest("scopes repository paths and reports a degraded fetch", async () => {
+        const seen: string[] = [];
+        let totals: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-stage-scope-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("repository", [
+                    { id: "a", root_path: "/tmp/a", remote_url: "https://github.com/o/a" },
+                    { id: "b", root_path: "/tmp/b", remote_url: "https://github.com/o/b" },
+                ]);
+                totals = yield* ingestGithubPrs(write, {
+                    repoPaths: ["/tmp/b"],
+                    fetchImpl: (input) => {
+                        seen.push(input.cwd);
+                        return Effect.succeed({ ok: false as const, prs: [], detail: "timeout" });
+                    },
+                });
+            }),
+        ));
+        expect(seen).toEqual(["/tmp/b"]);
+        expect(totals).toMatchObject({ repositoriesScanned: 1, repositoriesDegraded: 1, pullRequests: 0 });
     });
 
-    test("forwards updatedSince to the fetcher (since-bounded gh search)", async () => {
-        const db = makeMockDb({
-            repoRows: [
-                [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
-            ],
-        });
-        const seen: Array<{ cwd: string; updatedSince?: string | undefined }> = [];
-
-        await run(
-            {
-                updatedSince: "2026-06-09",
-                fetchImpl: (input) => {
-                    seen.push({ cwd: input.cwd, updatedSince: input.updatedSince });
-                    return Effect.succeed({ ok: true, prs: [] });
-                },
-            },
-            db,
-        );
-
-        expect(seen).toEqual([{ cwd: "/tmp/x", updatedSince: "2026-06-09" }]);
-    });
-
-    test("a failed fetch counts as degraded and writes nothing for that repo", async () => {
-        const db = makeMockDb({
-            repoRows: [
-                [
-                    { id: "repository:`bad`", root_path: "/tmp/bad", remote_url: "https://github.com/o/bad" },
-                    { id: "repository:`ok`", root_path: "/tmp/ok", remote_url: "https://github.com/o/ok" },
-                ],
-            ],
-            commitRows: [["commit:`c1`"]],
-            producedRows: [["session:`s1`"]],
-        });
-
-        const totals = await run(
-            {
-                fetchImpl: (input) =>
-                    input.cwd === "/tmp/bad"
-                        ? Effect.succeed({ ok: false, prs: [], detail: "gh pr list timed out after 30000ms" })
-                        : Effect.succeed({ ok: true, prs: [mergedPrFixture] }),
-            },
-            db,
-        );
-
-        expect(totals.repositoriesScanned).toBe(2);
-        expect(totals.repositoriesDegraded).toBe(1);
-        expect(totals.pullRequests).toBe(1); // only the healthy repo wrote
-        const prStmts = db.captured.filter((s) => s.includes("UPSERT pull_request:"));
-        expect(prStmts.every((s) => s.includes("repository:`ok`"))).toBe(true);
+    dtest("uses a successful fetch watermark for cooldown", async () => {
+        const now = 1_750_000_000_000;
+        let fetches = 0;
+        let first: unknown;
+        let second: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-stage-cooldown-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("repository", {
+                    id: "github", root_path: "/tmp/github", remote_url: "https://github.com/o/r",
+                });
+                const deps = {
+                    fetchCooldownMs: 15 * 60 * 1000,
+                    now: () => now,
+                    fetchImpl: () => {
+                        fetches += 1;
+                        return Effect.succeed({ ok: true as const, prs: [] });
+                    },
+                };
+                first = yield* ingestGithubPrs(write, deps);
+                second = yield* ingestGithubPrs(write, deps);
+            }),
+        ));
+        expect(fetches).toBe(1);
+        expect(first).toMatchObject({ repositoriesSkippedCooldown: 0 });
+        expect(second).toMatchObject({ repositoriesSkippedCooldown: 1 });
     });
 });
 
-describe("fetch cooldown", () => {
-    const repoRows = [
-        [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
-    ];
-    const NOW = 1_750_000_000_000;
-    const COOLDOWN = 15 * 60 * 1000;
-
-    test("skips a repo whose last successful fetch is within the cooldown", async () => {
-        const db = makeMockDb({
-            repoRows,
-            watermarkRows: [[{ path: "__github_pr_fetch__//tmp/x", mtime_ms: NOW - 60_000 }]],
-        });
-        let fetchCalls = 0;
-
-        const totals = await run(
-            {
-                fetchCooldownMs: COOLDOWN,
-                now: () => NOW,
-                fetchImpl: () => {
-                    fetchCalls += 1;
-                    return Effect.succeed({ ok: true, prs: [] });
-                },
-            },
-            db,
-        );
-
-        expect(fetchCalls).toBe(0);
-        expect(totals.repositoriesScanned).toBe(1);
-        expect(totals.repositoriesSkippedCooldown).toBe(1);
-    });
-
-    test("fetches when the watermark is older than the cooldown, and advances it", async () => {
-        const db = makeMockDb({
-            repoRows,
-            watermarkRows: [[{ path: "__github_pr_fetch__//tmp/x", mtime_ms: NOW - COOLDOWN - 1 }]],
-        });
-        let fetchCalls = 0;
-
-        const totals = await run(
-            {
-                fetchCooldownMs: COOLDOWN,
-                now: () => NOW,
-                fetchImpl: () => {
-                    fetchCalls += 1;
-                    return Effect.succeed({ ok: true, prs: [] });
-                },
-            },
-            db,
-        );
-
-        expect(fetchCalls).toBe(1);
-        expect(totals.repositoriesSkippedCooldown).toBe(0);
-        const wm = db.captured.find((s) => s.includes("UPSERT ingest_file_state:") && s.includes("github-pr:fetch"));
-        expect(wm).toBeDefined();
-        expect(wm!).toContain(`mtime_ms: ${NOW}`);
-        expect(wm!).toContain('"__github_pr_fetch__//tmp/x"');
-    });
-
-    test("a degraded fetch does NOT advance the watermark (retries next run)", async () => {
-        const db = makeMockDb({ repoRows });
-
-        const totals = await run(
-            {
-                fetchCooldownMs: COOLDOWN,
-                now: () => NOW,
-                fetchImpl: () => Effect.succeed({ ok: false, prs: [], detail: "gh pr list timed out" }),
-            },
-            db,
-        );
-
-        expect(totals.repositoriesDegraded).toBe(1);
-        const wm = db.captured.find((s) => s.includes("UPSERT ingest_file_state:"));
-        expect(wm).toBeUndefined();
-    });
-
-    test("cooldown disabled (0/absent) → no watermark read, every repo fetched", async () => {
-        const db = makeMockDb({ repoRows });
-        let fetchCalls = 0;
-
-        await run(
-            {
-                fetchImpl: () => {
-                    fetchCalls += 1;
-                    return Effect.succeed({ ok: true, prs: [] });
-                },
-            },
-            db,
-        );
-
-        expect(fetchCalls).toBe(1);
-        expect(db.captured.some((s) => s.includes("SELECT path, mtime_ms FROM ingest_file_state"))).toBe(false);
-    });
-
-    test("resolveFetchCooldownMs: default 15m, env seconds override, 0 disables, junk falls back", () => {
+describe("resolveFetchCooldownMs", () => {
+    test("uses the default and validates overrides", () => {
         expect(resolveFetchCooldownMs({})).toBe(15 * 60 * 1000);
         expect(resolveFetchCooldownMs({ AX_GITHUB_PR_FETCH_COOLDOWN_SECONDS: "60" })).toBe(60_000);
         expect(resolveFetchCooldownMs({ AX_GITHUB_PR_FETCH_COOLDOWN_SECONDS: "0" })).toBe(0);

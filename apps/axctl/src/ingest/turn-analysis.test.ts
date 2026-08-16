@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-    buildTurnAnalysisStatements,
-    classifyTurnAnalysis,
-    deriveTurnAnalysisRows,
-    semanticSignalKey,
-} from "./turn-analysis.ts";
+import { classifyTurnAnalysis, deriveTurnAnalysisRows, semanticSignalKey } from "./turn-analysis.ts";
 
 const row = (overrides: Partial<Parameters<typeof classifyTurnAnalysis>[0]> = {}) => ({
     id: "turn:`s__seq_000001`",
@@ -245,44 +240,6 @@ describe("classifyTurnAnalysis", () => {
             row({ id: "turn:`user_2`", role: "user", seq: 2, text_excerpt: "no wrong file", intent_kind: "correction" }),
         ]);
 
-        expect(analyses[1]?.reactsToTurnKey).toBe("assistant_1");
-    });
-});
-
-describe("buildTurnAnalysisStatements", () => {
-    test("writes analysis, semantic signal, expresses edge, and reacts_to edge", () => {
-        const analysis = classifyTurnAnalysis(row({
-            id: "turn:`user_2`",
-            text_excerpt: "no wrong file",
-            intent_kind: "correction",
-        }), "assistant_1");
-
-        const sql = buildTurnAnalysisStatements([analysis]).join("\n");
-
-        expect(sql).toContain("UPSERT turn_analysis:`user_2`");
-        expect(sql).toContain("UPSERT semantic_signal:`correction__wrong_target`");
-        expect(sql).toContain("->expresses:");
-        expect(sql).toContain("->reacts_to:");
-        expect(sql).toContain("signal = semantic_signal:`correction__wrong_target`");
-    });
-
-    test("aggregates semantic signal time bounds before writing", () => {
-        const early = classifyTurnAnalysis(row({
-            id: "turn:`user_1`",
-            text_excerpt: "no wrong file",
-            intent_kind: "correction",
-            ts: "2026-05-29T00:00:00.000Z",
-        }), "assistant_1");
-        const late = classifyTurnAnalysis(row({
-            id: "turn:`user_2`",
-            text_excerpt: "no wrong route",
-            intent_kind: "correction",
-            ts: "2026-05-30T00:00:00.000Z",
-        }), "assistant_2");
-
-        const sql = buildTurnAnalysisStatements([late, early]).join("\n");
-
-        expect(sql).toContain('first_seen: d"2026-05-29T00:00:00.000Z"');
-        expect(sql).toContain('last_seen: d"2026-05-30T00:00:00.000Z"');
+        expect(analyses[1]?.reactsToTurnKey).toBe("turn:`assistant_1`");
     });
 });

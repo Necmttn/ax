@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildCompactionStatements,
     compactionRecordKey,
     extractClaudeCompaction,
     extractCodexCompaction,
     extractCursorCompaction,
     extractPiCompaction,
-    type CompactionWrite,
 } from "./compaction.ts";
 
 describe("compactionRecordKey", () => {
@@ -15,62 +13,6 @@ describe("compactionRecordKey", () => {
     });
 });
 
-describe("buildCompactionStatements", () => {
-    test("emits one UPSERT with typed fields", () => {
-        const write: CompactionWrite = {
-            compactionKey: "codex_s_cmp_1",
-            sessionId: "s",
-            agentEventKey: "codex_s_seq_000001",
-            harness: "codex",
-            ts: new Date("2026-05-14T15:34:42.663Z"),
-            trigger: "auto",
-            strategy: "history_replacement",
-            sourceConfidence: "explicit",
-            summary: null,
-            tokensBefore: 120000,
-            boundaryRef: "seq_42",
-            keptCount: 83,
-            readFiles: null,
-            modifiedFiles: null,
-            raw: { replacement_count: 83 },
-        };
-        const [stmt] = buildCompactionStatements([write]);
-        expect(stmt).toContain("UPSERT compaction:");
-        expect(stmt).toContain('harness: "codex"');
-        expect(stmt).toContain('strategy: "history_replacement"');
-        expect(stmt).toContain("kept_count: 83");
-        expect(stmt).toContain("tokens_before: 120000");
-        expect(stmt).toContain("summary: NONE");
-        expect(stmt).toContain("session: session:");
-        expect(stmt).toContain("agent_event: agent_event:");
-    });
-
-    test("null kept_count and tokens become NONE", () => {
-        const write: CompactionWrite = {
-            compactionKey: "pi_s_cmp_1",
-            sessionId: "s",
-            agentEventKey: null,
-            harness: "pi",
-            ts: new Date("2026-05-29T06:05:38.132Z"),
-            trigger: "auto",
-            strategy: "summarize",
-            sourceConfidence: "explicit",
-            summary: "Goal: ship X",
-            tokensBefore: 90000,
-            boundaryRef: "entry-7",
-            keptCount: null,
-            readFiles: ["a.ts", "b.ts"],
-            modifiedFiles: null,
-            raw: null,
-        };
-        const [stmt] = buildCompactionStatements([write]);
-        expect(stmt).toContain("kept_count: NONE");
-        expect(stmt).toContain("agent_event: NONE");
-        expect(stmt).toContain('strategy: "summarize"');
-        expect(stmt).toContain("read_files: \"[\\\"a.ts\\\",\\\"b.ts\\\"]\"");
-        expect(stmt).toContain("raw: NONE");
-    });
-});
 
 describe("extractPiCompaction", () => {
     test("maps a Pi CompactionEntry", () => {

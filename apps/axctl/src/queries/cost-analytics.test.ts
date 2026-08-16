@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { makeMockDb, runWithMock, type TestSurrealClient } from "@ax/lib/testing/surreal";
-import { cacheReadResults } from "../testing/cache-read.ts";
-import type { SurrealClient } from "@ax/lib/db";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeMockDb, makeTestSurrealClient, runWithMock } from "@ax/lib/testing/surreal";
 import {
     fetchCostModels,
     fetchCostSessions,
@@ -125,7 +121,12 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "litellm",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+            },
+        });
         const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
 
         // 1,000,000 prompt tokens * $2/MTok = $2.00
@@ -162,7 +163,12 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "test",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+            },
+        });
         const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
 
         // Base rate only: 300k @ $1/M = $0.30. The tiered rate ($2/M) would
@@ -244,25 +250,12 @@ describe("fetchCostSessions", () => {
 /**
  * `fetchCostSplit` now spans both engines: the origin x model rollup is still a
  * SurrealQL statement, while its content-type dimension reads the published
- * snapshot through `fetchContentTypeBreakdown`. So the content rows are seeded
- * on a `CacheRead` stub here instead of occupying a positional Surreal slot.
- * The stub answers the seam directly (no schema decode), so the rows are already
- * in decoded shape.
+ * snapshot through `fetchContentTypeBreakdown`, and its pricing catalog reads
+ * `agent_model` the same way. Both streams are served by `runWithMock`, which
+ * provides the Surreal double AND the paired cache double off the same ROUTE
+ * table - so a content-type fixture is a `has_content` route, not a positional
+ * Surreal slot. The cache double decodes through the real column contracts.
  */
-const runSplit = <A, E>(
-    db: TestSurrealClient,
-    effect: Effect.Effect<A, E, SurrealClient | CacheRead>,
-    contentTypeRows: ReadonlyArray<{ ct: string; calls: number; bytes: number }> = [],
-): Promise<A> =>
-    Effect.runPromise(
-        effect.pipe(
-            Effect.provide(Layer.merge(
-                db.layer,
-                cacheReadResults([contentTypeRows]),
-            )),
-        ),
-    );
-
 describe("fetchCostSplit", () => {
     test("partitions source=claude-subagent into subagent origin", async () => {
         const dbRows = [
@@ -274,7 +267,7 @@ describe("fetchCostSplit", () => {
               cache_read_tokens: 10, cache_create_tokens: 5, cost_usd: 1.0 },
         ];
         const db = makeMockDb([[dbRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         const mainRow = result.rows.find((r) => r.origin === "main");
         const subRow = result.rows.find((r) => r.origin === "subagent");
@@ -295,7 +288,7 @@ describe("fetchCostSplit", () => {
               cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0 },
         ];
         const db = makeMockDb([[dbRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         const a = result.rows.find((r) => r.model === "A")!;
         const b = result.rows.find((r) => r.model === "B")!;
@@ -313,7 +306,7 @@ describe("fetchCostSplit", () => {
               cache_read_tokens: 10, cache_create_tokens: 4, cost_usd: 1.5 },
         ];
         const db = makeMockDb([[dbRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.totals.sessions).toBe(10);
         expect(result.totals.prompt_tokens).toBe(300);
@@ -327,7 +320,7 @@ describe("fetchCostSplit", () => {
               cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
         ];
         const db = makeMockDb([[dbRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.rows[0]!.share_pct).toBe(0);
     });
@@ -339,7 +332,7 @@ describe("fetchCostSplit", () => {
               cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
         ];
         const db = makeMockDb([[dbRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.rows[0]).toMatchObject({
             model: "unknown-model",
@@ -350,7 +343,7 @@ describe("fetchCostSplit", () => {
 
     test("SQL groups by source and model", async () => {
         const db = makeMockDb([[[]]] );
-        await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
         expect(db.captured[0]).toContain("GROUP BY source, model");
     });
 });
@@ -368,7 +361,7 @@ describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
               cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 4.25 },
         ];
         const db = makeMockDb([[dbRows], [[]], [[]]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.rows[0]).toMatchObject({ cost_usd: 4.25, unpriced: false });
     });
@@ -390,8 +383,14 @@ describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "litellm",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows], [[]]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+                "FROM has_content": [[]],
+            },
+        });
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         const recomputed = result.rows.find((r) => r.model === "custom-model-x")!;
         expect(recomputed).toMatchObject({ cost_usd: 2, unpriced: false });
@@ -408,7 +407,7 @@ describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
               cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0 },
         ];
         const db = makeMockDb([[dbRows], [[]], [[]]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.rows[0]).toMatchObject({ cost_usd: 0, unpriced: false });
     });
@@ -465,16 +464,21 @@ describe("fetchCostSplit - contentTypes dimension", () => {
                 cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.5,
             },
         ];
-        // Second query: fetchContentTypeBreakdown returns flat rows
+        // fetchContentTypeBreakdown reads the SNAPSHOT, so its rows ride the
+        // cache double via a `has_content` route rather than a positional
+        // Surreal slot. The pricing-catalog lookup is lazy - this all-priced
+        // fixture never triggers it, so no `agent_model` route either.
         const contentTypeRows = [
             { ct: "content_type:code", calls: 5, bytes: 400 },
             { ct: "content_type:docs", calls: 2, bytes: 200 },
         ];
-        // Query order: split rows, then content-type breakdown. The
-        // pricing-catalog lookup is lazy - this all-priced fixture never
-        // triggers it, so no catalog slot in the mock.
-        const db = makeMockDb([[splitRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }), contentTypeRows);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [splitRows],
+                "FROM has_content": contentTypeRows,
+            },
+        });
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes).toBeDefined();
         // rows are sorted by estTokens desc; code (400 bytes) > docs (200 bytes)
@@ -495,7 +499,7 @@ describe("fetchCostSplit - contentTypes dimension", () => {
         // Empty content-type response; cost_usd > 0 so the lazy
         // pricing-catalog lookup never fires (extra empty slot unused).
         const db = makeMockDb([[splitRows]]);
-        const result = await runSplit(db, fetchCostSplit({ sinceDays: 14 }));
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes.rows).toHaveLength(0);
         expect(result.contentTypes.totals.bytes).toBe(0);

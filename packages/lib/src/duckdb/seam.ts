@@ -518,6 +518,28 @@ export interface CacheWriteOptions extends DuckDbLiveOptions {
      *  `IF NOT EXISTS`, so this is idempotent and makes the cache self-healing.
      *  Pass `null` to skip (a caller that knows the schema is already there). */
     readonly schemaSql: string | null;
+    /**
+     * Whether a successful `body` publishes a snapshot. Defaults to `true` -
+     * the ingest path, where publishing IS the point.
+     *
+     * MAINTENANCE WRITES MUST PASS `false`, and the reason is a real defect this
+     * flag exists to make unrepresentable. Publishing is gated on "did `body`
+     * succeed", which reads as "did the INGEST succeed" only while the ingest is
+     * the sole thing opening this seam. It is not: the CLI stamps the
+     * `ingest_run` row from an `onTimeout` hook, and GCs blobs from `afterWork`,
+     * each through its OWN `withCacheWrite`. Those bodies are one-statement
+     * writes that succeed even when the ingest they are reporting on TIMED OUT,
+     * so with the default they publish the live database as the timed-out run
+     * left it - derived tables computed over half-written base tables, and no
+     * FTS index (`buildFtsIndexes` runs at the END of `runIngest`). Ingest also
+     * runs without a transaction, so there is no rollback to fall back on: the
+     * partial rows are committed, and publishing hands them to every CLI, MCP
+     * and dashboard read as the authoritative snapshot.
+     *
+     * The rule the flag encodes: publish when you wrote the DATA, never when you
+     * only wrote a note ABOUT the data.
+     */
+    readonly publish?: boolean;
 }
 
 /**
@@ -572,10 +594,15 @@ export const withCacheWrite = <A, E, R>(
                     const value = yield* body(write);
 
                     // Publish LAST and only on success: a failed ingest must
-                    // leave the previous snapshot exactly as it was.
-                    yield* opened.db
-                        .publishSnapshot(options.livePath, target, { from: conn })
-                        .pipe(Effect.mapError((err) => toPublishError(err, target)));
+                    // leave the previous snapshot exactly as it was. A
+                    // maintenance caller opts OUT entirely (see `publish`) -
+                    // its body succeeding says nothing about the state of the
+                    // database it would be publishing.
+                    if (options.publish !== false) {
+                        yield* opened.db
+                            .publishSnapshot(options.livePath, target, { from: conn })
+                            .pipe(Effect.mapError((err) => toPublishError(err, target)));
+                    }
                     return value;
                 }),
             (conn) => conn.close.pipe(Effect.andThen(Effect.sync(opened.close))),

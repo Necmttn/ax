@@ -18,6 +18,7 @@
 import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { compileRouting, ROUTING_CLASSES } from "../../queries/dispatch-analytics.ts";
 import {
     defaultRoutingTablePath,
@@ -69,7 +70,8 @@ const tuneCommand = Command.make(
             }
             const tablePath = optionValue(out) ?? defaultRoutingTablePath();
             const table = yield* loadEffectiveRoutingTable(tablePath);
-            const proposals = yield* fetchTuneProposals({ sinceDays: days, table });
+            const read = yield* CacheRead;
+            const proposals = yield* fetchTuneProposals(read, { sinceDays: days, table });
 
             // Parse --apply before the empty-proposals check: an explicit apply
             // against an empty re-mine must fail loudly, not "keep up" silently.

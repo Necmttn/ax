@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import type {
     NextActionCard,
     ProposalDto,
@@ -20,7 +21,7 @@ import {
     toolFailureCards,
     verdictCards,
 } from "./next-actions.ts";
-import { EmptyCacheReadTestLayer, EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -640,9 +641,19 @@ describe("fetchNextActions", () => {
             // biome-ignore lint: other methods not needed
         } as unknown as SurrealClientShape;
         const layer = Layer.succeed(SurrealClient, stub);
+        const failure = Effect.fail(new Error("db down") as never);
+        const cache: CacheReadService = {
+            rows: () => failure as never,
+            first: () => failure as never,
+            raw: () => failure as never,
+            snapshotPath: "(failing-test-cache)",
+        };
 
         const payload = await Effect.runPromise(
-            fetchNextActions().pipe(Effect.provide(layer), Effect.provide(EmptyJudgmentTestLayer), Effect.provide(EmptyCacheReadTestLayer)),
+            fetchNextActions().pipe(
+                Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(EmptyJudgmentTestLayer),
+            ),
         );
 
         expect(payload.cards).toEqual([]);
@@ -669,18 +680,29 @@ describe("fetchNextActions", () => {
             // biome-ignore lint: other methods not needed
         } as unknown as SurrealClientShape;
         const layer = Layer.succeed(SurrealClient, stub);
+        const cache: CacheReadService = {
+            rows: () => Effect.never,
+            first: () => Effect.never,
+            raw: () => Effect.never,
+            snapshotPath: "(hanging-test-cache)",
+        };
 
         const payload = await Effect.runPromise(
-            fetchNextActions({ sourceTimeoutMs: 50 }).pipe(Effect.provide(layer), Effect.provide(EmptyJudgmentTestLayer), Effect.provide(EmptyCacheReadTestLayer)),
+            fetchNextActions({ sourceTimeoutMs: 50 }).pipe(
+                Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(EmptyJudgmentTestLayer),
+            ),
         );
 
         expect(payload.cards).toEqual([]);
-        // Every source that still reaches SurrealDB times out; tool_failure is
-        // noted too, because timeoutOrElse interrupts the fiber before runQuery's
-        // internal swallow fires. skill_hygiene is absent: it reads the cache, and
-        // this stub only hangs `db.query`.
+        // Every source times out; tool_failure is noted too, because
+        // timeoutOrElse interrupts the fiber before runQuery's internal swallow
+        // fires. skill_hygiene is noted for the same reason from the OTHER
+        // engine: it reads the cache, and this stub hangs the cache as well. Its
+        // defensive `cacheRows` degrade-to-[] only catches a FAILED read (the
+        // test above) - a read that never answers is interrupted, not caught.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["tool_failure", "churn", "routing"]),
+            new Set(["tool_failure", "churn", "routing", "skill_hygiene"]),
         );
         // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
         expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);

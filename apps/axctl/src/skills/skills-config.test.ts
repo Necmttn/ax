@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 
@@ -22,7 +21,9 @@ import { makeCommandSource } from "./sources/command.ts";
 import { makeSkillSourceRegistryLayer } from "./sources/registry.ts";
 import { reconcileSkills } from "./reconcile.ts";
 import { scopeSkill, readAllSkills } from "./config.ts";
-import type { SkillDirRef, SkillSource } from "./sources/types.ts";
+import type { SkillDirRef } from "./sources/types.ts";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 
 const FS = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 const runFs = <A, E>(eff: Effect.Effect<A, E, any>) =>
@@ -188,101 +189,62 @@ describe("command source (flat .md)", () => {
     });
 });
 
-// --- mock SurrealClient capturing reconcile SQL --------------------------------
-const recordingDb = (
-    calls: { sql: string; bindings?: Record<string, unknown> | undefined }[],
-    rows: unknown[][],
-) => {
-    let i = 0;
-    return makeTestSurrealClient({
-        fallback: (sql, bindings) => {
-            calls.push({ sql, bindings });
-            return [rows[i++] ?? []];
-        },
-    }).layer;
-};
+// --- real DuckDB reconciliation -------------------------------------------------
 
-describe("reconcileSkills", () => {
-    test("discovers on-disk names and calls reconcileTable('skill', names)", async () => {
-        const root = tmp("ax-rec-");
-        writeSkill(root, "keep", "name: keep");
-        writeSkill(root, "also", "name: also");
-        const sources: SkillSource[] = [
-            makeDirSource({
-                name: "user",
-                label: "u",
-                writable: true,
-                roots: () => Effect.succeed([ref(root, "user")]),
-            }),
-        ];
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        // query order: SELECT absent, SELECT live, UPDATE absent, UPDATE revivable, UPDATE live.
-        // wouldTombstone=1 vs livePresent=9 keeps it under the 50% safety guard.
-        const layer = Layer.mergeAll(
-            FS,
-            makeSkillSourceRegistryLayer(sources),
-            recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [], [1, 2, 3, 4, 5, 6, 7, 8, 9]]),
-        );
-        const report = await Effect.runPromise(
-            reconcileSkills().pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>,
-        );
-        expect(report).toMatchObject({ table: "skill", tombstoned: 1, dryRun: false, tombstoneSkipped: false });
-        // calls[2] is the tombstone UPDATE with the on-disk $names binding.
-        expect(calls[2]!.sql).toContain("SET deleted_at = time::now()");
-        expect(calls[2]!.sql).toContain("NOT IN $names");
-        const names = (calls[2]!.bindings as { names: string[] }).names.sort();
-        expect(names).toEqual(["also", "keep"]);
-    });
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill config", { requireFts: true });
 
-    test("dry-run only SELECTs", async () => {
-        const root = tmp("ax-rec-dry-");
-        writeSkill(root, "x", "name: x");
-        const sources: SkillSource[] = [
-            makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([ref(root, "user")]) }),
-        ];
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = Layer.mergeAll(FS, makeSkillSourceRegistryLayer(sources), recordingDb(calls, [[], [], []]));
-        const report = await Effect.runPromise(
-            reconcileSkills({ dryRun: true }).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>,
-        );
-        expect(report.dryRun).toBe(true);
-        expect(calls.every((c) => c.sql.trimStart().startsWith("SELECT"))).toBe(true);
-    });
+const skillRow = (name: string, scope = "user", deletedAt: Date | null = null) => ({
+    id: skillRecordKey(SkillName.make(name)), name, scope, dir_path: `/skills/${name}`,
+    content_hash: name, deleted_at: deletedAt,
 });
 
-describe("readAllSkills status: orphan vs out-of-scope", () => {
-    const evidence = (over: Record<string, unknown>) => ({
-        name: "", scope: "user", dir_path: null, description: null, fired: 0, last_used: null, deleted_at: null, ...over,
+const sourceLayer = (root: string) => makeSkillSourceRegistryLayer([
+    makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([ref(root, "user")]) }),
+]);
+
+describe("skill database behavior on real DuckDB", () => {
+    dtest("reconcile discovers names and updates lifecycle rows", async () => {
+        const root = tmp("ax-skill-reconcile-");
+        writeSkill(root, "keep", "name: keep");
+        writeSkill(root, "also", "name: also");
+        for (let index = 0; index < 8; index += 1) writeSkill(root, `extra-${index}`, `name: extra-${index}`);
+        let report: unknown;
+        let goneDeleted = false;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-skill-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("skill", [
+                    skillRow("keep"), skillRow("also"), skillRow("gone"),
+                    ...Array.from({ length: 8 }, (_, index) => skillRow(`extra-${index}`)),
+                ]);
+                report = yield* reconcileSkills(write).pipe(
+                    Effect.provide(Layer.mergeAll(FS, sourceLayer(root))),
+                );
+                const rows = yield* write.raw("SELECT deleted_at FROM skill WHERE name = 'gone'");
+                goneDeleted = rows.rows[0]?.deleted_at instanceof Date;
+            }),
+        ));
+        expect(report).toMatchObject({ table: "skill", tombstoned: 1, tombstoneSkipped: false });
+        expect(goneDeleted).toBe(true);
     });
-    const run = (filter: Record<string, unknown>) => {
-        const root = tmp("ax-status-");
-        writeSkill(root, "keep", "name: keep"); // on disk, scope "user"
-        const sources: SkillSource[] = [
-            makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([ref(root, "user")]) }),
-        ];
-        const evRows = [
-            evidence({ name: "keep", scope: "user", fired: 5 }), // on disk -> live
-            evidence({ name: "gone", scope: "user" }), // owned scope, absent on disk -> orphan
-            evidence({ name: "othertool", scope: "codex-tool" }), // unowned scope -> out-of-scope
-        ];
-        const layer = Layer.mergeAll(FS, makeSkillSourceRegistryLayer(sources), recordingDb([], [evRows]));
-        return Effect.runPromise(
-            readAllSkills(filter).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>,
+
+    dtest("readAllSkills separates owned orphans from provider rows", async () => {
+        const root = tmp("ax-skill-read-");
+        writeSkill(root, "keep", "name: keep");
+        const fixture = await runWithPlatform(publishCacheFixture(
+            tempDir("ax-skill-read-db-"), dylibPath,
+            (write) => write.putMany("skill", [
+                skillRow("keep"), skillRow("gone"), skillRow("othertool", "codex-tool"),
+            ]),
+        ));
+        const layer = Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), FS, sourceLayer(root));
+        const hidden = await runWithPlatform(readAllSkills().pipe(Effect.provide(layer)));
+        expect(new Map(hidden.map((row) => [row.name, row.status]))).toEqual(new Map([
+            ["gone", "orphan"], ["keep", "live"],
+        ]));
+        const all = await runWithPlatform(
+            readAllSkills({ includeOutOfScope: true }).pipe(Effect.provide(layer)),
         );
-    };
-
-    test("owned-scope absentee = orphan; unowned scope = out-of-scope (hidden by default)", async () => {
-        const rows = await run({});
-        const byName = new Map(rows.map((r: any) => [r.name, r.status]));
-        expect(byName.get("keep")).toBe("live");
-        expect(byName.get("gone")).toBe("orphan");
-        expect(byName.has("othertool")).toBe(false); // out-of-scope hidden by default
-    });
-
-    test("--all-scopes surfaces out-of-scope rows", async () => {
-        const rows = await run({ includeOutOfScope: true });
-        const byName = new Map(rows.map((r: any) => [r.name, r.status]));
-        expect(byName.get("othertool")).toBe("out-of-scope");
+        expect(new Map(all.map((row) => [row.name, row.status])).get("othertool")).toBe("out-of-scope");
     });
 });
 

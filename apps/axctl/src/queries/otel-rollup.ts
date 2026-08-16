@@ -23,6 +23,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { fetchCostModels } from "./cost-analytics.ts";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,7 @@ export const buildOtelSessionIdsQuery = (table: string, days: number): string =>
 
 export const fetchOtelRollup = (
     input: OtelRollupInput,
-): Effect.Effect<OtelRollupResult, DbError, SurrealClient> =>
+): Effect.Effect<OtelRollupResult, DbError | CacheReadError, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const days = Math.max(1, Math.floor(input.sinceDays));

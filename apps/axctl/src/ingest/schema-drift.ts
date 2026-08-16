@@ -28,8 +28,8 @@
  * never worse.
  */
 import { Effect, FileSystem, Path } from "effect";
-import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
-import { SurrealClient } from "@ax/lib/db";
+import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 
 /** Statement prefixes safe to replay additively (no index/bucket/analyzer). */
 const HEAL_PREFIXES = ["DEFINE TABLE ", "DEFINE FIELD "] as const;
@@ -74,7 +74,7 @@ export const schemaHealSentinelPath = (pathSvc: Path.Path, dataDir: string, vers
 export const healAdditiveSchemaDrift = (opts: {
     readonly version: string;
     readonly dataDir: string;
-}): Effect.Effect<SchemaHealResult, never, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+}, write: CacheWriteService): Effect.Effect<SchemaHealResult, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const pathSvc = yield* Path.Path;
@@ -84,11 +84,8 @@ export const healAdditiveSchemaDrift = (opts: {
         const already = yield* fs.exists(sentinel).pipe(Effect.orElseSucceed(() => false));
         if (already) return { checked: false, applied: false, statements: 0 };
 
-        const statements = schemaAdditiveHealStatements(schemaSurql);
-        if (statements.length === 0) return { checked: true, applied: false, statements: 0 };
-
-        const db = yield* SurrealClient;
-        const applied = yield* db.query(statements.join("\n")).pipe(
+        const statementCount = DUCKDB_SCHEMA_SQL.split(";").filter((statement) => statement.trim().length > 0).length;
+        const applied = yield* write.exec(DUCKDB_SCHEMA_SQL).pipe(
             Effect.as(true),
             Effect.catch(() => Effect.succeed(false)),
         );
@@ -100,5 +97,5 @@ export const healAdditiveSchemaDrift = (opts: {
                 .writeFileString(sentinel, `${new Date().toISOString()}\n`)
                 .pipe(Effect.ignore);
         }
-        return { checked: true, applied, statements: statements.length };
+        return { checked: true, applied, statements: statementCount };
     });

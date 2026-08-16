@@ -1,6 +1,5 @@
-import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, FileSystem, Path, Schema } from "effect";
+import { CacheRead, type CacheReadError, type CacheWriteError } from "@ax/lib/duckdb/seam";
 import type { PlatformError } from "effect/PlatformError";
 import { findGitRoot } from "../project/git.ts";
 import { editAgentSkills } from "../config-core/agent-scope-edit.ts";
@@ -9,6 +8,8 @@ import { AGENT_DEF_TABLE } from "../ingest/agent-def.ts";
 import { AgentSourceRegistry } from "./registry.ts";
 import { AgentNotFoundError } from "./errors.ts";
 import type { AgentRecord, AgentScope, AgentSource } from "./source.ts";
+import { withConfigWrite } from "../config-core/reconcile.ts";
+import type { AxConfig } from "@ax/lib/config";
 
 /**
  * Orchestration for `ax agents` CLI subcommands. `readAllAgents` joins on-disk
@@ -37,10 +38,7 @@ export interface AgentFilter {
     readonly includeDeleted?: boolean;
 }
 
-interface AgentDbRow {
-    readonly name: string;
-    readonly deleted_at: unknown;
-}
+const AgentDbRowSchema = Schema.Struct({ name: Schema.String, deleted_at: Schema.NullOr(Schema.DateValid) });
 
 const resolveRepoRoot = (): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
     findGitRoot(process.cwd()).pipe(Effect.map((r) => r ?? undefined));
@@ -71,14 +69,14 @@ export const readAllAgents = (
     filter: AgentFilter = {},
 ): Effect.Effect<
     AgentListRow[],
-    ConfigParseError | PlatformError | DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
+    ConfigParseError | PlatformError | CacheReadError,
+    CacheRead | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         // disk discovery and the graph snapshot are independent -> run concurrently.
-        const [onDisk, [graphRows]] = yield* Effect.all(
-            [discoverAll(), db.query<[AgentDbRow[]]>(`SELECT name, deleted_at FROM ${AGENT_DEF_TABLE}`)],
+        const [onDisk, graphRows] = yield* Effect.all(
+            [discoverAll(), read.rows(AgentDbRowSchema, `SELECT name, deleted_at FROM ${AGENT_DEF_TABLE}`)],
             { concurrency: 2 },
         );
         const deletedInGraph = new Set(
@@ -157,19 +155,19 @@ const sourceForScope = (
 };
 
 /** Soft-tombstone the agent_def row so the lifecycle view drops it immediately. */
-const tombstoneAgent = (name: string): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* db.query(`UPDATE ${AGENT_DEF_TABLE} SET deleted_at = time::now() WHERE name = $name AND deleted_at IS NONE;`, { name });
-    });
+const tombstoneAgent = (name: string): Effect.Effect<void, CacheWriteError, FileSystem.FileSystem | Path.Path | AxConfig> =>
+    withConfigWrite((write) => write.exec(
+        `UPDATE ${AGENT_DEF_TABLE} SET deleted_at = current_timestamp WHERE name = ? AND deleted_at IS NULL`,
+        [name],
+    )).pipe(Effect.asVoid);
 
 /** Hard-delete an agent file + tombstone its graph row. */
 export const removeAgent = (
     name: string,
 ): Effect.Effect<
     AgentRecord,
-    ConfigParseError | PlatformError | AgentNotFoundError | DbError,
-    FileSystem.FileSystem | Path.Path | AgentSourceRegistry | SurrealClient
+    ConfigParseError | PlatformError | AgentNotFoundError | CacheWriteError,
+    FileSystem.FileSystem | Path.Path | AgentSourceRegistry | AxConfig
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;

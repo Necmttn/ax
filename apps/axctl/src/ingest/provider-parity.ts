@@ -94,7 +94,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
             ]),
             pi: supported("Pi JSONL path is stored on normalized session and agent_session rows.", [
                 { path: "apps/axctl/src/ingest/pi.ts", contains: "sourcePath: extract.sourcePath" },
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "raw_file: extracted.sourcePath" },
+                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "raw_file: session.rawFile ?? session.sourcePath ?? null" },
             ]),
             opencode: supported("OpenCode database path is stored on normalized session and agent_session rows.", [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "sourcePath" },
@@ -157,7 +157,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
             ]),
             opencode: supported("OpenCode structured tool parts write shared tool_call rows.", [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "toolCalls: extract.toolCalls" },
-                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "buildToolCallStatements(batch.toolCalls" },
+                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "writeToolCalls(write, batch.toolCalls)" },
             ]),
             cursor: supported("Cursor toolFormerData entries write shared tool_call rows.", [
                 { path: "apps/axctl/src/ingest/cursor.ts", contains: "toolCalls: extract.toolCalls" },
@@ -176,8 +176,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude Skill/tool invocations write invoked edges to real skill rows.", [
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "->invoked:" },
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildRelateToolCallSkillStatements" },
+                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "syntheticSkillInvocations: invocations.map" },
+                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "write.put(\"invoked\"" },
             ]),
             codex: supported("Codex tool calls write synthetic codex:<tool> skill invocations.", [
                 { path: "apps/axctl/src/ingest/codex.ts", contains: "syntheticSkillInvocations" },
@@ -190,8 +190,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
             opencode: supported("OpenCode tool parts write synthetic opencode:<tool> skill invocations.", [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "syntheticSkillInvocations" },
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "toolCallSkillRelations: extract.skillRelations" },
-                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "->invoked:" },
-                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "buildRelateToolCallSkillStatements" },
+                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "write.put(\"invoked\"" },
+                { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "relateToolCallSkill(write" },
             ]),
             cursor: supported("Cursor tool calls write synthetic cursor:<tool> skill invocations.", [
                 { path: "apps/axctl/src/ingest/cursor.ts", contains: "syntheticSkillInvocations" },
@@ -282,21 +282,20 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude sessions receive estimated token usage from session-health.", [
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.put(\"session_token_usage\"" },
             ]),
             codex: supported("Codex sessions receive token usage through session-health metrics and estimates.", [
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.put(\"session_token_usage\"" },
             ]),
             pi: supported("Pi usage fields write explicit token usage when present.", [
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "buildPiTokenUsageStatements" },
-                // Statement shape lives in the shared Parser Toolkit writer.
-                { path: "apps/axctl/src/ingest/token-usage-writers.ts", contains: "recordRef(\"session_token_usage\"" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "writePiTokenUsage(write" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "write.put(\"session_token_usage\"" },
             ]),
             opencode: supported("OpenCode sessions receive estimated token usage from session-health.", [
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.put(\"session_token_usage\"" },
             ]),
             cursor: supported("Cursor sessions receive estimated token usage from session-health.", [
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.put(\"session_token_usage\"" },
             ]),
         },
     },
@@ -330,12 +329,12 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude Task/Agent evidence writes spawned child-session links.", [
-                { path: "apps/axctl/src/ingest/derive-claude-subagents.ts", contains: "-> spawned ->" },
+                { path: "apps/axctl/src/ingest/derive-claude-subagents.ts", contains: "write.put(\"spawned\"" },
                 { path: "apps/axctl/src/ingest/derive-spawned.ts", contains: "deps: [\"claude\", \"codex\"]" },
             ]),
             codex: supported("Codex spawn-agent tool evidence writes spawned child-session links when present.", [
                 { path: "apps/axctl/src/ingest/derive-spawned.ts", contains: "deps: [\"claude\", \"codex\"]" },
-                { path: "apps/axctl/src/ingest/derive-spawned.ts", contains: "-> spawned ->" },
+                { path: "apps/axctl/src/ingest/derive-spawned.ts", contains: "write.put(\"spawned\"" },
             ]),
             pi: rawGap("Pi transcript blocks observed by this extractor do not expose delegated child-session identity."),
             opencode: extractorGap("OpenCode delegation signals are not extracted into spawned links yet."),
@@ -352,24 +351,24 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
+                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "write.putMany(\"command_outcome\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.putMany(\"session_health\"" },
             ]),
             codex: supported("Codex normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
+                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "write.putMany(\"command_outcome\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.putMany(\"session_health\"" },
             ]),
             pi: supported("Pi normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
+                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "write.putMany(\"command_outcome\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.putMany(\"session_health\"" },
             ]),
             opencode: supported("OpenCode normalized turns feed shared derived analysis stages.", [
-                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
+                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "write.putMany(\"command_outcome\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.putMany(\"session_health\"" },
             ]),
             cursor: supported("Cursor normalized turns feed shared derived analysis stages.", [
-                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
-                { path: "apps/axctl/src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
+                { path: "apps/axctl/src/ingest/outcomes.ts", contains: "write.putMany(\"command_outcome\"" },
+                { path: "apps/axctl/src/ingest/session-health.ts", contains: "write.putMany(\"session_health\"" },
             ]),
         },
     },

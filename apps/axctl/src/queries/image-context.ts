@@ -16,9 +16,9 @@
  *   spawned: edge from parent to child session (out = child session record)
  *   has_content: out (content_type record), session, bytes (int), ts (datetime)
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { countField } from "@ax/lib/shared/surreal";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import { BYTES_PER_TOKEN } from "./content-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -127,44 +127,35 @@ export const rollupImageContext = (
  * Fetch all subagent session ids in one cheap scan of the spawned edge table.
  * `out` is a record ref; type::string converts to "session:<id>" strings.
  */
-const SPAWNED_IDS_SQL = `SELECT VALUE type::string(out) FROM spawned;`;
-
-/**
- * Count binary content (images) per session within the time window.
- * `out = content_type:binary` filters to the binary bucket only.
- * Deref-free: session is a denormalized scalar on the edge row.
- */
-const IMAGE_CONTEXT_SQL = (sinceDays: number) => `
-SELECT type::string(session) AS sid, count() AS calls, math::sum(bytes) AS bytes
-FROM has_content
-WHERE out = content_type:binary AND session != NONE AND ts > time::now() - ${sqlWindowDays(sinceDays)}d
-GROUP BY sid;
-`;
+const SpawnedRow = Schema.Struct({ session: Schema.String });
+const ImageRow = Schema.Struct({
+    sid: Schema.String,
+    calls: NumberFromBigIntColumn,
+    bytes: NumberFromBigIntColumn,
+});
 
 // ---------------------------------------------------------------------------
 // Main fetch function
 // ---------------------------------------------------------------------------
 
 export const fetchImageContext = Effect.fn("queries.fetchImageContext")(
-    function* (input: ImageContextInput) {
-        const db = yield* SurrealClient;
+    function* (read: CacheReadService, input: ImageContextInput) {
 
         // Query 1: subagent session ids (spawned is small; no window filter needed)
-        const [spawnedRaw] = yield* db.query<[Array<unknown>]>(SPAWNED_IDS_SQL);
+        const spawnedRaw = yield* read.rows(SpawnedRow, `SELECT out_id AS session FROM spawned`);
         const subagentSet = new Set<string>(
-            (spawnedRaw ?? []).map((v) => String(v)).filter(Boolean),
+            spawnedRaw.map((v) => v.session),
         );
 
         // Query 2: image rows in the requested time window
-        const [rawRows] = yield* db.query<[Array<Record<string, unknown>>]>(
-            IMAGE_CONTEXT_SQL(input.sinceDays),
-        );
+        const rawRows = yield* read.rows(ImageRow, `
+          SELECT h.session AS sid, count(*) AS calls,
+                 CAST(coalesce(sum(h.bytes), 0) AS BIGINT) AS bytes
+          FROM has_content h JOIN content_type c ON c.id = h.out_id
+          WHERE c.category = 'binary' AND h.session IS NOT NULL AND h.ts > ?
+          GROUP BY h.session`, [new Date(Date.now() - sqlWindowDays(input.sinceDays) * 86_400_000)]);
 
-        const parsed: RawImageRow[] = (rawRows ?? []).map((row) => ({
-            sid: row.sid == null ? "" : String(row.sid),
-            calls: countField(row, "calls"),
-            bytes: countField(row, "bytes"),
-        }));
+        const parsed: ReadonlyArray<RawImageRow> = rawRows;
 
         return rollupImageContext(parsed, subagentSet, input.limit);
     },
