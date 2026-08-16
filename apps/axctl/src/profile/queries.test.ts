@@ -9,6 +9,7 @@ import {
     fetchCommitCount,
     fetchDailyActivity,
     fetchDailyActivityFull,
+    fetchDailyModels,
     fetchDeepSessionCount,
     fetchGuardrailHookEvidence,
     fetchGuardrailVerdicts,
@@ -362,6 +363,28 @@ describe("fetchWrappedCounts", () => {
         expect(r.verification_calls).toBe(500);
         expect(r.context_calls).toBe(300);
         expect(r.tool_calls).toBe(1000);
+    });
+});
+
+describe("fetchDailyModels", () => {
+    test("returns per-day per-model token totals, null model -> (unattributed)", async () => {
+        const cache = cacheRead({
+            "FROM session_token_usage": [
+                { date: "2026-06-11", model: "claude-opus-5", tokens: 40000 },
+                { date: "2026-06-11", model: null, tokens: 500 },
+            ],
+        });
+        const r = await runCache(fetchDailyModels({ windowDays: 30 }), cache.layer);
+        expect(r[0]).toEqual({ date: "2026-06-11", model: "claude-opus-5", tokens: 40000 });
+        expect(r[1]).toEqual({ date: "2026-06-11", model: "(unattributed)", tokens: 500 });
+        expect(cache.captured[0]).toContain("strftime(ts, '%Y-%m-%d')");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+    });
+
+    test("empty -> empty array", async () => {
+        const cache = cacheRead({});
+        const r = await runCache(fetchDailyModels({ windowDays: 30 }), cache.layer);
+        expect(r).toHaveLength(0);
     });
 });
 

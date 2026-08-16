@@ -659,26 +659,34 @@ export interface DailyModelRow {
     readonly tokens: number;
 }
 
-const DAILY_MODEL_TOKENS_SQL = (d: number) => `
+const DAILY_MODEL_TOKENS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
+    strftime(ts, '%Y-%m-%d') AS date,
     model,
-    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+    SUM(COALESCE(prompt_tokens, 0)) + SUM(COALESCE(completion_tokens, 0)) AS tokens
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date, model
-ORDER BY date ASC, tokens DESC;`;
+WHERE TRUE`;
+
+const DailyModelDbRow = Schema.Struct({
+    date: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    tokens: NumberFromBigIntColumn,
+});
 
 export const fetchDailyModels = Effect.fn("profile.fetchDailyModels")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_MODEL_TOKENS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyModelDbRow,
+            `${DAILY_MODEL_TOKENS_SQL} ${within.sql} AND ts IS NOT NULL `
+                + "GROUP BY date, model ORDER BY date ASC, tokens DESC",
+            within.params,
+        );
         return rows.map((r) => ({
-            date: String(r.date),
-            model: r.model == null ? "(unattributed)" : String(r.model),
-            tokens: Number(r.tokens ?? 0),
+            date: r.date,
+            model: r.model ?? "(unattributed)",
+            tokens: r.tokens,
         })) satisfies DailyModelRow[];
     },
 );
