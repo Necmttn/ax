@@ -1,8 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
 import { refListSource } from "@ax/lib/shared/record-select";
-import { surrealString } from "@ax/lib/shared/surql";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 import { numeric, durationMs, rankToolEvidence } from "./file-evidence-rank.ts";
@@ -81,36 +81,45 @@ const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.
  * repos. `fuzzyFallback: true` (the CLI pack) widens to suffix matching only
  * when the exact lookup finds nothing.
  */
+const FileRowSchema = Schema.Struct({
+    id: Schema.String,
+    path: Schema.String,
+    repo: Schema.NullOr(Schema.String),
+    repository: Schema.NullOr(Schema.String),
+});
+
 export const resolveFiles = (paths: readonly string[], opts: { readonly fuzzyFallback: boolean }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const clean = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
         if (clean.length === 0) return [] as FileRow[];
-        const exactList = clean.map(surrealString).join(", ");
-        const [exactRows] = yield* db.query<[FileRow[]]>(`
-            SELECT <string>id AS id, path, repo, <string>repository AS repository
+        const exactRows = yield* read.rows(FileRowSchema, `
+            SELECT id, path, repo, repository
             FROM file
-            WHERE path IN [${exactList}]
-            LIMIT 20;
-        `);
-        if (!opts.fuzzyFallback) return exactRows.slice(0, 8);
-        if (exactRows.length > 0) return exactRows.slice(0, 8);
+            WHERE path IN (${clean.map(() => "?").join(", ")})
+            LIMIT 20
+        `, clean);
+        if (!opts.fuzzyFallback) return exactRows.slice(0, 8) as FileRow[];
+        if (exactRows.length > 0) return exactRows.slice(0, 8) as FileRow[];
 
-        const clauses = clean.flatMap((path) => {
+        const clauses: string[] = [];
+        const params: string[] = [];
+        for (const path of clean) {
             const base = path.split("/").at(-1) ?? path;
-            const pathClauses = [`string::ends_with(path, ${surrealString(path)})`];
+            clauses.push("ends_with(path, ?)");
+            params.push(path);
             if (path.includes("/") && !GENERIC_BASENAMES.has(base)) {
-                pathClauses.push(`string::ends_with(path, ${surrealString(base)})`);
+                clauses.push("ends_with(path, ?)");
+                params.push(base);
             }
-            return pathClauses;
-        });
-        const [rows] = yield* db.query<[FileRow[]]>(`
-            SELECT <string>id AS id, path, repo, <string>repository AS repository
+        }
+        const rows = yield* read.rows(FileRowSchema, `
+            SELECT id, path, repo, repository
             FROM file
             WHERE ${clauses.join(" OR ")}
-            LIMIT 20;
-        `);
-        return rows.slice(0, 8);
+            LIMIT 20
+        `, params);
+        return rows.slice(0, 8) as FileRow[];
     });
 
 export const loadToolEvidenceTable = (table: "read_file" | "searched_file", fileIds: readonly string[]) =>
