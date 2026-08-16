@@ -6,7 +6,7 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheRead, CacheReadLive, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
@@ -69,7 +69,7 @@ import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
-import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
+import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
@@ -316,7 +316,7 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         // OTLP correlation moved INSIDE the run (ingest/run.ts): it writes
         // telemetry_of edges, so it needs the lock-held live writer, not a
         // post-hoc tap on a runtime that no longer holds one.
-        Effect.provideService(CacheRead, throwingCacheRead()),
+        withoutCacheRead,
         Effect.provide(layer),
         Effect.scoped,
     );
@@ -333,15 +333,6 @@ const throwingSurrealClient = (): SurrealClientShape =>
         get(_target, prop) {
             throw new Error(
                 `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
-            );
-        },
-    });
-
-const throwingCacheRead = (): CacheReadService =>
-    new Proxy({} as CacheReadService, {
-        get(_target, prop) {
-            throw new Error(
-                `axctl: CacheRead.${String(prop)} accessed inside the ingest runtime`,
             );
         },
     });

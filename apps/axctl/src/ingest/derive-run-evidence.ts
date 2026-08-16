@@ -511,7 +511,7 @@ export const buildLineage = (
 const SESSION_PROVIDER_SQL = `SELECT id, source FROM session`;
 
 const sinceAnd = (since: number | undefined, field = "ts"): string =>
-    since && since > 0 ? `AND ${field} > CURRENT_TIMESTAMP - INTERVAL '${Math.trunc(since)} days'` : "";
+    since && since > 0 ? `AND ${field} > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(since)} days'` : "";
 
 const toolCallSql = (since: number | undefined): string =>
     `SELECT id, session, CAST(ts AS VARCHAR) AS ts, name, has_error AS hasError, command_norm AS commandNorm

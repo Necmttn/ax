@@ -7,6 +7,9 @@ import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { recordRef } from "@ax/lib/shared/surql";
 import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
+import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
 import { runPropose } from "../../improve/propose.ts";
 import { listStoredRetros } from "../../queries/judgment-retros.ts";
@@ -28,6 +31,27 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * --source=<value> overrides. The Stop hook recipe in docs/HOOKS.md
  * uses this path.
  */
+/**
+ * Run the `retro-proposals` derivation for the retro just written (#742).
+ *
+ * That stage is the ONLY path from a retro's clustered failures to a proposal,
+ * and it otherwise runs during `ax ingest` - NOT during `ax derive-signals`,
+ * which is where a reporter reasonably looked and found nothing. Emitting a
+ * retro and then seeing an unchanged proposal queue reads as a broken loop, so
+ * emit runs the derivation itself.
+ *
+ * It reads the installed-skill catalog from the cache (hence the lock-held
+ * write scope) and reads + writes proposals in the sidecar. Best-effort: the
+ * retro is already committed, and a derivation failure must not turn a
+ * successful emit into a non-zero exit. Returns the number of proposals derived.
+ */
+const runInlineRetroDerive = () => withConfigWrite((write) => deriveRetroProposals(write)).pipe(
+    Effect.map((stats) =>
+        stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
+    ),
+    Effect.orElseSucceed(() => 0),
+);
+
 const cmdRetroEmit = (input: {
     readonly session: string | undefined;
     readonly fromFile: string | undefined;
@@ -99,7 +123,7 @@ const cmdRetroEmit = (input: {
                 filed.push({ status: result.status, title: result.title, sig: result.sig });
             }
 
-            const derived = 0;
+            const derived = yield* runInlineRetroDerive();
 
             if (json) {
                 console.log(prettyPrint({
@@ -131,12 +155,13 @@ const cmdRetroEmit = (input: {
             return;
         }
 
-        const retroInput = yield* retroFromSession(sessionRecordId);
+        const read = yield* CacheRead;
+        const retroInput = yield* retroFromSession(read, sessionRecordId);
         if (!retroInput) {
             fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
         yield* upsertRetro(retroInput);
-        const derived = 0;
+        const derived = yield* runInlineRetroDerive();
         if (json) {
             console.log(prettyPrint({
                 session: sessionRecordId,

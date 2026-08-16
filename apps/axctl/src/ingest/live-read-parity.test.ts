@@ -260,34 +260,91 @@ const snapshotResults = async (snapshotPath: string): Promise<LiveResults> =>
         }).pipe(Effect.provide(readFixture(snapshotPath, dylibPath))) as Effect.Effect<LiveResults>,
     );
 
+/**
+ * Equality alone cannot tell "both sides agree" from "both sides are empty",
+ * and an empty answer is exactly what a broken port produces. So EVERY one of
+ * the 11 DUAL modules asserts, on the snapshot side, that its own answer
+ * carries seeded rows - not just the four that return a bare collection.
+ *
+ * Two of them need more than a length check to be honest:
+ * - `costEstimate` merges the built-in pricing table under the DB rows, so its
+ *   map is non-empty even against an empty database. The guard pins the SEEDED
+ *   row instead (`pricing_source = "test"` beats the compiled-in `gpt-5`).
+ * - `projectHarness` returns counters, not a list; zero is its empty.
+ */
+const assertNonEmpty = (key: keyof LiveResults, value: LiveResults[keyof LiveResults]): void => {
+    switch (key) {
+        case "costEstimate": {
+            const catalog = value as ReadonlyMap<string, { readonly pricingSource: string | null }>;
+            expect(catalog.get("gpt-5")?.pricingSource).toBe("test");
+            return;
+        }
+        case "sessionLoc":
+        case "sessionMetrics": {
+            expect((value as ReadonlyMap<string, unknown>).size).toBeGreaterThan(0);
+            return;
+        }
+        case "fragilityCascade":
+        case "directiveNgrams":
+        case "workflowSequences": {
+            expect((value as ReadonlyArray<unknown>).length).toBeGreaterThan(0);
+            return;
+        }
+        case "sessionChurn": {
+            const churn = value as {
+                readonly aggregates: ReadonlyArray<{ readonly episodes: number }>;
+                readonly hotSessions: ReadonlyArray<unknown>;
+            };
+            expect(churn.aggregates.length).toBeGreaterThan(0);
+            expect(churn.hotSessions.length).toBeGreaterThan(0);
+            // The seeded fail -> same-family pass is one CLOSED episode.
+            expect(churn.aggregates.reduce((sum, row) => sum + row.episodes, 0)).toBe(1);
+            return;
+        }
+        case "projectHarness": {
+            const harness = value as {
+                readonly observedTooling: ReadonlyArray<unknown>;
+                readonly mainBranchGraph: {
+                    readonly editedOnMain: number;
+                    readonly commitsFromMain: number;
+                };
+            };
+            expect(harness.observedTooling.length).toBeGreaterThan(0);
+            expect(harness.mainBranchGraph.editedOnMain).toBeGreaterThan(0);
+            expect(harness.mainBranchGraph.commitsFromMain).toBeGreaterThan(0);
+            return;
+        }
+        case "dispatchAnalytics": {
+            const dispatches = value as { readonly candidates: ReadonlyArray<unknown> };
+            expect(dispatches.candidates.length).toBeGreaterThan(0);
+            return;
+        }
+        case "imageContext": {
+            const images = value as {
+                readonly rows: ReadonlyArray<unknown>;
+                readonly totals: { readonly mainBytes: number };
+            };
+            expect(images.rows.length).toBeGreaterThan(0);
+            expect(images.totals.mainBytes).toBeGreaterThan(0);
+            return;
+        }
+        case "telemetryRollup": {
+            const rollup = value as {
+                readonly telemetryCost: ReadonlyMap<string, unknown>;
+                readonly telemetryLatency: ReadonlyMap<string, unknown>;
+            };
+            expect(rollup.telemetryCost.size).toBeGreaterThan(0);
+            expect(rollup.telemetryLatency.size).toBeGreaterThan(0);
+            return;
+        }
+    }
+};
+
 const assertParity = async (key: keyof LiveResults): Promise<void> => {
     const fixture = await setupFixture();
     const snapshot = await snapshotResults(fixture.snapshotPath);
     expect(snapshot[key]).toEqual(fixture.live[key]);
-    if (key === "sessionLoc" || key === "sessionMetrics") {
-        expect((snapshot[key] as ReadonlyMap<string, unknown>).size).toBeGreaterThan(0);
-    }
-    // Equality alone cannot tell "both sides agree" from "both sides are empty",
-    // and an empty answer is exactly what a broken port produces. Every key that
-    // returns a collection asserts it actually carries rows.
-    if (key === "sessionChurn") {
-        const churn = snapshot[key] as {
-            readonly aggregates: ReadonlyArray<{ readonly episodes: number }>;
-            readonly hotSessions: ReadonlyArray<unknown>;
-        };
-        expect(churn.aggregates.length).toBeGreaterThan(0);
-        expect(churn.hotSessions.length).toBeGreaterThan(0);
-        // The seeded fail -> same-family pass is one CLOSED episode.
-        expect(churn.aggregates.reduce((sum, row) => sum + row.episodes, 0)).toBe(1);
-    }
-    if (key === "telemetryRollup") {
-        const rollup = snapshot[key] as {
-            readonly telemetryCost: ReadonlyMap<string, unknown>;
-            readonly telemetryLatency: ReadonlyMap<string, unknown>;
-        };
-        expect(rollup.telemetryCost.size).toBeGreaterThan(0);
-        expect(rollup.telemetryLatency.size).toBeGreaterThan(0);
-    }
+    assertNonEmpty(key, snapshot[key]);
 };
 
 dtest("cost estimate reads the same live and published pricing rows", () => assertParity("costEstimate"));

@@ -31,7 +31,7 @@ const fetchSessionTurns = (
     sinceDays: number | undefined,
 ): Effect.Effect<SessionTurns[], CacheWriteError> =>
     Effect.gen(function* () {
-        const sinceFilter = sinceDays && sinceDays > 0 ? `WHERE t.ts > CURRENT_TIMESTAMP - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
+        const sinceFilter = sinceDays && sinceDays > 0 ? `WHERE t.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
         const sql = `
 SELECT
     t.id, t.session, t.seq, t.role, t.text_excerpt, t.ts, t.has_error,
@@ -75,7 +75,7 @@ const fetchFailedToolCalls = (
     sinceDays: number | undefined,
 ): Effect.Effect<ToolCallLike[], CacheWriteError> =>
     Effect.gen(function* () {
-        const sinceFilter = sinceDays && sinceDays > 0 ? `AND tc.ts > CURRENT_TIMESTAMP - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
+        const sinceFilter = sinceDays && sinceDays > 0 ? `AND tc.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
         const sql = `
 SELECT
     tc.id, tc.session, tc.turn, tc.name, tc.ts, tc.status, tc.command_norm,

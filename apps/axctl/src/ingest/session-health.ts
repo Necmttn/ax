@@ -335,7 +335,7 @@ WHERE s.name LIKE '%superpowers:%'`);
     });
 
 const sinceWhere = (field: string, sinceDays: number | undefined): string =>
-    sinceDays && sinceDays > 0 ? `WHERE ${field} > CURRENT_TIMESTAMP - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
+    sinceDays && sinceDays > 0 ? `WHERE ${field} > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
 
 export const deriveSessionHealth = (
     write: CacheWriteService,

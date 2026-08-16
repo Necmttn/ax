@@ -52,39 +52,43 @@ export const relateSkillRoles = (
             cleaned.push(norm);
         }
 
-        yield* judgment.exec(
-            "DELETE FROM plays_role WHERE in_id = ? AND source = 'frontmatter'",
-            [args.skillId],
-        );
-
-        if (cleaned.length === 0) {
-            return { rolesUpserted: 0, edgesWritten: 0, rolesSkipped };
-        }
-
+        // Replace this writer's complete opinion in ONE transaction, matching
+        // `ax skills tag` and `ax skills lint`. The sweep and the writes are a
+        // single statement of "these are the frontmatter roles now": a failure
+        // between them would otherwise leave the skill with its old rows
+        // removed and its new ones missing - a silently unclassified skill.
         let rolesUpserted = 0;
         let edgesWritten = 0;
-        for (const roleName of cleaned) {
-            // CREATE IF MISSING, never modify - the same contract `ax skills tag`
-            // holds. A role's `weight` is judgment of its own, and a skill's
-            // frontmatter naming that role says nothing about it. The DDL's
-            // DEFAULT seeds 1.0 on the create path.
-            const roleId = roleRowId(roleName);
-            yield* judgment.exec(
-                "INSERT INTO role (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
-                [roleId, roleName],
-            );
-            rolesUpserted += 1;
+        yield* judgment.transaction((transaction) =>
+            Effect.gen(function* () {
+                yield* transaction.exec(
+                    "DELETE FROM plays_role WHERE in_id = ? AND source = 'frontmatter'",
+                    [args.skillId],
+                );
+                for (const roleName of cleaned) {
+                    // CREATE IF MISSING, never modify - the same contract
+                    // `ax skills tag` holds. A role's `weight` is judgment of its
+                    // own, and a skill's frontmatter naming that role says
+                    // nothing about it. The DDL's DEFAULT seeds 1.0 on create.
+                    const roleId = roleRowId(roleName);
+                    yield* transaction.exec(
+                        "INSERT INTO role (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+                        [roleId, roleName],
+                    );
+                    rolesUpserted += 1;
 
-            yield* judgment.put("plays_role", {
-                id: edgeRowId("plays_role", args.skillId, roleId, "frontmatter"),
-                in_id: args.skillId,
-                out_id: roleId,
-                confidence: 1,
-                source: "frontmatter",
-                weight: null,
-                rationale: null,
-            });
-            edgesWritten += 1;
-        }
+                    yield* transaction.put("plays_role", {
+                        id: edgeRowId("plays_role", args.skillId, roleId, "frontmatter"),
+                        in_id: args.skillId,
+                        out_id: roleId,
+                        confidence: 1,
+                        source: "frontmatter",
+                        weight: null,
+                        rationale: null,
+                    });
+                    edgesWritten += 1;
+                }
+            }),
+        );
         return { rolesUpserted, edgesWritten, rolesSkipped };
     });
