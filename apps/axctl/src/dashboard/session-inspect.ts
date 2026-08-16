@@ -6,16 +6,17 @@
  * `scripts/prototypes/ax-session-inspect.ts`.
  */
 
-import { Data, Effect, FileSystem, type Path } from "effect";
+import { Data, Effect, FileSystem, Schema, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
-import { SurrealClient } from "@ax/lib/db";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn, JsonArrayColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows, cacheFirst } from "@ax/lib/duckdb/query";
+import { inClause } from "@ax/lib/duckdb/clause";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
-import { sessionShareTurnToolCallsQuery, type ShareTurnToolCall } from "../queries/session-detail.ts";
 import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
@@ -31,17 +32,8 @@ import type {
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
 import { categoryOf } from "@ax/lib/shared/tool-presentation";
-import {
-    interpolateRid,
-    queryMany,
-    queryOptional,
-    runQuery,
-} from "@ax/lib/shared/graph-query";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
-import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
-import { recordRef } from "@ax/lib/shared/surql";
-import { refListSource } from "@ax/lib/shared/record-select";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -171,6 +163,20 @@ function toToolCall(seq: number, name: string, rawInput: unknown): ToolCallDto {
     }
     const command = input && typeof input.command === "string" ? input.command : null;
     return { seq, name, category: categoryOf(name), input, command, output_excerpt: null, has_error: false, tokens: null };
+}
+
+/** A recorded `tool_call` row, projected for the turn-toolcalls view. Mirrors
+ *  `queries/session-detail.ts`'s `ShareTurnToolCall` shape (that file is
+ *  chunk 2b's; this is a same-shaped LOCAL type, not an import, so this
+ *  module never depends on queries/ for its DuckDB read path). */
+export interface ShareTurnToolCall {
+    readonly seq: number;
+    readonly name: string;
+    readonly command: string | null;
+    /** JSON-encoded tool input/arguments, as recorded. */
+    readonly input_json: string | null;
+    readonly output: string | null;
+    readonly has_error: boolean;
 }
 
 /** Map a recorded `tool_call` row (the share-turn-toolcalls projection) to a
@@ -307,20 +313,24 @@ interface ChildStats {
     readonly duration_ms: number | null;
 }
 
-/** SQL constants kept near their resolvers so the only thing the helper hides
+/** Row schemas kept near their resolvers so the only thing the helper hides
  *  is the Effect.gen + Effect.catch ceremony - the SQL stays grep-able. */
-const PARENT_SQL = `
-    SELECT <string>in AS parent, nickname FROM spawned WHERE out = $sid LIMIT 1;
-`;
-const SESSION_META_SQL = `
-    SELECT project, cwd, raw_file, source FROM session WHERE id = $sid LIMIT 1;
-`;
-const CHILDREN_SQL = `
-    SELECT <string>out AS child, <string>ts AS ts, tool, nickname
-    FROM spawned
-    WHERE in = $sid
-    ORDER BY ts ASC;
-`;
+const ParentDbRow = Schema.Struct({
+    parent: Schema.String,
+    nickname: Schema.NullOr(Schema.String),
+});
+const SessionMetaDbRow = Schema.Struct({
+    project: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    raw_file: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+});
+const ChildEdgeDbRow = Schema.Struct({
+    child: Schema.String,
+    ts: Schema.NullOr(TimestampColumn),
+    tool: Schema.NullOr(Schema.String),
+    nickname: Schema.NullOr(Schema.String),
+});
 /** Batched subagent run-metrics over a list of child session record-ids.
  *  Four grouped SELECTs in one round-trip (turns, tool_calls, token usage,
  *  session timestamps); stitched together in JS by bare session id. The
@@ -384,13 +394,6 @@ const TURN_TOKEN_USAGE_FOR_REFS_SQL = `
     ORDER BY seq ASC;
 `;
 
-interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
-interface ChildEdgeRow {
-    readonly child: string;
-    readonly ts: string | null;
-    readonly tool: string | null;
-    readonly nickname: string | null;
-}
 /** Raw shape returned by Surreal for hook_fire SELECT. Datetime fields come
  *  back as JS Date via the SDK. */
 interface HookFireRow {
@@ -435,17 +438,20 @@ interface GraphSessionHealthRow {
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
  *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
  *  the inspector still renders without graph attribution. */
-const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
-    queryOptional<ParentRow, ParentInfo>(
-        interpolateRid(PARENT_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            // Strip the record-id decoration before the value crosses the
-            // HTTP seam. See src/lib/shared/session-id.ts for the seam.
-            parent_session: row.parent ? toBareSessionId(row.parent) : null,
-            parent_nickname: row.nickname ?? null,
-        }),
-        "session-inspect resolveParent",
-    ).pipe(Effect.map((v) => v ?? { parent_session: null, parent_nickname: null }));
+const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, CacheRead> =>
+    cacheFirst(
+        ParentDbRow,
+        {
+            sql: `SELECT in_id AS parent, nickname FROM spawned WHERE out_id = ? LIMIT 1`,
+            params: [sessionId],
+        },
+        "session-inspect.resolve_parent",
+    ).pipe(
+        Effect.map((row) => ({
+            parent_session: row?.parent ?? null,
+            parent_nickname: row?.nickname ?? null,
+        })),
+    );
 
 interface SessionMeta {
     readonly project: string | null;
@@ -453,40 +459,42 @@ interface SessionMeta {
     readonly raw_file: string | null;
     readonly source: string | null;
 }
-interface SessionMetaRow {
-    readonly project?: string | null;
-    readonly cwd?: string | null;
-    readonly raw_file?: string | null;
-    readonly source?: string | null;
-}
 
 /** The session's canonical project key + cwd, for the inspect header label.
  *  Defensive: swallows DB errors so the inspector still renders unlabelled. */
-const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, SurrealClient> =>
-    queryOptional<SessionMetaRow, SessionMeta>(
-        interpolateRid(SESSION_META_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            project: row.project ?? null,
-            cwd: row.cwd ?? null,
-            raw_file: row.raw_file ?? null,
-            source: row.source ?? null,
-        }),
-        "session-inspect resolveSessionMeta",
-    ).pipe(Effect.map((v) => v ?? { project: null, cwd: null, raw_file: null, source: null }));
+const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, CacheRead> =>
+    cacheFirst(
+        SessionMetaDbRow,
+        { sql: `SELECT project, cwd, raw_file, source FROM session WHERE id = ?`, params: [sessionId] },
+        "session-inspect.resolve_session_meta",
+    ).pipe(
+        Effect.map((row) => ({
+            project: row?.project ?? null,
+            cwd: row?.cwd ?? null,
+            raw_file: row?.raw_file ?? null,
+            source: row?.source ?? null,
+        })),
+    );
 
 /** Sessions this one spawned (its subagents). Same defensive shape as
  *  resolveParent - DB failure degrades to empty list. */
-const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
-    queryMany<ChildEdgeRow, ChildEdge>(
-        interpolateRid(CHILDREN_SQL, toBareSessionId(sessionId)),
-        (r) => ({
-            // Bare session id over the HTTP seam.
-            session_id: toBareSessionId(r.child),
-            ts: r.ts ?? null,
-            tool: r.tool ?? null,
-            nickname: r.nickname ?? null,
-        }),
-        "session-inspect resolveChildren",
+const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, CacheRead> =>
+    cacheRows(
+        ChildEdgeDbRow,
+        {
+            sql: `SELECT out_id AS child, ts, tool, nickname FROM spawned WHERE in_id = ? ORDER BY ts ASC`,
+            params: [sessionId],
+        },
+        "session-inspect.resolve_children",
+    ).pipe(
+        Effect.map((rows) =>
+            rows.map((r) => ({
+                session_id: r.child,
+                ts: r.ts ? r.ts.toISOString() : null,
+                tool: r.tool ?? null,
+                nickname: r.nickname ?? null,
+            })),
+        ),
     );
 
 /** A `session` record-id reference as returned by Surreal. The SDK hands
