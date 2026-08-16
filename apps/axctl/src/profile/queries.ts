@@ -7,15 +7,33 @@
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { inClause, withinDaysClause } from "@ax/lib/duckdb/clause";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
+
+/**
+ * Unwrap `CacheReadService.raw`'s `{ columns, rows }` to just the rows - the
+ * DuckDB-side equivalent of the old `db.query(...).pipe(Effect.map(r => r?.[0]
+ * ?? []))` SurrealDB multi-statement-result unwrap. Schema-free on purpose:
+ * every function here already coerces each field with `Number(...)`/
+ * `String(...)` at the call site (its pre-existing style), and `Number(...)`
+ * on a native BIGINT is a safe widening (unlike `JSON.stringify`, which is
+ * never called on these raw rows before that coercion happens).
+ */
+const rawRows = (
+    read: CacheReadService,
+    sql: string,
+    params?: ReadonlyArray<DuckDbParam>,
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, CacheReadError> =>
+    read.raw(sql, params).pipe(Effect.map((r) => r.rows));
 
 // ---------------------------------------------------------------------------
 // Per-query slow-query diagnostics
@@ -51,22 +69,21 @@ export interface TokenTotals {
     readonly sessions: number;
 }
 
-const TOKEN_TOTALS_SQL = (d: number) => `
+const TOKEN_TOTALS_SQL = `
 SELECT
-    math::sum(prompt_tokens ?? 0) AS prompt_tokens,
-    math::sum(completion_tokens ?? 0) AS completion_tokens,
-    count() AS sessions
+    SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens,
+    SUM(COALESCE(completion_tokens, 0)) AS completion_tokens,
+    count(*) AS sessions
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
 
 export const fetchTokenTotals = Effect.fn("profile.fetchTokenTotals")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
         const rows = yield* timedQuery(
             "tokenTotals",
-            db.query<[Array<Record<string, unknown>>]>(TOKEN_TOTALS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(read, `${TOKEN_TOTALS_SQL} ${within.sql}`, within.params),
         );
         const row = rows[0] ?? {};
         return {
@@ -82,19 +99,22 @@ export const fetchTokenTotals = Effect.fn("profile.fetchTokenTotals")(
 // users who accumulate millions of turn rows). The streak only needs distinct
 // active days, and session.started_at is indexed.
 
-const DAILY_ACTIVITY_SQL = (d: number) => `
-SELECT time::format(started_at, "%Y-%m-%d") AS date
+const DAILY_ACTIVITY_SQL = `
+SELECT strftime(started_at, '%Y-%m-%d') AS date
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND started_at IS NOT NONE
-GROUP BY date ORDER BY date ASC;`;
+WHERE started_at IS NOT NULL`;
 
 export const fetchDailyActivity = Effect.fn("profile.fetchDailyActivity")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
         const rows = yield* timedQuery(
             "dailyActivity",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_ACTIVITY_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_ACTIVITY_SQL} ${within.sql} GROUP BY date ORDER BY date ASC`,
+                within.params,
+            ),
         );
         return rows
             .map((r) => String(r.date))
@@ -104,19 +124,20 @@ export const fetchDailyActivity = Effect.fn("profile.fetchDailyActivity")(
 
 // --- harnesses --------------------------------------------------------------
 
-const HARNESSES_SQL = (d: number) => `
-SELECT source, count() AS count
+const HARNESSES_SQL = `
+SELECT source, count(*) AS count
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND source IS NOT NONE
-GROUP BY source
-ORDER BY count DESC;`;
+WHERE source IS NOT NULL`;
 
 export const fetchHarnesses = Effect.fn("profile.fetchHarnesses")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(HARNESSES_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* rawRows(
+            read,
+            `${HARNESSES_SQL} ${within.sql} GROUP BY source ORDER BY count DESC`,
+            within.params,
+        );
         return rows.map((r) => String(r.source));
     },
 );
@@ -128,20 +149,23 @@ export interface SkillInvocationRow {
     readonly count: number;
 }
 
-const SKILL_INVOCATIONS_SQL = (d: number) => `
-SELECT out.name AS skill, count() AS count
-FROM invoked
-WHERE ts > time::now() - ${win(d)} AND out.name IS NOT NONE
-GROUP BY skill
-ORDER BY count DESC
-LIMIT 100;`;
+// `invoked.out_id` is a bare ref -> skill (no graph deref in DuckDB), so the
+// skill name comes from a join, not a dotted path.
+const SKILL_INVOCATIONS_SQL = `
+SELECT sk.name AS skill, count(*) AS count
+FROM invoked i
+JOIN skill sk ON sk.id = i.out_id
+WHERE TRUE`;
 
 export const fetchSkillInvocations = Effect.fn("profile.fetchSkillInvocations")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SKILL_INVOCATIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("i.ts", opts.windowDays);
+        const rows = yield* rawRows(
+            read,
+            `${SKILL_INVOCATIONS_SQL} ${within.sql} GROUP BY sk.name ORDER BY count DESC LIMIT 100`,
+            within.params,
+        );
         return rows.map((r) => ({
             skill: String(r.skill),
             count: Number(r.count ?? 0),
@@ -150,14 +174,12 @@ export const fetchSkillInvocations = Effect.fn("profile.fetchSkillInvocations")(
 );
 
 const SKILL_SCOPES_SQL = `
-SELECT name, scope FROM skill WHERE deleted_at IS NONE;`;
+SELECT name, scope FROM skill WHERE deleted_at IS NULL`;
 
 export const fetchSkillScopes = Effect.fn("profile.fetchSkillScopes")(
     function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SKILL_SCOPES_SQL)
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const rows = yield* rawRows(read, SKILL_SCOPES_SQL);
         return new Map(rows.map((r) => [String(r.name), String(r.scope)]));
     },
 );
@@ -202,38 +224,43 @@ export interface DailyActivityRow {
 
 // Session-based: count() per day from the session table - avoids the full
 // turn-table scan (array::distinct(session) over millions of Codex turns = 3s+).
-const DAILY_SESSIONS_SQL = (d: number) => `
+const DAILY_SESSIONS_SQL = `
 SELECT
-    time::format(started_at, "%Y-%m-%d") AS date,
-    count() AS sessions
+    strftime(started_at, '%Y-%m-%d') AS date,
+    count(*) AS sessions
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND started_at IS NOT NONE
-GROUP BY date ORDER BY date ASC;`;
+WHERE started_at IS NOT NULL`;
 
-const DAILY_TOKENS_SQL = (d: number) => `
+const DAILY_TOKENS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+    strftime(ts, '%Y-%m-%d') AS date,
+    SUM(COALESCE(prompt_tokens, 0)) + SUM(COALESCE(completion_tokens, 0)) AS tokens
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+WHERE ts IS NOT NULL`;
 
 export const fetchDailyActivityFull = Effect.fn("profile.fetchDailyActivityFull")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const withinStarted = withinDaysClause("started_at", opts.windowDays);
+        const withinTs = withinDaysClause("ts", opts.windowDays);
         const sessionRows = yield* timedQuery(
             "dailySessions",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_SESSIONS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_SESSIONS_SQL} ${withinStarted.sql} GROUP BY date ORDER BY date ASC`,
+                withinStarted.params,
+            ),
         );
         const tokenRows = yield* timedQuery(
             "dailyTokens",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_TOKENS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_TOKENS_SQL} ${withinTs.sql} GROUP BY date ORDER BY date ASC`,
+                withinTs.params,
+            ),
         );
-        // Join tokens onto session rows in JS (two grouped queries; SurrealDB
-        // 3.x grouped aggregates stay deref-free per the hang rule).
+        // Join tokens onto session rows in JS (two grouped queries; mirrors
+        // the deref-free-aggregate discipline the SurrealDB era established).
         const tokenMap = new Map(
             tokenRows
                 .map((r) => [String(r.date), Number(r.tokens ?? 0)] as const)
@@ -255,27 +282,34 @@ export interface SessionDurationRow {
     readonly ended_at: string;
 }
 
-const SESSION_DURATIONS_SQL = (d: number) => `
-SELECT
-    type::string(started_at) AS started_at,
-    type::string(ended_at) AS ended_at
+const SESSION_DURATIONS_SQL = `
+SELECT started_at, ended_at
 FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-  AND ended_at IS NOT NONE;`;
+WHERE started_at IS NOT NULL
+  AND ended_at IS NOT NULL`;
+
+// `started_at`/`ended_at` are TIMESTAMP columns - `raw()` would hand back
+// native `Date`s, and `String(date)` is NOT an ISO string (it's the JS
+// default toString() format). Decode through Schema + toISOString() so the
+// string contract this row type promises actually holds.
+const SessionDurationDbRow = Schema.Struct({
+    started_at: TimestampColumn,
+    ended_at: TimestampColumn,
+});
 
 export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SESSION_DURATIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return rows
-            .filter((r) => r.started_at != null && r.ended_at != null)
-            .map((r) => ({
-                started_at: String(r.started_at),
-                ended_at: String(r.ended_at),
-            })) satisfies SessionDurationRow[];
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            SessionDurationDbRow,
+            `${SESSION_DURATIONS_SQL} ${within.sql}`,
+            within.params,
+        );
+        return rows.map((r) => ({
+            started_at: r.started_at.toISOString(),
+            ended_at: r.ended_at.toISOString(),
+        })) satisfies SessionDurationRow[];
     },
 );
 
@@ -290,27 +324,33 @@ export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
  * LOC floor beyond >0 - a surgical fix that ships clean is a deep outcome; size
  * lives on the SCALE axis, not here.
  */
-const DEEP_PRODUCED_SQL = (d: number) => `
-SELECT type::string(in) AS session, type::string(out) AS commit
-FROM produced
-WHERE in.started_at > time::now() - ${win(d)}
-  AND in.source != "claude-subagent"
-  AND out.reverted != true;`;
+// DuckDB is bare-ref (no `session:`/`commit:` record prefixes and no `in`/`out`
+// graph deref), so the old SurrealQL `in.started_at`/`in.source`/`out.reverted`
+// path through the `produced` edge becomes explicit JOINs against `session` and
+// `commit`, and `touched.in`/`commit` become `touched.in_id`/`"commit".id`.
+// `out.reverted != true` needs `IS DISTINCT FROM TRUE` (not `!= TRUE`) because
+// `reverted` is a nullable BOOLEAN (schema.duckdb.sql: NONE means "not known
+// reverted") and plain `!=` against NULL evaluates to NULL, which WHERE treats
+// as false and would wrongly drop every commit that has never been checked.
+const DEEP_PRODUCED_SQL = `
+SELECT p.in_id AS session, p.out_id AS commit
+FROM produced p
+JOIN session s ON s.id = p.in_id
+JOIN "commit" c ON c.id = p.out_id
+WHERE TRUE`;
 
-const COMMIT_LANDED_LOC_SQL = (refs: string) => `
-SELECT type::string(in) AS commit, math::sum((additions ?? 0) + (deletions ?? 0)) AS loc
-FROM touched WHERE in IN [${refs}] GROUP BY commit;`;
+const COMMIT_LANDED_LOC_SQL = `
+SELECT t.in_id AS commit, SUM(COALESCE(t.additions, 0) + COALESCE(t.deletions, 0)) AS loc
+FROM touched t
+WHERE TRUE`;
 
 // DEPTH denominator: own (non-subagent) session count, so the numerator's
 // subagent filter is mirrored. fetchSessionDurations (which feeds hours/longest)
 // keeps counting every session, so the two denominators differ on purpose -
 // subagent sessions roughly DOUBLE the raw count and would halve this share.
-const DEEP_SESSION_TOTAL_SQL = (d: number) => `
-SELECT count() AS total FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-  AND source != "claude-subagent"
-GROUP ALL;`;
+const DEEP_SESSION_TOTAL_SQL = `
+SELECT count(*) AS total FROM session
+WHERE TRUE`;
 
 const LOC_CHUNK = 500;
 
@@ -321,26 +361,33 @@ export interface DeepSessionCount {
     readonly total: number;
 }
 
+const DeepSessionTotalRow = Schema.Struct({ total: NumberFromBigIntColumn });
+const DeepProducedRow = Schema.Struct({ session: Schema.String, commit: Schema.String });
+const CommitLandedLocRow = Schema.Struct({ commit: Schema.String, loc: NumberFromBigIntColumn });
+
 export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const totalRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DEEP_SESSION_TOTAL_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const total = Number(totalRows[0]?.total ?? 0);
+        const read = yield* CacheRead;
 
-        const produced = yield* db
-            .query<[Array<Record<string, unknown>>]>(DEEP_PRODUCED_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const totalWithin = withinDaysClause("started_at", opts.windowDays);
+        const totalRows = yield* read.rows(
+            DeepSessionTotalRow,
+            `${DEEP_SESSION_TOTAL_SQL} ${totalWithin.sql} AND started_at IS NOT NULL AND source != 'claude-subagent'`,
+            totalWithin.params,
+        );
+        const total = totalRows[0]?.total ?? 0;
 
-        // (session, commit-key) pairs for landed, non-reverted commits.
-        const pairs = produced
-            .map((r) => ({
-                session: String(r.session ?? ""),
-                commit: recordKeyPart(String(r.commit ?? ""), "commit"),
-            }))
-            .filter((p): p is { session: string; commit: string } =>
-                p.session.length > 0 && p.commit !== null && p.commit.length > 0);
+        const producedWithin = withinDaysClause("s.started_at", opts.windowDays);
+        const produced = yield* read.rows(
+            DeepProducedRow,
+            `${DEEP_PRODUCED_SQL} ${producedWithin.sql} `
+                + "AND s.source != 'claude-subagent' AND c.reverted IS DISTINCT FROM TRUE",
+            producedWithin.params,
+        );
+
+        // (session, commit) pairs for landed, non-reverted commits. Ids are
+        // already bare strings in DuckDB, so no key-extraction step is needed.
+        const pairs = produced.filter((p) => p.session.length > 0 && p.commit.length > 0);
         if (pairs.length === 0) return { deep: 0, total } satisfies DeepSessionCount;
 
         const commitKeys = [...new Set(pairs.map((p) => p.commit))];
@@ -349,21 +396,21 @@ export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
             chunks.push(commitKeys.slice(i, i + LOC_CHUNK));
         }
         const locRows = (yield* Effect.all(
-            chunks.map((keys) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    COMMIT_LANDED_LOC_SQL(keys.map((k) => recordLiteral("commit", k)).join(", ")),
-                ).pipe(Effect.map((r) => r?.[0] ?? [])),
-            ),
+            chunks.map((keys) => {
+                const inKeys = inClause("t.in_id", keys);
+                return read.rows(
+                    CommitLandedLocRow,
+                    `${COMMIT_LANDED_LOC_SQL} ${inKeys.sql} GROUP BY t.in_id`,
+                    inKeys.params,
+                );
+            }),
             { concurrency: 4 },
         )).flat();
 
-        // Commit keys whose landed diff actually touched code.
+        // Commits whose landed diff actually touched code.
         const realCommits = new Set<string>();
         for (const row of locRows) {
-            if (Number(row.loc ?? 0) > 0) {
-                const key = recordKeyPart(String(row.commit ?? ""), "commit");
-                if (key !== null && key.length > 0) realCommits.add(key);
-            }
+            if (row.loc > 0) realCommits.add(row.commit);
         }
 
         // Distinct sessions that produced >=1 real commit.
@@ -377,63 +424,63 @@ export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
 
 // --- peak hour ---------------------------------------------------------------
 
-const PEAK_HOUR_SQL = (d: number) => `
-SELECT
-    time::format(started_at, "%H") AS hour,
-    count() AS count
+// time::format(started_at, "%H") -> DuckDB strftime; both return a
+// zero-padded 24h hour string ("00".."23").
+const PEAK_HOUR_SQL = `
+SELECT strftime(started_at, '%H') AS hour, count(*) AS count
 FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-GROUP BY hour
-ORDER BY count DESC
-LIMIT 1;`;
+WHERE TRUE`;
+
+const PeakHourRow = Schema.Struct({ hour: Schema.String, count: NumberFromBigIntColumn });
 
 export const fetchPeakHour = Effect.fn("profile.fetchPeakHour")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(PEAK_HOUR_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            PeakHourRow,
+            `${PEAK_HOUR_SQL} ${within.sql} AND started_at IS NOT NULL `
+                + "GROUP BY hour ORDER BY count DESC LIMIT 1",
+            within.params,
+        );
         const row = rows[0];
         if (row == null) return null;
-        return Number(row.hour ?? 0);
+        return Number(row.hour);
     },
 );
 
 // --- spawned count -----------------------------------------------------------
 
-const SPAWNED_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const SPAWNED_COUNT_SQL = `
+SELECT count(*) AS count
 FROM spawned
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
+
+const CountRow = Schema.Struct({ count: NumberFromBigIntColumn });
 
 export const fetchSpawnedCount = Effect.fn("profile.fetchSpawnedCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SPAWNED_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return Number(rows[0]?.count ?? 0);
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(CountRow, `${SPAWNED_COUNT_SQL} ${within.sql}`, within.params);
+        return rows[0]?.count ?? 0;
     },
 );
 
 // --- commit count ------------------------------------------------------------
 // commit table uses `ts` (datetime) - confirmed in packages/schema/src/schema.surql.
 
-const COMMIT_COUNT_SQL = (d: number) => `
-SELECT count() AS count
-FROM commit
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+const COMMIT_COUNT_SQL = `
+SELECT count(*) AS count
+FROM "commit"
+WHERE TRUE`;
 
 export const fetchCommitCount = Effect.fn("profile.fetchCommitCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(COMMIT_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return Number(rows[0]?.count ?? 0);
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(CountRow, `${COMMIT_COUNT_SQL} ${within.sql}`, within.params);
+        return rows[0]?.count ?? 0;
     },
 );
 
@@ -444,26 +491,26 @@ export interface TopToolRow {
     readonly runs: number;
 }
 
-const TOP_TOOLS_SQL = (d: number) => `
-SELECT
-    (command_norm ?? name) AS tool,
-    count() AS count
+const TOP_TOOLS_SQL = `
+SELECT COALESCE(command_norm, name) AS tool, count(*) AS count
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_norm ?? name) IS NOT NONE
-GROUP BY tool
-ORDER BY count DESC
-LIMIT 10;`;
+WHERE TRUE`;
+
+const TopToolDbRow = Schema.Struct({ tool: Schema.String, count: NumberFromBigIntColumn });
 
 export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TOP_TOOLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            TopToolDbRow,
+            `${TOP_TOOLS_SQL} ${within.sql} AND COALESCE(command_norm, name) IS NOT NULL `
+                + "GROUP BY tool ORDER BY count DESC LIMIT 10",
+            within.params,
+        );
         return rows.map((r) => ({
-            name: String(r.tool),
-            runs: Number(r.count ?? 0),
+            name: r.tool,
+            runs: r.count,
         })) satisfies TopToolRow[];
     },
 );
@@ -492,17 +539,19 @@ export interface WrappedCounts {
 // via tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
 
 // Per-tool rows (name, count, failures) - same shape as WRAPPED_TOOLS_SQL but windowed.
-const TOOL_AGG_SQL = (d: number) => `
+const TOOL_AGG_SQL = `
 SELECT
-    (command_norm ?? name) AS tool,
-    count() AS count,
-    math::sum(IF has_error = true THEN 1 ELSE 0 END) AS failures
+    COALESCE(command_norm, name) AS tool,
+    count(*) AS count,
+    SUM(CASE WHEN has_error THEN 1 ELSE 0 END) AS failures
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_norm ?? name) IS NOT NONE
-GROUP BY tool
-ORDER BY count DESC
-LIMIT 200;`;
+WHERE TRUE`;
+
+const ToolAggRow = Schema.Struct({
+    tool: Schema.String,
+    count: NumberFromBigIntColumn,
+    failures: NumberFromBigIntColumn,
+});
 
 // Verification / context counts classify on the FULL command (`command_text`),
 // not the collapsed `command_norm` - `normalizeCommand` strips the subcommand
@@ -510,79 +559,92 @@ LIMIT 200;`;
 // `npm run`, `bundle exec rspec` -> `bundle`), so the normalized label alone
 // can't see the verifier. Grouped to keep cardinality sane; the command text
 // is classified in-process and never returned (counts-only privacy invariant).
-const VERIFY_AGG_SQL = (d: number) => `
-SELECT
-    (command_text ?? command_norm ?? name) AS cmd,
-    count() AS count
+const VERIFY_AGG_SQL = `
+SELECT COALESCE(command_text, command_norm, name) AS cmd, count(*) AS count
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_text ?? command_norm ?? name) IS NOT NONE
-GROUP BY cmd;`;
+WHERE TRUE`;
+
+const VerifyAggRow = Schema.Struct({ cmd: Schema.String, count: NumberFromBigIntColumn });
 
 // Total turn count in window.
-const TURN_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const TURN_COUNT_SQL = `
+SELECT count(*) AS count
 FROM turn
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
 
-// Distinct invoked skill names in window.
-const DISTINCT_SKILLS_SQL = (d: number) => `
-SELECT count() AS count
+// Distinct invoked skill names in window. DuckDB is bare-ref, so the old
+// `out.name` deref through `invoked` becomes an explicit JOIN against `skill`.
+const DISTINCT_SKILLS_SQL = `
+SELECT count(*) AS count
 FROM (
-    SELECT out.name AS skill
-    FROM invoked
-    WHERE ts > time::now() - ${win(d)} AND out.name IS NOT NONE
-    GROUP BY skill
-) GROUP ALL;`;
+    SELECT sk.name AS skill
+    FROM invoked i
+    JOIN skill sk ON sk.id = i.out_id
+    WHERE TRUE`;
 
 // Count of distinct non-null repositories in window (count only, never names).
-const REPOS_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const REPOS_COUNT_SQL = `
+SELECT count(*) AS count
 FROM (
     SELECT repository
     FROM session
-    WHERE started_at > time::now() - ${win(d)} AND repository IS NOT NONE
-    GROUP BY repository
-) GROUP ALL;`;
+    WHERE TRUE`;
 
 export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const toolRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TOOL_AGG_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const turnRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TURN_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const skillRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DISTINCT_SKILLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const repoRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(REPOS_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const verifyRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(VERIFY_AGG_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const toolWithin = withinDaysClause("ts", opts.windowDays);
+        const verifyWithin = withinDaysClause("ts", opts.windowDays);
+        const turnWithin = withinDaysClause("ts", opts.windowDays);
+        const skillWithin = withinDaysClause("i.ts", opts.windowDays);
+        const repoWithin = withinDaysClause("started_at", opts.windowDays);
 
-        const tool_calls = toolRows.reduce((s, r) => s + Number(r.count ?? 0), 0);
-        const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
+        const toolRows = yield* read.rows(
+            ToolAggRow,
+            `${TOOL_AGG_SQL} ${toolWithin.sql} AND COALESCE(command_norm, name) IS NOT NULL `
+                + "GROUP BY tool ORDER BY count DESC LIMIT 200",
+            toolWithin.params,
+        );
+        const turnRows = yield* read.rows(
+            CountRow,
+            `${TURN_COUNT_SQL} ${turnWithin.sql}`,
+            turnWithin.params,
+        );
+        const skillRows = yield* read.rows(
+            CountRow,
+            `${DISTINCT_SKILLS_SQL} ${skillWithin.sql} AND sk.name IS NOT NULL GROUP BY skill) t`,
+            skillWithin.params,
+        );
+        const repoRows = yield* read.rows(
+            CountRow,
+            `${REPOS_COUNT_SQL} ${repoWithin.sql} AND repository IS NOT NULL GROUP BY repository) t`,
+            repoWithin.params,
+        );
+        const verifyRows = yield* read.rows(
+            VerifyAggRow,
+            `${VERIFY_AGG_SQL} ${verifyWithin.sql} AND COALESCE(command_text, command_norm, name) IS NOT NULL `
+                + "GROUP BY cmd",
+            verifyWithin.params,
+        );
+
+        const tool_calls = toolRows.reduce((s, r) => s + r.count, 0);
+        const tool_failures = toolRows.reduce((s, r) => s + r.failures, 0);
         const distinct_tools = toolRows.length;
 
         // Verification/context classify on the full command text (verifyRows),
         // not the collapsed command_norm tool label (toolRows).
         const cmdCount = (pred: (label: string) => boolean): number =>
             verifyRows
-                .filter((r) => pred(String(r.cmd ?? "")))
-                .reduce((s, r) => s + Number(r.count ?? 0), 0);
+                .filter((r) => pred(r.cmd))
+                .reduce((s, r) => s + r.count, 0);
 
         return {
-            turns: Number(turnRows[0]?.count ?? 0),
+            turns: turnRows[0]?.count ?? 0,
             tool_calls,
             tool_failures,
             distinct_tools,
-            distinct_skills: Number(skillRows[0]?.count ?? 0),
-            repos_count: Number(repoRows[0]?.count ?? 0),
+            distinct_skills: skillRows[0]?.count ?? 0,
+            repos_count: repoRows[0]?.count ?? 0,
             verification_calls: cmdCount(isVerificationTool),
             context_calls: cmdCount(isContextTool),
         } satisfies WrappedCounts;
@@ -597,26 +659,34 @@ export interface DailyModelRow {
     readonly tokens: number;
 }
 
-const DAILY_MODEL_TOKENS_SQL = (d: number) => `
+const DAILY_MODEL_TOKENS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
+    strftime(ts, '%Y-%m-%d') AS date,
     model,
-    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+    SUM(COALESCE(prompt_tokens, 0)) + SUM(COALESCE(completion_tokens, 0)) AS tokens
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date, model
-ORDER BY date ASC, tokens DESC;`;
+WHERE TRUE`;
+
+const DailyModelDbRow = Schema.Struct({
+    date: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    tokens: NumberFromBigIntColumn,
+});
 
 export const fetchDailyModels = Effect.fn("profile.fetchDailyModels")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_MODEL_TOKENS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyModelDbRow,
+            `${DAILY_MODEL_TOKENS_SQL} ${within.sql} AND ts IS NOT NULL `
+                + "GROUP BY date, model ORDER BY date ASC, tokens DESC",
+            within.params,
+        );
         return rows.map((r) => ({
-            date: String(r.date),
-            model: r.model == null ? "(unattributed)" : String(r.model),
-            tokens: Number(r.tokens ?? 0),
+            date: r.date,
+            model: r.model ?? "(unattributed)",
+            tokens: r.tokens,
         })) satisfies DailyModelRow[];
     },
 );
@@ -628,26 +698,26 @@ export interface DailyToolCallRow {
     readonly tool_calls: number;
 }
 
-const DAILY_TOOL_CALLS_SQL = (d: number) => `
+const DAILY_TOOL_CALLS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    count() AS tool_calls
+    strftime(ts, '%Y-%m-%d') AS date,
+    count(*) AS tool_calls
 FROM tool_call
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+WHERE TRUE`;
+
+const DailyToolCallDbRow = Schema.Struct({ date: Schema.String, tool_calls: NumberFromBigIntColumn });
 
 export const fetchDailyToolCalls = Effect.fn("profile.fetchDailyToolCalls")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_TOOL_CALLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyToolCallDbRow,
+            `${DAILY_TOOL_CALLS_SQL} ${within.sql} AND ts IS NOT NULL GROUP BY date ORDER BY date ASC`,
+            within.params,
+        );
         return rows
-            .map((r) => ({
-                date: String(r.date),
-                tool_calls: Number(r.tool_calls ?? 0),
-            }))
+            .map((r) => ({ date: r.date, tool_calls: r.tool_calls }))
             .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyToolCallRow[];
     },
 );
@@ -659,26 +729,26 @@ export interface DailyCommitRow {
     readonly commits: number;
 }
 
-const DAILY_COMMITS_SQL = (d: number) => `
+const DAILY_COMMITS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    count() AS commits
-FROM commit
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+    strftime(ts, '%Y-%m-%d') AS date,
+    count(*) AS commits
+FROM "commit"
+WHERE TRUE`;
+
+const DailyCommitDbRow = Schema.Struct({ date: Schema.String, commits: NumberFromBigIntColumn });
 
 export const fetchDailyCommits = Effect.fn("profile.fetchDailyCommits")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_COMMITS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyCommitDbRow,
+            `${DAILY_COMMITS_SQL} ${within.sql} AND ts IS NOT NULL GROUP BY date ORDER BY date ASC`,
+            within.params,
+        );
         return rows
-            .map((r) => ({
-                date: String(r.date),
-                commits: Number(r.commits ?? 0),
-            }))
+            .map((r) => ({ date: r.date, commits: r.commits }))
             .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyCommitRow[];
     },
 );
@@ -733,58 +803,72 @@ export interface WindowedSessionRow {
     readonly e: string;
 }
 
-const WINDOWED_SESSIONS_SQL = (d: number) => `
-SELECT
-    type::string(id) AS id,
-    type::string(started_at) AS s,
-    type::string(ended_at) AS e
+const WINDOWED_SESSIONS_SQL = `
+SELECT id, started_at AS s, ended_at AS e
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND ended_at IS NOT NONE;`;
+WHERE TRUE`;
+
+const WindowedSessionDbRow = Schema.Struct({
+    id: Schema.String,
+    s: Schema.NullOr(TimestampColumn),
+    e: Schema.NullOr(TimestampColumn),
+});
 
 export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(WINDOWED_SESSIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            WindowedSessionDbRow,
+            `${WINDOWED_SESSIONS_SQL} ${within.sql} AND ended_at IS NOT NULL`,
+            within.params,
+        );
         return rows
-            .filter((r) => r.id != null && r.s != null && r.e != null)
+            .filter((r): r is { id: string; s: Date; e: Date } => r.s !== null && r.e !== null)
             .map((r) => ({
-                id: String(r.id),
-                s: String(r.s),
-                e: String(r.e),
+                id: r.id,
+                s: r.s.toISOString(),
+                e: r.e.toISOString(),
             })) satisfies WindowedSessionRow[];
     },
 );
 
 // --- guardrail receipts -----------------------------------------------------
 
-const GUARDRAIL_HOOK_EVIDENCE_SQL = (d: number) => `
+const GUARDRAIL_HOOK_EVIDENCE_SQL = `
 SELECT
     hook_name,
-    count() AS fires,
-    math::sum(IF effect = "blocked" OR provider_status = "blocking_error" THEN 1 ELSE 0 END) AS blocked,
-    math::sum(IF effect IN ["notified", "injected_context", "modified_input"] THEN 1 ELSE 0 END) AS warned
+    count(*) AS fires,
+    SUM(CASE WHEN effect = 'blocked' OR provider_status = 'blocking_error' THEN 1 ELSE 0 END) AS blocked,
+    SUM(CASE WHEN effect IN ('notified', 'injected_context', 'modified_input') THEN 1 ELSE 0 END) AS warned
 FROM hook_command_invocation
-WHERE ts > time::now() - ${win(d)}
-  AND hook_name IS NOT NONE
-GROUP BY hook_name
-ORDER BY fires DESC
-LIMIT 1000;`;
+WHERE TRUE`;
+
+const GuardrailHookDbRow = Schema.Struct({
+    hook_name: Schema.String,
+    fires: NumberFromBigIntColumn,
+    blocked: NumberFromBigIntColumn,
+    warned: NumberFromBigIntColumn,
+});
 
 export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookEvidence")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
         const rows = yield* timedQuery(
             "guardrailHookEvidence",
-            db.query<[Array<Record<string, unknown>>]>(GUARDRAIL_HOOK_EVIDENCE_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            read.rows(
+                GuardrailHookDbRow,
+                `${GUARDRAIL_HOOK_EVIDENCE_SQL} ${within.sql} AND hook_name IS NOT NULL `
+                    + "GROUP BY hook_name ORDER BY fires DESC LIMIT 1000",
+                within.params,
+            ),
         );
         return rows.map((r) => ({
-            hook_name: String(r.hook_name ?? ""),
-            fires: Number(r.fires ?? 0),
-            blocked: Number(r.blocked ?? 0),
-            warned: Number(r.warned ?? 0),
+            hook_name: r.hook_name,
+            fires: r.fires,
+            blocked: r.blocked,
+            warned: r.warned,
         })).filter((r) => r.hook_name.length > 0) satisfies GuardrailHookEvidenceRow[];
     },
 );

@@ -1,6 +1,7 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
 import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
 import type { ImpactEstimate, ProposalDto } from "@ax/lib/shared/dashboard-types";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { interventionFormSpec } from "./intervention-forms.ts";
@@ -54,18 +55,25 @@ const routingImpact = Effect.fn("improve.routingImpact")(function* () {
     } satisfies ImpactEstimate;
 });
 
-const TOOL_STATS_SQL = (
-    tool: string,
-) => `SELECT count() AS n FROM tool_call WHERE name = ${JSON.stringify(tool)} AND ts > time::now() - ${HOOK_WINDOW_DAYS}d GROUP ALL;
-SELECT count() AS n FROM tool_call WHERE name = ${JSON.stringify(tool)} AND status = "error" AND ts > time::now() - ${HOOK_WINDOW_DAYS}d GROUP ALL;`;
+const ToolCallCountRow = Schema.Struct({ n: NumberFromBigIntColumn });
 
 const hookImpact = Effect.fn("improve.hookImpact")(function* (tool: string) {
-    const db = yield* SurrealClient;
-    const [totalRows, failRows] = yield* db.query<
-        [Array<{ n: number }>, Array<{ n: number }>]
-    >(TOOL_STATS_SQL(tool));
-    const total = Number(totalRows?.[0]?.n ?? 0);
-    const failures = Number(failRows?.[0]?.n ?? 0);
+    const read = yield* CacheRead;
+    const within = withinDaysClause("ts", HOOK_WINDOW_DAYS);
+    const [totalRows, failRows] = yield* Effect.all([
+        read.rows(
+            ToolCallCountRow,
+            `SELECT count(*) AS n FROM tool_call WHERE name = ? ${within.sql}`,
+            [tool, ...within.params],
+        ),
+        read.rows(
+            ToolCallCountRow,
+            `SELECT count(*) AS n FROM tool_call WHERE name = ? AND status = ? ${within.sql}`,
+            [tool, "error", ...within.params],
+        ),
+    ]);
+    const total = totalRows[0]?.n ?? 0;
+    const failures = failRows[0]?.n ?? 0;
     return {
         kind: "addressable_failures",
         headline: `intersects ${failures.toLocaleString("en")} failures (of ${total.toLocaleString("en")} ${tool} calls) in ${HOOK_WINDOW_DAYS}d`,
