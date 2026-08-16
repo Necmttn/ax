@@ -778,22 +778,26 @@ export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: n
 /** Recent commits whose `touched` relation points to any of these files. */
 export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCommit[];
         const cap = Math.max(1, Math.min(limit, 20));
-        const [rows] = yield* db.query<[
-            Array<{ commit_id: string; sha: string | null; message: string | null; ts: string | null }>
-        ]>(`
+        const rows = yield* read.rows(Schema.Struct({
+            commit_id: Schema.String,
+            sha: Schema.NullOr(Schema.String),
+            message: Schema.NullOr(Schema.String),
+            ts: Schema.NullOr(TimestampColumn),
+        }), `
             SELECT
-                <string>in.id AS commit_id,
-                in.sha AS sha,
-                in.message AS message,
-                <string>in.ts AS ts
-            FROM touched
-            WHERE out IN [${fileIds.join(", ")}]
-            ORDER BY ts DESC
-            LIMIT ${cap};
-        `);
+                c.id AS commit_id,
+                c.sha AS sha,
+                c.message AS message,
+                c.ts AS ts
+            FROM touched t
+            JOIN "commit" c ON c.id = t.in_id
+            WHERE t.out_id IN (${fileIds.map(() => "?").join(", ")})
+            ORDER BY c.ts DESC
+            LIMIT ?
+        `, [...fileIds, cap]);
         // De-dupe by commit_id (multiple touched rows can share a commit when
         // we feed in several file-id variants for the same canonical file).
         const seen = new Set<string>();
@@ -805,7 +809,7 @@ export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: numb
                 commit_id: row.commit_id,
                 sha: row.sha,
                 message: row.message?.split("\n")[0]?.trim() ?? null,
-                ts: row.ts,
+                ts: row.ts?.toISOString() ?? null,
             });
             if (out.length >= cap) break;
         }
