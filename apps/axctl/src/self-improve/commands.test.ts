@@ -29,7 +29,7 @@ test("guidanceNextSql selects fields used for ordering", () => {
 
 test("sessionSummarySql orders by a selected alias", () => {
     const sql = sessionSummarySql();
-    expect(sql).toContain("(ended_at ?? started_at) AS last_seen_at");
+    expect(sql).toContain("COALESCE(s.ended_at, s.started_at) AS last_seen_at");
     expect(sql).toContain("ORDER BY last_seen_at DESC");
-    expect(sql).not.toContain("ORDER BY (ended_at ?? started_at)");
+    expect(sql).not.toContain("ORDER BY COALESCE(s.ended_at, s.started_at)");
 });
