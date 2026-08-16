@@ -5,7 +5,9 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestSurrealClient, type TestSurrealClientOptions } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessServiceTest } from "@ax/lib/process";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import {
@@ -872,10 +874,15 @@ describe("resolveSkillSparTask", () => {
 describe("scoreSkillSpar", () => {
     // AxConfig is required by fetchSessionMetrics (churn scan reads AxConfig.knobs).
     const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
+    const paired = (options: TestSurrealClientOptions) => {
+        const tc = makeTestSurrealClient(options);
+        const cache = makeTestCacheRead({ routes: options.routes as never });
+        return { tc, layer: Layer.merge(tc.layer, cache.layer) };
+    };
 
     const runScore = <A>(
-        eff: Effect.Effect<A, unknown, SurrealClient | Judgment | AxConfig>,
-        tcLayer: Layer.Layer<SurrealClient>,
+        eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment | AxConfig>,
+        tcLayer: Layer.Layer<SurrealClient | CacheRead>,
     ): Promise<A> =>
         Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer, EmptyJudgmentTestLayer))));
 
@@ -896,18 +903,17 @@ describe("scoreSkillSpar", () => {
         // spar-arm-a / spar-arm-b appear only in those two queries; all other
         // queries fall through to the default [[]] → null/0/false metrics.
         // With empty metrics: variant.landed = false → verdict = "regression".
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "spar-arm-a": [[{ id: "session:arm-a" }]],
                 "spar-arm-b": [[{ id: "session:arm-b" }]],
-                // stamp SELECT labels → null (will issue UPDATE, but query is OK)
             },
         });
 
         const result = await runScore(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
 
         expect(result.sessionA).toBe("session:arm-a");
@@ -925,7 +931,7 @@ describe("scoreSkillSpar", () => {
     // -----------------------------------------------------------------------
     test("arm A session missing → SparCaptureError mentioning 'arm A'", async () => {
         // No route for spar-arm-a → default [[]] → findVariantSession → null
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "spar-arm-b": [[{ id: "session:arm-b" }]],
@@ -934,7 +940,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -948,7 +954,7 @@ describe("scoreSkillSpar", () => {
     // -----------------------------------------------------------------------
     test("arm B session missing → SparCaptureError mentioning 'arm B'", async () => {
         // Arm A is found; arm B has no route → findVariantSession returns null.
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "spar-arm-a": [[{ id: "session:arm-a" }]],
@@ -957,7 +963,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -979,15 +985,15 @@ describe("scoreSkillSpar", () => {
         // The cost + produced queries are shared across both metric fetches;
         // each carries BOTH sessions' rows and the per-call clean-id lookup
         // picks the right one (mirrors spar.test.ts's metric-row idiom).
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "spar-arm-a": [[{ id: "session:arm-a" }]],
                 "spar-arm-b": [[{ id: "session:arm-b" }]],
                 // cost: arm-a = $2.00 (baseline), arm-b = $0.80 (variant, cheaper)
                 "FROM session_token_usage": [[
-                    { session: "session:arm-a", model: "claude", estimated_cost_usd: 2.0 },
-                    { session: "session:arm-b", model: "claude", estimated_cost_usd: 0.8 },
+                    { session: "session:arm-a", model: "claude", estimated_tokens: 2_000, estimated_cost_usd: 2.0 },
+                    { session: "session:arm-b", model: "claude", estimated_tokens: 800, estimated_cost_usd: 0.8 },
                 ]],
                 // both arms produced a commit → landed = true for both
                 "FROM produced": [[
@@ -1007,7 +1013,7 @@ describe("scoreSkillSpar", () => {
 
         const result = await runScore(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
 
         expect(result.sessionA).toBe("session:arm-a");
@@ -1028,12 +1034,12 @@ describe("scoreSkillSpar", () => {
     // Test 5: malformed created_at → SparCaptureError (no RangeError escape)
     // -----------------------------------------------------------------------
     test("malformed created_at → SparCaptureError before any session lookup", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { tc, layer } = paired({ denyWrites: true });
         const badBrief: SkillSparBrief = { ...SCORE_BRIEF, createdAt: "not-a-date" };
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(badBrief, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer, EmptyJudgmentTestLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");

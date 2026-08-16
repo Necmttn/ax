@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { stableDigest } from "@ax/lib/ids";
-import { recordRef } from "../ingest/evidence-writers.ts";
+import { recordRef } from "@ax/lib/shared/surql";
 
 export const ENFORCE_WORKTREE_CASE_KEY = "enforce_worktree_next_worktree";
 

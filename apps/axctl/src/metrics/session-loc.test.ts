@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { applyPatchDelta, computeSessionLoc } from "./session-loc.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { applyPatchDelta, computeSessionLoc as computeSessionLocWithRead } from "./session-loc.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 const db = (rows: Array<Record<string, unknown>>) =>
-    Layer.succeed(SurrealClient, { query: <T>(_s: string) => Effect.succeed([rows] as unknown as T) } as never);
+    makeTestCacheRead({ fallback: rows }).layer;
+const computeSessionLoc = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* computeSessionLocWithRead(yield* CacheRead, ids);
+});
 
 const PATCH = [
     "*** Begin Patch",

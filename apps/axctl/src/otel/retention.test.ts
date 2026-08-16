@@ -1,58 +1,41 @@
-import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { describe, expect } from "bun:test";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { retainRecentOtel } from "./retention.ts";
 
-describe("retainRecentOtel", () => {
-    test("deletes rows via the non-quadratic result-set DELETE form", async () => {
-        const db = makeTestSurrealClient();
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("OTLP retention", { requireFts: true });
 
-        await Effect.runPromise(retainRecentOtel().pipe(Effect.provide(db.layer)));
+describe("retainRecentOtel with real DuckDB", () => {
+    dtest("removes old rows and dangling edges", async () => {
+        let result: Record<string, unknown> = {};
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-retention-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const old = new Date(Date.now() - 40 * 86_400_000);
+                const recent = new Date();
+                yield* write.putMany("otel_metric_point", [
+                    { id: "old", harness: "claude", metric: "cost", value: 1, observed_at: old },
+                    { id: "recent", harness: "claude", metric: "cost", value: 2, observed_at: recent },
+                ]);
+                yield* write.putMany("telemetry_of", [
+                    { id: "edge-old", in_id: "session-1", out_id: "old", out_table: "otel_metric_point", linked_at: old },
+                    { id: "edge-missing", in_id: "session-2", out_id: "missing", out_table: "otel_metric_point", linked_at: recent },
+                    { id: "edge-recent", in_id: "session-3", out_id: "recent", out_table: "otel_metric_point", linked_at: recent },
+                ]);
+                const deleted = yield* retainRecentOtel(write);
+                const counts = yield* write.rows(
+                    Schema.Struct({ metrics: Schema.BigInt, edges: Schema.BigInt }),
+                    `SELECT (SELECT count(*) FROM otel_metric_point) AS metrics,
+                            (SELECT count(*) FROM telemetry_of) AS edges`,
+                );
+                result = { deleted, counts: counts[0] };
+            }),
+        ));
 
-        const sql = db.captured.join("\n");
-        for (const table of ["otel_metric_point", "otel_span", "otel_log_event"]) {
-            // Correct form: DELETE targets the subquery RESULT by primary id.
-            expect(sql).toContain(
-                `DELETE (SELECT VALUE id FROM ${table} WHERE observed_at < time::now() - 30d);`,
-            );
-            // Never the quadratic id-IN-subquery form (measured: never
-            // completes at ~460k rows - see provider-events.ts doc comment).
-            expect(sql).not.toContain(
-                `DELETE ${table} WHERE id IN (SELECT VALUE id FROM ${table}`,
-            );
-        }
-    });
-
-    test("prunes dangling telemetry_of edges left by the otel delete", async () => {
-        const db = makeTestSurrealClient();
-
-        await Effect.runPromise(retainRecentOtel().pipe(Effect.provide(db.layer)));
-
-        const sql = db.captured.join("\n");
-        expect(sql).toContain(
-            "DELETE (SELECT VALUE id FROM telemetry_of WHERE out.id IS NONE);",
-        );
-        // Same non-quadratic form for the edge cleanup too.
-        expect(sql).not.toContain("DELETE telemetry_of WHERE id IN (SELECT");
-    });
-
-    test("reports pruned counts for observability", async () => {
-        const db = makeTestSurrealClient({
-            routes: {
-                "SELECT count() FROM otel_log_event": [[{ count: 5 }]],
-                "SELECT count() FROM otel_span": [[{ count: 3 }]],
-                "SELECT count() FROM otel_metric_point": [[{ count: 1 }]],
-                "SELECT count() FROM telemetry_of": [[{ count: 2 }]],
-            },
+        expect(result.deleted).toEqual({
+            deletedByTable: { otel_metric_point: 1, otel_span: 0, otel_log_event: 0 },
+            deletedEdges: 2,
         });
-
-        const result = await Effect.runPromise(retainRecentOtel().pipe(Effect.provide(db.layer)));
-
-        expect(result.deletedByTable).toEqual({
-            otel_metric_point: 1,
-            otel_span: 3,
-            otel_log_event: 5,
-        });
-        expect(result.deletedEdges).toBe(2);
+        expect(result.counts).toEqual({ metrics: 1n, edges: 1n });
     });
 });

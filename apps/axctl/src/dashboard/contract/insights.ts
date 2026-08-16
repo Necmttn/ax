@@ -7,6 +7,7 @@
  *   - everything else is fetch* + the 500 InternalError mapping.
  */
 import { Effect } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi, NotFoundError } from "@ax/lib/shared/api-contract";
 import { fetchCostModels, fetchCostSplit } from "../../queries/cost-analytics.ts";
@@ -91,9 +92,13 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
         .handle("costSplit", ({ query }) =>
             orInternal(fetchCostSplit({ sinceDays: query.days ?? 14 }).pipe(Effect.map(asJsonValue))))
         .handle("costDispatches", ({ query }) =>
-            query.candidates
-                ? orInternal(fetchDispatchCandidates({ sinceDays: query.days ?? 14 }).pipe(Effect.map(asJsonValue)))
-                : orInternal(fetchDispatches({ sinceDays: query.days ?? 14, limit: 30 }).pipe(Effect.map(asJsonValue))))
+            orInternal(Effect.gen(function* () {
+                const read = yield* CacheRead;
+                const result = query.candidates
+                    ? yield* fetchDispatchCandidates(read, { sinceDays: query.days ?? 14 })
+                    : yield* fetchDispatches(read, { sinceDays: query.days ?? 14, limit: 30 });
+                return asJsonValue(result);
+            })))
         .handle("costRoutability", ({ query }) =>
             orInternal(fetchRoutability({ days: query.days ?? 14, minRun: query.minRun ?? 1 }).pipe(Effect.map(asJsonValue))))
         .handle("routingTable", () =>

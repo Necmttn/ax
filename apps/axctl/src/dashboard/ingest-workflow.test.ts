@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { DbError } from "@ax/lib/errors";
 import type { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { AxConfigTest } from "@ax/lib/config";
 import { ProcessServiceTest } from "@ax/lib/process";
 import type { IngestLockInfo } from "@ax/lib/ingest-lock";
@@ -22,18 +23,7 @@ const fakeDb = () => {
     return { queries: tc.captured, layer: tc.layer };
 };
 
-/** A fake DB whose first query fails - simulates a DbError thrown BEFORE the
- * tracer wraps the pipeline (the `buildIngestRunStartStatement` query in
- * runIngest runs before `LiveTrace.withTrace`), so no TraceEnd is ever emitted. */
-const fakeFailingDb = () => {
-    const tc = makeTestSurrealClient({
-        responses: [
-            Effect.fail(new DbError({ operation: "query", message: "boom: run-start failed" })),
-        ],
-        fallback: [],
-    });
-    return { layer: tc.layer };
-};
+const { dylibPath, dtest } = await duckdbTestSetup("ingest workflow");
 
 const stage = (key: string, deps: string[] = []): StageDef => ({
     meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
@@ -48,18 +38,23 @@ const failingStage = (key: string, deps: string[] = []): StageDef => ({
 });
 
 let dataDir: string;
+let oldDylib: string | undefined;
 beforeEach(() => {
     // Isolated per-test dataDir: startIngestWorkflow now single-flights
     // through `<dataDir>/ingest.lock` (#F3) - without this override
     // AxConfigLive's real default (~/.local/share/ax) would have every test
     // acquire/release an actual lock file on the machine running the suite.
     dataDir = mkdtempSync(join(tmpdir(), "ax-ingest-workflow-"));
+    oldDylib = process.env.AX_DUCKDB_DYLIB;
+    if (dylibPath !== null) process.env.AX_DUCKDB_DYLIB = dylibPath;
 });
 afterEach(() => {
     rmSync(dataDir, { recursive: true, force: true });
+    if (oldDylib === undefined) delete process.env.AX_DUCKDB_DYLIB;
+    else process.env.AX_DUCKDB_DYLIB = oldDylib;
 });
 
-const baseServices = (dbLayer: Layer.Layer<SurrealClient>, registry: Layer.Layer<StageRegistry>) => {
+const baseServices = (dbLayer: Layer.Layer<SurrealClient>, registry: Layer.Layer<StageRegistry, unknown>) => {
     const process = ProcessServiceTest({
         route: () => new Error("ProcessService not expected in this test"),
     });
@@ -101,7 +96,7 @@ const countTerminal = (history: readonly IngestStreamEvent[]): number =>
     history.filter((e) => e.kind === "run_finished").length;
 
 describe("startIngestWorkflow", () => {
-    it("forks the pipeline and publishes run_started..run_finished to the bus", async () => {
+    dtest("forks the pipeline and publishes run_started..run_finished to the bus", async () => {
         const db = fakeDb();
         const registry = StageRegistryLive([stage("skills"), stage("commands", ["skills"])]);
         const bus = new InMemoryIngestStreamBus();
@@ -137,7 +132,7 @@ describe("startIngestWorkflow", () => {
         for (const e of history) expect(e.runId).toBe(runId);
     });
 
-    it("publishes exactly one terminal run_finished{failed} when a stage fails (normal-failure path)", async () => {
+    dtest("publishes exactly one terminal run_finished{failed} when a stage fails (normal-failure path)", async () => {
         const db = fakeDb();
         const registry = StageRegistryLive([failingStage("skills")]);
         const bus = new InMemoryIngestStreamBus();
@@ -155,12 +150,9 @@ describe("startIngestWorkflow", () => {
         for (const e of history) expect(e.runId).toBe(runId);
     });
 
-    it("publishes a synthetic terminal run_finished{failed} on early failure before the tracer (no TraceEnd)", async () => {
-        // First DB query (run-start) fails before LiveTrace.withTrace wraps the
-        // pipeline, so no TraceEnd is ever emitted - only the synthetic terminal
-        // event from the catchCause handler can terminate the stream.
-        const db = fakeFailingDb();
-        const registry = StageRegistryLive([stage("skills")]);
+    dtest("publishes a synthetic terminal run_finished{failed} on an early layer failure", async () => {
+        const db = fakeDb();
+        const registry = Layer.effect(StageRegistry, Effect.fail(new Error("registry build failed")));
         const bus = new InMemoryIngestStreamBus();
 
         const { runId } = await Effect.runPromise(
@@ -178,7 +170,7 @@ describe("startIngestWorkflow", () => {
         for (const e of history) expect(e.runId).toBe(runId);
     });
 
-    it("single-flight (#F3): skips the pipeline and publishes a clean run_finished{failed} when the CLI lock is held", async () => {
+    dtest("single-flight (#F3): skips the pipeline and publishes a clean run_finished{failed} when the CLI lock is held", async () => {
         const db = fakeDb();
         const registry = StageRegistryLive([stage("skills")]);
         const bus = new InMemoryIngestStreamBus();

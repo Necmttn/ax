@@ -1,7 +1,6 @@
 import { Effect, Schema } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
-import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { DigestSnapshot, type DigestItem } from "./model.ts";
 import { topForSnapshot } from "./rank.ts";
 import { improveItems, costItems, churnItems, quotaToItem } from "./sources.ts";
@@ -22,14 +21,15 @@ export const assembleSnapshot = (
 
 /** Collect items from every source (DB sources via Effect; quota via cache). */
 export const collectItems = (
+  read: CacheReadService,
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestItem[], DbError | JudgmentError, SurrealClient | Judgment> =>
+): Effect.Effect<DigestItem[], CacheReadError | JudgmentError, Judgment> =>
   Effect.gen(function* () {
     const out: DigestItem[] = [];
     out.push(...(yield* improveItems(now)));
-    out.push(...(yield* costItems(now, windowDays)));
-    out.push(...(yield* churnItems(now, windowDays)));
+    out.push(...(yield* costItems(read, now, windowDays)));
+    out.push(...(yield* churnItems(read, now, windowDays)));
     const quota = yield* Effect.promise(() => loadQuotaCache(defaultQuotaCachePath()));
     if (quota) {
       const q = quotaToItem({ windowLabel: "7d", pctUsed: quota.seven_day?.utilization ?? 0 }, now);
@@ -52,11 +52,12 @@ export async function writeSnapshot(path: string, snap: DigestSnapshot): Promise
 
 /** Build + persist the snapshot for the given window. */
 export const buildAndWrite = (
+  read: CacheReadService,
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestSnapshot, DbError | JudgmentError, SurrealClient | Judgment> =>
+): Effect.Effect<DigestSnapshot, CacheReadError | JudgmentError, Judgment> =>
   Effect.gen(function* () {
-    const items = yield* collectItems(now, windowDays);
+    const items = yield* collectItems(read, now, windowDays);
     const snap = assembleSnapshot(items, { now, windowDays });
     yield* Effect.promise(() => writeSnapshot(defaultDigestPath(), snap));
     return snap;

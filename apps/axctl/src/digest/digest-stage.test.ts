@@ -1,51 +1,51 @@
-import { describe, expect, it } from "bun:test";
-import { Effect, Exit, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
+import { describe, expect } from "bun:test";
+import { Effect, Exit } from "effect";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { DuckDbQueryError } from "@ax/lib/duckdb/errors";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { IngestContext } from "../ingest/stage/types.ts";
 import { digestStage, DigestStats } from "./digest-stage.ts";
 import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
-const ctx = IngestContext.make({
-  cwd: "/tmp",
-  since: new Date(0),
-  debug: false,
-});
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("digest stage", { requireFts: true });
+const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
 
-/** A SurrealClient whose every query fails with a typed DbError - simulates a
- *  DB hiccup hit while collecting digest source items. */
-const failingDb = Layer.succeed(SurrealClient, {
-  query: (_sql: string) =>
-    Effect.fail(new DbError({ operation: "query", message: "simulated DB failure" })),
-} as never);
+const failingRead = (write: CacheWriteService, defect: boolean): CacheWriteService => ({
+  ...write,
+  rows: defect
+    ? (() => Effect.die(new Error("simulated cache defect")))
+    : (() => Effect.fail(new DuckDbQueryError({ sql: "SELECT", message: "simulated cache failure" }))),
+}) as CacheWriteService;
 
-/** A SurrealClient whose query *dies* (defect) - simulates the
- *  `catchAll`-bypassing failure mode the review flagged. */
-const dyingDb = Layer.succeed(SurrealClient, {
-  query: (_sql: string) => Effect.die(new Error("simulated DB defect")),
-} as never);
-
-describe("digestStage failure isolation", () => {
-  it("a typed DB failure yields Success with 0 items (never aborts ingest)", async () => {
-    const exit = await Effect.runPromiseExit(
-      digestStage.run(ctx).pipe(Effect.provide(failingDb), Effect.provide(EmptyJudgmentTestLayer)),
-    );
-    expect(Exit.isSuccess(exit)).toBe(true);
-    if (Exit.isSuccess(exit)) {
+describe("digestStage failure isolation with real DuckDB", () => {
+  dtest("a typed cache failure returns zero items", async () => {
+    let exit: Exit.Exit<unknown, unknown> | undefined;
+    await runWithPlatform(publishCacheFixture(tempDir("ax-digest-failure-"), dylibPath, (write) =>
+      Effect.gen(function* () {
+        exit = yield* Effect.exit(
+          digestStage.run(ctx, failingRead(write, false)).pipe(Effect.provide(EmptyJudgmentTestLayer)),
+        );
+      }),
+    ));
+    expect(Exit.isSuccess(exit!)).toBe(true);
+    if (Exit.isSuccess(exit!)) {
       const stats = exit.value as DigestStats;
       expect(stats.items).toBe(0);
       expect(stats.summary).toContain("skipped");
     }
   });
 
-  it("a DB defect (die) is also swallowed - Success with 0 items", async () => {
-    const exit = await Effect.runPromiseExit(
-      digestStage.run(ctx).pipe(Effect.provide(dyingDb), Effect.provide(EmptyJudgmentTestLayer)),
-    );
-    expect(Exit.isSuccess(exit)).toBe(true);
-    if (Exit.isSuccess(exit)) {
-      const stats = exit.value as DigestStats;
-      expect(stats.items).toBe(0);
-    }
+  dtest("a cache defect also returns zero items", async () => {
+    let exit: Exit.Exit<unknown, unknown> | undefined;
+    await runWithPlatform(publishCacheFixture(tempDir("ax-digest-defect-"), dylibPath, (write) =>
+      Effect.gen(function* () {
+        exit = yield* Effect.exit(
+          digestStage.run(ctx, failingRead(write, true)).pipe(Effect.provide(EmptyJudgmentTestLayer)),
+        );
+      }),
+    ));
+    expect(Exit.isSuccess(exit!)).toBe(true);
+    if (Exit.isSuccess(exit!)) expect((exit.value as DigestStats).items).toBe(0);
   });
 });

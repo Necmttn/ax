@@ -3,7 +3,9 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestSurrealClient, type TestSurrealClientOptions } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import {
     COST_TOL,
     fetchSessionMetrics,
@@ -134,15 +136,21 @@ describe("renderSparReport", () => {
 // enrichSessions/churn read fan-out width from AxConfig.knobs.
 const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
 
+const paired = (options: TestSurrealClientOptions) => {
+    const tc = makeTestSurrealClient(options);
+    const cache = makeTestCacheRead({ routes: options.routes as never });
+    return { tc, layer: Layer.merge(tc.layer, cache.layer) };
+};
+
 const runDb = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | Judgment | AxConfig>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment | AxConfig>,
+    layer: Layer.Layer<SurrealClient | CacheRead>,
 ): Promise<A> =>
     Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer))));
 
 const runDbOnly = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | Judgment>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment>,
+    layer: Layer.Layer<SurrealClient | CacheRead>,
 ): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer))));
 
 describe("fetchSessionMetrics", () => {
@@ -150,11 +158,11 @@ describe("fetchSessionMetrics", () => {
         const since = new Date("2026-06-11T00:00:00.000Z");
         // routes: cost usage, churn base scan, churn fan-out, and the focused
         // turn/wall lookup. Unmatched -> [[]] (pricing falls back to built-in).
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
-                    { session: "session:`s1`", model: "claude", estimated_cost_usd: 1.5 },
+                    { session: "session:`s1`", model: "claude", estimated_tokens: 1_000, estimated_cost_usd: 1.5 },
                 ]],
                 // churn base session scan (selects id AS session, source)
                 "AS session, source\nFROM session": [[
@@ -173,8 +181,8 @@ describe("fetchSessionMetrics", () => {
                 // failure opens an episode; the later pass closes it so the
                 // edit between them is classified as repair.
                 "FROM command_outcome": [[
-                    { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                    { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", status: "ok", command_norm: "tsc" },
+                    { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                    { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "check", status: "ok", command_norm: "tsc" },
                 ]],
                 // focused turn/wall lookup: `FROM ONLY` returns the bare object,
                 // so the statement result is `[ {turn_count, s, e} ]` (NOT
@@ -185,7 +193,7 @@ describe("fetchSessionMetrics", () => {
             },
         });
 
-        const m = await runDb(fetchSessionMetrics("session:`s1`", since), tc.layer);
+        const m = await runDb(fetchSessionMetrics("session:`s1`", since), layer);
         expect(m.costUsd).toBe(1.5);
         expect(m.turns).toBe(21);
         expect(m.wallMs).toBe(600_000);
@@ -199,11 +207,11 @@ describe("fetchSessionMetrics", () => {
         // zero verification failures) is FILTERED OUT of churn.hotSessions by
         // hasVerificationSignal. landed must come from the produced edge, not
         // hotSessions - otherwise the best outcome scores as a regression.
-        const tc = makeTestSurrealClient({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "FROM session_token_usage": [[
-                    { session: "session:`clean`", model: "claude", estimated_cost_usd: 0.7 },
+                    { session: "session:`clean`", model: "claude", estimated_tokens: 500, estimated_cost_usd: 0.7 },
                 ]],
                 // churn base scan: clean session has NO verification signal, so
                 // it never appears here (and thus never in hotSessions).
@@ -221,7 +229,7 @@ describe("fetchSessionMetrics", () => {
 
         const m = await runDb(
             fetchSessionMetrics("session:`clean`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.landed).toBe(true);
         expect(m.repairLines).toBe(0);
@@ -231,10 +239,10 @@ describe("fetchSessionMetrics", () => {
     });
 
     test("null cost + null turn/wall when nothing matches", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { layer } = paired({ denyWrites: true });
         const m = await runDb(
             fetchSessionMetrics("session:`ghost`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.costUsd).toBeNull();
         expect(m.turns).toBeNull();
@@ -247,13 +255,13 @@ describe("fetchSessionMetrics", () => {
 
 describe("findVariantSession", () => {
     test("returns the most recent bare id; embeds cwd + since literals", async () => {
-        const tc = makeTestSurrealClient({
+        const { tc, layer } = paired({
             denyWrites: true,
             routes: { "FROM session": [[{ id: "session:variant" }]] },
         });
         const id = await runDbOnly(
             findVariantSession("/abs/cwd", Date.parse("2026-06-13T10:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(id).toBe("session:variant");
         const sql = tc.captured[0]!;
@@ -263,10 +271,10 @@ describe("findVariantSession", () => {
     });
 
     test("returns null when no variant session exists", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { layer } = paired({ denyWrites: true });
         const id = await runDbOnly(
             findVariantSession("/abs/cwd", Date.now()),
-            tc.layer,
+            layer,
         );
         expect(id).toBeNull();
     });

@@ -4,7 +4,7 @@ import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
 import { buildProjectHarnessReport } from "./harness.ts";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import type { ProjectContext, ProjectHarnessReport, ProjectVerification } from "./types.ts";
 
@@ -64,5 +64,8 @@ export const buildProjectVerification = (
 
 export const buildProjectHarness = (
     cwd = process.cwd(),
-): Effect.Effect<ProjectHarnessReport, never, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
-    buildProjectHarnessReport(cwd);
+): Effect.Effect<ProjectHarnessReport, CacheReadError, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const read = yield* CacheRead;
+        return yield* buildProjectHarnessReport(read, cwd);
+    });

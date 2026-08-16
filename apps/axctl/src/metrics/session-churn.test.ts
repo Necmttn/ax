@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import {
     computeSessionChurn,
-    fetchSessionChurnSummary,
+    fetchSessionChurnSummary as fetchSessionChurnSummaryWithRead,
     formatSessionChurnSummary,
     normalizeCheckFamily,
     type ChurnEvent,
@@ -47,6 +48,12 @@ const landed = (entries: Array<readonly [string, { readonly added: number; reado
 const health = (entries: Array<readonly [string, string | null]>) =>
     new Map(entries);
 
+const fetchSessionChurnSummary = (options: Parameters<typeof fetchSessionChurnSummaryWithRead>[1]) =>
+    Effect.gen(function* () {
+        const read = yield* CacheRead;
+        return yield* fetchSessionChurnSummaryWithRead(read, options);
+    });
+
 const db = (input: {
     base: Array<Record<string, unknown>>;
     health?: Array<Record<string, unknown>>;
@@ -60,24 +67,23 @@ const db = (input: {
     otelLogs?: Array<Record<string, unknown>>;
     seenSql?: string[];
     respectBaseLimit?: boolean;
-}) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+}) => makeTestCacheRead({
+        fallback: (sql) => {
             input.seenSql?.push(sql);
-            if (sql.includes("FROM otel_metric_point")) return Effect.succeed([input.otelMetrics ?? []] as unknown as T);
-            if (sql.includes("FROM otel_log_event")) return Effect.succeed([input.otelLogs ?? []] as unknown as T);
-            if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
-            if (sql.includes("FROM produced")) return Effect.succeed([input.produced ?? []] as unknown as T);
-            if (sql.includes("FROM touched")) return Effect.succeed([input.touched ?? []] as unknown as T);
-            if (sql.includes("FROM tool_call") && sql.includes("WHERE id IN")) return Effect.succeed([input.toolTexts ?? []] as unknown as T);
-            if (sql.includes("FROM tool_call")) return Effect.succeed([input.edits ?? []] as unknown as T);
-            if (sql.includes("FROM command_outcome")) return Effect.succeed([input.outcomes ?? []] as unknown as T);
-            if (sql.includes("FROM hook_command_invocation")) return Effect.succeed([input.hooks ?? []] as unknown as T);
+            if (sql.includes("FROM otel_metric_point")) return input.otelMetrics ?? [];
+            if (sql.includes("FROM otel_log_event")) return input.otelLogs ?? [];
+            if (sql.includes("FROM session_health")) return input.health ?? [];
+            if (sql.includes("FROM produced")) return input.produced ?? [];
+            if (sql.includes("FROM touched")) return input.touched ?? [];
+            if (sql.includes("SELECT id, command_text FROM tool_call")) return input.toolTexts ?? [];
+            if (sql.includes("FROM tool_call")) return input.edits ?? [];
+            if (sql.includes("FROM command_outcome")) return input.outcomes ?? [];
+            if (sql.includes("FROM hook_command_invocation")) return input.hooks ?? [];
             const limit = input.respectBaseLimit ? Number(sql.match(/\bLIMIT\s+(\d+)/)?.[1] ?? NaN) : NaN;
             const base = Number.isFinite(limit) ? input.base.slice(0, limit) : input.base;
-            return Effect.succeed([base] as unknown as T);
+            return base;
         },
-    } as never);
+    }).layer;
 
 describe("normalizeCheckFamily", () => {
     test("normalizes known verification families", () => {
@@ -375,9 +381,9 @@ describe("fetchSessionChurnSummary", () => {
         expect(baseSql).toContain("FROM session");
         expect(baseSql).not.toContain("session_metrics");
         expect(baseSql).not.toContain("ORDER BY");
-        expect(baseSql).toContain('started_at >= d"2026-06-01T00:00:00.000Z"');
-        expect(baseSql).toContain('cwd = "/repo/ax"');
-        expect(baseSql).toContain('source = "codex"');
+        expect(baseSql).toContain("started_at >= ?");
+        expect(baseSql).toContain("cwd = ?");
+        expect(baseSql).toContain("source = ?");
     });
 
     test("empty base sessions skip secondary scans", async () => {
@@ -427,18 +433,19 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`quiet`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`cmd-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`cmd-hot`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
             hooks: [
-                { session: "session:`hook-hot`", ts: "2026-06-11T00:02:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
+                { session: "session:`hook-hot`", ts: "2026-06-11T00:02:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test", hook_name: "PreToolUse:Bash" },
             ],
         }))));
 
         expect(summary.hotSessions.map((row) => row.session)).toEqual(["cmd-hot", "hook-hot"]);
         expect(summary.hotSessions.find((row) => row.session === "quiet")).toBeUndefined();
 
-        const candidateSql = seenSql.find((sql) => sql.includes("FROM command_outcome") && sql.includes('kind = "expected_feedback"'))!;
-        expect(candidateSql).toContain("quiet");
+        const candidateSql = seenSql.find((sql) => sql.includes("FROM command_outcome") && sql.includes("kind = 'expected_feedback'"))!;
+        expect(candidateSql).toContain("session IN (?, ?, ?)");
+        expect(candidateSql).not.toContain("quiet");
         const healthSql = seenSql.find((sql) => sql.includes("FROM session_health"))!;
         const producedSql = seenSql.find((sql) => sql.includes("FROM produced"))!;
         const editSql = seenSql.find((sql) => sql.includes("FROM tool_call") && sql.includes("input_json"))!;
@@ -466,9 +473,9 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`older-warm`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`older-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`older-hot`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "eslint" },
-                { session: "session:`older-warm`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`older-hot`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`older-hot`", ts: "2026-06-11T00:03:00.000Z", kind: "check", status: "error", command_norm: "eslint" },
+                { session: "session:`older-warm`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
         }))));
 
@@ -498,7 +505,7 @@ describe("fetchSessionChurnSummary", () => {
                 { commit: "commit:`c1`", file: "file:`f2`", path: "src/b.ts", additions: 3, deletions: 1 },
             ],
             edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
-            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" }],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" }],
         }))));
 
         expect(summary.hotSessions[0]).toMatchObject({
@@ -532,8 +539,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
         }))));
 
@@ -556,7 +563,7 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Write", input_json: JSON.stringify({ content: "a\nb\nc" }) },
                 { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", name: "exec_command", command_norm: "apply_patch", input_json: JSON.stringify({ patch: "+new\n-old\n+++ b/file\n--- a/file" }) },
             ],
-            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "bun test" }],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "check", status: "error", command_norm: "bun test" }],
         }))));
 
         expect(summary.hotSessions[0]).toMatchObject({
@@ -585,8 +592,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s1`", ts: "2026-06-11T00:05:00.000Z", kind: "check", status: "ok", command_norm: "deploy" },
             ],
             hooks: [
-                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
-                { session: "session:`s1`", ts: "2026-06-11T00:06:00.000Z", provider_status: "success", effect: "allowed", exit_code: null, command: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test", hook_name: "PreToolUse:Bash" },
+                { session: "session:`s1`", ts: "2026-06-11T00:06:00.000Z", provider_status: "success", effect: "allowed", exit_code: null, command: "bun test", hook_name: "PreToolUse:Bash" },
             ],
         }))));
 
@@ -715,8 +722,8 @@ describe("fetchSessionChurnSummary", () => {
                 { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
             ],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
             ],
             otelMetrics: [
                 { session_id: "s1", metric: "claude_code.cost.usage", total: 0.042 },
@@ -756,7 +763,7 @@ describe("fetchSessionChurnSummary", () => {
             ],
         }))));
 
-        const lookupSql = seenSql.find((s) => s.includes("WHERE id IN"))!;
+        const lookupSql = seenSql.find((s) => s.includes("SELECT id, command_text"))!;
         expect(lookupSql).toContain("FROM tool_call");
         expect(summary.hotSessions[0]).toMatchObject({
             topCheck: "typecheck",

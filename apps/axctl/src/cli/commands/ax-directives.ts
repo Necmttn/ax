@@ -19,6 +19,7 @@ import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurnRow } from "../../ingest/directives.ts";
 import { listDirectiveProposals, type ProposalRow } from "../../improve/list.ts";
 import type { LiftRow } from "../../queries/directive-ngrams.ts";
@@ -227,7 +228,8 @@ const workflowsCommand = Command.make(
     },
     ({ emitBrief, json }) =>
         Effect.gen(function* () {
-            const arcs = yield* fetchWorkflowArcs().pipe(
+            const read = yield* CacheRead;
+            const arcs = yield* fetchWorkflowArcs(read).pipe(
                 Effect.orElseSucceed(() => []),
             );
 

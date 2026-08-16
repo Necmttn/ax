@@ -1,14 +1,10 @@
 import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import { buildHarnessGrounding, type HarnessGrounding } from "../project/harness.ts";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
+import { buildProjectHarnessReport } from "../project/harness.ts";
 import type { GuidanceRevision, GuidanceSource, StackSignal } from "../project/types.ts";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;
@@ -16,77 +12,52 @@ export interface HarnessIngestStats {
     readonly stacks: number;
 }
 
-const sqlBool = (value: boolean): string => value ? "true" : "false";
-
-
 export const guidanceSourceKey = (source: Pick<GuidanceSource, "path">): string =>
-    `${safeKeyPart(source.path)}__${Bun.hash(source.path).toString(16).slice(0, 16)}`;
+    stableId("guidance_source", [source.path]);
 
 export const guidanceRevisionKey = (revision: Pick<GuidanceRevision, "sourcePath" | "contentHash">): string =>
-    `${safeKeyPart(revision.sourcePath).slice(0, 72)}__${revision.contentHash}`;
+    stableId("guidance_revision", [revision.sourcePath, revision.contentHash]);
 
 export const stackKey = (signal: Pick<StackSignal, "name">): string =>
-    safeKeyPart(signal.name.toLowerCase());
-
-function guidanceSourceStatement(source: GuidanceSource): string {
-    return `UPSERT ${recordRef("guidance_source", guidanceSourceKey(source))} MERGE ${surrealObject([
-        ["path", surrealString(source.path)],
-        ["kind", surrealString(source.kind)],
-        ["scope", surrealString(source.scope)],
-        ["provider", surrealString(source.provider)],
-        ["evidence_strength", surrealString(source.evidenceStrength)],
-        ["git_root", surrealOptionString(source.gitRoot)],
-        ["tracked", sqlBool(source.tracked)],
-        ["observed_at", "time::now()"],
-    ])};`;
-}
-
-function guidanceRevisionStatement(revision: GuidanceRevision): string {
-    return `UPSERT ${recordRef("guidance_revision", guidanceRevisionKey(revision))} MERGE ${surrealObject([
-        ["source", recordRef("guidance_source", guidanceSourceKey({ path: revision.sourcePath }))],
-        ["source_path", surrealString(revision.sourcePath)],
-        ["scope", surrealString(revision.scope)],
-        ["content_hash", surrealString(revision.contentHash)],
-        ["evidence_strength", surrealString(revision.evidenceStrength)],
-        ["commit_evidence", surrealOptionString(revision.commitEvidence)],
-        ["file_evidence", surrealOptionString(revision.fileEvidence)],
-        ["observed_at", surrealDate(revision.observedAt)],
-    ])};`;
-}
-
-function stackStatement(signal: StackSignal): string {
-    return `UPSERT ${recordRef("stack", stackKey(signal))} MERGE ${surrealObject([
-        ["name", surrealString(signal.name)],
-        ["aliases", "NONE"],
-        ["labels", surrealJsonOption({ confidence: signal.confidence, evidence: signal.evidence })],
-        ["updated_at", "time::now()"],
-    ])};`;
-}
+    stableId("stack", [signal.name.toLowerCase()]);
 
 /**
  * The three collections this stage persists - and the ONLY thing it reads from
  * the harness module. `HarnessGrounding` is deliberately narrower than the full
- * report: the report's other half comes from the published DuckDB snapshot, and
- * this stage writes SurrealDB, so reaching for it would make one ingest
- * operation span both engines and answer from a snapshot that omits everything
- * the run in progress has written.
+ * report: the report's other half comes from the published DuckDB snapshot.
+ * This stage writes the live cache. A snapshot read would omit current writes.
  */
-export function buildHarnessIngestStatements(
-    report: Pick<HarnessGrounding, "guidanceSources" | "guidanceRevisions" | "stacks">,
-): string[] {
-    return [
-        ...report.guidanceSources.map(guidanceSourceStatement),
-        ...report.guidanceRevisions.map(guidanceRevisionStatement),
-        ...report.stacks.map(stackStatement),
-    ];
+export function buildHarnessIngestRows(
+    report: Pick<import("../project/types.ts").ProjectHarnessReport, "guidanceSources" | "guidanceRevisions" | "stacks">,
+){
+    return {
+        guidanceSources: report.guidanceSources.map((source) => cacheRow({
+            id: guidanceSourceKey(source), path: source.path, kind: source.kind, scope: source.scope,
+            provider: source.provider, evidence_strength: source.evidenceStrength, git_root: source.gitRoot,
+            tracked: source.tracked, observed_at: new Date(),
+        })),
+        guidanceRevisions: report.guidanceRevisions.map((revision) => cacheRow({
+            id: guidanceRevisionKey(revision), source: guidanceSourceKey({ path: revision.sourcePath }),
+            source_path: revision.sourcePath, scope: revision.scope, content_hash: revision.contentHash,
+            prev_hash: null, bytes: null, prev_bytes: null, change: null,
+            evidence_strength: revision.evidenceStrength, commit_evidence: revision.commitEvidence,
+            file_evidence: revision.fileEvidence, observed_at: tsParam(revision.observedAt),
+        })),
+        stacks: report.stacks.map((signal) => cacheRow({
+            id: stackKey(signal), name: signal.name, aliases: null,
+            labels: jsonParam({ confidence: signal.confidence, evidence: signal.evidence }),
+            created_at: new Date(), updated_at: new Date(),
+        })),
+    };
 }
 
-export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
+export const ingestHarness = (write: CacheWriteService): Effect.Effect<HarnessIngestStats, CacheWriteError | CacheReadError, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const report = yield* buildHarnessGrounding();
-        const statements = buildHarnessIngestStatements(report);
-        yield* executeStatementsWith(db, statements);
+        const report = yield* buildProjectHarnessReport(write);
+        const rows = buildHarnessIngestRows(report);
+        yield* write.putMany("guidance_source", rows.guidanceSources);
+        yield* write.putMany("guidance_revision", rows.guidanceRevisions);
+        yield* write.putMany("stack", rows.stacks);
         return {
             guidanceSources: report.guidanceSources.length,
             guidanceRevisions: report.guidanceRevisions.length,
@@ -94,22 +65,13 @@ export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, Surr
         };
     });
 
-if (import.meta.main) {
-    await Effect.runPromise(
-        ingestHarness().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<HarnessIngestStats>,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
 import { Schema } from "effect";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
-import type { StageDef } from "./stage/registry.ts";
+import type { IngestStageError, StageDef } from "./stage/registry.ts";
 
 export const HarnessKey = Schema.Literal("harness");
 export type HarnessKey = typeof HarnessKey.Type;
@@ -125,12 +87,12 @@ export class HarnessStageStats extends BaseStageStats.extend<HarnessStageStats>(
     stacks: Schema.Number,
 }) {}
 
-export const harnessStage: StageDef<HarnessStageStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
+export const harnessStage: StageDef<HarnessStageStats, ProcessService | FileSystem.FileSystem | Path.Path, IngestStageError> = {
     meta: StageMeta.make({ key: "harness", deps: ["outcomes", "session-health", "closure"], tags: ["derive", "health"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestHarness();
+            const result = yield* ingestHarness(write);
             return HarnessStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.guidanceSources} guidance sources, ${result.guidanceRevisions} revisions, ${result.stacks} stacks`,

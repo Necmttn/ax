@@ -1,114 +1,82 @@
-import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { describe, expect } from "bun:test";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { deriveCostBackfill } from "./derive-cost-backfill.ts";
 import { MODEL_PRICING_SOURCE } from "./model-pricing.ts";
 
-interface UsageRowFixture {
-    readonly id: string;
-    readonly model: string | null;
-    readonly prompt_tokens: number | null;
-    readonly completion_tokens: number | null;
-    readonly cache_creation_input_tokens: number | null;
-    readonly cache_read_input_tokens: number | null;
-    readonly estimated_tokens: number;
-    readonly estimated_cost_usd: number | null;
-    readonly pricing_source: string | null;
-}
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cost backfill", { requireFts: true });
 
-// Serve the null-cost selection from a fixture; capture UPDATEs. The
-// `agent_model` catalog fetch returns nothing, so pricing comes from the
-// built-in catalog (claude-opus-4 etc.).
-const makeDb = (rows: UsageRowFixture[], sink: string[]) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            if (/UPDATE session_token_usage/.test(sql)) {
-                sink.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            }
-            if (/FROM session_token_usage WHERE estimated_cost_usd IS NONE/.test(sql)) {
-                return Effect.succeed([rows] as unknown as T);
-            }
-            if (/agent_model/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
-
-const row = (over: Partial<UsageRowFixture>): UsageRowFixture => ({
-    id: "session_token_usage:`s1`",
-    model: "claude-opus-4-5",
+const usage = (id: string, model: string | null, values: Record<string, unknown> = {}) => ({
+    id,
+    session: id,
+    source: "claude",
+    model,
     prompt_tokens: null,
     completion_tokens: null,
     cache_creation_input_tokens: null,
     cache_read_input_tokens: null,
     estimated_tokens: 1_000_000,
+    transcript_bytes: 4_000_000,
     estimated_cost_usd: null,
     pricing_source: null,
-    ...over,
+    ...values,
 });
 
-describe("deriveCostBackfill", () => {
-    test("prices null-cost rows and persists estimated: provenance, guarded by IS NONE", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(
-            deriveCostBackfill().pipe(Effect.provide(makeDb([row({})], sink))),
-        );
+describe("deriveCostBackfill on real DuckDB", () => {
+    dtest("prices estimated tokens and preserves the pricing source", async () => {
+        let stats: unknown;
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-cost-backfill-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session_token_usage", usage("s1", "claude-opus-4-5"));
+                stats = yield* deriveCostBackfill(write);
+                row = (yield* write.rows(Schema.Struct({
+                    cost: Schema.Number,
+                    source: Schema.String,
+                }), "SELECT estimated_cost_usd AS cost, pricing_source AS source FROM session_token_usage WHERE id = ?", ["s1"]))[0];
+            }),
+        ));
         expect(stats).toEqual({ scanned: 1, backfilled: 1, unpriced: 0 });
-        expect(sink).toHaveLength(1);
-        const stmt = sink[0]!;
-        // Writes by primary record id (never UPDATE-WHERE over the table).
-        expect(stmt).toContain("UPDATE session_token_usage:`s1` SET");
-        // 1M estimated tokens × claude-opus-4-5 input $5/M (byte-estimate rows
-        // price the whole count at the input rate - honest lower bound).
-        expect(stmt).toContain("estimated_cost_usd = 5.00000000");
-        expect(stmt).toContain(`pricing_source = "estimated:${MODEL_PRICING_SOURCE}"`);
-        // Race guard: a concurrently ingest-priced cost wins at write time.
-        expect(stmt).toContain("WHERE estimated_cost_usd IS NONE");
+        expect(row).toEqual({ cost: 5, source: `estimated:${MODEL_PRICING_SOURCE}` });
     });
 
-    test("prices from the prompt/completion split when present", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(
-            deriveCostBackfill().pipe(Effect.provide(makeDb([
-                row({ prompt_tokens: 1_000_000, completion_tokens: 1_000_000, estimated_tokens: 123 }),
-            ], sink))),
-        );
-        expect(stats.backfilled).toBe(1);
-        // $5/M input + $25/M output for claude-opus-4-5.
-        expect(sink[0]).toContain("estimated_cost_usd = 30.00000000");
+    dtest("uses the prompt and completion split", async () => {
+        let cost = -1;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-cost-split-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session_token_usage", usage("s1", "claude-opus-4-5", {
+                    prompt_tokens: 1_000_000,
+                    completion_tokens: 1_000_000,
+                    estimated_tokens: 123,
+                }));
+                yield* deriveCostBackfill(write);
+                cost = (yield* write.rows(Schema.Struct({ cost: Schema.Number }),
+                    "SELECT estimated_cost_usd AS cost FROM session_token_usage WHERE id = ?", ["s1"]))[0]!.cost;
+            }),
+        ));
+        expect(cost).toBe(30);
     });
 
-    test("unknown/unpriceable models stay null (unknown is not $0)", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(
-            deriveCostBackfill().pipe(Effect.provide(makeDb([
-                row({ model: null }),
-                row({ id: "session_token_usage:`s2`", model: "totally-unknown-model" }),
-            ], sink))),
-        );
-        expect(stats).toEqual({ scanned: 2, backfilled: 0, unpriced: 2 });
-        expect(sink).toHaveLength(0);
-    });
-
-    test("defensively skips already-estimated and already-priced rows", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(
-            deriveCostBackfill().pipe(Effect.provide(makeDb([
-                // Should be excluded by the selection - never rewritten even if returned.
-                row({ pricing_source: "estimated:built_in_catalog_2026-06-10" }),
-                row({ id: "session_token_usage:`s2`", estimated_cost_usd: 1.23, pricing_source: "built_in_catalog_2026-06-10" }),
-            ], sink))),
-        );
-        expect(stats.backfilled).toBe(0);
-        expect(sink).toHaveLength(0);
-    });
-
-    test("no null-cost rows -> no catalog fetch, no writes", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(
-            deriveCostBackfill().pipe(Effect.provide(makeDb([], sink))),
-        );
-        expect(stats).toEqual({ scanned: 0, backfilled: 0, unpriced: 0 });
-        expect(sink).toHaveLength(0);
+    dtest("leaves unknown models null and becomes idempotent", async () => {
+        let first: unknown;
+        let second: unknown;
+        let nullCount = -1;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-cost-unknown-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("session_token_usage", [
+                    usage("s1", null),
+                    usage("s2", "totally-unknown-model"),
+                    usage("s3", "claude-opus-4-5"),
+                ]);
+                first = yield* deriveCostBackfill(write);
+                second = yield* deriveCostBackfill(write);
+                nullCount = (yield* write.rows(Schema.Struct({ count: Schema.Number }),
+                    "SELECT count(*)::INTEGER AS count FROM session_token_usage WHERE estimated_cost_usd IS NULL"))[0]!.count;
+            }),
+        ));
+        expect(first).toEqual({ scanned: 3, backfilled: 1, unpriced: 2 });
+        expect(second).toEqual({ scanned: 2, backfilled: 0, unpriced: 2 });
+        expect(nullCount).toBe(2);
     });
 });

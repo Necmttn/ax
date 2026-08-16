@@ -8,6 +8,7 @@ import {
     TimestampColumn,
     type JudgmentError,
     type JudgmentService,
+    type SidecarParam,
 } from "@ax/lib/sqlite";
 
 const NullableText = Schema.NullOr(TextColumn);
@@ -234,3 +235,21 @@ export const findStoredProposal = (
         );
         return (yield* loadDetails(judgment, proposals))[0] ?? null;
     });
+
+/**
+ * The sidecar counterpart of `@ax/lib/duckdb/row`'s `cacheRow`: drop `undefined`
+ * to `null` so an absent optional field binds SQL NULL instead of widening the
+ * row's column set.
+ *
+ * It exists because the proposal derivations write the SAME row shapes they used
+ * to write to the cache, and `put` keys on `id` in both seams - only the value
+ * type differs. Without it every mined-proposal writer would hand-roll the same
+ * loop, and one of them would forget and produce a ragged batch.
+ */
+export const judgmentRow = (
+    fields: Readonly<Record<string, SidecarParam | undefined>>,
+): Record<string, SidecarParam> => {
+    const row: Record<string, SidecarParam> = {};
+    for (const [key, value] of Object.entries(fields)) row[key] = value === undefined ? null : value;
+    return row;
+};

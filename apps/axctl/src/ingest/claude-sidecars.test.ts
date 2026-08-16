@@ -156,7 +156,7 @@ describe("discoverClaudeSidecarArtifacts", () => {
 });
 
 describe("buildClaudeSidecarStatements", () => {
-    test("writes metadata-only Surreal statements", () => {
+    test("writes metadata-only cache rows", () => {
         const observedAt = new Date("2026-06-17T12:00:00.000Z");
         const mtime = new Date("2026-06-17T11:00:00.000Z");
         const record = {
@@ -179,22 +179,25 @@ describe("buildClaudeSidecarStatements", () => {
 
         const [statement] = buildClaudeSidecarStatements([record]);
 
-        expect(statement).toContain("UPSERT claude_sidecar_artifact:`aaaaaaaa");
-        expect(statement).toContain("kind: \"stats-cache\"");
-        expect(statement).toContain("project: \"-Users-me-Projects-ax\"");
-        expect(statement).toContain("safe_relative_path: \"-Users-me-Projects-ax/stats-cache/aaaaaaaaaaaaaaaa\"");
-        expect(statement).toContain("path_hash: \"aaaaaaaa");
-        expect(statement).toContain("size: 42");
-        expect(statement).toContain("mtime: d\"2026-06-17T11:00:00.000Z\"");
-        expect(statement).toContain("content_hash: \"bbbbbbbb");
-        expect(statement).toContain("session: NONE");
-        expect(statement).toContain("relation_ids_json: \"{}\"");
-        expect(statement).toContain("\\\"path_hash\\\":\\\"aaaaaaaa");
-        expect(statement).toContain("observed_at: d\"2026-06-17T12:00:00.000Z\"");
-        expect(statement).not.toContain("\\\"relative_path\\\"");
-        expect(statement).not.toContain("stats-cache.json");
-        expect(statement).not.toContain("secret");
-        expect(statement).not.toContain(process.env.HOME ?? "__no_home__");
+        expect(statement).toMatchObject({
+            id: "a".repeat(64),
+            kind: "stats-cache",
+            project: "-Users-me-Projects-ax",
+            safe_relative_path: "-Users-me-Projects-ax/stats-cache/aaaaaaaaaaaaaaaa",
+            path_hash: "a".repeat(64),
+            size: 42,
+            mtime,
+            content_hash: "b".repeat(64),
+            session: null,
+            relation_ids_json: "{}",
+            observed_at: observedAt,
+        });
+        const serialized = JSON.stringify(statement);
+        expect(serialized).toContain(`\"path_hash\":\"${"a".repeat(64)}\"`);
+        expect(statement.relation_attrs_json).not.toContain('"relative_path"');
+        expect(serialized).not.toContain("stats-cache.json");
+        expect(serialized).not.toContain("secret");
+        expect(serialized).not.toContain(process.env.HOME ?? "__no_home__");
     });
 });
 
@@ -275,14 +278,11 @@ describe("Claude sidecar usage edges", () => {
             pattern: "needle",
         });
 
-        const sql = buildClaudeSidecarUsageStatements(edges).join("\n");
-        expect(sql).toContain("->used_sidecar_artifact:");
-        expect(sql).toContain("action = \"produced\"");
-        expect(sql).toContain("action = \"read\"");
-        expect(sql).toContain("action = \"searched\"");
-        expect(sql).toContain("pattern = \"needle\"");
-        expect(sql).toContain("offset = 600");
-        expect(sql).not.toContain(artifactPath);
+        const rows = buildClaudeSidecarUsageStatements(edges);
+        expect(rows.map((row) => row.action).sort()).toEqual(["produced", "read", "searched"]);
+        expect(rows.find((row) => row.action === "searched")?.pattern).toBe("needle");
+        expect(rows.find((row) => row.action === "read")?.offset).toBe(600);
+        expect(JSON.stringify(rows)).not.toContain(artifactPath);
     });
 });
 
@@ -418,12 +418,13 @@ describe("buildClaudeSidecarPlanSnapshotStatements", () => {
                 ],
             },
         ]);
-        const sql = statements.join("\n");
-
-        expect(sql).toContain("UPSERT plan_snapshot:");
-        expect(sql).toContain("UPSERT plan_item:");
-        expect(sql).toContain("Visible sidecar plan");
-        expect(sql).toContain("tool_call: NONE");
+        expect(statements).toHaveLength(1);
+        expect(statements[0]).toMatchObject({
+            sessionId: "s1",
+            source: "claude_sidecar_plan",
+            toolCallKey: null,
+            items: [{ content: "Visible sidecar plan", status: "pending" }],
+        });
     });
 });
 

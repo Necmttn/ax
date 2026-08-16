@@ -18,16 +18,10 @@
  * incremental-merge subtlety.
  */
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import {
-    executeStatementsWith,
-    recordKeyPart,
-    recordRef,
-    safeKeyPart,
-    surrealDate,
-    surrealString,
-} from "@ax/lib/shared/surreal";
+import { JsonArrayColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -85,18 +79,14 @@ export const buildLoadedEdges = (
     return [...byKey.values()];
 };
 
-/** Render one `loaded` edge to a RELATE statement (deterministic edge id). */
-export const renderLoadedEdge = (e: LoadedEdgeSpec): string | null => {
-    const childKey = recordKeyPart(e.child, "session");
-    const skillKey = recordKeyPart(e.skillId, "skill");
-    if (!childKey || !skillKey) return null;
-    const edgeKey = safeKeyPart(`${e.child}|${e.skillId}`);
-    return (
-        `RELATE ${recordRef("session", childKey)}->${recordRef("loaded", edgeKey)}->` +
-        `${recordRef("skill", skillKey)} SET ts = ${surrealDate(e.ts)}, ` +
-        `agent = ${surrealString(e.agent)}, source = 'frontmatter';`
-    );
-};
+export const loadedEdgeRow = (edge: LoadedEdgeSpec) => cacheRow({
+    id: stableId("loaded", [edge.child, edge.skillId]),
+    in_id: edge.child,
+    out_id: edge.skillId,
+    ts: tsParam(edge.ts),
+    agent: edge.agent,
+    source: "frontmatter",
+});
 
 // ---------------------------------------------------------------------------
 // Stage
@@ -107,36 +97,29 @@ export interface DeriveLoadedStats {
     agents: number;
 }
 
-type SpawnRow = { child: unknown; agent_name: unknown; agent_type: unknown; ts: unknown };
-type AgentRow = { name: unknown; skills: unknown };
-type SkillRow = { id: unknown; name: unknown; scope: unknown };
+const SpawnRow = Schema.Struct({
+    child: Schema.String,
+    agent_name: Schema.NullOr(Schema.String),
+    agent_type: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+const AgentRow = Schema.Struct({ name: Schema.String, skills: JsonArrayColumn(Schema.String) });
+const SkillRow = Schema.Struct({ id: Schema.String, name: Schema.String, scope: Schema.String });
 
-export const deriveLoadedSkills = (): Effect.Effect<
+export const deriveLoadedSkills = (write: CacheWriteService): Effect.Effect<
     DeriveLoadedStats,
-    DbError,
-    SurrealClient
+    CacheWriteError
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-
-        const [spawnRows, agentRows, skillRows] = yield* db.query<[
-            Array<SpawnRow>,
-            Array<AgentRow>,
-            Array<SkillRow>,
-        ]>(`
-            SELECT type::string(out) AS child, agent_name, agent_type, type::string(ts) AS ts FROM spawned;
-            SELECT name, skills FROM agent_def WHERE skills != NONE AND deleted_at IS NONE;
-            SELECT type::string(id) AS id, name, scope FROM skill WHERE dir_path != '(synthetic)';
-        `);
+        const spawnRows = yield* write.rows(SpawnRow, "SELECT out_id AS child, agent_name, agent_type, ts FROM spawned");
+        const agentRows = yield* write.rows(AgentRow, "SELECT name, skills FROM agent_def WHERE skills IS NOT NULL AND deleted_at IS NULL");
+        const skillRows = yield* write.rows(SkillRow, "SELECT id, name, scope FROM skill WHERE dir_path != '(synthetic)'");
 
         // agent name -> declared skills
         const agentSkills = new Map<string, ReadonlyArray<string>>();
-        for (const a of agentRows ?? []) {
-            const name = typeof a.name === "string" ? a.name : null;
-            if (!name) continue;
-            const skills = Array.isArray(a.skills)
-                ? a.skills.filter((s): s is string => typeof s === "string" && s.length > 0)
-                : [];
+        for (const a of agentRows) {
+            const name = a.name;
+            const skills = a.skills.filter((skill) => skill.length > 0);
             if (skills.length > 0) agentSkills.set(name, skills);
         }
 
@@ -144,11 +127,8 @@ export const deriveLoadedSkills = (): Effect.Effect<
         // (bare) row so the edge lands on the canonical skill.
         const skillIdByName = new Map<string, string>();
         const skillScopeByName = new Map<string, string>();
-        for (const s of skillRows ?? []) {
-            const name = typeof s.name === "string" ? s.name : null;
-            const id = typeof s.id === "string" ? s.id : null;
-            if (!name || !id) continue;
-            const scope = typeof s.scope === "string" ? s.scope : "";
+        for (const s of skillRows) {
+            const { name, id, scope } = s;
             const prevScope = skillScopeByName.get(name);
             if (prevScope === undefined || (prevScope !== "user" && scope === "user")) {
                 skillIdByName.set(name, id);
@@ -156,20 +136,16 @@ export const deriveLoadedSkills = (): Effect.Effect<
             }
         }
 
-        const spawns: SpawnInput[] = (spawnRows ?? []).map((r) => ({
-            child: typeof r.child === "string" ? r.child : "",
-            agentName: typeof r.agent_name === "string" ? r.agent_name : null,
-            agentType: typeof r.agent_type === "string" ? r.agent_type : null,
-            ts: typeof r.ts === "string" ? r.ts : "",
+        const spawns: SpawnInput[] = spawnRows.map((r) => ({
+            child: r.child,
+            agentName: r.agent_name,
+            agentType: r.agent_type,
+            ts: r.ts.toISOString(),
         }));
 
         const edges = buildLoadedEdges(spawns, agentSkills, skillIdByName);
-        const stmts = ["DELETE loaded;"];
-        for (const e of edges) {
-            const sql = renderLoadedEdge(e);
-            if (sql) stmts.push(sql);
-        }
-        yield* executeStatementsWith(db, stmts, { chunkSize: 250, label: "loadedEdges" });
+        yield* write.exec("DELETE FROM loaded");
+        yield* write.putMany("loaded", edges.map(loadedEdgeRow));
 
         return { written: edges.length, agents: agentSkills.size };
     });
@@ -191,16 +167,16 @@ export class LoadedSkillsStats extends BaseStageStats.extend<LoadedSkillsStats>(
  * Consumed by: edit→outcome analysis; kept separate from `invoked` usage views.
  * Tags: derive
  */
-export const loadedSkillsStage: StageDef<LoadedSkillsStats, SurrealClient> = {
+export const loadedSkillsStage: StageDef<LoadedSkillsStats, never, CacheWriteError> = {
     meta: StageMeta.make({
         key: "loaded-skills",
         deps: ["skills", "agent-def", "spawned"],
         tags: ["derive"],
     }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveLoadedSkills();
+            const result = yield* deriveLoadedSkills(write);
             return LoadedSkillsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `wrote ${result.written} loaded edges from ${result.agents} skill-scoped agents`,

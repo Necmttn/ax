@@ -1,13 +1,3 @@
-import {
-    recordRef,
-    surrealDate,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionInt,
-    surrealOptionRecord,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
 import { isRecord, stringArray } from "./normalized/toolkit.ts";
 
 export type CompactionStrategy = "summarize" | "history_replacement" | "encrypted";
@@ -37,29 +27,6 @@ export const compactionRecordKey = (
     providerSessionId: string,
     seq: number,
 ): string => `${harness}_${providerSessionId}_cmp_${seq}`.replace(/[^A-Za-z0-9_]/g, "_");
-
-export const buildCompactionStatements = (
-    writes: readonly CompactionWrite[],
-): string[] =>
-    writes.map(
-        (c) =>
-            `UPSERT ${recordRef("compaction", c.compactionKey)} CONTENT ${surrealObject([
-                ["session", recordRef("session", c.sessionId)],
-                ["agent_event", surrealOptionRecord("agent_event", c.agentEventKey ?? null)],
-                ["harness", surrealString(c.harness)],
-                ["ts", surrealDate(c.ts)],
-                ["trigger", surrealOptionString(c.trigger ?? null)],
-                ["strategy", surrealString(c.strategy)],
-                ["source_confidence", surrealString(c.sourceConfidence)],
-                ["summary", surrealOptionString(c.summary ?? null)],
-                ["tokens_before", surrealOptionInt(c.tokensBefore ?? null)],
-                ["boundary_ref", surrealOptionString(c.boundaryRef ?? null)],
-                ["kept_count", surrealOptionInt(c.keptCount ?? null)],
-                ["read_files", surrealJsonTextOption(c.readFiles ?? null)],
-                ["modified_files", surrealJsonTextOption(c.modifiedFiles ?? null)],
-                ["raw", surrealJsonTextOption(c.raw ?? null)],
-            ])};`,
-    );
 
 /** The per-event context every harness shares; provider extractors extend it
  *  with harness-specific fields (tokensBefore, boundaryRef, summary, ...). */

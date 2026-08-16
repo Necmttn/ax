@@ -1,356 +1,94 @@
-import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { describe, expect } from "bun:test";
+import { Effect, Schema } from "effect";
 import { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
-
-// Fixture skill names are plain string literals; brand via the schema constructor.
-const sn = (s: string): SkillName => SkillName.make(s);
+import { skillRowId } from "@ax/lib/stable-id";
 import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildSkillPlaceholderStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
-    recordRef,
     relateToolCallSkill,
+    toolEvidenceFileRecordKey,
+    writePlanSnapshot,
+    writeToolCalls,
+    writeToolFileEvidence,
 } from "./evidence-writers.ts";
+import { toolCallRecordKey } from "./record-keys.ts";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 
-const TOOL_CALL_SCHEMA_FIELDS = new Set([
-    "session",
-    "turn",
-    "agent_event",
-    "tool",
-    "name",
-    "seq",
-    "call_id",
-    "ts",
-    "status",
-    "input_json",
-    "output_json",
-    "raw",
-    "duration_ms",
-    "cwd",
-    "command_text",
-    "command_norm",
-    "command_tool",
-    "output_excerpt",
-    "error_text",
-    "exit_code",
-    "has_error",
-]);
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("evidence writers", { requireFts: true });
+const at = new Date("2026-05-29T06:00:00.000Z");
 
-function contentFields(statement: string): string[] {
-    const body = (statement.match(/CONTENT \{([\s\S]*)\};/)?.[1] ?? "").trim();
-    return [...body.matchAll(/(?:^|, )([a-z_]+):/g)].map((match) => match[1]);
-}
-
-function unescapedBacktickCount(value: string): number {
-    let count = 0;
-    let backslashes = 0;
-
-    for (const char of value) {
-        if (char === "\\") {
-            backslashes += 1;
-            continue;
-        }
-
-        if (char === "`" && backslashes % 2 === 0) {
-            count += 1;
-        }
-        backslashes = 0;
-    }
-
-    return count;
-}
-
-function fakeClient(): TestSurrealClient {
-    return makeTestSurrealClient({
-        routes: [{ match: /^SELECT VALUE id/, rows: [[{ id: "skill:known" }]] }],
-        fallback: [],
-    });
-}
-
-describe("evidence writer statement builders", () => {
-    test("record refs escape unsafe key characters", () => {
-        expect(recordRef("session", "session\na")).toBe("session:`session\\na`");
-        expect(recordRef("session", "bad`key")).toBe("session:`bad\\`key`");
-        expect(recordRef("session", "bad\\key")).toBe("session:`bad\\\\key`");
-        expect(unescapedBacktickCount(recordRef("session", "bad`key"))).toBe(2);
+describe("evidence writers on real DuckDB", () => {
+    dtest("writes tool calls and hot command columns", async () => {
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-tool-call-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* writeToolCalls(write, [{
+                    sessionId: "session-1", turnKey: "turn-1", provider: "codex",
+                    toolName: "exec_command", toolKind: "builtin", seq: 7, callId: "call-abc", ts: at,
+                    inputJson: { cmd: "git status --short" }, outputJson: { stdout: " M src/index.ts" },
+                    commandText: "git status --short", commandNorm: "git status",
+                    commandToolName: "git", exitCode: 128, hasError: true,
+                }]);
+                row = (yield* write.rows(Schema.Struct({
+                    status: Schema.String, command_norm: Schema.String,
+                    exit_code: Schema.BigInt, has_error: Schema.Boolean,
+                }), "SELECT status, command_norm, exit_code, has_error FROM tool_call"))[0];
+            }),
+        ));
+        expect(row).toEqual({ status: "error", command_norm: "git status", exit_code: 128n, has_error: true });
     });
 
-    test("tool call statements write hot command fields without schemafull extras", () => {
-        const statements = buildToolCallStatements([
-            {
-                sessionId: "session-1\nunsafe",
-                turnKey: "session1_`3",
-                provider: "codex",
-                toolName: "exec_command",
-                toolKind: "builtin",
-                seq: 7,
-                callId: "call-abc",
-                ts: "2026-05-09T10:00:00.000Z",
-                cwd: "/tmp/project",
-                inputJson: { cmd: "git status --short" },
-                outputJson: { stdout: " M src/index.ts" },
-                rawJson: { type: "function_call" },
-                commandText: "git status --short",
-                commandNorm: "git status",
-                commandToolName: "git",
-                outputExcerpt: "M src/index.ts",
-                errorText: "fatal: not a git repository",
-                exitCode: 128,
-                durationMs: 42,
-                hasError: true,
-            },
-        ]);
-
-        const sql = statements.join("\n");
-        const toolCallStatement = statements.find((statement) =>
-            statement.startsWith("UPSERT tool_call:`"),
-        );
-
-        expect(sql).toContain("command_norm: \"git status\"");
-        expect(sql).toContain("exit_code: 128");
-        expect(sql).toContain("has_error: true");
-        expect(sql).toContain("command_tool: tool:`");
-        expect(sql).toContain("session: session:`session-1\\nunsafe`");
-        expect(sql).toContain("turn: turn:`session1_\\`3`");
-        expect(sql).toContain("status: \"error\"");
-        expect(toolCallStatement).toBeDefined();
-        expect(contentFields(toolCallStatement ?? "")).toEqual(
-            expect.arrayContaining([...TOOL_CALL_SCHEMA_FIELDS]),
-        );
-        for (const field of contentFields(toolCallStatement ?? "")) {
-            expect(TOOL_CALL_SCHEMA_FIELDS.has(field)).toBe(true);
-        }
+    dtest("uses one file identity across edit, read, and search edges", async () => {
+        let counts: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-file-evidence-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* writeToolFileEvidence(write, [
+                    { kind: "edited", sessionId: "session-1", turnKey: "turn-1",
+                        toolCallKey: "edit-call", toolName: "apply_patch", ts: at,
+                        path: "/repo/src/a.ts", pathSeen: "src/a.ts", evidence: "tool_name:apply_patch" },
+                    { kind: "read_file", sessionId: "session-1", turnKey: "turn-1",
+                        toolCallKey: "read-call", toolName: "Read", ts: at,
+                        path: "/repo/src/a.ts", pathSeen: "src/a.ts", evidence: "tool_name:Read" },
+                    { kind: "searched_file", sessionId: "session-1", turnKey: "turn-1",
+                        toolCallKey: "grep-call", toolName: "Grep", ts: at,
+                        path: "/repo/src", pathSeen: "src", evidence: "tool_name:Grep" },
+                ]);
+                counts = (yield* write.rows(Schema.Struct({
+                    files: Schema.BigInt, edited: Schema.BigInt,
+                    read: Schema.BigInt, searched: Schema.BigInt,
+                }), `SELECT (SELECT count(*) FROM file) AS files,
+                    (SELECT count(*) FROM edited) AS edited,
+                    (SELECT count(*) FROM read_file) AS read,
+                    (SELECT count(*) FROM searched_file) AS searched`))[0];
+            }),
+        ));
+        expect(toolEvidenceFileRecordKey("/repo/src/a.ts")).toMatch(/^repository__.*__repo_src_a_ts__/);
+        expect(counts).toEqual({ files: 2n, edited: 1n, read: 1n, searched: 1n });
     });
 
-    test("tool-call-to-skill relation uses concerns instead of invoked", () => {
-        const statements = buildRelateToolCallSkillStatements({
-            toolCallKey: "session__call",
-            skillName: sn("superpowers:test-driven-development"),
-            ts: "2026-05-09T10:00:00.000Z",
-            reason: "Skill tool call referenced the TDD workflow.",
-            labels: { source: "codex" },
-            metrics: { confidence: 1 },
-        });
-
-        const sql = statements.join("\n");
-
-        expect(sql).not.toContain("DELETE concerns WHERE");
-        expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns:\``);
-        expect(sql).toContain(`->skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\``);
-        expect(sql).toContain("kind = \"invoked_skill\"");
-        expect(sql).toContain("labels = \"{\\\"source\\\":\\\"codex\\\"}\"");
-        expect(sql).toContain("metrics = \"{\\\"confidence\\\":1}\"");
-        expect(sql).not.toContain("UPSERT skill:");
-        expect(sql).not.toContain("scope: \"unknown\"");
-        expect(sql).not.toContain("->invoked->");
-    });
-
-    test("tool file evidence statements share local file identity across edit read and search edges", () => {
-        const statements = buildToolFileEvidenceStatements([
-            {
-                kind: "edited",
-                sessionId: "session-1",
-                turnKey: "turn-key",
-                toolCallKey: "tool-call-edit",
-                toolName: "apply_patch",
-                ts: "2026-05-29T06:00:00.000Z",
-                path: "/repo/src/a.ts",
-                pathSeen: "src/a.ts",
-                evidence: "tool_name:apply_patch",
-            },
-            {
-                kind: "read_file",
-                sessionId: "session-1",
-                turnKey: "turn-key",
-                toolCallKey: "tool-call-read",
-                toolName: "Read",
-                ts: "2026-05-29T06:00:01.000Z",
-                path: "/repo/src/a.ts",
-                pathSeen: "src/a.ts",
-                evidence: "tool_name:Read",
-                excerpt: "export const a = 1;",
-            },
-            {
-                kind: "searched_file",
-                sessionId: "session-1",
-                turnKey: "turn-key",
-                toolCallKey: "tool-call-grep",
-                toolName: "Grep",
-                ts: "2026-05-29T06:00:02.000Z",
-                path: "/repo/src",
-                pathSeen: "src",
-                evidence: "tool_name:Grep",
-            },
-        ]);
-
-        const sql = statements.join("\n");
-
-        expect(sql.match(/UPSERT file:`/g)).toHaveLength(2);
-        expect(sql).toContain('identity_scope: "local_path"');
-        expect(sql).toContain("->edited:`");
-        expect(sql).toContain("tool = \"apply_patch\"");
-        expect(sql).toContain("path_seen = \"src/a.ts\"");
-        expect(sql).toContain("absolute_path_seen = \"/repo/src/a.ts\"");
-        expect(sql).toContain("->read_file:`");
-        expect(sql).toContain("evidence = \"tool_name:Read\"");
-        expect(sql).toContain("excerpt = \"export const a = 1;\"");
-        expect(sql).toContain("->searched_file:`");
-        expect(sql).toContain("evidence = \"tool_name:Grep\"");
-    });
-
-    test("placeholder skill statements are separate from relation statements", () => {
-        const placeholderSql = buildSkillPlaceholderStatements(
-            sn("superpowers:test-driven-development"),
-        ).join("\n");
-        const relationSql = buildRelateToolCallSkillStatements({
-            toolCallKey: "session__call",
-            skillName: sn("superpowers:test-driven-development"),
-            ts: "2026-05-09T10:00:00.000Z",
-        }).join("\n");
-
-        expect(placeholderSql).toContain(
-            `UPSERT skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\` CONTENT`,
-        );
-        expect(placeholderSql).toContain("scope: \"unknown\"");
-        expect(relationSql).not.toContain("scope: \"unknown\"");
-        expect(relationSql).not.toContain("content_hash: \"unknown\"");
-    });
-
-    test("relateToolCallSkill skips placeholder creation for existing skills", async () => {
-        const tc = fakeClient();
-
-        await Effect.runPromise(
-            relateToolCallSkill({
-                toolCallKey: "session__call",
-                skillName: sn("superpowers:test-driven-development"),
-                ts: "2026-05-09T10:00:00.000Z",
-            }).pipe(Effect.provide(tc.layer)),
-        );
-
-        expect(tc.captured[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\``);
-        expect(tc.captured.slice(1).join("\n")).not.toContain("UPSERT skill:");
-        expect(tc.captured.slice(1).join("\n")).toContain("->concerns:");
-    });
-
-    test("plan snapshot statements persist snapshot items and item raw JSON", () => {
-        const statements = buildPlanSnapshotStatements({
-            planKey: "session-1__codex_update_plan`unsafe",
-            sessionId: "session-1\nunsafe",
-            source: "codex_update_plan",
-            status: "in_progress",
-            createdAt: "2026-05-09T10:00:00.000Z",
-            updatedAt: "2026-05-09T10:01:00.000Z",
-            snapshotKey: "session-1__plan__001`unsafe",
-            toolCallKey: "session__call`unsafe",
-            itemsJson: [{ content: "Inspect schema", status: "completed" }],
-            explanation: "Following the statement-builder contract.",
-            ts: "2026-05-09T10:01:00.000Z",
-            items: [
-                {
-                    key: "session-1__item__001`unsafe",
-                    externalId: "todo-1",
-                    seq: 1,
-                    content: "Inspect schema",
-                    activeForm: "Inspecting schema",
-                    status: "completed",
-                },
-            ],
-        });
-
-        const sql = statements.join("\n");
-
-        expect(sql).toContain("UPSERT plan_snapshot:`session-1__plan__001\\`unsafe` CONTENT");
-        expect(sql).toContain("session: session:`session-1\\nunsafe`");
-        expect(sql).toContain("tool_call: tool_call:`session__call\\`unsafe`");
-        expect(sql).toContain("items: \"[{\\\"content\\\":\\\"Inspect schema\\\",\\\"status\\\":\\\"completed\\\"}]\"");
-        expect(sql).toContain("explanation: \"Following the statement-builder contract.\"");
-        expect(sql).toContain("UPSERT plan_item:`session-1__item__001\\`unsafe` CONTENT");
-        expect(sql).toContain("text: \"Inspect schema\"");
-        expect(sql).toContain("raw: \"{\\\"key\\\":\\\"session-1__item__001`unsafe\\\",\\\"externalId\\\":\\\"todo-1\\\"");
-    });
-
-    test("plan snapshot statements remove legacy item ids that conflict on plan sequence", () => {
-        const statements = buildPlanSnapshotStatements({
-            planKey: "plan-key",
-            sessionId: "session-1",
-            source: "codex_update_plan",
-            status: "in_progress",
-            createdAt: "2026-05-09T10:00:00.000Z",
-            updatedAt: "2026-05-09T10:00:00.000Z",
-            snapshotKey: "snapshot-key",
-            itemsJson: [],
-            explanation: null,
-            ts: "2026-05-09T10:00:00.000Z",
-            items: [
-                {
-                    key: "plan-key__item_001",
-                    seq: 1,
-                    content: "Run tests again",
-                    status: "in_progress",
-                },
-            ],
-        });
-
-        const sql = statements.join("\n");
-
-        expect(sql).toContain(
-            "DELETE plan_item WHERE plan = plan:`plan-key` AND seq = 1 AND id != plan_item:`plan-key__item_001`;",
-        );
-    });
-
-    test("Claude task plan items replace by external id instead of sequence", () => {
-        const withExternalId = buildPlanSnapshotStatements({
-            planKey: "claude-task-plan",
-            sessionId: "session-1",
-            source: "claude_task",
-            status: "in_progress",
-            createdAt: "2026-05-09T10:00:00.000Z",
-            updatedAt: "2026-05-09T10:00:00.000Z",
-            snapshotKey: "snapshot-key",
-            itemsJson: [],
-            explanation: null,
-            ts: "2026-05-09T10:00:00.000Z",
-            items: [
-                {
-                    key: "claude-task-plan__item_external__task_1",
-                    externalId: "task-1",
-                    seq: 1,
-                    content: "Task 1",
-                    status: "in_progress",
-                },
-            ],
-        });
-
-        expect(withExternalId.join("\n")).toContain(
-            "DELETE plan_item WHERE plan = plan:`claude-task-plan` AND external_id = \"task-1\" AND id != plan_item:`claude-task-plan__item_external__task_1`;",
-        );
-        expect(withExternalId.join("\n")).not.toContain("AND seq = 1");
-
-        const withoutExternalId = buildPlanSnapshotStatements({
-            planKey: "claude-task-plan",
-            sessionId: "session-1",
-            source: "claude_task",
-            status: "pending",
-            createdAt: "2026-05-09T10:00:00.000Z",
-            updatedAt: "2026-05-09T10:00:00.000Z",
-            snapshotKey: "snapshot-key-2",
-            itemsJson: [],
-            explanation: null,
-            ts: "2026-05-09T10:00:00.000Z",
-            items: [
-                {
-                    key: "claude-task-plan__item_tool_call__abc__seq_001",
-                    seq: 1,
-                    content: "Task without id",
-                    status: "pending",
-                },
-            ],
-        });
-
-        expect(withoutExternalId.some((statement) => statement.startsWith("DELETE plan_item"))).toBe(false);
+    dtest("creates a missing skill relation and persists plan items", async () => {
+        let counts: unknown;
+        const skillName = SkillName.make("superpowers:test-driven-development");
+        await runWithPlatform(publishCacheFixture(tempDir("ax-relations-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const toolCallKey = toolCallRecordKey({ sessionId: "session-1", seq: 1, callId: "call-1" });
+                yield* relateToolCallSkill(write, { toolCallKey, skillName, ts: at, reason: "TDD" });
+                yield* writePlanSnapshot(write, {
+                    planKey: "plan-1", sessionId: "session-1", source: "codex_update_plan",
+                    status: "in_progress", createdAt: at, snapshotKey: "snapshot-1",
+                    itemsJson: [{ id: "one" }], ts: at,
+                    items: [{ key: "item-1", externalId: "one", seq: 1, content: "Inspect schema", status: "completed" }],
+                });
+                counts = (yield* write.rows(Schema.Struct({
+                    skills: Schema.BigInt, concerns: Schema.BigInt, plans: Schema.BigInt,
+                    snapshots: Schema.BigInt, items: Schema.BigInt,
+                }), `SELECT (SELECT count(*) FROM skill) AS skills,
+                    (SELECT count(*) FROM concerns) AS concerns,
+                    (SELECT count(*) FROM plan) AS plans,
+                    (SELECT count(*) FROM plan_snapshot) AS snapshots,
+                    (SELECT count(*) FROM plan_item) AS items`))[0];
+            }),
+        ));
+        expect(skillRowId(skillName)).toMatch(/^[0-9a-f]{32}$/);
+        expect(counts).toEqual({ skills: 1n, concerns: 1n, plans: 1n, snapshots: 1n, items: 1n });
     });
 });

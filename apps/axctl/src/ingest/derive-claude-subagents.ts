@@ -1,12 +1,12 @@
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
-import { SurrealClient, RecordId } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import { fileWatermark } from "@ax/lib/duckdb/watermark";
+import { edgeRowId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { fileWatermark } from "@ax/lib/shared/watermark";
 import { isNotFound, orAbsent } from "@ax/lib/shared/fs-error";
 import {
     extractFileWithSessionId,
@@ -19,7 +19,6 @@ import {
     writeTokenUsageForSubagents,
 } from "./transcripts.ts";
 import { resolveSkillName } from "@ax/lib/skill-id";
-import { recordLiteral } from "@ax/lib/ids";
 
 interface SubagentManifest {
     readonly agentId: string;
@@ -180,15 +179,15 @@ export interface DeriveClaudeSubagentsStats {
  * re-running upserts the session and re-RELATEs.
  */
 export const deriveClaudeSubagents = (
+    write: CacheWriteService,
     opts: DeriveClaudeSubagentsOpts = {},
 ): Effect.Effect<
     DeriveClaudeSubagentsStats,
-    DbError,
-    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
+    CacheWriteError,
+    AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         if (opts.onProgress) yield* opts.onProgress({ phase: 1 });
         const manifests = yield* discover(cfg.paths.transcriptsDir);
@@ -202,9 +201,8 @@ export const deriveClaudeSubagents = (
         // Real skill/command catalog, snapshotted once - lets us resolve each
         // invoked name onto the canonical row (see resolveSkillName) instead
         // of minting ghost `scope='unknown'` rows for subagent invocations.
-        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
-            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
-        ))?.[0] ?? [];
+        const catalogRows = yield* write.rows(Schema.Struct({ name: Schema.String }),
+            "SELECT name FROM skill WHERE dir_path != '(unknown)'");
         const skillCatalog: ReadonlySet<string> = new Set(
             catalogRows
                 .map((row) => row.name)
@@ -220,7 +218,7 @@ export const deriveClaudeSubagents = (
         // manifest whose stat still matches its watermark is output-equivalent
         // to a prior run (its rows persist) so we skip parsing+writing it.
         // `AX_REDERIVE_SUBAGENTS=1` forces a full re-derive.
-        const wm = yield* fileWatermark({
+        const wm = yield* fileWatermark(write, {
             sourceKind: "claude_subagent",
             forceEnv: "AX_REDERIVE_SUBAGENTS",
         });
@@ -274,15 +272,15 @@ export const deriveClaudeSubagents = (
 
             // Confirm parent exists - subagent without its parent is orphaned data.
             // Also fetch repository/checkout/cwd so we can inherit them below.
-            const parentRid = `session:⟨${m.parentSessionId}⟩`;
-            const check = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id, repository, checkout, cwd FROM ${parentRid};`,
-            );
-            if ((check?.[0]?.length ?? 0) === 0) {
+            const check = yield* write.rows(Schema.Struct({
+                id: Schema.String, repository: Schema.NullOr(Schema.String),
+                checkout: Schema.NullOr(Schema.String), cwd: Schema.NullOr(Schema.String),
+            }), "SELECT id, repository, checkout, cwd FROM session WHERE id = ?", [m.parentSessionId]);
+            if (check.length === 0) {
                 missingParent += 1;
                 continue;
             }
-            const parentRow = check[0]![0]!;
+            const parentRow = check[0]!;
 
             // Run the Claude extractor against the subagent jsonl using the
             // synthetic session id. This produces turns/invocations/tool_calls
@@ -308,71 +306,58 @@ export const deriveClaudeSubagents = (
 
             // Inherit repository/checkout from parent unconditionally (the extractor
             // never sets them). Inherit cwd from parent only if extractor produced none.
-            const parentRepository = parentRow["repository"] ?? undefined;
-            const parentCheckout = parentRow["checkout"] ?? undefined;
-            const parentCwd = typeof parentRow["cwd"] === "string" && parentRow["cwd"].length > 0
-                ? parentRow["cwd"]
+            const parentRepository = parentRow.repository;
+            const parentCheckout = parentRow.checkout;
+            const parentCwd = typeof parentRow.cwd === "string" && parentRow.cwd.length > 0
+                ? parentRow.cwd
                 : undefined;
 
             if (!extracted) {
                 // No usable content; still record the session+edge so the link
                 // shows in the parent's "spawned" list.
-                const subagentRid = new RecordId("session", m.subagentSessionId);
-                yield* db.upsert(subagentRid, {
-                    project: m.project ?? undefined,
+                yield* write.put("session", cacheRow({
+                    id: m.subagentSessionId, project: m.project,
                     source: "claude-subagent",
-                    started_at: m.startedAt ? new Date(m.startedAt) : undefined,
-                    ended_at: m.endedAt ? new Date(m.endedAt) : undefined,
-                    raw_file: m.file ?? undefined,
+                    started_at: tsParam(m.startedAt), ended_at: tsParam(m.endedAt), raw_file: m.file,
                     repository: parentRepository,
                     checkout: parentCheckout,
                     cwd: parentCwd,
-                });
-                if (parentRepository !== undefined) repositoryInherited += 1;
+                }));
+                if (parentRepository !== null) repositoryInherited += 1;
             } else {
                 // Force source=claude-subagent at the upsert level (the extractor
                 // doesn't track source; it's set on the DB row).
-                const subagentRid = new RecordId("session", m.subagentSessionId);
                 // cwd: use extracted value if present, else inherit from parent
                 const cwdValue = (extracted.session.cwd != null && extracted.session.cwd !== "")
                     ? extracted.session.cwd
                     : parentCwd;
-                yield* db.upsert(subagentRid, {
-                    project: extracted.session.project ?? m.project ?? undefined,
+                yield* write.put("session", cacheRow({
+                    id: m.subagentSessionId, project: extracted.session.project ?? m.project,
                     cwd: cwdValue,
                     source: "claude-subagent",
-                    model: extracted.session.model ?? undefined,
-                    started_at: extracted.session.started_at
-                        ? new Date(extracted.session.started_at)
-                        : m.startedAt
-                            ? new Date(m.startedAt)
-                            : undefined,
-                    ended_at: extracted.session.ended_at
-                        ? new Date(extracted.session.ended_at)
-                        : m.endedAt
-                            ? new Date(m.endedAt)
-                            : undefined,
-                    raw_file: m.file ?? undefined,
+                    model: extracted.session.model ?? null,
+                    started_at: tsParam(extracted.session.started_at ?? m.startedAt),
+                    ended_at: tsParam(extracted.session.ended_at ?? m.endedAt), raw_file: m.file,
                     repository: parentRepository,
                     checkout: parentCheckout,
-                });
-                if (parentRepository !== undefined) repositoryInherited += 1;
+                }));
+                if (parentRepository !== null) repositoryInherited += 1;
 
-                yield* writeTokenUsageForSubagents(extracted);
-                yield* upsertTurnsForSubagents(extracted.turns);
-                yield* writeToolCallStatementsForSubagents(extracted.toolCalls);
-                yield* writeToolFileEvidenceForSubagents(extracted.toolCalls);
+                yield* writeTokenUsageForSubagents(write, extracted);
+                yield* upsertTurnsForSubagents(write, extracted.turns);
+                yield* writeToolCallStatementsForSubagents(write, extracted.toolCalls);
+                yield* writeToolFileEvidenceForSubagents(write, extracted.toolCalls);
                 const resolvedInvocations = extracted.invocations.map((inv) => ({
                     ...inv,
                     skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
                 }));
-                yield* relateInvocationsForSubagents(resolvedInvocations);
+                yield* relateInvocationsForSubagents(write, resolvedInvocations);
                 const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
                     ...rel,
                     skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
                 }));
-                yield* relateToolCallSkillsForSubagents(resolvedSkillRelations);
-                yield* writePlanSnapshotsForSubagents(extracted.planSnapshots);
+                yield* relateToolCallSkillsForSubagents(write, resolvedSkillRelations);
+                yield* writePlanSnapshotsForSubagents(write, extracted.planSnapshots);
 
                 turnsTotal += extracted.turns.length;
                 invocationsTotal += extracted.invocations.length;
@@ -382,20 +367,14 @@ export const deriveClaudeSubagents = (
             }
 
             // Idempotent RELATE: dedupe first by exact (in,out) pair.
-            const subagentRef = `session:⟨${m.subagentSessionId}⟩`;
-            yield* db.query(
-                `DELETE spawned WHERE in = ${parentRid} AND out = ${subagentRef} AND tool = "Agent";`,
-            );
-            // Build optional meta SET clauses from adjacent meta.json fields.
-            const metaClauses = [
-                meta.agentType !== undefined ? `, agent_type = ${surrealLiteral(meta.agentType)}` : "",
-                meta.description !== undefined ? `, description = ${surrealLiteral(meta.description)}` : "",
-                meta.name !== undefined ? `, agent_name = ${surrealLiteral(meta.name)}` : "",
-                meta.toolUseId !== undefined ? `, tool_use_id = ${surrealLiteral(meta.toolUseId)}` : "",
-            ].join("");
-            yield* db.query(
-                `RELATE ${parentRid} -> spawned -> ${subagentRef} SET ts = d${surrealLiteral(m.startedAt ?? new Date().toISOString())}, tool = "Agent", nickname = ${surrealLiteral(m.agentId.slice(0, 12))}${metaClauses};`,
-            );
+            yield* write.put("spawned", cacheRow({
+                id: edgeRowId("spawned", m.parentSessionId, m.subagentSessionId, "Agent"),
+                in_id: m.parentSessionId, out_id: m.subagentSessionId,
+                ts: tsParam(m.startedAt) ?? new Date(), tool: "Agent", tool_call: null,
+                nickname: m.agentId.slice(0, 12), agent_type: meta.agentType ?? null,
+                description: meta.description ?? null, agent_name: meta.name ?? null,
+                tool_use_id: meta.toolUseId ?? null,
+            }));
             written += 1;
 
             // Record the watermark only after every write for this file
@@ -428,27 +407,23 @@ export const deriveClaudeSubagents = (
         // repository/checkout/cwd. Idempotent: WHERE clause guards against
         // overwriting rows that already have a value.
         // ---------------------------------------------------------------------------
-        const backfillRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, <-spawned<-session[0].repository AS parent_repository, <-spawned<-session[0].checkout AS parent_checkout, <-spawned<-session[0].cwd AS parent_cwd FROM session WHERE source = "claude-subagent" AND repository IS NONE;`,
-        ))?.[0] ?? [];
+        const backfillRows = yield* write.rows(Schema.Struct({
+            id: Schema.String, parent_repository: Schema.NullOr(Schema.String),
+            parent_checkout: Schema.NullOr(Schema.String), parent_cwd: Schema.NullOr(Schema.String),
+        }), `SELECT child.id, parent.repository AS parent_repository, parent.checkout AS parent_checkout,
+                    parent.cwd AS parent_cwd
+             FROM session child JOIN spawned sp ON sp.out_id = child.id
+             JOIN session parent ON parent.id = sp.in_id
+             WHERE child.source = 'claude-subagent' AND child.repository IS NULL`);
 
         for (const row of backfillRows) {
-            const id = row["id"];
-            const parentRepo = row["parent_repository"];
-            const parentCk = row["parent_checkout"] ?? undefined;
-            const parentCwdBf = typeof row["parent_cwd"] === "string" && row["parent_cwd"].length > 0
-                ? row["parent_cwd"]
-                : undefined;
+            const id = row.id;
+            const parentRepo = row.parent_repository;
+            const parentCk = row.parent_checkout;
+            const parentCwdBf = row.parent_cwd;
             if (id == null || parentRepo == null) continue;
-            if (!(id instanceof RecordId)) continue;
-            if (!(parentRepo instanceof RecordId)) continue;
-            // Record-typed fields require record literals, not bindings, for correct comparison.
-            // parentRepo.id is the bare key from the graph traversal result.
-            const repoLiteral = recordLiteral("repository", String(parentRepo.id));
-            yield* db.query(
-                `UPDATE ${id} SET repository = ${repoLiteral}, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
-                { checkout: parentCk, cwd: parentCwdBf },
-            );
+            yield* write.exec("UPDATE session SET repository = ?, checkout = ?, cwd = ? WHERE id = ? AND repository IS NULL",
+                [parentRepo, parentCk, parentCwdBf, id]);
             repositoryBackfilled += 1;
         }
 
@@ -488,12 +463,12 @@ export class SubagentsStats extends BaseStageStats.extend<SubagentsStats>("Subag
     subagentLinksWritten: Schema.Number,
 }) {}
 
-export const subagentsStage: StageDef<SubagentsStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const subagentsStage: StageDef<SubagentsStats, AxConfig | FileSystem.FileSystem | Path.Path, CacheWriteError> = {
     meta: StageMeta.make({ key: "subagents", deps: ["claude", "codex"], tags: ["derive"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveClaudeSubagents();
+            const result = yield* deriveClaudeSubagents(write);
             return SubagentsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `wrote ${result.written} subagent links`,

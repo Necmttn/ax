@@ -18,6 +18,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { recordIdString } from "@ax/lib/shared/row-fields";
 import { surrealDate } from "@ax/lib/shared/surql";
@@ -173,9 +174,10 @@ const fetchFrictionContentTypes = (
  *  session-dominant content-type tag appended. */
 export const enrichInsightRows = Effect.fn("queries.enrichInsightRows")(
     function* (view: InsightView, rows: ReadonlyArray<Row>) {
+        const read = yield* CacheRead;
         if (view === "friction") {
             const contentTypes = yield* fetchFrictionContentTypes(rows.map(frictionSessionId));
-            const withCost = yield* enrichRowsWithTelemetryCost(rows, frictionSessionId, (row, cost): Row => ({
+            const withCost = yield* enrichRowsWithTelemetryCost(read, rows, frictionSessionId, (row, cost): Row => ({
                 ...row,
                 otlp_cost_usd: cost?.cost_usd ?? null,
                 otlp_tokens: cost?.tokens ?? null,

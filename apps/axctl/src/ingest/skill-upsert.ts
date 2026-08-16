@@ -1,9 +1,9 @@
-import { RecordId } from "@ax/lib/db";
 import type { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
-import type { DbError } from "@ax/lib/errors";
-import type { SurrealClientShape } from "@ax/lib/db";
-import { Effect } from "effect";
+import { skillRowId } from "@ax/lib/stable-id";
+import { cacheRow } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
+import { Effect, Option, Schema } from "effect";
 
 export interface SkillContent {
     readonly name: SkillName;
@@ -14,70 +14,57 @@ export interface SkillContent {
     readonly bytes: number | undefined;
 }
 
-interface SkillLookupRow {
-    readonly id?: unknown;
-    readonly content_hash?: unknown;
-    readonly bytes?: unknown;
-}
-
-function skillUpsertPayload(content: SkillContent): Record<string, unknown> {
-    const payload: Record<string, unknown> = {
-        name: content.name,
-        scope: content.scope,
-        dir_path: content.dir_path,
-        content_hash: content.content_hash,
-    };
-    if (content.description != null) payload.description = content.description;
-    if (content.bytes !== undefined) payload.bytes = content.bytes;
-    return payload;
-}
-
-export function skillRecordIdFromLookup(raw: unknown, fallbackName: SkillName): RecordId {
-    if (raw instanceof RecordId) return raw;
-    if (typeof raw === "string") {
-        const backticked = raw.match(/^skill:`(.+)`$/);
-        if (backticked) return new RecordId("skill", backticked[1]);
-        if (raw.startsWith("skill:")) return new RecordId("skill", raw.slice("skill:".length));
-    }
-    return new RecordId("skill", skillRecordKey(fallbackName));
-}
+const SkillLookupRow = Schema.Struct({
+    id: Schema.String,
+    content_hash: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(Schema.BigInt),
+});
 
 export function upsertSkillByName(
-    db: SurrealClientShape,
+    write: CacheWriteService,
     content: SkillContent,
-): Effect.Effect<RecordId, DbError> {
+): Effect.Effect<string, CacheWriteError> {
     return Effect.gen(function* () {
-        const result = yield* db.query<[SkillLookupRow[]]>(
-            "SELECT id, content_hash, bytes FROM skill WHERE name = $name LIMIT 1;",
-            { name: content.name },
+        const existingOption = yield* write.first(
+            SkillLookupRow,
+            "SELECT id, content_hash, bytes FROM skill WHERE name = ? LIMIT 1",
+            [content.name],
         );
-        const existing = result?.[0]?.[0];
-        const id = skillRecordIdFromLookup(existing?.id, content.name);
+        const existing = Option.getOrNull(existingOption);
+        const id = existing?.id ?? skillRowId(content.name);
 
         // Drift log: append a skill_revision ONLY on a real content change (the
         // hash flipped) or the first sighting of a new skill. The current `skill`
         // row is the baseline; this is the append-only trail to diff against.
         // Fails open - the audit write must never break ingest.
-        const prevHash = typeof existing?.content_hash === "string" ? existing.content_hash : undefined;
+        const prevHash = existing?.content_hash ?? undefined;
         const isNew = existing == null;
         const changed = prevHash != null && prevHash !== content.content_hash;
         if ((isNew || changed) && content.content_hash) {
-            yield* Effect.ignore(db.query(
-                "CREATE skill_revision SET skill = $skill, name = $name, scope = $scope, content_hash = $hash, prev_hash = $prev, bytes = $bytes, prev_bytes = $prevBytes, change = $change;",
-                {
-                    skill: id,
-                    name: content.name,
-                    scope: content.scope,
-                    hash: content.content_hash,
-                    prev: prevHash ?? undefined,
-                    bytes: content.bytes ?? undefined,
-                    prevBytes: typeof existing?.bytes === "number" ? existing.bytes : undefined,
-                    change: isNew ? "added" : "changed",
-                },
-            ));
+            yield* write.put("skill_revision", cacheRow({
+                id: stableId("skill_revision", [id, content.content_hash]),
+                skill: id,
+                name: content.name,
+                scope: content.scope,
+                content_hash: content.content_hash,
+                prev_hash: prevHash ?? null,
+                bytes: content.bytes ?? null,
+                prev_bytes: existing?.bytes ?? null,
+                change: isNew ? "added" : "changed",
+            })).pipe(Effect.ignore);
         }
 
-        yield* db.upsert(id, skillUpsertPayload(content));
+        yield* write.put("skill", cacheRow({
+            id,
+            name: content.name,
+            scope: content.scope,
+            dir_path: content.dir_path,
+            description: content.description ?? null,
+            content_hash: content.content_hash,
+            bytes: content.bytes ?? null,
+            last_seen_at: null,
+            deleted_at: null,
+        }));
         return id;
     });
 }

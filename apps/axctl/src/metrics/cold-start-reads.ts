@@ -1,13 +1,19 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import {
-    editOrReadToolSqlFilter,
     isEditTool,
     isReadTool,
     toolClassInputOf,
 } from "@ax/lib/shared/tool-classes";
-import { isoMs, sessionRefList } from "./util.ts";
+import { isoMs, sessionIdsClause } from "./util.ts";
+
+const ToolRow = Schema.Struct({
+    session: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
 
 /**
  * Count of read/search tool_calls that happened BEFORE the session's first
@@ -23,18 +29,19 @@ import { isoMs, sessionRefList } from "./util.ts";
  * relations would need an unindexed per-edge deref to bound by session.
  */
 export const computeColdStartReads = (
+    read: CacheReadService,
     sessionIds: readonly string[],
-): Effect.Effect<Map<string, number>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, number>, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const map = new Map<string, number>();
         if (sessionIds.length === 0) return map;
 
-        const refs = sessionRefList(sessionIds);
-        const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(session) AS session, name, command_norm, type::string(ts) AS ts`
-            + ` FROM tool_call WHERE session IN [${refs}] AND ${editOrReadToolSqlFilter};`,
-        ))?.[0] ?? [];
+        const sessions = sessionIdsClause("session", sessionIds);
+        const rows = yield* read.rows(
+            ToolRow,
+            `SELECT session, name, command_norm, ts FROM tool_call WHERE TRUE ${sessions.sql}`,
+            sessions.params,
+        );
 
         // Group rows per session, tracking first-edit ms and the read/search timestamps.
         const firstEdit = new Map<string, number>();

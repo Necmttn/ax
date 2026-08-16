@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { makeMockDb, makeTestSurrealClient, runWithMock } from "@ax/lib/testing/surreal";
 import {
     fetchCostModels,
     fetchCostSessions,
@@ -121,7 +121,12 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "litellm",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+            },
+        });
         const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
 
         // 1,000,000 prompt tokens * $2/MTok = $2.00
@@ -158,7 +163,12 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "test",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+            },
+        });
         const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
 
         // Base rate only: 300k @ $1/M = $0.30. The tiered rate ($2/M) would
@@ -364,7 +374,13 @@ describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
                 fast_multiplier: 1, context_window: null, pricing_source: "litellm",
             },
         ];
-        const db = makeMockDb([[dbRows], [agentModelRows], [[]]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [dbRows],
+                "FROM agent_model": [agentModelRows],
+                "FROM has_content": [[]],
+            },
+        });
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         const recomputed = result.rows.find((r) => r.model === "custom-model-x")!;

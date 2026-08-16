@@ -3,8 +3,7 @@ import { homedir } from "node:os";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import type { Clause } from "@ax/lib/duckdb/clause";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
-import { cacheFirst, cacheRows } from "@ax/lib/duckdb/query";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -252,29 +251,25 @@ const ObservedToolRow = Schema.Struct({
  * it `now() - INTERVAL 30 DAY`, but a bound parameter keeps the window testable
  * without a clock, and the seam pins the connection to UTC either way.
  */
-export const fetchObservedTooling = (): Effect.Effect<
+export const fetchObservedTooling = (read: CacheReadService): Effect.Effect<
     ReadonlyArray<AgentToolingSignal>,
-    never,
-    CacheRead
+    CacheReadError
 > =>
     Effect.gen(function* () {
         const cutoff = new Date(Date.now() - OBSERVED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-        const rows = yield* cacheRows(
+        const rows = yield* read.rows(
             ObservedToolRow,
-            {
-                // The alias is `tool_name`, not `tool`: `tool_call` HAS a column
-                // called `tool` (its ref to the tool row), so `GROUP BY tool`
-                // binds to that column rather than to the alias, and DuckDB
-                // then rejects the statement. Measured, not guessed.
-                sql: `SELECT coalesce(command_norm, name) AS tool_name, count(*) AS calls
+            // The alias is `tool_name`, not `tool`: `tool_call` HAS a column
+            // called `tool` (its ref to the tool row), so `GROUP BY tool`
+            // binds to that column rather than to the alias, and DuckDB
+            // then rejects the statement. Measured, not guessed.
+            `SELECT coalesce(command_norm, name) AS tool_name, count(*) AS calls
                       FROM tool_call
                       WHERE ts > ? AND coalesce(command_norm, name) IS NOT NULL
                       GROUP BY tool_name
-                      ORDER BY calls DESC
+                      ORDER BY calls DESC, tool_name ASC
                       LIMIT 25`,
-                params: [cutoff],
-            },
-            "project harness observed tooling",
+            [cutoff],
         );
 
         return rows
@@ -310,33 +305,23 @@ const onMainCount = (table: "edited" | "produced"): Clause => ({
     params: MAIN_BRANCHES,
 });
 
-export const fetchMainBranchGraphEvidence = (): Effect.Effect<
+export const fetchMainBranchGraphEvidence = (read: CacheReadService): Effect.Effect<
     MainBranchGraphEvidence,
-    never,
-    CacheRead
+    CacheReadError
 > =>
     Effect.gen(function* () {
-        const edited = yield* cacheFirst(
-            MainBranchCountRow,
-            onMainCount("edited"),
-            "project harness edits on main",
-        );
-        const produced = yield* cacheFirst(
-            MainBranchCountRow,
-            onMainCount("produced"),
-            "project harness commits from main",
-        );
-        const latest = yield* cacheFirst(
+        const editedQuery = onMainCount("edited");
+        const edited = (yield* read.rows(MainBranchCountRow, editedQuery.sql, editedQuery.params))[0] ?? null;
+        const producedQuery = onMainCount("produced");
+        const produced = (yield* read.rows(MainBranchCountRow, producedQuery.sql, producedQuery.params))[0] ?? null;
+        const latest = (yield* read.rows(
             LatestEditRow,
-            {
-                sql: `SELECT e.path_seen AS path_seen FROM edited e
+            `SELECT e.path_seen AS path_seen FROM edited e
                       JOIN checkout c ON c.id = e.checkout
                       WHERE c.branch IN (${MAIN_BRANCH_PLACEHOLDERS})
                       ORDER BY e.ts DESC LIMIT 1`,
-                params: MAIN_BRANCHES,
-            },
-            "project harness latest edit on main",
-        );
+            MAIN_BRANCHES,
+        ))[0] ?? null;
 
         return {
             editedOnMain: edited?.count ?? 0,
@@ -397,18 +382,19 @@ export const buildHarnessGrounding = (
  * {@link buildHarnessGrounding} instead; see its note.
  */
 export const buildProjectHarnessReport = (
+    read: CacheReadService,
     cwd = process.cwd(),
     builder: HarnessDoctorReportBuilder = defaultHarnessDoctorReportBuilder,
-): Effect.Effect<ProjectHarnessReport, never, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<ProjectHarnessReport, CacheReadError, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
         yield* queryLiveDiagnostics(git.root);
-        const graphEvidence = yield* fetchMainBranchGraphEvidence();
+        const graphEvidence = yield* fetchMainBranchGraphEvidence(read);
         const guidanceSources = yield* scanGuidanceSources(git.root);
         const guidanceRevisions = yield* buildGuidanceRevisions(guidanceSources);
         const staticTooling = yield* detectAgentTooling(git, stack);
-        const observedTooling = yield* fetchObservedTooling();
+        const observedTooling = yield* fetchObservedTooling(read);
         return builder.build({
             git,
             stack,

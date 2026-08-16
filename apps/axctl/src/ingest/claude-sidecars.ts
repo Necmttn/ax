@@ -1,25 +1,15 @@
 import { createHash } from "node:crypto";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
-import {
-    recordKeyPart,
-    recordRef,
-    surrealDate,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionDate,
-    surrealOptionInt,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surreal";
-import { buildPlanSnapshotStatements, type PlanSnapshotWrite } from "./evidence-writers.ts";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { writePlanSnapshot, type PlanSnapshotWrite } from "./evidence-writers.ts";
 import {
     toPlanSnapshotWrite,
     type NormalizedPlanItem,
@@ -774,7 +764,7 @@ export const discoverClaudeSidecarPlanSnapshots = (
 
 export const buildClaudeSidecarPlanSnapshotStatements = (
     snapshots: readonly PlanSnapshotWrite[],
-): string[] => snapshots.flatMap(buildPlanSnapshotStatements);
+): readonly PlanSnapshotWrite[] => snapshots;
 
 const numberField = (record: Record<string, unknown>, field: string): number | null => {
     const value = record[field];
@@ -934,44 +924,47 @@ export const buildClaudeSidecarUsageEdges = (
 };
 
 const queryClaudeToolCallRowsForSessions = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     sessionIds: readonly string[],
-): Effect.Effect<ClaudeToolCallSidecarRow[], DbError> =>
+): Effect.Effect<ClaudeToolCallSidecarRow[], CacheWriteError> =>
     Effect.gen(function* () {
         if (sessionIds.length === 0) return [];
         const rows: ClaudeToolCallSidecarRow[] = [];
         for (let i = 0; i < sessionIds.length; i += 100) {
             const chunk = sessionIds.slice(i, i + 100);
-            const refs = chunk.map((sessionId) => recordRef("session", sessionId)).join(", ");
-            const [result] = yield* db.query<[ClaudeToolCallSidecarRow[]]>(`
-SELECT type::string(id) AS id,
-       type::string(session) AS session,
+            const result = yield* write.rows(Schema.Struct({
+                id: Schema.String, session: Schema.String, name: Schema.String,
+                inputJson: Schema.NullOr(Schema.String), outputExcerpt: Schema.NullOr(Schema.String),
+                commandText: Schema.NullOr(Schema.String), commandNorm: Schema.NullOr(Schema.String), ts: TimestampColumn,
+            }), `
+SELECT id, session,
        name,
        input_json AS inputJson,
        output_excerpt AS outputExcerpt,
        command_text AS commandText,
        command_norm AS commandNorm,
-       type::string(ts) AS ts
+       ts
 FROM tool_call
-WHERE session IN [${refs}];
-`);
-            rows.push(...(result ?? []));
+WHERE session IN (${chunk.map(() => "?").join(",")})`, chunk);
+            rows.push(...result.map((row) => ({ ...row, inputJson: row.inputJson ?? null,
+                outputExcerpt: row.outputExcerpt ?? null, commandText: row.commandText ?? null,
+                commandNorm: row.commandNorm ?? null, ts: row.ts.toISOString() })));
         }
         return rows;
     });
 
 const discoverClaudeSidecarUsageEdges = (
     input: {
-        readonly db: SurrealClientShape;
+        readonly write: CacheWriteService;
         readonly transcriptsDir: string;
         readonly artifacts: readonly ClaudeSidecarArtifact[];
     },
-): Effect.Effect<ClaudeSidecarUsageEdge[], DbError> =>
+): Effect.Effect<ClaudeSidecarUsageEdge[], CacheWriteError> =>
     Effect.gen(function* () {
         const sessionIds = [
             ...new Set(input.artifacts.map((artifact) => artifact.sessionId).filter((sessionId): sessionId is string => !!sessionId)),
         ];
-        const rows = yield* queryClaudeToolCallRowsForSessions(input.db, sessionIds);
+        const rows = yield* queryClaudeToolCallRowsForSessions(input.write, sessionIds);
         return buildClaudeSidecarUsageEdges({
             rows,
             artifacts: input.artifacts,
@@ -981,59 +974,36 @@ const discoverClaudeSidecarUsageEdges = (
 
 export const buildClaudeSidecarUsageStatements = (
     edges: readonly ClaudeSidecarUsageEdge[],
-): string[] =>
-    edges.map((edge) =>
-        `RELATE ${recordRef("tool_call", edge.toolCallKey)}->${recordRef("used_sidecar_artifact", usageEdgeKey(edge))}->${recordRef("claude_sidecar_artifact", edge.artifactKey)} SET ${[
-            `session = ${edge.sessionId ? recordRef("session", edge.sessionId) : "NONE"}`,
-            `action = ${surrealString(edge.action)}`,
-            `source = ${surrealString(edge.source)}`,
-            `sidecar_kind = ${surrealString(edge.sidecarKind)}`,
-            `path_hash = ${surrealString(edge.pathHash)}`,
-            `command_tool = ${surrealOptionString(edge.commandTool)}`,
-            `pattern = ${surrealOptionString(edge.pattern)}`,
-            `offset = ${surrealOptionInt(edge.offset)}`,
-            `limit = ${surrealOptionInt(edge.limit)}`,
-            `ts = ${surrealDate(edge.ts)}`,
-        ].join(", ")};`
-    );
+): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => edges.map((edge) => cacheRow({
+    id: usageEdgeKey(edge), in_id: edge.toolCallKey, out_id: edge.artifactKey,
+    session: edge.sessionId, action: edge.action, source: edge.source,
+    sidecar_kind: edge.sidecarKind, path_hash: edge.pathHash, command_tool: edge.commandTool,
+    pattern: edge.pattern, offset: edge.offset, limit: edge.limit, ts: tsParam(edge.ts) ?? new Date(),
+}));
 
 export const claudeSidecarArtifactKey = (record: Pick<ClaudeSidecarArtifact, "pathHash">): string =>
     safeKeyPart(record.pathHash);
 
-const intLiteral = (value: number): string =>
-    Number.isFinite(value) ? Math.trunc(value).toString(10) : "0";
-
 export const buildClaudeSidecarStatements = (
     records: readonly ClaudeSidecarArtifact[],
-): string[] =>
-    records.map((record) =>
-        `UPSERT ${recordRef("claude_sidecar_artifact", claudeSidecarArtifactKey(record))} CONTENT ${surrealObject([
-            ["kind", surrealString(record.kind)],
-            ["project", surrealString(record.project)],
-            ["safe_relative_path", surrealString(record.safeRelativePath)],
-            ["path_hash", surrealString(record.pathHash)],
-            ["size", intLiteral(record.size)],
-            ["mtime", surrealOptionDate(record.mtime)],
-            ["content_hash", surrealOptionString(record.contentHash)],
-            ["session", record.sessionId ? recordRef("session", record.sessionId) : "NONE"],
-            ["relation_ids_json", surrealJsonTextOption(record.relationIds)],
-            ["relation_attrs_json", surrealJsonTextOption(record.relationAttrs)],
-            ["observed_at", surrealOptionDate(record.observedAt)],
-            ["excerpt", surrealOptionString(record.excerpt)],
-            ["attrs_json", surrealJsonTextOption(record.attrs)],
-        ])};`
-    );
+): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => records.map((record) => cacheRow({
+    id: claudeSidecarArtifactKey(record), kind: record.kind, project: record.project,
+    safe_relative_path: record.safeRelativePath, path_hash: record.pathHash, size: Math.trunc(record.size),
+    mtime: tsParam(record.mtime) ?? new Date(0), content_hash: record.contentHash, session: record.sessionId,
+    relation_ids_json: jsonParam(record.relationIds), relation_attrs_json: jsonParam(record.relationAttrs),
+    observed_at: tsParam(record.observedAt) ?? new Date(), excerpt: record.excerpt, attrs_json: jsonParam(record.attrs),
+}));
 
 export const ingestClaudeSidecars = (
+    write: CacheWriteService,
     project?: string,
 ): Effect.Effect<
     IngestClaudeSidecarsStats,
-    DbError,
-    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
+    CacheWriteError,
+    AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const records = yield* discoverClaudeSidecarArtifacts({
             transcriptsDir: cfg.paths.transcriptsDir,
             ...(project === undefined ? {} : { project }),
@@ -1043,16 +1013,13 @@ export const ingestClaudeSidecars = (
             ...(project === undefined ? {} : { project }),
         });
         const usageEdges = yield* discoverClaudeSidecarUsageEdges({
-            db,
+            write,
             transcriptsDir: cfg.paths.transcriptsDir,
             artifacts: records,
         });
-        const statements = [
-            ...buildClaudeSidecarStatements(records),
-            ...buildClaudeSidecarUsageStatements(usageEdges),
-            ...buildClaudeSidecarPlanSnapshotStatements(planSnapshots),
-        ];
-        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeSidecars" });
+        yield* write.putMany("claude_sidecar_artifact", buildClaudeSidecarStatements(records));
+        yield* write.putMany("used_sidecar_artifact", buildClaudeSidecarUsageStatements(usageEdges));
+        for (const snapshot of planSnapshots) yield* writePlanSnapshot(write, snapshot);
         return {
             discovered: records.length,
             written: records.length,
@@ -1070,13 +1037,14 @@ export class ClaudeSidecarsStats extends BaseStageStats.extend<ClaudeSidecarsSta
 
 export const claudeSidecarsStage: StageDef<
     ClaudeSidecarsStats,
-    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
+    AxConfig | FileSystem.FileSystem | Path.Path,
+    CacheWriteError
 > = {
     meta: StageMeta.make({ key: "claude-sidecars", deps: ["claude", "subagents"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestClaudeSidecars(ctx.claudeProject);
+            const result = yield* ingestClaudeSidecars(write, ctx.claudeProject);
             return ClaudeSidecarsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.written} Claude sidecar artifacts, ${result.usageEdgesWritten} sidecar usage edges, and ${result.planSnapshotsWritten} sidecar plan snapshots`,

@@ -15,9 +15,9 @@
  * drift (ADR-0014). ROUTING_CLASSES remains the exported name for the shipped
  * default seed.
  */
-import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
+import { Effect, FileSystem, Path, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import {
     DEFAULT_ROUTING_TABLE,
     matchRoutingTable,
@@ -27,7 +27,6 @@ import {
 } from "@ax/hooks-sdk/routing-table";
 import { resolveDispatchModel } from "@ax/hooks-sdk/resolve-dispatch-model";
 import { type ModelPricing } from "../ingest/model-pricing.ts";
-import { SUBAGENT_SOURCES_SQL } from "../ingest/source-origin.ts";
 import { MODEL_ALIASES, reprice as repriceUsage, type RepriceUsage } from "./reprice.ts";
 import {
     defaultRoutingTablePath,
@@ -83,6 +82,47 @@ interface SpawnedRow {
     tool_use_id: string | null;
 }
 
+const SpawnedSchema = Schema.Struct({
+    parent_id: Schema.String,
+    child_id: Schema.String,
+    ts: TimestampColumn,
+    agent_type: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    tool_use_id: Schema.NullOr(Schema.String),
+});
+const UsageSchema = Schema.Struct({
+    session_id: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_read_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_create_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cost_usd: Schema.NullOr(Schema.Number),
+});
+const ToolCallSchema = Schema.Struct({
+    session_id: Schema.String,
+    call_id: Schema.String,
+    input_json: Schema.NullOr(Schema.String),
+});
+const ParentSessionSchema = Schema.Struct({
+    session_id: Schema.String,
+    model: Schema.NullOr(Schema.String),
+});
+const ChildLegSchema = Schema.Struct({
+    session_id: Schema.String,
+    model: Schema.String,
+    cost_usd: Schema.Number,
+    turns: NumberFromBigIntColumn,
+});
+const AgentModelSchema = Schema.Struct({
+    name: Schema.String,
+    input_per_million_usd: Schema.NullOr(Schema.Number),
+    output_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_read_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_creation_per_million_usd: Schema.NullOr(Schema.Number),
+});
+const HookFireSchema = Schema.Struct({ n: NumberFromBigIntColumn });
+
 interface UsageRow {
     session_id: string;
     model: string | null;
@@ -97,19 +137,6 @@ interface ToolCallRow {
     session_id: string;
     call_id: string;
     input_json: string | null;
-}
-
-interface ParentSessionRow {
-    session_id: string;
-    model: string | null;
-}
-
-interface AgentModelRow {
-    name: string;
-    input_per_million_usd: number | null;
-    output_per_million_usd: number | null;
-    cache_read_per_million_usd: number | null;
-    cache_creation_per_million_usd: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,22 +257,21 @@ export interface EconomyResult {
 // SQL queries (flat, no derefs in aggregates)
 // ---------------------------------------------------------------------------
 
-const SPAWNED_SQL = (sinceDays: number) => `
+const SPAWNED_SQL = `
 SELECT
-    type::string(in)  AS parent_id,
-    type::string(out) AS child_id,
-    type::string(ts)  AS ts,
+    in_id AS parent_id,
+    out_id AS child_id,
+    ts,
     agent_type,
     description,
     tool_use_id
 FROM spawned
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-  AND agent_type != NONE;
+WHERE ts > ? AND agent_type IS NOT NULL
 `;
 
-const USAGE_SQL = (sinceDays: number) => `
+const USAGE_SQL = `
 SELECT
-    type::string(session) AS session_id,
+    session AS session_id,
     model,
     prompt_tokens,
     completion_tokens,
@@ -253,27 +279,24 @@ SELECT
     cache_creation_input_tokens AS cache_create_tokens,
     estimated_cost_usd AS cost_usd
 FROM session_token_usage
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-  AND source IN ${SUBAGENT_SOURCES_SQL};
+WHERE ts > ? AND source IN ('claude-subagent', 'codex-subagent')
 `;
 
-const TOOL_CALLS_SQL = (sinceDays: number) => `
+const TOOL_CALLS_SQL = `
 SELECT
-    type::string(session) AS session_id,
+    session AS session_id,
     call_id,
     input_json
 FROM tool_call
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-  AND name = 'Agent';
+WHERE ts > ? AND name = 'Agent' AND call_id IS NOT NULL
 `;
 
-const PARENT_SESSIONS_SQL = (sinceDays: number) => `
+const PARENT_SESSIONS_SQL = `
 SELECT
-    type::string(id) AS session_id,
+    id AS session_id,
     model
 FROM session
-WHERE source NOT IN ${SUBAGENT_SOURCES_SQL}
-  AND started_at > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d;
+WHERE source NOT IN ('claude-subagent', 'codex-subagent') AND started_at > ?
 `;
 
 /**
@@ -281,19 +304,11 @@ WHERE source NOT IN ${SUBAGENT_SOURCES_SQL}
  * (raw fields only); the outer select stringifies the grouped record id, the
  * inner/outer shape mirrors graph-explorer's FILE_ATTENTION_SQL.
  */
-const CHILD_LEGS_SQL = (sinceDays: number) => `
-SELECT type::string(session) AS session_id, model, cost_usd, turns FROM (
-    SELECT
-        session,
-        model,
-        math::sum(estimated_cost_usd ?? 0) AS cost_usd,
-        count() AS turns
-    FROM turn_token_usage
-    WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-      AND source IN ${SUBAGENT_SOURCES_SQL}
-      AND model != NONE
-    GROUP BY session, model
-);
+const CHILD_LEGS_SQL = `
+SELECT session AS session_id, model, coalesce(sum(estimated_cost_usd), 0) AS cost_usd, count(*) AS turns
+FROM turn_token_usage
+WHERE ts > ? AND source IN ('claude-subagent', 'codex-subagent') AND model IS NOT NULL
+GROUP BY session, model
 `;
 
 const AGENT_MODELS_SQL = `
@@ -312,14 +327,42 @@ FROM agent_model;
  * so we match by contains. effect = "injected_context" means Verdict.advise
  * fired (stdout included hookSpecificOutput.additionalContext).
  */
-const ROUTE_DISPATCH_FIRES_SQL = (sinceDays: number) => `
-SELECT count() AS n
+const ROUTE_DISPATCH_FIRES_SQL = `
+SELECT count(*) AS n
 FROM hook_command_invocation
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
-  AND string::contains(hook_name, "route-dispatch")
-  AND effect = "injected_context"
-GROUP ALL;
+WHERE ts > ? AND contains(hook_name, 'route-dispatch') AND effect = 'injected_context'
 `;
+
+const cutoff = (days: number): Date =>
+    new Date(Date.now() - Math.max(1, Math.trunc(days)) * 86_400_000);
+
+const loadDispatchRows = (read: CacheReadService, sinceDays: number, legs: boolean) =>
+    Effect.gen(function* () {
+        const since = cutoff(sinceDays);
+        const [spawned, usage, toolCalls, parentSessions, childLegs] = yield* Effect.all([
+            read.rows(SpawnedSchema, SPAWNED_SQL, [since]),
+            read.rows(UsageSchema, USAGE_SQL, [since]),
+            read.rows(ToolCallSchema, TOOL_CALLS_SQL, [since]),
+            read.rows(ParentSessionSchema, PARENT_SESSIONS_SQL, [since]),
+            legs ? read.rows(ChildLegSchema, CHILD_LEGS_SQL, [since]) : Effect.succeed([]),
+        ], { concurrency: 5 });
+        return {
+            spawned: spawned.map((row): SpawnedRow => ({ ...row, ts: row.ts.toISOString() })),
+            usage: usage.map((row): UsageRow => ({
+                ...row,
+                prompt_tokens: row.prompt_tokens ?? 0,
+                completion_tokens: row.completion_tokens ?? 0,
+                cache_read_tokens: row.cache_read_tokens ?? 0,
+                cache_create_tokens: row.cache_create_tokens ?? 0,
+                cost_usd: Number.isFinite(row.cost_usd ?? 0) ? row.cost_usd ?? 0 : 0,
+            })),
+            toolCalls,
+            parentSessions,
+            childLegs,
+        };
+    });
+
+const loadPricing = (read: CacheReadService) => read.rows(AgentModelSchema, AGENT_MODELS_SQL);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -389,65 +432,23 @@ const parseInputJson = (raw: string | null): Record<string, unknown> => {
 // ---------------------------------------------------------------------------
 
 export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
-    function* (opts: { readonly sinceDays: number; readonly limit: number }) {
-        const db = yield* SurrealClient;
-
-        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, childLegsResult] =
-            yield* db.query<[
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-            ]>(
-                SPAWNED_SQL(opts.sinceDays) +
-                USAGE_SQL(opts.sinceDays) +
-                TOOL_CALLS_SQL(opts.sinceDays) +
-                PARENT_SESSIONS_SQL(opts.sinceDays) +
-                CHILD_LEGS_SQL(opts.sinceDays),
-            );
-
-        const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: stringFieldOr(r, "parent_id"),
-            child_id: stringFieldOr(r, "child_id"),
-            ts: stringFieldOr(r, "ts"),
-            agent_type: r.agent_type == null ? null : String(r.agent_type),
-            description: r.description == null ? null : String(r.description),
-            tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
-        }));
-
-        const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-            prompt_tokens: countField(r, "prompt_tokens"),
-            completion_tokens: countField(r, "completion_tokens"),
-            cache_read_tokens: countField(r, "cache_read_tokens"),
-            cache_create_tokens: countField(r, "cache_create_tokens"),
-            cost_usd: countField(r, "cost_usd"),
-        }));
-
-        const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            call_id: stringFieldOr(r, "call_id"),
-            input_json: r.input_json == null ? null : String(r.input_json),
-        }));
-
-        const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-        }));
+    function* (read: CacheReadService, opts: { readonly sinceDays: number; readonly limit: number }) {
+        const loaded = yield* loadDispatchRows(read, opts.sinceDays, true);
+        const spawnedRows = loaded.spawned;
+        const usageRows = loaded.usage;
+        const toolCallRows = loaded.toolCalls;
+        const parentSessionRows = loaded.parentSessions;
 
         // Per-model legs keyed by bare child session id
         const legsByChildId = new Map<string, DispatchLeg[]>();
-        for (const r of childLegsResult ?? []) {
-            const model = r.model == null ? null : String(r.model);
-            if (!model) continue;
-            const bare = cleanSessionId(stringFieldOr(r, "session_id"));
+        for (const r of loaded.childLegs) {
+            const model = r.model;
+            const bare = cleanSessionId(r.session_id);
             const list = legsByChildId.get(bare) ?? [];
             list.push({
                 model,
-                cost_usd: countField(r, "cost_usd"),
-                turns: countField(r, "turns"),
+                cost_usd: r.cost_usd,
+                turns: r.turns,
             });
             legsByChildId.set(bare, list);
         }
@@ -554,62 +555,16 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
 // ---------------------------------------------------------------------------
 
 export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidates")(
-    function* (opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
+    function* (read: CacheReadService, opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
         const table = opts.table ?? ROUTING_CLASSES;
-        const db = yield* SurrealClient;
-
-        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, agentModelsResult] =
-            yield* db.query<[
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-            ]>(
-                SPAWNED_SQL(opts.sinceDays) +
-                USAGE_SQL(opts.sinceDays) +
-                TOOL_CALLS_SQL(opts.sinceDays) +
-                PARENT_SESSIONS_SQL(opts.sinceDays) +
-                AGENT_MODELS_SQL,
-            );
-
-        const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: stringFieldOr(r, "parent_id"),
-            child_id: stringFieldOr(r, "child_id"),
-            ts: stringFieldOr(r, "ts"),
-            agent_type: r.agent_type == null ? null : String(r.agent_type),
-            description: r.description == null ? null : String(r.description),
-            tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
-        }));
-
-        const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-            prompt_tokens: countField(r, "prompt_tokens"),
-            completion_tokens: countField(r, "completion_tokens"),
-            cache_read_tokens: countField(r, "cache_read_tokens"),
-            cache_create_tokens: countField(r, "cache_create_tokens"),
-            cost_usd: countField(r, "cost_usd"),
-        }));
-
-        const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            call_id: stringFieldOr(r, "call_id"),
-            input_json: r.input_json == null ? null : String(r.input_json),
-        }));
-
-        const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-        }));
-
-        const agentModels: AgentModelRow[] = (agentModelsResult ?? []).map((r) => ({
-            name: stringFieldOr(r, "name"),
-            input_per_million_usd: r.input_per_million_usd == null ? null : Number(r.input_per_million_usd),
-            output_per_million_usd: r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
-            cache_read_per_million_usd: r.cache_read_per_million_usd == null ? null : Number(r.cache_read_per_million_usd),
-            cache_creation_per_million_usd: r.cache_creation_per_million_usd == null ? null : Number(r.cache_creation_per_million_usd),
-        }));
+        const [loaded, agentModels] = yield* Effect.all([
+            loadDispatchRows(read, opts.sinceDays, false),
+            loadPricing(read),
+        ], { concurrency: 2 });
+        const spawnedRows = loaded.spawned;
+        const usageRows = loaded.usage;
+        const toolCallRows = loaded.toolCalls;
+        const parentSessionRows = loaded.parentSessions;
 
         // Build lookup maps
         const usageByChildId = new Map<string, UsageRow>();
@@ -771,74 +726,19 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
 export const CHEAP_TIER_RE = /sonnet|haiku/i;
 
 export const fetchDispatchEconomy = Effect.fn("queries.fetchDispatchEconomy")(
-    function* (opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
+    function* (read: CacheReadService, opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
         const table = opts.table ?? ROUTING_CLASSES;
-        const db = yield* SurrealClient;
-
-        // Parallel: candidates data + cheap-ran data + hook fires
-        // Candidates fetch uses the same 4 queries as fetchDispatchCandidates.
-        // For the cheap-ran half we need the same spawned/usage/toolcall/parent
-        // data but filtered to cheap child models - reuse the same raw queries.
-        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, agentModelsResult, hookFiresResult] =
-            yield* db.query<[
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-                Array<Record<string, unknown>>,
-            ]>(
-                SPAWNED_SQL(opts.sinceDays) +
-                USAGE_SQL(opts.sinceDays) +
-                TOOL_CALLS_SQL(opts.sinceDays) +
-                PARENT_SESSIONS_SQL(opts.sinceDays) +
-                AGENT_MODELS_SQL +
-                ROUTE_DISPATCH_FIRES_SQL(opts.sinceDays),
-            );
-
-        const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: stringFieldOr(r, "parent_id"),
-            child_id: stringFieldOr(r, "child_id"),
-            ts: stringFieldOr(r, "ts"),
-            agent_type: r.agent_type == null ? null : String(r.agent_type),
-            description: r.description == null ? null : String(r.description),
-            tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
-        }));
-
-        const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-            prompt_tokens: countField(r, "prompt_tokens"),
-            completion_tokens: countField(r, "completion_tokens"),
-            cache_read_tokens: countField(r, "cache_read_tokens"),
-            cache_create_tokens: countField(r, "cache_create_tokens"),
-            cost_usd: countField(r, "cost_usd"),
-        }));
-
-        const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            call_id: stringFieldOr(r, "call_id"),
-            input_json: r.input_json == null ? null : String(r.input_json),
-        }));
-
-        const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: stringFieldOr(r, "session_id"),
-            model: r.model == null ? null : String(r.model),
-        }));
-
-        const agentModels: AgentModelRow[] = (agentModelsResult ?? []).map((r) => ({
-            name: stringFieldOr(r, "name"),
-            input_per_million_usd: r.input_per_million_usd == null ? null : Number(r.input_per_million_usd),
-            output_per_million_usd: r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
-            cache_read_per_million_usd: r.cache_read_per_million_usd == null ? null : Number(r.cache_read_per_million_usd),
-            cache_creation_per_million_usd: r.cache_creation_per_million_usd == null ? null : Number(r.cache_creation_per_million_usd),
-        }));
-
-        // Hook fire count
-        const hookFireRows = hookFiresResult ?? [];
-        const advise_fires = hookFireRows.length > 0
-            ? Number((hookFireRows[0] as Record<string, unknown>).n ?? 0)
-            : 0;
+        const since = cutoff(opts.sinceDays);
+        const [loaded, agentModels, hookFireRows] = yield* Effect.all([
+            loadDispatchRows(read, opts.sinceDays, false),
+            loadPricing(read),
+            read.rows(HookFireSchema, ROUTE_DISPATCH_FIRES_SQL, [since]),
+        ], { concurrency: 3 });
+        const spawnedRows = loaded.spawned;
+        const usageRows = loaded.usage;
+        const toolCallRows = loaded.toolCalls;
+        const parentSessionRows = loaded.parentSessions;
+        const advise_fires = hookFireRows[0]?.n ?? 0;
         const advise_fires_available = hookFireRows.length > 0;
 
         // Build lookup maps (mirrors fetchDispatchCandidates)

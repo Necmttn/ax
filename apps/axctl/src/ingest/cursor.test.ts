@@ -6,7 +6,6 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
-    __testBuildCursorBatchStatements,
     __testFindCursorStateDbs,
     __testIncludeCursorByMtime,
     extractCursorStateDb,
@@ -334,13 +333,6 @@ describe("Cursor state.vscdb extraction", () => {
                 skill: "cursor:run_terminal_command_v2",
             });
 
-            const statements = __testBuildCursorBatchStatements(extracted, dbPath);
-            expect(statements.some((statement) => statement.includes("tool_call"))).toBe(true);
-            expect(statements.some((statement) => statement.includes("cursor:run_terminal_command_v2"))).toBe(true);
-            expect(statements.some((statement) => statement.includes("->invoked:"))).toBe(true);
-            expect(statements.some((statement) => statement.includes(`session = session:\`${extracted.sessions[0]?.id}\``))).toBe(true);
-            expect(statements.some((statement) => statement.includes("->concerns:"))).toBe(true);
-            expect(statements.join("\n")).toContain("git status");
         });
     });
 

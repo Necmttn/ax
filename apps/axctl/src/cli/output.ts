@@ -26,11 +26,12 @@ export const wantsJsonFlag = (json: boolean): boolean =>
  */
 export const catchDbErrorAndExit =
     (prefix: string) =>
-    <A, E extends { readonly message: string }, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, never, R> =>
+    <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, never, R> =>
         eff.pipe(
             Effect.catch((e: E) =>
                 Effect.promise(async () => {
-                    process.stderr.write(`${prefix}: DB error - ${e.message}\n`);
+                    const message = e instanceof Error ? e.message : String(e);
+                    process.stderr.write(`${prefix}: DB error - ${message}\n`);
                     process.exit(1);
                 }),
             ),
