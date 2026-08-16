@@ -451,19 +451,19 @@ export const fetchPeakHour = Effect.fn("profile.fetchPeakHour")(
 
 // --- spawned count -----------------------------------------------------------
 
-const SPAWNED_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const SPAWNED_COUNT_SQL = `
+SELECT count(*) AS count
 FROM spawned
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
+
+const CountRow = Schema.Struct({ count: NumberFromBigIntColumn });
 
 export const fetchSpawnedCount = Effect.fn("profile.fetchSpawnedCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SPAWNED_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return Number(rows[0]?.count ?? 0);
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(CountRow, `${SPAWNED_COUNT_SQL} ${within.sql}`, within.params);
+        return rows[0]?.count ?? 0;
     },
 );
 

@@ -230,16 +230,16 @@ describe("fetchPeakHour", () => {
 
 describe("fetchSpawnedCount", () => {
     test("returns spawned count in window", async () => {
-        const db = makeMockDb([[[{ count: 420 }]]]);
-        const r = await runWithMock(db, fetchSpawnedCount({ windowDays: 30 }));
+        const cache = cacheRead({ "FROM spawned": [{ count: 420 }] });
+        const r = await runCache(fetchSpawnedCount({ windowDays: 30 }), cache.layer);
         expect(r).toBe(420);
-        expect(db.captured[0]).toContain("FROM spawned");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain("FROM spawned");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 
     test("empty -> 0", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchSpawnedCount({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchSpawnedCount({ windowDays: 30 }), cache.layer);
         expect(r).toBe(0);
     });
 });
