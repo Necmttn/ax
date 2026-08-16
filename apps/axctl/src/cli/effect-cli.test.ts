@@ -61,11 +61,29 @@ describe("effect cli", () => {
     test("retired top-level commands are gone", () => {
         const names = topLevelNames();
 
-        // "daemon" retired in wave 3 (daemon subtraction): embedded DuckDB
-        // needs no background LaunchAgent lifecycle to manage.
-        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve", "dashboard", "interventions", "daemon"]) {
+        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve", "dashboard", "interventions"]) {
             expect(names).not.toContain(removed);
         }
+    });
+
+    test("daemon survives ONLY as a retirement stub, not as a daemon surface", () => {
+        // `daemon` is deliberately NOT in the removed list above. The LaunchAgent
+        // lifecycle it managed is gone, but `.github/workflows/ci.yml` smoke-tests
+        // `axctl daemon status --json`, and that file cannot be edited from this
+        // branch - the push token lacks the `workflow` scope, and GitHub rejects
+        // the whole push when any commit touches `.github/workflows/`. Deleting
+        // the verb turns CI red with no in-branch fix.
+        //
+        // So it stays, reporting the truth. This test pins BOTH halves: the verb
+        // still answers, and it answers with an empty daemon list - so a future
+        // change cannot quietly restore a working daemon surface behind it.
+        expect(topLevelNames()).toContain("daemon");
+
+        // Runtime "none" is the load-bearing half: it proves the stub reaches no
+        // engine at all. Hidden keeps it out of help so nobody discovers it as a
+        // feature.
+        expect(entryRuntime(RUNTIME_BY_COMMAND.daemon)).toBe("none");
+        expect(entryHidden(RUNTIME_BY_COMMAND.daemon)).toBe(true);
     });
 
     test("dogfood is hidden by default", () => {
