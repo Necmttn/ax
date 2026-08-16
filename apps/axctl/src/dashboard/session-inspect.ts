@@ -13,10 +13,11 @@ import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn, JsonArrayColumn } from "@ax/lib/duckdb/columns";
-import { cacheRows, cacheFirst } from "@ax/lib/duckdb/query";
+import { cacheRows, cacheFirst, runCacheSingleQuery } from "@ax/lib/duckdb/query";
 import { inClause } from "@ax/lib/duckdb/clause";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
+import { sessionTokenUsageCacheQuery } from "../queries/session-detail-cache.ts";
 import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
@@ -353,23 +354,17 @@ const ChildSessionDbRow = Schema.Struct({
     started_at: Schema.NullOr(TimestampColumn),
     ended_at: Schema.NullOr(TimestampColumn),
 });
-const HOOK_FIRES_SQL = `
-    SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
-    FROM hook_fire
-    WHERE session = $sid
-    ORDER BY ts ASC;
-`;
-const TOKEN_USAGE_SQL = `
-    SELECT model, prompt_tokens, completion_tokens,
-           cache_creation_input_tokens, cache_read_input_tokens,
-           estimated_tokens,
-           estimated_input_cost_usd, estimated_output_cost_usd,
-           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source
-    FROM session_token_usage
-    WHERE session = $sid
-    LIMIT 1;
-`;
+const HookFireDbRow = Schema.Struct({
+    ts: TimestampColumn,
+    event: Schema.String,
+    file_path: Schema.String,
+    inject: Schema.Boolean,
+    reason: Schema.String,
+    latency_ms: NumberFromBigIntColumn,
+    injected_titles: JsonArrayColumn(Schema.String),
+});
+// (session_token_usage row shape/query reused from session-detail-cache.ts's
+// sessionTokenUsageCacheQuery below - no local schema needed.)
 const TURN_TOKEN_USAGE_SQL = `
     SELECT seq, model, prompt_tokens, completion_tokens,
            cache_creation_input_tokens, cache_read_input_tokens,
@@ -392,18 +387,7 @@ const TURN_TOKEN_USAGE_FOR_REFS_SQL = `
     ORDER BY seq ASC;
 `;
 
-/** Raw shape returned by Surreal for hook_fire SELECT. Datetime fields come
- *  back as JS Date via the SDK. */
-interface HookFireRow {
-    readonly ts: Date | string;
-    readonly event: string;
-    readonly file_path: string;
-    readonly inject: boolean;
-    readonly reason: string;
-    readonly latency_ms: number;
-    readonly injected_titles: ReadonlyArray<string> | null;
-}
-interface TokenUsageRow {
+interface TurnTokenUsageRow {
     readonly model: string | null;
     readonly prompt_tokens: number | null;
     readonly completion_tokens: number | null;
@@ -416,8 +400,6 @@ interface TokenUsageRow {
     readonly estimated_cache_read_cost_usd?: number | null;
     readonly estimated_cost_usd: number | null;
     readonly pricing_source: string | null;
-}
-interface TurnTokenUsageRow extends TokenUsageRow {
     readonly seq: number;
     readonly fresh_input_tokens: number | null;
     readonly usage_source: string | null;
@@ -584,41 +566,34 @@ const resolveChildStats = (
  *  window filter happens after assigning stable idx so paginating doesn't
  *  shift the dom anchors. Degrades to [] on DB error - hook telemetry is
  *  decorative for the inspector, not load-bearing. */
-const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, SurrealClient> =>
-    queryMany<HookFireRow, HookFireDto>(
-        interpolateRid(HOOK_FIRES_SQL, toBareSessionId(sessionId)),
-        (row, idx) => ({
-            idx,
-            ts: row.ts instanceof Date ? row.ts.toISOString() : String(row.ts),
-            event: row.event,
-            file_path: row.file_path,
-            inject: row.inject,
-            reason: row.reason,
-            latency_ms: row.latency_ms,
-            injected_titles: row.injected_titles ?? [],
-        }),
-        "session-inspect resolveHookFires",
+const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, CacheRead> =>
+    cacheRows(
+        HookFireDbRow,
+        {
+            sql: `SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
+                  FROM hook_fire WHERE session = ? ORDER BY ts ASC`,
+            params: [sessionId],
+        },
+        "session-inspect.hook_fires",
+    ).pipe(
+        Effect.map((rows) =>
+            rows.map((row, idx) => ({
+                idx,
+                ts: row.ts.toISOString(),
+                event: row.event,
+                file_path: row.file_path,
+                inject: row.inject,
+                reason: row.reason,
+                latency_ms: row.latency_ms,
+                injected_titles: row.injected_titles ?? [],
+            })),
+        ),
     );
 
-const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, SurrealClient> =>
-    queryOptional<TokenUsageRow, SessionTokenUsageDetail>(
-        interpolateRid(TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            model: row.model ?? null,
-            prompt_tokens: row.prompt_tokens ?? null,
-            completion_tokens: row.completion_tokens ?? null,
-            cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
-            cache_read_input_tokens: row.cache_read_input_tokens ?? null,
-            estimated_tokens: Number(row.estimated_tokens ?? 0),
-            estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
-            estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
-            estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
-            estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
-            estimated_cost_usd: row.estimated_cost_usd ?? null,
-            pricing_source: row.pricing_source ?? null,
-        }),
-        "session-inspect resolveTokenUsage",
-    );
+// Reuses the existing session-detail-cache.ts query (identical shape/SQL to
+// what this resolver used to run itself) rather than duplicating it.
+const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, CacheRead> =>
+    runCacheSingleQuery(sessionTokenUsageCacheQuery, { sessionId });
 
 const mapTurnTokenUsageRow = (row: TurnTokenUsageRow): TurnTokenUsageDetail => ({
     seq: Number(row.seq),
