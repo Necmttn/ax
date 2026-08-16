@@ -66,7 +66,13 @@ const PROJECT_RECENT_SESSIONS_SQL = `
     SELECT id, source, started_at, ended_at, model, cwd
     FROM session
     WHERE project = ?
-    ORDER BY started_at DESC
+    -- `id` breaks the tie deliberately. Sessions that started inside the same
+    -- timestamp resolution are common (a parent and the subagent it spawns), and
+    -- with `started_at` alone the row order is whatever the scan happens to
+    -- produce - it differed between macOS and Linux CI on the same fixture. An
+    -- ordering that reshuffles between refreshes is a real defect in a "recent
+    -- sessions" list, not just a flaky assertion.
+    ORDER BY started_at DESC, id DESC
     LIMIT 20
 `;
 
