@@ -97,7 +97,7 @@ export const fetchToolFailures = (): Effect.Effect<
                         count(*) AS failure_count,
                         MAX(ts) AS last_seen,
                         COUNT(DISTINCT session) AS distinct_sessions,
-                        COALESCE(to_json(list(DISTINCT exit_code))::VARCHAR, '[]') AS exit_codes
+                        COALESCE(to_json(list(DISTINCT exit_code) FILTER (WHERE exit_code IS NOT NULL))::VARCHAR, '[]') AS exit_codes
                       FROM tool_call
                       WHERE has_error = true AND COALESCE(command_norm, name) IS NOT NULL
                       GROUP BY label
