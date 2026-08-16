@@ -40,6 +40,10 @@ const snapshotFilename = (input: {
 export const pushCurrentTeamProfile = Effect.fn("team.pushCurrentTeamProfile")(
     function* (input: {
         readonly repoKey: string;
+        /** The DuckDB cache's `repository` row id (null when never ingested -
+         *  the pushed profile then has zero sessions, same as an unmatched
+         *  Surreal record used to). */
+        readonly repositoryId: string | null;
         readonly bindingsPath: string;
         readonly publishStatePath: string;
         readonly windowDays: number;
@@ -76,6 +80,7 @@ export const pushCurrentTeamProfile = Effect.fn("team.pushCurrentTeamProfile")(
         const profile = yield* buildTeamProfile({
             org: binding.org,
             repoKey: input.repoKey,
+            repositoryId: input.repositoryId,
             windowDays: input.windowDays,
             // Bindings call named sharing "full"; TeamProfileV1 calls it "public".
             share: anonymous ? "anon" : "public",

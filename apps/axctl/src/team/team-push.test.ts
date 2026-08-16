@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { makeMockDb } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { Effect, Layer } from "effect";
 import { GitHubEnvTest } from "../profile/github-env.ts";
 import { savePublishState } from "../profile/publish-state.ts";
@@ -22,6 +23,7 @@ describe("pushCurrentTeamProfile", () => {
         const outcome = await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey: "repo-unbound",
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,
@@ -31,7 +33,7 @@ describe("pushCurrentTeamProfile", () => {
                     onSuccess: (value) => ({ ok: true as const, value }),
                     onFailure: (error) => ({ ok: false as const, error }),
                 }),
-                Effect.provide(Layer.merge(github.layer, db.layer)),
+                Effect.provide(Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer)),
             ),
         );
 
@@ -63,11 +65,12 @@ describe("pushCurrentTeamProfile", () => {
         const firstResult = await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey,
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.merge(first.layer, db.layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(first.layer, db.layer, makeTestCacheRead().layer))),
         );
 
         expect(firstResult.file).toBe(".ax-team/alice.json");
@@ -93,11 +96,12 @@ describe("pushCurrentTeamProfile", () => {
         await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey,
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.merge(second.layer, db.layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(second.layer, db.layer, makeTestCacheRead().layer))),
         );
 
         expect(second.calls.map(({ method, path: callPath }) => `${method} ${callPath}`)).toEqual([
@@ -135,11 +139,12 @@ describe("pushCurrentTeamProfile", () => {
         const result = await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey,
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.merge(github.layer, db.layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer))),
         );
 
         expect(result.anonymous).toBe(true);
@@ -180,11 +185,12 @@ describe("pushCurrentTeamProfile", () => {
             login: "alice",
         });
         const db = makeMockDb(new Map());
-        const layer = Layer.merge(github.layer, db.layer);
+        const layer = Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer);
 
         await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey: "repo-one",
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,
@@ -194,6 +200,7 @@ describe("pushCurrentTeamProfile", () => {
         await Effect.runPromise(
             pushCurrentTeamProfile({
                 repoKey: "repo-two",
+                repositoryId: null,
                 bindingsPath,
                 publishStatePath,
                 windowDays: 30,

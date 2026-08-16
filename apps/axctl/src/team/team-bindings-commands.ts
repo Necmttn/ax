@@ -1,4 +1,4 @@
-import type { PwdResolution } from "../pwd.ts";
+import type { PwdCacheResolution } from "../pwd.ts";
 import {
     DEFAULT_TEAM_SHARE,
     bindingFor,
@@ -9,14 +9,19 @@ import {
 } from "./team-bindings-state.ts";
 
 export interface TeamRepositoryContext {
+    /** Git-derived key. Local-only identity: keys the `~/.ax/team-bindings.json`
+     *  file, independent of any DB schema or row-id recipe. */
     readonly repoKey: string;
     readonly name: string;
     readonly repoRoot: string;
     readonly remoteUrlNormalized: string | null;
+    /** The DuckDB cache's `repository` ROW id for this repo, or `null` when the
+     *  cache has never ingested it yet (nothing to build a profile from). */
+    readonly repositoryId: string | null;
 }
 
 export const teamRepositoryContext = (
-    resolution: PwdResolution,
+    resolution: PwdCacheResolution,
 ): TeamRepositoryContext => ({
     repoKey: resolution.identity.repositoryKey,
     name:
@@ -25,6 +30,7 @@ export const teamRepositoryContext = (
         resolution.repoRoot,
     repoRoot: resolution.repoRoot,
     remoteUrlNormalized: resolution.remoteUrlNormalized,
+    repositoryId: resolution.repositoryId,
 });
 
 type WriteLine = (line: string) => void;
