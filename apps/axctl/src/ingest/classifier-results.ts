@@ -1,5 +1,4 @@
 import { Effect, Schema } from "effect";
-import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import {
     buildEventWindows,
     enrichEventWindowsWithToolCalls,
@@ -151,7 +150,7 @@ const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Ef
             text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn,
         }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, role, message_kind, text, text_excerpt, ts
 FROM turn
-${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
@@ -164,7 +163,7 @@ const fetchToolCalls = (write: CacheWriteService, sinceDays: number | undefined)
             has_error: Schema.Boolean, ts: TimestampColumn,
         }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, name, command_norm, command_text, output_excerpt, error_text, has_error, ts
 FROM tool_call
-${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY session, ts`, sinceDays === undefined ? [] : [sinceDays + 1]);
     });
 
@@ -175,7 +174,7 @@ const fetchEditedFiles = (write: CacheWriteService, sinceDays: number | undefine
             seq: Schema.NullOr(Schema.Number), ts: TimestampColumn,
         }), `SELECT e.in_id AS turn, e.out_id AS file, e.session, CAST(t.seq AS DOUBLE) AS seq, e.ts
              FROM edited e LEFT JOIN turn t ON t.id = e.in_id
-             ${sinceDays === undefined ? "" : `WHERE e.ts >= ${daysAgoExpr}`}
+             ${sinceDays === undefined ? "" : "WHERE e.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
              ORDER BY e.ts`, sinceDays === undefined ? [] : [sinceDays + 1]);
     });
 

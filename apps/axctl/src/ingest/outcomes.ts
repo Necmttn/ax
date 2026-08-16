@@ -1,5 +1,4 @@
 import { Effect, Schema } from "effect";
-import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
@@ -215,7 +214,7 @@ const fetchToolCalls = (write: CacheWriteService, sinceDays: number | undefined)
         }), `SELECT id, session, turn, name, command_norm, command_text, output_excerpt, error_text,
                     CAST(exit_code AS DOUBLE) AS exit_code, has_error, status, ts
 FROM tool_call
-${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY ts DESC`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
@@ -226,7 +225,7 @@ const fetchUserTurns = (write: CacheWriteService, sinceDays: number | undefined)
             text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn, has_error: Schema.Boolean,
         }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, text_excerpt, ts, has_error
 FROM turn
-WHERE role = 'user' ${sinceDays === undefined ? "" : `AND ts >= ${daysAgoExpr}`}
+WHERE role = 'user' ${sinceDays === undefined ? "" : "AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY ts DESC`, sinceDays === undefined ? [] : [sinceDays]);
     });
 

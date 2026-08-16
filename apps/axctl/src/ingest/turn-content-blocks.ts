@@ -1,5 +1,4 @@
 import { Effect, Schema } from "effect";
-import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "./record-keys.ts";
@@ -105,7 +104,7 @@ const fetchTurnRows = (
         return yield* write.rows(Row, `
 SELECT id, session, agent_event, CAST(seq AS DOUBLE) AS seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, ts
 FROM turn
-${sinceDays === undefined ? "" : `WHERE ts >= ${daysAgoExpr}`}
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 

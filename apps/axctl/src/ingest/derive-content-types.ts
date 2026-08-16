@@ -13,7 +13,6 @@
  */
 
 import { Effect, Schema } from "effect";
-import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
@@ -133,7 +132,7 @@ export const rowsSql = (sinceDays: number | undefined): string => `
 SELECT id, session, name,
        input_json AS inputJson, output_excerpt AS outputExcerpt,
        length(output_json) AS bytes, ts
-FROM tool_call WHERE output_json IS NOT NULL ${sinceDays === undefined ? "" : `AND ts >= ${daysAgoExpr}`};
+FROM tool_call WHERE output_json IS NOT NULL ${sinceDays === undefined ? "" : "AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"};
 `;
 
 export interface DeriveContentTypeStats {
