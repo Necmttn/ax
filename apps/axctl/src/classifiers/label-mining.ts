@@ -1,4 +1,6 @@
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isControlOrContextText } from "./control-text.ts";
 
 /**
@@ -737,14 +739,32 @@ export interface LabelMiningVectorRow {
     readonly nearest_scores: readonly number[];
 }
 
+/**
+ * One row this projection will `put` into the main DuckDB cache -
+ * `classifier_graph_{node,edge,fact}` (shared with package-operations.ts's
+ * write plan) plus `transcript_label_vector`. `transcript_label_review` is
+ * NOT here: it lives in the judgment sidecar (a separate DuckDB, written via
+ * `Judgment.transaction` in label-mining-service.ts), never this seam.
+ * `label` is a human-readable description, kept for `statements` and never
+ * executed as SQL - see the identical convention in package-operations.ts.
+ */
+export interface LabelMiningGraphWriteRow {
+    readonly table: "classifier_graph_node" | "classifier_graph_edge" | "classifier_graph_fact" | "transcript_label_vector";
+    readonly row: Readonly<Record<string, DuckDbParam>>;
+    readonly label: string;
+}
+
 export interface LabelMiningGraphProjection {
     readonly nodes: readonly LabelMiningGraphNode[];
     readonly edges: readonly LabelMiningGraphEdge[];
     readonly facts: readonly LabelMiningGraphFact[];
     readonly review_rows: readonly LabelMiningReviewedRow[];
     readonly vector_rows: readonly LabelMiningVectorRow[];
-    /** Idempotent UPSERT statements (deterministic order) for all rows above. */
+    /** Human-readable description of each write in `rows`, deterministic order. */
     readonly statements: readonly string[];
+    /** The structured payload actually written - `transcript_label_review` is
+     *  excluded (see {@link LabelMiningGraphWriteRow}); same order as `statements`. */
+    readonly rows: readonly LabelMiningGraphWriteRow[];
     readonly accepted_count: number;
     readonly promotion_safe_fact_count: number;
 }
@@ -765,31 +785,6 @@ const graphFactId = (candidateId: string, predicate: string): string =>
 const graphEdgeId = (candidateId: string, idx: number): string =>
     `tlmg_edge__${safeKeyPart(candidateId)}__${idx}__${stableId(["edge", candidateId, String(idx)])}`;
 
-/** Deterministic SurrealQL string literal (escapes `\` and `'`). */
-const surqlString = (value: string): string =>
-    `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-
-/**
- * Backtick-quoted record-id part. A record id after `:` must be an identifier,
- * not a single-quoted strand (SurrealDB v3 rejects `table:'id'`); backtick
- * quoting is the safe form for arbitrary string keys.
- */
-const surqlRecordId = (value: string): string =>
-    `\`${value.replace(/`/g, "")}\``;
-
-/**
- * Build a single idempotent UPSERT keyed by the row's stable string id. Fields
- * are emitted in a fixed order so re-running over identical input is byte-stable.
- */
-const upsert = (
-    table: string,
-    id: string,
-    fields: readonly (readonly [string, string])[],
-): string => {
-    const set = fields.map(([key, expr]) => `${key} = ${expr}`).join(", ");
-    return `UPSERT ${table}:${surqlRecordId(id)} SET ${set}`;
-};
-
 const PROMOTION_SAFE_STATUS = "accepted" as const;
 
 export function projectReviewedLabelsToGraph(input: {
@@ -804,7 +799,6 @@ export function projectReviewedLabelsToGraph(input: {
     const edges: LabelMiningGraphEdge[] = [];
     const facts: LabelMiningGraphFact[] = [];
     const reviewRows: LabelMiningReviewedRow[] = [];
-    const statements: string[] = [];
 
     // Accepted reviews keyed by candidate id, used to join vector rows back.
     const acceptedFactByCandidate = new Map<string, string>();
@@ -957,65 +951,77 @@ export function projectReviewedLabelsToGraph(input: {
         });
     }
 
-    // Build idempotent UPSERT statements in a fixed, deterministic order.
+    // Build the DuckDB write rows in a fixed, deterministic order. NOTE:
+    // `transcript_label_review` is deliberately absent here - it lives in the
+    // judgment sidecar (see the doc comment on LabelMiningGraphWriteRow) and
+    // was always excluded before the row is applied even when this emitted
+    // SurrealQL text for it.
+    const rows: LabelMiningGraphWriteRow[] = [];
     for (const node of [...nodes].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
-        statements.push(upsert("classifier_graph_node", node.graph_id, [
-            ["graph_id", surqlString(node.graph_id)],
-            ["kind", surqlString(node.kind)],
-            ["label", surqlString(node.label)],
-            ["properties_json", surqlString(node.properties_json)],
-            ["source_kind", surqlString(node.source_kind)],
-        ]));
+        rows.push({
+            table: "classifier_graph_node",
+            row: cacheRow({
+                id: node.graph_id,
+                graph_id: node.graph_id,
+                kind: node.kind,
+                label: node.label,
+                properties_json: node.properties_json,
+                source_kind: node.source_kind,
+            }),
+            label: `PUT classifier_graph_node ${node.graph_id}`,
+        });
     }
     for (const edge of [...edges].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
-        statements.push(upsert("classifier_graph_edge", edge.graph_id, [
-            ["graph_id", surqlString(edge.graph_id)],
-            ["kind", surqlString(edge.kind)],
-            ["from_id", surqlString(edge.from_id)],
-            ["to_id", surqlString(edge.to_id)],
-            ["evidence_path", surqlString(edge.evidence_path)],
-            ["properties_json", surqlString(edge.properties_json)],
-            ["source_kind", surqlString(edge.source_kind)],
-        ]));
+        rows.push({
+            table: "classifier_graph_edge",
+            row: cacheRow({
+                id: edge.graph_id,
+                graph_id: edge.graph_id,
+                kind: edge.kind,
+                from_id: edge.from_id,
+                to_id: edge.to_id,
+                evidence_path: edge.evidence_path,
+                properties_json: edge.properties_json,
+                source_kind: edge.source_kind,
+            }),
+            label: `PUT classifier_graph_edge ${edge.graph_id}`,
+        });
     }
     for (const fact of [...facts].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
-        statements.push(upsert("classifier_graph_fact", fact.graph_id, [
-            ["graph_id", surqlString(fact.graph_id)],
-            ["kind", surqlString(fact.kind)],
-            ["subject", surqlString(fact.subject)],
-            ["predicate", surqlString(fact.predicate)],
-            ["object", fact.object !== undefined ? surqlString(fact.object) : "NONE"],
-            ["value_json", fact.value_json !== undefined ? surqlString(fact.value_json) : "NONE"],
-            ["evidence_edges_json", surqlString(fact.evidence_edges_json)],
-            ["properties_json", surqlString(fact.properties_json)],
-            ["source_kind", surqlString(fact.source_kind)],
-        ]));
-    }
-    for (const row of [...reviewRows].sort((a, b) => a.candidate_id.localeCompare(b.candidate_id))) {
-        statements.push(upsert("transcript_label_review", row.candidate_id, [
-            ["candidate_id", surqlString(row.candidate_id)],
-            ["graph_fact_id", row.graph_fact_id !== undefined ? surqlString(row.graph_fact_id) : "NONE"],
-            ["label_family", surqlString(row.label_family)],
-            ["review_status", surqlString(row.review_status)],
-            ["promotion_safe", row.promotion_safe ? "true" : "false"],
-            ["reviewed_label", row.reviewed_label !== undefined ? surqlString(row.reviewed_label) : "NONE"],
-            ["reviewed_target", row.reviewed_target !== undefined ? surqlString(row.reviewed_target) : "NONE"],
-            ["reviewer", surqlString(row.reviewer)],
-            ["rationale", surqlString(row.rationale)],
-            ["evidence_paths_json", surqlString(JSON.stringify(row.evidence_paths))],
-        ]));
+        rows.push({
+            table: "classifier_graph_fact",
+            row: cacheRow({
+                id: fact.graph_id,
+                graph_id: fact.graph_id,
+                kind: fact.kind,
+                subject: fact.subject,
+                predicate: fact.predicate,
+                object: fact.object ?? null,
+                value_json: fact.value_json ?? null,
+                evidence_edges_json: fact.evidence_edges_json,
+                properties_json: fact.properties_json,
+                source_kind: fact.source_kind,
+            }),
+            label: `PUT classifier_graph_fact ${fact.graph_id}`,
+        });
     }
     for (const row of [...vectorRows].sort((a, b) => a.id.localeCompare(b.id))) {
-        statements.push(upsert("transcript_label_vector", row.id, [
-            ["candidate_id", surqlString(row.candidate_id)],
-            ["graph_fact_id", row.graph_fact_id !== undefined ? surqlString(row.graph_fact_id) : "NONE"],
-            ["embedding_model", surqlString(row.embedding_model)],
-            ["embedding_dim", String(row.embedding_dim)],
-            ["embedding_ref", surqlString(row.embedding_ref)],
-            ["nearest_reviewed_candidate_ids_json", surqlString(JSON.stringify(row.nearest_reviewed_candidate_ids))],
-            ["nearest_scores_json", surqlString(JSON.stringify(row.nearest_scores))],
-        ]));
+        rows.push({
+            table: "transcript_label_vector",
+            row: cacheRow({
+                id: row.id,
+                candidate_id: row.candidate_id,
+                graph_fact_id: row.graph_fact_id ?? null,
+                embedding_model: row.embedding_model,
+                embedding_dim: row.embedding_dim,
+                embedding_ref: row.embedding_ref,
+                nearest_reviewed_candidate_ids_json: jsonParam(row.nearest_reviewed_candidate_ids),
+                nearest_scores_json: jsonParam(row.nearest_scores),
+            }),
+            label: `PUT transcript_label_vector ${row.id}`,
+        });
     }
+    const statements = rows.map((entry) => entry.label);
 
     return {
         nodes,
@@ -1024,6 +1030,7 @@ export function projectReviewedLabelsToGraph(input: {
         review_rows: reviewRows,
         vector_rows: vectorRows,
         statements,
+        rows,
         accepted_count: acceptedCount,
         promotion_safe_fact_count: promotionSafeFactCount,
     };
