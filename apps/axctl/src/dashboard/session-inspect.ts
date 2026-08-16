@@ -365,46 +365,32 @@ const HookFireDbRow = Schema.Struct({
 });
 // (session_token_usage row shape/query reused from session-detail-cache.ts's
 // sessionTokenUsageCacheQuery below - no local schema needed.)
-const TURN_TOKEN_USAGE_SQL = `
-    SELECT seq, model, prompt_tokens, completion_tokens,
+const TURN_TOKEN_USAGE_COLUMNS = `seq, model, prompt_tokens, completion_tokens,
            cache_creation_input_tokens, cache_read_input_tokens,
            fresh_input_tokens, estimated_tokens,
            estimated_input_cost_usd, estimated_output_cost_usd,
            estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source, usage_source, usage_quality
-    FROM turn_token_usage
-    WHERE session = $sid
-    ORDER BY seq ASC;
-`;
-const TURN_TOKEN_USAGE_FOR_REFS_SQL = `
-    SELECT seq, model, prompt_tokens, completion_tokens,
-           cache_creation_input_tokens, cache_read_input_tokens,
-           fresh_input_tokens, estimated_tokens,
-           estimated_input_cost_usd, estimated_output_cost_usd,
-           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source, usage_source, usage_quality
-    FROM $refs
-    ORDER BY seq ASC;
-`;
+           estimated_cost_usd, pricing_source, usage_source, usage_quality`;
 
-interface TurnTokenUsageRow {
-    readonly model: string | null;
-    readonly prompt_tokens: number | null;
-    readonly completion_tokens: number | null;
-    readonly cache_creation_input_tokens: number | null;
-    readonly cache_read_input_tokens: number | null;
-    readonly estimated_tokens: number;
-    readonly estimated_input_cost_usd?: number | null;
-    readonly estimated_output_cost_usd?: number | null;
-    readonly estimated_cache_creation_cost_usd?: number | null;
-    readonly estimated_cache_read_cost_usd?: number | null;
-    readonly estimated_cost_usd: number | null;
-    readonly pricing_source: string | null;
-    readonly seq: number;
-    readonly fresh_input_tokens: number | null;
-    readonly usage_source: string | null;
-    readonly usage_quality: string | null;
-}
+const TurnTokenUsageDbRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    fresh_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_tokens: NumberFromBigIntColumn,
+    estimated_input_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_output_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cache_creation_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cache_read_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String),
+    usage_source: Schema.NullOr(Schema.String),
+    usage_quality: Schema.NullOr(Schema.String),
+});
+type TurnTokenUsageRow = typeof TurnTokenUsageDbRow.Type;
 interface GraphTurnRow {
     readonly seq: number;
     readonly role: string;
@@ -596,46 +582,55 @@ const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDe
     runCacheSingleQuery(sessionTokenUsageCacheQuery, { sessionId });
 
 const mapTurnTokenUsageRow = (row: TurnTokenUsageRow): TurnTokenUsageDetail => ({
-    seq: Number(row.seq),
-    model: row.model ?? null,
-    prompt_tokens: row.prompt_tokens ?? null,
-    completion_tokens: row.completion_tokens ?? null,
-    cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
-    cache_read_input_tokens: row.cache_read_input_tokens ?? null,
-    fresh_input_tokens: row.fresh_input_tokens ?? null,
-    estimated_tokens: Number(row.estimated_tokens ?? 0),
-    estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
-    estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
-    estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
-    estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
-    estimated_cost_usd: row.estimated_cost_usd ?? null,
-    pricing_source: row.pricing_source ?? null,
+    seq: row.seq,
+    model: row.model,
+    prompt_tokens: row.prompt_tokens,
+    completion_tokens: row.completion_tokens,
+    cache_creation_input_tokens: row.cache_creation_input_tokens,
+    cache_read_input_tokens: row.cache_read_input_tokens,
+    fresh_input_tokens: row.fresh_input_tokens,
+    estimated_tokens: row.estimated_tokens,
+    estimated_input_cost_usd: row.estimated_input_cost_usd,
+    estimated_output_cost_usd: row.estimated_output_cost_usd,
+    estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd,
+    estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd,
+    estimated_cost_usd: row.estimated_cost_usd,
+    pricing_source: row.pricing_source,
     usage_source: row.usage_source ?? "unknown",
     usage_quality: row.usage_quality ?? "unknown",
 });
 
-const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> =>
-    queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
-        interpolateRid(TURN_TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
-        mapTurnTokenUsageRow,
-        "session-inspect resolveTurnTokenUsage",
+const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, CacheRead> =>
+    cacheRows(
+        TurnTokenUsageDbRow,
+        { sql: `SELECT ${TURN_TOKEN_USAGE_COLUMNS} FROM turn_token_usage WHERE session = ? ORDER BY seq ASC`, params: [sessionId] },
+        "session-inspect.turn_token_usage",
     ).pipe(
-        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, mapTurnTokenUsageRow(row)]))),
     );
 
-const resolveTurnTokenUsageForSourceRefs = (
-    sourceRefs: ReadonlyArray<string>,
-): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> => {
-    const refs = sourceRefs.map((key) => recordRef("turn_token_usage", key));
-    if (refs.length === 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
-    return queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
-        // Materialized record-list source - bare `FROM [refs]` throws on
-        // SurrealDB 3.0.x (see @ax/lib/shared/record-select, issue #251).
-        TURN_TOKEN_USAGE_FOR_REFS_SQL.split("$refs").join(refListSource(refs)),
-        mapTurnTokenUsageRow,
-        "session-inspect resolveTurnTokenUsageForSourceRefs",
+/** Same rows as resolveTurnTokenUsage, narrowed to a contiguous seq window -
+ *  the DuckDB equivalent of the old materialized-record-list `FROM $refs`
+ *  query (turn ids in that window are exactly seq in [offset+1, offset+limit],
+ *  since DB turn seq is one-based and the window is contiguous). */
+const resolveTurnTokenUsageForWindow = (
+    sessionId: string,
+    turnOffset: number,
+    turnLimit: number,
+): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, CacheRead> => {
+    if (turnLimit <= 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
+    const minSeq = turnOffset + 1;
+    const maxSeq = turnOffset + turnLimit;
+    return cacheRows(
+        TurnTokenUsageDbRow,
+        {
+            sql: `SELECT ${TURN_TOKEN_USAGE_COLUMNS} FROM turn_token_usage
+                  WHERE session = ? AND seq BETWEEN ? AND ? ORDER BY seq ASC`,
+            params: [sessionId, minSeq, maxSeq],
+        },
+        "session-inspect.turn_token_usage_window",
     ).pipe(
-        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, mapTurnTokenUsageRow(row)]))),
     );
 };
 
@@ -1016,7 +1011,7 @@ const fetchGraphSessionInspect = (
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
             resolveTokenUsage(bareSessionId),
-            resolveTurnTokenUsageForSourceRefs(turnSourceRefs),
+            resolveTurnTokenUsageForWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphTurnWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphSessionHealth(bareSessionId),
             resolveTurnContentForSourceRefs(turnSourceRefs),
