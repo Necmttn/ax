@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient } from "@ax/lib/db";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { Judgment, JudgmentLayer, NumberColumn, TextColumn } from "@ax/lib/sqlite";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { upsertRetro } from "./ingest/retro.ts";
@@ -66,7 +67,11 @@ describe("judgment cutover sidecar", () => {
         const graph = Layer.succeed(SurrealClient, {
             query: () => Effect.succeed([[]]),
         } as never);
-        const deps = Layer.mergeAll(sidecar, graph, BunFileSystem.layer, BunPath.layer);
+        // `selfImproveQuery` reads reviewed classifier_graph_fact rows through
+        // CacheRead now (see label-mining-service.ts); no facts exist in this
+        // fixture, matching the SurrealQL stub's empty result above.
+        const cacheRead = makeTestCacheRead({ fallback: [] }).layer;
+        const deps = Layer.mergeAll(sidecar, graph, cacheRead, BunFileSystem.layer, BunPath.layer);
         const result = await Effect.runPromise(Effect.gen(function* () {
             const judgment = yield* Judgment;
             yield* judgment.put("transcript_label_review", {

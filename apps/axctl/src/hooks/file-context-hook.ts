@@ -1,7 +1,5 @@
 import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { decodeJsonRecordOrNull } from "@ax/lib/decode";
 import {
     type BuildFileContextInput,
@@ -32,7 +30,7 @@ export interface FileContextHookEvidence {
 
 export const buildFileContextHookEvidence = (
     input: BuildFileContextInput,
-): Effect.Effect<FileContextHookEvidence, DbError, SurrealClient> =>
+): Effect.Effect<FileContextHookEvidence, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const signals = extractFileContextSignals(input.q, input.files);
         const files = yield* resolveFiles(signals.paths, { fuzzyFallback: false });
@@ -49,7 +47,7 @@ export const buildFileContextHookEvidence = (
         // Each evidence query is isolated: a SQL failure in one (schema drift,
         // bad cast, missing table) must not block the hook output. Degrade to
         // empty and log to stderr; the agent still gets whatever did succeed.
-        const guard = <T,>(eff: Effect.Effect<T, DbError, SurrealClient>, label: string, fallback: T) =>
+        const guard = <T,>(eff: Effect.Effect<T, CacheReadError, CacheRead>, label: string, fallback: T) =>
             eff.pipe(Effect.catch((err) =>
                 Effect.sync(() => {
                     console.error(`axctl hook ${label} query failed:`, err.message);
@@ -443,7 +441,7 @@ const DEDUP_WINDOW_MINUTES = 30;
 
 export const buildFileContextHookResponse = (
     input: FileContextHookInput,
-): Effect.Effect<FileContextHookResponse, DbError, SurrealClient | CacheRead> =>
+): Effect.Effect<FileContextHookResponse, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const emptyEvidence = {
             prior_file_sessions: [] as readonly PriorFileSession[],

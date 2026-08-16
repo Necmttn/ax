@@ -1,8 +1,7 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
-import { refListSource } from "@ax/lib/shared/record-select";
-import { surrealString } from "@ax/lib/shared/surql";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 import { numeric, durationMs, rankToolEvidence } from "./file-evidence-rank.ts";
@@ -81,86 +80,254 @@ const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.
  * repos. `fuzzyFallback: true` (the CLI pack) widens to suffix matching only
  * when the exact lookup finds nothing.
  */
+const FileRowSchema = Schema.Struct({
+    id: Schema.String,
+    path: Schema.String,
+    repo: Schema.NullOr(Schema.String),
+    repository: Schema.NullOr(Schema.String),
+});
+
 export const resolveFiles = (paths: readonly string[], opts: { readonly fuzzyFallback: boolean }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const clean = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
         if (clean.length === 0) return [] as FileRow[];
-        const exactList = clean.map(surrealString).join(", ");
-        const [exactRows] = yield* db.query<[FileRow[]]>(`
-            SELECT <string>id AS id, path, repo, <string>repository AS repository
+        const exactRows = yield* read.rows(FileRowSchema, `
+            SELECT id, path, repo, repository
             FROM file
-            WHERE path IN [${exactList}]
-            LIMIT 20;
-        `);
-        if (!opts.fuzzyFallback) return exactRows.slice(0, 8);
-        if (exactRows.length > 0) return exactRows.slice(0, 8);
+            WHERE path IN (${clean.map(() => "?").join(", ")})
+            LIMIT 20
+        `, clean);
+        if (!opts.fuzzyFallback) return exactRows.slice(0, 8) as FileRow[];
+        if (exactRows.length > 0) return exactRows.slice(0, 8) as FileRow[];
 
-        const clauses = clean.flatMap((path) => {
+        const clauses: string[] = [];
+        const params: string[] = [];
+        for (const path of clean) {
             const base = path.split("/").at(-1) ?? path;
-            const pathClauses = [`string::ends_with(path, ${surrealString(path)})`];
+            clauses.push("ends_with(path, ?)");
+            params.push(path);
             if (path.includes("/") && !GENERIC_BASENAMES.has(base)) {
-                pathClauses.push(`string::ends_with(path, ${surrealString(base)})`);
+                clauses.push("ends_with(path, ?)");
+                params.push(base);
             }
-            return pathClauses;
-        });
-        const [rows] = yield* db.query<[FileRow[]]>(`
-            SELECT <string>id AS id, path, repo, <string>repository AS repository
+        }
+        const rows = yield* read.rows(FileRowSchema, `
+            SELECT id, path, repo, repository
             FROM file
             WHERE ${clauses.join(" OR ")}
-            LIMIT 20;
-        `);
-        return rows.slice(0, 8);
+            LIMIT 20
+        `, params);
+        return rows.slice(0, 8) as FileRow[];
     });
 
+const ToolEvidenceQueryRow = Schema.Struct({
+    evidence: Schema.NullOr(Schema.String),
+    path_seen: Schema.NullOr(Schema.String),
+    excerpt: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+    path: Schema.NullOr(Schema.String),
+    tool_name: Schema.NullOr(Schema.String),
+    command_norm: Schema.NullOr(Schema.String),
+    turn_id: Schema.NullOr(Schema.String),
+    turn_seq: Schema.NullOr(NumberFromBigIntColumn),
+    turn_intent_kind: Schema.NullOr(Schema.String),
+    turn_text_excerpt: Schema.NullOr(Schema.String),
+    turn_session_id: Schema.NullOr(Schema.String),
+    turn_session_source: Schema.NullOr(Schema.String),
+});
+
+/**
+ * `read_file`/`searched_file` are `(tool_call) -in-> edge -out-> (file)` edges.
+ * The `claude-subagent` filter is against the TOOL CALL's own session (`tc`),
+ * matching the original `in.session.source` - not the (possibly different)
+ * turn's session.
+ */
 export const loadToolEvidenceTable = (table: "read_file" | "searched_file", fileIds: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as ToolEvidenceRow[];
-        const [rows] = yield* db.query<[Array<Omit<ToolEvidenceRow, "kind">>]>(`
+        const rows = yield* read.rows(ToolEvidenceQueryRow, `
             SELECT
-                evidence,
-                path_seen,
-                excerpt,
-                <string>ts AS ts,
-                out.path AS path,
-                in.name AS tool_name,
-                in.command_norm AS command_norm,
-                in.turn.{ id, seq, intent_kind, text_excerpt, session: session.{ id, source } } AS turn
-            FROM ${table}
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            ORDER BY ts DESC
-            LIMIT 30;
-        `);
-        return rows.map((row) => ({ ...row, kind: table })).sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a));
+                e.evidence AS evidence,
+                e.path_seen AS path_seen,
+                e.excerpt AS excerpt,
+                e.ts AS ts,
+                f.path AS path,
+                tc.name AS tool_name,
+                tc.command_norm AS command_norm,
+                t.id AS turn_id,
+                t.seq AS turn_seq,
+                t.intent_kind AS turn_intent_kind,
+                t.text_excerpt AS turn_text_excerpt,
+                tsess.id AS turn_session_id,
+                tsess.source AS turn_session_source
+            FROM ${table} e
+            JOIN file f ON f.id = e.out_id
+            JOIN tool_call tc ON tc.id = e.in_id
+            JOIN session s ON s.id = tc.session
+            LEFT JOIN turn t ON t.id = tc.turn
+            LEFT JOIN session tsess ON tsess.id = t.session
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            ORDER BY e.ts DESC
+            LIMIT 30
+        `, fileIds);
+        const mapped: ToolEvidenceRow[] = rows.map((row) => ({
+            kind: table,
+            evidence: row.evidence,
+            path_seen: row.path_seen,
+            excerpt: row.excerpt,
+            ts: row.ts.toISOString(),
+            path: row.path,
+            tool_name: row.tool_name,
+            command_norm: row.command_norm,
+            turn: row.turn_id === null ? null : {
+                id: row.turn_id,
+                seq: row.turn_seq,
+                intent_kind: row.turn_intent_kind,
+                text_excerpt: row.turn_text_excerpt,
+                session: row.turn_session_id === null ? null : {
+                    id: row.turn_session_id,
+                    source: row.turn_session_source,
+                },
+            },
+        }));
+        return mapped.sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a));
     });
 
+const TouchQueryRow = Schema.Struct({
+    id: Schema.String,
+    additions: Schema.NullOr(NumberFromBigIntColumn),
+    deletions: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    file_id: Schema.NullOr(Schema.String),
+    file_path: Schema.NullOr(Schema.String),
+    file_repo: Schema.NullOr(Schema.String),
+    file_repository: Schema.NullOr(Schema.String),
+    commit_id: Schema.NullOr(Schema.String),
+    commit_sha: Schema.NullOr(Schema.String),
+    commit_message: Schema.NullOr(Schema.String),
+    commit_author: Schema.NullOr(Schema.String),
+    commit_ts: Schema.NullOr(TimestampColumn),
+});
+
+const ProducedSessionRow = Schema.Struct({
+    commit_id: Schema.String,
+    session_id: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+});
+
+/**
+ * `touched` is a `(commit) -in-> edge -out-> (file)` edge; `commit.sessions`
+ * (the sessions that produced the commit) was a reverse graph traversal
+ * (`<-produced.in`) in SurrealQL. DuckDB has no record-graph traversal, so
+ * this is a second batched query over `produced` (session -in-> commit -out->)
+ * for the commit ids the first query returned, grouped back onto each commit
+ * in JS - same batching shape as `prevTurnQuery` in label-mining-service.ts.
+ */
 export const loadTouches = (fileIds: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as TouchRow[];
-        const [rows] = yield* db.query<[TouchRow[]]>(`
+        const rows = yield* read.rows(TouchQueryRow, `
             SELECT
-                <string>id AS id,
-                additions,
-                deletions,
-                <string>ts AS ts,
-                out.{ id, path, repo, repository } AS file,
-                in.{ id, sha, message, author, ts, sessions: <-produced.in.{ id, source, cwd } } AS commit
-            FROM touched
-            WHERE out IN [${fileIds.join(", ")}]
-            ORDER BY ts DESC
-            LIMIT 40;
-        `);
-        return rows;
+                t.id AS id,
+                t.additions AS additions,
+                t.deletions AS deletions,
+                t.ts AS ts,
+                f.id AS file_id,
+                f.path AS file_path,
+                f.repo AS file_repo,
+                f.repository AS file_repository,
+                c.id AS commit_id,
+                c.sha AS commit_sha,
+                c.message AS commit_message,
+                c.author AS commit_author,
+                c.ts AS commit_ts
+            FROM touched t
+            JOIN file f ON f.id = t.out_id
+            JOIN "commit" c ON c.id = t.in_id
+            WHERE t.out_id IN (${fileIds.map(() => "?").join(", ")})
+            ORDER BY t.ts DESC
+            LIMIT 40
+        `, fileIds);
+
+        const commitIds = Array.from(new Set(rows.map((row) => row.commit_id).filter((id): id is string => id !== null)));
+        const sessionsByCommit = new Map<string, Array<{ id: string; source: string | null; cwd: string | null }>>();
+        if (commitIds.length > 0) {
+            const producedRows = yield* read.rows(ProducedSessionRow, `
+                SELECT p.out_id AS commit_id, s.id AS session_id, s.source AS source, s.cwd AS cwd
+                FROM produced p
+                JOIN session s ON s.id = p.in_id
+                WHERE p.out_id IN (${commitIds.map(() => "?").join(", ")})
+            `, commitIds);
+            for (const row of producedRows) {
+                const list = sessionsByCommit.get(row.commit_id) ?? [];
+                list.push({ id: row.session_id, source: row.source, cwd: row.cwd });
+                sessionsByCommit.set(row.commit_id, list);
+            }
+        }
+
+        return rows.map((row): TouchRow => ({
+            id: row.id,
+            additions: row.additions,
+            deletions: row.deletions,
+            ts: row.ts.toISOString(),
+            file: row.file_id === null ? null : {
+                id: row.file_id,
+                path: row.file_path ?? "",
+                repo: row.file_repo,
+                repository: row.file_repository,
+            },
+            commit: row.commit_id === null ? null : {
+                id: row.commit_id,
+                sha: row.commit_sha,
+                message: row.commit_message,
+                author: row.commit_author,
+                ts: row.commit_ts?.toISOString() ?? null,
+                sessions: sessionsByCommit.get(row.commit_id) ?? [],
+            },
+        }));
     });
 
+const MentionQueryRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    intent_kind: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+    score: NumberFromBigIntColumn,
+    why: Schema.String,
+});
+type MentionQueryRowType = typeof MentionQueryRow.Type;
+
+const mentionRowToTurn = (row: MentionQueryRowType): Omit<MentionTurn, "score" | "why"> & { score: number; why: string } => ({
+    id: row.id,
+    session: row.session,
+    source: row.source,
+    seq: row.seq,
+    ts: row.ts.toISOString(),
+    intent_kind: row.intent_kind,
+    text_excerpt: row.text_excerpt,
+    score: row.score,
+    why: row.why,
+});
+
+/**
+ * `mentioned_file`/`mentioned_symbol`/`mentioned_error` are `(turn) -in->
+ * edge -out-> (target)` edges. `why` was `string::concat(source, ": ", ...)`
+ * self-referencing the `source` alias defined earlier in the same SELECT -
+ * DuckDB (standard SQL) cannot do that, so the expression is repeated.
+ */
 export const loadMentions = (signals: MentionSignals, files: readonly FileRow[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const scored = new Map<string, MentionTurn>();
-        const addRows = (rows: Array<Omit<MentionTurn, "score" | "why"> & { readonly score: number; readonly why: string }>) => {
+        const addRows = (rows: readonly (Omit<MentionTurn, "score" | "why"> & { readonly score: number; readonly why: string })[]) => {
             for (const row of rows) {
                 if (row.source === "claude-subagent") continue;
                 if (!["organic_task", "correction", "preference"].includes(row.intent_kind ?? "")) continue;
@@ -175,47 +342,56 @@ export const loadMentions = (signals: MentionSignals, files: readonly FileRow[])
 
         const fileIds = files.map((file) => file.id);
         if (fileIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       8 AS score, string::concat(source, ": ", out.path) AS why
-                FROM mentioned_file
-                WHERE out IN [${fileIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       8 AS score, (s.source || ': ' || f.path) AS why
+                FROM mentioned_file mf
+                JOIN turn t ON t.id = mf.in_id
+                JOIN session s ON s.id = t.session
+                JOIN file f ON f.id = mf.out_id
+                WHERE mf.out_id IN (${fileIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, fileIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
-        const symbolIds = signals.symbols.map((symbol) => `symbol:\`${symbolRecordKey(symbol)}\``);
+        const symbolIds = signals.symbols.map((symbol) => `symbol:${symbolRecordKey(symbol)}`);
         if (symbolIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       5 AS score, string::concat(source, ": ", out.name) AS why
-                FROM mentioned_symbol
-                WHERE out IN [${symbolIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       5 AS score, (s.source || ': ' || sym.name) AS why
+                FROM mentioned_symbol ms
+                JOIN turn t ON t.id = ms.in_id
+                JOIN session s ON s.id = t.session
+                JOIN symbol sym ON sym.id = ms.out_id
+                WHERE ms.out_id IN (${symbolIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, symbolIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
-        const errorIds = signals.errors.map((error) => `error_signature:\`${errorSignatureRecordKey(normalizeErrorSignature(error))}\``);
+        const errorIds = signals.errors.map((error) => `error_signature:${errorSignatureRecordKey(normalizeErrorSignature(error))}`);
         if (errorIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       10 AS score, string::concat(source, ": ", out.text) AS why
-                FROM mentioned_error
-                WHERE out IN [${errorIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       10 AS score, (s.source || ': ' || es.text) AS why
+                FROM mentioned_error me
+                JOIN turn t ON t.id = me.in_id
+                JOIN session s ON s.id = t.session
+                JOIN error_signature es ON es.id = me.out_id
+                WHERE me.out_id IN (${errorIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, errorIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
         return Array.from(scored.values())
@@ -223,9 +399,20 @@ export const loadMentions = (signals: MentionSignals, files: readonly FileRow[])
             .slice(0, 12);
     });
 
+const SessionTurnQueryRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    message_kind: Schema.NullOr(Schema.String),
+    intent_kind: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+});
+
 export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const sessionIds = Array.from(
             new Set(
                 touches.flatMap((touch) =>
@@ -236,33 +423,40 @@ export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
             ),
         ).slice(0, 8);
         if (sessionIds.length === 0) return [] as SessionTurn[];
-        const [rows] = yield* db.query<[SessionTurn[]]>(`
+        const rows = yield* read.rows(SessionTurnQueryRow, `
             SELECT
-                <string>id AS id,
-                <string>session AS session,
-                session.source AS source,
-                seq,
-                <string>ts AS ts,
-                message_kind,
-                intent_kind,
-                text_excerpt
-            FROM turn
-            WHERE session IN [${sessionIds.join(", ")}]
-              AND text_excerpt IS NOT NONE
-              AND message_kind = "task"
-              AND session.source != "claude-subagent"
-            ORDER BY ts ASC
-            LIMIT 40;
-        `);
+                t.id AS id,
+                t.session AS session,
+                s.source AS source,
+                t.seq AS seq,
+                t.ts AS ts,
+                t.message_kind AS message_kind,
+                t.intent_kind AS intent_kind,
+                t.text_excerpt AS text_excerpt
+            FROM turn t
+            JOIN session s ON s.id = t.session
+            WHERE t.session IN (${sessionIds.map(() => "?").join(", ")})
+              AND t.text_excerpt IS NOT NULL
+              AND t.message_kind = 'task'
+              AND s.source <> 'claude-subagent'
+            ORDER BY t.ts ASC
+            LIMIT 40
+        `, sessionIds);
         return rows
-            .map((row) => ({
-                ...row,
+            .map((row): SessionTurn => ({
+                id: row.id,
+                session: row.session,
+                source: row.source,
+                seq: row.seq,
+                ts: row.ts.toISOString(),
+                message_kind: row.message_kind,
                 intent_kind: row.intent_kind ?? classifyTurnIntent({
                     role: "user",
                     messageKind: row.message_kind ?? "task",
                     source: row.source ?? null,
                     text: row.text_excerpt ?? null,
                 }),
+                text_excerpt: row.text_excerpt,
             }))
             .filter((row) => ["organic_task", "correction", "preference"].includes(row.intent_kind ?? ""));
     });
@@ -271,85 +465,91 @@ export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
  * Prior sessions that edited the target files, with per-session summary stats.
  *
  * Two-stage aggregation: run the cheap inner aggregation first (one indexed
- * query), then issue batched `IN [sessions]` reads in parallel plus per-session
- * INDEXED turn reads, aggregating client-side. `turn WHERE session IN [<sids>]`
- * is a membership scan over the 560k-row turn table (~3s for 50 sessions);
- * `session = <lit>` hits `turn_session_seq` (~1ms), so the turn reads fan out.
- * The other reads stay batched (session/produced/delivery_outcome/
- * session_health are tiny). This is the single loader both adapters share;
- * the old per-row-subquery variant cost ~3.5s per high-signal session and its
- * only extra output (`hands_free_ms`) had no consumer.
+ * query), then issue batched `session IN (...)` reads through CacheRead,
+ * aggregating client-side. Ported off the SurrealDB-specific "N per-session
+ * queries beat one IN-list scan" tuning (Surreal's `session = <lit>` hit a
+ * point index the `IN [...]` form didn't); DuckDB's turn_session_seq index
+ * serves an IN-list scan directly, so this is one batched query per shape
+ * instead of a fanned-out per-session loop.
  */
-const CONTEXT_TURN_FANOUT = 16;
-
 export const loadPriorFileSessions = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as PriorFileSession[];
         const cappedLimit = Math.max(1, Math.min(limit, 50));
-        const [aggRows] = yield* db.query<[
-            Array<{
-                session: string;
-                file: string;
-                weight: number;
-                last_seen: string;
-            }>
-        ]>(`
-            SELECT <string>in.session AS session, out.path AS file, count() AS weight, time::max(ts) AS last_seen
-            FROM edited
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            GROUP BY session, file
+        const aggRows = yield* read.rows(Schema.Struct({
+            session: Schema.String,
+            file: Schema.String,
+            weight: NumberFromBigIntColumn,
+            last_seen: TimestampColumn,
+        }), `
+            SELECT t.session AS session, f.path AS file, count(*) AS weight, max(e.ts) AS last_seen
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN session s ON s.id = t.session
+            JOIN file f ON f.id = e.out_id
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            GROUP BY t.session, f.path
             ORDER BY weight DESC, last_seen DESC
-            LIMIT ${cappedLimit};
-        `);
+            LIMIT ?
+        `, [...fileIds, cappedLimit]);
         if (aggRows.length === 0) return [] as PriorFileSession[];
 
         const sessionIds = Array.from(new Set(aggRows.map((r) => r.session)));
-        const sidLiteral = sessionIds.join(", ");
+        const sidPlaceholders = sessionIds.map(() => "?").join(", ");
 
-        const perSessionTurns = <Row>(sqlFor: (sid: string) => string) =>
-            Effect.forEach(
-                sessionIds,
-                (sid) => db.query<[Row[]]>(sqlFor(sid)).pipe(Effect.map(([rows]) => rows ?? [])),
-                { concurrency: CONTEXT_TURN_FANOUT },
-            ).pipe(Effect.map((chunks) => chunks.flat()));
-
-        const [sessionsResult, producedResult, deliveryResult, healthResult] =
+        const [sessionsRows, producedRows, deliveryRows, healthRows, turnsRows, titleRows] =
             yield* Effect.all([
-                // Record-list selection for the by-id fetch - `FROM session
-                // WHERE id IN [...]` happens to work on `session` today, but
-                // the id IN-list form silently matches nothing on other tables
-                // (see @ax/lib/shared/record-select); don't rely on it. The
-                // non-id field IN-lists below are fine.
-                db.query<[Array<{ id: string; project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>]>(
-                    `SELECT <string>id AS id, project, source, started_at, ended_at FROM ${refListSource(sessionIds)};`,
-                ),
-                db.query<[Array<{ in: string }>]>(
-                    `SELECT <string>in AS in FROM produced WHERE in IN [${sidLiteral}];`,
-                ),
-                db.query<[Array<{ session: string; status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>]>(
-                    `SELECT <string>session AS session, status, review_pain, pr_size, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
-                ),
-                db.query<[Array<{ session: string; interruptions: number }>]>(
-                    `SELECT <string>session AS session, interruptions FROM session_health WHERE session IN [${sidLiteral}];`,
-                ),
+                read.rows(Schema.Struct({
+                    id: Schema.String,
+                    project: Schema.NullOr(Schema.String),
+                    source: Schema.NullOr(Schema.String),
+                    started_at: Schema.NullOr(TimestampColumn),
+                    ended_at: Schema.NullOr(TimestampColumn),
+                }), `SELECT id, project, source, started_at, ended_at FROM session WHERE id IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({ session_id: Schema.String }),
+                    `SELECT in_id AS session_id FROM produced WHERE in_id IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({
+                    session: Schema.NullOr(Schema.String),
+                    status: Schema.NullOr(Schema.String),
+                    review_pain: Schema.NullOr(Schema.String),
+                    pr_size: Schema.NullOr(Schema.String),
+                    pr_title: Schema.NullOr(Schema.String),
+                }), `
+                    SELECT d.session AS session, d.status AS status, d.review_pain AS review_pain,
+                           d.pr_size AS pr_size, pr.title AS pr_title
+                    FROM delivery_outcome d
+                    LEFT JOIN pull_request pr ON pr.id = d.pull_request
+                    WHERE d.session IN (${sidPlaceholders})
+                `, sessionIds),
+                read.rows(Schema.Struct({ session: Schema.String, interruptions: NumberFromBigIntColumn }),
+                    `SELECT session, interruptions FROM session_health WHERE session IN (${sidPlaceholders})`, sessionIds),
+                read.rows(Schema.Struct({ session: Schema.String, role: Schema.String, intent_kind: Schema.NullOr(Schema.String) }),
+                    `SELECT session, role, intent_kind FROM turn WHERE session IN (${sidPlaceholders}) AND role IN ('user', 'assistant')`, sessionIds),
+                read.rows(Schema.Struct({
+                    session: Schema.String,
+                    text_excerpt: Schema.String,
+                    seq: NumberFromBigIntColumn,
+                    intent_kind: Schema.NullOr(Schema.String),
+                }), `
+                    SELECT session, text_excerpt, seq, intent_kind FROM turn
+                    WHERE session IN (${sidPlaceholders}) AND role = 'user' AND message_kind = 'task'
+                      AND intent_kind IN ('organic_task', 'preference', 'correction')
+                      AND text_excerpt IS NOT NULL
+                    ORDER BY seq ASC
+                `, sessionIds),
             ], { concurrency: "unbounded" });
 
-        const turnsRows = yield* perSessionTurns<{ session: string; role: string; intent_kind: string | null }>(
-            (sid) => `SELECT <string>session AS session, role, intent_kind FROM turn WHERE session = ${sid} AND role IN ['user','assistant'];`,
-        );
-        const titleRows = yield* perSessionTurns<{ session: string; text_excerpt: string; seq: number; intent_kind: string | null }>(
-            (sid) => `SELECT <string>session AS session, text_excerpt, seq, intent_kind FROM turn WHERE session = ${sid} AND role = 'user' AND message_kind = 'task' AND intent_kind IN ['organic_task','preference','correction'] AND text_excerpt IS NOT NONE ORDER BY seq ASC;`,
-        );
-
-        const [sessionsRows] = sessionsResult;
-        const [producedRows] = producedResult;
-        const [deliveryRows] = deliveryResult;
-        const [healthRows] = healthResult;
-
         const sessionMeta = new Map<string, { project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>();
-        for (const row of sessionsRows) sessionMeta.set(row.id, row);
+        for (const row of sessionsRows) {
+            sessionMeta.set(row.id, {
+                project: row.project,
+                source: row.source,
+                started_at: row.started_at?.toISOString() ?? null,
+                ended_at: row.ended_at?.toISOString() ?? null,
+            });
+        }
 
         const turnCounts = new Map<string, { user: number; assistant: number; corrections: number }>();
         for (const row of turnsRows) {
@@ -364,11 +564,11 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
         }
 
         const producedCounts = new Map<string, number>();
-        for (const row of producedRows) producedCounts.set(row.in, (producedCounts.get(row.in) ?? 0) + 1);
+        for (const row of producedRows) producedCounts.set(row.session_id, (producedCounts.get(row.session_id) ?? 0) + 1);
 
         const deliveryBySession = new Map<string, { status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>();
         for (const row of deliveryRows) {
-            if (!deliveryBySession.has(row.session)) deliveryBySession.set(row.session, row);
+            if (row.session && !deliveryBySession.has(row.session)) deliveryBySession.set(row.session, row);
         }
 
         const interruptionsBySession = new Map<string, number>();
@@ -427,7 +627,7 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
                 interruptions: interruptionsBySession.get(row.session) ?? 0,
                 duration_ms: durationMs(meta?.started_at, meta?.ended_at),
                 hands_free_ms: null,
-                last_seen: row.last_seen ?? null,
+                last_seen: row.last_seen.toISOString(),
                 fileWeights: new Map(),
             };
             base.weight += weight;
@@ -467,15 +667,16 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
 
 export const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const commitIds = Array.from(new Set(touches.map((touch) => touch.commit?.id).filter((id): id is string => !!id))).slice(0, 12);
         if (commitIds.length === 0) return [] as NeighborFile[];
-        const [rows] = yield* db.query<Array<Array<{ path: string }>>>(`
-            SELECT out.path AS path
-            FROM touched
-            WHERE in IN [${commitIds.join(", ")}]
-            LIMIT 200;
-        `);
+        const rows = yield* read.rows(Schema.Struct({ path: Schema.String }), `
+            SELECT f.path AS path
+            FROM touched t
+            JOIN file f ON f.id = t.out_id
+            WHERE t.in_id IN (${commitIds.map(() => "?").join(", ")})
+            LIMIT 200
+        `, commitIds);
         const target = new Set(targetPaths);
         const counts = new Map<string, number>();
         for (const row of rows) {
@@ -494,43 +695,48 @@ export const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: rea
  *  not "any correction in a session that happened to edit this file." */
 export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCorrection[];
         const cap = Math.max(1, Math.min(limit, 20));
         // Defense-in-depth: existing turn rows still carry the old (loose)
         // intent_kind classification. Filter slash-command bodies and long
         // text at query time so the hook doesn't surface non-corrections
         // until a re-derivation pass cleans them up.
-        const [rows] = yield* db.query<[
-            Array<{
-                turn_id: string;
-                session_id: string;
-                ts: string | null;
-                text: string | null;
-            }>
-        ]>(`
+        const rows = yield* read.rows(Schema.Struct({
+            turn_id: Schema.String,
+            session_id: Schema.String,
+            ts: Schema.NullOr(TimestampColumn),
+            text: Schema.NullOr(Schema.String),
+        }), `
             SELECT
-                <string>in.id AS turn_id,
-                <string>in.session AS session_id,
-                <string>in.ts AS ts,
-                in.text_excerpt AS text
-            FROM mentioned_file
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.role = "user"
-              AND in.intent_kind = "correction"
-              AND in.session.source != "claude-subagent"
-              AND in.text_excerpt IS NOT NONE
-              AND string::len(in.text_excerpt) < 500
-            ORDER BY ts DESC
-            LIMIT ${cap * 2};
-        `);
+                t.id AS turn_id,
+                t.session AS session_id,
+                t.ts AS ts,
+                t.text_excerpt AS text
+            FROM mentioned_file mf
+            JOIN turn t ON t.id = mf.in_id
+            JOIN session s ON s.id = t.session
+            WHERE mf.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND t.role = 'user'
+              AND t.intent_kind = 'correction'
+              AND s.source <> 'claude-subagent'
+              AND t.text_excerpt IS NOT NULL
+              AND length(t.text_excerpt) < 500
+            ORDER BY t.ts DESC
+            LIMIT ?
+        `, [...fileIds, cap * 2]);
         if (rows.length === 0) return [] as FileMemoryCorrection[];
 
         // Defense-in-depth filter (TS side): existing rows still carry old
         // loose intent classification. Drop wrapper-instruction-shaped text
         // that slipped through. Once intent-kind.ts is re-derived this becomes
         // a no-op.
-        const filtered = rows.filter((r) => {
+        const filtered = rows.map((row) => ({
+            turn_id: row.turn_id,
+            session_id: row.session_id,
+            ts: row.ts?.toISOString() ?? null,
+            text: row.text,
+        })).filter((r) => {
             const t = (r.text ?? "").trimStart();
             if (t.startsWith("## Your task")) return false;
             if (t.startsWith("# /")) return false;
@@ -542,14 +748,18 @@ export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: n
         // Batch-fetch delivery_outcome for the unique sessions to surface
         // `merged_to_main` and PR titles next to each correction quote.
         const sessionIds = Array.from(new Set(filtered.map((r) => r.session_id)));
-        const sidLiteral = sessionIds.join(", ");
-        const [deliveryRows] = yield* db.query<[
-            Array<{ session: string; status: string | null; pr_title: string | null }>
-        ]>(
-            `SELECT <string>session AS session, status, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
-        );
+        const deliveryRows = yield* read.rows(Schema.Struct({
+            session: Schema.NullOr(Schema.String),
+            status: Schema.NullOr(Schema.String),
+            pr_title: Schema.NullOr(Schema.String),
+        }), `
+            SELECT d.session AS session, d.status AS status, pr.title AS pr_title
+            FROM delivery_outcome d
+            LEFT JOIN pull_request pr ON pr.id = d.pull_request
+            WHERE d.session IN (${sessionIds.map(() => "?").join(", ")})
+        `, sessionIds);
         const deliveryBySession = new Map<string, { status: string | null; pr_title: string | null }>();
-        for (const row of deliveryRows) deliveryBySession.set(row.session, row);
+        for (const row of deliveryRows) if (row.session) deliveryBySession.set(row.session, row);
 
         return filtered.map((row): FileMemoryCorrection => {
             const delivery = deliveryBySession.get(row.session_id);
@@ -567,22 +777,26 @@ export const loadFileTargetedCorrections = (fileIds: readonly string[], limit: n
 /** Recent commits whose `touched` relation points to any of these files. */
 export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCommit[];
         const cap = Math.max(1, Math.min(limit, 20));
-        const [rows] = yield* db.query<[
-            Array<{ commit_id: string; sha: string | null; message: string | null; ts: string | null }>
-        ]>(`
+        const rows = yield* read.rows(Schema.Struct({
+            commit_id: Schema.String,
+            sha: Schema.NullOr(Schema.String),
+            message: Schema.NullOr(Schema.String),
+            ts: Schema.NullOr(TimestampColumn),
+        }), `
             SELECT
-                <string>in.id AS commit_id,
-                in.sha AS sha,
-                in.message AS message,
-                <string>in.ts AS ts
-            FROM touched
-            WHERE out IN [${fileIds.join(", ")}]
-            ORDER BY ts DESC
-            LIMIT ${cap};
-        `);
+                c.id AS commit_id,
+                c.sha AS sha,
+                c.message AS message,
+                c.ts AS ts
+            FROM touched t
+            JOIN "commit" c ON c.id = t.in_id
+            WHERE t.out_id IN (${fileIds.map(() => "?").join(", ")})
+            ORDER BY c.ts DESC
+            LIMIT ?
+        `, [...fileIds, cap]);
         // De-dupe by commit_id (multiple touched rows can share a commit when
         // we feed in several file-id variants for the same canonical file).
         const seen = new Set<string>();
@@ -594,7 +808,7 @@ export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: numb
                 commit_id: row.commit_id,
                 sha: row.sha,
                 message: row.message?.split("\n")[0]?.trim() ?? null,
-                ts: row.ts,
+                ts: row.ts?.toISOString() ?? null,
             });
             if (out.length >= cap) break;
         }
@@ -605,33 +819,38 @@ export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: numb
  *  hidden coupling that single-commit `git log` can't see. */
 export const loadCoTouchedFiles = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCoTouch[];
         const cap = Math.max(1, Math.min(limit, 20));
         const targetSet = new Set(fileIds);
 
-        // Stage 1: top sessions that edited the target file. `count()` must
-        // appear in SELECT to be sortable in ORDER BY under SurrealDB v3.
-        const [sessionsRows] = yield* db.query<[Array<{ session: string; n: number }>]>(`
-            SELECT <string>in.session AS session, count() AS n
-            FROM edited
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            GROUP BY session
+        // Stage 1: top sessions that edited the target file.
+        const sessionsRows = yield* read.rows(Schema.Struct({ session: Schema.String, n: NumberFromBigIntColumn }), `
+            SELECT t.session AS session, count(*) AS n
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN session s ON s.id = t.session
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            GROUP BY t.session
             ORDER BY n DESC
-            LIMIT 15;
-        `);
+            LIMIT 15
+        `, fileIds);
         const sessionIds = sessionsRows.map((r) => r.session).filter(Boolean);
         if (sessionIds.length === 0) return [] as FileMemoryCoTouch[];
 
         // Stage 2: all files those sessions touched. Aggregate per file in JS.
-        const [editedRows] = yield* db.query<[
-            Array<{ session: string; file: string; path: string | null }>
-        ]>(`
-            SELECT <string>in.session AS session, <string>out AS file, out.path AS path
-            FROM edited
-            WHERE in.session IN [${sessionIds.join(", ")}];
-        `);
+        const editedRows = yield* read.rows(Schema.Struct({
+            session: Schema.String,
+            file: Schema.String,
+            path: Schema.NullOr(Schema.String),
+        }), `
+            SELECT t.session AS session, e.out_id AS file, f.path AS path
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN file f ON f.id = e.out_id
+            WHERE t.session IN (${sessionIds.map(() => "?").join(", ")})
+        `, sessionIds);
 
         // Count distinct sessions per co-touched file (not total edits, to
         // weight files that show up across MANY sessions over heavy churn in
