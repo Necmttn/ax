@@ -505,7 +505,7 @@ const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Ef
         }), `SELECT t.id, t.session, CAST(t.seq AS DOUBLE) AS seq, t.role, s.source,
                     t.message_kind, t.intent_kind, t.text, t.text_excerpt, t.ts
              FROM turn t JOIN session s ON s.id = t.session
-             ${sinceDays === undefined ? "" : "WHERE t.ts >= current_timestamp - (? * INTERVAL '1 day')"}
+             ${sinceDays === undefined ? "" : "WHERE t.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
              ORDER BY t.session, t.seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 

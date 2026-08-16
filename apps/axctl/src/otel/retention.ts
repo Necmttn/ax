@@ -12,15 +12,21 @@ export interface OtelRetentionResult {
 
 /** Keep 30 days of OTLP rows and remove relation rows without a target. */
 export const retainRecentOtel = Effect.fn("otel.retention")(function* (write: CacheWriteService) {
+    // The CAST is load-bearing: `CURRENT_TIMESTAMP` is TIMESTAMPTZ, and
+    // TIMESTAMPTZ - INTERVAL is resolved by the ICU extension, which the shipped
+    // static build does not carry - so the uncast form is a binder error there.
+    // `observed_at` is a naive UTC TIMESTAMP (schema.duckdb.sql UTC CONTRACT) and
+    // the seam pins connections to UTC, so the cast preserves meaning.
+    const cutoff = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '30 days'";
     const deletedByTable: Record<string, number> = {};
     for (const table of OTEL_TABLES) {
         const rows = yield* write.rows(
             CountRow,
-            `SELECT count(*) AS count FROM ${table} WHERE observed_at < current_timestamp - INTERVAL '30 days'`,
+            `SELECT count(*) AS count FROM ${table} WHERE observed_at < ${cutoff}`,
         );
         deletedByTable[table] = rows[0]?.count ?? 0;
         yield* write.exec(
-            `DELETE FROM ${table} WHERE observed_at < current_timestamp - INTERVAL '30 days'`,
+            `DELETE FROM ${table} WHERE observed_at < ${cutoff}`,
         );
     }
 

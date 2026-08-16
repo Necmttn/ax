@@ -30,7 +30,7 @@ export const correlateOrphanOtel = (write: CacheWriteService) =>
             const rows = yield* write.rows(
                 TelemetryRow,
                 `SELECT id, session_id FROM ${table}
-                 WHERE observed_at > current_timestamp - INTERVAL '${SCAN_WINDOW_DAYS} days'
+                 WHERE observed_at > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${SCAN_WINDOW_DAYS} days'
                    AND session_id IS NOT NULL
                  QUALIFY row_number() OVER (PARTITION BY session_id ORDER BY observed_at DESC) = 1`,
             );
