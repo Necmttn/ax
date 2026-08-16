@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, type FileSystem, Layer, type Path } from "effect";
+import { Effect, type FileSystem, Layer, type Path, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { CacheRead } from "@ax/lib/duckdb/seam";
+import { AxConfig, AxConfigTest } from "@ax/lib/config";
+import { CacheRead, CacheReadLayer } from "@ax/lib/duckdb/seam";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     ClassifierPackageOperationNotFound,
     ClassifierPackageService,
@@ -34,15 +34,23 @@ const runWithService = <A>(
         Effect.provide(ClassifierPackageServiceLive.pipe(Layer.provideMerge(BunFsLayer))),
     ));
 
-const runWithServiceAndDb = <A>(
-    effect: Effect.Effect<A, unknown, ClassifierPackageService | SurrealClient | FileSystem.FileSystem | Path.Path>,
-    db: SurrealClientShape,
+/**
+ * `applyExecutionSurrealWritePlanReport` writes through `withConfigWrite`
+ * (config-core/reconcile.ts), which needs a REAL `AxConfig` (for
+ * `paths.dataDir`) - a fake/no-op layer can't stand in the way it could for
+ * `SurrealClient`, since the write seam actually opens a DuckDB file at that
+ * path. `dataDir`/`AX_DUCKDB_SNAPSHOT` are pointed at the test's own temp dir
+ * so nothing lands in a developer's real `~/.ax` cache.
+ */
+const runWithServiceAndConfig = <A>(
+    effect: Effect.Effect<A, unknown, ClassifierPackageService | AxConfig | FileSystem.FileSystem | Path.Path>,
+    dataDir: string,
 ): Promise<A> =>
     Effect.runPromise(effect.pipe(
         Effect.provide(ClassifierPackageServiceLive),
-        Effect.provideService(SurrealClient, db),
+        Effect.provide(AxConfigTest({ paths: { dataDir } })),
         Effect.provide(BunFsLayer),
-    ));
+    ) as Effect.Effect<A, unknown>);
 
 /**
  * `executionGraphHealth` (package-service.ts) reads through `CacheRead` now -
@@ -115,6 +123,13 @@ async function writeTempExecutionReportRoot(): Promise<string> {
     );
     return root;
 }
+
+// `applies write plans` below is a REAL DuckDB round trip (write through
+// withConfigWrite, read the rows back), so it needs a working libduckdb.
+const { dylibPath: duckdbDylibPath, dtest: duckdbTest, tempDir: duckdbTempDir } = await duckdbTestSetup(
+    "classifier package service write plan apply",
+    { requireFts: true },
+);
 
 describe("ClassifierPackageService", () => {
     test("loads pending review task list reports through the service layer", async () => {
@@ -664,7 +679,7 @@ describe("ClassifierPackageService", () => {
         expect(report.totals.fact_count).toBeGreaterThanOrEqual(report.totals.source_report_count);
     });
 
-    test("builds Surreal write plans through the service layer", async () => {
+    test("builds write plans through the service layer", async () => {
         const root = await writeTempExecutionReportRoot();
         const report = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
@@ -673,21 +688,53 @@ describe("ClassifierPackageService", () => {
 
         expect(report.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
         expect(report.totals.statement_count).toBeGreaterThanOrEqual(1);
-        expect(report.statements[0]).toStartWith("UPSERT classifier_graph_node:");
+        expect(report.statements[0]).toStartWith("PUT classifier_graph_node ");
+        expect(report.rows[0]?.table).toBe("classifier_graph_node");
     });
 
-    test("applies Surreal write plans through the service layer", async () => {
-        const tc = makeTestSurrealClient({ fallback: [] });
+    // Real DuckDB round trip: apply the write plan through the actual seam
+    // (`withConfigWrite`, the same front door the CLI uses), then read the
+    // rows back out of the published snapshot and assert their contents -
+    // "the query stopped erroring" is not evidence on this migration; a row
+    // that decodes back out with the right `source_kind` is.
+    duckdbTest("applies write plans through the service layer, round-tripping into DuckDB", async () => {
+        const root = await writeTempExecutionReportRoot();
+        const dataDir = duckdbTempDir("ax-package-service-apply-");
+        const snapshotPath = join(dataDir, "test-snapshot.duckdb");
+        const previousSnapshotEnv = process.env.AX_DUCKDB_SNAPSHOT;
+        process.env.AX_DUCKDB_SNAPSHOT = snapshotPath;
+        try {
+            const report = await runWithServiceAndConfig(Effect.gen(function* () {
+                const packages = yield* ClassifierPackageService;
+                return yield* packages.applyExecutionSurrealWritePlanReport({ root });
+            }), dataDir);
 
-        const report = await runWithServiceAndDb(Effect.gen(function* () {
-            const packages = yield* ClassifierPackageService;
-            return yield* packages.applyExecutionSurrealWritePlanReport({ root: ".ax/experiments" });
-        }), tc.client);
+            expect(report.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
+            expect(report.decision).toBe("applied");
+            expect(report.applied_statement_count).toBeGreaterThanOrEqual(1);
+            expect(report.failed_statement_count).toBe(0);
 
-        expect(report.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
-        expect(report.decision).toBe("applied");
-        expect(report.applied_statement_count).toBe(tc.captured.length);
-        expect(tc.captured.length).toBeGreaterThanOrEqual(1);
+            const readLayer = CacheReadLayer({
+                snapshotPath,
+                ...(duckdbDylibPath === null ? {} : { assetPath: duckdbDylibPath }),
+            });
+            const nodes = await Effect.runPromise(Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* read.rows(
+                    Schema.Struct({ id: Schema.String, source_kind: Schema.String }),
+                    "SELECT id, source_kind FROM classifier_graph_node WHERE source_kind = ?",
+                    ["classifier_package_execution"],
+                );
+            }).pipe(Effect.provide(readLayer)) as Effect.Effect<
+                ReadonlyArray<{ readonly id: string; readonly source_kind: string }>,
+                unknown
+            >);
+            expect(nodes.length).toBeGreaterThanOrEqual(1);
+            expect(nodes.every((row) => row.source_kind === "classifier_package_execution")).toBe(true);
+        } finally {
+            if (previousSnapshotEnv === undefined) delete process.env.AX_DUCKDB_SNAPSHOT;
+            else process.env.AX_DUCKDB_SNAPSHOT = previousSnapshotEnv;
+        }
     });
 
     test("queries classifier graph health through the service layer", async () => {

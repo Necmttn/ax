@@ -1,7 +1,8 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { prettyPrint } from "@ax/lib/json";
-import { SurrealClient } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { withConfigWrite } from "../config-core/reconcile.ts";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     applyExecutionSurrealWritePlanReport,
@@ -416,10 +417,10 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierPackageExecutionSurrealWritePlanReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly applyExecutionSurrealWritePlanReport: (
         input?: ClassifierPackageExecutionSurrealApplyInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, AxConfig | FileSystem.FileSystem | Path.Path>;
     readonly writeExecutionSurrealApplyReport: (
         input: ClassifierPackageExecutionSurrealApplyWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, AxConfig | FileSystem.FileSystem | Path.Path>;
     readonly executionGraphHealthReport: (
         input?: ClassifierPackageExecutionGraphHealthInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, CacheRead>;
@@ -768,20 +769,34 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
         const applyExecutionSurrealWritePlan = Effect.fn("ClassifierPackageService.applyExecutionSurrealWritePlanReport")(function* (
             input?: ClassifierPackageExecutionSurrealApplyInput,
         ) {
-            const db = yield* SurrealClient;
             const writePlan = yield* executionSurrealWritePlanReport(input);
-            // Run child queries with the surrounding services (tracing etc.)
-            // instead of a detached Effect.runPromise.
-            const services = yield* Effect.context();
-            return yield* Effect.tryPromise({
-                try: () => applyExecutionSurrealWritePlanReport(writePlan, async (statement) => {
-                    await Effect.runPromiseWith(services)(db.query(statement));
-                }),
-                catch: (error) => ClassifierPackageReportWriteError.make({
-                    path: input?.root ?? ".ax/experiments",
-                    message: errorMessage(error),
-                }),
+            const toWriteError = (error: unknown) => ClassifierPackageReportWriteError.make({
+                path: input?.root ?? ".ax/experiments",
+                message: errorMessage(error),
             });
+            // `withConfigWrite` (config-core/reconcile.ts) is the established
+            // "a CLI command, not ingest, needs a CacheWriteService" front door:
+            // it takes the shared ingest lock itself, opens the live DuckDB
+            // read-write, and publishes a snapshot on success - the same seam
+            // `ax hooks lint` / `ax skills lint` / `ax ingest`'s own maintenance
+            // writes go through. Each row is applied via `write.put`, which is
+            // itself an Effect; run child effects with the SURROUNDING services
+            // (tracing etc.) rather than a detached `Effect.runPromise`, exactly
+            // as the SurrealQL version this replaced did with `db.query`.
+            return yield* withConfigWrite((write) =>
+                Effect.gen(function* () {
+                    const services = yield* Effect.context();
+                    return yield* Effect.tryPromise({
+                        try: () => applyExecutionSurrealWritePlanReport(writePlan, (entry) =>
+                            Effect.runPromiseWith(services)(write.put(entry.table, entry.row))),
+                        catch: toWriteError,
+                    });
+                }),
+            ).pipe(
+                Effect.mapError((error) =>
+                    error instanceof ClassifierPackageReportWriteError ? error : toWriteError(error),
+                ),
+            );
         });
 
         const writeExecutionSurrealApply = Effect.fn("ClassifierPackageService.writeExecutionSurrealApplyReport")(function* (

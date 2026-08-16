@@ -4,15 +4,8 @@ import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettyPrint } from "@ax/lib/json";
-import {
-    recordRef,
-    surrealJson,
-    surrealJsonOption,
-    surrealJsonText,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import {
     ClassifierPackageInvalidError,
     findClassifierPackageOperation,
@@ -252,11 +245,29 @@ export interface ClassifierPackageExecutionFactProjectionReport {
     };
 }
 
+/**
+ * One row this write plan will `put` into a `classifier_graph_*` table via the
+ * DuckDB write seam (`CacheWriteService.put`). `label` is a human-readable
+ * description of the write (kept for the report's `statements` field and for
+ * `first_failure.statement` on a failed apply) - it is NEVER executed as SQL,
+ * unlike the SurrealQL text this replaced.
+ */
+export interface ClassifierGraphWriteRow {
+    readonly table: "classifier_graph_node" | "classifier_graph_edge" | "classifier_graph_fact";
+    readonly row: Readonly<Record<string, DuckDbParam>>;
+    readonly label: string;
+}
+
 export interface ClassifierPackageExecutionSurrealWritePlanReport {
     readonly schema: "ax.classifier_package_execution_surreal_write_plan.v1";
     readonly root: string;
     readonly source_projection_schema: ClassifierPackageExecutionFactProjectionReport["schema"];
+    /** Human-readable description of each write, in apply order (was raw
+     *  SurrealQL text before the DuckDB port; see {@link ClassifierGraphWriteRow}). */
     readonly statements: readonly string[];
+    /** The structured payload `applyExecutionSurrealWritePlanReport` actually
+     *  writes - one entry per `statements[i]`, same order. */
+    readonly rows: readonly ClassifierGraphWriteRow[];
     readonly tables: readonly string[];
     readonly totals: {
         readonly statement_count: number;
@@ -2558,70 +2569,101 @@ export function buildExecutionFactProjectionReport(
     };
 }
 
+/**
+ * Build the DuckDB write plan for `classifier_graph_{node,edge,fact}`.
+ *
+ * Was a SurrealQL statement builder (raw `UPSERT table:id CONTENT {...}` text).
+ * The three tables now live in DuckDB (`packages/schema/src/schema.duckdb.sql`),
+ * so this builds structured rows for `CacheWriteService.put` instead - see
+ * {@link ClassifierGraphWriteRow}. `id` and `graph_id` both carry the
+ * projection's node/edge/fact id (mirroring the old SurrealQL, which used the
+ * same value as both the record id and the `graph_id` field); `updated_at` is
+ * stamped here with the writer's own clock rather than a `time::now()` literal,
+ * since DuckDB binds parameters rather than interpolating SQL text.
+ */
 export function buildExecutionSurrealWritePlanReport(
     projection: ClassifierPackageExecutionFactProjectionReport,
 ): ClassifierPackageExecutionSurrealWritePlanReport {
-    const nodeStatements = projection.nodes.map((node) =>
-        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(node.id)],
-            ["kind", surrealString(node.kind)],
-            ["label", surrealString(node.label)],
-            ["properties_json", surrealJson(node.properties)],
-            ["source_kind", surrealString("classifier_package_execution")],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const edgeStatements = projection.edges.map((edge) =>
-        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(edge.id)],
-            ["kind", surrealString(edge.kind)],
-            ["from_id", surrealString(edge.from)],
-            ["to_id", surrealString(edge.to)],
-            ["evidence_path", surrealString(edge.evidence_path)],
-            ["properties_json", surrealJson(edge.properties)],
-            ["source_kind", surrealString("classifier_package_execution")],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const factStatements = projection.facts.map((fact) =>
-        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(fact.id)],
-            ["kind", surrealString(fact.kind)],
-            ["subject", surrealString(fact.subject)],
-            ["predicate", surrealString(fact.predicate)],
-            ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonOption(fact.value)],
-            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
-            ["properties_json", surrealJson(fact.properties)],
-            ["source_kind", surrealString("classifier_package_execution")],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    const now = new Date();
+    const nodeWrites: ClassifierGraphWriteRow[] = projection.nodes.map((node) => ({
+        table: "classifier_graph_node",
+        row: cacheRow({
+            id: node.id,
+            graph_id: node.id,
+            kind: node.kind,
+            label: node.label,
+            properties_json: jsonParam(node.properties),
+            source_kind: "classifier_package_execution",
+            updated_at: now,
+        }),
+        label: `PUT classifier_graph_node ${node.id}`,
+    }));
+    const edgeWrites: ClassifierGraphWriteRow[] = projection.edges.map((edge) => ({
+        table: "classifier_graph_edge",
+        row: cacheRow({
+            id: edge.id,
+            graph_id: edge.id,
+            kind: edge.kind,
+            from_id: edge.from,
+            to_id: edge.to,
+            evidence_path: edge.evidence_path,
+            properties_json: jsonParam(edge.properties),
+            source_kind: "classifier_package_execution",
+            updated_at: now,
+        }),
+        label: `PUT classifier_graph_edge ${edge.id}`,
+    }));
+    const factWrites: ClassifierGraphWriteRow[] = projection.facts.map((fact) => ({
+        table: "classifier_graph_fact",
+        row: cacheRow({
+            id: fact.id,
+            graph_id: fact.id,
+            kind: fact.kind,
+            subject: fact.subject,
+            predicate: fact.predicate,
+            object: fact.object ?? null,
+            value_json: jsonParam(fact.value ?? null),
+            evidence_edges_json: jsonParam(fact.evidence_edges),
+            properties_json: jsonParam(fact.properties),
+            source_kind: "classifier_package_execution",
+            updated_at: now,
+        }),
+        label: `PUT classifier_graph_fact ${fact.id}`,
+    }));
+    const rows = [...nodeWrites, ...edgeWrites, ...factWrites];
+    const statements = rows.map((entry) => entry.label);
     return {
         schema: "ax.classifier_package_execution_surreal_write_plan.v1",
         root: projection.root,
         source_projection_schema: projection.schema,
         statements,
+        rows,
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         totals: {
             statement_count: statements.length,
-            node_statement_count: nodeStatements.length,
-            edge_statement_count: edgeStatements.length,
-            fact_statement_count: factStatements.length,
+            node_statement_count: nodeWrites.length,
+            edge_statement_count: edgeWrites.length,
+            fact_statement_count: factWrites.length,
         },
     };
 }
 
+/**
+ * Apply a write plan built by {@link buildExecutionSurrealWritePlanReport}.
+ * `put` is expected to be `CacheWriteService.put` (or an equivalent wrapper) -
+ * one row per call, applied in order, so a mid-plan failure still reports
+ * exactly how far it got (mirrors the old per-statement SurrealQL apply loop).
+ */
 export async function applyExecutionSurrealWritePlanReport(
     writePlan: ClassifierPackageExecutionSurrealWritePlanReport,
-    query: (statement: string) => Promise<unknown>,
+    put: (entry: ClassifierGraphWriteRow) => Promise<unknown>,
 ): Promise<ClassifierPackageExecutionSurrealApplyReport> {
     let appliedStatementCount = 0;
-    for (let index = 0; index < writePlan.statements.length; index += 1) {
-        const statement = writePlan.statements[index] ?? "";
+    for (let index = 0; index < writePlan.rows.length; index += 1) {
+        const entry = writePlan.rows[index];
+        if (entry === undefined) continue;
         try {
-            await query(statement);
+            await put(entry);
             appliedStatementCount += 1;
         } catch (error) {
             return {
@@ -2629,12 +2671,12 @@ export async function applyExecutionSurrealWritePlanReport(
                 root: writePlan.root,
                 source_write_plan_schema: writePlan.schema,
                 applied: false,
-                attempted_statement_count: writePlan.statements.length,
+                attempted_statement_count: writePlan.rows.length,
                 applied_statement_count: appliedStatementCount,
-                failed_statement_count: writePlan.statements.length - appliedStatementCount,
+                failed_statement_count: writePlan.rows.length - appliedStatementCount,
                 first_failure: {
                     index,
-                    statement,
+                    statement: entry.label,
                     message: error instanceof Error ? error.message : String(error),
                 },
                 tables: writePlan.tables,
@@ -2647,7 +2689,7 @@ export async function applyExecutionSurrealWritePlanReport(
         root: writePlan.root,
         source_write_plan_schema: writePlan.schema,
         applied: true,
-        attempted_statement_count: writePlan.statements.length,
+        attempted_statement_count: writePlan.rows.length,
         applied_statement_count: appliedStatementCount,
         failed_statement_count: 0,
         tables: writePlan.tables,

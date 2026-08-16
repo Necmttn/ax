@@ -1,5 +1,5 @@
-import { Effect, FileSystem, type PlatformError } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
+import { Effect, FileSystem, type Path, type PlatformError } from "effect";
+import type { AxConfig } from "@ax/lib/config";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettyPrint } from "@ax/lib/json";
@@ -1148,11 +1148,10 @@ const serviceErrorText = (error: unknown): string => {
 
 export const runClassifiersPackageOperations = (
     input: ClassifierPackageOperationsCommandInput,
-// `CacheRead` joins `SurrealClient` here rather than replacing it: the read half
-// of `ClassifierPackageService` moved to the DuckDB seam (wave 3, `c-read-context`)
-// while `applyExecutionSurrealWritePlan` still emits SurrealQL, so this operation
-// genuinely needs both until the write plan is ported.
-): Effect.Effect<void, never, ClassifierPackageService | SurrealClient | CacheRead | FileSystem.FileSystem> =>
+// `applyExecutionSurrealWritePlanReport` now writes through `withConfigWrite`
+// (the DuckDB seam's CLI-invoked write front door), which needs `AxConfig` +
+// `Path.Path` rather than `SurrealClient` - see package-service.ts.
+): Effect.Effect<void, never, ClassifierPackageService | AxConfig | CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
         if (input.applyWritePlan) {
