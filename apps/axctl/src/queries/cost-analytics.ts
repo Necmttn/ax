@@ -11,15 +11,41 @@
  *     estimated_cost_usd, ts
  *   session: id, source, project, started_at, model
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { CacheRead } from "@ax/lib/duckdb/seam";
-import { surrealLiteral } from "@ax/lib/json";
-import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
+import { eqClause, withinDaysClause } from "@ax/lib/duckdb/clause";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 import { originOfSource } from "../ingest/source-origin.ts";
 import { estimateCost, normalizeModelName, pricingForModel, type ModelPricing } from "../ingest/model-pricing.ts";
 import { loadPricingCatalogForModels } from "../metrics/cost-estimate.ts";
+
+// ---------------------------------------------------------------------------
+// Row contracts
+// ---------------------------------------------------------------------------
+
+const nnum = Schema.NullOr(NumberFromBigIntColumn);
+
+const CostModelsAggRow = Schema.Struct({
+    model: Schema.NullOr(Schema.String),
+    sessions: NumberFromBigIntColumn,
+    prompt_tokens: nnum,
+    completion_tokens: nnum,
+    cache_read_tokens: nnum,
+    cache_create_tokens: nnum,
+    cost_usd: Schema.NullOr(Schema.Number),
+});
+
+const CostSplitAggRow = Schema.Struct({
+    source: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    sessions: NumberFromBigIntColumn,
+    prompt_tokens: nnum,
+    completion_tokens: nnum,
+    cache_read_tokens: nnum,
+    cache_create_tokens: nnum,
+    cost_usd: Schema.NullOr(Schema.Number),
+});
 
 // ---------------------------------------------------------------------------
 // Shared constants + SQL-boundary helpers
@@ -71,11 +97,19 @@ const EMPTY_PRICING_CATALOG: ReadonlyMap<string, ModelPricing> = new Map();
  * out of the common all-priced path (and out of every positional-mock caller
  * that never exercises recompute, e.g. buildProfile).
  */
-const rowsNeedPricing = (rows: ReadonlyArray<Record<string, unknown>>): boolean =>
+interface PriceableTotals {
+    readonly cost_usd: number | null;
+    readonly prompt_tokens: number | null;
+    readonly completion_tokens: number | null;
+    readonly cache_read_tokens: number | null;
+    readonly cache_create_tokens: number | null;
+}
+
+const rowsNeedPricing = (rows: ReadonlyArray<PriceableTotals>): boolean =>
     rows.some((row) =>
-        countField(row, "cost_usd") === 0
-        && countField(row, "prompt_tokens") + countField(row, "completion_tokens")
-            + countField(row, "cache_read_tokens") + countField(row, "cache_create_tokens") > 0,
+        (row.cost_usd ?? 0) === 0
+        && (row.prompt_tokens ?? 0) + (row.completion_tokens ?? 0)
+            + (row.cache_read_tokens ?? 0) + (row.cache_create_tokens ?? 0) > 0,
     );
 
 function resolveRowCost(
@@ -142,28 +176,26 @@ export interface CostModelsResult {
  * Fetch raw session_token_usage rows for the cost-models rollup. Avoids
  * GROUP BY + deref inside aggregates; aggregation is done in JS.
  */
-const COST_MODELS_SQL = (sinceDays: number) => `
-SELECT
-    model,
-    count() AS sessions,
-    math::sum(prompt_tokens) AS prompt_tokens,
-    math::sum(completion_tokens) AS completion_tokens,
-    math::sum(cache_read_input_tokens) AS cache_read_tokens,
-    math::sum(cache_creation_input_tokens) AS cache_create_tokens,
-    math::sum(estimated_cost_usd) AS cost_usd
-FROM session_token_usage
-WHERE ts > time::now() - ${sqlWindowDays(sinceDays)}d
-GROUP BY model
-ORDER BY cost_usd DESC;
-`;
-
 export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
     function* (opts: { readonly sinceDays: number }) {
-        const db = yield* SurrealClient;
         const read = yield* CacheRead;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            COST_MODELS_SQL(opts.sinceDays),
-        ).pipe(Effect.map((r) => r?.[0] ?? []));
+        const clause = withinDaysClause("ts", sqlWindowDays(opts.sinceDays));
+        const rows = yield* read.rows(
+            CostModelsAggRow,
+            `SELECT
+    model,
+    count(*) AS sessions,
+    coalesce(sum(prompt_tokens), 0) AS prompt_tokens,
+    coalesce(sum(completion_tokens), 0) AS completion_tokens,
+    coalesce(sum(cache_read_input_tokens), 0) AS cache_read_tokens,
+    coalesce(sum(cache_creation_input_tokens), 0) AS cache_create_tokens,
+    coalesce(sum(estimated_cost_usd), 0) AS cost_usd
+FROM session_token_usage
+WHERE 1 = 1 ${clause.sql}
+GROUP BY model
+ORDER BY cost_usd DESC;`,
+            clause.params,
+        );
 
         // Lazy: the catalog round-trip only happens when some row actually
         // needs pricing resolution (stored zero cost with real tokens) - the
@@ -171,27 +203,31 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
         const catalog = rowsNeedPricing(rows)
             ? yield* loadPricingCatalogForModels(
                 read,
-                rows.map((row) => (row.model == null ? null : String(row.model))),
+                rows.map((row) => row.model),
             )
             : EMPTY_PRICING_CATALOG;
 
         const parsed: CostModelsRow[] = rows.map((row) => {
-            const model = row.model == null ? "(unattributed)" : String(row.model);
+            const model = row.model ?? "(unattributed)";
+            const promptTokens = row.prompt_tokens ?? 0;
+            const completionTokens = row.completion_tokens ?? 0;
+            const cacheReadTokens = row.cache_read_tokens ?? 0;
+            const cacheCreateTokens = row.cache_create_tokens ?? 0;
             const resolved = resolveRowCost({
                 model,
-                promptTokens: countField(row, "prompt_tokens"),
-                completionTokens: countField(row, "completion_tokens"),
-                cacheReadTokens: countField(row, "cache_read_tokens"),
-                cacheCreateTokens: countField(row, "cache_create_tokens"),
-                costUsd: countField(row, "cost_usd"),
+                promptTokens,
+                completionTokens,
+                cacheReadTokens,
+                cacheCreateTokens,
+                costUsd: row.cost_usd ?? 0,
             }, catalog);
             return {
                 model,
-                sessions: countField(row, "sessions"),
-                prompt_tokens: countField(row, "prompt_tokens"),
-                completion_tokens: countField(row, "completion_tokens"),
-                cache_read_tokens: countField(row, "cache_read_tokens"),
-                cache_create_tokens: countField(row, "cache_create_tokens"),
+                sessions: row.sessions,
+                prompt_tokens: promptTokens,
+                completion_tokens: completionTokens,
+                cache_read_tokens: cacheReadTokens,
+                cache_create_tokens: cacheCreateTokens,
                 cost_usd: resolved.cost_usd,
                 unpriced: resolved.unpriced,
             };
@@ -223,30 +259,15 @@ export interface CostSessionsResult {
     readonly rows: ReadonlyArray<CostSessionsRow>;
 }
 
-const COST_SESSIONS_SQL = (sinceDays: number, limit: number, modelFilter: string | null) => {
-    const whereFragments = [
-        `ts > time::now() - ${sqlWindowDays(sinceDays)}d`,
-        "estimated_cost_usd != NONE",
-    ];
-    if (modelFilter) {
-        whereFragments.push(`model = ${surrealLiteral(modelFilter)}`);
-    }
-    const where = whereFragments.join(" AND ");
-    return `
-SELECT
-    type::string(session) AS session_id,
-    session.project AS project,
-    model,
-    type::string(session.started_at) AS started_at,
-    estimated_cost_usd AS cost_usd,
-    completion_tokens,
-    cache_read_input_tokens AS cache_read_tokens
-FROM session_token_usage
-WHERE ${where}
-ORDER BY estimated_cost_usd DESC
-LIMIT ${Math.min(Math.max(1, Math.trunc(limit)), 500)};
-`;
-};
+const CostSessionsQueryRow = Schema.Struct({
+    session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    cost_usd: Schema.NullOr(Schema.Number),
+    completion_tokens: nnum,
+    cache_read_tokens: nnum,
+});
 
 export const fetchCostSessions = Effect.fn("queries.fetchCostSessions")(
     function* (opts: {
@@ -254,19 +275,36 @@ export const fetchCostSessions = Effect.fn("queries.fetchCostSessions")(
         readonly limit: number;
         readonly model: string | null;
     }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            COST_SESSIONS_SQL(opts.sinceDays, opts.limit, opts.model),
-        ).pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const windowClause = withinDaysClause("stu.ts", sqlWindowDays(opts.sinceDays));
+        const modelClause = eqClause("stu.model", opts.model);
+        const limit = Math.min(Math.max(1, Math.trunc(opts.limit)), 500);
+        const rows = yield* read.rows(
+            CostSessionsQueryRow,
+            `SELECT
+    stu.session AS session_id,
+    s.project AS project,
+    stu.model AS model,
+    s.started_at AS started_at,
+    stu.estimated_cost_usd AS cost_usd,
+    stu.completion_tokens AS completion_tokens,
+    stu.cache_read_input_tokens AS cache_read_tokens
+FROM session_token_usage stu
+LEFT JOIN session s ON s.id = stu.session
+WHERE stu.estimated_cost_usd IS NOT NULL ${windowClause.sql} ${modelClause.sql}
+ORDER BY stu.estimated_cost_usd DESC
+LIMIT ?;`,
+            [...windowClause.params, ...modelClause.params, limit],
+        );
 
         const parsed: CostSessionsRow[] = rows.map((row) => ({
-            session_id: stringFieldOr(row, "session_id"),
-            project: row.project == null ? null : String(row.project),
-            model: row.model == null ? null : String(row.model),
-            started_at: row.started_at == null ? null : String(row.started_at),
-            cost_usd: countField(row, "cost_usd"),
-            completion_tokens: countField(row, "completion_tokens"),
-            cache_read_tokens: countField(row, "cache_read_tokens"),
+            session_id: row.session_id,
+            project: row.project,
+            model: row.model,
+            started_at: row.started_at === null ? null : row.started_at.toISOString(),
+            cost_usd: row.cost_usd ?? 0,
+            completion_tokens: row.completion_tokens ?? 0,
+            cache_read_tokens: row.cache_read_tokens ?? 0,
         }));
 
         return { rows: parsed } satisfies CostSessionsResult;
@@ -309,22 +347,6 @@ export interface CostSplitResult {
     readonly contentTypes: ContentTypeBreakdown;
 }
 
-const COST_SPLIT_SQL = (sinceDays: number) => `
-SELECT
-    source,
-    model,
-    count() AS sessions,
-    math::sum(prompt_tokens) AS prompt_tokens,
-    math::sum(completion_tokens) AS completion_tokens,
-    math::sum(cache_read_input_tokens) AS cache_read_tokens,
-    math::sum(cache_creation_input_tokens) AS cache_create_tokens,
-    math::sum(estimated_cost_usd) AS cost_usd
-FROM session_token_usage
-WHERE ts > time::now() - ${sqlWindowDays(sinceDays)}d
-GROUP BY source, model
-ORDER BY cost_usd DESC;
-`;
-
 /**
  * Aggregate into (origin × model) cells where origin is "subagent" for any
  * subagent source (claude-subagent / codex-subagent) and "main" otherwise.
@@ -332,11 +354,25 @@ ORDER BY cost_usd DESC;
  */
 export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
     function* (opts: { readonly sinceDays: number }) {
-        const db = yield* SurrealClient;
         const read = yield* CacheRead;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            COST_SPLIT_SQL(opts.sinceDays),
-        ).pipe(Effect.map((r) => r?.[0] ?? []));
+        const clause = withinDaysClause("ts", sqlWindowDays(opts.sinceDays));
+        const rows = yield* read.rows(
+            CostSplitAggRow,
+            `SELECT
+    source,
+    model,
+    count(*) AS sessions,
+    coalesce(sum(prompt_tokens), 0) AS prompt_tokens,
+    coalesce(sum(completion_tokens), 0) AS completion_tokens,
+    coalesce(sum(cache_read_input_tokens), 0) AS cache_read_tokens,
+    coalesce(sum(cache_creation_input_tokens), 0) AS cache_create_tokens,
+    coalesce(sum(estimated_cost_usd), 0) AS cost_usd
+FROM session_token_usage
+WHERE 1 = 1 ${clause.sql}
+GROUP BY source, model
+ORDER BY cost_usd DESC;`,
+            clause.params,
+        );
 
         // Aggregate per (origin × model)
         const cellMap = new Map<string, {
@@ -351,16 +387,16 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
         }>();
 
         for (const row of rows) {
-            const origin = originOfSource(stringFieldOr(row, "source"));
-            const model = row.model == null ? "(unattributed)" : String(row.model);
+            const origin = originOfSource(row.source);
+            const model = row.model ?? "(unattributed)";
             const key = `${origin}\x00${model}`;
 
-            const sessions = countField(row, "sessions");
-            const prompt = countField(row, "prompt_tokens");
-            const completion = countField(row, "completion_tokens");
-            const cacheRead = countField(row, "cache_read_tokens");
-            const cacheCreate = countField(row, "cache_create_tokens");
-            const cost = countField(row, "cost_usd");
+            const sessions = row.sessions;
+            const prompt = row.prompt_tokens ?? 0;
+            const completion = row.completion_tokens ?? 0;
+            const cacheRead = row.cache_read_tokens ?? 0;
+            const cacheCreate = row.cache_create_tokens ?? 0;
+            const cost = row.cost_usd ?? 0;
 
             const existing = cellMap.get(key);
             if (existing) {

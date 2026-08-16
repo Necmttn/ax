@@ -2,26 +2,21 @@
  * insights-enrich.ts - post-query context enrichment for the classifier
  * insight views.
  *
- * classifier-facts / correction-contexts / classifier-outcomes used to fetch
- * their per-row context (previous assistant turn, recent tool failures, later
- * tool calls / command outcomes / user turns) via correlated
- * `WHERE session = $parent.session` subqueries inside the view SQL. SurrealDB
- * v3 cannot use index lookups through `$parent.*`, so each subquery partial-
- * scans the 560k-turn / 150k-tool_call tables: with the default LIMIT 20 that
- * was ~20s (facts/contexts) and ~38s (outcomes) per view.
+ * classifier-facts / correction-contexts / classifier-outcomes fetch their
+ * per-row context (previous assistant turn, recent tool failures, later
+ * tool calls / command outcomes / user turns) via literal-session-id lookups
+ * fanned out at bounded concurrency, so a view row never pays a correlated
+ * per-row scan. Field names and shapes match what `insights.ts` emits, so
+ * `formatInsightRows` is unchanged.
  *
- * The view SQL now returns just the classifier rows (indexed, fast) and this
- * module resolves the same context per row with LITERAL session ids - each an
- * indexed ~1ms lookup (turn_session_seq / tool_call_session_ts) - fanned out
- * at bounded concurrency. Field names and shapes match what the old SQL
- * emitted, so `formatInsightRows` is unchanged.
+ * Ported off SurrealQL onto the DuckDB `CacheRead` seam: `session` is now a
+ * bare VARCHAR (no `session:` record-id wrapper) and every lookup binds its
+ * session id / seq / ts as ordinary parameters instead of splicing record-id
+ * literals into statement text.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { CacheRead } from "@ax/lib/duckdb/seam";
-import type { DbError } from "@ax/lib/errors";
-import { recordIdString } from "@ax/lib/shared/row-fields";
-import { surrealDate } from "@ax/lib/shared/surql";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { InsightView } from "./insights.ts";
 import { bareSession, enrichRowsWithTelemetryCost } from "./telemetry-rollup.ts";
 
@@ -36,23 +31,23 @@ const ENRICHED_VIEWS = new Set<InsightView>([
     "classifier-outcomes",
 ]);
 
-/** `session:⟨uuid⟩`-style literal from a row's raw `session` field (RecordId
- *  object or string). Null when absent/malformed - the row passes through
- *  unenriched rather than failing the whole view. */
-const sessionLiteral = (row: Row): string | null => {
-    const raw = recordIdString(row.session);
-    if (!raw || !raw.startsWith("session:")) return null;
-    let key = raw.slice("session:".length);
-    if (key.startsWith("⟨") && key.endsWith("⟩")) key = key.slice(1, -1);
-    else if (key.startsWith("`") && key.endsWith("`")) key = key.slice(1, -1);
-    if (!key) return null;
-    return `session:\`${key.replace(/`/g, "")}\``;
+/** Bare session id from a row's `session` field. DuckDB rows carry the plain
+ *  VARCHAR id directly - no `session:` record-id unwrapping needed. Null when
+ *  absent/malformed, so the row passes through unenriched rather than failing
+ *  the whole view. */
+const sessionIdOf = (row: Row): string | null => {
+    const raw = row.session;
+    if (typeof raw !== "string" || raw.length === 0) return null;
+    return raw;
 };
 
-const tsLiteral = (row: Row): string | null => {
+const tsOf = (row: Row): Date | null => {
     const ts = row.ts;
-    if (ts instanceof Date) return surrealDate(ts);
-    if (typeof ts === "string" && ts.length > 0) return surrealDate(ts);
+    if (ts instanceof Date) return ts;
+    if (typeof ts === "string" && ts.length > 0) {
+        const parsed = new Date(ts);
+        return Number.isFinite(parsed.getTime()) ? parsed : null;
+    }
     return null;
 };
 
@@ -61,71 +56,151 @@ const seqOf = (row: Row): number | null =>
 
 const one = <T>(rows: readonly T[] | undefined): T | null => rows?.[0] ?? null;
 
-const enrichRow = (
+// ---------------------------------------------------------------------------
+// Row contracts for the enrichment lookups
+// ---------------------------------------------------------------------------
+
+const PrevAssistantRow = Schema.Struct({
+    id: Schema.String,
+    seq: NumberFromBigIntColumn,
+    text: Schema.NullOr(Schema.String),
+});
+
+const ToolFailureRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    error_text: Schema.NullOr(Schema.String),
+    output_excerpt: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+
+const LaterToolCallRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    has_error: Schema.Boolean,
+    status: Schema.NullOr(Schema.String),
+    exit_code: Schema.NullOr(NumberFromBigIntColumn),
+    output_excerpt: Schema.NullOr(Schema.String),
+    error_text: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+
+const LaterCommandOutcomeRow = Schema.Struct({
+    id: Schema.String,
+    kind: Schema.String,
+    status: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    command_tool: Schema.NullOr(Schema.String),
+    text: Schema.NullOr(Schema.String),
+    tool_call: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+
+const LaterUserTurnRow = Schema.Struct({
+    id: Schema.String,
+    seq: NumberFromBigIntColumn,
+    role: Schema.String,
+    text: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+
+const PREV_ASSISTANT_SQL = `
+SELECT id, seq, text_excerpt AS text
+FROM turn
+WHERE session = ? AND role = 'assistant' AND seq < ?
+ORDER BY seq DESC
+LIMIT 1;
+`;
+
+const RECENT_TOOL_FAILURES_SQL = (limit: number) => `
+SELECT id, name, command_norm, error_text, output_excerpt, ts
+FROM tool_call
+WHERE session = ? AND has_error = TRUE AND ts <= ?
+ORDER BY ts DESC
+LIMIT ${limit};
+`;
+
+const LATER_TOOL_CALLS_SQL = `
+SELECT id, name, command_norm, has_error, status, exit_code, output_excerpt, error_text, ts
+FROM tool_call
+WHERE session = ? AND ts > ?
+ORDER BY ts ASC
+LIMIT 5;
+`;
+
+const LATER_COMMAND_OUTCOMES_SQL = `
+SELECT id, kind, status, command_norm, command_tool, text, tool_call, ts
+FROM command_outcome
+WHERE session = ? AND ts > ?
+ORDER BY ts ASC
+LIMIT 5;
+`;
+
+const LATER_USER_TURNS_SQL = `
+SELECT id, seq, role, text_excerpt AS text, ts
+FROM turn
+WHERE session = ? AND role = 'user' AND seq > ?
+ORDER BY seq ASC
+LIMIT 3;
+`;
+
+const enrichRow = Effect.fn("queries.enrichRow")(function* (
     view: InsightView,
     row: Row,
-): Effect.Effect<Row, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sid = sessionLiteral(row);
-        if (sid === null) return row;
-        const seq = seqOf(row);
-        const ts = tsLiteral(row);
+) {
+    const read = yield* CacheRead;
+    const sid = sessionIdOf(row);
+    if (sid === null) return row;
+    const seq = seqOf(row);
+    const ts = tsOf(row);
 
-        if (view === "classifier-facts" || view === "correction-contexts") {
-            const failureLimit = view === "classifier-facts" ? 3 : 5;
-            const [prevResult, failResult] = yield* Effect.all([
-                seq === null
-                    ? Effect.succeed([[]] as [Row[]])
-                    : db.query<[Row[]]>(
-                        `SELECT id, seq, text_excerpt AS text FROM turn WHERE session = ${sid} AND role = "assistant" AND seq < ${seq} ORDER BY seq DESC LIMIT 1;`,
-                    ),
-                ts === null
-                    ? Effect.succeed([[]] as [Row[]])
-                    : db.query<[Row[]]>(
-                        `SELECT id, name, command_norm, error_text, output_excerpt, ts FROM tool_call WHERE session = ${sid} AND has_error = true AND ts <= ${ts} ORDER BY ts DESC LIMIT ${failureLimit};`,
-                    ),
-            ], { concurrency: 2 });
-            return {
-                ...row,
-                previous_assistant: one(prevResult?.[0]),
-                recent_tool_failures: failResult?.[0] ?? [],
-            };
-        }
-
-        // classifier-outcomes: what happened AFTER the classified turn.
-        const [toolResult, outcomeResult, userResult] = yield* Effect.all([
-            ts === null
-                ? Effect.succeed([[]] as [Row[]])
-                : db.query<[Row[]]>(
-                    `SELECT id, name, command_norm, has_error, status, exit_code, output_excerpt, error_text, ts FROM tool_call WHERE session = ${sid} AND ts > ${ts} ORDER BY ts ASC LIMIT 5;`,
-                ),
-            ts === null
-                ? Effect.succeed([[]] as [Row[]])
-                : db.query<[Row[]]>(
-                    `SELECT id, kind, status, command_norm, command_tool, text, tool_call, ts FROM command_outcome WHERE session = ${sid} AND ts > ${ts} ORDER BY ts ASC LIMIT 5;`,
-                ),
+    if (view === "classifier-facts" || view === "correction-contexts") {
+        const failureLimit = view === "classifier-facts" ? 3 : 5;
+        const [prevResult, failResult] = yield* Effect.all([
             seq === null
-                ? Effect.succeed([[]] as [Row[]])
-                : db.query<[Row[]]>(
-                    `SELECT id, seq, role, text_excerpt AS text, ts FROM turn WHERE session = ${sid} AND role = "user" AND seq > ${seq} ORDER BY seq ASC LIMIT 3;`,
-                ),
-        ], { concurrency: 3 });
+                ? Effect.succeed([])
+                : read.rows(PrevAssistantRow, PREV_ASSISTANT_SQL, [sid, seq]),
+            ts === null
+                ? Effect.succeed([])
+                : read.rows(ToolFailureRow, RECENT_TOOL_FAILURES_SQL(failureLimit), [sid, ts]),
+        ], { concurrency: 2 });
         return {
             ...row,
-            later_tool_calls: toolResult?.[0] ?? [],
-            later_command_outcomes: outcomeResult?.[0] ?? [],
-            later_user_turns: userResult?.[0] ?? [],
+            previous_assistant: one(prevResult),
+            recent_tool_failures: failResult,
         };
-    });
+    }
 
-/** Extract a bare session UUID from a friction row's session_ref (string from
- *  `type::string(session)`) or fall back to the raw session field. */
+    // classifier-outcomes: what happened AFTER the classified turn.
+    const [toolResult, outcomeResult, userResult] = yield* Effect.all([
+        ts === null
+            ? Effect.succeed([])
+            : read.rows(LaterToolCallRow, LATER_TOOL_CALLS_SQL, [sid, ts]),
+        ts === null
+            ? Effect.succeed([])
+            : read.rows(LaterCommandOutcomeRow, LATER_COMMAND_OUTCOMES_SQL, [sid, ts]),
+        seq === null
+            ? Effect.succeed([])
+            : read.rows(LaterUserTurnRow, LATER_USER_TURNS_SQL, [sid, seq]),
+    ], { concurrency: 3 });
+    return {
+        ...row,
+        later_tool_calls: toolResult,
+        later_command_outcomes: outcomeResult,
+        later_user_turns: userResult,
+    };
+});
+
+/** Extract a bare session UUID from a friction row's session_ref/session field. */
 const frictionSessionId = (row: Row): string =>
     bareSession(
         typeof row.session_ref === "string"
             ? row.session_ref
-            : (recordIdString(row.session) ?? String(row.session ?? "")),
+            : typeof row.session === "string"
+                ? row.session
+                : String(row.session ?? ""),
     );
 
 /** Pure fold - exported for unit testing. Tags each friction row with the
@@ -137,30 +212,36 @@ export const foldContentTypeOntoFriction = (
 ): Array<Row & { readonly contentType: string | null }> =>
     rows.map((r) => ({ ...r, contentType: bySession.get(frictionSessionId(r)) ?? null }));
 
+const FrictionContentTypeRow = Schema.Struct({
+    sid: Schema.String,
+    ct: Schema.String,
+    bytes: NumberFromBigIntColumn,
+});
+
 /** Batch lookup: for each session in `ids`, return the dominant content-type
  *  category (most bytes) from the `has_content` edge. Deref-free - the edge
  *  already denormalizes `session`. */
 const fetchFrictionContentTypes = (
     sessionIds: readonly string[],
-): Effect.Effect<Map<string, string>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, string>, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         if (sessionIds.length === 0) return new Map<string, string>();
-        const db = yield* SurrealClient;
-        const list = sessionIds
-            .map((id) => `session:\`${bareSession(id).replace(/`/g, "")}\``)
-            .join(", ");
-        const raw = (yield* db.query<[Array<{ sid: string; ct: string; bytes: number }>]>(
-            `SELECT type::string(session) AS sid, type::string(out) AS ct, math::sum(bytes) AS bytes `
-            + `FROM has_content WHERE session IN [${list}] GROUP BY sid, ct;`,
-        ))?.[0] ?? [];
+        const read = yield* CacheRead;
+        const bareIds = [...new Set(sessionIds.map((id) => bareSession(id)))];
+        const placeholders = bareIds.map(() => "?").join(", ");
+        const raw = yield* read.rows(
+            FrictionContentTypeRow,
+            `SELECT session AS sid, out_id AS ct, coalesce(sum(bytes), 0) AS bytes
+FROM has_content WHERE session IN (${placeholders}) GROUP BY sid, ct;`,
+            bareIds,
+        );
         // Per session: pick the category with the most bytes
         const best = new Map<string, { ct: string; bytes: number }>();
         for (const r of raw) {
             const sid = bareSession(r.sid);
-            const b = Number(r.bytes ?? 0);
             const prev = best.get(sid);
-            if (!prev || b > prev.bytes) {
-                best.set(sid, { ct: String(r.ct).replace(/^content_type:/, ""), bytes: b });
+            if (!prev || r.bytes > prev.bytes) {
+                best.set(sid, { ct: r.ct.replace(/^content_type:/, ""), bytes: r.bytes });
             }
         }
         const out = new Map<string, string>();
