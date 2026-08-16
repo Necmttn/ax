@@ -6,16 +6,18 @@
  * `scripts/prototypes/ax-session-inspect.ts`.
  */
 
-import { Data, Effect, FileSystem, type Path } from "effect";
+import { Data, Effect, FileSystem, Schema, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
 import { SurrealClient } from "@ax/lib/db";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn, JsonArrayColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows, cacheFirst, runCacheSingleQuery } from "@ax/lib/duckdb/query";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
-import { sessionShareTurnToolCallsQuery, type ShareTurnToolCall } from "../queries/session-detail.ts";
+import { sessionTokenUsageCacheQuery } from "../queries/session-detail-cache.ts";
 import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
@@ -31,17 +33,8 @@ import type {
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
 import { categoryOf } from "@ax/lib/shared/tool-presentation";
-import {
-    interpolateRid,
-    queryMany,
-    queryOptional,
-    runQuery,
-} from "@ax/lib/shared/graph-query";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
-import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
-import { recordRef } from "@ax/lib/shared/surql";
-import { refListSource } from "@ax/lib/shared/record-select";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -171,6 +164,20 @@ function toToolCall(seq: number, name: string, rawInput: unknown): ToolCallDto {
     }
     const command = input && typeof input.command === "string" ? input.command : null;
     return { seq, name, category: categoryOf(name), input, command, output_excerpt: null, has_error: false, tokens: null };
+}
+
+/** A recorded `tool_call` row, projected for the turn-toolcalls view. Mirrors
+ *  `queries/session-detail.ts`'s `ShareTurnToolCall` shape (that file is
+ *  chunk 2b's; this is a same-shaped LOCAL type, not an import, so this
+ *  module never depends on queries/ for its DuckDB read path). */
+export interface ShareTurnToolCall {
+    readonly seq: number;
+    readonly name: string;
+    readonly command: string | null;
+    /** JSON-encoded tool input/arguments, as recorded. */
+    readonly input_json: string | null;
+    readonly output: string | null;
+    readonly has_error: boolean;
 }
 
 /** Map a recorded `tool_call` row (the share-turn-toolcalls projection) to a
@@ -307,127 +314,98 @@ interface ChildStats {
     readonly duration_ms: number | null;
 }
 
-/** SQL constants kept near their resolvers so the only thing the helper hides
+/** Row schemas kept near their resolvers so the only thing the helper hides
  *  is the Effect.gen + Effect.catch ceremony - the SQL stays grep-able. */
-const PARENT_SQL = `
-    SELECT <string>in AS parent, nickname FROM spawned WHERE out = $sid LIMIT 1;
-`;
-const SESSION_META_SQL = `
-    SELECT project, cwd, raw_file, source FROM session WHERE id = $sid LIMIT 1;
-`;
-const CHILDREN_SQL = `
-    SELECT <string>out AS child, <string>ts AS ts, tool, nickname
-    FROM spawned
-    WHERE in = $sid
-    ORDER BY ts ASC;
-`;
-/** Batched subagent run-metrics over a list of child session record-ids.
- *  Four grouped SELECTs in one round-trip (turns, tool_calls, token usage,
- *  session timestamps); stitched together in JS by bare session id. The
- *  `$ids` placeholder is replaced with an inline record-id array literal
- *  (each id validated + wrapped via toSessionRid). */
-const CHILD_STATS_SQL = `
-    SELECT session, count() AS turns
-    FROM turn
-    WHERE session IN $ids
-    GROUP BY session;
-
-    SELECT session, count() AS tool_calls
-    FROM tool_call
-    WHERE session IN $ids
-    GROUP BY session;
-
-    SELECT session, estimated_tokens, estimated_cost_usd
-    FROM session_token_usage
-    WHERE session IN $ids;
-
-    SELECT id AS session, started_at, ended_at
-    FROM session
-    WHERE id IN $ids;
-`;
-const HOOK_FIRES_SQL = `
-    SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
-    FROM hook_fire
-    WHERE session = $sid
-    ORDER BY ts ASC;
-`;
-const TOKEN_USAGE_SQL = `
-    SELECT model, prompt_tokens, completion_tokens,
-           cache_creation_input_tokens, cache_read_input_tokens,
-           estimated_tokens,
-           estimated_input_cost_usd, estimated_output_cost_usd,
-           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source
-    FROM session_token_usage
-    WHERE session = $sid
-    LIMIT 1;
-`;
-const TURN_TOKEN_USAGE_SQL = `
-    SELECT seq, model, prompt_tokens, completion_tokens,
+const ParentDbRow = Schema.Struct({
+    parent: Schema.String,
+    nickname: Schema.NullOr(Schema.String),
+});
+const SessionMetaDbRow = Schema.Struct({
+    project: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    raw_file: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+});
+const ChildEdgeDbRow = Schema.Struct({
+    child: Schema.String,
+    ts: Schema.NullOr(TimestampColumn),
+    tool: Schema.NullOr(Schema.String),
+    nickname: Schema.NullOr(Schema.String),
+});
+/** Batched subagent run-metrics over a list of child session ids. Four
+ *  grouped queries (turns, tool_calls, token usage, session timestamps),
+ *  one DuckDB statement per call (CacheRead has no multi-statement round
+ *  trip), stitched together in JS by session id. */
+const ChildTurnsDbRow = Schema.Struct({
+    session: Schema.String,
+    turns: NumberFromBigIntColumn,
+});
+const ChildToolCallsDbRow = Schema.Struct({
+    session: Schema.String,
+    tool_calls: NumberFromBigIntColumn,
+});
+const ChildTokenDbRow = Schema.Struct({
+    session: Schema.String,
+    estimated_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+});
+const ChildSessionDbRow = Schema.Struct({
+    session: Schema.String,
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+});
+const HookFireDbRow = Schema.Struct({
+    ts: TimestampColumn,
+    event: Schema.String,
+    file_path: Schema.String,
+    inject: Schema.Boolean,
+    reason: Schema.String,
+    latency_ms: NumberFromBigIntColumn,
+    injected_titles: JsonArrayColumn(Schema.String),
+});
+// (session_token_usage row shape/query reused from session-detail-cache.ts's
+// sessionTokenUsageCacheQuery below - no local schema needed.)
+const TURN_TOKEN_USAGE_COLUMNS = `seq, model, prompt_tokens, completion_tokens,
            cache_creation_input_tokens, cache_read_input_tokens,
            fresh_input_tokens, estimated_tokens,
            estimated_input_cost_usd, estimated_output_cost_usd,
            estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source, usage_source, usage_quality
-    FROM turn_token_usage
-    WHERE session = $sid
-    ORDER BY seq ASC;
-`;
-const TURN_TOKEN_USAGE_FOR_REFS_SQL = `
-    SELECT seq, model, prompt_tokens, completion_tokens,
-           cache_creation_input_tokens, cache_read_input_tokens,
-           fresh_input_tokens, estimated_tokens,
-           estimated_input_cost_usd, estimated_output_cost_usd,
-           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
-           estimated_cost_usd, pricing_source, usage_source, usage_quality
-    FROM $refs
-    ORDER BY seq ASC;
-`;
+           estimated_cost_usd, pricing_source, usage_source, usage_quality`;
 
-interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
-interface ChildEdgeRow {
-    readonly child: string;
-    readonly ts: string | null;
-    readonly tool: string | null;
-    readonly nickname: string | null;
-}
-/** Raw shape returned by Surreal for hook_fire SELECT. Datetime fields come
- *  back as JS Date via the SDK. */
-interface HookFireRow {
-    readonly ts: Date | string;
-    readonly event: string;
-    readonly file_path: string;
-    readonly inject: boolean;
-    readonly reason: string;
-    readonly latency_ms: number;
-    readonly injected_titles: ReadonlyArray<string> | null;
-}
-interface TokenUsageRow {
-    readonly model: string | null;
-    readonly prompt_tokens: number | null;
-    readonly completion_tokens: number | null;
-    readonly cache_creation_input_tokens: number | null;
-    readonly cache_read_input_tokens: number | null;
-    readonly estimated_tokens: number;
-    readonly estimated_input_cost_usd?: number | null;
-    readonly estimated_output_cost_usd?: number | null;
-    readonly estimated_cache_creation_cost_usd?: number | null;
-    readonly estimated_cache_read_cost_usd?: number | null;
-    readonly estimated_cost_usd: number | null;
-    readonly pricing_source: string | null;
-}
-interface TurnTokenUsageRow extends TokenUsageRow {
-    readonly seq: number;
-    readonly fresh_input_tokens: number | null;
-    readonly usage_source: string | null;
-    readonly usage_quality: string | null;
-}
+const TurnTokenUsageDbRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    fresh_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_tokens: NumberFromBigIntColumn,
+    estimated_input_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_output_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cache_creation_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cache_read_cost_usd: Schema.NullOr(Schema.Number),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String),
+    usage_source: Schema.NullOr(Schema.String),
+    usage_quality: Schema.NullOr(Schema.String),
+});
+type TurnTokenUsageRow = typeof TurnTokenUsageDbRow.Type;
+const GraphTurnDbRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    role: Schema.String,
+    ts: Schema.NullOr(TimestampColumn),
+    text: Schema.NullOr(Schema.String),
+});
 interface GraphTurnRow {
     readonly seq: number;
     readonly role: string;
     readonly ts: string | Date | null;
     readonly text: string | null;
 }
+const GraphSessionHealthDbRow = Schema.Struct({
+    turns: Schema.NullOr(NumberFromBigIntColumn),
+});
 interface GraphSessionHealthRow {
     readonly turns?: number | null;
 }
@@ -435,17 +413,20 @@ interface GraphSessionHealthRow {
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
  *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
  *  the inspector still renders without graph attribution. */
-const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
-    queryOptional<ParentRow, ParentInfo>(
-        interpolateRid(PARENT_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            // Strip the record-id decoration before the value crosses the
-            // HTTP seam. See src/lib/shared/session-id.ts for the seam.
-            parent_session: row.parent ? toBareSessionId(row.parent) : null,
-            parent_nickname: row.nickname ?? null,
-        }),
-        "session-inspect resolveParent",
-    ).pipe(Effect.map((v) => v ?? { parent_session: null, parent_nickname: null }));
+const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, CacheRead> =>
+    cacheFirst(
+        ParentDbRow,
+        {
+            sql: `SELECT in_id AS parent, nickname FROM spawned WHERE out_id = ? LIMIT 1`,
+            params: [sessionId],
+        },
+        "session-inspect.resolve_parent",
+    ).pipe(
+        Effect.map((row) => ({
+            parent_session: row?.parent ?? null,
+            parent_nickname: row?.nickname ?? null,
+        })),
+    );
 
 interface SessionMeta {
     readonly project: string | null;
@@ -453,122 +434,116 @@ interface SessionMeta {
     readonly raw_file: string | null;
     readonly source: string | null;
 }
-interface SessionMetaRow {
-    readonly project?: string | null;
-    readonly cwd?: string | null;
-    readonly raw_file?: string | null;
-    readonly source?: string | null;
-}
 
 /** The session's canonical project key + cwd, for the inspect header label.
  *  Defensive: swallows DB errors so the inspector still renders unlabelled. */
-const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, SurrealClient> =>
-    queryOptional<SessionMetaRow, SessionMeta>(
-        interpolateRid(SESSION_META_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            project: row.project ?? null,
-            cwd: row.cwd ?? null,
-            raw_file: row.raw_file ?? null,
-            source: row.source ?? null,
-        }),
-        "session-inspect resolveSessionMeta",
-    ).pipe(Effect.map((v) => v ?? { project: null, cwd: null, raw_file: null, source: null }));
+const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, CacheRead> =>
+    cacheFirst(
+        SessionMetaDbRow,
+        { sql: `SELECT project, cwd, raw_file, source FROM session WHERE id = ?`, params: [sessionId] },
+        "session-inspect.resolve_session_meta",
+    ).pipe(
+        Effect.map((row) => ({
+            project: row?.project ?? null,
+            cwd: row?.cwd ?? null,
+            raw_file: row?.raw_file ?? null,
+            source: row?.source ?? null,
+        })),
+    );
 
 /** Sessions this one spawned (its subagents). Same defensive shape as
  *  resolveParent - DB failure degrades to empty list. */
-const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
-    queryMany<ChildEdgeRow, ChildEdge>(
-        interpolateRid(CHILDREN_SQL, toBareSessionId(sessionId)),
-        (r) => ({
-            // Bare session id over the HTTP seam.
-            session_id: toBareSessionId(r.child),
-            ts: r.ts ?? null,
-            tool: r.tool ?? null,
-            nickname: r.nickname ?? null,
-        }),
-        "session-inspect resolveChildren",
+const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, CacheRead> =>
+    cacheRows(
+        ChildEdgeDbRow,
+        {
+            sql: `SELECT out_id AS child, ts, tool, nickname FROM spawned WHERE in_id = ? ORDER BY ts ASC`,
+            params: [sessionId],
+        },
+        "session-inspect.resolve_children",
+    ).pipe(
+        Effect.map((rows) =>
+            rows.map((r) => ({
+                session_id: r.child,
+                ts: r.ts ? r.ts.toISOString() : null,
+                tool: r.tool ?? null,
+                nickname: r.nickname ?? null,
+            })),
+        ),
     );
 
-/** A `session` record-id reference as returned by Surreal. The SDK hands
- *  these back either as a decorated string or a RecordId-like object; we only
- *  need its string form to re-bare. */
-type SurrealRef = string | { toString(): string };
-
-const refToBare = (ref: SurrealRef | null | undefined): string | null => {
-    if (ref == null) return null;
-    return toBareSessionId(typeof ref === "string" ? ref : String(ref));
-};
-
-interface ChildTurnsRow { readonly session: SurrealRef; readonly turns: number | null }
-interface ChildToolCallsRow { readonly session: SurrealRef; readonly tool_calls: number | null }
-interface ChildTokenRow {
-    readonly session: SurrealRef;
-    readonly estimated_tokens: number | null;
-    readonly estimated_cost_usd: number | null;
-}
-interface ChildSessionRow {
-    readonly session: SurrealRef;
-    readonly started_at: Date | string | null;
-    readonly ended_at: Date | string | null;
-}
-
-const toMs = (v: Date | string | null | undefined): number | null => {
+const toMs = (v: Date | null | undefined): number | null => {
     if (v == null) return null;
-    const ms = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    const ms = v.getTime();
     return Number.isFinite(ms) ? ms : null;
 };
 
-/** Resolve run metrics for every spawned child in ONE round-trip. Returns a
- *  map keyed by bare child session id. Defensive: any DB failure degrades to
- *  an empty map so the inspector still renders the spawn markers metric-less
- *  (mirrors resolveChildren's swallow-and-degrade contract). */
+/** Resolve run metrics for every spawned child. Four separate statements
+ *  (CacheRead has no multi-statement round trip), run concurrently, stitched
+ *  together in JS by session id. Returns a map keyed by child session id.
+ *  Defensive: cacheRows already degrades a failed query to [] so the
+ *  inspector still renders the spawn markers metric-less. */
 const resolveChildStats = (
     childIds: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyMap<string, ChildStats>, never, SurrealClient> =>
+): Effect.Effect<ReadonlyMap<string, ChildStats>, never, CacheRead> =>
     Effect.gen(function* () {
         if (childIds.length === 0) return new Map<string, ChildStats>();
-        const idList = childIds.map((id) => toSessionRid(toBareSessionId(id))).join(", ");
-        const sql = CHILD_STATS_SQL.split("$ids").join(`[${idList}]`);
-        const db = yield* SurrealClient;
-        const [turnRows, toolRows, tokenRows, sessionRows] = yield* db.query<[
-            ChildTurnsRow[],
-            ChildToolCallsRow[],
-            ChildTokenRow[],
-            ChildSessionRow[],
-        ]>(sql);
+        const placeholders = childIds.map(() => "?").join(", ");
+        const [turnRows, toolRows, tokenRows, sessionRows] = yield* Effect.all(
+            [
+                cacheRows(
+                    ChildTurnsDbRow,
+                    {
+                        sql: `SELECT session, count(*) AS turns FROM turn WHERE session IN (${placeholders}) GROUP BY session`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_turns",
+                ),
+                cacheRows(
+                    ChildToolCallsDbRow,
+                    {
+                        sql: `SELECT session, count(*) AS tool_calls FROM tool_call WHERE session IN (${placeholders}) GROUP BY session`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_tool_calls",
+                ),
+                cacheRows(
+                    ChildTokenDbRow,
+                    {
+                        sql: `SELECT session, estimated_tokens, estimated_cost_usd FROM session_token_usage WHERE session IN (${placeholders})`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_tokens",
+                ),
+                cacheRows(
+                    ChildSessionDbRow,
+                    {
+                        sql: `SELECT id AS session, started_at, ended_at FROM session WHERE id IN (${placeholders})`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_sessions",
+                ),
+            ],
+            { concurrency: 4 },
+        );
 
         const turnsByChild = new Map<string, number>();
-        for (const r of turnRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) turnsByChild.set(id, Number(r.turns ?? 0));
-        }
+        for (const r of turnRows) turnsByChild.set(r.session, r.turns);
         const toolsByChild = new Map<string, number>();
-        for (const r of toolRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) toolsByChild.set(id, Number(r.tool_calls ?? 0));
-        }
+        for (const r of toolRows) toolsByChild.set(r.session, r.tool_calls);
         const tokensByChild = new Map<string, { est_tokens: number | null; cost_usd: number | null }>();
-        for (const r of tokenRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) {
-                tokensByChild.set(id, {
-                    est_tokens: r.estimated_tokens == null ? null : Number(r.estimated_tokens),
-                    cost_usd: r.estimated_cost_usd == null ? null : Number(r.estimated_cost_usd),
-                });
-            }
+        for (const r of tokenRows) {
+            tokensByChild.set(r.session, { est_tokens: r.estimated_tokens, cost_usd: r.estimated_cost_usd });
         }
         const durationByChild = new Map<string, number | null>();
-        for (const r of sessionRows ?? []) {
-            const id = refToBare(r.session);
-            if (!id) continue;
+        for (const r of sessionRows) {
             const start = toMs(r.started_at);
             const end = toMs(r.ended_at);
-            durationByChild.set(id, start != null && end != null && end >= start ? end - start : null);
+            durationByChild.set(r.session, start != null && end != null && end >= start ? end - start : null);
         }
 
         const out = new Map<string, ChildStats>();
-        for (const rawId of childIds) {
-            const id = toBareSessionId(rawId);
+        for (const id of childIds) {
             const tokens = tokensByChild.get(id);
             out.set(id, {
                 turns: turnsByChild.get(id) ?? null,
@@ -579,97 +554,92 @@ const resolveChildStats = (
             });
         }
         return out;
-    }).pipe(
-        Effect.catch((err) =>
-            Effect.sync(() => {
-                console.error("axctl session-inspect resolveChildStats failed:", err);
-                return new Map<string, ChildStats>();
-            }),
-        ),
-    );
+    });
 
 /** Fetch every hook_fire row for the session, ts-ordered. N is small
  *  (tens-to-hundreds in practice) so fetching whole-session is fine; the
  *  window filter happens after assigning stable idx so paginating doesn't
  *  shift the dom anchors. Degrades to [] on DB error - hook telemetry is
  *  decorative for the inspector, not load-bearing. */
-const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, SurrealClient> =>
-    queryMany<HookFireRow, HookFireDto>(
-        interpolateRid(HOOK_FIRES_SQL, toBareSessionId(sessionId)),
-        (row, idx) => ({
-            idx,
-            ts: row.ts instanceof Date ? row.ts.toISOString() : String(row.ts),
-            event: row.event,
-            file_path: row.file_path,
-            inject: row.inject,
-            reason: row.reason,
-            latency_ms: row.latency_ms,
-            injected_titles: row.injected_titles ?? [],
-        }),
-        "session-inspect resolveHookFires",
+const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, CacheRead> =>
+    cacheRows(
+        HookFireDbRow,
+        {
+            sql: `SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
+                  FROM hook_fire WHERE session = ? ORDER BY ts ASC`,
+            params: [sessionId],
+        },
+        "session-inspect.hook_fires",
+    ).pipe(
+        Effect.map((rows) =>
+            rows.map((row, idx) => ({
+                idx,
+                ts: row.ts.toISOString(),
+                event: row.event,
+                file_path: row.file_path,
+                inject: row.inject,
+                reason: row.reason,
+                latency_ms: row.latency_ms,
+                injected_titles: row.injected_titles ?? [],
+            })),
+        ),
     );
 
-const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, SurrealClient> =>
-    queryOptional<TokenUsageRow, SessionTokenUsageDetail>(
-        interpolateRid(TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
-        (row) => ({
-            model: row.model ?? null,
-            prompt_tokens: row.prompt_tokens ?? null,
-            completion_tokens: row.completion_tokens ?? null,
-            cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
-            cache_read_input_tokens: row.cache_read_input_tokens ?? null,
-            estimated_tokens: Number(row.estimated_tokens ?? 0),
-            estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
-            estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
-            estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
-            estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
-            estimated_cost_usd: row.estimated_cost_usd ?? null,
-            pricing_source: row.pricing_source ?? null,
-        }),
-        "session-inspect resolveTokenUsage",
-    );
+// Reuses the existing session-detail-cache.ts query (identical shape/SQL to
+// what this resolver used to run itself) rather than duplicating it.
+const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, CacheRead> =>
+    runCacheSingleQuery(sessionTokenUsageCacheQuery, { sessionId });
 
 const mapTurnTokenUsageRow = (row: TurnTokenUsageRow): TurnTokenUsageDetail => ({
-    seq: Number(row.seq),
-    model: row.model ?? null,
-    prompt_tokens: row.prompt_tokens ?? null,
-    completion_tokens: row.completion_tokens ?? null,
-    cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
-    cache_read_input_tokens: row.cache_read_input_tokens ?? null,
-    fresh_input_tokens: row.fresh_input_tokens ?? null,
-    estimated_tokens: Number(row.estimated_tokens ?? 0),
-    estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
-    estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
-    estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
-    estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
-    estimated_cost_usd: row.estimated_cost_usd ?? null,
-    pricing_source: row.pricing_source ?? null,
+    seq: row.seq,
+    model: row.model,
+    prompt_tokens: row.prompt_tokens,
+    completion_tokens: row.completion_tokens,
+    cache_creation_input_tokens: row.cache_creation_input_tokens,
+    cache_read_input_tokens: row.cache_read_input_tokens,
+    fresh_input_tokens: row.fresh_input_tokens,
+    estimated_tokens: row.estimated_tokens,
+    estimated_input_cost_usd: row.estimated_input_cost_usd,
+    estimated_output_cost_usd: row.estimated_output_cost_usd,
+    estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd,
+    estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd,
+    estimated_cost_usd: row.estimated_cost_usd,
+    pricing_source: row.pricing_source,
     usage_source: row.usage_source ?? "unknown",
     usage_quality: row.usage_quality ?? "unknown",
 });
 
-const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> =>
-    queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
-        interpolateRid(TURN_TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
-        mapTurnTokenUsageRow,
-        "session-inspect resolveTurnTokenUsage",
+const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, CacheRead> =>
+    cacheRows(
+        TurnTokenUsageDbRow,
+        { sql: `SELECT ${TURN_TOKEN_USAGE_COLUMNS} FROM turn_token_usage WHERE session = ? ORDER BY seq ASC`, params: [sessionId] },
+        "session-inspect.turn_token_usage",
     ).pipe(
-        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, mapTurnTokenUsageRow(row)]))),
     );
 
-const resolveTurnTokenUsageForSourceRefs = (
-    sourceRefs: ReadonlyArray<string>,
-): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> => {
-    const refs = sourceRefs.map((key) => recordRef("turn_token_usage", key));
-    if (refs.length === 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
-    return queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
-        // Materialized record-list source - bare `FROM [refs]` throws on
-        // SurrealDB 3.0.x (see @ax/lib/shared/record-select, issue #251).
-        TURN_TOKEN_USAGE_FOR_REFS_SQL.split("$refs").join(refListSource(refs)),
-        mapTurnTokenUsageRow,
-        "session-inspect resolveTurnTokenUsageForSourceRefs",
+/** Same rows as resolveTurnTokenUsage, narrowed to a contiguous seq window -
+ *  the DuckDB equivalent of the old materialized-record-list `FROM $refs`
+ *  query (turn ids in that window are exactly seq in [offset+1, offset+limit],
+ *  since DB turn seq is one-based and the window is contiguous). */
+const resolveTurnTokenUsageForWindow = (
+    sessionId: string,
+    turnOffset: number,
+    turnLimit: number,
+): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, CacheRead> => {
+    if (turnLimit <= 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
+    const minSeq = turnOffset + 1;
+    const maxSeq = turnOffset + turnLimit;
+    return cacheRows(
+        TurnTokenUsageDbRow,
+        {
+            sql: `SELECT ${TURN_TOKEN_USAGE_COLUMNS} FROM turn_token_usage
+                  WHERE session = ? AND seq BETWEEN ? AND ? ORDER BY seq ASC`,
+            params: [sessionId, minSeq, maxSeq],
+        },
+        "session-inspect.turn_token_usage_window",
     ).pipe(
-        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, mapTurnTokenUsageRow(row)]))),
     );
 };
 
@@ -685,30 +655,43 @@ const turnSourceRefsForWindow = (
     return Array.from({ length: turnLimit }, (_, i) => turnRecordKey(bare, turnOffset + i + 1));
 };
 
+/** The same contiguous-seq-window equivalence as resolveTurnTokenUsageForWindow:
+ *  turn ids in the old materialized `FROM $refs` list are exactly
+ *  seq in [offset+1, offset+limit]. */
 const resolveGraphTurnWindow = (
     sessionId: string,
     turnOffset: number,
     turnLimit: number,
-): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, SurrealClient> => {
-    const turnRefs = turnSourceRefsForWindow(sessionId, turnOffset, turnLimit);
-    if (turnRefs.length === 0) return Effect.succeed([]);
-    // pick: turn rows carry full message text in several fields; materialize
-    // only what the projection + WHERE touch (text itself is selected).
-    const from = refListSource(
-        turnRefs.map((key) => recordRef("turn", key)),
-        ["seq", "role", "ts", "text", "has_tool_use"],
-    );
-    return queryMany<GraphTurnRow, GraphTurnRow>(
-        `
-            SELECT seq, role, type::string(ts) AS ts, text
-            FROM ${from}
-            WHERE text IS NOT NONE OR has_tool_use = true
-            ORDER BY seq ASC;
-        `,
-        (row) => row,
-        "session-inspect resolveGraphTurnWindow",
+): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, CacheRead> => {
+    if (turnLimit <= 0) return Effect.succeed([]);
+    const minSeq = turnOffset + 1;
+    const maxSeq = turnOffset + turnLimit;
+    return cacheRows(
+        GraphTurnDbRow,
+        {
+            sql: `SELECT seq, role, ts, text FROM turn
+                  WHERE session = ? AND seq BETWEEN ? AND ? AND (text IS NOT NULL OR has_tool_use = true)
+                  ORDER BY seq ASC`,
+            params: [sessionId, minSeq, maxSeq],
+        },
+        "session-inspect.graph_turn_window",
+    ).pipe(
+        Effect.map((rows) => rows.map((row) => ({ ...row, ts: row.ts ? row.ts.toISOString() : null }))),
     );
 };
+
+/** Same projection as `queries/session-detail.ts`'s (chunk 2b's)
+ *  SESSION_SHARE_TURN_TOOLCALLS_SQL / sessionShareTurnToolCallsQuery - defined
+ *  locally so this module's DuckDB read path never depends on queries/. */
+const GraphTurnToolCallDbRow = Schema.Struct({
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    command_text: Schema.NullOr(Schema.String),
+    input_json: Schema.NullOr(Schema.String),
+    output_excerpt: Schema.NullOr(Schema.String),
+    has_error: Schema.Boolean,
+});
 
 /** Per-turn tool calls for this session, keyed by the (1-based DB) turn seq the
  *  calls ran in - exactly the `tool_call.seq` written at ingest, which equals
@@ -717,18 +700,34 @@ const resolveGraphTurnWindow = (
  *  identical tool cards. `ToolCallDto.seq` is set to 0 here and rewritten with
  *  the turn's display seq at assembly (matching the JSONL path).
  *
- *  Defensive: a failed query degrades to an empty map - turns still render,
+ *  Defensive: cacheRows degrades a failed query to [] - turns still render,
  *  just without their tool cards (never crashes the inspector). */
 const resolveGraphTurnToolCalls = (
     sessionId: string,
-): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, SurrealClient> =>
-    runQuery(sessionShareTurnToolCallsQuery, { recordRef: toSessionRid(toBareSessionId(sessionId)) }).pipe(
+): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, CacheRead> =>
+    cacheRows(
+        GraphTurnToolCallDbRow,
+        {
+            sql: `SELECT seq, name, command_norm, command_text, input_json, output_excerpt, has_error
+                  FROM tool_call WHERE session = ? AND seq IS NOT NULL ORDER BY seq ASC LIMIT 4000`,
+            params: [sessionId],
+        },
+        "session-inspect.graph_turn_tool_calls",
+    ).pipe(
         Effect.map((rows) => {
             const bySeq = new Map<number, ToolCallDto[]>();
             for (const row of rows) {
-                if (row === null) continue;
+                if (row.seq === null) continue;
+                const dto = shareTurnToolCallToDto({
+                    seq: row.seq,
+                    name: row.name,
+                    command: row.command_norm ?? row.command_text,
+                    input_json: row.input_json,
+                    output: row.output_excerpt,
+                    has_error: row.has_error,
+                });
                 const list = bySeq.get(row.seq) ?? [];
-                list.push(shareTurnToolCallToDto(row));
+                list.push(dto);
                 bySeq.set(row.seq, list);
             }
             return bySeq;
@@ -737,11 +736,11 @@ const resolveGraphTurnToolCalls = (
 
 const resolveGraphSessionHealth = (
     sessionId: string,
-): Effect.Effect<GraphSessionHealthRow | null, never, SurrealClient> =>
-    queryOptional<GraphSessionHealthRow, GraphSessionHealthRow>(
-        `SELECT turns FROM ${recordRef("session_health", safeKeyPart(toBareSessionId(sessionId)))} LIMIT 1;`,
-        (row) => row,
-        "session-inspect resolveGraphSessionHealth",
+): Effect.Effect<GraphSessionHealthRow | null, never, CacheRead> =>
+    cacheFirst(
+        GraphSessionHealthDbRow,
+        { sql: `SELECT turns FROM session_health WHERE session = ? LIMIT 1`, params: [sessionId] },
+        "session-inspect.graph_session_health",
     );
 
 function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
@@ -1037,11 +1036,15 @@ export function assembleInspectPayload(args: {
     };
 }
 
+// R channel still carries SurrealClient: resolveTurnContentForSourceRefs
+// (queries/session-turn-content.ts, chunk 2b's) has not been ported to
+// CacheRead yet - see the module-doc note near the top of this file. Every
+// other resolver in this function is CacheRead-only.
 const fetchGraphSessionInspect = (
     bareSessionId: string,
     turnOffset: number,
     turnLimit: number,
-): Effect.Effect<SessionInspectPayload | null, never, SurrealClient> =>
+): Effect.Effect<SessionInspectPayload | null, never, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
         const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent, toolCallsByDbSeq] = yield* Effect.all([
@@ -1050,7 +1053,7 @@ const fetchGraphSessionInspect = (
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
             resolveTokenUsage(bareSessionId),
-            resolveTurnTokenUsageForSourceRefs(turnSourceRefs),
+            resolveTurnTokenUsageForWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphTurnWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphSessionHealth(bareSessionId),
             resolveTurnContentForSourceRefs(turnSourceRefs),

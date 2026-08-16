@@ -3,15 +3,28 @@
  *
  * Pure data layer: no IO formatting, no CLI concerns. Each function returns
  * typed rows from the `session` table with a lightweight turn summary.
+ *
+ * PORTED TO DUCKDB. The Surreal version fetched the session projection, then
+ * fanned out ONE indexed query per session (`enrichSessions`) to compute
+ * `turn_count` + `first_user_message` - because SurrealDB evaluated
+ * `session IN [<all ids>]` as a per-row membership test rather than using the
+ * `turn_session_seq` index, so a single batched query was slower than N
+ * literal-id lookups at concurrency. DuckDB has no such limitation: a real
+ * `GROUP BY` aggregate plus a `row_number() OVER (PARTITION BY session ...)`
+ * window for the first user turn both use the `turn_session_seq` index
+ * directly, so the whole session list - projection AND enrichment - is now
+ * ONE statement with two `LEFT JOIN`s, not 1+N round trips. `AxConfig`'s
+ * `sessionsEnrichConcurrency` knob (the old fan-out width) has no DuckDB
+ * analogue and is dropped from every signature here.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AxConfig } from "@ax/lib/config";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import type { CacheRead } from "@ax/lib/duckdb/seam";
-import { runCacheQuery } from "@ax/lib/duckdb/query";
+import { Effect, Schema } from "effect";
+import { andAll, eqClause, withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { sessionIdsByPrefixCacheQuery } from "../queries/session-detail-cache.ts";
+import { runCacheQuery } from "@ax/lib/duckdb/query";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 // ---------------------------------------------------------------------------
 // Row shape
@@ -30,95 +43,65 @@ export interface SessionRow {
     readonly first_user_message: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// SQL helpers
-// ---------------------------------------------------------------------------
+const NullableText = Schema.NullOr(Schema.String);
+const NullableTimestamp = Schema.NullOr(TimestampColumn);
+
+const SessionEnrichedRow = Schema.Struct({
+    id: Schema.String,
+    started_at: NullableTimestamp,
+    ended_at: NullableTimestamp,
+    source: Schema.String,
+    project: NullableText,
+    cwd: NullableText,
+    repository: NullableText,
+    turn_count: NumberFromBigIntColumn,
+    first_user_message: NullableText,
+});
+
+const iso = (value: Date | null): string | null => (value === null ? null : value.toISOString());
+
+const toSessionRow = (row: typeof SessionEnrichedRow.Type): SessionRow => ({
+    id: toBareSessionId(row.id),
+    started_at: iso(row.started_at),
+    ended_at: iso(row.ended_at),
+    source: row.source,
+    project: row.project,
+    cwd: row.cwd,
+    repository: row.repository,
+    turn_count: row.turn_count,
+    first_user_message: row.first_user_message,
+});
 
 /**
- * Core session projection. Turn count and first-user-message are resolved
- * in a second batched query (`enrichSessions`) instead of correlated sub-
- * selects, which were O(N * turns_per_session) and hung at ~5k sessions.
+ * The one session projection every list variant shares: turn count and the
+ * first user-role turn's excerpt, both joined in rather than fanned out.
+ * `where` is appended after `WHERE TRUE` on the outer `session s` scan.
  */
-const SESSION_SELECT = `
-    type::string(id) AS id,
-    type::string(started_at) AS started_at,
-    type::string(ended_at) AS ended_at,
-    source,
-    project,
-    cwd,
-    type::string(repository) AS repository
-FROM session`.trim();
-
-/**
- * `type::string(id)` returns one of: `session:plain`, `session:⟨key⟩`, or
- * `` session:`key` `` depending on the key's char set. Strip the prefix + any
- * wrapping delimiters and rebuild a clean backtick record literal.
- */
-const sessionLiteral = (id: string): string => {
-    let k = id.replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return `session:\`${k}\``;
-};
-
-/**
- * Enrich session rows with turn_count + first_user_message.
- *
- * One INDEXED lookup per session, fanned out with bounded concurrency. The
- * obvious batch form - `... FROM turn WHERE session IN [<all ids>] ...` - does
- * NOT use the `turn_session_seq` index; SurrealDB evaluates `session IN [list]`
- * as a per-row membership test, so cost is O(total_turns × #sessions) and a
- * 120d/798-session window took >24s (and could wedge the DB). A literal-id
- * lookup (`session = session:\`k\``) hits the index in ~1ms; 798 of them at
- * concurrency 16 finish in well under a second. Order is preserved by
- * `Effect.forEach`.
- */
-const enrichSessions = (
-    rows: ReadonlyArray<{
-        readonly id: string;
-        readonly started_at: string | null;
-        readonly ended_at: string | null;
-        readonly source: string;
-        readonly project: string | null;
-        readonly cwd: string | null;
-        readonly repository: string | null;
-    }>,
-): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
-    Effect.gen(function* () {
-        if (rows.length === 0) return [];
-        const db = yield* SurrealClient;
-        // Fan-out width comes from AxConfig (the single env boundary), not a raw
-        // process.env read. 16 is empirically fast (798 sessions ~1.3s through
-        // the WS client, which multiplexes by request id); tune down via
-        // AX_SESSIONS_ENRICH_CONCURRENCY if a load test shows saturation.
-        const concurrency = (yield* AxConfig).knobs.sessionsEnrichConcurrency;
-
-        return yield* Effect.forEach(
-            rows,
-            (r) =>
-                Effect.gen(function* () {
-                    const lit = sessionLiteral(r.id);
-                    // `FROM ONLY <session record>` returns a single object; the
-                    // two correlated counts use literal ids (not `$parent.id`,
-                    // which would defeat the index).
-                    const result = yield* db.query<
-                        [{ turn_count: number | null; first_user_message: string | null } | null]
-                    >(
-                        `SELECT
-                            (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
-                            (SELECT text_excerpt, seq FROM turn WHERE session = ${lit} AND role = 'user' ORDER BY seq ASC LIMIT 1)[0].text_excerpt AS first_user_message
-                         FROM ONLY ${lit};`,
-                    );
-                    const enriched = result?.[0] ?? null;
-                    return {
-                        ...r,
-                        turn_count: Number(enriched?.turn_count ?? 0) || 0,
-                        first_user_message: enriched?.first_user_message ?? null,
-                    };
-                }),
-            { concurrency },
-        );
-    });
+const fetchSessions = (where: Clause): Effect.Effect<SessionRow[], never, CacheRead> =>
+    Effect.map(
+        cacheRows(
+            SessionEnrichedRow,
+            {
+                sql: `SELECT s.id AS id, s.started_at AS started_at, s.ended_at AS ended_at,
+                             s.source AS source, s.project AS project, s.cwd AS cwd, s.repository AS repository,
+                             COALESCE(tc.turn_count, 0) AS turn_count, fu.text_excerpt AS first_user_message
+                      FROM session s
+                      LEFT JOIN (SELECT session, count(*) AS turn_count FROM turn GROUP BY session) tc
+                          ON tc.session = s.id
+                      LEFT JOIN (
+                          SELECT session, text_excerpt,
+                                 row_number() OVER (PARTITION BY session ORDER BY seq ASC) AS rn
+                          FROM turn
+                          WHERE role = 'user'
+                      ) fu ON fu.session = s.id AND fu.rn = 1
+                      WHERE TRUE ${where.sql}
+                      ORDER BY s.started_at DESC`,
+                params: where.params,
+            },
+            "sessions-query.list",
+        ),
+        (rows) => rows.map(toSessionRow),
+    );
 
 // ---------------------------------------------------------------------------
 // findSessionIdsByPrefix
@@ -145,35 +128,25 @@ export const findSessionIdsByPrefix = (
 
 export interface SessionsHereOpts {
     /**
-     * Bare repository key (suitable for `recordLiteral("repository", key)`).
-     * E.g. `remote__github_com_foo_bar__<hash>` - NOT the full record id string.
+     * Bare repository row id (`session.repository` / `checkout.repository`),
+     * bound as a plain parameter - DuckDB row ids are VARCHARs, not a typed
+     * record reference, so there is no record-literal seam to go through.
      */
     readonly repositoryKey: string;
     /** how many days back from now (default 14) */
     readonly days?: number;
 }
 
-/**
- * List sessions anchored to a specific repository within a look-back window.
- *
- * SurrealQL uses the `session_repository_started` composite index for efficiency.
- */
+/** List sessions anchored to a specific repository within a look-back window. */
 export const listSessionsHere = (
     opts: SessionsHereOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const days = opts.days ?? 14;
-        // `days` is a validated integer and `repositoryKey` is validated by recordLiteral -
-        // literal interpolation is intentional: record-typed fields require record literals.
-        const sql = `
-SELECT ${SESSION_SELECT}
-WHERE repository = ${recordLiteral("repository", opts.repositoryKey)}
-  AND started_at >= time::now() - ${days}d
-ORDER BY started_at DESC;`;
-        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql);
-        return yield* enrichSessions(result?.[0] ?? []);
-    });
+): Effect.Effect<SessionRow[], never, CacheRead> =>
+    fetchSessions(
+        andAll([
+            eqClause("s.repository", opts.repositoryKey),
+            withinDaysClause("s.started_at", opts.days ?? 14),
+        ]),
+    );
 
 // ---------------------------------------------------------------------------
 // listSessionsAround
@@ -228,29 +201,17 @@ export const normalizeSessionsAroundOpts = (
  */
 export const listSessionsAround = (
     opts: SessionsAroundOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const days = opts.days ?? SESSIONS_AROUND_DEFAULT_DAYS;
-        const from = new Date(opts.date.getTime() - days * 24 * 60 * 60 * 1000);
-        const to = new Date(opts.date.getTime() + days * 24 * 60 * 60 * 1000);
-
-        const projectClause = opts.project
-            ? `  AND project = $project`
-            : "";
-
-        const sql = `
-SELECT ${SESSION_SELECT}
-WHERE started_at >= $from
-  AND started_at <= $to${projectClause}
-ORDER BY started_at DESC;`;
-
-        const bindings: Record<string, unknown> = { from, to };
-        if (opts.project) bindings.project = opts.project;
-
-        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql, bindings);
-        return yield* enrichSessions(result?.[0] ?? []);
-    });
+): Effect.Effect<SessionRow[], never, CacheRead> => {
+    const days = opts.days ?? SESSIONS_AROUND_DEFAULT_DAYS;
+    const from = new Date(opts.date.getTime() - days * 24 * 60 * 60 * 1000);
+    const to = new Date(opts.date.getTime() + days * 24 * 60 * 60 * 1000);
+    return fetchSessions(
+        andAll([
+            { sql: "AND s.started_at >= ? AND s.started_at <= ?", params: [from, to] },
+            eqClause("s.project", opts.project),
+        ]),
+    );
+};
 
 // ---------------------------------------------------------------------------
 // listSessionsNear
@@ -262,8 +223,8 @@ export interface SessionsNearOpts {
     /** end of commit window (commit ts or commitTs + 3d fallback) */
     readonly to: Date;
     /**
-     * Bare repository key (suitable for `recordLiteral("repository", key)`).
-     * Omit or pass null/undefined to skip the repo filter.
+     * Bare repository row id. Omit or pass null/undefined to skip the repo
+     * filter.
      */
     readonly repositoryKey?: string | null;
 }
@@ -276,20 +237,10 @@ export interface SessionsNearOpts {
  */
 export const listSessionsNear = (
     opts: SessionsNearOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // Record-typed fields require record literals, not bindings, for correct comparison.
-        const repoClause = opts.repositoryKey
-            ? `  AND repository = ${recordLiteral("repository", opts.repositoryKey)}`
-            : "";
-
-        const sql = `
-SELECT ${SESSION_SELECT}
-WHERE started_at >= $from
-  AND started_at <= $to${repoClause}
-ORDER BY started_at DESC;`;
-
-        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql, { from: opts.from, to: opts.to });
-        return yield* enrichSessions(result?.[0] ?? []);
-    });
+): Effect.Effect<SessionRow[], never, CacheRead> =>
+    fetchSessions(
+        andAll([
+            { sql: "AND s.started_at >= ? AND s.started_at <= ?", params: [opts.from, opts.to] },
+            eqClause("s.repository", opts.repositoryKey),
+        ]),
+    );
