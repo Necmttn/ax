@@ -1,3 +1,4 @@
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Layer, ManagedRuntime } from "effect";
 import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
@@ -13,7 +14,19 @@ import { JudgmentLive } from "../judgment.ts";
  */
 export type McpRuntimeKind = "cache" | "judgment" | "cache-judgment" | "legacy";
 
-const CacheLayer = CacheReadLive;
+/**
+ * Bun-backed `FileSystem` + `Path`, merged into the cache runtime.
+ *
+ * A ported reader can still need the filesystem for a config file that never
+ * lived in the database - `dispatches` reads `~/.ax/hooks/routing-table.json`
+ * through `loadEffectiveRoutingTable()`. Without these the tool had to stay on
+ * `legacy`, which opened a SurrealDB connection nothing used. The CLI's own
+ * cache runtime (`withCache`, cli/index.ts) already merges exactly these two.
+ * Carrying no database client, this stays a no-DB runtime.
+ */
+const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
+const CacheLayer = Layer.merge(CacheReadLive, PlatformLayer);
 const JudgmentLayer = JudgmentLive;
 const CacheJudgmentLayer = Layer.merge(CacheReadLive, JudgmentLive);
 const LegacyLayer = Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive);

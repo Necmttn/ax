@@ -176,6 +176,31 @@ describe("MCP per-tool runtimes", () => {
                 rows: expect.any(Array),
                 totals: expect.any(Object),
             });
+
+            // `dispatches` was pinned to `legacy` only because its `candidates`
+            // branch reads ~/.ax/hooks/routing-table.json through
+            // `loadEffectiveRoutingTable()`, which needs `FileSystem`. The
+            // `cache` runtime now carries the Bun platform layers, so BOTH
+            // branches must answer with no SurrealDB at all. The candidates call
+            // is the one that proves the layer: without it the tool dispatch
+            // cannot even build its effect. (The file read fails open to the
+            // built-in defaults when no routing table exists.)
+            const dispatches = await client.callTool({ name: "dispatches", arguments: {} });
+            expect(dispatches.isError).not.toBe(true);
+            expect(bodyOf(dispatches)).toMatchObject({
+                rows: expect.any(Array),
+                total_dispatches: expect.any(Number),
+            });
+
+            const candidates = await client.callTool({
+                name: "dispatches",
+                arguments: { candidates: true },
+            });
+            expect(candidates.isError).not.toBe(true);
+            expect(bodyOf(candidates)).toMatchObject({
+                candidates: expect.any(Array),
+                total_est_savings_usd: expect.any(Number),
+            });
         } finally {
             await client.close().catch(() => undefined);
         }

@@ -795,11 +795,10 @@ const costRoutabilityTool: AxMcpTool = defineMcpTool({
 
 const dispatchesTool: AxMcpTool = defineMcpTool({
     name: "dispatches",
-    // Stays `legacy`: the `candidates` branch calls `loadEffectiveRoutingTable()`,
-    // which needs `FileSystem` - a service the MCP `cache` runtime does not carry.
-    // The dispatch QUERY itself is cache-only now; the routing-table file read is
-    // what pins this tool, so it flips when that read gets a home in the pool.
-    runtime: "legacy",
+    // Both branches read through `CacheRead`; the only non-cache need was
+    // `FileSystem` for `loadEffectiveRoutingTable()`'s routing-table file, and
+    // the `cache` runtime now carries the Bun platform layers (mcp/runtime.ts).
+    runtime: "cache",
     description:
         `Subagent dispatch analytics over the spawned relation. Without candidates: table of dispatches sorted by child cost (ts, agent_type, description, dispatch_model, child_model, child_cost_usd) + summary (count, inherit%, total cost). With candidates=true: only inherit dispatches on expensive models (fable/opus) that match a routing class, with suggested model + est savings. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
