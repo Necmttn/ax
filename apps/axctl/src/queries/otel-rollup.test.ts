@@ -88,8 +88,8 @@ describe("buildOtelSessionIdsQuery", () => {
     it("windows the session-id scan by observed_at", () => {
         expect(buildOtelSessionIdsQuery("otel_log_event", 14)).toBe(
             "SELECT session_id FROM otel_log_event"
-            + " WHERE observed_at > time::now() - 14d"
-            + " AND session_id != NONE GROUP BY session_id;",
+            + " WHERE observed_at > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"
+            + " AND session_id IS NOT NULL GROUP BY session_id;",
         );
     });
 });
