@@ -13,9 +13,19 @@
  *
  * Query shape follows dispatch-analytics: flat grouped aggregates (no record
  * derefs), JS-side join on stringified session ids.
+ *
+ * Ported onto the DuckDB CacheRead seam: the single 5-statement SurrealQL
+ * batch becomes 5 parallel `cacheRows` calls. `SUM()` over a BIGINT column
+ * (thinking_blocks/thinking_tokens/reasoning_output_tokens/completion_tokens)
+ * widens to HUGEINT in DuckDB, so every sum is CAST back to BIGINT and
+ * decoded via NumberFromBigIntColumn (see session-detail-cache.ts for the
+ * same contract). `fetchSparSessionIds` already reads through a separate
+ * SQLite-backed `Judgment` service, not SurrealDB/DuckDB - unaffected here.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { normalizeModelName } from "../ingest/model-pricing.ts";
 import { CODEX_SOURCES_SQL } from "../ingest/source-origin.ts";
 import { fetchSparSessionIds } from "./spar-sessions.ts";
@@ -76,59 +86,84 @@ export interface ThinkingResult {
 }
 
 // ---------------------------------------------------------------------------
-// SQL (flat, deref-free aggregates; outer select stringifies grouped ids)
+// SQL (flat, deref-free aggregates; every query binds `?` = sinceDays)
 // ---------------------------------------------------------------------------
 
 const days = (sinceDays: number): number => Math.max(1, Math.trunc(sinceDays));
 
-const SESSION_THINKING_SQL = (sinceDays: number) => `
-SELECT type::string(session) AS session_id, blocks, tokens, assistant_turns, thinking_turns FROM (
-    SELECT
-        session,
-        math::sum(thinking_blocks ?? 0) AS blocks,
-        math::sum(thinking_tokens ?? 0) AS tokens,
-        count() AS assistant_turns,
-        count((thinking_blocks ?? 0) > 0) AS thinking_turns
-    FROM turn
-    WHERE ts > time::now() - ${days(sinceDays)}d
-      AND role = 'assistant'
-    GROUP BY session
-);
+const SessionThinkingSchemaRow = Schema.Struct({
+    session_id: Schema.String,
+    blocks: NumberFromBigIntColumn,
+    tokens: NumberFromBigIntColumn,
+    assistant_turns: NumberFromBigIntColumn,
+    thinking_turns: NumberFromBigIntColumn,
+});
+
+const SESSION_THINKING_SQL = `
+SELECT
+    session AS session_id,
+    CAST(COALESCE(SUM(COALESCE(thinking_blocks, 0)), 0) AS BIGINT) AS blocks,
+    CAST(COALESCE(SUM(COALESCE(thinking_tokens, 0)), 0) AS BIGINT) AS tokens,
+    COUNT(*) AS assistant_turns,
+    COUNT(*) FILTER (WHERE COALESCE(thinking_blocks, 0) > 0) AS thinking_turns
+FROM turn
+WHERE ts > ${daysAgoExpr}
+  AND role = 'assistant'
+GROUP BY session;
 `;
 
-const SESSION_MODELS_SQL = (sinceDays: number) => `
-SELECT
-    type::string(id) AS session_id,
-    model,
-    source
+const SessionModelSchemaRow = Schema.Struct({
+    session_id: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+});
+
+const SESSION_MODELS_SQL = `
+SELECT id AS session_id, model, source
 FROM session
-WHERE started_at > time::now() - ${days(sinceDays)}d;
+WHERE started_at > ${daysAgoExpr};
 `;
 
-const EFFORT_SQL = (sinceDays: number) => `
-SELECT source, model, reasoning_effort, count() AS sessions FROM (
-    SELECT source, model, reasoning_effort
-    FROM session
-    WHERE started_at > time::now() - ${days(sinceDays)}d
-      AND reasoning_effort != NONE
-) GROUP BY source, model, reasoning_effort;
+const EffortSchemaRow = Schema.Struct({
+    source: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    reasoning_effort: Schema.NullOr(Schema.String),
+    sessions: NumberFromBigIntColumn,
+});
+
+const EFFORT_SQL = `
+SELECT source, model, reasoning_effort, COUNT(*) AS sessions
+FROM session
+WHERE started_at > ${daysAgoExpr}
+  AND reasoning_effort IS NOT NULL
+GROUP BY source, model, reasoning_effort;
 `;
 
-const CODEX_REASONING_SQL = (sinceDays: number) => `
+const CodexReasoningSchemaRow = Schema.Struct({
+    model: Schema.NullOr(Schema.String),
+    sessions: NumberFromBigIntColumn,
+    reasoning_tokens: NumberFromBigIntColumn,
+    completion_tokens: NumberFromBigIntColumn,
+});
+
+const CODEX_REASONING_SQL = `
 SELECT
     model,
-    count() AS sessions,
-    math::sum(reasoning_output_tokens ?? 0) AS reasoning_tokens,
-    math::sum(completion_tokens ?? 0) AS completion_tokens
+    COUNT(*) AS sessions,
+    CAST(COALESCE(SUM(COALESCE(reasoning_output_tokens, 0)), 0) AS BIGINT) AS reasoning_tokens,
+    CAST(COALESCE(SUM(COALESCE(completion_tokens, 0)), 0) AS BIGINT) AS completion_tokens
 FROM session_token_usage
 WHERE source IN ${CODEX_SOURCES_SQL}
-  AND ts > time::now() - ${days(sinceDays)}d
+  AND ts > ${daysAgoExpr}
 GROUP BY model;
 `;
 
-const AGENT_MODELS_SQL = `
-SELECT name, output_per_million_usd FROM agent_model;
-`;
+const AgentModelRateSchemaRow = Schema.Struct({
+    name: Schema.NullOr(Schema.String),
+    output_per_million_usd: Schema.NullOr(Schema.Number),
+});
+
+const AGENT_MODELS_SQL = `SELECT name, output_per_million_usd FROM agent_model;`;
 
 // ---------------------------------------------------------------------------
 // Pure rollup (exported for tests)
@@ -229,29 +264,23 @@ export const rollupThinkingByModel = (
 
 export const fetchThinking = Effect.fn("queries.fetchThinking")(
     function* (opts: { readonly sinceDays: number }) {
-        const db = yield* SurrealClient;
+        const sinceDays = days(opts.sinceDays);
 
-        // Fetch spar variant session ids before the main query so we can
+        // Fetch spar variant session ids before the main queries so we can
         // exclude them from behavioral totals at the JS join. fetchSparSessionIds
         // returns RecordId[] (record-vs-record exclusion for the weighted path);
         // here we normalize each via String() -> cleanSessionId to the bare uuid
-        // so the Set keys match the `type::string(session)` rows below.
+        // so the Set keys match the session ids below (bare VARCHARs in DuckDB).
         const sparSessionIds = yield* fetchSparSessionIds();
         const sparSet = new Set(sparSessionIds.map((id) => cleanSessionId(String(id))));
 
-        const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* db.query<[
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-        ]>(
-            SESSION_THINKING_SQL(opts.sinceDays) +
-            SESSION_MODELS_SQL(opts.sinceDays) +
-            EFFORT_SQL(opts.sinceDays) +
-            CODEX_REASONING_SQL(opts.sinceDays) +
-            AGENT_MODELS_SQL,
-        );
+        const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* Effect.all([
+            cacheRows(SessionThinkingSchemaRow, { sql: SESSION_THINKING_SQL, params: [sinceDays] }, "thinking per-session"),
+            cacheRows(SessionModelSchemaRow, { sql: SESSION_MODELS_SQL, params: [sinceDays] }, "thinking session models"),
+            cacheRows(EffortSchemaRow, { sql: EFFORT_SQL, params: [sinceDays] }, "thinking effort distribution"),
+            cacheRows(CodexReasoningSchemaRow, { sql: CODEX_REASONING_SQL, params: [sinceDays] }, "thinking codex reasoning"),
+            cacheRows(AgentModelRateSchemaRow, { sql: AGENT_MODELS_SQL, params: [] }, "thinking agent model rates"),
+        ], { concurrency: 5 });
 
         // Model name -> output rate ($/M); null when the catalog has no rate.
         const outputRateByModel = new Map<string, number | null>();

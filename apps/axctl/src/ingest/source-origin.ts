@@ -13,11 +13,13 @@
 /** All subagent `source` values, in provider order. */
 export const SUBAGENT_SOURCES = ["claude-subagent", "codex-subagent"] as const;
 
-/** SQL list literal for `... source IN [...]` predicates. */
-export const SUBAGENT_SOURCES_SQL = `['claude-subagent', 'codex-subagent']`;
+/** SQL IN-list literal for `... source IN (...)` predicates (DuckDB - a
+ *  bracketed `[...]` list literal, valid SurrealQL, is not valid DuckDB IN
+ *  syntax). */
+export const SUBAGENT_SOURCES_SQL = `('claude-subagent', 'codex-subagent')`;
 
 /** All `source` values that count as Codex spend (main + subagent). */
-export const CODEX_SOURCES_SQL = `['codex', 'codex-subagent']`;
+export const CODEX_SOURCES_SQL = `('codex', 'codex-subagent')`;
 
 /** True when a `source` marks subagent (sub-task) work rather than main-agent. */
 export function isSubagentSource(source: string | null | undefined): boolean {
