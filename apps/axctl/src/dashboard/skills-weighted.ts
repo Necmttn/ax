@@ -115,7 +115,7 @@ export const normalizeSkillsWeightedParams = (
  * fetch the small set of tombstoned skill ids once (DELETED_SKILLS_SQL) and
  * filter them out in JS during the merge.
  */
-function buildInvocationSql(windowDays: number | undefined): string {
+export function buildInvocationSql(windowDays: number | undefined): string {
     const conditions: string[] = [];
     if (windowDays !== undefined && windowDays > 0) {
         conditions.push(`ts >= time::now() - ${windowDays}d`);

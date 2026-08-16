@@ -27,7 +27,7 @@ import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-
 import type { SurrealClient } from "@ax/lib/db";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { Judgment } from "@ax/lib/sqlite";
-import { fetchSkillsWeighted } from "./skills-weighted.ts";
+import { buildInvocationSql, fetchSkillsWeighted } from "./skills-weighted.ts";
 
 const runWithMock = <A, E>(
     db: TestSurrealClient,
@@ -203,20 +203,33 @@ describe("fetchSkillsWeighted", () => {
         expect(result.doctor.unclassified_count).toBe(2);
     });
 
-    it("includes window clause when windowDays is set", async () => {
-        const db = makeMockDb();
-
-        await runWithMock(db, fetchSkillsWeighted({ windowDays: 30 }));
-        // Invocation query is at index 1 (after spar query at 0)
-        expect(db.captured[0]).toContain("ts >= time::now() - 30d");
+    // The previous versions of these two cases ran the full effect through the
+    // mock and asserted on `db.captured[0]` - a SQL-text assertion on a string
+    // the mock never executes, so it could not tell a correct window filter
+    // from a typo'd one (the same class of bug the CURRENT_TIMESTAMP fix above
+    // survived two sibling chunks' green suites by hiding behind). The real
+    // fix - asserting through a real database - is not available here:
+    // `fetchSkillsWeighted` is still SurrealClient-backed (it depends on
+    // `queries/telemetry-rollup.ts`, a `w2-live-reads` module that has not
+    // landed yet), so there is no DuckDB fixture to route this through, and
+    // porting the source is explicitly out of this task's scope. Instead,
+    // `buildInvocationSql` - the pure function that actually decides the
+    // clause - is exported and asserted on DIRECTLY, which is a real
+    // assertion on the thing that produces the behavior rather than an
+    // inference through an unexecuted mock capture.
+    it("buildInvocationSql includes the window clause when windowDays is set", () => {
+        expect(buildInvocationSql(30)).toContain("ts >= time::now() - 30d");
     });
 
-    it("omits window clause when windowDays is not set", async () => {
-        const db = makeMockDb();
+    it("buildInvocationSql omits the window clause when windowDays is undefined", () => {
+        expect(buildInvocationSql(undefined)).not.toContain("ts >= time::now()");
+    });
 
-        await runWithMock(db, fetchSkillsWeighted());
-        // Invocation query at index 1 must not have a time window
-        expect(db.captured[0]).not.toContain("ts >= time::now()");
+    it("buildInvocationSql omits the window clause when windowDays is 0 or negative", () => {
+        // The source guards on `windowDays > 0`; a 0 or negative value must
+        // fall through the same as `undefined`, not emit `- 0d` / `- -5d`.
+        expect(buildInvocationSql(0)).not.toContain("ts >= time::now()");
+        expect(buildInvocationSql(-5)).not.toContain("ts >= time::now()");
     });
 
     it("doctor: no advice when count < threshold", async () => {

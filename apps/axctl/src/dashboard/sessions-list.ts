@@ -9,17 +9,16 @@
  * expands a row.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb";
+import { JsonArrayColumn, NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import type {
     SessionChildrenResponse,
     SessionListResponse,
     SessionListRow,
 } from "@ax/lib/shared/dashboard-types";
-import { queryPagedWithCount } from "@ax/lib/shared/graph-query";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
-import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { fetchSessionBaselines } from "./session-baselines.ts";
 
 export interface SessionsListOpts {
@@ -41,30 +40,6 @@ const SESSIONS_PAGINATION: PaginationConfig = { defaultLimit: 200, maxLimit: 500
  *  payloads if fan-out ever spikes past observed ceilings. */
 const MAX_CHILDREN = 1000;
 
-interface RawRow {
-    readonly id: string;
-    readonly project: string | null;
-    readonly source: string | null;
-    readonly cwd: string | null;
-    readonly model: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly has_raw_file: boolean;
-}
-
-const safeLiteral = (value: string): string => {
-    if (value.includes("'")) throw new Error(`sessions-list: filter value contains a single quote: ${value}`);
-    return `'${value}'`;
-};
-
-/**
- * Surreal record-id literal IN-list. The ids here come straight out of
- * `<string>id` casts (already `session:\`uuid\`` form) and are interpolated
- * into SurrealQL as record-link comparators, so we don't double-quote them.
- * Bare ids in DTOs go through `toSessionRid` before reaching this helper.
- */
-const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", ");
-
 /** ended_at-null sessions count as live only when the health derive row was
  *  written recently - the watcher re-ingests live transcripts within ~1 min,
  *  so a stale ts means the session is dead, just never closed. */
@@ -78,14 +53,14 @@ interface HealthRow {
     readonly tool_errors: number | null;
     readonly user_corrections: number | null;
     readonly context_pressure: string | null;
-    readonly ts: string | null;
+    readonly ts: Date | null;
 }
 interface UsageRow {
     readonly session: string;
     readonly estimated_cost_usd: number | null;
     readonly estimated_tokens: number | null;
     readonly cache_read_input_tokens: number | null;
-    readonly burn_buckets: string | null;
+    readonly burn_buckets: ReadonlyArray<number> | null;
 }
 interface MetricsRow {
     readonly session: string;
@@ -95,20 +70,27 @@ interface MetricsRow {
     readonly lines_removed: number | null;
 }
 
-const parseBurnBuckets = (raw: string | null): number[] | null => {
-    if (!raw) return null;
-    try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return null;
-        return parsed.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : 0));
-    } catch {
-        return null;
-    }
-};
+const RawRowSchema = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+    has_raw_file: Schema.Boolean,
+});
+const CountSchema = Schema.Struct({ total: NumberFromBigIntColumn });
+const ChildCountSchema = Schema.Struct({ parent: Schema.String, c: NumberFromBigIntColumn });
+const HealthSchema = Schema.Struct({ session: Schema.String, turns: Schema.NullOr(NumberFromBigIntColumn), tool_errors: Schema.NullOr(NumberFromBigIntColumn), user_corrections: Schema.NullOr(NumberFromBigIntColumn), context_pressure: Schema.NullOr(Schema.String), ts: Schema.NullOr(TimestampColumn) });
+const UsageSchema = Schema.Struct({ session: Schema.String, estimated_cost_usd: Schema.NullOr(Schema.Number), estimated_tokens: Schema.NullOr(NumberFromBigIntColumn), cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn), burn_buckets: Schema.NullOr(JsonArrayColumn(Schema.Number)) });
+const MetricsSchema = Schema.Struct({ session: Schema.String, produced_commits: Schema.NullOr(NumberFromBigIntColumn), reverted_commits: Schema.NullOr(NumberFromBigIntColumn), lines_added: Schema.NullOr(NumberFromBigIntColumn), lines_removed: Schema.NullOr(NumberFromBigIntColumn) });
 
-export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<SessionListResponse, DbError, SurrealClient> =>
+const placeholders = (count: number): string => Array.from({ length: count }, () => "?").join(", ");
+
+export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<SessionListResponse, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
         const { offset, limit } = clampPagination(
             { offset: opts.offset, limit: opts.limit },
             SESSIONS_PAGINATION,
@@ -117,9 +99,10 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // returns truthy when this session has zero inbound spawned edges.
         // Index `spawned_out` (on `spawned.out`) makes this cheap. Verified
         // <250ms over 5.4k sessions / 2.3k edges.
-        const filters: string[] = ["started_at IS NOT NONE", "!<-spawned"];
-        if (opts.source) filters.push(`source = ${safeLiteral(opts.source)}`);
-        if (opts.project) filters.push(`project = ${safeLiteral(opts.project)}`);
+        const filters: string[] = ["s.started_at IS NOT NULL", "NOT EXISTS (SELECT 1 FROM spawned e WHERE e.out_id = s.id)"];
+        const filterParams: Array<string> = [];
+        if (opts.source) { filters.push("s.source = ?"); filterParams.push(opts.source); }
+        if (opts.project) { filters.push("s.project = ?"); filterParams.push(opts.project); }
         const whereClause = `WHERE ${filters.join(" AND ")}`;
         // Per-row subqueries against `turn` deadlock at scale (same anti-
         // pattern that bit loadPriorFileSessions). Fetch the session-only
@@ -129,87 +112,45 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // multi-statement query: the shared SurrealDB websocket interleaves
         // independent .query() calls badly, so issuing both in one round-trip
         // keeps the response framing aligned.
-        // Stash the raw record-id `<string>id` value during the page mapper
-        // so the second-step spawned-counts query has the keys it needs
-        // without re-running the SELECT. `<string>id` returns the wrapped
-        // form (`session:\`uuid\``) which is exactly what `<string>in` from
-        // the spawned table also returns - matching keys.
-        const rawIdByBare = new Map<string, string>();
-        const paged = yield* queryPagedWithCount<RawRow, { total: number }, SessionListRow>(
-            `
+        // Keep the cache row id during mapping for the batched edge and
+        // aggregate queries. Only the bare id crosses the HTTP boundary.
+        const [pageRows, countRows] = yield* Effect.all([
+            db.rows(RawRowSchema, `
             SELECT
-                <string>id AS id,
-                project,
-                source,
-                cwd,
-                model,
-                <string>started_at AS started_at,
-                <string>ended_at AS ended_at,
-                raw_file != NONE AS has_raw_file
-            FROM session
+                s.id, s.project, s.source, s.cwd, s.model, s.started_at, s.ended_at,
+                s.raw_file IS NOT NULL AS has_raw_file
+            FROM session s
             ${whereClause}
-            ORDER BY started_at DESC
-            START ${offset} LIMIT ${limit};
-            SELECT count() AS total
-            FROM session
-            ${whereClause}
-            GROUP ALL;
-        `,
-            (r) => {
-                // Bare ids cross the HTTP seam; raw record-id form is kept
-                // privately for the childCountByRoot lookup below. See
-                // src/lib/shared/session-id.ts for the seam contract.
-                const bareId = toBareSessionId(r.id);
-                rawIdByBare.set(bareId, r.id);
-                return {
-                    id: bareId,
-                    // SurrealDB returns absent/NONE columns as `undefined`, but the
-                    // SessionListRow schema fields are NullOr(String) (string | null) -
-                    // `undefined` fails encode and 400s the whole list. Coalesce every
-                    // pass-through nullable to `null`. (This was the all-sources bug: a
-                    // row with no ended_at/model/etc. broke `?source=` absent.)
-                    project: r.project ?? null,
-                    source: r.source ?? "unknown",
-                    cwd: r.cwd ?? null,
-                    model: r.model ?? null,
-                    started_at: r.started_at ?? null,
-                    ended_at: r.ended_at ?? null,
-                    has_raw_file: !!r.has_raw_file,
-                    // turn_count intentionally NOT counted from `turn` here:
-                    // the cross-session turn table is huge and a batched
-                    // IN-list count still takes ~8 s at the 200-row scale we
-                    // want. Filled below from session_health.turns (0 when no
-                    // health row exists).
-                    turn_count: 0,
-                    parent_session: null,
-                    // Filled in below after the spawned-counts query.
-                    direct_children_count: 0,
-                    cost_usd: null,
-                    burn_buckets: null,
-                    friction: null,
-                    signal: null,
-                    produced_commits: null,
-                    reverted_commits: null,
-                    lines_added: null,
-                    lines_removed: null,
-                    is_live: false,
-                };
-            },
-            (row) => row.total,
-        );
-
+            ORDER BY s.started_at DESC
+            LIMIT ? OFFSET ?`, [...filterParams, limit, offset]),
+            db.rows(CountSchema, `SELECT count(*) AS total FROM session s ${whereClause}`, filterParams),
+        ]);
+        const rawIdByBare = new Map<string, string>();
+        const baseItems: SessionListRow[] = pageRows.map((r) => {
+            const bareId = toBareSessionId(r.id);
+            rawIdByBare.set(bareId, r.id);
+            return {
+                id: bareId, project: r.project, source: r.source ?? "unknown", cwd: r.cwd,
+                model: r.model, started_at: r.started_at?.toISOString() ?? null,
+                ended_at: r.ended_at?.toISOString() ?? null, has_raw_file: r.has_raw_file,
+                turn_count: 0, parent_session: null, direct_children_count: 0,
+                cost_usd: null, burn_buckets: null, friction: null, signal: null,
+                produced_commits: null, reverted_commits: null, lines_added: null,
+                lines_removed: null, is_live: false,
+            };
+        });
+        const paged = { items: baseItems, total: countRows[0]?.total ?? 0 };
         // Single grouped query against `spawned` gives us the direct-child
         // count per visible root. Lets the SPA render the expand toggle +
         // "K with subagents" metric without per-row fan-out fetches.
         const rawIds = Array.from(rawIdByBare.values());
         const childCountByRawId = new Map<string, number>();
         if (rawIds.length > 0) {
-            const [counts] = yield* db.query<[Array<{ parent: string; c: number }>]>(`
-                SELECT <string>in AS parent, count() AS c
+            const counts = yield* db.rows(ChildCountSchema, `
+                SELECT in_id AS parent, count(*) AS c
                 FROM spawned
-                WHERE in IN [${formatRecordIdList(rawIds)}]
-                GROUP BY parent;
-            `);
+                WHERE in_id IN (${placeholders(rawIds.length)})
+                GROUP BY in_id`, rawIds);
             for (const r of counts) {
                 childCountByRawId.set(r.parent, Number(r.c) || 0);
             }
@@ -222,25 +163,19 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         const usageBySession = new Map<string, UsageRow>();
         const metricsBySession = new Map<string, MetricsRow>();
         if (rawIds.length > 0) {
-            const inList = formatRecordIdList(rawIds);
+            const inList = placeholders(rawIds.length);
             // enrichment must never break the base list - degrade to bare rows.
-            const [health, usage, metrics] = yield* db.query<[
-                HealthRow[],
-                UsageRow[],
-                MetricsRow[],
-            ]>(`
-                SELECT <string>session AS session, turns, tool_errors,
-                       user_corrections, context_pressure, <string>ts AS ts
-                FROM session_health WHERE session IN [${inList}];
-                SELECT <string>session AS session, estimated_cost_usd,
+            const [health, usage, metrics] = yield* Effect.all([
+                db.rows(HealthSchema, `SELECT session, turns, tool_errors,
+                       user_corrections, context_pressure, ts
+                FROM session_health WHERE session IN (${inList})`, rawIds),
+                db.rows(UsageSchema, `SELECT session, estimated_cost_usd,
                        estimated_tokens, cache_read_input_tokens, burn_buckets
-                FROM session_token_usage WHERE session IN [${inList}];
-                SELECT <string>session AS session, produced_commits,
+                FROM session_token_usage WHERE session IN (${inList})`, rawIds),
+                db.rows(MetricsSchema, `SELECT session, produced_commits,
                        reverted_commits, lines_added, lines_removed
-                FROM session_metrics WHERE session IN [${inList}];
-            `).pipe(
-                Effect.catch(() => Effect.succeed<[HealthRow[], UsageRow[], MetricsRow[]]>([[], [], []])),
-            );
+                FROM session_metrics WHERE session IN (${inList})`, rawIds),
+            ]).pipe(Effect.catch(() => Effect.succeed([[], [], []] as const)));
             for (const h of health) healthBySession.set(h.session, h);
             for (const u of usage) usageBySession.set(u.session, u);
             for (const m of metrics) metricsBySession.set(m.session, m);
@@ -261,7 +196,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                 direct_children_count: childCountByRawId.get(rawId) ?? 0,
                 turn_count: health?.turns ?? 0,
                 cost_usd: usage?.estimated_cost_usd ?? null,
-                burn_buckets: parseBurnBuckets(usage?.burn_buckets ?? null),
+                burn_buckets: usage?.burn_buckets ? [...usage.burn_buckets] : null,
                 friction,
                 signal: friction === null ? null : friction === 0 ? "clean" : "friction",
                 produced_commits: metrics?.produced_commits ?? null,
@@ -301,38 +236,29 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
 export const fetchSessionChildren = (
     parentBareId: string,
     opts: SessionChildrenOpts = {},
-): Effect.Effect<SessionChildrenResponse, DbError, SurrealClient> =>
+): Effect.Effect<SessionChildrenResponse, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
         const limit = Math.max(1, Math.min(opts.limit ?? 500, MAX_CHILDREN));
         const parent_session = toBareSessionId(parentBareId);
-        const parentRid = toSessionRid(parent_session);
         // Two-step: fetch child record ids from `spawned`, then materialise
         // the child session rows. Avoids a nested subquery that Surreal can
         // mis-bind, and matches the existing IN-list pattern used elsewhere
         // in this module. Both queries are index-backed (`spawned_in`).
-        const [edges] = yield* db.query<[Array<{ child: string }>]>(`
-            SELECT <string>out AS child FROM spawned WHERE in = ${parentRid};
-        `);
+        const EdgeSchema = Schema.Struct({ child: Schema.String });
+        const edges = yield* db.rows(EdgeSchema, "SELECT out_id AS child FROM spawned WHERE in_id = ?", [parent_session]);
         const childIds = edges.map((e) => e.child).filter(Boolean);
         if (childIds.length === 0) {
             return { parent_session, children: [] };
         }
-        const [rows] = yield* db.query<[RawRow[]]>(`
+        const rows = yield* db.rows(RawRowSchema, `
             SELECT
-                <string>id AS id,
-                project,
-                source,
-                cwd,
-                model,
-                <string>started_at AS started_at,
-                <string>ended_at AS ended_at,
-                raw_file != NONE AS has_raw_file
+                id, project, source, cwd, model, started_at, ended_at,
+                raw_file IS NOT NULL AS has_raw_file
             FROM session
-            WHERE id IN [${formatRecordIdList(childIds)}]
+            WHERE id IN (${placeholders(childIds.length)})
             ORDER BY started_at ASC
-            LIMIT ${limit};
-        `);
+            LIMIT ?`, [...childIds, limit]);
 
         const children: SessionListRow[] = rows.map((r): SessionListRow => ({
             id: toBareSessionId(r.id),
@@ -341,8 +267,8 @@ export const fetchSessionChildren = (
             source: r.source ?? "unknown",
             cwd: r.cwd ?? null,
             model: r.model ?? null,
-            started_at: r.started_at ?? null,
-            ended_at: r.ended_at ?? null,
+            started_at: r.started_at?.toISOString() ?? null,
+            ended_at: r.ended_at?.toISOString() ?? null,
             has_raw_file: !!r.has_raw_file,
             turn_count: 0,
             parent_session,

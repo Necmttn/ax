@@ -27,7 +27,7 @@ import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
@@ -139,6 +139,22 @@ export interface MakeContractWebHandlerOptions {
     readonly memoMap?: Layer.MemoMap;
     /** Test seam: services the handlers need (default: production AppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
+    /**
+     * Test seam for the published-snapshot reader (default: `CacheReadLive`,
+     * which resolves a real libduckdb).
+     *
+     * v2 moved DuckDB-backed routes (`/api/recall`, `/api/sessions`, ...) onto
+     * `CacheRead`, and `CacheReadLive` fails with "the DuckDB library could not
+     * be loaded" wherever no dylib is resolvable - which is every plain
+     * `bun test` run and CI. Without this seam a route-plumbing test (does
+     * `GET /api/sessions` answer 200 with empty data?) reports 500 for a reason
+     * that has nothing to do with the route, and the only way to make it green
+     * would be to stop asserting the status. `@ax/lib/testing/cache`
+     * `makeTestCacheRead` fills it with canned rows that still decode through
+     * the caller's `Schema`. Query CORRECTNESS is a different question and
+     * belongs on a real temp DuckDB (`duckdbTestSetup` + `publishCacheFixture`).
+     */
+    readonly cacheRead?: Layer.Layer<CacheRead, unknown>;
     /** Test seam for server-side GitHub calls (default: daemon `gh` auth). */
     readonly github?: Layer.Layer<GitHubEnv, unknown>;
 }
@@ -159,7 +175,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         // SurrealDB. The layer opens nothing until a query actually arrives
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that
         // never serves a recall request exactly nothing.
-        CacheReadLive,
+        opts.cacheRead ?? CacheReadLive,
         JudgmentLive,
     ).pipe(
         Layer.provide([
