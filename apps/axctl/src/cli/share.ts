@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
@@ -262,14 +262,14 @@ const liveShareDeps: ShareCommandDeps = {
         Effect.runPromise(
             exportSessionShare(sessionId, axVersion).pipe(
                 catchDbErrorAndExit("axctl share"),
-                Effect.provide(AppLayer),
+                Effect.provide(LegacySurrealAppLayer),
                 Effect.scoped,
             ),
         ),
     locateTranscript: (sessionId) =>
         Effect.runPromise(
             locateShareTranscript(sessionId).pipe(
-                Effect.provide(AppLayer),
+                Effect.provide(LegacySurrealAppLayer),
                 Effect.scoped,
             ),
         ),

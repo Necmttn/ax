@@ -4,7 +4,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
 import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
 import { AxConfig } from "@ax/lib/config";
-import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import { jsonParam } from "@ax/lib/duckdb/row";
 import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
@@ -37,9 +37,11 @@ import {
 } from "../progress.ts";
 import { stderrExit } from "../output.ts";
 import {
-    makeIngestEvent,
-    publishIngestEvent,
-} from "../../dashboard/telemetry.ts";
+    writeIngestEvent,
+    writeIngestRunStart,
+    writeIngestStageFinish,
+    writeIngestStageStart,
+} from "../../ingest/telemetry.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import {
     boolArg,
@@ -70,33 +72,6 @@ function errorText(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-const writeIngestEvent = (
-    write: CacheWriteService,
-    input: {
-        readonly runId: string;
-        readonly source: string;
-        readonly stage: string;
-        readonly level: "debug" | "info" | "warn" | "error";
-        readonly message: string;
-        readonly counts?: Record<string, number>;
-    },
-): Effect.Effect<void, CacheWriteError> =>
-    Effect.gen(function* () {
-        const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
-        yield* write.put("ingest_event", cacheRow({
-            id: event.id,
-            run: event.runId,
-            source: event.source,
-            stage: event.stage,
-            level: event.level,
-            message: event.message,
-            counts: jsonParam(event.counts),
-            raw: jsonParam(event),
-            ts: new Date(event.ts),
-        }));
-        publishIngestEvent(event);
-    }).pipe(Effect.asVoid);
-
 const telemetryStage = <A, E, R = AxConfig | ProcessService>(
     write: CacheWriteService,
     runId: string,
@@ -106,27 +81,17 @@ const telemetryStage = <A, E, R = AxConfig | ProcessService>(
     progress?: ProgressReporter,
 ): Effect.Effect<A, CacheWriteError | E, R | AxConfig | ProcessService> =>
     Effect.gen(function* () {
-        const stageId = `${runId}__${source}__${stage}`.replace(/[^A-Za-z0-9_:-]+/g, "_");
+        const ledgerKey = { runId, source, stage } as const;
         progress?.start({ source, stage });
-        yield* write.put("ingest_stage", cacheRow({
-            id: stageId, run: runId, source, stage, status: "running",
-            started_at: new Date(), ended_at: null, counts: null, error_text: null,
-        }));
-        yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+        yield* writeIngestStageStart(write, ledgerKey);
         const result = yield* program.pipe(
             Effect.tap((value) => {
                 const counts = numericCounts(value);
                 return Effect.gen(function* () {
                     progress?.finish({ source, stage }, counts);
-                    yield* write.exec(
-                        "UPDATE ingest_stage SET status = 'ok', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = NULL WHERE id = ?",
-                        [jsonParam(counts), stageId],
-                    );
-                    yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                    yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts });
                     yield* writeIngestEvent(write, {
-                        runId,
-                        source,
-                        stage,
+                        ...ledgerKey,
                         level: "info",
                         message: `${source} ${stage} complete`,
                         counts,
@@ -137,15 +102,13 @@ const telemetryStage = <A, E, R = AxConfig | ProcessService>(
                 Effect.gen(function* () {
                     const message = errorText(error);
                     progress?.fail({ source, stage }, message);
-                    yield* write.exec(
-                        "UPDATE ingest_stage SET status = 'error', ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ? WHERE id = ?",
-                        [jsonParam({}), message, stageId],
-                    );
-                    yield* write.exec("UPDATE ingest_run SET last_progress_at = CURRENT_TIMESTAMP WHERE id = ?", [runId]);
+                    yield* writeIngestStageFinish(write, {
+                        ...ledgerKey,
+                        status: "error",
+                        errorText: message,
+                    });
                     yield* writeIngestEvent(write, {
-                        runId,
-                        source,
-                        stage,
+                        ...ledgerKey,
                         level: "error",
                         message,
                     });
@@ -584,11 +547,11 @@ const cmdDeriveSignals = (input: {
         });
         yield* withConfigWrite((write) =>
             Effect.gen(function* () {
-                yield* write.put("ingest_run", cacheRow({
-                    id: runId, command: "derive-signals", status: "running",
-                    since_days: sinceDays ?? null, started_at: new Date(),
-                    last_progress_at: new Date(), ended_at: null, metrics: null,
-                }));
+                yield* writeIngestRunStart(write, {
+                    runId,
+                    command: "derive-signals",
+                    sinceDays: sinceDays ?? null,
+                });
                 return yield* withIngestRunFinish(write, runId)(telemetryStage(
                     write,
                     runId,
@@ -620,11 +583,11 @@ const cmdIngestInsights = (input: {
         });
         const program = withConfigWrite((write) =>
             Effect.gen(function* () {
-                yield* write.put("ingest_run", cacheRow({
-                    id: runId, command: "ingest-insights", status: "running",
-                    since_days: null, started_at: new Date(),
-                    last_progress_at: new Date(), ended_at: null, metrics: null,
-                }));
+                yield* writeIngestRunStart(write, {
+                    runId,
+                    command: "ingest-insights",
+                    sinceDays: null,
+                });
                 return yield* withIngestRunFinish(write, runId)(telemetryStage(
                     write,
                     runId,
@@ -891,7 +854,15 @@ export const ingestRuntime: RuntimeManifest = {
     ingest: "ingest",
     // Hidden maintenance verbs. `derive-signals`/`derive-intents` MUST stay
     // callable - the installed LaunchAgent plists invoke them by name.
-    derive: { runtime: "db", hidden: true },
-    "derive-signals": { runtime: "db", hidden: true },
-    "derive-intents": { runtime: "db", hidden: true },
+    //
+    // `"ingest"`, not `"db"` (wave 3, `c-ingest-cutover`). All three handlers
+    // write through `withConfigWrite` -> the DuckDB seam and resolve no
+    // `SurrealClient`; routing them through `withDb` only bought them an
+    // AppLayer SurrealDB connect (and, with nothing listening, its full
+    // `CONNECT_TIMEOUT_MS`) before they could touch the cache. `withIngest`
+    // gives them the same `AxConfig`/platform/trace stack, the panicking
+    // no-DB client, and the trace transport the progress reporter needs.
+    derive: { runtime: "ingest", hidden: true },
+    "derive-signals": { runtime: "ingest", hidden: true },
+    "derive-intents": { runtime: "ingest", hidden: true },
 };

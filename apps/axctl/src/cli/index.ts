@@ -5,7 +5,7 @@ import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
@@ -222,9 +222,14 @@ const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, Surre
 type CliProgram = Effect.Effect<void, unknown, never>;
 
 /**
- * Provide AppLayer (SurrealClient + AxConfig + ProcessService) and a
+ * Provide `LegacySurrealAppLayer` (AppLayer + a live SurrealClient) and a
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
+ *
+ * The SurrealDB client is named at THIS site rather than inherited from
+ * `AppLayer` (wave 3): `withIngest` and `withCache` compose the same
+ * `AppLayer` and get no database client at all, so which runtimes still open a
+ * websocket is now visible in three lines of this file.
  *
  * Every such command also gets the stale-graph warning (#697): one indexed
  * query, stderr only, before the command body. This is deliberately a
@@ -234,7 +239,7 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive)),
+        Effect.provide(Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive)),
         Effect.scoped,
     );
 
@@ -317,6 +322,16 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         // telemetry_of edges, so it needs the lock-held live writer, not a
         // post-hoc tap on a runtime that no longer holds one.
         withoutCacheRead,
+        // The PANICKING SurrealClient, not a live one (wave 3,
+        // `c-ingest-cutover`). `runCli`'s requirement is the union across every
+        // registered command, so `SurrealClient` has to be satisfiable here even
+        // though ingest never resolves it - the same reason `withoutDb` and
+        // `withCache` provide the proxy. Satisfying it with the panicking
+        // sentinel rather than `SurrealClientLive` is what makes `ax ingest`
+        // work on a machine with no SurrealDB at all, and turns any residual
+        // reader that sneaks back into a stage into a loud throw instead of an
+        // empty answer from a write-frozen engine.
+        Effect.provideService(SurrealClient, throwingSurrealClient()),
         Effect.provide(layer),
         Effect.scoped,
     );

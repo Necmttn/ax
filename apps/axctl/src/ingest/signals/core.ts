@@ -1,9 +1,9 @@
 /**
  * Pure signal-derivation core: typed evidence rows in -> Friction Event /
- * Diagnostic Event records + edge specs out. No Effect, no SurrealClient -
- * every classification rule here is exercised by core.test.ts on fixture
- * rows shaped like real transcripts. This is where signal-quality bugs live;
- * keep new rules here, not in the stage wiring.
+ * Diagnostic Event records + edge specs out. No Effect and no database client
+ * of any kind - every classification rule here is exercised by core.test.ts on
+ * fixture rows shaped like real transcripts. This is where signal-quality bugs
+ * live; keep new rules here, not in the stage wiring.
  */
 import type { SkillName } from "@ax/lib/brands";
 import { turnRecordKey } from "@ax/lib/ids";
@@ -77,7 +77,9 @@ export function isHarnessInjected(text: string): boolean {
  * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
  * the lexicographically-smaller skill key always sits in the `in` slot. A
  * short hash of the joined keys keeps the id stable + length-bounded
- * regardless of skill-name length (Surreal record-id segment escaping).
+ * regardless of skill-name length. (The bound outlived its original reason -
+ * Surreal record-id segment escaping - but a stable, short primary key is
+ * worth keeping on its own terms.)
  */
 export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     edgeId: string;
@@ -266,9 +268,11 @@ export function deriveDiagnosticsFromToolCalls(
     return out;
 }
 
-/** Pure grouping of raw turn rows into per-session bundles. Session ids come
- *  back from Surreal as either `session:⟨id⟩` strings or `{ tb, id }` objects;
- *  both normalize to the bare key. First row wins for repo/checkout/cwd meta. */
+/** Pure grouping of raw turn rows into per-session bundles. DuckDB returns a
+ *  session id as a plain string; the legacy Surreal shapes (`session:⟨id⟩` and
+ *  `{ tb, id }`) are still normalized here because rows written before the
+ *  cut-over survive in cached fixtures. All three land on the bare key. First
+ *  row wins for repo/checkout/cwd meta. */
 export function groupTurnsBySession(
     rows: ReadonlyArray<TurnRow & { session: unknown }>,
 ): SessionTurns[] {

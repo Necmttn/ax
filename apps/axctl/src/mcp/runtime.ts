@@ -1,6 +1,6 @@
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Layer, ManagedRuntime } from "effect";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
 
@@ -8,7 +8,7 @@ import { JudgmentLive } from "../judgment.ts";
  * Runtime needs are part of each MCP tool's contract.
  *
  * `legacy` is temporary for tools whose read query still uses SurrealDB. The
- * other three values exclude `AppLayer`, so those requests never construct a
+ * other three values exclude `LegacySurrealAppLayer`, so those requests never construct a
  * SurrealDB client. This keeps the cutover incremental without hiding a live
  * reader behind a process-wide union layer.
  */
@@ -29,7 +29,7 @@ const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 const CacheLayer = Layer.merge(CacheReadLive, PlatformLayer);
 const JudgmentLayer = JudgmentLive;
 const CacheJudgmentLayer = Layer.merge(CacheReadLive, JudgmentLive);
-const LegacyLayer = Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive);
+const LegacyLayer = Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive);
 
 const RUNTIME_LAYERS = {
     cache: CacheLayer,
@@ -57,7 +57,7 @@ export interface McpRuntimePool {
  * Build runtimes on first tool call, one per exact need set.
  *
  * Registering or listing tools opens no database. A cache-only or
- * judgment-only request cannot resolve `AppLayer`, even when legacy tools are
+ * judgment-only request cannot resolve `LegacySurrealAppLayer`, even when legacy tools are
  * present in the same MCP process.
  */
 export const makeMcpRuntimePool = (): McpRuntimePool => {

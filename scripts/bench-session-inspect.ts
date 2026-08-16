@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { fetchSessionInspect } from "../apps/axctl/src/dashboard/session-inspect.ts";
 
 const sessionId = process.argv[2];
@@ -16,7 +16,7 @@ const payload = await Effect.runPromise(
     fetchSessionInspect(sessionId, {
         turnOffset: Number.isFinite(turnOffset) ? turnOffset : 0,
         turnLimit: Number.isFinite(turnLimit) ? turnLimit : 100,
-    }).pipe(Effect.provide(AppLayer), Effect.scoped),
+    }).pipe(Effect.provide(LegacySurrealAppLayer), Effect.scoped),
 );
 
 console.log(JSON.stringify({

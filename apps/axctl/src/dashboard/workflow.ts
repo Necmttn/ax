@@ -1,6 +1,13 @@
 import { Effect } from "effect";
 import { encodeJson, jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import {
+    CacheRead,
+    type CacheReadError,
+    type CacheWriteError,
+    type CacheWriteService,
+} from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import {
@@ -8,7 +15,6 @@ import {
     WORKFLOW_EPISODES_SQL,
     WORKFLOW_EPISODE_PAIRS_SQL,
     WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL,
-    WORKFLOW_SNAPSHOT_SQL,
     WORKFLOW_SESSION_SEQUENCES_SQL,
     WORKFLOW_SESSION_SHAPE_SQL,
     WORKFLOW_WEEKLY_SKILLS_SQL,
@@ -417,39 +423,62 @@ export const computeWorkflow = (): Effect.Effect<
         };
     });
 
-export const refreshWorkflowSnapshot = (): Effect.Effect<
-    WorkflowResponse,
-    DbError,
-    SurrealClient
-> =>
+/**
+ * The single stored workflow snapshot. Keyed `latest` because there is exactly
+ * one: the row is a materialized cache of `computeWorkflow`, not history.
+ */
+const WORKFLOW_SNAPSHOT_ID = "latest";
+
+const DUCKDB_WORKFLOW_SNAPSHOT_SQL =
+    "SELECT payload FROM workflow_snapshot WHERE id = ? LIMIT 1";
+
+/**
+ * Recompute the workflow rollup and PERSIST it.
+ *
+ * Takes the `CacheWriteService` rather than resolving a client, because under
+ * v2 that is the only way to write: `withCacheWrite` refuses to open the live
+ * database unless the calling process holds the ingest lock. That constraint is
+ * the reason this function grew a parameter, and the reason `fetchWorkflow`
+ * below no longer calls it - a dashboard READ must not take the ingest lock out
+ * from under a running ingest just because its cache was cold.
+ *
+ * `computeWorkflow` itself is still SurrealQL; it is claimed by
+ * `c-read-dashboard`. This function is the WRITE half only.
+ */
+export const refreshWorkflowSnapshot = (
+    write: CacheWriteService,
+): Effect.Effect<WorkflowResponse, DbError | CacheWriteError, SurrealClient> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const payload = yield* computeWorkflow();
-        yield* db.query(
-            `UPSERT workflow_snapshot:latest CONTENT {
-                generated_at: $generated_at,
-                payload: $payload,
-                source: "workflow-refresh"
-            };`,
-            {
-                generated_at: new Date(payload.generatedAt),
-                payload: encodeJson(payload),
-            },
-        );
+        yield* write.put("workflow_snapshot", cacheRow({
+            id: WORKFLOW_SNAPSHOT_ID,
+            generated_at: tsParam(payload.generatedAt),
+            payload: encodeJson(payload),
+            source: "workflow-refresh",
+        }));
         return payload;
     });
 
+/**
+ * The stored snapshot, or a freshly computed rollup when none exists.
+ *
+ * The cold-cache branch COMPUTES BUT DOES NOT PERSIST. It used to write the
+ * snapshot it had just built, which was free against Surreal and is not against
+ * DuckDB: writes go through the ingest lock, so a dashboard request that healed
+ * its own cache would contend with - or die on - a concurrent ingest. The
+ * snapshot is now filled by whoever holds the lock (see
+ * {@link refreshWorkflowSnapshot}); a cold read pays the compute and answers
+ * correctly, which is the behaviour that matters to the caller.
+ */
 export const fetchWorkflow = (): Effect.Effect<
     WorkflowResponse,
-    DbError,
-    SurrealClient
+    DbError | CacheReadError,
+    SurrealClient | CacheRead
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const snapshotRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            WORKFLOW_SNAPSHOT_SQL,
-        ))?.[0] ?? [];
-        const snapshot = parseSnapshotPayload(snapshotRows);
+        const read = yield* CacheRead;
+        const stored = yield* read.raw(DUCKDB_WORKFLOW_SNAPSHOT_SQL, [WORKFLOW_SNAPSHOT_ID]);
+        const snapshot = parseSnapshotPayload(stored.rows);
         if (snapshot) return snapshot;
-        return yield* refreshWorkflowSnapshot();
+        return yield* computeWorkflow();
     });

@@ -11,7 +11,7 @@ import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../telemetry.ts";
+import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../../ingest/telemetry.ts";
 import { rawRoute, type AnyRoute, type EffectRunner } from "../router.ts";
 
 /**

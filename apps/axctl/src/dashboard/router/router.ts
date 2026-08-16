@@ -18,6 +18,7 @@
  */
 import { Effect } from "effect";
 import type { Layer } from "effect";
+import type { SurrealClient } from "@ax/lib/db";
 import type { AppLayer } from "@ax/lib/layers";
 import type { Judgment } from "@ax/lib/sqlite";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
@@ -25,8 +26,16 @@ import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-/** Everything AppLayer provides; the upper bound for jsonRoute handler envs. */
-export type DashboardEnv = Layer.Success<typeof AppLayer> | CacheRead | Judgment;
+/**
+ * Everything the serve runtime provides; the upper bound for jsonRoute handler
+ * envs.
+ *
+ * `SurrealClient` is named EXPLICITLY rather than inherited from `AppLayer`
+ * (wave 3, `c-ingest-cutover` dropped it from that layer). It stays in the
+ * union because ~15 dashboard route handlers still execute SurrealQL - it is
+ * the honest remaining bill, and `c-read-dashboard` shrinks it to nothing.
+ */
+export type DashboardEnv = Layer.Success<typeof AppLayer> | SurrealClient | CacheRead | Judgment;
 
 /** Runs a handler effect to a Promise. Production = ServeRuntimeHandle.runner. */
 export type EffectRunner = {

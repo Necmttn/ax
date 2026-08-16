@@ -26,7 +26,6 @@
  */
 import { Cause, Effect, FileSystem, Layer, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import { ProcessService } from "@ax/lib/process";
 import {
@@ -45,9 +44,11 @@ import type { IngestStreamBus } from "./ingest-stream.ts";
 /** Services `runIngest` (+ the single-flight lock) need that the caller must
  *  provide via `baseLayer`. `FileSystem`/`Path` are read/written for the lock
  *  file; production callers already get them from `AppLayer` (it re-exposes
- *  its Bun-backed platform layer via `provideMerge` - see packages/lib/src/layers.ts). */
+ *  its Bun-backed platform layer via `provideMerge` - see packages/lib/src/layers.ts).
+ *  NO `SurrealClient` since wave 3's `c-ingest-cutover`: `runIngest` writes
+ *  DuckDB through the seam only, so requiring a Surreal client here would have
+ *  forced the Studio Live tab to hold a connection nothing reads. */
 export type IngestBaseServices =
-    | SurrealClient
     | AxConfig
     | ProcessService
     | StageRegistry

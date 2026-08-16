@@ -26,7 +26,7 @@ import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
 import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
@@ -137,7 +137,7 @@ export interface MakeContractWebHandlerOptions {
     readonly ingestStream: DurableIngestStream | null;
     /** Share with the server runtime so AppLayer builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
-    /** Test seam: services the handlers need (default: production AppLayer). */
+    /** Test seam: services the handlers need (default: `LegacySurrealAppLayer`). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
     /**
      * Test seam for the published-snapshot reader (default: `CacheReadLive`,
@@ -170,7 +170,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
         Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
-        opts.services ?? AppLayer,
+        opts.services ?? LegacySurrealAppLayer,
         // v2: the recall vertical reads the published DuckDB snapshot, not
         // SurrealDB. The layer opens nothing until a query actually arrives
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that

@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
-import { Effect } from "effect";
-import { AppLayer } from "@ax/lib/layers";
+import { Effect, Layer } from "effect";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { withConfigWrite } from "../../apps/axctl/src/config-core/reconcile.ts";
 import { fetchWorkflow, refreshWorkflowSnapshot } from "../../apps/axctl/src/dashboard/workflow.ts";
 
 interface Args {
@@ -88,7 +90,13 @@ const main = async (): Promise<void> => {
     if (args.refreshSnapshot) {
         const refresh = await timed(
             "workflow.refresh_snapshot",
-            refreshWorkflowSnapshot().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown, unknown, never>,
+            // The refresh is a WRITE, so it runs through the same seam front door
+            // the CLI uses - it takes the ingest lock, applies the DDL, and
+            // publishes a snapshot on success.
+            withConfigWrite((write) => refreshWorkflowSnapshot(write)).pipe(
+                Effect.provide(LegacySurrealAppLayer),
+                Effect.scoped,
+            ) as Effect.Effect<unknown, unknown, never>,
         );
         samples.push(refresh.sample);
     }
@@ -96,7 +104,10 @@ const main = async (): Promise<void> => {
     for (let i = 0; i < args.iterations; i += 1) {
         const read = await timed(
             "workflow.fetch_cached",
-            fetchWorkflow().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown, unknown, never>,
+            fetchWorkflow().pipe(
+                Effect.provide(Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive)),
+                Effect.scoped,
+            ) as Effect.Effect<unknown, unknown, never>,
         );
         samples.push(read.sample);
     }

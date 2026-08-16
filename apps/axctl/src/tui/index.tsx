@@ -2,7 +2,7 @@ import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { App } from "./App.tsx";
 
 /**
@@ -22,7 +22,7 @@ export async function runTui(): Promise<void> {
     let client: SurrealClientShape;
     try {
         const context = await Effect.runPromise(
-            Layer.buildWithScope(AppLayer, scope) as Effect.Effect<
+            Layer.buildWithScope(LegacySurrealAppLayer, scope) as Effect.Effect<
                 Context.Context<SurrealClient>,
                 unknown
             >,

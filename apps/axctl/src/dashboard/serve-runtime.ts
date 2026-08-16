@@ -18,6 +18,7 @@
  * successful build is a handler error and never triggers a swap.
  */
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SurrealClientLive } from "@ax/lib/db";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { JudgmentLive } from "../judgment.ts";
@@ -59,7 +60,16 @@ export const defaultRuntimeFactory = (
     options?: { readonly memoMap?: Layer.MemoMap },
 ): (() => RuntimeLike) =>
 () => ManagedRuntime.make(
-    Layer.mergeAll(IngestRuntimeLayer, CacheReadLive, JudgmentLive),
+    // `SurrealClientLive` is merged HERE, not inherited from `AppLayer` (wave 3,
+    // `c-ingest-cutover`): the ingest fibers this runtime forks are Surreal-free,
+    // and only the un-ported route handlers still need a client. It is
+    // `provideMerge`d onto the ingest layer because it depends on `AxConfig`,
+    // which `Layer.mergeAll` (parallel) would not satisfy.
+    Layer.mergeAll(
+        SurrealClientLive.pipe(Layer.provideMerge(IngestRuntimeLayer)),
+        CacheReadLive,
+        JudgmentLive,
+    ),
     options?.memoMap ? { memoMap: options.memoMap } : undefined,
 );
 
