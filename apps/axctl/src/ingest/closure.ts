@@ -305,7 +305,7 @@ export const deriveClosure = (
             write.rows(Schema.Struct({ id: Schema.String, message: Schema.NullOr(Schema.String), repository: Schema.NullOr(Schema.String), ts: TimestampColumn }), `
 SELECT id, message, repository, ts
 FROM commit
-${opts.sinceDays === undefined ? "" : "WHERE ts >= current_timestamp - (? * INTERVAL '1 day')"}
+${opts.sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY ts ASC`, opts.sinceDays === undefined ? [] : [opts.sinceDays]),
             write.rows(Schema.Struct({ in: Schema.String, out: Schema.String, path: Schema.String }), `
 SELECT t.in_id AS in, t.out_id AS out, f.path
