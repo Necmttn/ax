@@ -319,6 +319,14 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         // post-hoc tap on a runtime that no longer holds one.
         withoutCacheRead,
         Effect.provide(layer),
+        // The PANICKING sentinel, exactly as `withoutDb`/`withCache` use it -
+        // NOT a live client. `IngestRuntimeLayer` no longer merges a SurrealDB
+        // client (wave 3), so a residual `SurrealClient` requirement anywhere in
+        // the command tree would otherwise be a type error here. Providing the
+        // sentinel keeps `ax ingest` daemon-free while making any code path that
+        // actually touches Surreal fail LOUDLY instead of quietly opening a
+        // websocket.
+        Effect.provideService(SurrealClient, throwingSurrealClient()),
         Effect.scoped,
     );
 };

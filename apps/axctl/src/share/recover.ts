@@ -16,7 +16,6 @@
  */
 import { Effect, FileSystem, Option, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
