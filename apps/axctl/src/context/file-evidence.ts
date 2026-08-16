@@ -198,24 +198,100 @@ export const loadToolEvidenceTable = (table: "read_file" | "searched_file", file
         return mapped.sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a));
     });
 
+const TouchQueryRow = Schema.Struct({
+    id: Schema.String,
+    additions: Schema.NullOr(NumberFromBigIntColumn),
+    deletions: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    file_id: Schema.NullOr(Schema.String),
+    file_path: Schema.NullOr(Schema.String),
+    file_repo: Schema.NullOr(Schema.String),
+    file_repository: Schema.NullOr(Schema.String),
+    commit_id: Schema.NullOr(Schema.String),
+    commit_sha: Schema.NullOr(Schema.String),
+    commit_message: Schema.NullOr(Schema.String),
+    commit_author: Schema.NullOr(Schema.String),
+    commit_ts: Schema.NullOr(TimestampColumn),
+});
+
+const ProducedSessionRow = Schema.Struct({
+    commit_id: Schema.String,
+    session_id: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+});
+
+/**
+ * `touched` is a `(commit) -in-> edge -out-> (file)` edge; `commit.sessions`
+ * (the sessions that produced the commit) was a reverse graph traversal
+ * (`<-produced.in`) in SurrealQL. DuckDB has no record-graph traversal, so
+ * this is a second batched query over `produced` (session -in-> commit -out->)
+ * for the commit ids the first query returned, grouped back onto each commit
+ * in JS - same batching shape as `prevTurnQuery` in label-mining-service.ts.
+ */
 export const loadTouches = (fileIds: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as TouchRow[];
-        const [rows] = yield* db.query<[TouchRow[]]>(`
+        const rows = yield* read.rows(TouchQueryRow, `
             SELECT
-                <string>id AS id,
-                additions,
-                deletions,
-                <string>ts AS ts,
-                out.{ id, path, repo, repository } AS file,
-                in.{ id, sha, message, author, ts, sessions: <-produced.in.{ id, source, cwd } } AS commit
-            FROM touched
-            WHERE out IN [${fileIds.join(", ")}]
-            ORDER BY ts DESC
-            LIMIT 40;
-        `);
-        return rows;
+                t.id AS id,
+                t.additions AS additions,
+                t.deletions AS deletions,
+                t.ts AS ts,
+                f.id AS file_id,
+                f.path AS file_path,
+                f.repo AS file_repo,
+                f.repository AS file_repository,
+                c.id AS commit_id,
+                c.sha AS commit_sha,
+                c.message AS commit_message,
+                c.author AS commit_author,
+                c.ts AS commit_ts
+            FROM touched t
+            JOIN file f ON f.id = t.out_id
+            JOIN "commit" c ON c.id = t.in_id
+            WHERE t.out_id IN (${fileIds.map(() => "?").join(", ")})
+            ORDER BY t.ts DESC
+            LIMIT 40
+        `, fileIds);
+
+        const commitIds = Array.from(new Set(rows.map((row) => row.commit_id).filter((id): id is string => id !== null)));
+        const sessionsByCommit = new Map<string, Array<{ id: string; source: string | null; cwd: string | null }>>();
+        if (commitIds.length > 0) {
+            const producedRows = yield* read.rows(ProducedSessionRow, `
+                SELECT p.out_id AS commit_id, s.id AS session_id, s.source AS source, s.cwd AS cwd
+                FROM produced p
+                JOIN session s ON s.id = p.in_id
+                WHERE p.out_id IN (${commitIds.map(() => "?").join(", ")})
+            `, commitIds);
+            for (const row of producedRows) {
+                const list = sessionsByCommit.get(row.commit_id) ?? [];
+                list.push({ id: row.session_id, source: row.source, cwd: row.cwd });
+                sessionsByCommit.set(row.commit_id, list);
+            }
+        }
+
+        return rows.map((row): TouchRow => ({
+            id: row.id,
+            additions: row.additions,
+            deletions: row.deletions,
+            ts: row.ts.toISOString(),
+            file: row.file_id === null ? null : {
+                id: row.file_id,
+                path: row.file_path ?? "",
+                repo: row.file_repo,
+                repository: row.file_repository,
+            },
+            commit: row.commit_id === null ? null : {
+                id: row.commit_id,
+                sha: row.commit_sha,
+                message: row.commit_message,
+                author: row.commit_author,
+                ts: row.commit_ts?.toISOString() ?? null,
+                sessions: sessionsByCommit.get(row.commit_id) ?? [],
+            },
+        }));
     });
 
 export const loadMentions = (signals: MentionSignals, files: readonly FileRow[]) =>
