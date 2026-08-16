@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { DbError } from "@ax/lib/errors";
-import { makeMockDb, makeTestSurrealClient, runWithMock } from "@ax/lib/testing/surreal";
+import { Effect, Layer } from "effect";
+import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import {
     fetchLastSuccessfulIngestAt,
     staleIngestThresholdMs,
@@ -10,11 +10,8 @@ import {
 } from "./ingest-staleness.ts";
 
 describe("staleIngestThresholdMs", () => {
-    test("defaults to 48h", () => {
+    test("uses the default and accepts an explicit disable", () => {
         expect(staleIngestThresholdMs({} as NodeJS.ProcessEnv)).toBe(48 * 3_600_000);
-    });
-
-    test("honours AX_STALE_INGEST_HOURS; 0 disables", () => {
         expect(staleIngestThresholdMs({ AX_STALE_INGEST_HOURS: "6" } as NodeJS.ProcessEnv)).toBe(6 * 3_600_000);
         expect(staleIngestThresholdMs({ AX_STALE_INGEST_HOURS: "0" } as NodeJS.ProcessEnv)).toBe(0);
     });
@@ -31,33 +28,15 @@ describe("staleIngestThresholdMs", () => {
 });
 
 describe("fetchLastSuccessfulIngestAt", () => {
-    test("reads the newest ok run via one status-filtered indexed query", async () => {
-        const db = makeMockDb([[[{ ended_at: "2026-07-03T12:00:00.000Z", started_at: "2026-07-03T11:50:00.000Z" }]]]);
-        const at = await runWithMock(db, fetchLastSuccessfulIngestAt);
-
-        expect(at).toBe(Date.parse("2026-07-03T12:00:00.000Z"));
-        expect(db.captured).toHaveLength(1);
-        // Must hit the ingest_run_status_started index: filter on status, order
-        // by started_at. A full scan here would tax every read command.
-        expect(db.captured[0]).toContain("FROM ingest_run");
-        expect(db.captured[0]).toContain("status = 'ok'");
-        expect(db.captured[0]).toContain("ORDER BY started_at DESC");
-        expect(db.captured[0]).toContain("LIMIT 1");
+    test("uses ended_at and falls back to started_at", async () => {
+        const ended = new Date("2026-07-03T12:00:00.000Z");
+        const started = new Date("2026-07-03T11:50:00.000Z");
+        expect(await runWithCacheRead(fetchLastSuccessfulIngestAt, cacheReadResults([[{ ended_at: ended, started_at: started }]]))).toBe(ended.getTime());
+        expect(await runWithCacheRead(fetchLastSuccessfulIngestAt, cacheReadResults([[{ ended_at: null, started_at: started }]]))).toBe(started.getTime());
     });
 
-    test("falls back to started_at when ended_at is absent", async () => {
-        const db = makeMockDb([[[{ started_at: "2026-07-03T11:50:00.000Z" }]]]);
-        expect(await runWithMock(db, fetchLastSuccessfulIngestAt)).toBe(Date.parse("2026-07-03T11:50:00.000Z"));
-    });
-
-    test("null when no ok run exists", async () => {
-        const db = makeMockDb([[[]]]);
-        expect(await runWithMock(db, fetchLastSuccessfulIngestAt)).toBeNull();
-    });
-
-    test("null when the timestamps are unparseable", async () => {
-        const db = makeMockDb([[[{ ended_at: "not-a-date" }]]]);
-        expect(await runWithMock(db, fetchLastSuccessfulIngestAt)).toBeNull();
+    test("returns null without a successful run", async () => {
+        expect(await runWithCacheRead(fetchLastSuccessfulIngestAt, cacheReadResults([[]]))).toBeNull();
     });
 });
 
@@ -101,12 +80,35 @@ describe("warnIfIngestStale (real seam)", () => {
         return { stdout, stderr };
     };
 
-    const okRunFrom = (iso: string) =>
-        makeTestSurrealClient({ routes: { "FROM ingest_run": [[{ ended_at: iso, started_at: iso }]] } });
+    /** The one `ingest_run` row the reader selects, as a published cache would return it. */
+    const okRunFrom = (at: Date): Layer.Layer<CacheRead> =>
+        cacheReadResults([[{ ended_at: at, started_at: at }]]);
+
+    /**
+     * A cache that cannot be opened - the v2 equivalent of the old
+     * "DB unreachable" case. `cacheReadResults` can only succeed, so the
+     * fail-open path needs its own stub; without one, "never fails" is asserted
+     * nowhere and a future `Effect.ignoreCause` removal goes unnoticed.
+     */
+    const unopenableCache: Layer.Layer<CacheRead> = Layer.succeed(CacheRead, {
+        snapshotPath: "(test)",
+        rows: () =>
+            Effect.fail(
+                new CacheUnavailableError({ path: "(test)", message: "no snapshot published" }),
+            ),
+        first: () =>
+            Effect.fail(
+                new CacheUnavailableError({ path: "(test)", message: "no snapshot published" }),
+            ),
+        raw: () =>
+            Effect.fail(
+                new CacheUnavailableError({ path: "(test)", message: "no snapshot published" }),
+            ),
+    } as unknown as CacheReadService);
 
     test("prints one warning line to stderr, and nothing to stdout, when the last ok ingest is older than 48h", async () => {
-        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000).toISOString());
-        const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db.layer)));
+        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+        const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db)));
 
         expect(stderr).toContain("graph is stale");
         expect(stderr).toContain("13d ago");
@@ -116,27 +118,25 @@ describe("warnIfIngestStale (real seam)", () => {
     });
 
     test("stays silent when the graph is fresh", async () => {
-        const db = okRunFrom(new Date(Date.now() - 3_600_000).toISOString());
-        const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db.layer)));
+        const db = okRunFrom(new Date(Date.now() - 3_600_000));
+        const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db)));
         expect(stderr).toBe("");
         expect(stdout).toBe("");
     });
 
-    test("degrades silently when the DB is unreachable", async () => {
-        const db = makeTestSurrealClient({
-            routes: {
-                "FROM ingest_run": Effect.fail(
-                    new DbError({ operation: "query", message: "connection refused" }),
-                ),
-            },
-        });
-        const { stdout, stderr } = await captureOutput(warnIfIngestStale.pipe(Effect.provide(db.layer)));
+    test("degrades silently when the cache cannot be opened", async () => {
+        const { stdout, stderr } = await captureOutput(
+            warnIfIngestStale.pipe(Effect.provide(unopenableCache)),
+        );
         expect(stderr).toBe("");
         expect(stdout).toBe("");
     });
 
     test("runs as a preflight before the command body", async () => {
-        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000).toISOString());
+        // Seeded STALE on purpose. With a FRESH run no warning fires at all, so
+        // the resulting `["command"]` would be equally consistent with the
+        // preflight running last, or never - proving nothing about ordering.
+        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
         const originalStderr = process.stderr.write.bind(process.stderr);
         const events: string[] = [];
         process.stderr.write = () => {
@@ -149,7 +149,7 @@ describe("warnIfIngestStale (real seam)", () => {
                     Effect.sync(() => {
                         events.push("command");
                     }),
-                ).pipe(Effect.provide(db.layer)),
+                ).pipe(Effect.provide(db)),
             );
         } finally {
             process.stderr.write = originalStderr;

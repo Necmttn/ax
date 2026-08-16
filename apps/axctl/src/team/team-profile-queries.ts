@@ -51,7 +51,6 @@ export const fetchTeamRepoSessions = Effect.fn("team.fetchTeamRepoSessions")(
             })) satisfies TeamSessionRow[];
     },
 );
-
 // --- per-session token usage (machine window; repo-filtered in JS) -----------
 // One row per session (session_token_usage_session UNIQUE index), so a
 // whole-window scan is a few thousand rows at most - cheaper and simpler

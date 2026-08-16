@@ -22,12 +22,35 @@
 import { describe, it, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
-import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb as makeSurrealMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import type { SurrealClient } from "@ax/lib/db";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { Judgment } from "@ax/lib/sqlite";
 import { buildInvocationSql, fetchSkillsWeighted } from "./skills-weighted.ts";
+
+/**
+ * The doctor count delegates to `fetchSkillHygiene`, whose counts + catalog now
+ * come from the CACHE, not from a SurrealQL statement. So the fixture at index 1
+ * of every response list is peeled off here and handed to a `CacheRead` stub -
+ * which also keeps the remaining positional Surreal responses aligned with the
+ * calls that are still SurrealQL.
+ */
+const hygieneByDb = new WeakMap<TestSurrealClient, ReadonlyArray<ReadonlyArray<unknown>>>();
+
+const makeMockDb = (responses: ReadonlyArray<ReadonlyArray<unknown>> = []) => {
+    const [inv, hygiene, ...rest] = responses;
+    const db = makeSurrealMockDb(
+        (inv === undefined ? [] : [inv, ...rest]) as never,
+    );
+    const pair = (hygiene ?? []) as ReadonlyArray<ReadonlyArray<Record<string, unknown>>>;
+    const counts = pair[0] ?? [];
+    const skills = pair[1] ?? [];
+    // The stub answers the seam directly (no schema decode), so these are the
+    // DECODED row shapes - plain numbers, not the BIGINTs DuckDB would return.
+    hygieneByDb.set(db, [counts, skills.map((sk) => ({ content_hash: null, ...sk }))]);
+    return db;
+};
 
 const runWithMock = <A, E>(
     db: TestSurrealClient,
@@ -44,7 +67,18 @@ const runWithMock = <A, E>(
         if (sql.includes("JOIN role")) return mockRoleRows[0];
         return [];
     }),
-    cacheReadTestLayer((sql) => sql.includes("otel_log_event") ? latencyRows : []),
+    // ONE cache stub answers every `CacheRead` on this path, dispatched by SQL
+    // text rather than call order: two of the three reads are the hygiene pair
+    // (`invoked` counts + the `skill` catalog) this chunk ported, the third is
+    // the telemetry latency the live-reads chunk moved onto the cache. A
+    // positional stub cannot serve both - the two features interleave.
+    cacheReadTestLayer((sql) => {
+        if (sql.includes("otel_log_event")) return latencyRows;
+        const [counts, skills] = hygieneByDb.get(db) ?? [[], []];
+        if (sql.includes("FROM invoked")) return counts as ReadonlyArray<Record<string, unknown>>;
+        if (sql.includes("FROM skill")) return skills as ReadonlyArray<Record<string, unknown>>;
+        return [];
+    }),
 ))));
 
 // ---------------------------------------------------------------------------
@@ -373,7 +407,7 @@ describe("recovery latency (lens E)", () => {
         }
     });
 
-    it("recovered_by query is issued as a separate pass (index 7)", async () => {
+    it("recovered_by is issued as its own SurrealQL pass", async () => {
         const db = makeMockDb([
             mockInvRows,
             mockDoctorBelow,
@@ -381,7 +415,10 @@ describe("recovery latency (lens E)", () => {
 
         await runWithMock(db, fetchSkillsWeighted());
 
-        expect(db.captured[5]).toContain("recovered_by");
+        // Asserted by CONTENT, not by call index: the doctor count and the role
+        // weights have both left the SurrealQL path (cache and sidecar), so a
+        // pinned index only records how many passes happen to precede it today.
+        expect(db.captured.filter((sql) => sql.includes("recovered_by"))).toHaveLength(1);
     });
 
     it("single recovery session: median_recovery_ms equals its duration", async () => {

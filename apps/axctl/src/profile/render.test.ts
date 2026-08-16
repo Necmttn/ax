@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
-import { EmptyCacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
 // Mock result order MUST match the query order in buildProfile:
@@ -90,17 +90,20 @@ const mockResults = [
         { commit: "commit:abc", loc: 120 },
         { commit: "commit:def", loc: 0 },
     ]],
-    // 27: contentTypeBreakdown
-    [[
-        { ct: "content_type:code", calls: 10, bytes: 800 },
-        { ct: "content_type:text", calls: 5, bytes: 200 },
-    ]],
     // 28: guardrailHookEvidence
     [[
         { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
         { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
         { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
     ]],
+];
+
+// 27 in the old positional list - `fetchContentTypeBreakdown` reads the
+// published snapshot now, so it is no longer a SurrealQL statement and gets its
+// own fixture. Everything after it in `mockResults` shifts up by one.
+const contentTypeRows = [
+    { ct: "content_type:code", calls: 10, bytes: 800 },
+    { ct: "content_type:text", calls: 5, bytes: 200 },
 ];
 
 const proposalRows = [{
@@ -122,12 +125,16 @@ const runProfile = <A, E>(
     db: TestSurrealClient,
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
+    contentTypes: ReadonlyArray<Record<string, unknown>> = contentTypeRows,
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
     db.layer,
-    // `fetchCostModels` resolves the pricing catalog through the published
-    // cache when a row stores zero cost against real tokens; none of these
-    // fixtures do, so an empty reader is enough to satisfy the requirement.
-    EmptyCacheReadTestLayer,
+    // Two cache reads on this path, dispatched by SQL text: the content-type
+    // breakdown this chunk ported (`has_content`), and the pricing catalog
+    // `fetchCostModels` resolves when a row stores zero cost against real
+    // tokens - none of these fixtures do, so empty is the right answer there.
+    cacheReadTestLayer((sql) =>
+        sql.includes("has_content") ? contentTypes : []
+    ),
     judgmentTestLayer((sql) => {
         const now = new Date();
         if (sql.includes("FROM proposal")) return proposals;
@@ -256,9 +263,8 @@ describe("buildProfile", () => {
     });
 
     test("no proposals + no content types -> taste omitted", async () => {
-        const noTaste = mockResults.map((r, i) => (i === 26 ? [[]] : r));
-        const db = makeMockDb(noTaste);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), []);
+        const db = makeMockDb(mockResults);
+        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
         expect(p.taste).toBeUndefined();
     });
 

@@ -6,24 +6,11 @@
  * by invocations, sort + limit.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import { estimateTokens, fetchSkillBloat } from "./skill-bloat.ts";
 
-type QueryResult = Array<unknown>;
-
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) =>
-            Effect.succeed(results as unknown as [QueryResult, ...QueryResult[]]),
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
-
-const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
-) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+const makeMockDb = cacheReadResults;
+const run = runWithCacheRead;
 
 describe("estimateTokens", () => {
     it("estimates ~4 bytes per token, rounded", () => {

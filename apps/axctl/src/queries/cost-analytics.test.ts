@@ -247,6 +247,15 @@ describe("fetchCostSessions", () => {
 // fetchCostSplit
 // ---------------------------------------------------------------------------
 
+/**
+ * `fetchCostSplit` now spans both engines: the origin x model rollup is still a
+ * SurrealQL statement, while its content-type dimension reads the published
+ * snapshot through `fetchContentTypeBreakdown`, and its pricing catalog reads
+ * `agent_model` the same way. Both streams are served by `runWithMock`, which
+ * provides the Surreal double AND the paired cache double off the same ROUTE
+ * table - so a content-type fixture is a `has_content` route, not a positional
+ * Surreal slot. The cache double decodes through the real column contracts.
+ */
 describe("fetchCostSplit", () => {
     test("partitions source=claude-subagent into subagent origin", async () => {
         const dbRows = [
@@ -455,15 +464,20 @@ describe("fetchCostSplit - contentTypes dimension", () => {
                 cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.5,
             },
         ];
-        // Second query: fetchContentTypeBreakdown returns flat rows
+        // fetchContentTypeBreakdown reads the SNAPSHOT, so its rows ride the
+        // cache double via a `has_content` route rather than a positional
+        // Surreal slot. The pricing-catalog lookup is lazy - this all-priced
+        // fixture never triggers it, so no `agent_model` route either.
         const contentTypeRows = [
             { ct: "content_type:code", calls: 5, bytes: 400 },
             { ct: "content_type:docs", calls: 2, bytes: 200 },
         ];
-        // Query order: split rows, then content-type breakdown. The
-        // pricing-catalog lookup is lazy - this all-priced fixture never
-        // triggers it, so no catalog slot in the mock.
-        const db = makeMockDb([[splitRows], [contentTypeRows]]);
+        const db = makeTestSurrealClient({
+            routes: {
+                "FROM session_token_usage": [splitRows],
+                "FROM has_content": contentTypeRows,
+            },
+        });
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes).toBeDefined();
@@ -484,7 +498,7 @@ describe("fetchCostSplit - contentTypes dimension", () => {
         ];
         // Empty content-type response; cost_usd > 0 so the lazy
         // pricing-catalog lookup never fires (extra empty slot unused).
-        const db = makeMockDb([[splitRows], [[]]]);
+        const db = makeMockDb([[splitRows]]);
         const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
 
         expect(result.contentTypes.rows).toHaveLength(0);

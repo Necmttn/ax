@@ -6,8 +6,9 @@
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { Judgment } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
+import type { Judgment } from "@ax/lib/sqlite";
+import { cacheReadResults } from "../testing/cache-read.ts";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { fetchSkillHygiene } from "./skill-hygiene.ts";
 
@@ -15,26 +16,25 @@ import { fetchSkillHygiene } from "./skill-hygiene.ts";
 // Mock DB helper (mirrors dispatch-analytics.test.ts idiom exactly)
 // ---------------------------------------------------------------------------
 
-// Allow unknown[] so SELECT VALUE results (bare strings) typecheck alongside
-// the normal Record<string,unknown>[] statement results.
+// The reader spans BOTH engines, so the stub does too: statements (1) and (2)
+// are cache reads, and the classified-id list (3) comes from the judgment
+// sidecar. Entries in (3) may be written as bare ids or as `{ id }` rows - both
+// normalize to the sidecar's `skill_id` column here.
 type QueryResult = Array<unknown>;
 
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient | Judgment> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => {
-            return Effect.succeed(results as unknown as [QueryResult, ...QueryResult[]]);
-        },
-        // biome-ignore lint: other methods not needed
-    } as unknown as SurrealClientShape;
-    return Layer.merge(
-        Layer.succeed(SurrealClient, stub),
-        judgmentTestLayer(() => (results[2] ?? []).map((skill_id) => ({ skill_id }))),
+const makeMockDb = (results: QueryResult[]): Layer.Layer<CacheRead | Judgment> =>
+    Layer.merge(
+        cacheReadResults([results[0] ?? [], results[1] ?? []]),
+        judgmentTestLayer(() =>
+            (results[2] ?? []).map((row) => ({
+                skill_id: typeof row === "string" ? row : (row as { id: string }).id,
+            })),
+        ),
     );
-};
 
 const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | Judgment>,
-    layer: Layer.Layer<SurrealClient | Judgment>,
+    eff: Effect.Effect<A, unknown, CacheRead | Judgment>,
+    layer: Layer.Layer<CacheRead | Judgment>,
 ) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ describe("fetchSkillHygiene", () => {
                     { id: "skill:rare", name: "rare", dir_path: "/skills/rare" },
                 ],
                 // statement 3: classified skill ids (SELECT VALUE -> bare values)
-                ["skill:tagged"],
+                [{ id: "skill:tagged" }],
             ]),
         );
         expect(rows).toEqual([{ name: "composto", invocations: 41, sessions: 12 }]);
@@ -135,7 +135,7 @@ describe("fetchSkillHygiene", () => {
             makeMockDb([
                 [{ sid: "skill:foo", invocations: 10, sessions: 4 }],
                 [{ id: "skill:foo", name: "foo", dir_path: "/skills/foo" }],
-                ["skill:foo"],
+                [{ id: "skill:foo" }],
             ]),
         );
         expect(rows).toEqual([]);
@@ -184,7 +184,7 @@ describe("fetchSkillHygiene", () => {
                     { id: "skill:bare", name: "foo", dir_path: "/s/foo", content_hash: "h1" },
                     { id: "skill:ns", name: "necmttn:foo", dir_path: "/s/foo", content_hash: "h1" },
                 ],
-                ["skill:ns"], // only the namespaced twin is classified
+                [{ id: "skill:ns" }], // only the namespaced twin is classified
             ]),
         );
         // collapsed -> classified -> dropped entirely

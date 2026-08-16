@@ -5,9 +5,10 @@
  * a "recent" window against a "baseline" window of the same width immediately before.
  * No new schema needed - reads existing hook_command_invocation telemetry.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { percentiles } from "../hooks/bench.ts";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,7 @@ interface RawInvocationRow {
     readonly ts: string | Date;
     readonly duration_ms: number;
 }
+const RawInvocationDbRow = Schema.Struct({ hook_name: Schema.String, ts: TimestampColumn, duration_ms: NumberFromBigIntColumn });
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -197,18 +199,17 @@ export const fetchHookLatencyRegression = (opts: {
     readonly factor?: number;
     readonly minDeltaMs?: number;
     readonly minSamples?: number;
-}): Effect.Effect<HookLatencyReport, DbError, SurrealClient> =>
+}): Effect.Effect<HookLatencyReport, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cache = yield* CacheRead;
         const factor = opts.factor ?? 1.5;
         const minDeltaMs = opts.minDeltaMs ?? 15;
         const minSamples = opts.minSamples ?? 20;
         const totalDays = validDays(opts.recentDays) + validDays(opts.baselineDays);
 
-        const sql = `SELECT hook_name, <string>ts AS ts, duration_ms FROM hook_command_invocation WHERE duration_ms != NONE AND ts > time::now() - ${totalDays}d ORDER BY ts DESC;`;
+        const sql = `SELECT hook_name, ts, duration_ms FROM hook_command_invocation WHERE duration_ms IS NOT NULL AND ts > ${daysAgoExpr} ORDER BY ts DESC`;
 
-        const [rows] = yield* db.query<[RawInvocationRow[]]>(sql);
-        const rawRows = rows ?? [];
+        const rawRows = yield* cache.rows(RawInvocationDbRow, sql, [totalDays]);
 
         const computedRows = computeHookLatency(rawRows, {
             recentDays: validDays(opts.recentDays),

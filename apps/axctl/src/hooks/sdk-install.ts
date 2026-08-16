@@ -8,8 +8,7 @@ import type {
     HookProviderNotFoundError,
 } from "./errors.ts";
 import type { PlatformError } from "effect/PlatformError";
-import type { DbError } from "@ax/lib/errors";
-import type { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { FileSystem, Path } from "effect";
 import { HookProviderRegistry } from "./providers/registry.ts";
 
@@ -232,12 +231,11 @@ export const installHookFile = (
     | SdkHookImportError
     | SdkHookValidationError
     | PlatformError
-    | DbError
     | HookConfigParseError
     | HookConfigSchemaError
     | HookValidationError
     | HookProviderNotFoundError,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
 > =>
     Effect.gen(function* () {
         if (!file.startsWith("/")) {

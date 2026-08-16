@@ -13,9 +13,9 @@
  * Fail-open: an unreachable DB prints nothing (the command's own error already
  * says that) and a warning never touches stdout, so `--json` stays machine-clean.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import {
     formatStaleIngestWarning,
@@ -33,10 +33,10 @@ export const staleIngestThresholdMs = (env: NodeJS.ProcessEnv = process.env): nu
  *  is already failing - the warning is a courtesy, not a feature. */
 const PROBE_TIMEOUT_MS = 2_000;
 
-interface LastOkRunRow {
-    readonly ended_at?: unknown;
-    readonly started_at?: unknown;
-}
+const LastOkRunRow = Schema.Struct({
+    ended_at: Schema.NullOr(TimestampColumn),
+    started_at: TimestampColumn,
+});
 
 /**
  * Epoch ms of the newest ingest that finished with status "ok", or null when
@@ -45,23 +45,23 @@ interface LastOkRunRow {
  * indexed `started_at`. Reads `ended_at` as the completion instant, falling
  * back to `started_at` for rows written before `ended_at` existed.
  */
-export const fetchLastSuccessfulIngestAt: Effect.Effect<number | null, DbError, SurrealClient> =
+export const fetchLastSuccessfulIngestAt: Effect.Effect<number | null, CacheReadError, CacheRead> =
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[LastOkRunRow[]]>(
+        const cache = yield* CacheRead;
+        const rows = yield* cache.rows(
+            LastOkRunRow,
             "SELECT ended_at, started_at FROM ingest_run WHERE status = 'ok' ORDER BY started_at DESC LIMIT 1;",
         );
-        const row = rows?.[0];
+        const row = rows[0];
         if (row === undefined) return null;
-        const at = Date.parse(String(row.ended_at ?? row.started_at ?? ""));
-        return Number.isFinite(at) ? at : null;
+        return (row.ended_at ?? row.started_at).getTime();
     });
 
 /**
  * Print the stale-graph warning to stderr if the graph is out of date. Never
  * fails, never throws, never writes to stdout.
  */
-export const warnIfIngestStale: Effect.Effect<void, never, SurrealClient> = Effect.gen(
+export const warnIfIngestStale: Effect.Effect<void, never, CacheRead> = Effect.gen(
     function* () {
         const thresholdMs = staleIngestThresholdMs();
         if (thresholdMs <= 0) return;
@@ -87,5 +87,5 @@ export const warnIfIngestStale: Effect.Effect<void, never, SurrealClient> = Effe
  */
 export const withIngestStalenessPreflight = <A, E, R>(
     command: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R | SurrealClient> =>
+): Effect.Effect<A, E, R | CacheRead> =>
     warnIfIngestStale.pipe(Effect.andThen(command));

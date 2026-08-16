@@ -658,16 +658,18 @@ describe("fetchNextActions", () => {
 
         expect(payload.cards).toEqual([]);
         // tool_failure uses runQuery (internal fail-open), so it does NOT add a note
-        // on DB failure - it silently returns []. The other 4 sources use db.query
-        // directly and do add notes. Exact set: if runQuery's internal swallow ever
-        // changes and tool_failure starts noting, this surfaces it.
+        // on DB failure - it silently returns []. skill_hygiene is also silent, for
+        // a second reason: it reads the CACHE now, and `cacheRows` is defensive by
+        // policy - a failed read degrades to [] with an error channel of `never`,
+        // so there is nothing for this guard to catch. The remaining sources use
+        // db.query directly and do add notes.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["churn", "routing", "skill_hygiene"]),
+            new Set(["churn", "routing"]),
         );
         expect(typeof payload.generatedAt).toBe("string");
     });
 
-    test("a hanging source (Effect.never) is timed out and noted; all 6 sources noted", async () => {
+    test("a hanging source (Effect.never) is timed out and noted", async () => {
         // db.query returns Effect.never - simulates a hung DB / slow query.
         // runQuery's internal Effect.catch only catches DbError failures; it does NOT
         // prevent fiber interruption from timeoutOrElse. The timeout fires, the
@@ -693,8 +695,12 @@ describe("fetchNextActions", () => {
         );
 
         expect(payload.cards).toEqual([]);
-        // All 6 direct-DB sources time out; tool_failure is also noted because
-        // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
+        // Every source times out; tool_failure is noted too, because
+        // timeoutOrElse interrupts the fiber before runQuery's internal swallow
+        // fires. skill_hygiene is noted for the same reason from the OTHER
+        // engine: it reads the cache, and this stub hangs the cache as well. Its
+        // defensive `cacheRows` degrade-to-[] only catches a FAILED read (the
+        // test above) - a read that never answers is interrupted, not caught.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
             new Set(["tool_failure", "churn", "routing", "skill_hygiene"]),
         );

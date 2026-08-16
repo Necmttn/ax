@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
+import { cacheReadResults } from "../testing/cache-read.ts";
 import { claudeProvider } from "./providers/claude.ts";
 import { cursorProvider } from "./providers/cursor.ts";
 import { codexProvider } from "./providers/codex.ts";
@@ -291,20 +291,24 @@ describe("registry", () => {
 });
 
 // ---------------------------------------------------------------------------
-// config.ts orchestration (real fs in tmpdir + mock SurrealClient)
+// config.ts orchestration (real fs in tmpdir + a stubbed CacheRead)
 // ---------------------------------------------------------------------------
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
+// `readAllHooks({ withEvidence: true })` joins fired counts from
+// `queryHookSummary`, which now reads the published snapshot. The stub answers
+// the seam directly (no schema decode), so the rows are the DECODED shape.
 const mockDb = (rows: Array<{ command: string; count: number }>) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>() => Effect.sync(() => [rows.map((r) => ({
-            command: r.command,
-            hook_name: "h",
-            provider_status: "ok",
-            effect: "allow",
-            count: r.count,
-        }))] as unknown as T),
-    } as never);
+    cacheReadResults([rows.map((r) => ({
+        command: r.command,
+        hook_name: "h",
+        provider_status: "ok",
+        effect: "allow",
+        count: r.count,
+        avg_duration_ms: null,
+        max_duration_ms: null,
+        last_seen: null,
+    }))]);
 
 const fullLayer = (dbRows: Array<{ command: string; count: number }> = []) =>
     Layer.mergeAll(fsLayers, HookProviderRegistryDefault, mockDb(dbRows));

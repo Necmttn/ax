@@ -419,6 +419,13 @@ const benchCommand = Command.make(
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
 ).pipe(Command.withDescription("Latency ledger for an SDK hook: per-fire p50/p95 (spawn) + fires/day + installed-chain budget (--days=30 --runs=20 --budget-ms=250 --json)"));
 
+/** The three non-"unavailable" cache failures read the same way to a user. */
+const failWithCacheError = (message: string): Effect.Effect<void> =>
+    Effect.promise(async () => {
+        process.stderr.write(`Cache query failed: ${message}\n`);
+        process.exit(1);
+    });
+
 const latencyCommand = Command.make(
     "latency",
     {
@@ -433,15 +440,25 @@ const latencyCommand = Command.make(
                     console.log(asJson ? prettyPrint(report) : renderHookLatency(report));
                 }),
             ),
-            Effect.catchTag("DbError", (e) =>
-                Effect.promise(async () => {
-                    process.stderr.write(
-                        `DB unreachable or query failed: ${e.message}\n` +
-                        "Start the DB with 'axctl daemon start' and retry.\n",
-                    );
-                    process.exit(1);
-                }),
-            ),
+            // The reader answers from the published DuckDB snapshot, so the
+            // handled failures are exactly its four cache errors - listed by
+            // TAG, not swallowed with a bare `Effect.catch`. A catch-all here
+            // would report every unrelated failure as "cache query failed" and
+            // still exit 1, which is a misleading diagnosis rather than a
+            // handled error; anything else must stay on the error channel.
+            Effect.catchTags({
+                CacheUnavailableError: (e) =>
+                    Effect.promise(async () => {
+                        // By far the most common one, and it names its own fix.
+                        process.stderr.write(
+                            `${e.message}\nRun 'ax ingest' to publish a snapshot, then retry.\n`,
+                        );
+                        process.exit(1);
+                    }),
+                DuckDbQueryError: (e) => failWithCacheError(e.message),
+                DuckDbUnsupportedTypeError: (e) => failWithCacheError(e.message),
+                DuckDbDecodeError: (e) => failWithCacheError(e.message),
+            }),
         ),
 ).pipe(Command.withDescription("Regression lens over hook_command_invocation.duration_ms: compare recent (--days, default 7) vs baseline (--baseline, default 21) p95 per hook; flags regressions (factor 1.5, min 15ms delta, min 20 samples). Empty-state when duration_ms is absent. (--json)"));
 
