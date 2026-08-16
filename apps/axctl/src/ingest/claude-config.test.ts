@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import type { GuidanceConfigArtifact } from "./claude-config.ts";
 import {
+    fetchPreviousArtifacts,
     buildClaudeMdGuidanceRevisionStatements,
     buildGuidanceConfigPersistenceStatements,
     buildGuidanceConfigReconcileStatements,
@@ -578,5 +582,50 @@ describe("claudeConfigStage", () => {
         expect(claudeConfigStage.meta.key).toBe("claude-config");
         expect(claudeConfigStage.meta.deps).toEqual(["skills", "commands", "agent-def"]);
         expect(claudeConfigStage.meta.tags).toEqual(["ingest"]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Real-DuckDB coverage for the guidance-revision "previous artifact" read.
+//
+// Same defect family as the run-evidence BIGINT crash, but SILENT: `bytes` is
+// BIGINT, `write.raw` applies no column decoder, and the `typeof === "number"`
+// guard in `fetchPreviousArtifacts` reads FALSE for a `bigint` - so every
+// guidance_revision was written with `prev_bytes` NULL and nothing failed. This
+// case reads the value back through the real column, which is the only way to
+// see it.
+// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("claude-config previous artifacts", { requireFts: true });
+
+describe("fetchPreviousArtifacts on real DuckDB", () => {
+    dtest("decodes the BIGINT bytes column as a number", async () => {
+        const record: GuidanceConfigArtifact = {
+            provider: "claude", kind: "memory", scope: "user",
+            safePath: "~/CLAUDE.md", pathHash: "ph-1",
+            authorityKind: "user", authorityHash: "ah-1",
+            contentHash: "ch-new", parseStatus: "ok",
+            bytes: 4_096, tokenEstimate: 1_024,
+            commandHashes: [], hookEventNames: [], matcherCount: 0,
+            mcpServerNames: [], envKeys: [], enabledToolCount: null,
+            model: null, reasoningEffort: null, outputStyle: null,
+            permissionAllowCount: 0, permissionAskCount: 0, permissionDenyCount: 0,
+            observedAt: new Date("2026-05-30T00:00:00Z"), metadata: {},
+        };
+        let previous: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-claude-config-prev-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("guidance_config_artifact", {
+                    id: "gca-1", provider: "claude", kind: "memory", scope: "user",
+                    safe_path: "~/CLAUDE.md", path_hash: "ph-1",
+                    authority_kind: "user", authority_hash: "ah-1",
+                    content_hash: "ch-old", parse_status: "ok",
+                    bytes: 4_000, token_estimate: 1_000, matcher_count: 0,
+                    permission_allow_count: 0, permission_ask_count: 0, permission_deny_count: 0,
+                    observed_at: new Date("2026-05-29T00:00:00Z"),
+                });
+                previous = (yield* fetchPreviousArtifacts(write, [record])).get("ph-1");
+            }),
+        ));
+        expect(previous).toEqual({ content_hash: "ch-old", bytes: 4_000 });
     });
 });
