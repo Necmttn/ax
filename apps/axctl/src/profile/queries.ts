@@ -698,26 +698,26 @@ export interface DailyToolCallRow {
     readonly tool_calls: number;
 }
 
-const DAILY_TOOL_CALLS_SQL = (d: number) => `
+const DAILY_TOOL_CALLS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    count() AS tool_calls
+    strftime(ts, '%Y-%m-%d') AS date,
+    count(*) AS tool_calls
 FROM tool_call
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+WHERE TRUE`;
+
+const DailyToolCallDbRow = Schema.Struct({ date: Schema.String, tool_calls: NumberFromBigIntColumn });
 
 export const fetchDailyToolCalls = Effect.fn("profile.fetchDailyToolCalls")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DAILY_TOOL_CALLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            DailyToolCallDbRow,
+            `${DAILY_TOOL_CALLS_SQL} ${within.sql} AND ts IS NOT NULL GROUP BY date ORDER BY date ASC`,
+            within.params,
+        );
         return rows
-            .map((r) => ({
-                date: String(r.date),
-                tool_calls: Number(r.tool_calls ?? 0),
-            }))
+            .map((r) => ({ date: r.date, tool_calls: r.tool_calls }))
             .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyToolCallRow[];
     },
 );

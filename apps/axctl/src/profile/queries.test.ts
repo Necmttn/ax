@@ -10,6 +10,7 @@ import {
     fetchDailyActivity,
     fetchDailyActivityFull,
     fetchDailyModels,
+    fetchDailyToolCalls,
     fetchDeepSessionCount,
     fetchGuardrailHookEvidence,
     fetchGuardrailVerdicts,
@@ -384,6 +385,30 @@ describe("fetchDailyModels", () => {
     test("empty -> empty array", async () => {
         const cache = cacheRead({});
         const r = await runCache(fetchDailyModels({ windowDays: 30 }), cache.layer);
+        expect(r).toHaveLength(0);
+    });
+});
+
+describe("fetchDailyToolCalls", () => {
+    test("returns per-day tool_call counts", async () => {
+        const cache = cacheRead({
+            "FROM tool_call": [
+                { date: "2026-06-11", tool_calls: 120 },
+                { date: "2026-06-12", tool_calls: 80 },
+            ],
+        });
+        const r = await runCache(fetchDailyToolCalls({ windowDays: 30 }), cache.layer);
+        expect(r).toEqual([
+            { date: "2026-06-11", tool_calls: 120 },
+            { date: "2026-06-12", tool_calls: 80 },
+        ]);
+        expect(cache.captured[0]).toContain("strftime(ts, '%Y-%m-%d')");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+    });
+
+    test("empty -> empty array", async () => {
+        const cache = cacheRead({});
+        const r = await runCache(fetchDailyToolCalls({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });
