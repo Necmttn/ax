@@ -1,30 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer, Option } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
 import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { DuckDbQueryError } from "@ax/lib/duckdb/errors";
 import { AX_VERSION } from "../../cli/version.ts";
 import { API_VERSION } from "../capabilities.ts";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
-/** Stub DB: only graphHealth (still SurrealClient - see system.ts's module
- *  doc) reads through this. */
-const stubDb = Layer.mock(SurrealClient, {
-    query: <T extends unknown[] = unknown[]>(sql: string, _bindings?: Record<string, unknown> | undefined): Effect.Effect<T, DbError, never> =>
-        sql.includes("boom")
-            ? Effect.fail(new DbError({ operation: "query", message: "boom: db exploded" }))
-            : Effect.succeed([[{ ok: true }]] as unknown as T),
-    // `raw` is the only non-effect member, so Layer.mock requires it; the
-    // contract handlers never touch it.
-    raw: null as never,
-});
-
 /** Stub CacheRead: `rows`/`first` (fetchWorktreesOverview's many small
  *  queries) degrade to empty, same as a real dylib-less test run - that
- *  view only asserts response shape, not content. `raw` (the /api/query
- *  console + /api/self-improve) echoes a canned row, or fails with a
- *  DuckDbQueryError for SQL containing "boom" - mirrors stubDb's contract. */
+ *  view only asserts response shape, not content. `raw` (/api/self-improve)
+ *  echoes a canned row, or fails with a DuckDbQueryError for SQL containing
+ *  "boom". No SurrealClient stub: nothing left in this contract group reads
+ *  it (see system.ts's module doc - the default `InertSurrealLayer` in
+ *  web-handler.ts is exercised as-is). */
 const stubCacheReadService: CacheReadService = {
     rows: () => Effect.succeed([]),
     first: () => Effect.succeed(Option.none()),
@@ -41,7 +29,6 @@ function make(liveIngest = false): ContractWebHandler {
     // A truthy fake stream handle is enough: version only null-checks it.
     const h = makeContractWebHandler({
         ingestStream: liveIngest ? ({} as never) : null,
-        services: stubDb,
         cacheRead: stubCacheRead,
     });
     handlers.push(h);
@@ -66,13 +53,15 @@ describe("isContractRequest", () => {
         // ROUTED to the DB-free legacy row so the daemon's identity probe
         // keeps answering when SurrealDB is down - see web-handler.ts.
         expect(isContractRequest("GET", "/api/version")).toBe(false);
-        expect(isContractRequest("POST", "/api/query")).toBe(true);
+        expect(isContractRequest("GET", "/api/worktrees")).toBe(true);
         expect(isContractRequest("GET", "/docs")).toBe(true);
         expect(isContractRequest("GET", "/openapi.json")).toBe(true);
         // Non-GET on a migrated GET path stays with the legacy table (its
         // method-ANY quirk) until the family is fully cut over.
         expect(isContractRequest("POST", "/api/version")).toBe(false);
-        expect(isContractRequest("GET", "/api/query")).toBe(false);
+        // Retired (studio ephemeral, wave 3): never routes anywhere now.
+        expect(isContractRequest("POST", "/api/query")).toBe(false);
+        expect(isContractRequest("GET", "/api/graph-health")).toBe(false);
         // The deliberately-unmigrated route never routes here.
         expect(isContractRequest("GET", "/api/graph-explorer")).toBe(false);
     });
@@ -95,64 +84,6 @@ describe("contract system group", () => {
         const { handler } = make(false);
         const res = await handler(req("GET", "/api/version"));
         expect(((await res.json()) as { live_ingest: boolean }).live_ingest).toBe(false);
-    });
-
-    test("POST /api/query rejects non-read SQL with 400 (legacy parity)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "DELETE FROM session" }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({
-            error: "Only a single SELECT or read-only DuckDB introspection statement is allowed",
-        });
-    });
-
-    test("POST /api/query rejects a stacked write after a read (multi-statement)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT 1; DELETE FROM session" }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({
-            error: expect.stringContaining("single"),
-        });
-    });
-
-    test("POST /api/query still accepts a single read with a trailing semicolon", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session;" }));
-        expect(res.status).toBe(200);
-    });
-
-    test("POST /api/query rejects empty SQL with 400", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "   " }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({ error: "SQL is required" });
-    });
-
-    test("POST /api/query returns result + durationMs", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session" }));
-        expect(res.status).toBe(200);
-        const body = await res.json() as { result: unknown; durationMs: number };
-        // Shape changed with the engine: CacheRead.raw() returns an undecoded
-        // {columns, rows, rowsChanged} object, not SurrealDB's nested
-        // array-of-statement-results.
-        expect(body.result).toEqual({ columns: [], rows: [{ ok: true }], rowsChanged: 0 });
-        expect(typeof body.durationMs).toBe("number");
-    });
-
-    test("POST /api/query maps DbError to 400 (legacy parity)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT boom" }));
-        expect(res.status).toBe(400);
-        const body = await res.json() as { error: string };
-        expect(body.error).toContain("boom");
-    });
-
-    test("GET /api/graph-health passes rows through", async () => {
-        const { handler } = make();
-        const res = await handler(req("GET", "/api/graph-health"));
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual([[{ ok: true }]]);
     });
 
     test("GET /api/worktrees returns activity + git", async () => {
@@ -180,7 +111,10 @@ describe("contract docs", () => {
         expect(res.status).toBe(200);
         const spec = await res.json() as { paths: Record<string, unknown> };
         expect(Object.keys(spec.paths)).toEqual(expect.arrayContaining([
-            "/api/version", "/api/query", "/api/graph-health", "/api/worktrees", "/api/self-improve",
+            "/api/version", "/api/worktrees", "/api/self-improve",
+        ]));
+        expect(Object.keys(spec.paths)).not.toEqual(expect.arrayContaining([
+            "/api/query", "/api/graph-health",
         ]));
     });
 });

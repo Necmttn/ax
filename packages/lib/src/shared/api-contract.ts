@@ -38,12 +38,6 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
     otlp_receiver: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-/** POST /api/query rejection: non-read SQL or a database error. Legacy
- *  behavior mapped every failure on this endpoint to HTTP 400. */
-export class QueryRejected extends Schema.ErrorClass<QueryRejected>("ax/QueryRejected")({
-    error: Schema.String,
-}, { httpApiStatus: 400 }) {}
-
 /** Database/internal failure on a read endpoint - the legacy route table
  *  rendered these as `{ error }` with HTTP 500; the contract keeps that. */
 export class InternalError extends Schema.ErrorClass<InternalError>("ax/InternalError")({
@@ -60,39 +54,24 @@ export class BadRequestError extends Schema.ErrorClass<BadRequestError>("ax/BadR
     error: Schema.String,
 }, { httpApiStatus: 400 }) {}
 
-/** POST /api/query - the read-only SQL console (SELECT/RETURN/INFO only). */
-export class QueryResult extends Schema.Class<QueryResult>("ax/QueryResult")({
-    result: Schema.Unknown,
-    durationMs: Schema.Number,
-}) {}
-
 export class WorktreesResult extends Schema.Class<WorktreesResult>("ax/WorktreesResult")({
     activity: Schema.Unknown,
     git: Schema.Unknown,
 }) {}
 
 /**
- * The system family: version/capability metadata, the read-only SQL console,
- * and the legacy raw-row insight queries. The raw-row endpoints are
- * deliberately `Schema.Unknown` payloads - they pass SurrealDB rows through
- * untyped today; tightening them is contract work for a later pass, not a
- * blocker for the strangler migration.
+ * The system family: version/capability metadata and the legacy raw-row
+ * insight queries. The raw-row endpoints are deliberately `Schema.Unknown`
+ * payloads - they pass DuckDB rows through untyped today; tightening them is
+ * contract work for a later pass, not a blocker for the strangler migration.
+ *
+ * Studio ephemeral (wave 3) RETIRED `POST /api/query` (the read-only SQL
+ * console) and `GET /api/graph-health` - see system.ts's module doc for why.
  */
 export const SystemGroup = HttpApiGroup.make("system")
     .add(
         HttpApiEndpoint.get("version", "/api/version", {
             success: DaemonVersion,
-        }),
-        HttpApiEndpoint.post("query", "/api/query", {
-            // A real Schema (not bare fields) so the payload codec is JSON -
-            // bare field maps are interpreted as form-urlencoded by HttpApi.
-            payload: Schema.Struct({ sql: Schema.String }),
-            success: QueryResult,
-            error: QueryRejected,
-        }),
-        HttpApiEndpoint.get("graphHealth", "/api/graph-health", {
-            success: Schema.Unknown,
-            error: InternalError,
         }),
         HttpApiEndpoint.get("worktrees", "/api/worktrees", {
             success: WorktreesResult,

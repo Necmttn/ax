@@ -74,9 +74,8 @@ const InertSurrealLayer: Layer.Layer<SurrealClient> = Layer.mock(SurrealClient, 
 
 /** Migrated exact (method, path) pairs the contract router owns. */
 const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
-    // system (GET /api/version deliberately absent - see module doc)
-    "POST /api/query",
-    "GET /api/graph-health",
+    // system (GET /api/version deliberately absent - see module doc; POST
+    // /api/query and GET /api/graph-health retired - see system.ts)
     "GET /api/worktrees",
     "GET /api/self-improve",
     // insights
