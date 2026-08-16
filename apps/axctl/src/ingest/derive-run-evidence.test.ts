@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     buildLineage,
+    deriveRunEvidence,
     buildRunEvidenceEvents,
     buildRunEvidenceRefs,
     pickEarliestPerSession,
@@ -320,5 +324,46 @@ describe("runEvidenceStage wiring", () => {
             "tool_observation", "verification", "boundary", "task_state",
             "objective", "policy_decision", "repo_state", "derived_summary",
         ]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Real-DuckDB coverage for the SQL half of this stage.
+//
+// The builders above are exercised with hand-written rows whose numbers are JS
+// `number`s. The stage does not get its rows that way: it reads them through
+// `write.raw`, which applies NO column decoder, so a BIGINT column arrives as a
+// JS `bigint`. `compaction.tokens_before` is BIGINT, it lands in the boundary
+// event's `attrs`, and `attrs` is written through `jsonParam` -> JSON.stringify,
+// which THROWS on a bigint. The fix is at the read boundary (project the column
+// as DOUBLE) rather than at the write boundary: a JSON.stringify replacer that
+// coerced bigints would hide this instance and leave every other raw reader
+// handing `bigint` to code whose types say `number`.
+// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("run evidence bigint", { requireFts: true });
+
+describe("deriveRunEvidence on real DuckDB", () => {
+    dtest("projects BIGINT columns as numbers so boundary attrs serialize", async () => {
+        let stats: unknown;
+        let attrs: string | null = null;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-run-evidence-bigint-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const ts = new Date("2026-05-30T00:01:00Z");
+                yield* write.put("session", { id: "s1", source: "claude", started_at: ts });
+                yield* write.put("compaction", {
+                    id: "c1", session: "s1", harness: "claude", ts,
+                    trigger: "auto", strategy: "summarize", source_confidence: "explicit",
+                    summary: "compacted the history", tokens_before: 123_456,
+                });
+                stats = yield* deriveRunEvidence(write, undefined);
+                attrs = (yield* write.rows(
+                    Schema.Struct({ attrs: Schema.NullOr(Schema.String) }),
+                    "SELECT attrs FROM run_evidence_event WHERE kind = 'boundary'",
+                ))[0]?.attrs ?? null;
+            }),
+        ));
+        expect(stats).toMatchObject({ written: 2 });
+        // A `number`, not the `"123456n"`/throw a bigint would produce.
+        expect(JSON.parse(attrs ?? "{}")).toMatchObject({ tokens_before: 123_456 });
     });
 });

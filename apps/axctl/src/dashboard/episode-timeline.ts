@@ -1,12 +1,7 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import {
-    EPISODE_CHILDREN_SQL,
-    EPISODE_CHILD_INVOCATIONS_SQL,
-    EPISODE_PARENT_INVOCATIONS_SQL,
-    EPISODE_PARENT_SQL,
-} from "../queries/episode-timeline.ts";
+import { Effect, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import {
     classifyPhase,
     compressPhaseSequence,
@@ -21,34 +16,6 @@ import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
-
-const stringField = (row: Record<string, unknown>, key: string): string | null => {
-    const v = row[key];
-    return typeof v === "string" && v.length > 0 ? v : null;
-};
-
-const dateField = (row: Record<string, unknown>, key: string): string | null => {
-    const v = row[key];
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString();
-    if (v && typeof v === "object" && "toJSON" in v) {
-        const j = (v as { toJSON: () => unknown }).toJSON();
-        if (typeof j === "string" && j.length > 0) return j;
-    }
-    return null;
-};
-
-const recordIdString = (v: unknown): string | null => {
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v && typeof v === "object" && "toString" in v) {
-        const s = String(v);
-        return s.length > 0 ? s : null;
-    }
-    return null;
-};
-
 const durationMs = (start: string | null, end: string | null): number | null => {
     if (!start || !end) return null;
     const s = Date.parse(start);
@@ -57,13 +24,29 @@ const durationMs = (start: string | null, end: string | null): number | null => 
     return e - s;
 };
 
+const EpisodeSessionDbRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+    cwd: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+});
+type EpisodeSessionRow = typeof EpisodeSessionDbRow.Type;
+
+const EpisodeInvocationDbRow = Schema.Struct({
+    session: Schema.NullOr(Schema.String),
+    skill: Schema.NullOr(Schema.String),
+});
+
 /**
  * Aggregate an episode's invocations into per-session phase summary +
  * top-5 skills. A session is `mixed` if it has more than one distinct
  * non-`other` phase; otherwise it inherits the dominant phase.
  */
 function summarizePerSession(
-    invocations: ReadonlyArray<Record<string, unknown>>,
+    invocations: ReadonlyArray<typeof EpisodeInvocationDbRow.Type>,
 ): Map<string, { phase: EpisodeNode["phase"]; top_skills: EpisodeNode["top_skills"]; invocation_count: number }> {
     interface Acc {
         skills: Map<string, number>;
@@ -72,8 +55,8 @@ function summarizePerSession(
     }
     const bySession = new Map<string, Acc>();
     for (const raw of invocations) {
-        const sessionRaw = recordIdString(raw.session);
-        const skill = stringField(raw, "skill");
+        const sessionRaw = raw.session;
+        const skill = raw.skill;
         if (!sessionRaw || !skill) continue;
         // Bare keys so lookups against toBareSessionId(raw.id) below match.
         const session = toBareSessionId(sessionRaw);
@@ -139,9 +122,8 @@ function buildShape(nodes: ReadonlyArray<EpisodeNode>): string {
 
 export const fetchEpisodeTimeline = (
     parentSessionId: string,
-): Effect.Effect<EpisodeTimelinePayload, DbError, SurrealClient> =>
+): Effect.Effect<EpisodeTimelinePayload, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const uuid = parentSessionId
             .replace(/^session:⟨/, "")
             .replace(/⟩$/, "")
@@ -158,65 +140,77 @@ export const fetchEpisodeTimeline = (
                 shape: "",
             };
         }
-        const parentRef = `session:⟨${uuid}⟩`;
+        // Bare id, matching what session.id / spawned.in_id / invoked.session
+        // hold under DuckDB (no record-id decoration to strip).
+        const parentId = uuid;
 
         const [parentRows, childRows] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(EPISODE_PARENT_SQL(parentRef)),
-            db.query<[Array<Record<string, unknown>>]>(EPISODE_CHILDREN_SQL(parentRef)),
+            cacheRows(
+                EpisodeSessionDbRow,
+                { sql: `SELECT id, project, source, started_at, ended_at, cwd, model FROM session WHERE id = ?`, params: [parentId] },
+                "episode-timeline.parent",
+            ),
+            cacheRows(
+                EpisodeSessionDbRow,
+                {
+                    sql: `SELECT s.id AS id, s.project AS project, s.source AS source, s.started_at AS started_at,
+                                 s.ended_at AS ended_at, s.cwd AS cwd, s.model AS model
+                          FROM spawned sp JOIN session s ON s.id = sp.out_id
+                          WHERE sp.in_id = ? ORDER BY s.started_at ASC LIMIT 500`,
+                    params: [parentId],
+                },
+                "episode-timeline.children",
+            ),
         ]);
 
-        // Collect child session refs from the cheap spawned scan, then fetch
-        // invocations using a literal IN list. The IN-subquery form scans
-        // every invoked row (600k+); the literal form uses the
-        // in.session index on each id.
-        const childRefs: string[] = [];
-        for (const raw of childRows?.[0] ?? []) {
-            if (!isRecord(raw)) continue;
-            const id = recordIdString(raw.id);
-            if (!id) continue;
-            childRefs.push(id);
-        }
-        const childIdsLiteral = childRefs.length === 0
-            ? "[NONE]"
-            : `[${childRefs.join(", ")}]`;
+        // Collect child session ids from the cheap spawned join above, then
+        // fetch invocations using a literal IN list - avoids the IN-subquery
+        // slowdown that scans every invoked row (600k+).
+        const childIds = childRows.map((row) => row.id);
 
         const [parentInvocationRows, childInvocationRows] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(
-                EPISODE_PARENT_INVOCATIONS_SQL(parentRef),
+            cacheRows(
+                EpisodeInvocationDbRow,
+                {
+                    sql: `SELECT iv.session AS session, sk.name AS skill
+                          FROM invoked iv JOIN skill sk ON sk.id = iv.out_id
+                          WHERE iv.session = ? AND sk.name IS NOT NULL
+                          ORDER BY iv.ts ASC LIMIT 5000`,
+                    params: [parentId],
+                },
+                "episode-timeline.parent_invocations",
             ),
-            childRefs.length === 0
-                ? Effect.succeed([[]] as [Array<Record<string, unknown>>])
-                : db.query<[Array<Record<string, unknown>>]>(
-                      EPISODE_CHILD_INVOCATIONS_SQL(childIdsLiteral),
+            childIds.length === 0
+                ? Effect.succeed([] as ReadonlyArray<typeof EpisodeInvocationDbRow.Type>)
+                : cacheRows(
+                      EpisodeInvocationDbRow,
+                      {
+                          sql: `SELECT iv.session AS session, sk.name AS skill
+                                FROM invoked iv JOIN skill sk ON sk.id = iv.out_id
+                                WHERE iv.session IN (${childIds.map(() => "?").join(", ")}) AND sk.name IS NOT NULL
+                                ORDER BY iv.ts ASC LIMIT 20000`,
+                          params: [...childIds],
+                      },
+                      "episode-timeline.child_invocations",
                   ),
         ]);
 
-        const combinedInvocations: Array<Record<string, unknown>> = [
-            ...(parentInvocationRows?.[0] ?? []),
-            ...(childInvocationRows?.[0] ?? []),
-        ];
+        const combinedInvocations = [...parentInvocationRows, ...childInvocationRows];
         const summary = summarizePerSession(combinedInvocations);
-        // Wire format is bare; the storage record-id form (`session:⟨uuid⟩`)
-        // stays in `parentRef` for SurrealQL interpolation above.
         const parentBareId = uuid;
         const nodes: EpisodeNode[] = [];
         let parentMeta: EpisodeNode | null = null;
 
-        const toNode = (
-            raw: Record<string, unknown>,
-            role: "parent" | "child",
-        ): EpisodeNode | null => {
-            const idRaw = recordIdString(raw.id);
-            if (!idRaw) return null;
-            const id = toBareSessionId(idRaw);
-            const started_at = dateField(raw, "started_at");
-            const ended_at = dateField(raw, "ended_at");
+        const toNode = (raw: EpisodeSessionRow, role: "parent" | "child"): EpisodeNode => {
+            const id = toBareSessionId(raw.id);
+            const started_at = raw.started_at ? raw.started_at.toISOString() : null;
+            const ended_at = raw.ended_at ? raw.ended_at.toISOString() : null;
             const sum = summary.get(id);
             return {
                 session_id: id,
                 role,
-                project: stringField(raw, "project"),
-                source: stringField(raw, "source"),
+                project: raw.project,
+                source: raw.source,
                 started_at,
                 ended_at,
                 duration_ms: durationMs(started_at, ended_at),
@@ -226,16 +220,8 @@ export const fetchEpisodeTimeline = (
             };
         };
 
-        for (const raw of parentRows?.[0] ?? []) {
-            if (!isRecord(raw)) continue;
-            const node = toNode(raw, "parent");
-            if (node) parentMeta = node;
-        }
-        for (const raw of childRows?.[0] ?? []) {
-            if (!isRecord(raw)) continue;
-            const node = toNode(raw, "child");
-            if (node) nodes.push(node);
-        }
+        for (const raw of parentRows) parentMeta = toNode(raw, "parent");
+        for (const raw of childRows) nodes.push(toNode(raw, "child"));
 
         // Parent first, children chronologically.
         const ordered: EpisodeNode[] = [];

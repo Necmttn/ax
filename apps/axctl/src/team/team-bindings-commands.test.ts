@@ -26,6 +26,7 @@ const repo = (remote: string, root: string): TeamRepositoryContext => {
         name: remote.split("/").at(-1) ?? remote,
         repoRoot: root,
         remoteUrlNormalized: remote,
+        repositoryId: null,
     };
 };
 

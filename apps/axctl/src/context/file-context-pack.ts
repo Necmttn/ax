@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import {
     type BuildFileContextInput,
     type FileRow,
@@ -54,17 +53,41 @@ export interface FileContextPack {
     };
 }
 
+/**
+ * DuckDB SQL a human can paste into `ax duckdb sql` (or any DuckDB client
+ * against the published snapshot) to dig deeper than the rendered context.
+ * Was hand-rolled SurrealQL; SurrealDB is write-frozen (no ingest writes it
+ * any more), so that text pointed at a store this evidence no longer flows
+ * through - rewritten against the same tables/joins `context/file-evidence.ts`
+ * itself queries. `commit.sessions` (the reverse `<-produced.in` traversal) has
+ * no single-statement DuckDB equivalent; add a `JOIN produced p ON p.out_id =
+ * c.id JOIN session s ON s.id = p.in_id` to the last query for that.
+ */
 function renderInspectionQuery(files: readonly FileRow[]): string {
     if (files.length === 0) return "-- No matched file records to inspect.";
-    const fileRefs = files.map((file) => file.id).join(", ");
+    const fileRefs = files.map((file) => `'${file.id.replace(/'/g, "''")}'`).join(", ");
     return [
-        `LET $files = [${fileRefs}];`,
-        "SELECT id, path, repo, repository FROM file WHERE id IN $files;",
-        "SELECT id, evidence, path_seen, ts, out.{ id, path } AS file, in.{ id, name, command_norm, turn, session } AS tool_call FROM read_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
-        "SELECT id, evidence, path_seen, ts, out.{ id, path } AS file, in.{ id, name, command_norm, turn, session } AS tool_call FROM searched_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
-        "SELECT id, source, confidence, ts, out.{ id, path } AS file, in.{ id, session, seq, intent_kind, text_excerpt } AS turn FROM mentioned_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
-        "SELECT in.session AS session, out.path AS file, count() AS edit_count, time::max(ts) AS last_seen FROM edited WHERE out IN $files GROUP BY session, file ORDER BY edit_count DESC, last_seen DESC LIMIT 40;",
-        "SELECT id, additions, deletions, ts, out.{ id, path } AS file, in.{ sha, message, author, ts, sessions: <-produced.in.{ id, source, cwd } } AS commit FROM touched WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
+        `SELECT id, path, repo, repository FROM file WHERE id IN (${fileRefs});`,
+        `SELECT e.id, e.evidence, e.path_seen, e.ts, f.id AS file_id, f.path AS file_path,
+       tc.id AS tool_call_id, tc.name AS tool_name, tc.command_norm, tc.turn, tc.session
+FROM read_file e JOIN file f ON f.id = e.out_id JOIN tool_call tc ON tc.id = e.in_id
+WHERE e.out_id IN (${fileRefs}) ORDER BY e.ts DESC LIMIT 40;`,
+        `SELECT e.id, e.evidence, e.path_seen, e.ts, f.id AS file_id, f.path AS file_path,
+       tc.id AS tool_call_id, tc.name AS tool_name, tc.command_norm, tc.turn, tc.session
+FROM searched_file e JOIN file f ON f.id = e.out_id JOIN tool_call tc ON tc.id = e.in_id
+WHERE e.out_id IN (${fileRefs}) ORDER BY e.ts DESC LIMIT 40;`,
+        `SELECT mf.id, mf.source, mf.confidence, mf.ts, f.id AS file_id, f.path AS file_path,
+       t.id AS turn_id, t.session, t.seq, t.intent_kind, t.text_excerpt
+FROM mentioned_file mf JOIN file f ON f.id = mf.out_id JOIN turn t ON t.id = mf.in_id
+WHERE mf.out_id IN (${fileRefs}) ORDER BY mf.ts DESC LIMIT 40;`,
+        `SELECT t.session AS session, f.path AS file, count(*) AS edit_count, max(e.ts) AS last_seen
+FROM edited e JOIN turn t ON t.id = e.in_id JOIN file f ON f.id = e.out_id
+WHERE e.out_id IN (${fileRefs}) GROUP BY t.session, f.path
+ORDER BY edit_count DESC, last_seen DESC LIMIT 40;`,
+        `SELECT tt.id, tt.additions, tt.deletions, tt.ts, f.id AS file_id, f.path AS file_path,
+       c.sha, c.message, c.author, c.ts AS commit_ts
+FROM touched tt JOIN file f ON f.id = tt.out_id JOIN "commit" c ON c.id = tt.in_id
+WHERE tt.out_id IN (${fileRefs}) ORDER BY tt.ts DESC LIMIT 40;`,
     ].join("\n\n");
 }
 
@@ -157,7 +180,7 @@ function renderAiContext(
     return lines.join("\n");
 }
 
-export const buildFileContextPack = (input: BuildFileContextInput): Effect.Effect<FileContextPack, DbError, SurrealClient> =>
+export const buildFileContextPack = (input: BuildFileContextInput): Effect.Effect<FileContextPack, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const signals = extractFileContextSignals(input.q, input.files);
         const files = yield* resolveFiles(signals.paths, { fuzzyFallback: true });

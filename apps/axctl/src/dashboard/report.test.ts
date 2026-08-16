@@ -2,11 +2,23 @@ import { describe, expect, test } from "bun:test";
 import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import type { DashboardData } from "./report.ts";
 import { renderDashboardHtml, writeDashboard } from "./report.ts";
 
-/** Mock SurrealClient that returns empty result sets for every query, so
- *  `fetchDashboardData` produces a zeroed-out DashboardData without a real DB. */
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("dashboard report", { requireFts: true });
+
+/**
+ * `writeDashboard` is PARTIALLY ported (see report.ts's module doc): its own
+ * counts + `fetchWorktreesOverview` read the published DuckDB snapshot through
+ * `CacheRead`, but the five `queries/insights.ts` reads (owned by chunk 2b,
+ * not yet ported) still run through `SurrealClient` against the write-frozen
+ * (but still reachable) SurrealDB instance - so this test needs BOTH a real
+ * empty DuckDB fixture and the Surreal fake, until 2b lands its half. This is
+ * the honest interim shape, not a from-scratch fake-backed test (common.md
+ * rule 2 governs a FULLY ported reader; this one is not yet fully ported for
+ * reasons outside this chunk's ownership). */
 function makeEmptyDb() {
     return makeTestSurrealClient({ denyWrites: true }).layer;
 }
@@ -148,7 +160,10 @@ describe("dashboard report renderer", () => {
 });
 
 describe("writeDashboard (@effect/platform write path)", () => {
-    test("creates the parent dir and writes the rendered HTML to disk", async () => {
+    dtest("creates the parent dir and writes the rendered HTML to disk", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-report-cache-"), dylibPath, () => Effect.void),
+        );
         const program = Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
             const dir = yield* fs.makeTempDirectory({ prefix: "ax-report-test-" });
@@ -159,7 +174,12 @@ describe("writeDashboard (@effect/platform write path)", () => {
             return { result, onDisk };
         }).pipe(
             Effect.provide(
-                Layer.mergeAll(makeEmptyDb(), BunFileSystem.layer, BunPath.layer),
+                Layer.mergeAll(
+                    makeEmptyDb(),
+                    readFixture(fixture.snapshotPath, dylibPath),
+                    BunFileSystem.layer,
+                    BunPath.layer,
+                ),
             ),
         );
 

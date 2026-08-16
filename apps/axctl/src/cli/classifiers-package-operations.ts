@@ -1,5 +1,6 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettyPrint } from "@ax/lib/json";
 import {
@@ -1147,7 +1148,11 @@ const serviceErrorText = (error: unknown): string => {
 
 export const runClassifiersPackageOperations = (
     input: ClassifierPackageOperationsCommandInput,
-): Effect.Effect<void, never, ClassifierPackageService | SurrealClient | FileSystem.FileSystem> =>
+// `CacheRead` joins `SurrealClient` here rather than replacing it: the read half
+// of `ClassifierPackageService` moved to the DuckDB seam (wave 3, `c-read-context`)
+// while `applyExecutionSurrealWritePlan` still emits SurrealQL, so this operation
+// genuinely needs both until the write plan is ported.
+): Effect.Effect<void, never, ClassifierPackageService | SurrealClient | CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
         if (input.applyWritePlan) {
@@ -1436,7 +1441,9 @@ export const runClassifiersLifecycle = (
         readonly out?: string;
         readonly json: boolean;
     },
-): Effect.Effect<void, PlatformError.PlatformError, ClassifierPackageService | SurrealClient | FileSystem.FileSystem> =>
+// Fully ported: this report path reads through the DuckDB seam only, so
+// `SurrealClient` is gone rather than joined (contrast the operation above).
+): Effect.Effect<void, PlatformError.PlatformError, ClassifierPackageService | CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const packages = yield* ClassifierPackageService;

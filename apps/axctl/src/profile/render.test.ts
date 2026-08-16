@@ -4,24 +4,17 @@ import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
-// Mock result order MUST match the query order in buildProfile:
-// 1 tokenTotals  2 dailyActivity  3 harnesses  4 skillInvocations
-// 5 skillScopes  6 acceptedProposals  7 costModels
-// 8 dailyActivityFull(sessions)  9 dailyActivityFull(tokens)
-// 10 sessionDurations  11 peakHour  12 spawnedCount  13 commitCount  14 topTools
-// 15 wrappedCounts(toolAgg)  16 wrappedCounts(turnCount)
-// 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
-// 18b wrappedCounts(verifyAgg)
-// 19 dailyModels  20 dailyToolCalls  21 dailyCommits
-// 22 windowedInvocations  23 windowedSessions
-// 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
-// 27 contentTypeBreakdown  28 guardrailHookEvidence  29 guardrailVerdicts
-const mockResults = [
-    [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
-    [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
-    [[{ source: "claude" }, { source: "codex" }]],
-    [[{ skill: "tdd", count: 88 }]],
-    [[{ name: "tdd", scope: "plugin:superpowers" }]],
+// buildProfile's own queries.ts fetch* calls are now served by CacheRead (see
+// the wave-3 queries.ts port history). Only 2 statements still resolve
+// SurrealClient: fetchCostModels' main query (queries/cost-analytics.ts - a
+// different wave-3 chunk's file, only its OPTIONAL pricing-catalog lookup
+// reads CacheRead, skipped here since no fixture row needs repricing) and
+// fetchWindowedInvocations (deliberately left unported - porting it breaks
+// apps/axctl/src/team/team-profile.ts, out of this chunk's ownership).
+// `surrealResults` replays ONLY those two, in call order (see buildProfile's
+// own ordering comment).
+const surrealResults = [
+    // fetchCostModels (queries/cost-analytics.ts COST_MODELS_SQL)
     [[{
         model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
         cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
@@ -29,82 +22,129 @@ const mockResults = [
         model: "haiku", sessions: 42, prompt_tokens: 1, completion_tokens: 1,
         cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
     }]],
-    [[{ date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 12 }]],
-    [[{ date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 120_000_000 }]],
-    [[
-        { started_at: "2026-06-12T10:00:00Z", ended_at: "2026-06-12T12:30:00Z" },
-        { started_at: "2026-06-12T09:00:00Z", ended_at: "2026-06-12T10:30:00Z" },
-    ]],
-    [[{ hour: "13", count: 42 }]],
-    [[{ count: 420 }]],
-    [[{ count: 1000 }]],
-    [[{ tool: "Bash", count: 5000 }, { tool: "Read", count: 3200 }]],
-    // 15: wrappedCounts toolAgg (Bash=verification, Read=context)
-    [[
-        { tool: "bun test", count: 900, failures: 10 },
-        { tool: "Read", count: 2000, failures: 5 },
-        { tool: "Bash", count: 3000, failures: 50 },
-    ]],
-    // 16: wrappedCounts turnCount
-    [[{ count: 41200 }]],
-    // 17: wrappedCounts distinctSkills
-    [[{ count: 56 }]],
-    // 18: wrappedCounts reposCount
-    [[{ count: 12 }]],
-    // 18b: wrappedCounts verifyAgg (full command_text: bun test=verification, Read=context)
-    [[
-        { cmd: "bun test", count: 900 },
-        { cmd: "Read", count: 2000 },
-        { cmd: "Bash", count: 3000 },
-    ]],
-    // 19: dailyModels
-    [[
-        { date: "2026-06-11", model: "fable", tokens: 80_000 },
-        { date: "2026-06-12", model: "fable", tokens: 100_000_000 },
-        { date: "2026-06-12", model: "haiku", tokens: 20_000_000 },
-    ]],
-    // 20: dailyToolCalls
-    [[{ date: "2026-06-11", tool_calls: 200 }, { date: "2026-06-12", tool_calls: 3900 }]],
-    // 21: dailyCommits
-    [[{ date: "2026-06-11", commits: 7 }, { date: "2026-06-12", commits: 50 }]],
-    // 22: windowedInvocations
+    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL)
     [[
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
         { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
     ]],
-    // 23: windowedSessions
-    [[
-        { id: "session:1", s: "2026-06-12T10:00:00Z", e: "2026-06-12T12:30:00Z" },
-        { id: "session:2", s: "2026-06-12T09:00:00Z", e: "2026-06-12T10:30:00Z" },
-    ]],
-    // 24: deepSessions total (non-subagent session count = DEPTH denominator)
-    [[{ total: 2 }]],
-    // 25: deepSessions produced edges (session -> non-reverted commit)
-    [[
-        { session: "session:1", commit: "commit:abc" },
-        { session: "session:2", commit: "commit:def" },
-    ]],
-    // 26: deepSessions landed LOC per commit (commit:def landed nothing -> not deep)
-    [[
-        { commit: "commit:abc", loc: 120 },
-        { commit: "commit:def", loc: 0 },
-    ]],
-    // 28: guardrailHookEvidence
-    [[
-        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
-        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
-        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
-    ]],
 ];
 
-// 27 in the old positional list - `fetchContentTypeBreakdown` reads the
-// published snapshot now, so it is no longer a SurrealQL statement and gets its
-// own fixture. Everything after it in `mockResults` shifts up by one.
+// `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
+// CacheRead snapshot, matched below by its own "has_content" fragment (a
+// different wave-3 chunk's convention, unchanged here).
 const contentTypeRows = [
     { ct: "content_type:code", calls: 10, bytes: 800 },
     { ct: "content_type:text", calls: 5, bytes: 200 },
 ];
+
+// One entry per queries.ts CacheRead statement, keyed by a fragment of that
+// statement's own SQL text unique enough not to collide with any other
+// statement in this file (verified by hand against queries.ts; every key
+// names the _SQL constant it targets). `cacheReadTestLayer` does NOT run
+// Schema decode (see judgment-test-layer.ts), so a field a ported function
+// calls a Date method on (fetchSessionDurations' .toISOString()) must be a
+// real `Date` here, not a string - everything else here is read via
+// Number(...)/String(...) at the call site, so plain values are safe.
+const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
+    // fetchTokenTotals (TOKEN_TOTALS_SQL)
+    "count(*) AS sessions\nFROM session_token_usage": [
+        { prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 },
+    ],
+    // fetchDailyActivity (DAILY_ACTIVITY_SQL)
+    "AS date\nFROM session\nWHERE started_at IS NOT NULL": [
+        { date: "2026-06-11" }, { date: "2026-06-12" },
+    ],
+    // fetchHarnesses (HARNESSES_SQL)
+    "source, count(*) AS count": [{ source: "claude" }, { source: "codex" }],
+    // fetchSkillInvocations (SKILL_INVOCATIONS_SQL)
+    "sk.name AS skill, count(*) AS count": [{ skill: "tdd", count: 88 }],
+    // fetchSkillScopes (SKILL_SCOPES_SQL)
+    "FROM skill WHERE deleted_at IS NULL": [{ name: "tdd", scope: "plugin:superpowers" }],
+    // fetchDailyActivityFull sessions half (DAILY_SESSIONS_SQL)
+    "count(*) AS sessions\nFROM session\nWHERE started_at IS NOT NULL": [
+        { date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 12 },
+    ],
+    // fetchDailyActivityFull tokens half (DAILY_TOKENS_SQL)
+    "FROM session_token_usage\nWHERE ts IS NOT NULL": [
+        { date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 120_000_000 },
+    ],
+    // fetchSessionDurations (SESSION_DURATIONS_SQL) - real Dates, see header note.
+    "SELECT started_at, ended_at\nFROM session": [
+        { started_at: new Date("2026-06-12T10:00:00Z"), ended_at: new Date("2026-06-12T12:30:00Z") },
+        { started_at: new Date("2026-06-12T09:00:00Z"), ended_at: new Date("2026-06-12T10:30:00Z") },
+    ],
+    // fetchPeakHour (PEAK_HOUR_SQL)
+    "strftime(started_at, '%H') AS hour": [{ hour: "13", count: 42 }],
+    // fetchSpawnedCount (SPAWNED_COUNT_SQL)
+    "FROM spawned": [{ count: 420 }],
+    // fetchCommitCount (COMMIT_COUNT_SQL)
+    "AS count\nFROM \"commit\"": [{ count: 1000 }],
+    // fetchTopTools (TOP_TOOLS_SQL)
+    "COALESCE(command_norm, name) AS tool, count(*) AS count": [
+        { tool: "Bash", count: 5000 }, { tool: "Read", count: 3200 },
+    ],
+    // fetchWrappedCounts toolAgg (TOOL_AGG_SQL) - Bash=verification, Read=context
+    "SUM(CASE WHEN has_error THEN 1 ELSE 0 END) AS failures": [
+        { tool: "bun test", count: 900, failures: 10 },
+        { tool: "Read", count: 2000, failures: 5 },
+        { tool: "Bash", count: 3000, failures: 50 },
+    ],
+    // fetchWrappedCounts turnCount (TURN_COUNT_SQL)
+    "count(*) AS count\nFROM turn": [{ count: 41200 }],
+    // fetchWrappedCounts distinctSkills (DISTINCT_SKILLS_SQL)
+    "    JOIN skill sk ON sk.id = i.out_id\n    WHERE TRUE": [{ count: 56 }],
+    // fetchWrappedCounts reposCount (REPOS_COUNT_SQL)
+    "    SELECT repository\n    FROM session": [{ count: 12 }],
+    // fetchWrappedCounts verifyAgg (VERIFY_AGG_SQL) - full command_text labels
+    "COALESCE(command_text, command_norm, name) AS cmd": [
+        { cmd: "bun test", count: 900 }, { cmd: "Read", count: 2000 }, { cmd: "Bash", count: 3000 },
+    ],
+    // fetchDailyModels (DAILY_MODEL_TOKENS_SQL)
+    "    model,\n    SUM(COALESCE(prompt_tokens, 0))": [
+        { date: "2026-06-11", model: "fable", tokens: 80_000 },
+        { date: "2026-06-12", model: "fable", tokens: 100_000_000 },
+        { date: "2026-06-12", model: "haiku", tokens: 20_000_000 },
+    ],
+    // fetchDailyToolCalls (DAILY_TOOL_CALLS_SQL)
+    "AS tool_calls\nFROM tool_call": [
+        { date: "2026-06-11", tool_calls: 200 }, { date: "2026-06-12", tool_calls: 3900 },
+    ],
+    // fetchDailyCommits (DAILY_COMMITS_SQL)
+    "AS commits\nFROM \"commit\"": [
+        { date: "2026-06-11", commits: 7 }, { date: "2026-06-12", commits: 50 },
+    ],
+    // fetchDeepSessionCount total (DEEP_SESSION_TOTAL_SQL) - non-subagent
+    // session count = DEPTH denominator
+    "count(*) AS total FROM session": [{ total: 2 }],
+    // fetchDeepSessionCount produced edges (DEEP_PRODUCED_SQL) - session -> non-reverted commit
+    "FROM produced p": [
+        { session: "session:1", commit: "commit:abc" },
+        { session: "session:2", commit: "commit:def" },
+    ],
+    // fetchDeepSessionCount landed LOC per commit (COMMIT_LANDED_LOC_SQL) -
+    // commit:def landed nothing -> not deep
+    "FROM touched t": [{ commit: "commit:abc", loc: 120 }, { commit: "commit:def", loc: 0 }],
+    // fetchWindowedSessions (WINDOWED_SESSIONS_SQL) - real Dates, see header note.
+    "id, started_at AS s, ended_at AS e": [
+        {
+            id: "session:1",
+            s: new Date("2026-06-12T10:00:00Z"),
+            e: new Date("2026-06-12T12:30:00Z"),
+        },
+        {
+            id: "session:2",
+            s: new Date("2026-06-12T09:00:00Z"),
+            e: new Date("2026-06-12T10:30:00Z"),
+        },
+    ],
+    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
+    "FROM hook_command_invocation": [
+        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
+        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
+        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
+    ],
+};
 
 const proposalRows = [{
     id: "p1", form: "guidance", title: "Stop edit loops early",
@@ -126,15 +166,25 @@ const runProfile = <A, E>(
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
     contentTypes: ReadonlyArray<Record<string, unknown>> = contentTypeRows,
+    cacheOverrides: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
     db.layer,
-    // Two cache reads on this path, dispatched by SQL text: the content-type
-    // breakdown this chunk ported (`has_content`), and the pricing catalog
-    // `fetchCostModels` resolves when a row stores zero cost against real
-    // tokens - none of these fixtures do, so empty is the right answer there.
-    cacheReadTestLayer((sql) =>
-        sql.includes("has_content") ? contentTypes : []
-    ),
+    // Dispatched by SQL text: content-type breakdown (`has_content`, a
+    // different wave-3 chunk's convention) first, then per-test overrides,
+    // then the default CACHE_ROUTES table built above. The pricing-catalog
+    // lookup inside fetchCostModels resolves when a row stores zero cost
+    // against real tokens - none of these fixtures do, so falling through to
+    // empty is the right answer for it.
+    cacheReadTestLayer((sql) => {
+        if (sql.includes("has_content")) return contentTypes;
+        for (const [key, rows] of Object.entries(cacheOverrides)) {
+            if (sql.includes(key)) return rows;
+        }
+        for (const [key, rows] of Object.entries(CACHE_ROUTES)) {
+            if (sql.includes(key)) return rows;
+        }
+        return [];
+    }),
     judgmentTestLayer((sql) => {
         const now = new Date();
         if (sql.includes("FROM proposal")) return proposals;
@@ -166,7 +216,7 @@ const env = {
 
 describe("buildProfile", () => {
     test("assembles a valid ProfileV1", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }));
 
         expect(p.v).toBe(1);
@@ -249,36 +299,46 @@ describe("buildProfile", () => {
     });
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: false, env }));
         expect(p.stats.cost_usd).toBeUndefined();
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
     test("no proposals -> taste has only the mix pattern from content types", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), []);
         expect(p.taste?.patterns).toHaveLength(1);
         expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
     });
 
     test("no proposals + no content types -> taste omitted", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
         expect(p.taste).toBeUndefined();
     });
 
     test("empty daily + durations -> activity and insights omitted", async () => {
-        // Blank out dailyFull(sessions+tokens) and sessionDurations (indices 6, 7, 8).
-        const empty = mockResults.map((r, i) => (i >= 6 && i <= 8 ? [[]] : r));
-        const db = makeMockDb(empty);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        // Blank out dailyFull(sessions+tokens) and sessionDurations via a
+        // CACHE_ROUTES override - all three are now CacheRead statements.
+        const db = makeMockDb(surrealResults);
+        const p = await runProfile(
+            db,
+            buildProfile({ windowDays: 30, includeCost: true, env }),
+            proposalRows,
+            contentTypeRows,
+            {
+                "count(*) AS sessions\nFROM session\nWHERE started_at IS NOT NULL": [],
+                "FROM session_token_usage\nWHERE ts IS NOT NULL": [],
+                "SELECT started_at, ended_at\nFROM session": [],
+            },
+        );
         expect(p.activity).toBeUndefined();
         expect(p.insights).toBeUndefined();
     });
 
     test("buildProfile attaches highlights from env", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const profile = await runProfile(db, buildProfile({
             windowDays: 30,
             includeCost: true,
@@ -292,7 +352,7 @@ describe("buildProfile", () => {
     });
 
     test("buildProfile omits highlights when env.highlights is null", async () => {
-        const db = makeMockDb(mockResults);
+        const db = makeMockDb(surrealResults);
         const profile = await runProfile(db, buildProfile({
             windowDays: 30,
             includeCost: true,

@@ -3,7 +3,14 @@
  * ProfileV1. Privacy invariants live HERE, not at the edge: cost only when
  * includeCost; aggregates only (nothing in this module touches transcript
  * content, project names, or paths). Environment (github login, today,
- * hook files, rules text) is injected so the Effect needs only SurrealClient.
+ * hook files, rules text) is injected so the Effect needs no ambient env
+ * reads.
+ *
+ * NOT SurrealClient-free yet: `./queries.ts` (this package) still resolves
+ * SurrealClient for every fetch* it exports, and `../queries/cost-analytics.ts`
+ * (owned by a different wave-3 chunk) resolves BOTH SurrealClient and
+ * CacheRead per query - so buildProfile keeps SurrealClient in its R channel
+ * even once queries.ts is ported.
  */
 import { Effect } from "effect";
 import { fetchContentTypeBreakdown } from "../queries/content-types.ts";

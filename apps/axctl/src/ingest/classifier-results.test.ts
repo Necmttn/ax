@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { classifierEvidenceRefsForWindows, deriveClassifierResultsFromRows } from "./classifier-results.ts";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import {
+    classifierEvidenceRefsForWindows,
+    deriveAndPersistClassifierResults,
+    deriveClassifierResultsFromRows,
+} from "./classifier-results.ts";
 import type { ClassifierTurnRow } from "../classifiers/event-window.ts";
 
 const row = (
@@ -129,5 +136,60 @@ describe("classifier results derive", () => {
                 kind: "recent_edited_file",
             }),
         ]));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Real-DuckDB coverage for the SQL half of this stage.
+//
+// The pure builders above are fed hand-written `ClassifierEditedFileRow`s, so
+// they cannot see whether `fetchEditedFiles` actually PRODUCES those rows. It
+// did not: the projection read `e.session` off `edited`, a column the DDL does
+// not define (`edited` is a turn->file edge; the session lives on the joined
+// `turn`). That is a binder error on every run, and once the column name is
+// right the second failure mode is the one this suite pins - a query that runs
+// and hands back NULL sessions, which silently drops every `recent_edited_file`
+// ref instead of erroring.
+// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("classifier results edited files", { requireFts: true });
+
+describe("fetchEditedFiles on real DuckDB", () => {
+    dtest("reads the session off the joined turn and links recent edited files", async () => {
+        let evidence: ReadonlyArray<{ readonly out_id: string; readonly kind: string | null }> = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-classifier-edited-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const ts = new Date("2026-05-30T00:01:00Z");
+                yield* write.put("session", { id: "s1", source: "claude", started_at: ts });
+                yield* write.put("turn", {
+                    id: "a1", session: "s1", seq: 1, ts, role: "assistant",
+                    text: "I used pip.", text_excerpt: "I used pip.",
+                });
+                yield* write.put("turn", {
+                    id: "t1", session: "s1", seq: 2, ts: new Date("2026-05-30T00:02:00Z"),
+                    role: "tool_result", message_kind: "tool_result",
+                    text: "ERROR: dependency resolution failed",
+                    text_excerpt: "ERROR: dependency resolution failed",
+                });
+                yield* write.put("turn", {
+                    id: "u1", session: "s1", seq: 3, ts: new Date("2026-05-30T00:03:00Z"),
+                    role: "user", text: "can you use UV ?", text_excerpt: "can you use UV ?",
+                });
+                yield* write.put("file", { id: "f1", path: "pyproject.toml" });
+                yield* write.put("edited", {
+                    id: "e1", in_id: "a1", out_id: "f1", tool: "Edit", ts,
+                });
+
+                yield* deriveAndPersistClassifierResults(write, { sinceDays: undefined });
+
+                evidence = yield* write.rows(
+                    Schema.Struct({ out_id: Schema.String, kind: Schema.NullOr(Schema.String) }),
+                    "SELECT out_id, kind FROM cites_evidence WHERE out_table = 'file' ORDER BY kind",
+                );
+            }),
+        ));
+        // `recent_edited_file` is reachable ONLY through the session+seq path,
+        // so its presence is proof the `session` column decoded non-null.
+        expect(evidence.map((e) => e.kind)).toContain("recent_edited_file");
+        expect(evidence.every((e) => e.out_id === "f1")).toBe(true);
     });
 });

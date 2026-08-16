@@ -4,8 +4,9 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import type { Judgment } from "@ax/lib/sqlite";
 import {
@@ -13,6 +14,17 @@ import {
     LabelMiningService,
     LabelMiningServiceLive,
 } from "./label-mining-service.ts";
+
+/**
+ * `SurrealClient` is still resolved once at `LabelMiningServiceLive` layer
+ * construction (see the module doc comment on the layer - it backs ONLY the
+ * `projectReviewed --apply` write path). None of the cases below exercise
+ * that path, so a client that dies if ever queried is enough to prove it: a
+ * passing suite is evidence the read paths never touch it.
+ */
+const deadSurrealClient = SurrealClient.of({
+    query: () => Effect.die("label-mining-service.test.ts: SurrealClient must not be queried by a read path"),
+} as never);
 
 /**
  * Persisted-turn fake rows. The service reads transcript windows from the
@@ -35,21 +47,28 @@ interface FakeWindowRow {
     readonly prev_evidence_path?: string | null;
 }
 
-function clientWithWindows(rows: readonly FakeWindowRow[]): TestSurrealClient {
-    return makeTestSurrealClient({ fallback: [rows] });
+/**
+ * All window fixtures below carry `prev_turn_id`/`prev_text` inline, which is
+ * exactly the case `miningReport` treats as "already has a previous turn" (see
+ * the merge loop's comment in label-mining-service.ts) - so the service never
+ * fires the second (prev-turn batch) query, and one canned response is enough.
+ */
+function windowsCacheRead(rows: readonly FakeWindowRow[]) {
+    return makeTestCacheRead({ fallback: rows });
 }
 
 const runWithDb = <A>(
     effect: Effect.Effect<
         A,
         unknown,
-        LabelMiningService | SurrealClient | Judgment | FileSystem.FileSystem | Path.Path
+        LabelMiningService | SurrealClient | CacheRead | Judgment | FileSystem.FileSystem | Path.Path
     >,
-    client: SurrealClientShape,
+    cacheReadLayer: Layer.Layer<CacheRead>,
 ): Promise<A> =>
     Effect.runPromise(effect.pipe(Effect.provide(LabelMiningServiceLive.pipe(
         Layer.provideMerge(Layer.mergeAll(
-            Layer.succeed(SurrealClient, client),
+            Layer.succeed(SurrealClient, deadSurrealClient),
+            cacheReadLayer,
             EmptyJudgmentTestLayer,
             BunFileSystem.layer,
             BunPath.layer,
@@ -112,13 +131,13 @@ const approvalWindow = (n: number): FakeWindowRow => ({
 
 describe("LabelMiningService.miningReport", () => {
     test("reads transcript windows from persisted turns", async () => {
-        const tc = clientWithWindows([correctionWindow(1)]);
+        const tc = windowsCacheRead([correctionWindow(1)]);
         await runWithDb(
             Effect.gen(function* () {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            tc.client,
+            tc.layer,
         );
 
         expect(tc.captured.at(-1)).toContain("FROM turn");
@@ -139,7 +158,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            clientWithWindows(rows).client,
+            windowsCacheRead(rows).layer,
         );
 
         expect(report.schema).toBe("ax.transcript_label_mining_report.v1");
@@ -167,7 +186,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 500 });
             }),
-            clientWithWindows(rows).client,
+            windowsCacheRead(rows).layer,
         );
 
         expect(EXPORT_REVIEW_LIMIT).toBe(80);
@@ -181,7 +200,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            clientWithWindows([correctionWindow(1), directionWindow(2)]).client,
+            windowsCacheRead([correctionWindow(1), directionWindow(2)]).layer,
         );
 
         expect(report.review_rows.length).toBeGreaterThan(0);
@@ -206,7 +225,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 10, reviewLimit: 80 });
             }),
-            clientWithWindows(rows).client,
+            windowsCacheRead(rows).layer,
         );
 
         expect(report.candidate_count).toBe(10);
@@ -222,7 +241,7 @@ describe("LabelMiningService.writeMiningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.writeMiningReport({ sinceDays: 14, limit: 500, reviewLimit: 80, out });
             }),
-            clientWithWindows([correctionWindow(1), directionWindow(2), verificationWindow(3)]).client,
+            windowsCacheRead([correctionWindow(1), directionWindow(2), verificationWindow(3)]).layer,
         );
 
         const saved = JSON.parse(readFileSync(out, "utf8"));

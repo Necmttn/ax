@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import {
     ClassifierPackageOperationNotFound,
     ClassifierPackageService,
@@ -41,6 +43,37 @@ const runWithServiceAndDb = <A>(
         Effect.provideService(SurrealClient, db),
         Effect.provide(BunFsLayer),
     ));
+
+/**
+ * `executionGraphHealth` (package-service.ts) reads through `CacheRead` now -
+ * three separate `.rows()` calls (node/edge/fact), possibly repeated several
+ * times per report (lifecycle insight fans out into multiple graph-health
+ * reads). `routes` (substring-matched, not consumed) is the right fixture
+ * shape here: every call to any of the three queries gets the SAME canned
+ * rows, exactly like the old SurrealQL fake's `fallback` array did for its
+ * one multi-statement query.
+ */
+const runWithServiceAndCacheRead = <A>(
+    effect: Effect.Effect<A, unknown, ClassifierPackageService | CacheRead | FileSystem.FileSystem | Path.Path>,
+    cacheReadLayer: Layer.Layer<CacheRead>,
+): Promise<A> =>
+    Effect.runPromise(effect.pipe(
+        Effect.provide(ClassifierPackageServiceLive),
+        Effect.provide(cacheReadLayer),
+        Effect.provide(BunFsLayer),
+    ));
+
+const graphHealthCacheRead = (
+    nodes: ReadonlyArray<unknown>,
+    edges: ReadonlyArray<unknown>,
+    facts: ReadonlyArray<unknown>,
+) => makeTestCacheRead({
+    routes: [
+        { match: "FROM classifier_graph_node", rows: nodes },
+        { match: "FROM classifier_graph_edge", rows: edges },
+        { match: "FROM classifier_graph_fact", rows: facts },
+    ],
+});
 
 function writeTempManifest(command: string): string {
     const path = join(mkdtempSync(join(tmpdir(), "ax-package-manifest-")), "ax.classifier.json");
@@ -658,47 +691,45 @@ describe("ClassifierPackageService", () => {
     });
 
     test("queries classifier graph health through the service layer", async () => {
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                expect(sql).toContain("FROM classifier_graph_node");
-                return [
-                    [
-                        {
-                            graph_id: "classifier_operation:demo/refresh",
-                            kind: "classifier_operation",
-                            label: "refresh",
-                            properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "edge:run",
-                            kind: "ran_operation",
-                            from_id: "classifier_execution:.ax/experiments/run.json",
-                            to_id: "classifier_operation:demo/refresh",
-                            evidence_path: ".ax/experiments/run.json",
-                            properties_json: "{}",
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "fact:run",
-                            kind: "classifier_operation_execution",
-                            subject: "classifier_execution:.ax/experiments/run.json",
-                            predicate: "completed_with_decision",
-                            value_json: "\"executed\"",
-                            evidence_edges_json: JSON.stringify(["edge:run"]),
-                            properties_json: "{}",
-                        },
-                    ],
-                ];
-            },
-        });
+        const tc = graphHealthCacheRead(
+            [
+                {
+                    graph_id: "classifier_operation:demo/refresh",
+                    kind: "classifier_operation",
+                    label: "refresh",
+                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+            [
+                {
+                    graph_id: "edge:run",
+                    kind: "ran_operation",
+                    from_id: "classifier_execution:.ax/experiments/run.json",
+                    to_id: "classifier_operation:demo/refresh",
+                    evidence_path: ".ax/experiments/run.json",
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+            [
+                {
+                    graph_id: "fact:run",
+                    kind: "classifier_operation_execution",
+                    subject: "classifier_execution:.ax/experiments/run.json",
+                    predicate: "completed_with_decision",
+                    value_json: "\"executed\"",
+                    evidence_edges_json: JSON.stringify(["edge:run"]),
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+        );
 
-        const report = await runWithServiceAndDb(Effect.gen(function* () {
+        const report = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.executionGraphHealthReport();
-        }), tc.client);
+        }), tc.layer);
 
         expect(report.schema).toBe("ax.classifier_package_execution_graph_health_report.v1");
         expect(report.decision).toBe("healthy");
@@ -707,37 +738,34 @@ describe("ClassifierPackageService", () => {
     });
 
     test("summarizes graph query suggestion repair routing through the service layer", async () => {
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                expect(sql).toContain("FROM classifier_graph_node");
-                return [
-                    [],
-                    [
-                        {
-                            graph_id: "edge:review",
-                            kind: "has_lifecycle_fact",
-                            from_id: "classifier_lifecycle:workflow_candidate_proposal",
-                            to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
-                            evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
-                            properties_json: "{}",
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
-                            kind: "classifier_lifecycle_status",
-                            subject: "classifier_lifecycle:workflow_candidate_proposal",
-                            predicate: "review_pipeline_recommended_action_execution_phase",
-                            value_json: "\"bind_inputs\"",
-                            evidence_edges_json: "[\"edge:review\"]",
-                            properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
-                        },
-                    ],
-                ];
-            },
-        });
+        const tc = graphHealthCacheRead(
+            [],
+            [
+                {
+                    graph_id: "edge:review",
+                    kind: "has_lifecycle_fact",
+                    from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                    to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                    evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                    properties_json: "{}",
+                    source_kind: "review_pipeline_lifecycle",
+                },
+            ],
+            [
+                {
+                    graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_proposal",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: "[\"edge:review\"]",
+                    properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
+                    source_kind: "review_pipeline_lifecycle",
+                },
+            ],
+        );
 
-        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+        const summary = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.executionGraphQuerySuggestionRoutingSummary({
                 query: {
@@ -746,7 +774,7 @@ describe("ClassifierPackageService", () => {
                     value_equals: "execute",
                 },
             });
-        }), tc.client);
+        }), tc.layer);
 
         expect(summary.has_suggestion).toBe(true);
         expect(summary.query_match_status).toBe("no_match");
@@ -766,37 +794,34 @@ describe("ClassifierPackageService", () => {
 
     test("writes graph query suggestion routing summaries through the service layer", async () => {
         const out = join(mkdtempSync(join(tmpdir(), "ax-query-routing-summary-")), "nested", "summary.json");
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                expect(sql).toContain("FROM classifier_graph_node");
-                return [
-                    [],
-                    [
-                        {
-                            graph_id: "edge:review",
-                            kind: "has_lifecycle_fact",
-                            from_id: "classifier_lifecycle:workflow_candidate_proposal",
-                            to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
-                            evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
-                            properties_json: "{}",
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
-                            kind: "classifier_lifecycle_status",
-                            subject: "classifier_lifecycle:workflow_candidate_proposal",
-                            predicate: "review_pipeline_recommended_action_execution_phase",
-                            value_json: "\"bind_inputs\"",
-                            evidence_edges_json: "[\"edge:review\"]",
-                            properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
-                        },
-                    ],
-                ];
-            },
-        });
+        const tc = graphHealthCacheRead(
+            [],
+            [
+                {
+                    graph_id: "edge:review",
+                    kind: "has_lifecycle_fact",
+                    from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                    to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                    evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                    properties_json: "{}",
+                    source_kind: "review_pipeline_lifecycle",
+                },
+            ],
+            [
+                {
+                    graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_proposal",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: "[\"edge:review\"]",
+                    properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
+                    source_kind: "review_pipeline_lifecycle",
+                },
+            ],
+        );
 
-        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+        const summary = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({
                 out,
@@ -806,7 +831,7 @@ describe("ClassifierPackageService", () => {
                     value_equals: "execute",
                 },
             });
-        }), tc.client);
+        }), tc.layer);
         const saved = await Bun.file(out).json();
 
         expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
@@ -816,64 +841,61 @@ describe("ClassifierPackageService", () => {
     });
 
     test("summarizes boundary replay posture through the service layer", async () => {
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                expect(sql).toContain("FROM classifier_graph_node");
-                return [
-                    [],
-                    [
-                        {
-                            graph_id: "edge:boundary",
-                            kind: "reported_boundary_miss",
-                            from_id: "artifact:boundary",
-                            to_id: "classifier_boundary_miss:workflow",
-                            evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
-                            properties_json: "{}",
-                            source_kind: "boundary_replay_deterministic_projection",
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "fact:boundary:covered",
-                            kind: "classifier_boundary_replay",
-                            subject: "classifier_boundary_miss:workflow",
-                            predicate: "covered_by_deterministic",
-                            value_json: JSON.stringify(true),
-                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
-                            properties_json: JSON.stringify({
-                                classifier_key: "correction-event",
-                                actual: "correction_or_rejection_signal",
-                                target: "workflow_state",
-                            }),
-                            source_kind: "boundary_replay_deterministic_projection",
-                        },
-                        {
-                            graph_id: "fact:boundary:label",
-                            kind: "classifier_boundary_replay",
-                            subject: "classifier_boundary_miss:workflow",
-                            predicate: "deterministic_label",
-                            object: "classifier_deterministic_result:workflow",
-                            value_json: JSON.stringify({ label: "correction", target: "workflow_state" }),
-                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
-                            properties_json: JSON.stringify({
-                                classifier_key: "correction-event",
-                                target: "workflow_state",
-                                confidence: 0.84,
-                                signals: ["correction:workflow_state"],
-                            }),
-                            source_kind: "boundary_replay_deterministic_projection",
-                        },
-                    ],
-                ];
-            },
-        });
+        const tc = graphHealthCacheRead(
+            [],
+            [
+                {
+                    graph_id: "edge:boundary",
+                    kind: "reported_boundary_miss",
+                    from_id: "artifact:boundary",
+                    to_id: "classifier_boundary_miss:workflow",
+                    evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                    properties_json: "{}",
+                    source_kind: "boundary_replay_deterministic_projection",
+                },
+            ],
+            [
+                {
+                    graph_id: "fact:boundary:covered",
+                    kind: "classifier_boundary_replay",
+                    subject: "classifier_boundary_miss:workflow",
+                    predicate: "covered_by_deterministic",
+                    value_json: JSON.stringify(true),
+                    evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                    properties_json: JSON.stringify({
+                        classifier_key: "correction-event",
+                        actual: "correction_or_rejection_signal",
+                        target: "workflow_state",
+                    }),
+                    source_kind: "boundary_replay_deterministic_projection",
+                },
+                {
+                    graph_id: "fact:boundary:label",
+                    kind: "classifier_boundary_replay",
+                    subject: "classifier_boundary_miss:workflow",
+                    predicate: "deterministic_label",
+                    object: "classifier_deterministic_result:workflow",
+                    value_json: JSON.stringify({ label: "correction", target: "workflow_state" }),
+                    evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                    properties_json: JSON.stringify({
+                        classifier_key: "correction-event",
+                        target: "workflow_state",
+                        confidence: 0.84,
+                        signals: ["correction:workflow_state"],
+                    }),
+                    source_kind: "boundary_replay_deterministic_projection",
+                },
+            ],
+        );
 
-        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+        const summary = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.boundaryReplaySummaryReport();
-        }), tc.client);
+        }), tc.layer);
 
-        expect(tc.captured).toHaveLength(1);
+        // executionGraphHealth now fires THREE separate CacheRead queries
+        // (node/edge/fact) instead of one multi-statement SurrealQL call.
+        expect(tc.captured).toHaveLength(3);
         expect(summary).toMatchObject({
             status: "reviewed_deterministic_facts_available",
             production_posture: "deterministic_and_reviewed_graph_facts_only",
@@ -889,45 +911,40 @@ describe("ClassifierPackageService", () => {
 
     test("writes boundary replay posture summaries through the service layer", async () => {
         const out = join(mkdtempSync(join(tmpdir(), "ax-boundary-replay-summary-")), "nested", "summary.json");
-        const tc = makeTestSurrealClient({
-            fallback: (sql) => {
-                expect(sql).toContain("FROM classifier_graph_node");
-                return [
-                    [],
-                    [
-                        {
-                            graph_id: "edge:boundary",
-                            kind: "reported_boundary_miss",
-                            from_id: "artifact:boundary",
-                            to_id: "classifier_boundary_miss:workflow",
-                            evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
-                            properties_json: "{}",
-                            source_kind: "boundary_replay_deterministic_projection",
-                        },
-                    ],
-                    [
-                        {
-                            graph_id: "fact:boundary:covered",
-                            kind: "classifier_boundary_replay",
-                            subject: "classifier_boundary_miss:workflow",
-                            predicate: "covered_by_deterministic",
-                            value_json: JSON.stringify(true),
-                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
-                            properties_json: JSON.stringify({
-                                classifier_key: "correction-event",
-                                target: "workflow_state",
-                            }),
-                            source_kind: "boundary_replay_deterministic_projection",
-                        },
-                    ],
-                ];
-            },
-        });
+        const tc = graphHealthCacheRead(
+            [],
+            [
+                {
+                    graph_id: "edge:boundary",
+                    kind: "reported_boundary_miss",
+                    from_id: "artifact:boundary",
+                    to_id: "classifier_boundary_miss:workflow",
+                    evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                    properties_json: "{}",
+                    source_kind: "boundary_replay_deterministic_projection",
+                },
+            ],
+            [
+                {
+                    graph_id: "fact:boundary:covered",
+                    kind: "classifier_boundary_replay",
+                    subject: "classifier_boundary_miss:workflow",
+                    predicate: "covered_by_deterministic",
+                    value_json: JSON.stringify(true),
+                    evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                    properties_json: JSON.stringify({
+                        classifier_key: "correction-event",
+                        target: "workflow_state",
+                    }),
+                    source_kind: "boundary_replay_deterministic_projection",
+                },
+            ],
+        );
 
-        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+        const summary = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.writeBoundaryReplaySummaryReport({ out });
-        }), tc.client);
+        }), tc.layer);
         const saved = JSON.parse(readFileSync(out, "utf8"));
 
         expect(summary.status).toBe("reviewed_deterministic_facts_available");
@@ -1014,58 +1031,61 @@ describe("ClassifierPackageService", () => {
             skipped_proposal_count: 1,
             failures: [],
         })}\n`);
-        const tc = makeTestSurrealClient({
-            fallback: [
-                [
-                    {
-                        graph_id: "classifier_operation:session-section-chunks/blind-review-refresh",
-                        kind: "classifier_operation",
-                        label: "blind-review-refresh",
-                        properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
-                    },
-                    {
-                        graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        kind: "classifier_lifecycle",
-                        label: "workflow candidate review pipeline lifecycle",
-                        properties_json: "{}",
-                    },
-                ],
-                [
-                    {
-                        graph_id: "edge:run",
-                        kind: "ran_operation",
-                        from_id: "classifier_execution:.ax/experiments/run.json",
-                        to_id: "classifier_operation:session-section-chunks/blind-review-refresh",
-                        evidence_path: ".ax/experiments/run.json",
-                        properties_json: "{}",
-                    },
-                    {
-                        graph_id: "edge:lifecycle",
-                        kind: "has_evidence",
-                        from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
-                    },
-                ],
-                [
-                    {
-                        graph_id: "fact:phase",
-                        kind: "classifier_lifecycle_status",
-                        subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        predicate: "review_pipeline_recommended_action_execution_phase",
-                        value_json: "\"bind_inputs\"",
-                        evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
-                        properties_json: JSON.stringify({
-                            lifecycle_key: "review_pipeline_lifecycle",
-                            artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        }),
-                    },
-                ],
+        const tc = graphHealthCacheRead(
+            [
+                {
+                    graph_id: "classifier_operation:session-section-chunks/blind-review-refresh",
+                    kind: "classifier_operation",
+                    label: "blind-review-refresh",
+                    properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
+                    source_kind: "classifier_package_execution",
+                },
+                {
+                    graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    kind: "classifier_lifecycle",
+                    label: "workflow candidate review pipeline lifecycle",
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
             ],
-        });
+            [
+                {
+                    graph_id: "edge:run",
+                    kind: "ran_operation",
+                    from_id: "classifier_execution:.ax/experiments/run.json",
+                    to_id: "classifier_operation:session-section-chunks/blind-review-refresh",
+                    evidence_path: ".ax/experiments/run.json",
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
+                {
+                    graph_id: "edge:lifecycle",
+                    kind: "has_evidence",
+                    from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+            [
+                {
+                    graph_id: "fact:phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                    properties_json: JSON.stringify({
+                        lifecycle_key: "review_pipeline_lifecycle",
+                        artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    }),
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+        );
 
-        const result = await runWithServiceAndDb(Effect.gen(function* () {
+        const result = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             const input = {
                 workflowStatusPath: statusPath,
@@ -1078,7 +1098,7 @@ describe("ClassifierPackageService", () => {
             const report = yield* packages.lifecycleInsightReport(input);
             const routing = yield* packages.lifecycleRoutingSummaryReport(input);
             return { report, routing };
-        }), tc.client);
+        }), tc.layer);
         const { report, routing } = result;
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");

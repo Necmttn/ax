@@ -5,11 +5,11 @@
  * Default mode (no names): all unclassified skills with invocations >= 3.
  * Explicit mode (one+ names): only those skills, no invocation threshold.
  */
-import { Effect, FileSystem, Path, type PlatformError } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, FileSystem, Path, Schema, type PlatformError } from "effect";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
-import type { DbError } from "@ax/lib/errors";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
@@ -38,21 +38,38 @@ export interface ClassifyResult {
 // "none found" while weighted reported a positive count.
 
 /**
- * SurrealQL for explicit mode: named skills only, no invocation threshold and
- * no unclassified guard (user-requested re-classification must be allowed).
+ * DuckDB row shape for explicit mode: named skills only, no invocation
+ * threshold and no unclassified guard (user-requested re-classification must
+ * be allowed).
  */
-const buildExplicitSql = (names: readonly string[]) => {
-    const nameList = names.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(", ");
-    return `
-SELECT
-    name,
-    array::len((SELECT id FROM invoked WHERE out = $parent.id)) AS invocations,
-    array::len(array::distinct((SELECT in.session FROM invoked WHERE out = $parent.id).in.session)) AS sessions
-FROM skill
-WHERE name IN [${nameList}]
-ORDER BY invocations DESC;
-`.trim();
-};
+const ExplicitClassifyRow = Schema.Struct({
+    name: Schema.String,
+    invocations: NumberFromBigIntColumn,
+    sessions: NumberFromBigIntColumn,
+});
+
+/**
+ * Named skills only - a `count(i.id)`/`count(DISTINCT i.session)` LEFT JOIN
+ * against `invoked` so a never-invoked but explicitly-named skill still comes
+ * back with zero counts instead of dropping out of the result set.
+ */
+const fetchExplicitSkillRows = (names: readonly string[]) =>
+    cacheRows(
+        ExplicitClassifyRow,
+        {
+            sql: `
+SELECT sk.name AS name,
+       count(i.id) AS invocations,
+       count(DISTINCT i.session) AS sessions
+FROM skill sk
+LEFT JOIN invoked i ON i.out_id = sk.id
+WHERE sk.name IN (${names.map(() => "?").join(", ")})
+GROUP BY sk.name
+ORDER BY invocations DESC`.trim(),
+            params: [...names],
+        },
+        "skills classify explicit",
+    );
 
 const safeSkillName = (name: string): string | null => {
     try {
@@ -71,9 +88,8 @@ export interface ClassifyOptions {
 
 export const cmdSkillsClassify = (
     opts: ClassifyOptions,
-): Effect.Effect<void, DbError | JudgmentError | PlatformError.PlatformError, SurrealClient | Judgment | CacheRead | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, JudgmentError | PlatformError.PlatformError, Judgment | CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
@@ -94,14 +110,11 @@ export const cmdSkillsClassify = (
         // classified filter - re-classification must be allowed).
         let selected: ClassifyRow[];
         if (opts.names.length > 0) {
-            const result = yield* db.query<[Array<Record<string, unknown>>]>(
-                buildExplicitSql(opts.names),
-            );
-            const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
+            const rows = yield* fetchExplicitSkillRows(opts.names);
             selected = rows.map((r) => ({
-                name: String(r.name ?? ""),
-                invocations: Number(r.invocations ?? 0),
-                sessions: Number(r.sessions ?? 0),
+                name: r.name,
+                invocations: r.invocations,
+                sessions: r.sessions,
             })).filter((r) => r.name.length > 0);
         } else {
             const hygiene = yield* fetchSkillHygiene({

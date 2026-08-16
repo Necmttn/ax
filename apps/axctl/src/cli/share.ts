@@ -1,6 +1,5 @@
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
-import { LegacySurrealAppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
@@ -258,24 +257,29 @@ export async function cmdShareWithDeps(
     if (parsed.open) await deps.open(ref);
 }
 
+const SharePlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
 const liveShareDeps: ShareCommandDeps = {
     exportArtifact: (sessionId, axVersion) =>
         Effect.runPromise(
             exportSessionShare(sessionId, axVersion).pipe(
                 catchDbErrorAndExit("axctl share"),
-                Effect.provide(LegacySurrealAppLayer),
+                // `ax share` is declared runtime "none" - it must never open a
+                // live SurrealDB connection. It used to self-provide
+                // `LegacySurrealAppLayer` here regardless of that declaration
+                // (wave-3 partition doc §2d finding); now that `exporter.ts`
+                // reads through the DuckDB cache, only CacheRead is needed.
+                Effect.provide(CacheReadLive),
                 Effect.scoped,
             ),
         ),
     locateTranscript: (sessionId) =>
         Effect.runPromise(
             locateShareTranscript(sessionId).pipe(
-                // The `raw_file` hint now comes off the published snapshot, so
-                // the cache layer rides alongside LegacySurrealAppLayer here. (`ax share`
-                // self-providing LegacySurrealAppLayer at all is the wave-3 finding in the
-                // partition doc's §2d - it is declared `"none"` in the manifest;
-                // that removal belongs to the runtime flip, not here.)
-                Effect.provide(Layer.merge(LegacySurrealAppLayer, CacheReadLive)),
+                // `locateShareTranscript` needs CacheRead (the `raw_file` hint
+                // off the published snapshot) + the filesystem, never
+                // SurrealDB - see recover.ts's own R-channel comment.
+                Effect.provide(Layer.merge(CacheReadLive, SharePlatformLayer)),
                 Effect.scoped,
             ),
         ),

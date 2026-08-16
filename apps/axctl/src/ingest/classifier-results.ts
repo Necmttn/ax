@@ -172,7 +172,14 @@ const fetchEditedFiles = (write: CacheWriteService, sinceDays: number | undefine
         return yield* write.rows(Schema.Struct({
             turn: Schema.String, file: Schema.String, session: Schema.NullOr(Schema.String),
             seq: Schema.NullOr(Schema.Number), ts: TimestampColumn,
-        }), `SELECT e.in_id AS turn, e.out_id AS file, e.session, CAST(t.seq AS DOUBLE) AS seq, e.ts
+        // `edited` is a turn->file edge and carries NO session column of its own
+        // (see the DDL) - the session hangs off the turn it points at, which is
+        // why the join is here at all. Reading `e.session` was a binder error on
+        // every run; taking `t.session` matches the sibling projection in
+        // derive-run-evidence.ts. The join stays a LEFT join so an edge whose
+        // turn is outside the window still yields its per-turn file ref (the
+        // session+seq path below simply skips it).
+        }), `SELECT e.in_id AS turn, e.out_id AS file, t.session AS session, CAST(t.seq AS DOUBLE) AS seq, e.ts
              FROM edited e LEFT JOIN turn t ON t.id = e.in_id
              ${sinceDays === undefined ? "" : "WHERE e.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
              ORDER BY e.ts`, sinceDays === undefined ? [] : [sinceDays + 1]);
