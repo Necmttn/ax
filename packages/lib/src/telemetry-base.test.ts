@@ -1,10 +1,8 @@
 /**
  * The cache-side row builder for telemetry rows.
  *
- * The WRITE cannot be ported yet (a hook cannot hold the ingest lock - see the
- * module header), but the ROW SHAPE can be, and it is the half that has to be
- * right before any spool-drain stage exists: it is where a Surreal record ref
- * has to become a bare row id, and where an array has to become JSON text.
+ * The hook spool drain uses this row mapper. It changes a stored reference to
+ * a bare row id, and it changes each array to JSON text.
  *
  * The last case writes a real `hook_fire` row into a real DuckDB, because
  * "does this row satisfy the DDL's NOT NULLs and read back" is a question about

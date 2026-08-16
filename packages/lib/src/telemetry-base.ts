@@ -1,9 +1,9 @@
 /**
  * Hook telemetry rows (`hook_fire`).
  *
- * THE ROW SHAPE IS PORTED ({@link telemetryCacheRow}); THE WRITE IS NOT, and
- * cannot be as it stands. The reason is worth writing down, because a half-ported
- * module looks like an oversight otherwise.
+ * Request-time code does not write this row directly. It appends a bounded,
+ * synced JSONL spool. A later ingest stage maps each row with
+ * {@link telemetryCacheRow} and writes it through `CacheWriteService`.
  *
  * The only caller is `hooks/telemetry.ts`, reached from `ax hooks file-context`,
  * which a PreToolUse hook runs MID-TURN in the agent's process. In v2 a write
@@ -15,21 +15,12 @@
  * `w0-otlp-spool` gave OTLP, and the same shape the judgment sidecar takes in
  * wave 3.
  *
- * So `writeTelemetryRow` and its statement builder stay on the Surreal path
- * until that lands, while {@link telemetryCacheRow} - the half that is a pure
- * value mapping, and the half a spool-drain stage will need on day one - is
- * ported and tested against the real `hook_fire` table now. `deterministicId`
- * and {@link TelemetryBaseRow} are engine-neutral and survive either way. See
- * REPORT.md for w2-lib-core.
+ * `deterministicId` and {@link TelemetryBaseRow} stay engine-neutral. This
+ * module contains no database client and no request-time write capability.
  */
 import { createHash } from "node:crypto";
-import { Effect } from "effect";
-import { SurrealClient } from "./db.ts";
 import { cacheRow, jsonParam, tsParam } from "./duckdb/row.ts";
 import type { DuckDbParam } from "./duckdb/types.ts";
-import type { DbError } from "./errors.ts";
-import { recordRef, surrealObject, surrealValue } from "./shared/surql.ts";
-import { executeStatements } from "./shared/statement-exec.ts";
 
 export type TelemetryHarness = "claude" | "codex" | "unknown";
 
@@ -105,43 +96,3 @@ export const telemetryCacheRow = <T extends TelemetryBaseRow>(
     }
     return cacheRow(out);
 };
-
-/** Turn a stored `table:id` ref string into a `recordRef` literal, or `null`
- *  if it does not parse. Strips the SurrealDB `⟨⟩` id delimiters. */
-const refLiteral = (value: string | undefined): string | null => {
-    if (!value) return null;
-    const idx = value.indexOf(":");
-    if (idx < 0) return null;
-    const table = value.slice(0, idx);
-    const id = value.slice(idx + 1).replace(/^⟨|⟩$/g, "");
-    if (!table || !id) return null;
-    return recordRef(table, id);
-};
-
-/**
- * Build the `UPSERT` statement for one telemetry row. `id` becomes the record
- * key; `session`/`file` become record refs; every other field is encoded by
- * `surrealValue`. This is the hook-side counterpart to the typed statement
- * builders in `evidence-writers.ts` - same seam, same escaping.
- */
-export const buildTelemetryRowStatement = <T extends TelemetryBaseRow>(
-    table: string,
-    row: T,
-): string => {
-    const { id, session, file, ...rest } = row;
-    const fields: Array<[string, string]> = [];
-    const sessionRef = refLiteral(session);
-    if (sessionRef) fields.push(["session", sessionRef]);
-    const fileRef = refLiteral(file);
-    if (fileRef) fields.push(["file", fileRef]);
-    for (const [k, v] of Object.entries(rest)) {
-        fields.push([k, surrealValue(v)]);
-    }
-    return `UPSERT ${recordRef(table, id)} CONTENT ${surrealObject(fields)};`;
-};
-
-export const writeTelemetryRow = <T extends TelemetryBaseRow>(
-    table: string,
-    row: T,
-): Effect.Effect<void, DbError, SurrealClient> =>
-    executeStatements([buildTelemetryRowStatement(table, row)]);

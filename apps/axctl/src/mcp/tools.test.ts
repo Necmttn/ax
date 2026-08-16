@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
+import { CacheUnavailableError } from "@ax/lib/duckdb/seam";
 import { axMcpTools, defineMcpTool } from "./tools.ts";
 
 /**
@@ -53,6 +54,18 @@ describe("axMcpTools advertised surface", () => {
             expect(typeof tool.register).toBe("function");
         }
     });
+
+    it("keeps each tool's exact runtime need in the registry", () => {
+        const runtimeOf = (name: string) => axMcpTools.find((tool) => tool.name === name)?.runtime;
+
+        expect(runtimeOf("recall")).toBe("cache");
+        expect(runtimeOf("roles")).toBe("judgment");
+        expect(runtimeOf("improve_list")).toBe("judgment");
+        expect(runtimeOf("skills_by_role")).toBe("cache-judgment");
+        expect(runtimeOf("skills_roles")).toBe("cache-judgment");
+        expect(runtimeOf("sessions_around")).toBe("legacy");
+        expect(runtimeOf("dojo_agenda")).toBe("legacy");
+    });
 });
 
 describe("dojo_agenda MCP tool", () => {
@@ -70,6 +83,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         let seen: unknown;
         const tool = defineMcpTool({
             name: "echo",
+            runtime: "legacy",
             description: "echo",
             inputSchema: { n: z.number(), s: z.string().optional() },
             run: async (args) => {
@@ -86,6 +100,7 @@ describe("defineMcpTool (typed zod factory)", () => {
         let seen: Record<string, unknown> = { sentinel: true };
         const tool = defineMcpTool({
             name: "opt",
+            runtime: "legacy",
             description: "opt",
             inputSchema: { a: z.string().optional() },
             run: async (args) => {
@@ -100,6 +115,7 @@ describe("defineMcpTool (typed zod factory)", () => {
     it("rejects args that violate the shape at the parse boundary", async () => {
         const tool = defineMcpTool({
             name: "strict",
+            runtime: "legacy",
             description: "strict",
             inputSchema: { n: z.number() },
             run: async () => "unreachable",
@@ -107,10 +123,34 @@ describe("defineMcpTool (typed zod factory)", () => {
         await expect(tool.run({ n: "not-a-number" }, rt)).rejects.toThrow();
     });
 
+    it("reports a typed cache failure at the MCP boundary", async () => {
+        const cause = new CacheUnavailableError({
+            path: "/tmp/missing.duckdb",
+            message: "no published cache",
+        });
+        const tool = defineMcpTool({
+            name: "cache-failure",
+            runtime: "legacy",
+            description: "cache failure",
+            inputSchema: {},
+            run: async () => Promise.reject(cause),
+        });
+
+        try {
+            await tool.run({}, rt);
+            throw new Error("expected tool failure");
+        } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).toBe("ax cache read failed: no published cache");
+            expect((error as Error).cause).toBe(cause);
+        }
+    });
+
     it("carries name/description/inputSchema onto the descriptor", () => {
         const shape = { x: z.string() };
         const tool = defineMcpTool({
             name: "meta",
+            runtime: "legacy",
             description: "the-desc",
             inputSchema: shape,
             run: async () => null,

@@ -28,6 +28,7 @@ import { installHookFile, stripAxMarker } from "./sdk-install.ts";
 import { installDispatcher, resolveDispatcherPath, resolveShimPath } from "./dispatch-install.ts";
 import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
+import { catchCacheReadErrorAndExit } from "../cli/output.ts";
 import { benchHook, renderLedger } from "./bench.ts";
 import type { HookDefinition } from "@ax/hooks-sdk/define";
 import { fetchHookLatencyRegression, renderHookLatency } from "../queries/hook-latency.ts";
@@ -373,17 +374,9 @@ const backtestCommand = Command.make(
             const providerFilter = optionValue(provider) ?? null;
             const toolNames = hookDef.matcher?.tools ? [...hookDef.matcher.tools] : [];
 
-            // Fetch rows from DB (read-only SELECTs). DB unavailable -> friendly error + exit.
+            // Fetch rows from the published cache. A typed cache error gets a stable CLI message.
             const fetched = yield* fetchRows(days, toolNames, providerFilter).pipe(
-                Effect.catchTag("DbError", (e) =>
-                    Effect.promise(async () => {
-                        process.stderr.write(
-                            `DB unreachable or query failed: ${e.message}\n` +
-                            "Start the DB with 'axctl daemon start' and retry.\n",
-                        );
-                        process.exit(1);
-                    }),
-                ),
+                catchCacheReadErrorAndExit("ax hooks backtest"),
             );
 
             // Replay through the hook with GitEnvLive (state-dependent checks

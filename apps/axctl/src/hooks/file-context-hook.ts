@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { decodeJsonRecordOrNull } from "@ax/lib/decode";
 import {
     type BuildFileContextInput,
@@ -442,7 +443,7 @@ const DEDUP_WINDOW_MINUTES = 30;
 
 export const buildFileContextHookResponse = (
     input: FileContextHookInput,
-): Effect.Effect<FileContextHookResponse, DbError, SurrealClient> =>
+): Effect.Effect<FileContextHookResponse, DbError, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const emptyEvidence = {
             prior_file_sessions: [] as readonly PriorFileSession[],

@@ -5,15 +5,13 @@
  * and we assert the registry/envelope shape directly.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { AppLayer } from "@ax/lib/layers";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
-import { JudgmentLive } from "../judgment.ts";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildServer, wrapToolError, wrapToolResult } from "./server.ts";
 import { axMcpTools } from "./tools.ts";
+import { makeMcpRuntimePool } from "./runtime.ts";
 
 const EXPECTED_TOOLS = [
     "recall",
@@ -396,8 +394,8 @@ describe("result wrapping", () => {
 
 describe("MCP server over in-memory transport", () => {
     it("lists the recall tool via tools/list", async () => {
-        const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive));
-        const server = buildServer(runtime);
+        const runtimes = makeMcpRuntimePool();
+        const server = buildServer(runtimes);
         const client = new Client({ name: "smoke-test", version: "0.0.0" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -418,7 +416,7 @@ describe("MCP server over in-memory transport", () => {
         } finally {
             await client.close().catch(() => undefined);
             await server.close().catch(() => undefined);
-            await runtime.dispose().catch(() => undefined);
+            await runtimes.dispose().catch(() => undefined);
         }
     });
 });
