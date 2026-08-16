@@ -25,12 +25,8 @@ const stubCacheReadService: CacheReadService = {
 const stubCacheRead = Layer.succeed(CacheRead)(stubCacheReadService);
 
 const handlers: ContractWebHandler[] = [];
-function make(liveIngest = false): ContractWebHandler {
-    // A truthy fake stream handle is enough: version only null-checks it.
-    const h = makeContractWebHandler({
-        ingestStream: liveIngest ? ({} as never) : null,
-        cacheRead: stubCacheRead,
-    });
+function make(): ContractWebHandler {
+    const h = makeContractWebHandler({ cacheRead: stubCacheRead });
     handlers.push(h);
     return h;
 }
@@ -69,21 +65,18 @@ describe("isContractRequest", () => {
 
 describe("contract system group", () => {
     test("GET /api/version matches the legacy response shape", async () => {
-        const { handler } = make(true);
+        const { handler } = make();
         const res = await handler(req("GET", "/api/version"));
         expect(res.status).toBe(200);
         const body = await res.json() as Record<string, unknown>;
         expect(body.version).toBe(AX_VERSION);
         expect(body.api_version).toBe(API_VERSION);
         expect(body.capabilities).toContain("sessions");
-        expect(body.live_ingest).toBe(true);
-        expect(body.otlp_receiver).toBe(true);
-    });
-
-    test("version reports live_ingest false when the sidecar is down", async () => {
-        const { handler } = make(false);
-        const res = await handler(req("GET", "/api/version"));
-        expect(((await res.json()) as { live_ingest: boolean }).live_ingest).toBe(false);
+        // Both retired in studio ephemeral (wave 3): the in-browser ingest
+        // trigger + sidecar are gone, and the OTLP receiver moved to its own
+        // daemon (ax otlpd) - this router registers zero /v1/* routes.
+        expect(body.live_ingest).toBe(false);
+        expect(body.otlp_receiver).toBe(false);
     });
 
     test("GET /api/worktrees returns activity + git", async () => {

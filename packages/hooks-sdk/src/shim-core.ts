@@ -1,13 +1,26 @@
 /**
  * The daemon-first hook shim - EFFECT-FREE on the fast path.
  *
- * Installed as the hook command, it POSTs the harness event to the running
- * `ax serve` daemon's `/hooks/eval` (warm, ~1ms) and applies the returned
+ * Installed as the hook command, it POSTs the harness event to `/hooks/eval`
+ * on whatever is listening at `hookEvalUrl` and applies the returned
  * ProcessOutcome - skipping the cold `bun` spawn + ~0.9 MB effect-bundle parse
- * the spawned dispatcher pays per fire. If the daemon is unreachable or errors,
- * it LAZY-imports the sibling dispatch bundle and runs the guards locally, so
+ * the spawned dispatcher pays per fire. If nothing answers (or errors), it
+ * LAZY-imports the sibling dispatch bundle and runs the guards locally, so
  * enforcement still works offline. The dynamic import keeps effect off the fast
  * path: the fat bundle is only loaded on the fallback.
+ *
+ * STUDIO IS EPHEMERAL (wave 3, `c-daemon-studio`): there is no more long-lived
+ * `ax serve` daemon for this to warm-hit against - `ax studio` binds the same
+ * port only while a client is connected, so on a typical machine nothing is
+ * listening and this fetch hits ECONNREFUSED. That failure is NEAR-INSTANT (a
+ * closed loopback port RSTs immediately - no listener to time out against),
+ * so the added cost on the common "studio not running" path is a few ms, not
+ * the full `AX_HOOK_TIMEOUT_MS` budget; the warm-hit path still pays off on
+ * the rarer occasion a studio happens to be open. This was the considered
+ * resolution for #791's "/hooks/eval decision": point the shim at the
+ * ephemeral server rather than retire it outright, because the alternative
+ * (spawn-only) throws away a real, if now-occasional, latency win for a
+ * one-line-comment cost.
  *
  * No effect / no @ax/hooks-sdk runtime imports here - this file (and the tiny
  * bundle of it) must stay dependency-light so the fast path is just a fetch.
@@ -63,7 +76,9 @@ export interface DaemonOutcome {
 export const isDaemonOutcome = (v: unknown): v is DaemonOutcome =>
     isObject(v) && typeof v["exitCode"] === "number";
 
-/** The daemon URL from an explicit port / AX_SERVE_PORT / the default 1738. */
+/** The `/hooks/eval` URL from an explicit port / AX_SERVE_PORT / the default
+ *  1738 - the same port `ax studio` binds. See the module doc for why POSTing
+ *  here even when nothing is listening is still the right default. */
 export const hookEvalUrl = (
     env: Record<string, string | undefined>,
     port?: string,

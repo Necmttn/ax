@@ -22,7 +22,6 @@ import type { SurrealClient } from "@ax/lib/db";
 import type { AppLayer } from "@ax/lib/layers";
 import type { Judgment } from "@ax/lib/sqlite";
 import type { CacheRead } from "@ax/lib/duckdb/seam";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -44,14 +43,13 @@ export type EffectRunner = {
 
 /**
  * Server-boot context threaded into raw routes. `null` means the request is
- * being handled WITHOUT a booted server (unit tests, direct invocation);
- * `ingestStream` is null when the Durable Streams sidecar could not start
- * (the compiled binary, which can't load native lmdb). /api/version reports
- * the second case as `live_ingest: false` and POST /api/ingest 503s on both.
+ * being handled WITHOUT a booted server (unit tests, direct invocation).
+ * Empty now that the live-ingest trigger (its Durable Streams sidecar handle
+ * used to live here) was retired in studio ephemeral (wave 3) - kept as a
+ * distinct type rather than deleted outright so a future boot-time fact has
+ * somewhere to land without re-threading every raw route's signature.
  */
-export interface ServeContext {
-    readonly ingestStream: DurableIngestStream | null;
-}
+export type ServeContext = Record<string, never>;
 
 export function jsonResponse(value: unknown, status = 200): Response {
     return new Response(JSON.stringify(value), {

@@ -31,17 +31,15 @@ import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
 import { errorText } from "./common.ts";
 import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
-import { LiveGroupLive } from "./live.ts";
 import { OtelGroupLive } from "./otel.ts";
 import { RoutingGroupLive } from "./routing.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
-import { ContractServeInfo, SystemGroupLive } from "./system.ts";
+import { SystemGroupLive } from "./system.ts";
 import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
 import { JudgmentLive } from "../../judgment.ts";
@@ -113,8 +111,9 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/usage",
     // team
     "GET /api/team",
-    // live (SSE /api/events + binary /api/image stay raw legacy routes)
-    "POST /api/ingest",
+    // live: SSE /api/events + binary /api/image stay raw legacy routes; the
+    // trigger POST /api/ingest was retired in studio ephemeral, wave 3 - see
+    // api-contract.ts's module doc.
     // otel receiver
     "POST /v1/metrics",
     "POST /v1/traces",
@@ -155,10 +154,14 @@ export interface ContractWebHandler {
 }
 
 export interface MakeContractWebHandlerOptions {
-    /** Durable Streams sidecar handle, or null when it could not start
-     *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
-    readonly ingestStream: DurableIngestStream | null;
-    /** Share with the server runtime so LegacySurrealAppLayer builds once (see above). */
+    /**
+     * Retired with the live-ingest trigger (studio ephemeral, wave 3) - the
+     * Durable Streams sidecar this used to identify no longer exists. Kept
+     * accepting `null` only so existing call sites (every group's test file
+     * passes `ingestStream: null`) compile unchanged; the value is not read.
+     */
+    readonly ingestStream?: null;
+    /** Share with the server runtime so `AppLayer` builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
     /** Test seam: services the handlers need (default: production LegacySurrealAppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
@@ -192,7 +195,6 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
     const routesLayer = Layer.mergeAll(
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
-        Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
         opts.services ?? InertSurrealLayer,
         // v2: the recall vertical reads the published DuckDB snapshot, not
         // SurrealDB. The layer opens nothing until a query actually arrives
@@ -214,7 +216,6 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             SkillsGroupLive,
             ImproveGroupLive,
             UsageGroupLive,
-            LiveGroupLive,
             OtelGroupLive,
             RoutingGroupLive,
             TeamGroupLive,

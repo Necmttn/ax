@@ -18,7 +18,7 @@
  * snapshot and exits. `GET /api/worktrees` and `GET /api/self-improve` were
  * already ported to `CacheRead` and are unaffected.
  */
-import { Context, Effect } from "effect";
+import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
     AxApi,
@@ -32,17 +32,6 @@ import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
 import { fetchWorktreesOverview } from "../worktrees-overview.ts";
 import { asJsonValue } from "./common.ts";
 
-/**
- * Boot-time facts the contract handlers need from `serveDashboard`: the
- * Durable Streams sidecar handle when it came up (null on the compiled
- * binary). Provided as a layer when the web handler is built - the
- * contract module itself must stay daemon-agnostic.
- */
-export class ContractServeInfo extends Context.Service<
-    ContractServeInfo,
-    { readonly ingestStream: import("../ingest-stream-durable.ts").DurableIngestStream | null }
->()("axctl/dashboard/ContractServeInfo") {}
-
 const errorText = (err: unknown): string =>
     err instanceof Error ? err.message : String(err);
 
@@ -52,15 +41,18 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
     handlers
         .handle("version", () =>
             Effect.gen(function* () {
-                const info = yield* ContractServeInfo;
                 return new DaemonVersion({
                     version: AX_VERSION,
                     api_version: API_VERSION,
                     capabilities: dashboardApiCapabilities(),
-                    live_ingest: info.ingestStream !== null,
-                    // OTLP receiver is pure HTTP+JSON+SurrealDB (no native dep),
-                    // so it works in both source and compiled binary - always true.
-                    otlp_receiver: true,
+                    // Retired in studio ephemeral (wave 3): the in-browser
+                    // ingest trigger + its Durable Streams sidecar are gone.
+                    live_ingest: false,
+                    // Retired too: the OTLP receiver moved to its own
+                    // long-lived daemon (`ax otlpd`) - this router registers
+                    // zero /v1/* routes now, so answering `true` here was
+                    // stale (see router/routes/system.ts's parity fix).
+                    otlp_receiver: false,
                 });
             }))
         .handle("worktrees", () =>
