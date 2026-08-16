@@ -15,11 +15,13 @@
  *   ax directives ngrams [--json] [--limit=N]
  *     The learned per-user lift table (directive_ngram rows sorted by lift desc).
  */
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveTurnRow } from "../../ingest/directives.ts";
 import { listDirectiveProposals, type ProposalRow } from "../../improve/list.ts";
 import type { LiftRow } from "../../queries/directive-ngrams.ts";
@@ -31,6 +33,22 @@ import { fail, jsonFlag, optionValue, requirePositiveInt } from "./shared.ts";
 
 // SQL boundary guard - same pattern as directive-ngrams.ts
 const sqlDays = (n: number): number => Math.max(1, Math.trunc(n));
+
+const MineTurnRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    text_excerpt: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+});
+const LiftMapRow = Schema.Struct({ ngram: Schema.String, lift: Schema.Number });
+const NgramLiftRow = Schema.Struct({
+    ngram: Schema.String,
+    n: NumberFromBigIntColumn,
+    occurrences: NumberFromBigIntColumn,
+    outcomes: NumberFromBigIntColumn,
+    sessions: NumberFromBigIntColumn,
+    lift: Schema.Number,
+});
 
 // ---------------------------------------------------------------------------
 // ax directives mine
@@ -49,26 +67,32 @@ const mineCommand = Command.make(
                 fail(`ax directives mine: --days must be a positive integer (got "${days}")`);
             }
 
-            const db = yield* SurrealClient;
-
             // Fetch user turns (same query shape as derive-proposals.ts directive turn fetch,
             // parameterized by --days instead of hard-coded 90d)
-            const [rawTurns] = yield* db.query<[DirectiveTurnRow[]]>(`
-SELECT type::string(id) AS id, type::string(session) AS session, text_excerpt, type::string(ts) AS ts
-FROM turn
-WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
-  AND ts > time::now() - ${sqlDays(days)}d AND session.source != "claude-subagent";
-`).pipe(Effect.orElseSucceed(() => [[] as DirectiveTurnRow[]]));
+            const daysClause = withinDaysClause("t.ts", sqlDays(days));
+            const rawTurns = yield* cacheRows(MineTurnRow, {
+                sql: `SELECT t.id, t.session AS session, t.text_excerpt, t.ts
+                      FROM turn t JOIN session s ON s.id = t.session
+                      WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt <> ''
+                        ${daysClause.sql} AND s.source <> 'claude-subagent'`,
+                params: daysClause.params,
+            }, "directives mine turns");
 
-            const turns: DirectiveTurnRow[] = rawTurns ?? [];
+            const turns: DirectiveTurnRow[] = rawTurns.map((r) => ({
+                id: r.id,
+                session: r.session,
+                text_excerpt: r.text_excerpt,
+                ts: r.ts,
+            }));
 
             // Fetch lift table from directive_ngram
-            const [rawLift] = yield* db.query<[Array<{ ngram: string; lift: number }>]>(
-                `SELECT ngram, lift FROM directive_ngram WHERE lift > 0;`,
-            ).pipe(Effect.orElseSucceed(() => [[] as Array<{ ngram: string; lift: number }>]));
+            const rawLift = yield* cacheRows(LiftMapRow, {
+                sql: "SELECT ngram, lift FROM directive_ngram WHERE lift > 0",
+                params: [],
+            }, "directives mine lift map");
 
             const liftMap = new Map<string, number>();
-            for (const r of rawLift ?? []) {
+            for (const r of rawLift) {
                 liftMap.set(r.ngram, r.lift);
             }
 
@@ -184,11 +208,10 @@ const ngramsCommand = Command.make(
     ({ limit, json }) =>
         Effect.gen(function* () {
             const validLimit = requirePositiveInt("directives ngrams", "limit", limit);
-            const db = yield* SurrealClient;
-            const [rawRows] = yield* db.query<[LiftRow[]]>(
-                `SELECT ngram, n, occurrences, outcomes, sessions, lift FROM directive_ngram ORDER BY lift DESC LIMIT ${validLimit};`,
-            ).pipe(Effect.orElseSucceed(() => [[] as LiftRow[]]));
-            const liftRows: LiftRow[] = rawRows ?? [];
+            const liftRows: ReadonlyArray<LiftRow> = yield* cacheRows(NgramLiftRow, {
+                sql: "SELECT ngram, n, occurrences, outcomes, sessions, lift FROM directive_ngram ORDER BY lift DESC LIMIT ?",
+                params: [validLimit],
+            }, "directives ngrams");
 
             if (json) {
                 console.log(prettyPrint(liftRows));
