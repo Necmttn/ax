@@ -123,7 +123,7 @@ describe("estimateImpact", () => {
 describe("estimateImpactCached", () => {
     test("second call within TTL skips recompute", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const cache = createImpactEstimateCache();
         const a = await run(estimateImpactCached(p, 1_000, cache), layer);
         const b = await run(estimateImpactCached(p, 2_000, cache), layer);
@@ -132,7 +132,7 @@ describe("estimateImpactCached", () => {
 
     test("expired entry recomputes", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const cache = createImpactEstimateCache();
         const a = await run(estimateImpactCached(p, 1_000, cache), layer);
         const b = await run(estimateImpactCached(p, 1_000 + 11 * 60_000, cache), layer);
@@ -142,7 +142,7 @@ describe("estimateImpactCached", () => {
 
     test("independent cache adapters isolate same-sig estimates", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const a = await run(estimateImpactCached(p, 1_000, createImpactEstimateCache()), layer);
         const b = await run(estimateImpactCached(p, 2_000, createImpactEstimateCache()), layer);
         expect(b).not.toBe(a);
