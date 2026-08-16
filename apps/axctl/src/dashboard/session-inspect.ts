@@ -11,10 +11,10 @@ import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
-import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn, JsonArrayColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows, cacheFirst, runCacheSingleQuery } from "@ax/lib/duckdb/query";
-import { inClause } from "@ax/lib/duckdb/clause";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
 import { sessionTokenUsageCacheQuery } from "../queries/session-detail-cache.ts";
@@ -1036,11 +1036,15 @@ export function assembleInspectPayload(args: {
     };
 }
 
+// R channel still carries SurrealClient: resolveTurnContentForSourceRefs
+// (queries/session-turn-content.ts, chunk 2b's) has not been ported to
+// CacheRead yet - see the module-doc note near the top of this file. Every
+// other resolver in this function is CacheRead-only.
 const fetchGraphSessionInspect = (
     bareSessionId: string,
     turnOffset: number,
     turnLimit: number,
-): Effect.Effect<SessionInspectPayload | null, never, SurrealClient> =>
+): Effect.Effect<SessionInspectPayload | null, never, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
         const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent, toolCallsByDbSeq] = yield* Effect.all([
