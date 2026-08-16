@@ -525,8 +525,45 @@ describe("sessions command", () => {
         expect(subNames).toEqual(expect.arrayContaining(["here", "around", "near", "churn"]));
     });
 
-    test("sessions is routed as a DB command", () => {
-        expect(DB_COMMANDS.has("sessions")).toBe(true);
+    const sessionsDeclaration = (): DbConditionalRuntime => {
+        const entry = RUNTIME_BY_COMMAND["sessions"];
+        expect(entry).toBeDefined();
+        const declared = entryRuntime(entry!);
+        expect(typeof declared).toBe("object");
+        expect((declared as DbConditionalRuntime).kind).toBe("db-conditional");
+        return declared as DbConditionalRuntime;
+    };
+
+    test("sessions is declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
+        // Was a static "db" entry. `show` is ported to the DuckDB cache
+        // (wave 3 c-read-seam) while here/around/near/compare are still
+        // SurrealQL, so routing is now per-subcommand.
+        sessionsDeclaration();
+        expect(DB_COMMANDS.has("sessions")).toBe(false);
+    });
+
+    test("every registered sessions subcommand declares its routing (anti-drift)", () => {
+        const declared = sessionsDeclaration().subcommands;
+        const sessions = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "sessions");
+        for (const name of sessions!.subcommands.flatMap((g) => g.commands.map((c) => c.name))) {
+            expect(
+                declared[name],
+                `sessions subcommand "${name}" missing from the db-conditional routing table in commands/sessions.ts`,
+            ).toBeDefined();
+        }
+    });
+
+    test("`sessions show` routes to the cache runtime; the unported siblings stay on db", () => {
+        const entry = RUNTIME_BY_COMMAND["sessions"]!;
+        expect(resolveRuntime(entry, ["sessions", "show", "abc"])).toBe("cache");
+        expect(resolveRuntime(entry, ["sessions", "here"])).toBe("db");
+        expect(resolveRuntime(entry, ["sessions", "around", "2026-01-01"])).toBe("db");
+        expect(resolveRuntime(entry, ["sessions", "near", "HEAD"])).toBe("db");
+        expect(resolveRuntime(entry, ["sessions", "compare", "a", "b"])).toBe("db");
+        // Bare family / --help / unknown subcommand keeps the old behaviour.
+        expect(resolveRuntime(entry, ["sessions"])).toBe("db");
     });
 });
 

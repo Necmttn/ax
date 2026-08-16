@@ -1,4 +1,15 @@
 /**
+ * SUPERSEDED - do not add call sites.
+ *
+ * REVIEWED in wave 3's `c-read-seam`, with the outcome "mirrored, not yet
+ * deletable". `packages/lib/src/duckdb/query.ts` carries the same shape -
+ * `defineQuery`/`defineSingleQuery` become `defineCacheQuery`/
+ * `defineCacheSingleQuery`, and the hand-written row mapper becomes a `Schema`
+ * plus a `Clause` - so this module has no unique responsibility left. It stays
+ * only because four Surreal query-definition modules still import it
+ * (`queries/{project,session-detail,skill-graph,tool-failures}.ts`), each owned
+ * by chunk 2b/2c. It goes with them, or with `c-surreal-delete`.
+ *
  * query: the typed read seam. A `Query` pairs a SurrealQL builder with a
  * row-mapper, so a dashboard caller hands over params and receives typed
  * domain records - it never touches `Record<string, unknown>` or restates

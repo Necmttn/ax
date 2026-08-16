@@ -1,6 +1,28 @@
 /**
  * graph-query: typed helpers for SurrealDB read resolvers.
  *
+ * SUPERSEDED - do not add call sites. `packages/lib/src/duckdb/query.ts` is the
+ * replacement and covers BOTH this module and `shared/query.ts`:
+ *
+ *     queryOptional      -> cacheFirst          runQuery       -> runCacheQuery
+ *     queryMany          -> cacheRows           runSingleQuery -> runCacheSingleQuery
+ *     queryPagedWithCount-> cachePaged          interpolateRid -> deleted (ids bind)
+ *
+ * Wave 3's `c-read-seam` moved the `ax sessions show` chain across (see
+ * `apps/axctl/src/queries/session-detail-cache.ts` for the worked example) and
+ * left this file standing only for the readers whose own chunks still own them:
+ *
+ *   chunk 2b: queries/session-turn-content.ts
+ *   chunk 2c: dashboard/{project,session-compare,session-inspect,skill-graph,
+ *             tool-failures}.ts
+ *   chunk 2d: share/exporter.ts
+ *
+ * BE CAREFUL READING THE POLICY BELOW. Both defensive helpers catch `DbError`
+ * and degrade - but SurrealDB is WRITE-FROZEN and still REACHABLE, so a query
+ * here now succeeds and returns `[]`. That never trips the catch, so there is no
+ * log line and no signal: every one of the modules above is quietly answering
+ * with empty results today. Deleting this file is `c-surreal-delete`.
+ *
  * Dashboard read paths kept restating the same skeleton:
  *
  *   Effect.gen(function* () {

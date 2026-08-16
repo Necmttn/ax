@@ -11,6 +11,7 @@ import { prettyPrint } from "@ax/lib/json";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
+import { duckdbAssetPathOption } from "../../duckdb-embed-wiring.ts";
 import { runIngest, withIngestRunFinish, type RunIngestResult } from "../../ingest/run.ts";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import type { OtelRetentionResult } from "../../otel/retention.ts";
@@ -252,11 +253,13 @@ export const maintenanceCacheWriteOptions = (
     readonly lockPath: string;
     readonly schemaSql: string;
     readonly publish: false;
+    readonly assetPath?: string;
 } => ({
     livePath: posixPath.join(dataDir, "ax-live.duckdb"),
     lockPath,
     schemaSql: DUCKDB_SCHEMA_SQL,
     publish: false,
+    ...duckdbAssetPathOption(),
 });
 
 /** One-line maintenance summary (F5/F6): reports pruned/deleted counts (or

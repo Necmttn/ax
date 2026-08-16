@@ -6,7 +6,8 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { LegacySurrealAppLayer } from "@ax/lib/layers";
-import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
@@ -222,14 +223,9 @@ const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, Surre
 type CliProgram = Effect.Effect<void, unknown, never>;
 
 /**
- * Provide `LegacySurrealAppLayer` (AppLayer + a live SurrealClient) and a
+ * Provide LegacySurrealAppLayer (SurrealClient + AxConfig + ProcessService) and a
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
- *
- * The SurrealDB client is named at THIS site rather than inherited from
- * `AppLayer` (wave 3): `withIngest` and `withCache` compose the same
- * `AppLayer` and get no database client at all, so which runtimes still open a
- * websocket is now visible in three lines of this file.
  *
  * Every such command also gets the stale-graph warning (#697): one indexed
  * query, stderr only, before the command body. This is deliberately a
@@ -244,13 +240,13 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
     );
 
 /**
- * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the
+ * Provide IngestRuntimeLayer (LegacySurrealAppLayer + StageRegistryDefault) for the
  * ingest command so the CLI handler can yield* StageRegistry.
  *
  * Transport selection for the ingest live-trace spans:
  *   - `--debug`            → ConsoleTransport (raw JSON events to stderr)
  *   - interactive terminal → PipelineTraceTransport (animated step pipeline)
- *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from AppLayer), so
+ *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from LegacySurrealAppLayer), so
  *     machine-readable stdout (e.g. `--progress=json`) stays clean.
  * All transports write to **stderr**, never stdout.
  */
@@ -305,7 +301,7 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
                         ? pipelineTraceTransportLayer("plain", resolveProgressStages(args))
                         : undefined;
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
-    // not merged on top of the already-built AppLayer - otherwise the sink keeps
+    // not merged on top of the already-built LegacySurrealAppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
     // `JudgmentLive` rides along because judgment-domain ingest stages (skills'
     // frontmatter role tags, digest's open-proposal count) resolve `Judgment`.
@@ -322,16 +318,6 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         // telemetry_of edges, so it needs the lock-held live writer, not a
         // post-hoc tap on a runtime that no longer holds one.
         withoutCacheRead,
-        // The PANICKING SurrealClient, not a live one (wave 3,
-        // `c-ingest-cutover`). `runCli`'s requirement is the union across every
-        // registered command, so `SurrealClient` has to be satisfiable here even
-        // though ingest never resolves it - the same reason `withoutDb` and
-        // `withCache` provide the proxy. Satisfying it with the panicking
-        // sentinel rather than `SurrealClientLive` is what makes `ax ingest`
-        // work on a machine with no SurrealDB at all, and turns any residual
-        // reader that sneaks back into a stage into a loud throw instead of an
-        // empty answer from a write-frozen engine.
-        Effect.provideService(SurrealClient, throwingSurrealClient()),
         Effect.provide(layer),
         Effect.scoped,
     );
@@ -347,7 +333,7 @@ const throwingSurrealClient = (): SurrealClientShape =>
     new Proxy({} as SurrealClientShape, {
         get(_target, prop) {
             throw new Error(
-                `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
+                `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without LegacySurrealAppLayer`,
             );
         },
     });
@@ -361,7 +347,7 @@ const throwingSurrealClient = (): SurrealClientShape =>
 const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
     // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
     // @effect/platform-native and require FileSystem + Path. Provide the real
-    // Bun-backed layers here (no DB), so they run without dragging in AppLayer's
+    // Bun-backed layers here (no DB), so they run without dragging in LegacySurrealAppLayer's
     // SurrealClient connect path.
     runCli(args).pipe(
         Effect.provideService(SurrealClient, throwingSurrealClient()),
@@ -374,7 +360,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
  * layers, `ProcessService` (git, for `--scope=here`), and the throwing no-DB
  * SurrealClient proxy.
  *
- * No `AppLayer`, so no SurrealDB connect on the way in: `ax recall` works on a
+ * No `LegacySurrealAppLayer`, so no SurrealDB connect on the way in: `ax recall` works on a
  * machine that has never run SurrealDB, which is the whole point of the v2
  * cut-over. And no `withIngestStalenessPreflight` - that warning is one indexed
  * SurrealDB query, so it belongs to the un-ported half of the CLI (the ported
@@ -394,7 +380,7 @@ const withCache = (args: ReadonlyArray<string>): CliProgram =>
         Effect.scoped,
     );
 
-// Commands whose handlers reach into SurrealClient via AppLayer (or the
+// Commands whose handlers reach into SurrealClient via LegacySurrealAppLayer (or the
 // ingest superset layer). Anything outside this set runs through `withoutDb`
 // (or, for a v2-ported command, `withCache`) so the user gets fast, honest
 // errors (e.g. "unknown command") instead of a 5s connect timeout. Derived - do

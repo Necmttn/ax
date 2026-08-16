@@ -17,7 +17,7 @@
  * routes recover once the DB comes up (mirrors serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
- * (serve-runtime.ts), so AppLayer's services - the SurrealDB connection,
+ * (serve-runtime.ts), so LegacySurrealAppLayer's services - the SurrealDB connection,
  * trace sink - are built ONCE and reused by both the contract routes and
  * the legacy routes' runner.
  */
@@ -27,8 +27,9 @@ import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
 import { LegacySurrealAppLayer } from "@ax/lib/layers";
-import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
+import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
@@ -135,9 +136,9 @@ export interface MakeContractWebHandlerOptions {
     /** Durable Streams sidecar handle, or null when it could not start
      *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
     readonly ingestStream: DurableIngestStream | null;
-    /** Share with the server runtime so AppLayer builds once (see above). */
+    /** Share with the server runtime so LegacySurrealAppLayer builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
-    /** Test seam: services the handlers need (default: `LegacySurrealAppLayer`). */
+    /** Test seam: services the handlers need (default: production LegacySurrealAppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
     /**
      * Test seam for the published-snapshot reader (default: `CacheReadLive`,

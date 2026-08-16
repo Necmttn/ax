@@ -2,26 +2,21 @@
  * surreal: the Graph Access Toolkit - the single shared module of safe
  * Storage Backend (SurrealDB) access primitives that query modules compose.
  *
- * Five sections, each previously its own file (now deprecated re-export shims):
+ * WHAT IS LEFT AFTER WAVE 3's `c-read-seam`. Only the parts that emit
+ * SurrealQL TEXT, and they exist purely to keep the not-yet-ported readers
+ * compiling until their own chunk lands:
  *
- *   1. LITERALS / ESCAPING        (was surql.ts) - turn JS values into
- *      SurrealQL literals so escaping is defined exactly once.
- *   2. TYPED ROW FIELD ACCESS     (was row-fields.ts) - extract typed values
- *      from `Record<string, unknown>` result rows.
- *   3. RECORD SELECTION           (was record-select.ts) - the one reliable
- *      shape for bulk fetch-by-record-id and the home of the 3.0.x id-IN quirk.
- *   4. STATEMENT EXECUTION        (was statement-exec.ts) - chunked execution
- *      of a batch of SurrealQL statements.
- *   5. RECORD-ID KEY DERIVATION   (was derive-keys.ts) - canonical
- *      key/timestamp helpers for building SurrealDB record IDs.
+ *   1. LITERALS / ESCAPING  - turn JS values into SurrealQL literals so
+ *      escaping is defined exactly once.
+ *   2. RECORD SELECTION     - the one reliable shape for bulk fetch-by-record-id
+ *      and the home of the SurrealDB 3.0.x id-IN quirk.
  *
- * The typed read DSL (`query.ts` / `graph-query.ts`) is its own module and
- * composes these primitives; it is intentionally NOT folded in here.
+ * Everything engine-NEUTRAL moved to `./row-fields.ts` (re-exported at the
+ * bottom, so existing import sites are untouched), and statement execution was
+ * deleted outright - see the note above that re-export. This whole file goes in
+ * `c-surreal-delete`; `row-fields.ts` does not.
  */
 
-import { Array as Arr, Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../db.ts";
-import type { DbError } from "../errors.ts";
 import { recordLiteral } from "../ids.ts";
 
 // ============================================================================
@@ -219,136 +214,9 @@ export const surrealValue = (value: unknown): string => {
     return surrealJson(value);
 };
 
-// ============================================================================
-// 2. TYPED ROW FIELD ACCESS
-// ----------------------------------------------------------------------------
-// SurrealDB hands back `Record<string, unknown>`; a missing column reads as
-// `undefined`, datetimes arrive as `Date` or ISO string depending on path, and
-// record ids as strings or `RecordId`-like objects. Every dashboard read used
-// to redefine these same guards. They live here once.
-// ============================================================================
-
-export const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** Non-empty string at `key`, else `null`. */
-export const stringField = (
-    row: Record<string, unknown>,
-    key: string,
-): string | null => {
-    const v = row[key];
-    return typeof v === "string" && v.length > 0 ? v : null;
-};
-
-/** ISO datetime string at `key` (accepts Date or string or `{toJSON}`), else
- *  `null`. */
-export const dateField = (
-    row: Record<string, unknown>,
-    key: string,
-): string | null => {
-    const v = row[key];
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString();
-    if (v && typeof v === "object" && "toJSON" in v) {
-        const j = (v as { toJSON: () => unknown }).toJSON();
-        if (typeof j === "string" && j.length > 0) return j;
-    }
-    return null;
-};
-
-/** Finite number at `key`, else `null` (no coercion - a string `"3"` is
- *  `null`). Naming follows metrics/util.ts `numOrNull`. */
-export const numberFieldOrNull = (
-    row: Record<string, unknown>,
-    key: string,
-): number | null => {
-    const v = row[key];
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
-};
-
-/** Aggregate count at `key`, coerced from any numeric-ish value (string
- *  counts, Date no); non-finite or missing → `0`. Named `countField` (not
- *  `numberFieldOrZero`) so the coercing/defaulting helper can't be confused
- *  with the strict `numberFieldOrNull` one suffix away. Use for aggregate
- *  counts where a missing column means zero. */
-export const countField = (
-    row: Record<string, unknown>,
-    key: string,
-): number => {
-    const v = Number(row[key] ?? 0);
-    return Number.isFinite(v) ? v : 0;
-};
-
-/**
- * Coerce a row field to a string.
- *
- * `String(v)` is called on non-null/undefined values so numbers, booleans,
- * and `RecordId`-like objects (whose `.toString()` emits `table:key`) all
- * produce readable strings rather than `'[object Object]'`. Null / undefined
- * fall back to `fallback` (default `""`).
- *
- * Use this instead of `String(row[key] ?? "")` so the coercion is named and
- * centrally tested. Distinct from the strict `stringField` which returns null
- * for any non-string input (no coercion).
- */
-export const stringFieldOr = (
-    row: Record<string, unknown>,
-    key: string,
-    fallback = "",
-): string => {
-    const v = row[key];
-    return v === null || v === undefined ? fallback : String(v);
-};
-
-// ---------------------------------------------------------------------------
-// VALUE-FORM coercers - shared bodies for the deprecated local copies in
-// metrics/util.ts, dashboard/cost-query.ts, etc.  Named by behavior, not by
-// coerce* vocabulary (spec §F).  New DB-row reads should prefer the ROW-form
-// helpers above (countField, stringFieldOr); these value-form variants exist
-// only as the canonical tested implementation the shims re-export.
-// ---------------------------------------------------------------------------
-
-/**
- * Coerce any value to a finite number, `null` for null / undefined /
- * non-finite (including NaN). Unlike the strict `numberFieldOrNull` (which
- * rejects string `"3"` → null), this calls `Number(v)` first so string counts
- * and similar coercible values are handled.
- *
- * VALUE-form sibling of `numberFieldOrNull`.
- */
-export const numberOrNull = (v: unknown): number | null => {
-    if (v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-};
-
-/**
- * Coerce any value to a finite number, `0` for null / undefined / non-finite.
- * VALUE-form sibling of `countField`.
- */
-export const numberOrZero = (v: unknown): number => numberOrNull(v) ?? 0;
-
-/**
- * Non-empty string or null; null for any non-string input (no coercion).
- * VALUE-form sibling of `stringField`. Use `stringFieldOr` (or `String(v)`)
- * when coercing numbers / RecordIds to a string is acceptable.
- */
-export const stringOrNull = (v: unknown): string | null =>
-    typeof v === "string" && v.length > 0 ? v : null;
-
-/** A record id rendered as a string - accepts a string or a `RecordId`-like
- *  object with a meaningful `toString`. */
-export const recordIdString = (v: unknown): string | null => {
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v && typeof v === "object" && "toString" in v) {
-        const s = String(v);
-        return s.length > 0 ? s : null;
-    }
-    return null;
-};
 
 // ============================================================================
-// 3. RECORD SELECTION
+// 2. RECORD SELECTION
 // ----------------------------------------------------------------------------
 // The ONE reliable shape for bulk fetch-by-record-id, and the single home of
 // the SurrealDB id-IN-list quirk documentation.
@@ -441,196 +309,34 @@ export const selectByIds = (fields: string, table: string, keys: readonly string
     `SELECT ${fields} FROM ${recordListSource(table, keys, pick)};`;
 
 // ============================================================================
-// 4. STATEMENT EXECUTION
+// 4. ENGINE-NEUTRAL HELPERS (moved out)
 // ----------------------------------------------------------------------------
-// The shared seam for executing a batch of SurrealQL statements. Statements
-// are joined and sent in chunks because a single `db.query()` with thousands
-// of statements blows past SurrealDB's parser limits and balloons memory.
+// Typed row-field access and record-id key derivation moved to
+// `./row-fields.ts` in wave 3 (`c-read-seam`): they have no Surreal dependency
+// and must survive `c-surreal-delete`, which deletes this file whole. The
+// re-export keeps the existing `@ax/lib/shared/surreal` import sites working
+// until their own chunk ports them; NEW callers import `./row-fields.ts`.
 //
-// This is the EXECUTE counterpart to the LITERALS section (which formats
-// literals) and `graph-query.ts` (which runs typed reads). Every ingest stage
-// that builds `UPSERT`/`RELATE`/`CREATE` statement arrays routes them through
-// here, so chunking + concurrency policy lives in exactly one place.
+// Statement execution (`executeStatements` / `executeStatementsWith`) was
+// DELETED in the same pass, not moved: after wave 2 ported every ingest writer
+// onto the DuckDB seam, its only remaining caller was the dead
+// `shared/watermark.ts`, which went with it.
 // ============================================================================
 
-/** Default statements per `db.query()` call. Matches the long-standing
- *  evidence-writers value; safely under SurrealDB's parser limits. */
-export const DEFAULT_CHUNK_SIZE = 250;
-
-export interface ExecuteOptions {
-    /** Statements per `db.query()` call. Defaults to {@link DEFAULT_CHUNK_SIZE}. */
-    readonly chunkSize?: number;
-    /** Span label identifying the caller (e.g. "upsertTurns") so DB time is
-     *  attributable per write-helper in a trace viewer. Default "statements". */
-    readonly label?: string;
-}
-
-/** Execute pre-built statements against an already-resolved client. Use when
- *  the caller already holds a `SurrealClientShape` (e.g. inside a larger
- *  `Effect.gen` that resolved `SurrealClient` once). */
-export const executeStatementsWith = (
-    db: SurrealClientShape,
-    statements: readonly string[],
-    options?: ExecuteOptions,
-): Effect.Effect<void, DbError> => {
-    if (statements.length === 0) return Effect.void;
-    const chunks = Arr.chunksOf(statements, options?.chunkSize ?? DEFAULT_CHUNK_SIZE);
-    return Effect.forEach(
-        chunks,
-        (chunk, i) =>
-            db.query(chunk.join("")).pipe(
-                Effect.asVoid,
-                Effect.withSpan("db.chunk", {
-                    attributes: { "db.chunk.index": i, "db.chunk.statements": chunk.length },
-                }),
-            ),
-        { discard: true },
-    ).pipe(
-        Effect.withSpan(`db.exec:${options?.label ?? "statements"}`, {
-            attributes: {
-                "db.exec.statements": statements.length,
-                "db.exec.chunks": chunks.length,
-            },
-        }),
-    );
-};
-
-/** Execute pre-built statements, resolving `SurrealClient` from context. */
-export const executeStatements = (
-    statements: readonly string[],
-    options?: ExecuteOptions,
-): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, statements, options);
-    });
-
-// ============================================================================
-// 5. RECORD-ID KEY DERIVATION
-// ----------------------------------------------------------------------------
-// Canonical key/timestamp seam for ingest derive stages.
-//
-// All ingest derive stages that build SurrealDB record IDs must import from
-// here. `safeKeyPart` output feeds record IDs directly, so the 96-char slice
-// cap is load-bearing - SurrealDB record keys have a practical length limit
-// and a consistent cap prevents divergence across stages.
-//
-// Previously each derive stage defined its own copies of these helpers; those
-// copies had started to diverge. This module is the single source of truth.
-// Do not redefine these helpers locally - import them from here.
-// ============================================================================
-
-/**
- * The union of input types accepted by `isoTimestamp`.
- * - `Date`            - JS Date object
- * - `string`          - already-formatted ISO string, passed through as-is
- * - SurrealDB DateTime - any object exposing `toISOString()`; detected
- *                        structurally (see `isoTimestamp` for why not by name)
- */
-export type TimestampInput =
-    | Date
-    | string
-    | { toISOString(): string };
-
-/**
- * Sanitize an arbitrary string into a safe SurrealDB record-key segment.
- *
- * Rules applied in order:
- * 1. Replace `:` with `__` (plugin-namespaced skill names use `:`)
- * 2. Replace any remaining non-alphanumeric characters with `_`
- * 3. Collapse runs of 3+ underscores to `__`
- * 4. Trim leading and trailing underscores
- * 5. If the result is non-empty, slice to 96 chars (SurrealDB key hygiene)
- * 6. If the result is empty, return the hex hash of the original value
- */
-export const safeKeyPart = (value: string): string => {
-    const sanitized = value
-        .replace(/:/g, "__")
-        .replace(/[^a-zA-Z0-9_]+/g, "_")
-        .replace(/_{3,}/g, "__")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized.slice(0, 96) : Bun.hash(value).toString(16);
-};
-
-/**
- * Extract the key portion from a SurrealDB record-ID value.
- *
- * Handles:
- * - `"table:key"` strings - strips the table prefix (expected or first colon)
- * - Backtick- or angle-bracket-quoted keys - strips the quoting characters
- * - Objects with an `.id` property - coerces `.id` to string
- *
- * Returns `null` for null/undefined, empty strings, or unrecognised types.
- */
-export const recordKeyPart = (value: unknown, expectedTable?: string): string | null => {
-    if (value === null || value === undefined) return null;
-    if (typeof value === "string") {
-        let raw = value.trim();
-        const prefix = expectedTable ? `${expectedTable}:` : null;
-        if (prefix && raw.startsWith(prefix)) raw = raw.slice(prefix.length);
-        else if (raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
-        if ((raw.startsWith("`") && raw.endsWith("`")) || (raw.startsWith("⟨") && raw.endsWith("⟩"))) {
-            raw = raw.slice(1, -1);
-        }
-        return raw.length > 0 ? raw : null;
-    }
-    if (typeof value === "object" && "id" in value) {
-        const id = (value as { id: unknown }).id;
-        return id === null || id === undefined ? null : String(id);
-    }
-    return null;
-};
-
-/**
- * Coerce a timestamp value to an ISO 8601 string.
- *
- * Branch order:
- * 1. `value instanceof Date`  → `value.toISOString()`
- * 2. Non-empty string         → pass through unchanged
- * 3. Any object exposing a `toISOString()` method (the SurrealDB DateTime) →
- *    `value.toISOString()`. We duck-type on the method rather than checking
- *    `constructor.name === "DateTime"`, because `bun build --compile` renames
- *    the bundled SDK class (observed as `DateTime3`), so an exact-name check
- *    silently falls through to epoch ONLY in the compiled binary - the #670
- *    "1970-01-01" friction-view timestamps that source builds never showed.
- * 4. Anything else (null / undefined / unknown) → epoch `new Date(0).toISOString()`
- *    and emits a `console.warn` so silent epoch timestamps surface as data bugs
- *    (symptom: `ax insights friction` events timestamped `1970-01-01 00:00:00`)
- */
-export const isoTimestamp = (value: TimestampInput | null | undefined): string => {
-    if (value instanceof Date) return value.toISOString();
-    if (typeof value === "string" && value.length > 0) return value;
-    if (
-        value &&
-        typeof value === "object" &&
-        typeof (value as { toISOString?: unknown }).toISOString === "function"
-    ) {
-        return (value as { toISOString(): string }).toISOString();
-    }
-    const typeDesc = (() => {
-        try {
-            if (value === null) return "null";
-            if (value === undefined) return "undefined";
-            const t = typeof value;
-            const ctor =
-                value != null && typeof value === "object"
-                    ? ((value as object).constructor?.name ?? "?")
-                    : undefined;
-            return ctor ? `${t}(${ctor})` : t;
-        } catch {
-            return "unknown";
-        }
-    })();
-    console.warn("[ax] isoTimestamp: unrecognized timestamp value, defaulting to epoch:", typeDesc);
-    return new Date(0).toISOString();
-};
-
-/**
- * Return the trimmed string if non-empty, otherwise `null`.
- * Returns `null` for any non-string input (number, object, null, undefined).
- */
-export const nonEmptyString = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-};
+export {
+    isRecord,
+    stringField,
+    dateField,
+    numberFieldOrNull,
+    countField,
+    stringFieldOr,
+    numberOrNull,
+    numberOrZero,
+    stringOrNull,
+    recordIdString,
+    safeKeyPart,
+    recordKeyPart,
+    isoTimestamp,
+    nonEmptyString,
+    type TimestampInput,
+} from "./row-fields.ts";

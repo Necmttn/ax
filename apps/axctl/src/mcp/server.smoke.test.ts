@@ -5,13 +5,20 @@
  * and we assert the registry/envelope shape directly.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildServer, wrapToolError, wrapToolResult } from "./server.ts";
 import { axMcpTools } from "./tools.ts";
 import { makeMcpRuntimePool } from "./runtime.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("mcp server smoke", { requireFts: true });
+
+const SMOKE_SESSION = "019e2531-b552-7b53-a029-c780adbb6560";
 
 const EXPECTED_TOOLS = [
     "recall",
@@ -306,68 +313,72 @@ describe("NavLink next[] wiring", () => {
         expect(result.next.some((l) => l.cmd?.includes("claude --resume"))).toBe(true);
     });
 
-    it("session_show returns full normalized turns when requested", async () => {
-        const sessionId = "019e2531-b552-7b53-a029-c780adbb6560";
-        let turnQueries = 0;
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            fallback: (sql) => {
-                if (sql.includes("FROM turn")) {
-                    turnQueries += 1;
-                    return [[{
-                        id: "turn:one",
+    dtest("session_show returns full normalized turns when requested", async () => {
+        // Runs against a REAL published snapshot: this tool goes through
+        // `fetchEnrichedSession` -> `fetchSessionView`, the chain wave 3's
+        // `c-read-seam` ported. The `testing/surreal.ts` fake it used before
+        // answered on a `sql.includes("FROM turn")` substring match, which
+        // cannot tell a working query from one that returns nothing.
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-mcp-session-show-"), dylibPath, (w: CacheWriteService) =>
+                Effect.gen(function* () {
+                    yield* w.put("session", {
+                        id: SMOKE_SESSION,
+                        source: "pi",
+                        project: "test-project",
+                        cwd: "/tmp/test-project",
+                        started_at: new Date("2026-05-28T10:00:00.000Z"),
+                        ended_at: new Date("2026-05-28T10:10:00.000Z"),
+                    });
+                    yield* w.put("turn", {
+                        id: "turn-one",
+                        session: SMOKE_SESSION,
                         seq: 1,
-                        ts: "2026-05-28T10:00:01Z",
+                        ts: new Date("2026-05-28T10:00:01.000Z"),
                         role: "user",
                         message_kind: "user",
                         intent_kind: "task",
                         text: "Full Pi turn text through MCP",
                         text_excerpt: "Full Pi turn…",
+                        has_tool_use: false,
                         has_error: false,
-                    }]];
-                }
-                if (sql.includes("FROM session:")) {
-                    return [[{
-                        id: `session:⟨${sessionId}⟩`,
-                        project: "test-project",
-                        cwd: "/tmp/test-project",
-                        source: "pi",
-                        started_at: "2026-05-28T10:00:00Z",
-                        ended_at: "2026-05-28T10:10:00Z",
-                    }]];
-                }
-                return [[]];
-            },
-        });
+                    });
+                }),
+            ),
+        );
+        const layer = Layer.mergeAll(
+            readFixture(fixture.snapshotPath, dylibPath),
+            EmptyJudgmentTestLayer,
+        );
         const rt = {
             runPromise: (effect: Effect.Effect<unknown, unknown, never>) =>
-                Effect.runPromise(effect.pipe(Effect.provide(tc.layer))),
+                Effect.runPromise(effect.pipe(Effect.provide(layer)) as Effect.Effect<unknown, unknown>),
         } as never;
 
         const withoutTurns = (await byName("session_show").run(
-            { sessionId },
+            { sessionId: SMOKE_SESSION },
             rt,
         )) as Record<string, unknown>;
 
-        expect(turnQueries).toBe(0);
+        // The session must RESOLVE, or "no turns key" proves nothing.
+        expect((withoutTurns.session as { overview: { id: string } }).overview.id).toBe(SMOKE_SESSION);
         expect("turns" in withoutTurns).toBe(false);
 
         const result = (await byName("session_show").run(
-            { sessionId, turns: "full" },
+            { sessionId: SMOKE_SESSION, turns: "full" },
             rt,
         )) as { turns: ReadonlyArray<Record<string, unknown>> | null };
 
-        expect(turnQueries).toBe(1);
         expect(result.turns?.[0]).toEqual({
             seq: 1,
-            ts: "2026-05-28T10:00:01Z",
+            ts: "2026-05-28T10:00:01.000Z",
             role: "user",
             message_kind: "user",
             intent_kind: "task",
             text: "Full Pi turn text through MCP",
             has_error: false,
         });
-    });
+    }, 60_000);
 });
 
 describe("result wrapping", () => {

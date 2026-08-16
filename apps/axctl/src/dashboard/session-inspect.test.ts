@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
 import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
@@ -210,7 +211,10 @@ describe("fetchSessionInspect graph-backed paging", () => {
         const payload = await Effect.runPromise(
             fetchSessionInspect("session-a", { turnOffset: 0, turnLimit: 100 }).pipe(
                 Effect.provideService(SurrealClient, db),
-                Effect.provide(BunFsLayer),
+                // The graph-backed path never asks for the raw_file hint (the
+                // assertion below pins that), so an empty cache is the right
+                // stand-in; session-inspect's own port is chunk 2c.
+                Effect.provide(Layer.merge(makeTestCacheRead({ fallback: [] }).layer, BunFsLayer)),
             ),
         );
 

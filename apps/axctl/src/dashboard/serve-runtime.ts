@@ -20,7 +20,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SurrealClientLive } from "@ax/lib/db";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { JudgmentLive } from "../judgment.ts";
 import type { DashboardEnv, EffectRunner } from "./router/router.ts";
 
