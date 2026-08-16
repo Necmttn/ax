@@ -521,9 +521,17 @@ export const commandOutcomeSql = (since: number | undefined): string =>
     `SELECT id, session, tool_call AS toolCall, CAST(ts AS VARCHAR) AS ts, kind, status, command_norm AS commandNorm
      FROM command_outcome WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
+// `tokens_before` is BIGINT and this stage reads through `write.raw`, which
+// applies no column decoder - so the cell arrives as a JS `bigint`, not the
+// `number` CompactionRow declares. It then lands in the boundary event's
+// `attrs`, and `jsonParam` (JSON.stringify) THROWS on a bigint, killing the
+// whole ingest run. Projecting as DOUBLE fixes the decode where the value is
+// read, which is the only place that can also make the declared type true;
+// coercing at the write boundary would silence this one crash and leave every
+// other consumer of the row holding a bigint behind a `number` type.
 const compactionSql = (since: number | undefined): string =>
     `SELECT id, session, CAST(ts AS VARCHAR) AS ts,
-            trigger, strategy, tokens_before AS tokensBefore, summary
+            trigger, strategy, CAST(tokens_before AS DOUBLE) AS tokensBefore, summary
      FROM compaction WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 const planSnapshotSql = (since: number | undefined): string =>
@@ -554,8 +562,12 @@ const editToolCallSql = (since: number | undefined): string => {
 // Objective: the run's stated goal. `task`-kind user turns only (real prompts,
 // not context/control wrappers); earliest-per-session is picked in JS by seq.
 const objectiveSql = (since: number | undefined): string =>
+    // `turn.seq` is BIGINT for the same reason as `tokens_before` above; it is
+    // only compared (min-per-session) today rather than serialized, so it does
+    // not crash - which is exactly why it is cast here too, before some later
+    // reader puts a value its type says is a `number` into an attrs bag.
     `SELECT id, session, CAST(ts AS VARCHAR) AS ts,
-            seq, text_excerpt AS textExcerpt
+            CAST(seq AS DOUBLE) AS seq, text_excerpt AS textExcerpt
      FROM turn WHERE session IS NOT NULL AND role = 'user' AND message_kind = 'task' ${sinceAnd(since)}`;
 
 // Policy decisions: hook invocations whose effect is a real intervention.
