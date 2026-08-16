@@ -31,6 +31,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { fetchClassifiedSkillIds } from "../dashboard/role-queries.ts";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ export interface SkillHygieneInput {
 }
 
 // ---------------------------------------------------------------------------
-// SQL - deref-free, three flat statements
+// SQL - deref-free, two flat statements
 // ---------------------------------------------------------------------------
 
 // Record ids are coerced to strings IN SQL via type::string() (sibling idiom,
@@ -77,7 +78,6 @@ export interface SkillHygieneInput {
 const SQL = `
 SELECT type::string(out) AS sid, count() AS invocations, array::len(array::distinct(in.session)) AS sessions FROM invoked GROUP BY sid;
 SELECT type::string(id) AS id, name, dir_path, content_hash FROM skill;
-SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
 `;
 
 // ---------------------------------------------------------------------------
@@ -88,11 +88,13 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
     input: SkillHygieneInput,
 ) {
     const db = yield* SurrealClient;
-    const [counts, skills, classified] = yield* db.query<[
-        Array<{ sid: string; invocations: number; sessions: number }>,
-        Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
-        Array<string>,
-    ]>(SQL);
+    const [[counts, skills], classified] = yield* Effect.all([
+        db.query<[
+            Array<{ sid: string; invocations: number; sessions: number }>,
+            Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
+        ]>(SQL),
+        fetchClassifiedSkillIds(),
+    ]);
 
     // Build lookup structures from the flat result sets
     const classifiedIds = new Set(classified ?? []);

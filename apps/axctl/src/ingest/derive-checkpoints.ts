@@ -39,11 +39,11 @@
  */
 
 import { Effect, Schema } from "effect";
-import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
-import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
-import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { Judgment, NumberColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 export type CheckpointKind = "+3s" | "+10s" | "+30s";
 export type CheckpointVerdict =
@@ -62,19 +62,6 @@ export interface DeriveCheckpointsStats {
 export interface DeriveCheckpointsOpts {
     readonly now?: Date;
     readonly force?: boolean;
-}
-
-interface CheckpointExperimentRow {
-    readonly id: string;
-    readonly created_at: Date;
-    readonly opportunities: number;
-    readonly addressed: number;
-    readonly artifact_path: string | null;
-    readonly existing_kinds: string | null;
-    readonly current_frequency?: number | null;
-    readonly baseline_json?: string | null;
-    /** Sessions created after this experiment's accept time. Drives window cadence. */
-    readonly sessions_since_created: number;
 }
 
 export interface CheckpointMeasured {
@@ -128,87 +115,36 @@ export const dueCheckpointKinds = (
 export const checkpointKey = (experimentKey: string, kind: CheckpointKind): string =>
     stableId("checkpoint", [experimentKey, kind]);
 
-export const buildCheckpointRow = (params: {
-    readonly experimentKey: string;
-    readonly kind: CheckpointKind;
-    readonly measured: CheckpointMeasured;
-    readonly suggested: CheckpointVerdict;
-    readonly observedAt: Date;
-}) => {
-    const key = checkpointKey(params.experimentKey, params.kind);
-    // Map camelCase TS fields to the snake_case schema fields. Optional
-    // current/baseline frequency are emitted only when defined so the
-    // option<int> columns stay NONE for older rows.
-    const m = params.measured;
-    const measuredJson: Record<string, number | boolean> = {
-        opportunities: m.opportunities,
-        addressed: m.addressed,
-        ratio: m.ratio,
-        built: m.built,
-    };
-    if (typeof m.currentFrequency === "number") {
-        measuredJson.current_frequency = m.currentFrequency;
-    }
-    if (typeof m.baselineFrequency === "number") {
-        measuredJson.baseline_frequency = m.baselineFrequency;
-    }
-    return cacheRow({
-        id: key,
-        experiment: params.experimentKey,
-        kind: params.kind,
-        measured: jsonParam(measuredJson),
-        suggested: params.suggested,
-        user_verdict: null,
-        observed_at: tsParam(params.observedAt),
-    });
-};
-
-const CheckpointExperimentDbRow = Schema.Struct({
-    id: Schema.String,
-    created_at: TimestampColumn,
-    opportunities: NumberFromBigIntColumn,
-    addressed: NumberFromBigIntColumn,
-    artifact_path: Schema.NullOr(Schema.String),
-    existing_kinds: Schema.NullOr(Schema.String),
-    current_frequency: Schema.NullOr(NumberFromBigIntColumn),
-    baseline_json: Schema.NullOr(Schema.String),
-    sessions_since_created: NumberFromBigIntColumn,
-});
-
 export const deriveCheckpoints = (
-    write: CacheWriteService,
     opts: DeriveCheckpointsOpts = {},
-): Effect.Effect<DeriveCheckpointsStats, CacheWriteError> =>
+): Effect.Effect<DeriveCheckpointsStats, CacheReadError | JudgmentError, CacheRead | Judgment> =>
     Effect.gen(function* () {
+        const cache = yield* CacheRead;
+        const judgment = yield* Judgment;
         const now = opts.now ?? new Date();
-
-        const experiments: readonly CheckpointExperimentRow[] = yield* write.rows(CheckpointExperimentDbRow, `
-            SELECT
-                e.id, e.created_at, e.artifact_path,
-                (SELECT count(*) FROM opportunity o WHERE o.in_id = e.id) AS opportunities,
-                (SELECT count(*) FROM opportunity o WHERE o.in_id = e.id AND o.was_addressed) AS addressed,
-                (SELECT string_agg(c.kind, ',') FROM checkpoint c WHERE c.experiment = e.id) AS existing_kinds,
-                p.frequency AS current_frequency,
-                p.baseline AS baseline_json,
-                (SELECT count(*) FROM session s WHERE s.created_at > e.created_at) AS sessions_since_created
-            FROM experiment e
-            LEFT JOIN proposal p ON p.id = e.proposal
-            WHERE e.locked_verdict IS NULL
-        `);
+        const proposals = yield* listStoredProposals(100_000);
+        const experiments = proposals.filter((proposal) =>
+            proposal.experiment !== null && proposal.experiment.locked_verdict === null);
+        const CountRow = Schema.Struct({ count: NumberColumn });
 
         let inserted = 0;
         let skipped = 0;
-        const rows = [];
-        for (const exp of experiments) {
+        const writes: Array<Readonly<Record<string, SidecarParam>>> = [];
+        for (const proposal of experiments) {
+            const exp = proposal.experiment!;
             const experimentKey = exp.id;
-            const actualExisting = new Set(exp.existing_kinds?.split(",").filter(Boolean) ?? []);
-            const existing = new Set(opts.force ? [] : actualExisting);
-            const sessionsSince = Number(exp.sessions_since_created ?? 0);
+            const existing = new Set(opts.force ? [] : exp.checkpoints.map((checkpoint) => checkpoint.kind));
+            const [opportunityRows, addressedRows, sessionRows] = yield* Effect.all([
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ?", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ? AND was_addressed = true", [experimentKey]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM session WHERE created_at > ?", [exp.created_at]),
+            ], { concurrency: 3 });
+            const sessionsSince = sessionRows[0]?.count ?? 0;
             const due = dueCheckpointKinds(sessionsSince, existing);
             if (due.length === 0) continue;
 
-            const opportunities = Number(exp.opportunities ?? 0);
-            const addressed = Number(exp.addressed ?? 0);
+            const opportunities = opportunityRows[0]?.count ?? 0;
+            const addressed = addressedRows[0]?.count ?? 0;
             const ratio = opportunities === 0 ? 0 : addressed / opportunities;
 
             // proposal.baseline is stored as a JSON string (schema rule:
@@ -216,13 +152,13 @@ export const deriveCheckpoints = (
             // older proposals predating the frequency snapshot won't have
             // baseline.frequency and we just leave it undefined.
             let baselineFrequency: number | undefined;
-            const rawBaseline = exp.baseline_json;
+            const rawBaseline = proposal.baseline;
             if (typeof rawBaseline === "string" && rawBaseline.length > 0) {
                 const parsed = safeJsonParse<{ frequency?: number }>(rawBaseline);
                 if (parsed && typeof parsed.frequency === "number") baselineFrequency = parsed.frequency;
                 // non-JSON baseline (legacy) - null parse is ignored.
             }
-            const rawCurrent = exp.current_frequency;
+            const rawCurrent = proposal.frequency;
             const currentFrequency =
                 typeof rawCurrent === "number" && Number.isFinite(rawCurrent)
                     ? rawCurrent
@@ -239,22 +175,28 @@ export const deriveCheckpoints = (
             const suggested = computeSuggestedVerdict(measured);
 
             for (const kind of due) {
-                if (opts.force && actualExisting.has(kind)) {
-                    yield* write.exec("DELETE FROM checkpoint WHERE id = ?", [checkpointKey(experimentKey, kind)]);
-                }
-                rows.push(buildCheckpointRow({
-                    experimentKey,
+                writes.push({
+                    id: checkpointKey(experimentKey, kind),
+                    experiment: experimentKey,
                     kind,
-                    measured,
+                    measured: JSON.stringify({
+                        opportunities: measured.opportunities,
+                        addressed: measured.addressed,
+                        ratio: measured.ratio,
+                        built: measured.built,
+                        ...(measured.currentFrequency === undefined ? {} : { current_frequency: measured.currentFrequency }),
+                        ...(measured.baselineFrequency === undefined ? {} : { baseline_frequency: measured.baselineFrequency }),
+                    }),
                     suggested,
-                    observedAt: now,
-                }));
+                    user_verdict: null,
+                    observed_at: now,
+                });
                 inserted += 1;
             }
             skipped += (CHECKPOINT_WINDOWS_SESSIONS.length - due.length);
         }
 
-        yield* write.putMany("checkpoint", rows);
+        yield* judgment.transaction((transaction) => transaction.putMany("checkpoint", writes));
         return {
             experimentsScanned: experiments.length,
             checkpointsInserted: inserted,

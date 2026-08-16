@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect";
 import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
-import { recommend } from "../improve/recommend.ts";
 import { loadPricingCatalogForModels } from "../metrics/cost-estimate.ts";
 import { persistFragilityCascade, readFragilityCascade } from "../metrics/fragility-cascade.ts";
 import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
@@ -25,7 +24,6 @@ const RECENT = new Date();
 const LATER = new Date(RECENT.getTime() + 1_000);
 
 interface LiveResults {
-    readonly recommend: unknown;
     readonly costEstimate: unknown;
     readonly fragilityCascade: unknown;
     readonly sessionChurn: unknown;
@@ -43,17 +41,6 @@ let fixturePromise: Promise<{ readonly snapshotPath: string; readonly live: Live
 
 const seedCurrentRows = (write: import("@ax/lib/duckdb/seam").CacheWriteService) =>
     Effect.gen(function* () {
-        yield* write.put("proposal", {
-            id: "proposal-live",
-            form: "guidance",
-            title: "Verify the current cache",
-            hypothesis: "A live reader must use rows from this ingest run.",
-            dedupe_sig: "live-read",
-            frequency: 4n,
-            confidence: "high",
-            status: "open",
-            origin: "mined",
-        });
         yield* write.put("agent_model", {
             id: "model-live",
             name: "gpt-5",
@@ -228,7 +215,6 @@ const queryAll = (read: CacheReadService): Effect.Effect<LiveResults, unknown> =
             sessionTelemetryLatency(read, ["child"]),
         ]);
         return {
-            recommend: yield* recommend(read, { limit: 10 }),
             costEstimate: yield* loadPricingCatalogForModels(read, []),
             fragilityCascade: yield* readFragilityCascade(read),
             sessionChurn: yield* fetchSessionChurnSummary(read, {
@@ -277,13 +263,6 @@ const snapshotResults = async (snapshotPath: string): Promise<LiveResults> =>
 const assertParity = async (key: keyof LiveResults): Promise<void> => {
     const fixture = await setupFixture();
     const snapshot = await snapshotResults(fixture.snapshotPath);
-    if (key === "recommend") {
-        const withoutClock = (value: unknown) =>
-            (value as ReadonlyArray<Record<string, unknown>>).map(({ score: _score, ...item }) => item);
-        expect(withoutClock(snapshot[key])).toEqual(withoutClock(fixture.live[key]));
-        expect(withoutClock(snapshot[key]).length).toBeGreaterThan(0);
-        return;
-    }
     expect(snapshot[key]).toEqual(fixture.live[key]);
     if (key === "sessionLoc" || key === "sessionMetrics") {
         expect((snapshot[key] as ReadonlyMap<string, unknown>).size).toBeGreaterThan(0);
@@ -311,7 +290,6 @@ const assertParity = async (key: keyof LiveResults): Promise<void> => {
     }
 };
 
-dtest("recommend reads the same live and published proposal rows", () => assertParity("recommend"));
 dtest("cost estimate reads the same live and published pricing rows", () => assertParity("costEstimate"));
 dtest("fragility cascade reads the same live and published edges", () => assertParity("fragilityCascade"));
 dtest("session churn reads the same live and published evidence", () => assertParity("sessionChurn"));

@@ -1,12 +1,15 @@
 import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Judgment } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
+import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { recordRef, surrealString } from "@ax/lib/shared/surql";
 import { ClassifierReviewPipelineService, ClassifierReviewPipelineServiceLive, type ClassifierReviewPipelineInputValues, nodeFileOutputVerifier } from "../classifiers/review-pipeline-service.ts";
 import { catchDbErrorAndExit } from "./output.ts";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import {
     workflowCandidateSql,
     WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES,
@@ -16,6 +19,8 @@ import {
     syncWorkflowCandidateReportFromBrief,
     syncWorkflowCandidateTopicReportFromBrief,
     buildWorkflowCandidateGuidanceProposalPlan,
+    workflowCandidateProposalHypothesis,
+    workflowCandidateSuggestedGuidance,
     buildWorkflowCandidateTaskDrafts,
     buildWorkflowCandidateReport,
     attachWorkflowCandidatePersistedReviewFacts,
@@ -93,6 +98,113 @@ import type {
 } from "../classifiers/workflow-candidate-types.ts";
 export * from "../classifiers/workflow-candidate-types.ts";
 export * from "../classifiers/workflow-candidate-helpers.ts";
+
+const loadWorkflowProposalRows = (input: {
+    readonly status: string;
+    readonly search?: string;
+    readonly limit: number;
+}) => listStoredProposals({
+    status: input.status,
+    dedupePrefixes: WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES,
+    ...(input.search === undefined ? {} : { search: input.search }),
+    limit: Math.max(1, input.limit),
+}).pipe(Effect.map((proposals) => proposals
+    .map((proposal): WorkflowCandidateProposalListRow => ({
+        proposal_id: `proposal:${proposal.id}`,
+        dedupe_sig: proposal.dedupe_sig,
+        title: proposal.title,
+        form: proposal.form,
+        status: proposal.status,
+        confidence: proposal.confidence,
+        frequency: proposal.frequency,
+        target: proposal.guidance_payload?.file_target ?? null,
+        section: proposal.guidance_payload?.section ?? null,
+        experiment_id: proposal.experiment ? `experiment:${proposal.experiment.id}` : null,
+        experiment_status: proposal.experiment?.status ?? null,
+        artifact_path: proposal.experiment?.artifact_path ?? null,
+        task_path: proposal.experiment?.task_path ?? null,
+        updated_at: (proposal.updated_at ?? proposal.created_at).toISOString(),
+    }))));
+
+const persistGuidanceProposalPlan = (
+    report: import("../classifiers/workflow-candidate-types.ts").WorkflowCandidateReport,
+    plan: ReturnType<typeof buildWorkflowCandidateGuidanceProposalPlan>,
+) => Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    const stored = yield* listStoredProposals(1_000);
+    const bySig = new Map(stored.map((proposal) => [proposal.dedupe_sig, proposal] as const));
+    const now = new Date();
+    yield* judgment.transaction((tx) => Effect.gen(function* () {
+        for (const promoted of plan.summary.proposals) {
+            if (promoted.status !== "created_or_refreshed") continue;
+            const task = report.promotion?.tasks.find((item) => item.candidate_id === promoted.candidate_id);
+            if (!task) continue;
+            const existing = bySig.get(promoted.dedupe_sig);
+            const id = existing?.id ?? stableId("proposal", [promoted.dedupe_sig]);
+            const candidateIds = task.candidate_ids ?? [task.candidate_id];
+            yield* tx.put("proposal", {
+                id,
+                form: "guidance",
+                title: promoted.title,
+                hypothesis: workflowCandidateProposalHypothesis(task, report),
+                dedupe_sig: promoted.dedupe_sig,
+                frequency: Math.max(1, candidateIds.length),
+                confidence: promoted.recommended_artifact.confidence,
+                status: existing?.status ?? "open",
+                origin: existing?.origin ?? "agent",
+                hypothesis_template: existing?.hypothesis_template ?? null,
+                evidence_query: existing?.evidence_query ?? null,
+                reject_reason: existing?.reject_reason ?? null,
+                baseline: prettyPrint({ source: "workflow_candidates", frequency: Math.max(1, candidateIds.length), candidate_ids: candidateIds, recommendation: task.recommended_artifact }),
+                created_at: existing?.created_at ?? now,
+                updated_at: now,
+            });
+            yield* tx.put("guidance_proposal", {
+                id: stableId("guidance_proposal", [id]),
+                proposal: id,
+                file_target: promoted.file_target,
+                section: promoted.section,
+                suggested_text: workflowCandidateSuggestedGuidance(task, report),
+            });
+        }
+    }));
+});
+
+const persistHarnessProposalPlan = (
+    report: WorkflowCandidateTopicReport,
+    plan: ReturnType<typeof buildWorkflowCandidateHarnessProposalPlan>,
+) => Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    const stored = yield* listStoredProposals(1_000);
+    const bySig = new Map(stored.map((proposal) => [proposal.dedupe_sig, proposal] as const));
+    const now = new Date();
+    yield* judgment.transaction((tx) => Effect.gen(function* () {
+        for (const promoted of plan.summary.proposals) {
+            if (promoted.status !== "created_or_refreshed") continue;
+            const candidate = report.candidates.candidates.find((item) => item.group_id === promoted.candidate_id);
+            if (!candidate) continue;
+            const existing = bySig.get(promoted.dedupe_sig);
+            const id = existing?.id ?? stableId("proposal", [promoted.dedupe_sig]);
+            yield* tx.put("proposal", {
+                id,
+                form: "harness_check",
+                title: promoted.title,
+                hypothesis: `${promoted.recommended_artifact.rationale} Evidence-backed workflow candidate: ${candidate.label}. The check should fail when the agent stops before producing applied classifier result evidence.`,
+                dedupe_sig: promoted.dedupe_sig,
+                frequency: Math.max(1, candidate.support_count),
+                confidence: promoted.recommended_artifact.confidence,
+                status: existing?.status ?? "open",
+                origin: existing?.origin ?? "agent",
+                hypothesis_template: existing?.hypothesis_template ?? null,
+                evidence_query: existing?.evidence_query ?? null,
+                reject_reason: existing?.reject_reason ?? null,
+                baseline: prettyPrint({ source: "workflow_topic_report", topic: report.topic, candidate_id: candidate.group_id, recommendation: promoted.recommended_artifact, examples: candidate.examples }),
+                created_at: existing?.created_at ?? now,
+                updated_at: now,
+            });
+        }
+    }));
+});
 const loadWorkflowCandidatePendingReviewTurnContexts = (
     db: SurrealClientShape,
     turnIds: readonly string[],
@@ -328,30 +440,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         const loadTopicReport = (topic: string) =>
             Effect.gen(function* () {
                 const status = input.proposalStatus ?? "all";
-                const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
-                    SELECT
-                        type::string(id) AS proposal_id,
-                        dedupe_sig,
-                        title,
-                        form,
-                        status,
-                        confidence,
-                        frequency,
-                        (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
-                        (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
-                        type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
-                        (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
-                        (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
-                        (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
-                        type::string(updated_at) AS updated_at
-                    FROM proposal
-                    WHERE (${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})
-                        ${status === "all" ? "" : `AND status = ${surrealString(status)}`}
-                        AND (string::lowercase(title) CONTAINS ${surrealString(topic.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(topic.toLowerCase())})
-                    ORDER BY updated_at DESC, frequency DESC
-                    LIMIT ${Math.max(1, input.limit)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                let proposalListRows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+                let proposalListRows: readonly WorkflowCandidateProposalListRow[] = yield* loadWorkflowProposalRows({
+                    status,
+                    search: topic,
+                    limit: input.limit,
+                }).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
                 if (proposalListRows.length > 0) {
                     const proposalRefs = proposalListRows
                         .map((row) => recordKeyPart(row.proposal_id, "proposal"))
@@ -1045,30 +1138,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 return;
             }
             const status = input.proposalStatus ?? "all";
-            const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
-                SELECT
-                    type::string(id) AS proposal_id,
-                    dedupe_sig,
-                    title,
-                    form,
-                    status,
-                    confidence,
-                    frequency,
-                    (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
-                    (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
-                    type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
-                    (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
-                    (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
-                    (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
-                    type::string(updated_at) AS updated_at
-                FROM proposal
-                WHERE (${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})
-                    ${status === "all" ? "" : `AND status = ${surrealString(status)}`}
-                    AND (string::lowercase(title) CONTAINS ${surrealString(topic.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(topic.toLowerCase())})
-                ORDER BY updated_at DESC, frequency DESC
-                LIMIT ${Math.max(1, input.limit)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            let proposalListRows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+            let proposalListRows: readonly WorkflowCandidateProposalListRow[] = yield* loadWorkflowProposalRows({
+                status,
+                search: topic,
+                limit: input.limit,
+            }).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
             if (proposalListRows.length > 0) {
                 const proposalRefs = proposalListRows
                     .map((row) => recordKeyPart(row.proposal_id, "proposal"))
@@ -1252,16 +1326,13 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 };
             }
             if (input.promoteHarnessProposals) {
-                const existingProposalRows = yield* db.query<[Array<{ dedupe_sig: string }>]>(
-                    "SELECT dedupe_sig FROM proposal;",
-                ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                const existingSigs = new Set((existingProposalRows?.[0] ?? []).map((row) => row.dedupe_sig));
+                const existingSigs = new Set((yield* listStoredProposals(1_000)).map((proposal) => proposal.dedupe_sig));
                 const plan = buildWorkflowCandidateHarnessProposalPlan(topicReport, existingSigs, {
                     dryRun: Boolean(input.proposalDryRun),
                     includeStatements: Boolean(input.proposalDryRun),
                 });
                 if (plan.statements.length > 0 && !input.proposalDryRun) {
-                    yield* db.query(plan.statements.join("\n")).pipe(
+                    yield* persistHarnessProposalPlan(topicReport, plan).pipe(
                         catchDbErrorAndExit("axctl classifiers workflow-candidates"),
                     );
                 }
@@ -1328,35 +1399,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         }
         if (input.listProposals) {
             const status = input.proposalStatus ?? "all";
-            const where = [
-                `(${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})`,
-                ...(status === "all" ? [] : [`status = ${surrealString(status)}`]),
-                ...(input.search === undefined ? [] : [
-                    `(string::lowercase(title) CONTAINS ${surrealString(input.search.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(input.search.toLowerCase())})`,
-                ]),
-            ];
-            const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
-                SELECT
-                    type::string(id) AS proposal_id,
-                    dedupe_sig,
-                    title,
-                    form,
-                    status,
-                    confidence,
-                    frequency,
-                    (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
-                    (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
-                    type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
-                    (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
-                    (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
-                    (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
-                    type::string(updated_at) AS updated_at
-                FROM proposal
-                WHERE ${where.join(" AND ")}
-                ORDER BY updated_at DESC, frequency DESC
-                LIMIT ${Math.max(1, input.limit)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            let rows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+            let rows: readonly WorkflowCandidateProposalListRow[] = yield* loadWorkflowProposalRows({
+                status,
+                ...(input.search === undefined ? {} : { search: input.search }),
+                limit: input.limit,
+            }).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
             if (input.expandEvidence && rows.length > 0) {
                 const proposalKeys = rows
                     .map((row) => recordKeyPart(row.proposal_id, "proposal"))
@@ -1453,10 +1500,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             }
         }
         if (input.promoteProposals) {
-            const existingProposalRows = yield* db.query<[Array<{ dedupe_sig: string }>]>(
-                "SELECT dedupe_sig FROM proposal;",
-            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const existingSigs = new Set((existingProposalRows?.[0] ?? []).map((row) => row.dedupe_sig));
+            const existingSigs = new Set((yield* listStoredProposals(1_000)).map((proposal) => proposal.dedupe_sig));
             const plan = buildWorkflowCandidateGuidanceProposalPlan(report, existingSigs, {
                 ...(input.proposalTarget === undefined ? {} : { fileTarget: input.proposalTarget }),
                 ...(input.proposalSection === undefined ? {} : { section: input.proposalSection }),
@@ -1464,7 +1508,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 includeStatements: Boolean(input.proposalDryRun),
             });
             if (plan.statements.length > 0 && !input.proposalDryRun) {
-                yield* db.query(plan.statements.join("\n")).pipe(
+                yield* persistGuidanceProposalPlan(report, plan).pipe(
                     catchDbErrorAndExit("axctl classifiers workflow-candidates"),
                 );
             }

@@ -1,60 +1,183 @@
-import { describe, expect } from "bun:test";
-import { Effect, Schema } from "effect";
+/**
+ * `relateSkillRoles` against a REAL SQLite judgment sidecar.
+ *
+ * Frontmatter role tags are durable judgment, so they land in the sidecar rather
+ * than the rebuildable DuckDB cache. This file used to assert SurrealQL TEXT,
+ * which could not tell a working write from one that merely looked right - and
+ * the two interesting failure modes here are behavioural, not textual:
+ *   - the sweep must remove ONLY this writer's `source = 'frontmatter'` rows, so
+ *     a user's `ax skills tag` on the same skill-role pair survives re-ingest;
+ *   - a re-ingest must NOT reset a role's user-tuned `weight`.
+ * Both are checked by reading the rows back out of a real database.
+ */
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, Layer, Schema } from "effect";
+import { Judgment, JudgmentLayer, NumberColumn, TextColumn } from "@ax/lib/sqlite";
+import { roleRowId } from "@ax/lib/stable-id";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { relateSkillRoles } from "./skill-role.ts";
-import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
-import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill roles", { requireFts: true });
+const SKILL_ID = "skill:test-skill";
 
-describe("relateSkillRoles on real DuckDB", () => {
-    dtest("deduplicates roles and writes frontmatter edges", async () => {
-        let result: unknown;
-        let counts: unknown;
-        await runWithPlatform(publishCacheFixture(tempDir("ax-skill-role-"), dylibPath, (write) =>
-            Effect.gen(function* () {
-                result = yield* relateSkillRoles(write, {
-                    skillId: "skill-a", roles: ["framing", "Framing", " framing ", "execution"],
-                });
-                counts = (yield* write.rows(Schema.Struct({
-                    roles: Schema.BigInt, edges: Schema.BigInt,
-                }), `SELECT (SELECT count(*) FROM role) AS roles,
-                    (SELECT count(*) FROM plays_role) AS edges`))[0];
-            }),
-        ));
+const TagRow = Schema.Struct({
+    in_id: TextColumn,
+    out_id: TextColumn,
+    source: TextColumn,
+    confidence: NumberColumn,
+});
+const RoleRow = Schema.Struct({ id: TextColumn, name: TextColumn, weight: NumberColumn });
+
+let dir: string;
+
+beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ax-skill-role-"));
+});
+afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+});
+
+/** Run `body` against a fresh sidecar in this test's temp dir. */
+const overSidecar = <A, E>(
+    body: Effect.Effect<A, E, Judgment>,
+): Promise<A> =>
+    Effect.runPromise(
+        body.pipe(
+            Effect.scoped,
+            Effect.provide(JudgmentLayer({
+                sidecarPath: join(dir, "judgment.sqlite"),
+                schemaSql: SIDECAR_SCHEMA_SQL,
+            })),
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        ) as Effect.Effect<A, E>,
+    );
+
+const tags = Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    return yield* judgment.rows(
+        TagRow,
+        "SELECT in_id, out_id, source, confidence FROM plays_role ORDER BY out_id, source",
+    );
+});
+
+const roles = Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    return yield* judgment.rows(RoleRow, "SELECT id, name, weight FROM role ORDER BY name");
+});
+
+describe("relateSkillRoles", () => {
+    test("writes one role row and one frontmatter edge per named role", async () => {
+        const { result, edges, roleRows } = await overSidecar(Effect.gen(function* () {
+            const result = yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing", "execution"] });
+            return { result, edges: yield* tags, roleRows: yield* roles };
+        }));
+
         expect(result).toEqual({ rolesUpserted: 2, edgesWritten: 2, rolesSkipped: 0 });
-        expect(counts).toEqual({ roles: 2n, edges: 2n });
+        expect(roleRows.map((r) => r.name)).toEqual(["execution", "framing"]);
+        // The DDL's DEFAULT seeds the weight on the create path.
+        expect(roleRows.every((r) => r.weight === 1)).toBe(true);
+        expect(edges).toHaveLength(2);
+        expect(edges.every((e) => e.in_id === SKILL_ID && e.source === "frontmatter")).toBe(true);
+        expect(new Set(edges.map((e) => e.out_id)))
+            .toEqual(new Set([roleRowId("framing"), roleRowId("execution")]));
     });
 
-    dtest("skips invalid names and removes stale edges when roles shrink", async () => {
-        let results: unknown[] = [];
-        let names: string[] = [];
-        await runWithPlatform(publishCacheFixture(tempDir("ax-skill-role-shrink-"), dylibPath, (write) =>
-            Effect.gen(function* () {
-                results = [
-                    yield* relateSkillRoles(write, { skillId: "skill-a", roles: ["framing", "execution"] }),
-                    yield* relateSkillRoles(write, { skillId: "skill-a", roles: ["framing", "bad;role"] }),
-                ];
-                names = (yield* write.rows(Schema.Struct({ name: Schema.String }), `
-                    SELECT r.name FROM plays_role p JOIN role r ON r.id = p.out_id ORDER BY r.name
-                `)).map((row) => row.name);
-            }),
-        ));
-        expect(results[1]).toEqual({ rolesUpserted: 1, edgesWritten: 1, rolesSkipped: 1 });
-        expect(names).toEqual(["framing"]);
+    test("normalizes and de-duplicates role names", async () => {
+        const { result, edges } = await overSidecar(Effect.gen(function* () {
+            const result = yield* relateSkillRoles({
+                skillId: SKILL_ID,
+                roles: ["framing", "Framing", " framing "],
+            });
+            return { result, edges: yield* tags };
+        }));
+
+        expect(result.rolesUpserted).toBe(1);
+        expect(edges).toHaveLength(1);
+        expect(edges[0]!.out_id).toBe(roleRowId("framing"));
     });
 
-    dtest("empty roles clear all frontmatter edges", async () => {
-        let edges = -1n;
-        await runWithPlatform(publishCacheFixture(tempDir("ax-skill-role-empty-"), dylibPath, (write) =>
-            Effect.gen(function* () {
-                yield* relateSkillRoles(write, { skillId: "skill-a", roles: ["framing"] });
-                expect(yield* relateSkillRoles(write, { skillId: "skill-a", roles: [] }))
-                    .toEqual({ rolesUpserted: 0, edgesWritten: 0, rolesSkipped: 0 });
-                edges = (yield* write.rows(
-                    Schema.Struct({ n: Schema.BigInt }), "SELECT count(*) AS n FROM plays_role",
-                ))[0]!.n;
-            }),
-        ));
-        expect(edges).toBe(0n);
+    test("skips an invalid role name rather than failing the stage", async () => {
+        const { result, edges } = await overSidecar(Effect.gen(function* () {
+            const result = yield* relateSkillRoles({
+                skillId: SKILL_ID,
+                roles: ["framing", "role`with`backtick", "bad;DROP TABLE role", "execution"],
+            });
+            return { result, edges: yield* tags };
+        }));
+
+        expect(result.rolesSkipped).toBe(2);
+        expect(result.edgesWritten).toBe(2);
+        expect(edges).toHaveLength(2);
+    });
+
+    test("re-running is idempotent - two runs leave one edge per role", async () => {
+        const edges = await overSidecar(Effect.gen(function* () {
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing"] });
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing"] });
+            return yield* tags;
+        }));
+
+        expect(edges).toHaveLength(1);
+    });
+
+    test("role SHRINKAGE drops the edge the frontmatter no longer names", async () => {
+        const edges = await overSidecar(Effect.gen(function* () {
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing", "execution"] });
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing"] });
+            return yield* tags;
+        }));
+
+        expect(edges).toHaveLength(1);
+        expect(edges[0]!.out_id).toBe(roleRowId("framing"));
+    });
+
+    test("empty roles sweeps every frontmatter edge and writes none", async () => {
+        const { result, edges } = await overSidecar(Effect.gen(function* () {
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing", "execution"] });
+            const result = yield* relateSkillRoles({ skillId: SKILL_ID, roles: [] });
+            return { result, edges: yield* tags };
+        }));
+
+        expect(result).toEqual({ rolesUpserted: 0, edgesWritten: 0, rolesSkipped: 0 });
+        expect(edges).toHaveLength(0);
+    });
+
+    test("the sweep leaves a USER tag on the same skill-role pair alone", async () => {
+        // `source` is part of the natural key precisely so the two writers can
+        // coexist. A sweep that dropped the user's row would silently erase a
+        // decision the user made through `ax skills tag`.
+        const edges = await overSidecar(Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            yield* judgment.put("plays_role", {
+                id: "user-tag",
+                in_id: SKILL_ID,
+                out_id: roleRowId("framing"),
+                source: "user",
+                confidence: 0.9,
+                weight: null,
+                rationale: "chosen by hand",
+            });
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing"] });
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: [] });
+            return yield* tags;
+        }));
+
+        expect(edges).toHaveLength(1);
+        expect(edges[0]!.source).toBe("user");
+    });
+
+    test("re-ingest does not reset a role's tuned weight", async () => {
+        const roleRows = await overSidecar(Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            yield* judgment.put("role", { id: roleRowId("framing"), name: "framing", weight: 3.5 });
+            yield* relateSkillRoles({ skillId: SKILL_ID, roles: ["framing"] });
+            return yield* roles;
+        }));
+
+        expect(roleRows).toHaveLength(1);
+        expect(roleRows[0]!.weight).toBe(3.5);
     });
 });

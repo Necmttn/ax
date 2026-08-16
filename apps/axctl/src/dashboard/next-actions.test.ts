@@ -21,6 +21,7 @@ import {
     toolFailureCards,
     verdictCards,
 } from "./next-actions.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -649,7 +650,10 @@ describe("fetchNextActions", () => {
         };
 
         const payload = await Effect.runPromise(
-            fetchNextActions().pipe(Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache)))),
+            fetchNextActions().pipe(
+                Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(EmptyJudgmentTestLayer),
+            ),
         );
 
         expect(payload.cards).toEqual([]);
@@ -658,7 +662,7 @@ describe("fetchNextActions", () => {
         // directly and do add notes. Exact set: if runQuery's internal swallow ever
         // changes and tool_failure starts noting, this surfaces it.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "churn", "routing", "skill_hygiene", "housekeeping"]),
+            new Set(["churn", "routing", "skill_hygiene"]),
         );
         expect(typeof payload.generatedAt).toBe("string");
     });
@@ -684,6 +688,7 @@ describe("fetchNextActions", () => {
         const payload = await Effect.runPromise(
             fetchNextActions({ sourceTimeoutMs: 50 }).pipe(
                 Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(EmptyJudgmentTestLayer),
             ),
         );
 
@@ -691,7 +696,7 @@ describe("fetchNextActions", () => {
         // All 6 direct-DB sources time out; tool_failure is also noted because
         // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene", "housekeeping"]),
+            new Set(["tool_failure", "churn", "routing", "skill_hygiene"]),
         );
         // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
         expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);

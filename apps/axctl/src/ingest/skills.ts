@@ -16,6 +16,7 @@ import { Effect, FileSystem, Path, Schema } from "effect";
 import { SkillName } from "@ax/lib/brands";
 import { defaultSkillDirs, skillDirsOverridden } from "@ax/lib/paths";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
@@ -252,8 +253,8 @@ const collectSkills = (): Effect.Effect<
 
 export const ingestSkills = (write: CacheWriteService): Effect.Effect<
     { count: number; rolesUpserted: number; edgesWritten: number },
-    CacheWriteError,
-    FileSystem.FileSystem | Path.Path
+    CacheWriteError | JudgmentError,
+    Judgment | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const items = yield* collectSkills();
@@ -280,7 +281,7 @@ export const ingestSkills = (write: CacheWriteService): Effect.Effect<
                         content_hash: hash,
                         bytes: item.bytes,
                     });
-                    const roleStats = yield* relateSkillRoles(write, {
+                    const roleStats = yield* relateSkillRoles({
                         skillId,
                         roles: item.skill.roles,
                     });
@@ -319,8 +320,8 @@ export class SkillsStats extends BaseStageStats.extend<SkillsStats>("SkillsStats
  */
 export const skillsStage: StageDef<
     SkillsStats,
-    FileSystem.FileSystem | Path.Path,
-    CacheWriteError
+    Judgment | FileSystem.FileSystem | Path.Path,
+    CacheWriteError | JudgmentError
 > = {
     meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
     run: (_ctx: IngestContext, write) =>

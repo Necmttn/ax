@@ -10,6 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildServer, wrapToolError, wrapToolResult } from "./server.ts";
 import { axMcpTools } from "./tools.ts";
@@ -395,7 +396,7 @@ describe("result wrapping", () => {
 
 describe("MCP server over in-memory transport", () => {
     it("lists the recall tool via tools/list", async () => {
-        const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive));
+        const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive));
         const server = buildServer(runtime);
         const client = new Client({ name: "smoke-test", version: "0.0.0" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

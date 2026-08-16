@@ -1,9 +1,16 @@
-import { describe, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { __testExtractCodexJsonlLines, toCodexNormalizedBatch } from "./codex.ts";
 import { writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import surrealSchema from "@ax/schema/schema.surql" with { type: "text" };
+
+describe("agent_event raw payload prune", () => {
+    test("the SCHEMAFULL table does not define the removed raw field", () => {
+        expect(surrealSchema).not.toMatch(/DEFINE FIELD\s+raw\s+ON agent_event\b/);
+    });
+});
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("codex re-ingest", { requireFts: true });
 

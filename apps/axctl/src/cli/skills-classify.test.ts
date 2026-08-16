@@ -6,16 +6,19 @@ import { readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { skillNameToSlug } from "./skills-classify-template.ts";
 import { DbError } from "@ax/lib/errors";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 // ---------------------------------------------------------------------------
 // Test fixtures + mock DB
 // ---------------------------------------------------------------------------
 
 type MockRow = { name: string; invocations: number; sessions: number };
+const classifiedByDb = new WeakMap<SurrealClientShape, ReadonlyArray<string>>();
 
 /** Build a minimal SurrealClientShape mock that returns a fixed row list. */
 function mockDb(rows: MockRow[]): SurrealClientShape {
@@ -61,10 +64,12 @@ function hygieneMockDb(
         dir_path: s.dir_path,
     }));
     const classified = all.filter((s) => s.classified).map((s) => `skill:${s.name}`);
-    return makeTestSurrealClient({
+    const client = makeTestSurrealClient({
         denyWrites: true,
         fallback: [counts, skills, classified],
     }).client;
+    classifiedByDb.set(client, classified);
+    return client;
 }
 
 // Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
@@ -73,10 +78,14 @@ const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 const runWith = <A>(
     db: SurrealClientShape,
-    eff: Effect.Effect<A, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path>,
+    eff: Effect.Effect<A, DbError | JudgmentError | PlatformError.PlatformError, SurrealClient | Judgment | FileSystem.FileSystem | Path.Path>,
 ): Promise<A> =>
     Effect.runPromise(
-        eff.pipe(Effect.provideService(SurrealClient, db), Effect.provide(BunFsLayer)),
+        eff.pipe(Effect.provide(Layer.mergeAll(
+            Layer.succeed(SurrealClient, db),
+            BunFsLayer,
+            judgmentTestLayer(() => (classifiedByDb.get(db) ?? []).map((skill_id) => ({ skill_id }))),
+        ))),
     );
 
 // ---------------------------------------------------------------------------
@@ -273,16 +282,13 @@ describe("SQL shape (default mode)", () => {
     // joins counts→skills in JS. The ≥3 threshold and synthetic exclusion are
     // applied in JS (see fetchSkillHygiene), NOT in SQL - so they are asserted by
     // the behavioral filter test above, not by string-matching the query.
-    test("default query reads the plays_role classification sources", async () => {
+    test("default graph query does not read judgment role tables", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
         const tc = makeTestSurrealClient({ denyWrites: true, fallback: [[], [], []] });
         await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
         const capturedSql = tc.captured.join("\n");
-        expect(capturedSql).toContain("plays_role");
+        expect(capturedSql).not.toContain("plays_role");
         expect(capturedSql).toContain("invoked");
-        expect(capturedSql).toContain(`"frontmatter"`);
-        expect(capturedSql).toContain(`"brief"`);
-        expect(capturedSql).toContain(`"user"`);
     });
 });
 

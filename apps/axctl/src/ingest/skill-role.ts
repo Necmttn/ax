@@ -1,7 +1,6 @@
 import { Effect } from "effect";
-import { cacheRow } from "@ax/lib/duckdb/row";
-import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
-import { edgeRowId, stableId } from "@ax/lib/stable-id";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import { edgeRowId, roleRowId } from "@ax/lib/stable-id";
 import { validateRoleName } from "@ax/lib/role-name";
 
 const safeRoleName = (name: string): string | null => {
@@ -12,11 +11,30 @@ const safeRoleName = (name: string): string | null => {
     }
 };
 
+/**
+ * Write the frontmatter-sourced role tags for one skill.
+ *
+ * These rows are DURABLE JUDGMENT, so they go to the SQLite sidecar rather than
+ * the rebuildable DuckDB cache - `role.weight` is user-tuned and `plays_role` is
+ * a classification, and neither survives a cache re-derive (see the sidecar DDL's
+ * "Role registry + role tags" note). `plays_role.in_id` still refs the CACHE
+ * skill id, which is what `skillId` carries here.
+ *
+ * `source` is part of the natural key, so this mined writer and the user writer
+ * behind `ax skills tag` can classify the same skill-role pair at once; each
+ * removes only its OWN source before writing the current set. That sweep is what
+ * makes role SHRINKAGE ([framing, execution] -> [framing]) and the empty-roles
+ * case work in one pass.
+ *
+ * A `Judgment` service tag is safe inside an ingest stage: the sidecar has no
+ * snapshot and no publish step, so a row written here is visible to the next
+ * statement in the same stage (unlike `CacheRead`, see F1).
+ */
 export const relateSkillRoles = (
-    write: CacheWriteService,
     args: { skillId: string; roles: ReadonlyArray<string> },
-): Effect.Effect<{ rolesUpserted: number; edgesWritten: number; rolesSkipped: number }, CacheWriteError> =>
+): Effect.Effect<{ rolesUpserted: number; edgesWritten: number; rolesSkipped: number }, JudgmentError, Judgment> =>
     Effect.gen(function* () {
+        const judgment = yield* Judgment;
         const seen = new Set<string>();
         const cleaned: string[] = [];
         let rolesSkipped = 0;
@@ -34,10 +52,10 @@ export const relateSkillRoles = (
             cleaned.push(norm);
         }
 
-        // Sweep ALL frontmatter-sourced edges for this skill before writing
-        // the current set. This handles role shrinkage (e.g. [framing,execution]
-        // → [framing]) and the empty-roles case in one pass.
-        yield* write.exec("DELETE FROM plays_role WHERE in_id = ? AND source = 'frontmatter'", [args.skillId]);
+        yield* judgment.exec(
+            "DELETE FROM plays_role WHERE in_id = ? AND source = 'frontmatter'",
+            [args.skillId],
+        );
 
         if (cleaned.length === 0) {
             return { rolesUpserted: 0, edgesWritten: 0, rolesSkipped };
@@ -46,19 +64,18 @@ export const relateSkillRoles = (
         let rolesUpserted = 0;
         let edgesWritten = 0;
         for (const roleName of cleaned) {
-            // UPSERT ... SET (not CONTENT) so an existing role's tunable
-            // `weight` survives re-ingest. A CONTENT upsert replaces the whole
-            // record, dropping `weight` to NONE; the next write then crashes
-            // with "Expected `float` but found `NONE`" because `weight ON role`
-            // is non-optional (Pi dogfood, 2026-06-04). SET only touches `name`
-            // - `weight` keeps its value, or gets DEFAULT 1.0 on first create.
-            // roleName is validated by validateRoleName (^[a-z][a-z0-9_-]*$),
-            // so it can't break out of the double-quoted string literal.
-            const roleId = stableId("role", [roleName]);
-            yield* write.put("role", cacheRow({ id: roleId, name: roleName, weight: 1 }));
+            // CREATE IF MISSING, never modify - the same contract `ax skills tag`
+            // holds. A role's `weight` is judgment of its own, and a skill's
+            // frontmatter naming that role says nothing about it. The DDL's
+            // DEFAULT seeds 1.0 on the create path.
+            const roleId = roleRowId(roleName);
+            yield* judgment.exec(
+                "INSERT INTO role (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+                [roleId, roleName],
+            );
             rolesUpserted += 1;
 
-            yield* write.put("plays_role", cacheRow({
+            yield* judgment.put("plays_role", {
                 id: edgeRowId("plays_role", args.skillId, roleId, "frontmatter"),
                 in_id: args.skillId,
                 out_id: roleId,
@@ -66,7 +83,7 @@ export const relateSkillRoles = (
                 source: "frontmatter",
                 weight: null,
                 rationale: null,
-            }));
+            });
             edgesWritten += 1;
         }
         return { rolesUpserted, edgesWritten, rolesSkipped };

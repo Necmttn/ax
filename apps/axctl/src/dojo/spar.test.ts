@@ -18,6 +18,8 @@ import {
     stampSparSession,
 } from "./spar.ts";
 import type { SparBrief, SparMetrics } from "./spar.ts";
+import { EmptyJudgmentTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 
 const baseMetrics = (o: Partial<SparMetrics> = {}): SparMetrics => ({
     costUsd: 1.20,
@@ -141,15 +143,15 @@ const paired = (options: TestSurrealClientOptions) => {
 };
 
 const runDb = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | AxConfig>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment | AxConfig>,
     layer: Layer.Layer<SurrealClient | CacheRead>,
 ): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, configLayer))));
+    Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer))));
 
 const runDbOnly = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead>,
+    eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment>,
     layer: Layer.Layer<SurrealClient | CacheRead>,
-): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer))));
 
 describe("fetchSessionMetrics", () => {
     test("composes cost + churn + turn/wall for a session", async () => {
@@ -283,51 +285,14 @@ describe("findVariantSession", () => {
 // ---------------------------------------------------------------------------
 
 describe("stampSparSession", () => {
-    test("issues UPDATE with labels = [\"spar\"] when session has no existing labels", async () => {
-        const { tc, layer } = paired({
-            denyWrites: false,
-            routes: {
-                // SELECT labels read: no existing labels (NONE row)
-                "SELECT labels FROM": [[{ labels: null }]],
-                // UPDATE: captured in tc.captured
-                "UPDATE ": [[]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), layer);
-        // The UPDATE should set labels to the JSON-encoded ["spar"]
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeDefined();
-        // The SQL wraps the JSON-encoded string in a SurrealQL string literal;
-        // the escaped form is: \"[\\\"spar\\\"]\". Check the label key is present.
-        expect(updateSql).toContain("spar");
-    });
-
-    test("merges into existing labels without clobbering them", async () => {
-        const { tc, layer } = paired({
-            denyWrites: false,
-            routes: {
-                "SELECT labels FROM": [[{ labels: JSON.stringify(["existing"]) }]],
-                "UPDATE ": [[]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), layer);
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeDefined();
-        // Must include both labels
-        expect(updateSql).toContain("existing");
-        expect(updateSql).toContain("spar");
-    });
-
-    test("is idempotent: does not issue an UPDATE when already tagged", async () => {
-        const { tc, layer } = paired({
-            denyWrites: false,
-            routes: {
-                "SELECT labels FROM": [[{ labels: JSON.stringify(["spar"]) }]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), layer);
-        // Only the SELECT query should be captured; no UPDATE
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeUndefined();
+    test("writes one spar label row to the judgment sidecar", async () => {
+        const writes: Array<{ table: string; row: Record<string, unknown> }> = [];
+        await Effect.runPromise(stampSparSession("session:abc").pipe(
+            Effect.provide(judgmentTestLayer(() => [], () => 0, (table, row) => {
+                writes.push({ table, row: { ...row } });
+            })),
+        ));
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toMatchObject({ table: "session_label", row: { session_id: "abc", label: "spar", source: "spar-score" } });
     });
 });

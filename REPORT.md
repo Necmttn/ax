@@ -1,57 +1,65 @@
-# w2-live-writers report
+# Sidecar Judgment Cutover Report
+
+Status: DONE
 
 ## Result
 
-DONE.
+The request paths now use the typed `Judgment` service for the remaining judgment data.
 
-The P1 and P2 remediation is complete.
+This data includes skill triage, role decisions, improvement records, reviews, retros, dogfood runs, and spar labels.
 
-Live readers use `CacheReadService`.
+Shared readers now prevent duplicate SQL in the dashboard, profile, and command paths.
 
-Ingest callers pass the lock-held `CacheWriteService`.
+The doctor command now checks references from the sidecar to the published cache.
 
-Ingest writers use DuckDB row writes and bound SQL values.
+The ingest runtime does not open the SQLite judgment database.
 
-The CLI paths no longer use SurrealDB.
+The dashboard runtime supplies the cache reader and judgment services at the request boundary.
 
-The dashboard OTLP receiver writes each request to the durable JSONL spool.
+Manual retro input works when SurrealDB is not available.
 
-## Remediation
+Dogfood writes transcript content to a durable artifact input file.
 
-- The change restores all 49 deleted test suites.
-- Pure logic tests keep their original coverage.
-- Engine tests use the real DuckDB schema and cache seam.
-- The tests decode query results through Effect schemas.
-- No restored test checks obsolete SurrealQL text.
-- The Git test runs `ingestGit` against real DuckDB.
-- The Cursor code no longer exports the unused statement budget.
-- Churn parity seeds one failed check and one later successful check.
-- Churn parity verifies one closed episode and non-empty aggregates.
-- OTLP retention stays in `runIngest` and reports typed failures.
-- The maintenance report includes OTLP retention failures.
-- The OTLP retention test uses real DuckDB.
-- Current comments describe DuckDB row writes.
+The `dogfood_run` row stores only the artifact identifier.
+
+The separate live writer worktree has no changes from this work.
+
+## Storage Rules
+
+SQLite contains only the existing judgment tables and columns.
+
+DuckDB keeps deterministic facts.
+
+The OTLP spool keeps telemetry data.
+
+The implementation has no SurrealDB fallback or dual write.
+
+Stable identifiers use the natural keys for each judgment record.
 
 ## Verification
 
-- `bun run typecheck` passes.
-- `bun test` passes with 6,087 tests and 14 skips.
-- `bun run build` passes.
-- `bun run check:no-node-fs` passes for 670 files.
-- `bun run check:table-coverage` passes.
-- `git diff --check` passes.
-- Standards review reports no hard violations.
-- Spec review items are corrected in `b5100746`.
+`bun run typecheck` exits with status 0.
+
+The non-Electron test suite has 5,448 passes, 15 skips, and no failures.
+
+The focused proposal test has 11 passes and no failures.
+
+The complete suite reports four Electron setup errors.
+
+The Electron package installation is incomplete in this worktree.
+
+Real SQLite tests cover write, read, transaction, reconciliation, and integrity behavior.
+
+Dead SurrealDB tests cover the cutover request paths.
+
+Two review agents found no remaining code or specification defects.
 
 ## Commits
 
-- `d49f4395` `refactor(v2): widen ingest stage errors`
-- `ece4574b` `feat(v2): port live readers and ingest writers`
-- `d87bb8e5` `fix(v2): complete DuckDB writer migration`
-- `70ddf10d` `fix(v2): stop maintenance writes publishing a partial snapshot`
-- `8dceaf1e` `test(v2): decode through the schema in the cache test double`
-- `9981aa46` `test(v2): restore migrated ingest coverage`
-- `8b85bfa6` `docs(v2): update cache writer comments`
-- `b5100746` `test(v2): close remaining ingest review gaps`
+- `ef5b0d46 feat(v2): port triage and brief role judgments`
+- `ae985df4 feat(v2): port request-time judgments to sidecar`
+- `4799d5df feat(v2): complete judgment reader cutover`
+- `874658d1 fix(v2): close sidecar judgment review gaps`
+- `81b2169f test(v2): cover all sidecar proposal forms`
 
-No commit was pushed or merged.
+No commit is pushed or merged.

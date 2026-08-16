@@ -1,15 +1,16 @@
-import { Effect, FileSystem } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { homedir } from "node:os";
 import type { ServerWebSocket } from "bun";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { Judgment } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
+import { JudgmentLive } from "../judgment.ts";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { recordRef, surrealJson, surrealString } from "@ax/lib/shared/surql";
 
 /** Bun-backed FS + Path layer for the standalone fs Effects this module runs
  *  via `Effect.runPromise` (the dogfood server is plain async, not Effect). */
-const WtermFsLayer = BunFileSystem.layer;
+const WtermFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 /** Probe a path for existence, recovering ANY failure to `false` (the original
  *  `existsSync` probes treated every fault as "absent"). */
@@ -74,7 +75,7 @@ export interface DogfoodTerminalServer {
     readonly stop: () => void;
 }
 
-interface DogfoodResult {
+export interface DogfoodResult {
     readonly runId: string;
     readonly scenario: DogfoodScenario;
     readonly status: DogfoodStatus;
@@ -94,6 +95,77 @@ interface DogfoodResult {
     readonly timeoutSeconds?: number;
     readonly transportFallbackReason?: string;
 }
+
+export const dogfoodArtifactInputDir = (): string =>
+    process.env.AX_DOGFOOD_INPUT_DIR
+    ?? posixPath.join(
+        process.env.AX_DATA_DIR ?? posixPath.join(homedir(), ".local", "share", "ax"),
+        "inputs",
+        "dogfood-artifacts",
+    );
+
+const writeDogfoodArtifactInput = (result: DogfoodResult, artifactId: string, inputDir = dogfoodArtifactInputDir()) =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = inputDir;
+        const target = path.join(dir, `${artifactId}.json`);
+        const staged = `${target}.tmp.${process.pid}`;
+        const now = new Date(result.endedAt);
+        const row = {
+            id: artifactId,
+            kind: "dogfood_wterm_transcript",
+            title: `wterm ${result.scenario} dogfood transcript`,
+            uri: `dogfood://wterm/${result.runId}/transcript`,
+            path: null,
+            content_hash: shortHash(result.transcript),
+            raw: JSON.stringify({
+                scenario: result.scenario,
+                transcript: result.transcript,
+                transport: result.transport,
+                requested_transport: result.requestedTransport,
+            }),
+            created_at: now.toISOString(),
+            updated_at: now.toISOString(),
+        };
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(staged, `${JSON.stringify(row)}\n`);
+        yield* fs.rename(staged, target);
+    });
+
+export const writeDogfoodResult = (
+    result: DogfoodResult,
+    options: { readonly artifactInputDir?: string } = {},
+) => Effect.gen(function* () {
+    const judgment = yield* Judgment;
+    const transcriptArtifact = stableId("artifact", [result.runId, "transcript"]);
+    yield* writeDogfoodArtifactInput(
+        result,
+        transcriptArtifact,
+        options.artifactInputDir ?? dogfoodArtifactInputDir(),
+    );
+    yield* judgment.put("dogfood_run", {
+        id: stableId("dogfood_run", [result.runId]),
+        run_id: result.runId,
+        scenario: result.scenario,
+        driver: "wterm",
+        status: result.status,
+        agent: result.agent ?? null,
+        command: result.command,
+        command_source: result.commandSource,
+        transport: result.transport,
+        requested_transport: result.requestedTransport,
+        transport_fallback_reason: result.transportFallbackReason ?? null,
+        success_marker: result.successMarker ?? null,
+        marker_found: result.markerFound,
+        timed_out: result.timedOut,
+        timeout_seconds: result.timeoutSeconds ?? null,
+        transcript_artifact: transcriptArtifact,
+        cwd: result.cwd,
+        started_at: new Date(result.startedAt),
+        ended_at: new Date(result.endedAt),
+    });
+});
 
 export interface DogfoodTerminalSession {
     readonly title: string;
@@ -118,11 +190,6 @@ export interface DogfoodAgentPreset {
 
 const DEFAULT_PORT = 1742;
 const SUCCESS_MARKER = "AXCTL_DOGFOOD_SETUP_OK";
-
-const sqlString = surrealString;
-const sqlJson = surrealJson;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 function shortHash(value: string): string {
     return Bun.hash(value).toString(16).padStart(16, "0");
@@ -377,65 +444,13 @@ window.__axctlDogfood = { term, transport };
 `;
 }
 
-async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
-    const scenarioKey = result.scenario.replaceAll("-", "_");
-    const transcriptKey = `dogfood_wterm_${scenarioKey}__${result.runId}__transcript`;
-    const runKey = `wterm_${scenarioKey}__${result.runId}`;
-    const artifactRef = recordRef("artifact", transcriptKey);
-    const runRef = recordRef("dogfood_run", runKey);
-    // Phase C12: dogfood_run is the durable home for test-scenario results.
-    const statements = [
-        `UPSERT ${artifactRef} MERGE ${sqlObject([
-            ["kind", sqlString("dogfood_wterm_transcript")],
-            ["title", sqlString(`wterm ${result.scenario} dogfood transcript`)],
-            ["uri", sqlString(`dogfood://wterm/${result.runId}/transcript`)],
-            ["path", "NONE"],
-            ["content_hash", sqlString(shortHash(result.transcript))],
-            ["raw", sqlJson({
-                scenario: result.scenario,
-                transcript: result.transcript,
-                started_at: result.startedAt,
-                ended_at: result.endedAt,
-                cwd: result.cwd,
-                command: result.command,
-                command_source: result.commandSource,
-                success_marker: result.successMarker,
-                timed_out: result.timedOut,
-                timeout_seconds: result.timeoutSeconds,
-                agent: result.agent,
-                transport: result.transport,
-                requested_transport: result.requestedTransport,
-            })],
-            ["updated_at", "time::now()"],
-        ])};`,
-        `UPSERT ${runRef} MERGE ${sqlObject([
-            ["run_id", sqlString(result.runId)],
-            ["scenario", sqlString(result.scenario)],
-            ["driver", sqlString("wterm")],
-            ["status", sqlString(result.status)],
-            ["agent", result.agent ? sqlString(result.agent) : "NONE"],
-            ["command", sqlString(result.command)],
-            ["command_source", sqlString(result.commandSource)],
-            ["transport", sqlString(result.transport)],
-            ["requested_transport", sqlString(result.requestedTransport)],
-            ["transport_fallback_reason", result.transportFallbackReason ? sqlString(result.transportFallbackReason) : "NONE"],
-            ["success_marker", result.successMarker ? sqlString(result.successMarker) : "NONE"],
-            ["marker_found", result.markerFound ? "true" : "false"],
-            ["timed_out", result.timedOut ? "true" : "false"],
-            ["timeout_seconds", String(result.timeoutSeconds)],
-            ["transcript_artifact", artifactRef],
-            ["cwd", sqlString(result.cwd)],
-            ["started_at", `d${JSON.stringify(result.startedAt)}`],
-            ["ended_at", `d${JSON.stringify(result.endedAt)}`],
-        ])};`,
-    ];
-
+export async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     try {
         await Effect.runPromise(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                yield* db.query(statements.join(""));
-            }).pipe(Effect.provide(AppLayer), Effect.scoped),
+            writeDogfoodResult(result).pipe(
+                Effect.provide(Layer.mergeAll(JudgmentLive, BunFileSystem.layer, BunPath.layer)),
+                Effect.scoped,
+            ),
         );
         return true;
     } catch {

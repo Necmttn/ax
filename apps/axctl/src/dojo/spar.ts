@@ -13,6 +13,8 @@ import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
@@ -464,41 +466,24 @@ export const captureBaseline = (
     });
 
 /**
- * Stamp a variant session's `labels` field with `"spar"` so behavioral
+ * Stamp a durable `session_label` judgment with `"spar"` so behavioral
  * analytics (`ax skills weighted`, `ax thinking`) can exclude it.
  *
- * Merge-union: reads the current labels JSON, adds `"spar"` if absent, and
- * writes back. Idempotent: re-stamping an already-tagged session is a no-op.
- * No-op when the session id cannot be resolved (silently returns).
- *
- * The `labels` field is `option<string>` containing a JSON-encoded string[]
- * (schema rule of thumb for SurrealDB v3: nested arrays → JSON string).
+ * The stable natural key makes repeat writes idempotent.
  */
 export const stampSparSession = (
     sessionId: string,
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-
-        // Read current labels (may be NONE / null / a JSON-encoded string[]).
-        const readRows = yield* db.query<[Array<{ labels: string | null }>]>(
-            `SELECT labels FROM ${recordLiteral("session", cleanSessionId(sessionId))};`,
-        );
-        const existing = readRows?.[0]?.[0]?.labels ?? null;
-        let current: string[];
-        try {
-            current = existing != null ? (JSON.parse(existing) as string[]) : [];
-            if (!Array.isArray(current)) current = [];
-        } catch {
-            current = [];
-        }
-
-        if (current.includes("spar")) return; // idempotent
-
-        const merged = [...current, "spar"];
-        yield* db.query(
-            `UPDATE ${recordLiteral("session", cleanSessionId(sessionId))} SET labels = ${surrealString(JSON.stringify(merged))};`,
-        );
+        const judgment = yield* Judgment;
+        const clean = cleanSessionId(sessionId);
+        yield* judgment.put("session_label", {
+            id: stableId("session_label", [clean, "spar"]),
+            session_id: clean,
+            label: "spar",
+            source: "spar-score",
+            created_at: new Date(),
+        });
     });
 
 /**

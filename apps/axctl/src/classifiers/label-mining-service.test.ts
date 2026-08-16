@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 import {
     EXPORT_REVIEW_LIMIT,
     LabelMiningService,
@@ -41,17 +43,18 @@ const runWithDb = <A>(
     effect: Effect.Effect<
         A,
         unknown,
-        LabelMiningService | SurrealClient | FileSystem.FileSystem | Path.Path
+        LabelMiningService | SurrealClient | Judgment | FileSystem.FileSystem | Path.Path
     >,
     client: SurrealClientShape,
 ): Promise<A> =>
-    Effect.runPromise(
-        effect.pipe(
-            Effect.provide(LabelMiningServiceLive),
-            Effect.provideService(SurrealClient, client),
-            Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
-        ),
-    );
+    Effect.runPromise(effect.pipe(Effect.provide(LabelMiningServiceLive.pipe(
+        Layer.provideMerge(Layer.mergeAll(
+            Layer.succeed(SurrealClient, client),
+            EmptyJudgmentTestLayer,
+            BunFileSystem.layer,
+            BunPath.layer,
+        )),
+    ))));
 
 const correctionWindow = (n: number): FakeWindowRow => ({
     window_key: `w-corr-${n}`,

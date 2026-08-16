@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { DigestSnapshot, type DigestItem } from "./model.ts";
 import { topForSnapshot } from "./rank.ts";
 import { improveItems, costItems, churnItems, quotaToItem } from "./sources.ts";
@@ -23,10 +24,10 @@ export const collectItems = (
   read: CacheReadService,
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestItem[], CacheReadError> =>
+): Effect.Effect<DigestItem[], CacheReadError | JudgmentError, Judgment> =>
   Effect.gen(function* () {
     const out: DigestItem[] = [];
-    out.push(...(yield* improveItems(read, now)));
+    out.push(...(yield* improveItems(now)));
     out.push(...(yield* costItems(read, now, windowDays)));
     out.push(...(yield* churnItems(read, now, windowDays)));
     const quota = yield* Effect.promise(() => loadQuotaCache(defaultQuotaCachePath()));
@@ -54,7 +55,7 @@ export const buildAndWrite = (
   read: CacheReadService,
   now: Date,
   windowDays: number,
-): Effect.Effect<DigestSnapshot, CacheReadError> =>
+): Effect.Effect<DigestSnapshot, CacheReadError | JudgmentError, Judgment> =>
   Effect.gen(function* () {
     const items = yield* collectItems(read, now, windowDays);
     const snap = assembleSnapshot(items, { now, windowDays });

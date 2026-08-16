@@ -11,6 +11,7 @@ import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { assembleAgenda, collectAgendaItems } from "./agenda.ts";
 import type { BudgetEnvelope, DojoItem } from "./schema.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const budget: BudgetEnvelope = {
     has_surplus: true, spendable_pct: 20, binding_window: "five_hour",
@@ -89,7 +90,12 @@ describe("collectAgendaItems", () => {
         raw: null as unknown as Surreal, // never touched by read-only agenda sources
     };
     const surrealLayer = Layer.succeed(SurrealClient, emptyClient);
-    const env = Layer.mergeAll(surrealLayer, makeTestCacheRead().layer, BunFileSystem.layer);
+    const env = Layer.mergeAll(
+        surrealLayer,
+        makeTestCacheRead().layer,
+        BunFileSystem.layer,
+        EmptyJudgmentTestLayer,
+    );
 
     test("empty graph + missing task dir -> only the proposal-mint nudge", async () => {
         const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
@@ -126,6 +132,7 @@ describe("collectAgendaItems", () => {
             failingSurreal,
             Layer.succeed(CacheRead, failingCache),
             BunFileSystem.layer,
+            EmptyJudgmentTestLayer,
         );
         const collected = await Effect.runPromise(
             collectAgendaItems({
@@ -137,8 +144,6 @@ describe("collectAgendaItems", () => {
             }).pipe(Effect.provide(failingEnv)),
         );
         expect(collected.items.map((i) => i.kind)).toEqual(["proposal_mint"]);
-        expect(collected.source_failures.map((f) => f.source)).toEqual(
-            expect.arrayContaining(["verdicts", "churn", "proposals", "routing"]),
-        );
+        expect(collected.source_failures.map((f) => f.source)).toEqual(["churn", "routing"]);
     });
 });

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { Judgment } from "@ax/lib/sqlite";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
@@ -879,10 +881,10 @@ describe("scoreSkillSpar", () => {
     };
 
     const runScore = <A>(
-        eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | AxConfig>,
+        eff: Effect.Effect<A, unknown, SurrealClient | CacheRead | Judgment | AxConfig>,
         tcLayer: Layer.Layer<SurrealClient | CacheRead>,
     ): Promise<A> =>
-        Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(tcLayer, configLayer))));
+        Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer, EmptyJudgmentTestLayer))));
 
     const MAIN_ROOT = "/main/repo";
 
@@ -901,12 +903,11 @@ describe("scoreSkillSpar", () => {
         // spar-arm-a / spar-arm-b appear only in those two queries; all other
         // queries fall through to the default [[]] → null/0/false metrics.
         // With empty metrics: variant.landed = false → verdict = "regression".
-        const { tc, layer } = paired({
+        const { layer } = paired({
             denyWrites: true,
             routes: {
                 "spar-arm-a": [[{ id: "session:arm-a" }]],
                 "spar-arm-b": [[{ id: "session:arm-b" }]],
-                // stamp SELECT labels → null (will issue UPDATE, but query is OK)
             },
         });
 
@@ -923,9 +924,6 @@ describe("scoreSkillSpar", () => {
         expect(result.a).toBeDefined();
         expect(result.b).toBeDefined();
 
-        // Both sessions got stampSparSession calls (SELECT labels + UPDATE each).
-        const stampUpdates = tc.captured.filter((s) => s.startsWith("UPDATE"));
-        expect(stampUpdates.length).toBeGreaterThanOrEqual(2);
     });
 
     // -----------------------------------------------------------------------
@@ -942,7 +940,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.merge(layer, configLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -965,7 +963,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.merge(layer, configLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -1041,7 +1039,7 @@ describe("scoreSkillSpar", () => {
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(badBrief, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.merge(layer, configLayer)),
+                Effect.provide(Layer.mergeAll(layer, configLayer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");

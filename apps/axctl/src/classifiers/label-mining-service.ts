@@ -2,6 +2,14 @@ import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { jsonArrayField, jsonField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import {
+    BooleanColumn,
+    Judgment,
+    TextColumn,
+    TimestampColumn,
+    type JudgmentError,
+} from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { prettyPrint } from "@ax/lib/json";
 import {
     buildReviewQueue,
@@ -40,7 +48,7 @@ export class LabelMiningReportWriteError extends Schema.TaggedErrorClass<LabelMi
     message: Schema.String,
 }) {}
 
-export type LabelMiningError = DbError | LabelMiningReportWriteError;
+export type LabelMiningError = DbError | JudgmentError | LabelMiningReportWriteError;
 
 export interface LabelMiningReportInput {
     /** Lookback window in days for transcript turns. */
@@ -82,7 +90,7 @@ const SELF_IMPROVE_SCHEMA = "ax.transcript_label_mining_self_improve.v1" as cons
 const GRAPH_PROJECTION_SCHEMA = "ax.transcript_label_mining_graph_projection.v1" as const;
 const REVIEWED_SOURCE_KIND = "transcript_label_mining_reviewed" as const;
 
-/** A persisted `transcript_label_review` row (as read back from SurrealDB). */
+/** A persisted `transcript_label_review` row from the judgment sidecar. */
 export interface LabelMiningReviewTableRow {
     readonly candidate_id: string;
     readonly graph_fact_id?: string | null;
@@ -94,6 +102,7 @@ export interface LabelMiningReviewTableRow {
     readonly reviewer: string;
     readonly rationale: string;
     readonly evidence_paths_json: string;
+    readonly updated_at?: Date | null;
 }
 
 /** A persisted `classifier_graph_fact` row scoped to the reviewed source kind. */
@@ -271,7 +280,7 @@ export interface LabelMiningSelfImproveInput {
 
 export interface LabelMiningProjectInput {
     readonly out?: string;
-    /** When false, build statements but do not run them against SurrealDB. */
+    /** When false, build statements but do not write graph facts or reviews. */
     readonly apply: boolean;
 }
 
@@ -447,7 +456,7 @@ export interface LabelMiningServiceShape {
     /**
      * Project persisted reviewed rows + vector rows into classifier graph facts.
      * Only `accepted` reviews become promotion-safe. With `apply`, the idempotent
-     * UPSERT statements are run against SurrealDB.
+     * Graph statements use SurrealDB. Review decisions use the sidecar.
      */
     readonly projectReviewed: (
         input: LabelMiningProjectInput,
@@ -459,10 +468,24 @@ export class LabelMiningService extends Context.Service<LabelMiningService, Labe
 ) {}
 
 /** Read all persisted reviewed-status rows. */
+const ReviewTableRowSchema = Schema.Struct({
+    candidate_id: TextColumn,
+    graph_fact_id: Schema.NullOr(TextColumn),
+    label_family: TextColumn,
+    review_status: TextColumn,
+    promotion_safe: BooleanColumn,
+    reviewed_label: Schema.NullOr(TextColumn),
+    reviewed_target: Schema.NullOr(TextColumn),
+    reviewer: TextColumn,
+    rationale: TextColumn,
+    evidence_paths_json: TextColumn,
+    updated_at: TimestampColumn,
+});
+
 const reviewTableSql = `
 SELECT
     candidate_id,
-    type::string(graph_fact_id) AS graph_fact_id,
+    graph_fact_id,
     label_family,
     review_status,
     promotion_safe,
@@ -470,7 +493,8 @@ SELECT
     reviewed_target,
     reviewer,
     rationale,
-    evidence_paths_json
+    evidence_paths_json,
+    updated_at
 FROM transcript_label_review;`.trim();
 
 /** Read all reviewed-source classifier graph facts. */
@@ -486,20 +510,6 @@ SELECT
     source_kind
 FROM classifier_graph_fact
 WHERE source_kind = '${REVIEWED_SOURCE_KIND}';`.trim();
-
-/** Read persisted reviewed rows + their candidate evidence for re-projection. */
-const reviewProjectionSql = `
-SELECT
-    candidate_id,
-    label_family,
-    review_status,
-    promotion_safe,
-    reviewed_label,
-    reviewed_target,
-    reviewer,
-    rationale,
-    evidence_paths_json
-FROM transcript_label_review;`.trim();
 
 /** Read persisted vector rows for re-projection. */
 const vectorProjectionSql = `
@@ -550,7 +560,7 @@ const reviewRowToReviewedLabel = (row: LabelMiningReviewTableRow): TranscriptRev
     ...(row.reviewed_target != null ? { reviewed_target: row.reviewed_target } : {}),
     rationale: row.rationale,
     reviewer: row.reviewer,
-    reviewed_at: "",
+    reviewed_at: row.updated_at?.toISOString() ?? "",
 });
 
 const reviewRowToCandidate = (row: LabelMiningReviewTableRow): TranscriptLabelCandidate => ({
@@ -597,11 +607,12 @@ const writeReport = (
         );
     });
 
-export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient> =
+export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient | Judgment> =
     Layer.effect(
         LabelMiningService,
         Effect.gen(function* () {
             const db = yield* SurrealClient;
+            const judgment = yield* Judgment;
 
             const miningReport = Effect.fn("LabelMiningService.miningReport")(function* (
                 input: LabelMiningReportInput,
@@ -697,10 +708,10 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
             const selfImproveQuery = Effect.fn("LabelMiningService.selfImproveQuery")(function* (
                 input: LabelMiningSelfImproveInput,
             ) {
-                const [reviewRows] = yield* db.query<[LabelMiningReviewTableRow[]]>(reviewTableSql);
+                const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewTableSql);
                 const [factRows] = yield* db.query<[LabelMiningGraphFactRow[]]>(reviewedFactSql);
                 const result = buildSelfImproveQuery({
-                    review_rows: reviewRows ?? [],
+                    review_rows: [...reviewRows],
                     fact_rows: factRows ?? [],
                 });
                 if (input.out === undefined) return result;
@@ -712,19 +723,33 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
             const projectReviewed = Effect.fn("LabelMiningService.projectReviewed")(function* (
                 input: LabelMiningProjectInput,
             ) {
-                const [reviewRows] = yield* db.query<[LabelMiningReviewTableRow[]]>(
-                    reviewProjectionSql,
-                );
+                const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewTableSql);
                 const [vectorRows] = yield* db.query<[VectorTableRow[]]>(vectorProjectionSql);
-                const reviews = (reviewRows ?? []).map(reviewRowToReviewedLabel);
-                const candidates = (reviewRows ?? []).map(reviewRowToCandidate);
+                const reviews = reviewRows.map(reviewRowToReviewedLabel);
+                const candidates = reviewRows.map(reviewRowToCandidate);
                 const vectors = (vectorRows ?? []).map(vectorRowToVector);
                 const projection = projectReviewedLabelsToGraph({ candidates, reviews, vectors });
 
                 if (input.apply) {
-                    for (const statement of projection.statements) {
+                    for (const statement of projection.statements.filter((sql) => !sql.startsWith("UPSERT transcript_label_review:"))) {
                         yield* db.query(statement);
                     }
+                    yield* judgment.transaction((transaction) =>
+                        Effect.forEach(projection.review_rows, (row) => transaction.put("transcript_label_review", {
+                            id: stableId("transcript_label_review", [row.candidate_id]),
+                            candidate_id: row.candidate_id,
+                            graph_fact_id: row.graph_fact_id ?? null,
+                            label_family: row.label_family,
+                            review_status: row.review_status,
+                            promotion_safe: row.promotion_safe,
+                            reviewed_label: row.reviewed_label ?? null,
+                            reviewed_target: row.reviewed_target ?? null,
+                            reviewer: row.reviewer,
+                            rationale: row.rationale,
+                            evidence_paths_json: JSON.stringify(row.evidence_paths),
+                            updated_at: row.reviewed_at ? new Date(row.reviewed_at) : new Date(),
+                        }), { discard: true }),
+                    );
                 }
 
                 const report = projectionToReport(projection, input.apply);

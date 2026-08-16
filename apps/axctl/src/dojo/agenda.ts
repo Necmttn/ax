@@ -10,6 +10,7 @@
 import { Effect, type FileSystem } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
+import type { Judgment } from "@ax/lib/sqlite";
 import { listDirectiveProposals, listProposals } from "../improve/list.ts";
 import { listPendingVerdicts } from "../improve/verdict-pending.ts";
 import { fetchSessionChurnSummary, type SessionChurnRow } from "../metrics/session-churn.ts";
@@ -107,7 +108,7 @@ export interface CollectAgendaItemsResult {
  */
 export const collectAgendaItems = (
     opts: CollectOptions,
-): Effect.Effect<CollectAgendaItemsResult, never, SurrealClient | CacheRead | FileSystem.FileSystem> =>
+): Effect.Effect<CollectAgendaItemsResult, never, SurrealClient | CacheRead | Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const read = yield* CacheRead;
         const verdicts = yield* soft("verdicts", listPendingVerdicts(), []);

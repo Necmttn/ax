@@ -19,12 +19,14 @@
 import { Effect } from "effect";
 import type { Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
+import type { Judgment } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** Everything AppLayer provides; the upper bound for jsonRoute handler envs. */
-export type DashboardEnv = Layer.Success<typeof AppLayer>;
+export type DashboardEnv = Layer.Success<typeof AppLayer> | CacheRead | Judgment;
 
 /** Runs a handler effect to a Promise. Production = ServeRuntimeHandle.runner. */
 export type EffectRunner = {

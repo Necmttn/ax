@@ -6,6 +6,7 @@ import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixt
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { IngestContext } from "../ingest/stage/types.ts";
 import { digestStage, DigestStats } from "./digest-stage.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("digest stage", { requireFts: true });
 const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
@@ -22,7 +23,9 @@ describe("digestStage failure isolation with real DuckDB", () => {
     let exit: Exit.Exit<unknown, unknown> | undefined;
     await runWithPlatform(publishCacheFixture(tempDir("ax-digest-failure-"), dylibPath, (write) =>
       Effect.gen(function* () {
-        exit = yield* Effect.exit(digestStage.run(ctx, failingRead(write, false)));
+        exit = yield* Effect.exit(
+          digestStage.run(ctx, failingRead(write, false)).pipe(Effect.provide(EmptyJudgmentTestLayer)),
+        );
       }),
     ));
     expect(Exit.isSuccess(exit!)).toBe(true);
@@ -37,7 +40,9 @@ describe("digestStage failure isolation with real DuckDB", () => {
     let exit: Exit.Exit<unknown, unknown> | undefined;
     await runWithPlatform(publishCacheFixture(tempDir("ax-digest-defect-"), dylibPath, (write) =>
       Effect.gen(function* () {
-        exit = yield* Effect.exit(digestStage.run(ctx, failingRead(write, true)));
+        exit = yield* Effect.exit(
+          digestStage.run(ctx, failingRead(write, true)).pipe(Effect.provide(EmptyJudgmentTestLayer)),
+        );
       }),
     ));
     expect(Exit.isSuccess(exit!)).toBe(true);

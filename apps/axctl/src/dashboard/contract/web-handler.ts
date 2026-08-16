@@ -43,6 +43,7 @@ import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
 import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
+import { JudgmentLive } from "../../judgment.ts";
 
 /** Everything the contract handlers reach for; widens as families join. */
 export type ContractServices = SurrealClient;
@@ -159,6 +160,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that
         // never serves a recall request exactly nothing.
         CacheReadLive,
+        JudgmentLive,
     ).pipe(
         Layer.provide([
             SystemGroupLive,

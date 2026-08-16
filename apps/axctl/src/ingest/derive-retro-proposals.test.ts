@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildRetroCorrectionGuidanceWrites,
-    buildRetroFrictionSkillWrites,
-    buildRetroSkillProposalWrites,
+    buildRetroCorrectionGuidanceStatements,
+    buildRetroFrictionSkillStatements,
+    buildRetroSkillProposalStatements,
     clusterRetroCorrections,
     clusterRetroFrictionKinds,
     clusterRetroToolFailures,
@@ -166,7 +166,7 @@ describe("deriveRetroProposalRows", () => {
     });
 });
 
-describe("buildRetroSkillProposalWrites", () => {
+describe("buildRetroSkillProposalStatements", () => {
     const baseRow: RetroSkillProposalRow = {
         proposalKey: "skill__retro__Bash__abcdef123456",
         title: "Pre-Bash guard",
@@ -184,23 +184,30 @@ describe("buildRetroSkillProposalWrites", () => {
     };
 
     test("new sig: CREATE proposal with form=skill, status=open, baseline, and UPSERT skill_proposal", () => {
-        const writes = buildRetroSkillProposalWrites([baseRow], new Set());
-        expect(writes.map((write) => write.table)).toEqual(["proposal", "skill_proposal"]);
-        expect(writes[0]!.row).toMatchObject({ form: "skill", status: "open" });
-        expect(writes[0]!.row).toHaveProperty("baseline");
+        const sql = buildRetroSkillProposalStatements([baseRow], new Set()).join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain('form: "skill"');
+        expect(sql).toContain('status: "open"');
+        expect(sql).toContain("baseline:");
+        expect(sql).toContain("UPSERT skill_proposal:");
     });
 
     test("existing sig: UPDATE only, no CREATE, no status=, no baseline=, but frequency = N", () => {
-        const writes = buildRetroSkillProposalWrites([baseRow], new Set([baseRow.sig]));
-        expect(writes[0]!.row.frequency).toBe(7);
-        expect(writes[0]!.row).not.toHaveProperty("status");
-        expect(writes[0]!.row).not.toHaveProperty("baseline");
-        expect(writes[1]!.table).toBe("skill_proposal");
+        const sql = buildRetroSkillProposalStatements([baseRow], new Set([baseRow.sig])).join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).not.toMatch(/\bstatus\s*=/);
+        expect(sql).not.toMatch(/\bbaseline\s*=/);
+        expect(sql).toMatch(/\bfrequency\s*=\s*7/);
+        expect(sql).toContain("UPSERT skill_proposal:");
     });
 
     test("baseline JSON encodes tool name and retroKeys list", () => {
-        const writes = buildRetroSkillProposalWrites([baseRow], new Set());
-        expect(JSON.parse(String(writes[0]!.row.baseline))).toMatchObject({ tool: "Bash", retroKeys: ["r1", "r2"] });
+        const sql = buildRetroSkillProposalStatements([baseRow], new Set()).join("\n");
+        // The baseline is wrapped in a SurrealQL string literal (JSON-stringified
+        // once), so the inner quotes are backslash-escaped in the emitted SQL.
+        expect(sql).toContain('\\"tool\\":\\"Bash\\"');
+        expect(sql).toContain('\\"retroKeys\\":[\\"r1\\",\\"r2\\"]');
     });
 });
 
@@ -374,7 +381,7 @@ describe("deriveRetroFrictionSkillRows", () => {
     });
 });
 
-describe("buildRetroCorrectionGuidanceWrites", () => {
+describe("buildRetroCorrectionGuidanceStatements", () => {
     const row: RetroGuidanceProposalRow = {
         proposalKey: "guidance__retro_corrections__abcdef123456",
         title: "Reduce recurring user corrections",
@@ -390,24 +397,28 @@ describe("buildRetroCorrectionGuidanceWrites", () => {
     };
 
     test("new sig: CREATE proposal form=guidance, UPSERT guidance_proposal", () => {
-        const writes = buildRetroCorrectionGuidanceWrites([row], new Set());
-        expect(writes.map((write) => write.table)).toEqual(["proposal", "guidance_proposal"]);
-        expect(writes[0]!.row).toMatchObject({ form: "guidance", status: "open" });
+        const sql = buildRetroCorrectionGuidanceStatements([row], new Set()).join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain('form: "guidance"');
+        expect(sql).toContain('status: "open"');
+        expect(sql).toContain("UPSERT guidance_proposal:");
     });
 
     test("baseline JSON encodes kind=corrections", () => {
-        const writes = buildRetroCorrectionGuidanceWrites([row], new Set());
-        expect(JSON.parse(String(writes[0]!.row.baseline))).toMatchObject({ kind: "corrections" });
+        const sql = buildRetroCorrectionGuidanceStatements([row], new Set()).join("\n");
+        expect(sql).toContain('\\"kind\\":\\"corrections\\"');
     });
 
     test("existing sig: UPDATE only, no CREATE, no baseline=", () => {
-        const writes = buildRetroCorrectionGuidanceWrites([row], new Set([row.sig]));
-        expect(writes[0]!.row).not.toHaveProperty("baseline");
-        expect(writes[1]!.table).toBe("guidance_proposal");
+        const sql = buildRetroCorrectionGuidanceStatements([row], new Set([row.sig])).join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).not.toMatch(/\bbaseline\s*=/);
+        expect(sql).toContain("UPSERT guidance_proposal:");
     });
 });
 
-describe("buildRetroFrictionSkillWrites", () => {
+describe("buildRetroFrictionSkillStatements", () => {
     const row: RetroFrictionSkillProposalRow = {
         proposalKey: "skill__retro_friction__tool_error__abcdef123456",
         title: "Address recurring tool_error friction",
@@ -425,15 +436,17 @@ describe("buildRetroFrictionSkillWrites", () => {
     };
 
     test("new sig: CREATE proposal form=skill, UPSERT skill_proposal, baseline has kind", () => {
-        const writes = buildRetroFrictionSkillWrites([row], new Set());
-        expect(writes.map((write) => write.table)).toEqual(["proposal", "skill_proposal"]);
-        expect(writes[0]!.row.form).toBe("skill");
-        expect(JSON.parse(String(writes[0]!.row.baseline))).toMatchObject({ kind: "tool_error" });
+        const sql = buildRetroFrictionSkillStatements([row], new Set()).join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain('form: "skill"');
+        expect(sql).toContain("UPSERT skill_proposal:");
+        expect(sql).toContain('\\"kind\\":\\"tool_error\\"');
     });
 
     test("existing sig: UPDATE only, no CREATE, payload still UPSERTs", () => {
-        const writes = buildRetroFrictionSkillWrites([row], new Set([row.sig]));
-        expect(writes[0]!.row).not.toHaveProperty("baseline");
-        expect(writes[1]!.table).toBe("skill_proposal");
+        const sql = buildRetroFrictionSkillStatements([row], new Set([row.sig])).join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).toContain("UPSERT skill_proposal:");
     });
 });

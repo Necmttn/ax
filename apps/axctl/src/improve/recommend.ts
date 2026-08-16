@@ -5,8 +5,7 @@
  */
 
 import { Effect, Schema } from "effect";
-import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
-import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { Judgment, NumberColumn, TextColumn, TimestampColumn, type JudgmentError } from "@ax/lib/sqlite";
 import { PROPOSAL_STATUS_OPEN } from "./lifecycle.ts";
 
 export interface RecommendInput {
@@ -78,16 +77,6 @@ const CONFIDENCE_WEIGHT: Record<string, number> = {
     low: 1,
 };
 
-const RecommendRow = Schema.Struct({
-    dedupe_sig: Schema.String,
-    title: Schema.String,
-    form: Schema.String,
-    hypothesis: Schema.String,
-    confidence: Schema.String,
-    frequency: NumberFromBigIntColumn,
-    updated_at: TimestampColumn,
-});
-
 const recency = (iso: string): number => {
     const t = new Date(iso).getTime();
     if (!Number.isFinite(t)) return 0.1;  // floor - same as the maximally-stale case
@@ -95,21 +84,26 @@ const recency = (iso: string): number => {
     return Math.max(0.1, 1 / Math.log(2 + Math.max(0, days)));
 };
 
-const safeIso = (value: Date): string =>
-    Number.isFinite(value.getTime()) ? value.toISOString() : new Date(0).toISOString();
-
 const score = (row: { confidence: string; frequency: number; updated_at: string }): number => {
     const c = CONFIDENCE_WEIGHT[row.confidence] ?? 1;
     return c * recency(row.updated_at) * (1 + Math.log1p(Math.max(0, row.frequency)));
 };
 
 export const recommend = (
-    read: CacheReadService,
     input: RecommendInput,
-): Effect.Effect<RecommendItem[], CacheReadError> =>
+): Effect.Effect<RecommendItem[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        let rows = yield* read.rows(
-            RecommendRow,
+        const judgment = yield* Judgment;
+        let rows = yield* judgment.rows(
+            Schema.Struct({
+                dedupe_sig: TextColumn,
+                title: TextColumn,
+                form: TextColumn,
+                hypothesis: TextColumn,
+                confidence: TextColumn,
+                frequency: NumberColumn,
+                updated_at: TimestampColumn,
+            }),
             `SELECT dedupe_sig, title, form, hypothesis, confidence, frequency,
                     coalesce(updated_at, created_at) AS updated_at
              FROM proposal WHERE status = ?`,
@@ -131,8 +125,8 @@ export const recommend = (
                 hypothesis: r.hypothesis,
                 confidence: r.confidence,
                 frequency: r.frequency,
-                updatedAt: safeIso(r.updated_at),
-                score: score({ ...r, updated_at: safeIso(r.updated_at) }),
+                updatedAt: r.updated_at.toISOString(),
+                score: score({ ...r, updated_at: r.updated_at.toISOString() }),
             }))
             .sort((a, b) => b.score - a.score)
             .slice(0, input.limit);

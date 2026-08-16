@@ -28,7 +28,7 @@ export const catchDbErrorAndExit =
     (prefix: string) =>
     <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, never, R> =>
         eff.pipe(
-            Effect.catch((e) =>
+            Effect.catch((e: E) =>
                 Effect.promise(async () => {
                     const message = e instanceof Error ? e.message : String(e);
                     process.stderr.write(`${prefix}: DB error - ${message}\n`);

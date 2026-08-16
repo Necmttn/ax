@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { DigestItem } from "./model.ts";
 import { salience } from "./rank.ts";
 import { recommend } from "../improve/recommend.ts";
@@ -72,12 +73,18 @@ export const quotaToItem = (
 
 // ---- Effect wrappers ----
 
+/**
+ * Open-proposal count. Proposals are DURABLE JUDGMENT, so they live in the
+ * SQLite sidecar rather than the rebuildable DuckDB cache - which is why this
+ * source takes the `Judgment` service instead of the live reader the other two
+ * take. The sidecar is not snapshot-published, so a service tag here is safe
+ * inside ingest: it answers from the same rows a CLI read would see.
+ */
 export const improveItems = (
-    read: CacheReadService,
     now: Date,
-): Effect.Effect<DigestItem[], CacheReadError> =>
+): Effect.Effect<DigestItem[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const proposals = yield* recommend(read, { limit: 100 });
+        const proposals = yield* recommend({ limit: 100 });
         const item = improveToItem(proposals.length, now);
         return item ? [item] : [];
     });

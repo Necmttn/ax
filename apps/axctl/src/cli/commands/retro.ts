@@ -1,16 +1,15 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { recordRef } from "@ax/lib/shared/surql";
-import { retroFromSession, retroRecordKey, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
-import { withConfigWrite } from "../../config-core/reconcile.ts";
+import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
 import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
-import { proposalKey, runPropose } from "../../improve/propose.ts";
-import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
+import { runPropose } from "../../improve/propose.ts";
+import { listStoredRetros } from "../../queries/judgment-retros.ts";
 import { cmdRetroReflect } from "../retro-reflect.ts";
 import { cmdRetroMeta } from "../retro-meta.ts";
 import { cmdRetroPlan } from "../retro-plan.ts";
@@ -29,26 +28,6 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * --source=<value> overrides. The Stop hook recipe in docs/HOOKS.md
  * uses this path.
  */
-/**
- * Run the `retro-proposals` derivation for the retro just written (#742).
- *
- * That stage is the ONLY path from a retro's clustered failures to a proposal,
- * and it runs during `ax ingest` - NOT during `ax derive-signals`, which is
- * where a reporter reasonably looked and found nothing. Emitting a retro and
- * then seeing an unchanged proposal queue reads as a broken loop, so emit runs
- * the derivation itself.
- *
- * Best-effort: the retro is already committed, and a derivation failure must
- * not turn a successful emit into a non-zero exit. It returns the number of
- * proposals derived so the caller can report it.
- */
-const runInlineRetroDerive = () => withConfigWrite((write) => deriveRetroProposals(write)).pipe(
-    Effect.map((stats) =>
-        stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
-    ),
-    Effect.orElseSucceed(() => 0),
-);
-
 const cmdRetroEmit = (input: {
     readonly session: string | undefined;
     readonly fromFile: string | undefined;
@@ -60,20 +39,19 @@ const cmdRetroEmit = (input: {
         const sessionFlag = input.session ?? process.env.AX_SESSION_ID;
         const sourceFlag = (input.source ?? (fromFile ? "claude_stop_hook" : "heuristic")) as RetroSource;
         const json = input.json;
-        const db = yield* SurrealClient;
 
         let sessionRecordId = sessionFlag;
         if (!sessionRecordId) {
-            const row = yield* withConfigWrite((write) =>
-                write.rows(Schema.Struct({ id: Schema.String }),
-                    "SELECT id FROM session ORDER BY started_at DESC LIMIT 1").pipe(
-                    Effect.map((rows) => rows[0]),
-                ),
+            const db = yield* SurrealClient;
+            const latest = yield* db.query<[Array<{ id: string | { tb: string; id: string } }>]>(
+                "SELECT id, started_at FROM session ORDER BY started_at DESC LIMIT 1;",
             );
+            const row = (latest?.[0] ?? [])[0];
             if (!row) {
                 fail("ax retro emit: no session to retro on (no --session and no rows in DB)");
             }
-            sessionRecordId = row.id;
+            const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
+            sessionRecordId = idStr;
         }
         if (!sessionRecordId.includes(":")) sessionRecordId = `session:${sessionRecordId}`;
 
@@ -99,7 +77,7 @@ const cmdRetroEmit = (input: {
                 ),
             );
             const sessionKey = sessionRecordId.split(":").slice(1).join(":").replace(/`/g, "");
-            yield* withConfigWrite((write) => upsertRetro(write, {
+            yield* upsertRetro({
                 sessionId: sessionKey,
                 source: sourceFlag,
                 payload: {
@@ -109,7 +87,7 @@ const cmdRetroEmit = (input: {
                     next: parsed.next ?? null,
                 },
                 raw,
-            }));
+            });
 
             // The retro -> proposal loop (#742). Proposals filed in the payload
             // go through the SAME writer as `ax improve propose`, then cite the
@@ -118,15 +96,10 @@ const cmdRetroEmit = (input: {
             const filed: Array<{ status: string; title: string; sig: string }> = [];
             for (const proposal of parsed.proposals ?? []) {
                 const result = yield* runPropose(proposal);
-                yield* db.query(
-                    `RELATE ${recordRef("proposal", proposalKey(result.sig))}->cites_evidence->${
-                        recordRef("retro", retroRecordKey(sessionKey))
-                    } SET kind = "retro";`,
-                );
                 filed.push({ status: result.status, title: result.title, sig: result.sig });
             }
 
-            const derived = yield* runInlineRetroDerive();
+            const derived = 0;
 
             if (json) {
                 console.log(prettyPrint({
@@ -158,12 +131,12 @@ const cmdRetroEmit = (input: {
             return;
         }
 
-        const retroInput = yield* withConfigWrite((write) => retroFromSession(write, sessionRecordId));
+        const retroInput = yield* retroFromSession(sessionRecordId);
         if (!retroInput) {
             fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
-        yield* withConfigWrite((write) => upsertRetro(write, retroInput));
-        const derived = yield* runInlineRetroDerive();
+        yield* upsertRetro(retroInput);
+        const derived = 0;
         if (json) {
             console.log(prettyPrint({
                 session: sessionRecordId,
@@ -193,18 +166,13 @@ const cmdRetroList = (input: {
         const json = input.json;
         const limit = requirePositiveInt("retro list", "limit", input.limit);
         const since = input.since;
-        const db = yield* SurrealClient;
-        const where = since ? `WHERE created_at > time::now() - ${parseInt(since, 10) || 7}d` : "";
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, session, source, tried, failed, next, type::string(created_at) AS created_at
-             FROM retro ${where} ORDER BY created_at DESC LIMIT ${limit};`,
-        );
-        const list = rows?.[0] ?? [];
+        const cutoff = since ? new Date(Date.now() - (parseInt(since, 10) || 7) * 86_400_000) : null;
+        const list = yield* listStoredRetros({ ...(cutoff ? { since: cutoff } : {}), limit });
         if (json) { console.log(prettyPrint(list)); return; }
         if (list.length === 0) { console.log("(no retros yet - try `ax retro emit`)"); return; }
         for (const row of list) {
             const tried = String(row.tried ?? "").slice(0, 60);
-            console.log(`${String(row.created_at ?? "?")}  [${String(row.source ?? "?")}]  ${String(row.session ?? "?")}`);
+            console.log(`${row.created_at.toISOString()}  [${row.source}]  session:${row.session}`);
             console.log(`  ${tried}${tried.length >= 60 ? "…" : ""}`);
             if (row.failed) console.log(`  ! ${String(row.failed).slice(0, 60)}`);
             if (row.next) console.log(`  → ${String(row.next).slice(0, 60)}`);
@@ -212,10 +180,10 @@ const cmdRetroList = (input: {
     });
 
 /**
- * `ax retro pending` - sessions that lack a `reviewed` edge to any retro.
+ * `ax retro pending` - sessions that have no sidecar retro judgment.
  *
  * A session is "pending retro" when:
- *   - it has no outbound `reviewed` edge, AND
+ *   - its cache id is absent from the sidecar retro rows, AND
  *   - it looks finished: either `ended_at` is set, or the last turn was
  *     more than --idle-min minutes ago (user closed the tab, no explicit
  *     end marker).
@@ -269,6 +237,9 @@ interface PendingQueryOpts {
 const queryPendingSessions = (opts: PendingQueryOpts) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const retros = yield* listStoredRetros({ limit: 100_000 });
+        const reviewedSessions = new Set(retros.map((retro) => retro.session.replace(/^session:/, "")));
+        const scanLimit = Math.min(100_000, opts.limit + reviewedSessions.size);
         // claude-subagent sessions are orchestrated children; their retros
         // belong to the parent session's review. Exclude unless asked.
         const subagentFilter = opts.includeSubagents ? "" : "AND source != 'claude-subagent'";
@@ -280,12 +251,11 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
                 type::string(started_at) AS started_at,
                 type::string(ended_at) AS ended_at
             FROM session
-            WHERE count(->reviewed) = 0
-              AND ended_at != NONE
+            WHERE ended_at != NONE
               AND ended_at > time::now() - ${opts.sinceDays}d
               ${subagentFilter}
             ORDER BY ended_at DESC
-            LIMIT ${opts.limit};
+            LIMIT ${scanLimit};
         `);
         const idleRows = yield* db.query<[Array<{
             id: PendingSessionRow["id"]; project: string | null; source: string | null;
@@ -294,14 +264,13 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
             SELECT id, project, source, model,
                 type::string(started_at) AS started_at
             FROM session
-            WHERE count(->reviewed) = 0
-              AND ended_at = NONE
+            WHERE ended_at = NONE
               AND started_at != NONE
               AND started_at > time::now() - ${opts.sinceDays}d
               AND started_at < time::now() - ${opts.idleMinutes}m
               ${subagentFilter}
             ORDER BY started_at DESC
-            LIMIT ${opts.limit};
+            LIMIT ${scanLimit};
         `);
 
         const recordIdOf = (id: PendingSessionRow["id"]): string =>
@@ -314,6 +283,7 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
         const out: PendingSession[] = [];
         for (const row of (endedRows?.[0] ?? [])) {
             const sessionRecordId = recordIdOf(row.id);
+            if (reviewedSessions.has(keyOf(sessionRecordId))) continue;
             out.push({
                 sessionId: sessionRecordId,
                 key: keyOf(sessionRecordId),
@@ -329,6 +299,7 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
         }
         for (const row of (idleRows?.[0] ?? [])) {
             const sessionRecordId = recordIdOf(row.id);
+            if (reviewedSessions.has(keyOf(sessionRecordId))) continue;
             out.push({
                 sessionId: sessionRecordId,
                 key: keyOf(sessionRecordId),
@@ -342,7 +313,7 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
                 reason: "idle",
             });
         }
-        return out;
+        return out.slice(0, opts.limit);
     });
 
 const cmdRetroPending = (input: {
@@ -675,5 +646,22 @@ export const retroCommand = Command.make("retro").pipe(
 );
 
 export const retroRuntime: RuntimeManifest = {
-    retro: "db",
+    retro: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            emit: (args) => {
+                const hasFile = args.some((arg) => arg === "--from-file" || arg.startsWith("--from-file="));
+                const hasSession = args.some((arg) => arg === "--session" || arg.startsWith("--session="))
+                    || Boolean(process.env.AX_SESSION_ID);
+                return hasFile && hasSession ? "cache" : "db";
+            },
+            list: "cache",
+            pending: "db",
+            brief: "db",
+            reflect: "cache",
+            meta: "db",
+            plan: "cache",
+        },
+    },
 };

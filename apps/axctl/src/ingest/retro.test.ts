@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composeHeuristicRetro } from "./retro.ts";
+import { composeHeuristicRetro, retroRecordKey } from "./retro.ts";
 
 const baseStat = {
     id: "session:abc",
@@ -75,5 +75,11 @@ describe("composeHeuristicRetro", () => {
         });
         expect(r.failed).toContain("4 user correction(s)");
         expect(r.next).toMatch(/guidance skill/);
+    });
+});
+
+describe("retroRecordKey", () => {
+    test("is stable for bare and prefixed session ids", () => {
+        expect(retroRecordKey("session:abc")).toBe(retroRecordKey("abc"));
     });
 });
