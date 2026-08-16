@@ -97,24 +97,6 @@ export const untilClause = (
     until: string | Date | null | undefined,
 ): Clause => boundClause(column, "<=", until);
 
-/**
- * "N days before now", as a TIMESTAMP - the right-hand side of every windowed
- * read. Binds one parameter: the day count.
- *
- * BOTH CASTS ARE LOad-BEARING against the vendored DuckDB build, and the plain
- * spelling `CURRENT_TIMESTAMP - (? * INTERVAL '1 day')` does not run at all:
- *
- *  - `CURRENT_TIMESTAMP` is a TIMESTAMPTZ, and TIMESTAMPTZ minus INTERVAL is
- *    resolved by the ICU extension, which is not in the static build ax ships.
- *    The binder reports "No function matches '-(TIMESTAMP WITH TIME ZONE,
- *    INTERVAL)'". Casting to a naive TIMESTAMP - which is what every `ts`
- *    column in the schema is, and what the seam pins to UTC - uses core
- *    arithmetic instead.
- *  - `CAST(? AS INTEGER)` because a bound day count has no declared type at
- *    bind time, and the multiplication has to resolve to an INTERVAL.
- */
-export const daysAgoExpr = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')";
-
 const requireCount = (name: string, value: number): void => {
     if (!Number.isInteger(value) || value < 0) {
         throw new RangeError(
