@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
 import { refListSource } from "@ax/lib/shared/record-select";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
@@ -122,27 +123,79 @@ export const resolveFiles = (paths: readonly string[], opts: { readonly fuzzyFal
         return rows.slice(0, 8) as FileRow[];
     });
 
+const ToolEvidenceQueryRow = Schema.Struct({
+    evidence: Schema.NullOr(Schema.String),
+    path_seen: Schema.NullOr(Schema.String),
+    excerpt: Schema.NullOr(Schema.String),
+    ts: TimestampColumn,
+    path: Schema.NullOr(Schema.String),
+    tool_name: Schema.NullOr(Schema.String),
+    command_norm: Schema.NullOr(Schema.String),
+    turn_id: Schema.NullOr(Schema.String),
+    turn_seq: Schema.NullOr(NumberFromBigIntColumn),
+    turn_intent_kind: Schema.NullOr(Schema.String),
+    turn_text_excerpt: Schema.NullOr(Schema.String),
+    turn_session_id: Schema.NullOr(Schema.String),
+    turn_session_source: Schema.NullOr(Schema.String),
+});
+
+/**
+ * `read_file`/`searched_file` are `(tool_call) -in-> edge -out-> (file)` edges.
+ * The `claude-subagent` filter is against the TOOL CALL's own session (`tc`),
+ * matching the original `in.session.source` - not the (possibly different)
+ * turn's session.
+ */
 export const loadToolEvidenceTable = (table: "read_file" | "searched_file", fileIds: readonly string[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as ToolEvidenceRow[];
-        const [rows] = yield* db.query<[Array<Omit<ToolEvidenceRow, "kind">>]>(`
+        const rows = yield* read.rows(ToolEvidenceQueryRow, `
             SELECT
-                evidence,
-                path_seen,
-                excerpt,
-                <string>ts AS ts,
-                out.path AS path,
-                in.name AS tool_name,
-                in.command_norm AS command_norm,
-                in.turn.{ id, seq, intent_kind, text_excerpt, session: session.{ id, source } } AS turn
-            FROM ${table}
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            ORDER BY ts DESC
-            LIMIT 30;
-        `);
-        return rows.map((row) => ({ ...row, kind: table })).sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a));
+                e.evidence AS evidence,
+                e.path_seen AS path_seen,
+                e.excerpt AS excerpt,
+                e.ts AS ts,
+                f.path AS path,
+                tc.name AS tool_name,
+                tc.command_norm AS command_norm,
+                t.id AS turn_id,
+                t.seq AS turn_seq,
+                t.intent_kind AS turn_intent_kind,
+                t.text_excerpt AS turn_text_excerpt,
+                tsess.id AS turn_session_id,
+                tsess.source AS turn_session_source
+            FROM ${table} e
+            JOIN file f ON f.id = e.out_id
+            JOIN tool_call tc ON tc.id = e.in_id
+            JOIN session s ON s.id = tc.session
+            LEFT JOIN turn t ON t.id = tc.turn
+            LEFT JOIN session tsess ON tsess.id = t.session
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            ORDER BY e.ts DESC
+            LIMIT 30
+        `, fileIds);
+        const mapped: ToolEvidenceRow[] = rows.map((row) => ({
+            kind: table,
+            evidence: row.evidence,
+            path_seen: row.path_seen,
+            excerpt: row.excerpt,
+            ts: row.ts.toISOString(),
+            path: row.path,
+            tool_name: row.tool_name,
+            command_norm: row.command_norm,
+            turn: row.turn_id === null ? null : {
+                id: row.turn_id,
+                seq: row.turn_seq,
+                intent_kind: row.turn_intent_kind,
+                text_excerpt: row.turn_text_excerpt,
+                session: row.turn_session_id === null ? null : {
+                    id: row.turn_session_id,
+                    source: row.turn_session_source,
+                },
+            },
+        }));
+        return mapped.sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a));
     });
 
 export const loadTouches = (fileIds: readonly string[]) =>
