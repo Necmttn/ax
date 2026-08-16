@@ -15,6 +15,7 @@ import {
     WorktreesResult,
 } from "@ax/lib/shared/api-contract";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AX_VERSION } from "../../cli/version.ts";
 import { graphHealthSql } from "../../queries/graph-health.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
@@ -59,12 +60,17 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
                 if (!sql) return yield* new QueryRejected({ error: "SQL is required" });
                 if (!isSingleReadStatement(sql)) {
                     return yield* new QueryRejected({
-                        error: "Only a single SELECT, RETURN, or INFO statement is allowed",
+                        error: "Only a single SELECT or read-only DuckDB introspection statement is allowed",
                     });
                 }
                 const started = performance.now();
-                const db = yield* SurrealClient;
-                const result = yield* db.query(sql).pipe(
+                const read = yield* CacheRead;
+                // Undecoded pass-through (`raw`): the console accepts caller-typed
+                // SQL with no schema to decode against - same as the old
+                // SurrealClient.query passthrough. The console's query LANGUAGE
+                // changed with the engine (DuckDB SQL, not SurrealQL) - see
+                // read-guard.ts's module doc.
+                const result = yield* read.raw(sql).pipe(
                     Effect.mapError((err) => new QueryRejected({ error: errorText(err) })),
                 );
                 return new QueryResult({
@@ -72,6 +78,13 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
                     durationMs: Math.round(performance.now() - started),
                 });
             }))
+        // NOT YET PORTED: graphHealthSql (queries/graph-health.ts, chunk 2b's)
+        // composes 6 sub-diagnostics (duplicate-identity scans across 7 edge
+        // tables, a backlink count, array::group aggregation) into one
+        // SurrealQL `RETURN { ... }` object literal - a genuinely complex
+        // multi-query bundle, not a mechanical single-query translation. Left
+        // on SurrealClient (write-frozen but still reachable) until 2b lands a
+        // CacheRead equivalent or this gets its own translation pass.
         .handle("graphHealth", () =>
             Effect.gen(function* () {
                 const db = yield* SurrealClient;
@@ -90,8 +103,8 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
             }))
         .handle("selfImprove", () =>
             Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                return yield* db.query(`
+                const read = yield* CacheRead;
+                return yield* read.raw(`
 SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before, metrics_after, created_at
 FROM guidance_version
 ORDER BY created_at DESC
