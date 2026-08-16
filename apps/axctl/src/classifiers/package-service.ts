@@ -15,7 +15,6 @@ import {
     buildExecutionFactProjectionReport,
     buildExecutionSurrealWritePlanReport,
     buildOperationsReport,
-    classifierGraphHealthSql,
     discoverClassifierPackageManifestPaths,
     discoverClassifierPackageExecutionReportPaths,
     executeOperationPlanReport,
@@ -49,9 +48,7 @@ import {
     type ClassifierLifecycleInsightReport,
     type ClassifierLifecycleRoutingSummaryReport,
     type ClassifierGraphHealthQuery,
-    type ClassifierGraphEdgeRow,
     type ClassifierGraphFactRow,
-    type ClassifierGraphNodeRow,
     type ClassifierPackageOperationPreflightReport,
     type ClassifierPackageOperationDryRunReport,
     type ClassifierPackageOperationExecutionReport,
@@ -425,34 +422,34 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly executionGraphHealthReport: (
         input?: ClassifierPackageExecutionGraphHealthInput,
-    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, CacheRead>;
     readonly executionGraphQuerySuggestionRoutingSummary: (
         input?: ClassifierPackageExecutionGraphHealthInput,
-    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, CacheRead>;
     readonly writeExecutionGraphQuerySuggestionRoutingSummaryReport: (
         input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
-    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly boundaryReplaySummaryReport: (
         input?: ClassifierBoundaryReplaySummaryInput,
-    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, CacheRead>;
     readonly writeBoundaryReplaySummaryReport: (
         input: ClassifierBoundaryReplaySummaryWriteInput,
-    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, CacheRead>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly lifecycleInsightReport: (
         input?: ClassifierLifecycleInsightInput,
-    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly writeLifecycleInsightReport: (
         input: ClassifierLifecycleInsightWriteInput,
-    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly lifecycleRoutingSummaryReport: (
         input?: ClassifierLifecycleInsightInput,
-    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly writeLifecycleRoutingSummaryReport: (
         input: ClassifierLifecycleRoutingSummaryWriteInput,
-    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, CacheRead | FileSystem.FileSystem>;
     readonly pendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListInput,
     ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError, FileSystem.FileSystem | Path.Path>;
@@ -470,6 +467,50 @@ export interface ClassifierPackageServiceShape {
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
     "ax/ClassifierPackageService",
 ) {}
+
+/**
+ * DuckDB read for `executionGraphHealth`. `classifierGraphHealthSql()` in
+ * `./package-operations.ts` (a different wave-3 chunk's file) stays SurrealQL
+ * - it also backs `applyExecutionSurrealWritePlanReport`'s write statements,
+ * which this chunk does not own - so the CacheRead port is a fresh, local
+ * query set rather than a rewrite of that shared builder.
+ */
+const CLASSIFIER_GRAPH_NODE_SQL =
+    "SELECT graph_id, kind, label, properties_json, source_kind FROM classifier_graph_node ORDER BY graph_id";
+const CLASSIFIER_GRAPH_EDGE_SQL =
+    "SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, source_kind FROM classifier_graph_edge ORDER BY graph_id";
+const CLASSIFIER_GRAPH_FACT_SQL =
+    "SELECT graph_id, kind, subject, predicate, object, value_json, evidence_edges_json, properties_json, source_kind FROM classifier_graph_fact ORDER BY graph_id";
+
+const CacheGraphNodeRow = Schema.Struct({
+    graph_id: Schema.String,
+    kind: Schema.String,
+    label: Schema.String,
+    properties_json: Schema.String,
+    source_kind: Schema.String,
+});
+
+const CacheGraphEdgeRow = Schema.Struct({
+    graph_id: Schema.String,
+    kind: Schema.String,
+    from_id: Schema.String,
+    to_id: Schema.String,
+    evidence_path: Schema.String,
+    properties_json: Schema.String,
+    source_kind: Schema.String,
+});
+
+const CacheGraphFactRow = Schema.Struct({
+    graph_id: Schema.String,
+    kind: Schema.String,
+    subject: Schema.String,
+    predicate: Schema.String,
+    object: Schema.NullOr(Schema.String),
+    value_json: Schema.NullOr(Schema.String),
+    evidence_edges_json: Schema.String,
+    properties_json: Schema.String,
+    source_kind: Schema.String,
+});
 
 export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService, never, FileSystem.FileSystem | Path.Path> = Layer.effect(
     ClassifierPackageService,
@@ -756,17 +797,28 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
         const executionGraphHealth = Effect.fn("ClassifierPackageService.executionGraphHealthReport")(function* (
             input?: ClassifierPackageExecutionGraphHealthInput,
         ) {
-            const db = yield* SurrealClient;
-            const result = yield* db.query<[ClassifierGraphNodeRow[], ClassifierGraphEdgeRow[], ClassifierGraphFactRow[]]>(classifierGraphHealthSql()).pipe(
-                Effect.mapError((error) => ClassifierPackageReportWriteError.make({
-                    path: "classifier_graph_*",
-                    message: errorMessage(error),
-                })),
-            );
+            const read = yield* CacheRead;
+            const mapReadError = (error: CacheReadError) => ClassifierPackageReportWriteError.make({
+                path: "classifier_graph_*",
+                message: errorMessage(error),
+            });
+            const nodes = yield* read.rows(CacheGraphNodeRow, CLASSIFIER_GRAPH_NODE_SQL).pipe(Effect.mapError(mapReadError));
+            const edges = yield* read.rows(CacheGraphEdgeRow, CLASSIFIER_GRAPH_EDGE_SQL).pipe(Effect.mapError(mapReadError));
+            const facts = yield* read.rows(CacheGraphFactRow, CLASSIFIER_GRAPH_FACT_SQL).pipe(Effect.mapError(mapReadError));
             return buildExecutionGraphHealthReport({
-                nodes: result[0] ?? [],
-                edges: result[1] ?? [],
-                facts: result[2] ?? [],
+                nodes: [...nodes],
+                edges: [...edges],
+                facts: facts.map((fact): ClassifierGraphFactRow => ({
+                    graph_id: fact.graph_id,
+                    kind: fact.kind,
+                    subject: fact.subject,
+                    predicate: fact.predicate,
+                    ...(fact.object === null ? {} : { object: fact.object }),
+                    ...(fact.value_json === null ? {} : { value_json: fact.value_json }),
+                    evidence_edges_json: fact.evidence_edges_json,
+                    properties_json: fact.properties_json,
+                    source_kind: fact.source_kind,
+                })),
                 ...(input?.query === undefined ? {} : { query: input.query }),
             });
         });
