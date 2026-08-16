@@ -5,9 +5,8 @@
  * Pure query - presentation lives in the caller.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 
 export interface PendingVerdictRow {
     readonly id: string;      // full record id string, e.g. "experiment:aaa"
@@ -21,21 +20,14 @@ export interface PendingVerdictRow {
  * Ordered by `created_at` (always set; `scaffolded_at` is NONE for
  * status='task_emitted' rows, so it is not a safe sort key).
  */
-export const listPendingVerdicts = (): Effect.Effect<PendingVerdictRow[], DbError, SurrealClient> =>
+export const listPendingVerdicts = (): Effect.Effect<PendingVerdictRow[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // SurrealDB 3.0 requires the ORDER BY field to appear in the
-        // projection, so created_at is selected and stripped below.
-        const sql = `SELECT
-                type::string(id) AS id,
-                proposal.dedupe_sig AS sig,
-                proposal.title AS title,
-                status,
-                type::string(created_at) AS created_at
-            FROM experiment
-            WHERE locked_verdict IS NONE AND status != 'retired'
-            ORDER BY created_at ASC
-            LIMIT 20;`; // cap keeps the dojo agenda to one reviewable sitting
-        const result = yield* db.query<[Array<PendingVerdictRow & { created_at?: string }>]>(sql);
-        return (result?.[0] ?? []).map(({ id, sig, title, status }) => ({ id, sig, title, status }));
+        const judgment = yield* Judgment;
+        return [...yield* judgment.rows(
+            Schema.Struct({ id: TextColumn, sig: TextColumn, title: TextColumn, status: TextColumn }),
+            `SELECT e.id, p.dedupe_sig AS sig, p.title, e.status
+             FROM experiment e JOIN proposal p ON p.id = e.proposal
+             WHERE e.locked_verdict IS NULL AND e.status != 'retired'
+             ORDER BY e.created_at ASC LIMIT 20`,
+        )];
     });

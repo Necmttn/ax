@@ -6,16 +6,27 @@ import { readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { skillNameToSlug } from "./skills-classify-template.ts";
 import { DbError } from "@ax/lib/errors";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import { cacheReadResults } from "../testing/cache-read.ts";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 
 // ---------------------------------------------------------------------------
 // Test fixtures + mock DB
 // ---------------------------------------------------------------------------
 
 type MockRow = { name: string; invocations: number; sessions: number };
+const classifiedByDb = new WeakMap<SurrealClientShape, ReadonlyArray<string>>();
+// The hygiene halves that come from the CACHE (counts + catalog), keyed by the
+// same client handle the test already threads around. The stub answers the seam
+// directly (no schema decode), so these are the DECODED row shapes.
+const cacheRowsByDb = new WeakMap<SurrealClientShape, ReadonlyArray<ReadonlyArray<unknown>>>();
+/** Every SQL string the cache stub was asked for, per client. */
+const cacheSqlByDb = new WeakMap<SurrealClientShape, string[]>();
 
 /** Build a minimal SurrealClientShape mock that returns a fixed row list. */
 function mockDb(rows: MockRow[]): SurrealClientShape {
@@ -61,22 +72,42 @@ function hygieneMockDb(
         dir_path: s.dir_path,
     }));
     const classified = all.filter((s) => s.classified).map((s) => `skill:${s.name}`);
-    return makeTestSurrealClient({
+    const client = makeTestSurrealClient({
         denyWrites: true,
         fallback: [counts, skills, classified],
     }).client;
+    classifiedByDb.set(client, classified);
+    cacheRowsByDb.set(client, [
+        counts,
+        skills.map((sk) => ({ ...sk, content_hash: null })),
+    ]);
+    return client;
 }
 
 // Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
 // (the @effect/platform migration); run against the REAL Bun-backed layers.
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
+/** The capture buffer for a client's cache reads, created on first use. */
+const capturedCacheSql = (db: SurrealClientShape): string[] => {
+    const existing = cacheSqlByDb.get(db);
+    if (existing) return existing;
+    const fresh: string[] = [];
+    cacheSqlByDb.set(db, fresh);
+    return fresh;
+};
+
 const runWith = <A>(
     db: SurrealClientShape,
-    eff: Effect.Effect<A, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path>,
+    eff: Effect.Effect<A, DbError | JudgmentError | PlatformError.PlatformError, SurrealClient | Judgment | CacheRead | FileSystem.FileSystem | Path.Path>,
 ): Promise<A> =>
     Effect.runPromise(
-        eff.pipe(Effect.provideService(SurrealClient, db), Effect.provide(BunFsLayer)),
+        eff.pipe(Effect.provide(Layer.mergeAll(
+            Layer.succeed(SurrealClient, db),
+            BunFsLayer,
+            judgmentTestLayer(() => (classifiedByDb.get(db) ?? []).map((skill_id) => ({ skill_id }))),
+            cacheReadResults(cacheRowsByDb.get(db) ?? [[], []], capturedCacheSql(db)),
+        ))),
     );
 
 // ---------------------------------------------------------------------------
@@ -273,16 +304,19 @@ describe("SQL shape (default mode)", () => {
     // joins counts→skills in JS. The ≥3 threshold and synthetic exclusion are
     // applied in JS (see fetchSkillHygiene), NOT in SQL - so they are asserted by
     // the behavioral filter test above, not by string-matching the query.
-    test("default query reads the plays_role classification sources", async () => {
+    test("default graph query does not read judgment role tables", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
         const tc = makeTestSurrealClient({ denyWrites: true, fallback: [[], [], []] });
         await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        // The default path spans two engines now, so BOTH have to be clean of
+        // plays_role - the role decisions come from the sidecar, and neither the
+        // SurrealQL nor the cache SQL may reach for that table.
         const capturedSql = tc.captured.join("\n");
-        expect(capturedSql).toContain("plays_role");
-        expect(capturedSql).toContain("invoked");
-        expect(capturedSql).toContain(`"frontmatter"`);
-        expect(capturedSql).toContain(`"brief"`);
-        expect(capturedSql).toContain(`"user"`);
+        const capturedCache = (cacheSqlByDb.get(tc.client) ?? []).join("\n");
+        expect(capturedSql).not.toContain("plays_role");
+        expect(capturedCache).not.toContain("plays_role");
+        // The invocation counts moved to the cache with the rest of hygiene.
+        expect(capturedCache).toContain("invoked");
     });
 });
 

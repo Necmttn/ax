@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import {
     UNUSED_RECENT_SQL,
@@ -14,7 +15,7 @@ import {
 describe("unused-skills SQL", () => {
     test("recent scan binds a validated day window and groups by out_id", () => {
         const sql = UNUSED_RECENT_SQL(7);
-        expect(sql).toContain("CURRENT_TIMESTAMP - (? * INTERVAL '1 day')");
+        expect(sql).toContain(daysAgoExpr);
         expect(sql).toContain("GROUP BY out_id");
         expect(sql).toContain("FROM invoked");
     });

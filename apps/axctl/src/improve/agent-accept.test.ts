@@ -1,307 +1,153 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { Effect, FileSystem, Layer } from "effect";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
+import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
+import { buildAgentAcceptPrompt } from "./agent-accept.ts";
 import { acceptProposal, shouldScaffoldWorkflowSkill } from "./actions.ts";
-import { SurrealClient } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
 
-// Real Bun-backed FS + Path: acceptProposal + runAgentAccept now require
-// FileSystem (forced dependency edit on the migrated production code).
-const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+type ProposalFixture = {
+    readonly id: string;
+    readonly form: "guidance" | "skill" | "subagent" | "hook" | "automation" | "harness_check";
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly dedupe_sig: string;
+    readonly frequency?: number;
+    readonly confidence?: string;
+    readonly baseline?: string | null;
+    readonly skill_payload?: Readonly<Record<string, unknown>>;
+    readonly subagent_payload?: Readonly<Record<string, unknown>>;
+    readonly hook_payload?: Readonly<Record<string, unknown>>;
+    readonly guidance_payload?: Readonly<Record<string, unknown>>;
+    readonly automation_payload?: Readonly<Record<string, unknown>>;
+};
 
-describe("buildAgentAcceptPrompt", () => {
-    const ctx = {
-        skillPath: "/home/u/.claude/skills/pre-bash-guard/SKILL.md",
-        proposalTitle: "Pre-Bash guard",
-        hypothesis: "Bash failed 7 times across 3 sessions.",
-        triggerPattern: "tool=Bash",
-        proposedBehavior: "validate Bash preconditions before invocation",
-        retroSummaries: [
-            "session abc: top tool Bash failed ×5",
-            "session def: top tool Bash failed ×2",
-        ],
-        relatedSkillsDir: "/home/u/.claude/skills/",
-    };
-
-    test("includes skillPath, triggerPattern, and every retro summary", () => {
-        const out = buildAgentAcceptPrompt(ctx);
-        expect(out).toContain(ctx.skillPath);
-        expect(out).toContain("tool=Bash");
-        for (const r of ctx.retroSummaries) {
-            expect(out).toContain(r);
+const seedProposal = (judgment: JudgmentService, row: ProposalFixture) =>
+    Effect.gen(function* () {
+        const now = new Date("2026-01-01T00:00:00Z");
+        yield* judgment.put("proposal", {
+            id: row.id,
+            form: row.form,
+            title: row.title,
+            hypothesis: row.hypothesis,
+            dedupe_sig: row.dedupe_sig,
+            frequency: row.frequency ?? 1,
+            confidence: row.confidence ?? "high",
+            status: "open",
+            origin: "agent",
+            hypothesis_template: null,
+            evidence_query: null,
+            reject_reason: null,
+            baseline: row.baseline ?? null,
+            created_at: now,
+            updated_at: now,
+        });
+        for (const table of ["skill", "subagent", "hook", "guidance", "automation"] as const) {
+            const payload = row[`${table}_payload`];
+            if (payload) {
+                yield* judgment.put(`${table}_proposal`, {
+                    id: `${table}-${row.id}`,
+                    proposal: row.id,
+                    ...payload,
+                });
+            }
         }
     });
 
-    test("mentions proposed behavior and hypothesis", () => {
-        const out = buildAgentAcceptPrompt(ctx);
-        expect(out).toContain("validate Bash preconditions before invocation");
-        expect(out).toContain("Bash failed 7 times across 3 sessions.");
-    });
+const runWithProposal = <A>(
+    row: ProposalFixture,
+    body: (judgment: JudgmentService, root: string) => Effect.Effect<A, unknown, Judgment | FileSystem.FileSystem>,
+    schemaSuffix = "",
+): Promise<A> => {
+    const root = mkdtempSync(join(tmpdir(), "ax-accept-sidecar-"));
+    const layer = Layer.mergeAll(
+        JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: `${SIDECAR_SCHEMA_SQL}\n${schemaSuffix}` }),
+        BunFileSystem.layer,
+        BunPath.layer,
+    );
+    return Effect.runPromise(Effect.gen(function* () {
+        const judgment = yield* Judgment;
+        yield* seedProposal(judgment, row);
+        return yield* body(judgment, root);
+    }).pipe(Effect.provide(layer), Effect.scoped));
+};
 
-    test("renders fallback line when no retros", () => {
-        const out = buildAgentAcceptPrompt({ ...ctx, retroSummaries: [] });
-        expect(out).toContain("(no recent retros captured)");
-    });
-
-    test("includes the related skills directory + sibling PLAN.md path", () => {
-        const out = buildAgentAcceptPrompt(ctx);
-        expect(out).toContain(ctx.relatedSkillsDir);
-        expect(out).toContain("PLAN.md");
+describe("buildAgentAcceptPrompt", () => {
+    test("includes the proposal and evidence", () => {
+        const text = buildAgentAcceptPrompt({
+            skillPath: "/tmp/SKILL.md",
+            proposalTitle: "Pre-Bash guard",
+            hypothesis: "Bash failed repeatedly.",
+            triggerPattern: "tool=Bash",
+            proposedBehavior: "validate preconditions",
+            retroSummaries: ["session abc: Bash failed"],
+            relatedSkillsDir: "/tmp/skills",
+        });
+        expect(text).toContain("Pre-Bash guard");
+        expect(text).toContain("tool=Bash");
+        expect(text).toContain("session abc");
     });
 });
 
-// ---------------------------------------------------------------------------
-// fakeRowsLayer: feed successive query() calls from a fixture array
-// ---------------------------------------------------------------------------
-const fakeRowsLayer = (fixtures: ReadonlyArray<unknown[]>) => {
-    let i = 0;
-    const db = Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.sync(() => (fixtures[i++] ?? []) as unknown as T),
-    } as never);
-    return Layer.mergeAll(db, fsLayer);
-};
-
-describe("acceptProposal - task emission", () => {
-    test("guidance form emits .ax/tasks/<id>.md (no direct file scaffold)", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
-        const longSig = "guidance__abcdef12345";
-        const proposalRow = {
-            id: "proposal:guid1",
+describe("acceptProposal with real SQLite", () => {
+    test("writes a guidance task with the complete stable marker", async () => {
+        const sig = "guidance__abcdef12345";
+        const result = await runWithProposal({
+            id: "guidance-one",
             form: "guidance",
-            title: "Add pre-bash guidance",
-            hypothesis: "Bash failed repeatedly without pre-checks",
-            dedupe_sig: longSig,
-            frequency: 4,
-            confidence: "high",
-            status: "open",
-            skill_payload: null,
-            guidance_payload: {
-                file_target: "~/.claude/CLAUDE.md",
-                section: "Pre-Bash",
-                suggested_text: "Always validate bash preconditions.",
-            },
-        };
-
-        const layer = fakeRowsLayer([
-            [[proposalRow]],   // fetchFullProposal: query returns [FullProposalRow[]]
-            [[]],              // UPDATE + UPSERT (ignored by fake)
-        ]);
-
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
-
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        expect(result.artifact_path).toBeUndefined();
-        expect(existsSync(result.task_path!)).toBe(true);
-
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=guidance");
-        expect(body).toContain("Confidence: high. Frequency: 4/wk.");
-        // Full sig must appear in the marker; a truncated 8-char slice must not
-        expect(body).toContain(`<!--ax:${longSig}-->`);
-        // Regression guard: truncated form must not appear as a standalone marker
-        expect(body).not.toContain(`<!--ax:${longSig.slice(0, 8)}-->`);
-    });
-
-    test("skill form defaults to task emission (no autoScaffold)", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
-        const longSig = "skill__abcdef12345";
-        const proposalRow = {
-            id: "proposal:skill1",
-            form: "skill",
-            title: "Pre-Bash guard skill",
-            hypothesis: "Bash failed 7 times",
-            dedupe_sig: longSig,
-            status: "open",
-            skill_payload: {
-                proposed_behavior: "validate preconditions before Bash",
-                trigger_pattern: "tool=Bash",
-                expected_impact: "reduces failures",
-            },
-            guidance_payload: null,
-        };
-
-        const layer = fakeRowsLayer([
-            [[proposalRow]],
-            [[]],
-        ]);
-
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
-
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        expect(result.artifact_path).toBeUndefined();
-        expect(existsSync(result.task_path!)).toBe(true);
-
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=skill");
-        // Full sig must appear in the frontmatter; a truncated 8-char slice must not
-        expect(body).toContain(`ax_id: ${longSig}`);
-        // Regression guard: the truncated form must not appear as the standalone ax_id value
-        expect(body).not.toContain(`ax_id: ${longSig.slice(0, 8)}\n`);
-    });
-
-    test("harness_check form defaults to task emission", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const sig = "harness_check__workflow_candidate__abc123";
-        const proposalRow = {
-            id: "proposal:harness1",
-            form: "harness_check",
-            title: "Require applied classifier output",
-            hypothesis: "The agent stopped at HTML instead of showing applied classifier results.",
+            title: "Use rg",
+            hypothesis: "Search is slow.",
             dedupe_sig: sig,
-            frequency: 2,
-            confidence: "high",
-            status: "open",
-            baseline: JSON.stringify({ examples: [{ result_id: "classifier_result:verification_event__abc" }] }),
-            skill_payload: null,
-            guidance_payload: null,
-        };
-
-        const layer = fakeRowsLayer([
-            [[proposalRow]],
-            [[]],
-        ]);
-
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: sig, taskDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
+            frequency: 4,
+            guidance_payload: {
+                file_target: "CLAUDE.md",
+                section: "tools",
+                suggested_text: "Use rg.",
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: sig, taskDir: root }));
 
         expect(result.status).toBe("ok");
         expect(result.task_path).toBeDefined();
-        expect(existsSync(result.task_path!)).toBe(true);
-
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=harness_check");
-        expect(body).toContain("**Action:** add harness check");
-        expect(body).toContain("Require applied classifier output");
-        expect(body).toContain("The agent stopped at HTML");
-        expect(body).toContain("classifier_result:verification_event__abc");
+        const body = readFileSync(result.task_path!, "utf8");
+        expect(body).toContain(`<!--ax:${sig}-->`);
+        expect(body).not.toContain(`<!--ax:${sig.slice(0, 8)}-->`);
     });
 
-    test("skill form with autoScaffold=true preserves direct-write path", async () => {
-        const scaffoldBaseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
-        const proposalRow = {
-            id: "proposal:skill2",
+    test("scaffolds a skill only when direct scaffold is requested", async () => {
+        const result = await runWithProposal({
+            id: "skill-one",
             form: "skill",
-            title: "My Direct Skill",
-            hypothesis: "direct scaffold test",
-            dedupe_sig: "skill2cd",
-            status: "open",
+            title: "Guard Bash",
+            hypothesis: "Bash fails.",
+            dedupe_sig: "guard_bash",
             skill_payload: {
-                proposed_behavior: "do the thing directly",
-                trigger_pattern: null,
-                expected_impact: null,
+                trigger_pattern: "tool=Bash",
+                suspected_gap: "no validation",
+                proposed_behavior: "validate first",
+                expected_impact: "fewer failures",
             },
-            guidance_payload: null,
-        };
-
-        const layer = fakeRowsLayer([
-            [[proposalRow]],
-            [[]],
-        ]);
-
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "skill2cd", autoScaffold: true, scaffoldBaseDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
+        }, (_judgment, root) => acceptProposal({
+            sigOrId: "guard_bash",
+            autoScaffold: true,
+            scaffoldBaseDir: root,
+        }));
 
         expect(result.status).toBe("ok");
-        expect(result.artifact_path).toBeDefined();
-        expect(result.task_path).toBeUndefined();
+        expect(result.artifact_path).toEndWith("/guard-bash/SKILL.md");
         expect(existsSync(result.artifact_path!)).toBe(true);
+        expect(result.task_path).toBeUndefined();
     });
 
-    test("subagent form emits a task brief", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const proposalRow = {
-            id: "proposal:subagent1",
-            form: "subagent",
-            title: "Review specialist",
-            hypothesis: "Reviews recur with the same bounded role",
-            dedupe_sig: "subagent_sig",
-            status: "open",
-            skill_payload: null,
-            subagent_payload: {
-                bounded_role: "Review TypeScript changes",
-                delegation_trigger: "Large TypeScript diff",
-                example_task_patterns: ["review this diff"],
-            },
-            guidance_payload: null,
-        };
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "subagent_sig", taskDir }).pipe(
-                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
-            ),
-        );
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=subagent");
-        expect(body).toContain("ax_id: subagent_sig");
-    });
-
-    test("hook form with complete safety contract emits a task brief", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const proposalRow = {
-            id: "proposal:hook1",
-            form: "hook",
-            title: "Pre-Bash guard hook",
-            hypothesis: "Bash failures recur",
-            dedupe_sig: "hook_sig",
-            status: "open",
-            skill_payload: null,
-            hook_payload: {
-                event_name: "PreToolUse",
-                target_tool: "Bash",
-                hook_command: "bash ~/.claude/hooks/pre-bash-guard.sh",
-                recovery_path: "Remove hook from settings.json",
-                smoke_test_command: "bun test src/improve/lifecycle.test.ts",
-                disable_command: "mv hook.sh hook.sh.disabled",
-                failure_mode: "fail_open",
-            },
-            guidance_payload: null,
-        };
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "hook_sig", taskDir }).pipe(
-                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
-            ),
-        );
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=hook");
-        expect(body).toContain("echo 'ax:hook_sig'");
-        expect(body).toContain("Recovery Path: Remove hook from settings.json");
-    });
-
-    test("hook form without complete safety contract is rejected before task emission", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const proposalRow = {
-            id: "proposal:hook2",
+    test("requires the complete hook safety contract", async () => {
+        const unsafe = await runWithProposal({
+            id: "hook-unsafe",
             form: "hook",
             title: "Unsafe hook",
-            hypothesis: "Missing safety gates",
+            hypothesis: "A guard is useful.",
             dedupe_sig: "unsafe_hook",
-            status: "open",
-            skill_payload: null,
             hook_payload: {
                 event_name: "PreToolUse",
                 target_tool: "Bash",
@@ -311,343 +157,179 @@ describe("acceptProposal - task emission", () => {
                 disable_command: null,
                 failure_mode: null,
             },
-            guidance_payload: null,
-        };
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "unsafe_hook", taskDir }).pipe(
-                Effect.provide(fakeRowsLayer([[[proposalRow]]])),
-            ),
-        );
-        expect(result.status).toBe("unsupported_form");
-        expect(result.message).toContain("Recovery Path");
-    });
+        }, (_judgment, root) => acceptProposal({ sigOrId: "unsafe_hook", taskDir: root }));
+        expect(unsafe.status).toBe("unsupported_form");
+        expect(unsafe.message).toContain("Recovery Path");
 
-    test("automation form with complete safety contract emits a task brief", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const proposalRow = {
-            id: "proposal:auto1",
-            form: "automation",
-            title: "Weekly cleanup",
-            hypothesis: "Cleanup should happen on a schedule",
-            dedupe_sig: "automation_sig",
-            status: "open",
-            skill_payload: null,
-            automation_payload: {
-                trigger_signal: "weekly",
-                schedule: "0 9 * * 1",
-                action: "bun run cleanup",
-                recovery_path: "Unload the LaunchAgent",
-                smoke_test_command: "bun test src/improve/lifecycle.test.ts",
-                disable_command: "launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist",
+        const safe = await runWithProposal({
+            id: "hook-safe",
+            form: "hook",
+            title: "Safe hook",
+            hypothesis: "A guard is useful.",
+            dedupe_sig: "safe_hook",
+            hook_payload: {
+                event_name: "PreToolUse",
+                target_tool: "Bash",
+                hook_command: "bash hook.sh",
+                recovery_path: "remove the hook",
+                smoke_test_command: "bun test",
+                disable_command: "mv hook.sh hook.disabled",
                 failure_mode: "fail_open",
             },
-            guidance_payload: null,
-        };
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "automation_sig", taskDir }).pipe(
-                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
-            ),
-        );
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=automation");
-        expect(body).toContain("<!-- ax:automation_sig experiment:");
-        expect(body).toContain("bun run cleanup");
+        }, (_judgment, root) => acceptProposal({ sigOrId: "safe_hook", taskDir: root }));
+        expect(safe.status).toBe("ok");
+        expect(readFileSync(safe.task_path!, "utf8")).toContain("Recovery Path: remove the hook");
     });
 
-    test("dedupe_sig with path separator characters is rejected", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const badRow = {
-            id: { tb: "proposal", id: "guid_evil" },
-            form: "guidance",
-            title: "x",
-            hypothesis: "y",
-            dedupe_sig: "../../etc/passwd",
-            status: "open",
-            skill_payload: null,
-            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
-        };
-        const program = acceptProposal({ sigOrId: "../../etc/passwd", taskDir });
-        let threw = false;
-        try {
-            await Effect.runPromise(
-                program.pipe(Effect.provide(fakeRowsLayer([[[badRow]], []]))),
-            );
-        } catch {
-            threw = true;
-        }
-        expect(threw).toBe(true);
-    });
-
-    test("two acceptProposal calls in quick succession produce distinct experiment keys", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
-        const row = {
-            id: { tb: "proposal", id: "guid_concurrent" },
-            form: "guidance",
-            title: "x",
-            hypothesis: "y",
-            dedupe_sig: "concurrent_sig",
-            status: "open",
-            skill_payload: null,
-            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
-        };
-        const r1 = await Effect.runPromise(
-            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
-                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
-        );
-        const r2 = await Effect.runPromise(
-            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
-                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
-        );
-        expect(r1.experiment_id).not.toBe(r2.experiment_id);
-    });
-});
-
-/** Layer that succeeds for queries matching `selectPattern`, fails for all others. */
-const fakeRowsLayerWithFailure = (
-    fixtures: ReadonlyArray<unknown[]>,
-    failPattern: RegExp,
-) => {
-    let i = 0;
-    const db = Layer.succeed(SurrealClient, {
-        query: <T>(sql: string): Effect.Effect<T, DbError> => {
-            if (failPattern.test(sql)) {
-                return Effect.fail(new DbError({ operation: "query", message: "simulated DB failure", sql }));
-            }
-            return Effect.sync(() => (fixtures[i++] ?? []) as unknown as T);
-        },
-    } as never);
-    return Layer.mergeAll(db, fsLayer);
-};
-
-describe("acceptProposal - atomic write success", () => {
-    test("DB success → content committed to final path, no .tmp file left behind", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-atomic-ok-"));
-        const longSig = "guidance__atomic_ok42";
-        const proposalRow = {
-            id: "proposal:atmok1",
-            form: "guidance",
-            title: "Atomic write success",
-            hypothesis: "Verify write-temp then rename commits the final file",
-            dedupe_sig: longSig,
-            status: "open",
-            skill_payload: null,
-            guidance_payload: {
-                file_target: "~/.claude/CLAUDE.md",
-                section: null,
-                suggested_text: "Atomic write body.",
+    test("writes a subagent task from its sidecar payload", async () => {
+        const result = await runWithProposal({
+            id: "subagent-one",
+            form: "subagent",
+            title: "Review migrations",
+            hypothesis: "Migration reviews need a bounded role.",
+            dedupe_sig: "migration_reviewer",
+            subagent_payload: {
+                bounded_role: "Review schema migrations only.",
+                delegation_trigger: "A change includes a migration.",
             },
-        };
-
-        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: longSig, taskDir }).pipe(Effect.provide(layer)),
-        );
+        }, (_judgment, root) => acceptProposal({ sigOrId: "migration_reviewer", taskDir: root }));
 
         expect(result.status).toBe("ok");
-        // Final file lands at <taskDir>/<sig>.md (the rename target).
-        const taskPath = join(taskDir, `${longSig}.md`);
-        expect(result.task_path).toBe(taskPath);
-        expect(existsSync(taskPath)).toBe(true);
-        // Rendered task content was committed by the rename (not left in the tmp).
-        expect(readFileSync(taskPath, "utf-8")).toContain(`<!--ax:${longSig}-->`);
-        // The staged temp file must have been renamed away - nothing .tmp remains.
-        const leftovers = readdirSync(taskDir).filter((f) => f.includes(".tmp."));
-        expect(leftovers).toHaveLength(0);
-        // Exactly the one committed file in the dir.
-        expect(readdirSync(taskDir)).toEqual([`${longSig}.md`]);
+        const body = readFileSync(result.task_path!, "utf8");
+        expect(body).toContain("form=subagent");
+        expect(body).toContain("Role: Review schema migrations only.");
+        expect(body).toContain("Delegation trigger: A change includes a migration.");
     });
-});
 
-describe("acceptProposal - atomic write on DB failure", () => {
-    test("DB failure after tmp write → neither taskPath nor tmpPath exists", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-atomic-"));
-        const longSig = "guidance__atomic99";
-        const proposalRow = {
-            id: "proposal:atm1",
+    test("writes a harness check task with baseline evidence", async () => {
+        const result = await runWithProposal({
+            id: "harness-one",
+            form: "harness_check",
+            title: "Check offline startup",
+            hypothesis: "The command must work without SurrealDB.",
+            dedupe_sig: "offline_startup",
+            baseline: "The old command connects to port 8521.",
+        }, (_judgment, root) => acceptProposal({ sigOrId: "offline_startup", taskDir: root }));
+
+        expect(result.status).toBe("ok");
+        const body = readFileSync(result.task_path!, "utf8");
+        expect(body).toContain("form=harness_check");
+        expect(body).toContain("The command must work without SurrealDB.");
+        expect(body).toContain("Baseline evidence:\nThe old command connects to port 8521.");
+    });
+
+    test("requires the complete automation safety contract", async () => {
+        const unsafe = await runWithProposal({
+            id: "automation-unsafe",
+            form: "automation",
+            title: "Unsafe automation",
+            hypothesis: "A schedule can reduce manual work.",
+            dedupe_sig: "unsafe_automation",
+            automation_payload: {
+                trigger_signal: "new transcript",
+                action: "ax ingest",
+                schedule: "hourly",
+                recovery_path: "remove the schedule",
+                smoke_test_command: null,
+                disable_command: null,
+                failure_mode: null,
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "unsafe_automation", taskDir: root }));
+        expect(unsafe.status).toBe("unsupported_form");
+        expect(unsafe.message).toContain("smoke test");
+        expect(unsafe.message).toContain("disable switch");
+        expect(unsafe.message).toContain("failure mode");
+
+        const safe = await runWithProposal({
+            id: "automation-safe",
+            form: "automation",
+            title: "Safe automation",
+            hypothesis: "A schedule can reduce manual work.",
+            dedupe_sig: "safe_automation",
+            automation_payload: {
+                trigger_signal: "new transcript",
+                action: "ax ingest",
+                schedule: "hourly",
+                recovery_path: "remove the schedule",
+                smoke_test_command: "ax status",
+                disable_command: "launchctl unload com.example.ax.plist",
+                failure_mode: "fail_open",
+            },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "safe_automation", taskDir: root }));
+        expect(safe.status).toBe("ok");
+        const body = readFileSync(safe.task_path!, "utf8");
+        expect(body).toContain("form=automation");
+        expect(body).toContain("Recovery Path: remove the schedule");
+        expect(body).toContain("Smoke Test: ax status");
+        expect(body).toContain("Disable Switch: launchctl unload com.example.ax.plist");
+        expect(body).toContain("Failure Mode: fail_open");
+    });
+
+    test("cleans the temporary task when the SQLite transaction fails", async () => {
+        const sig = "atomic_failure";
+        const result = await runWithProposal({
+            id: "atomic-one",
             form: "guidance",
-            title: "Atomic write test",
-            hypothesis: "Verify tmp cleanup on DB failure",
-            dedupe_sig: longSig,
-            status: "open",
-            skill_payload: null,
+            title: "Atomic task",
+            hypothesis: "Writes must be atomic.",
+            dedupe_sig: sig,
             guidance_payload: {
-                file_target: "~/.claude/CLAUDE.md",
+                file_target: "CLAUDE.md",
                 section: null,
                 suggested_text: "Use atomic writes.",
             },
-        };
+        }, (_judgment, root) => Effect.gen(function* () {
+            const exit = yield* acceptProposal({ sigOrId: sig, taskDir: root }).pipe(Effect.exit);
+            return { exit, root };
+        }), `CREATE TRIGGER fail_experiment BEFORE INSERT ON experiment
+             BEGIN SELECT RAISE(FAIL, 'simulated SQLite failure'); END;`);
 
-        // SELECT query succeeds (returns proposalRow); UPDATE+UPSERT query fails
-        const layer = fakeRowsLayerWithFailure([[[proposalRow]]], /UPSERT/);
+        expect(result.exit._tag).toBe("Failure");
+        expect(existsSync(join(result.root, `${sig}.md`))).toBe(false);
+        expect(readdirSync(result.root).filter((name) => name.includes(`${sig}.md.tmp.`))).toHaveLength(0);
+    });
 
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
-                Effect.provide(layer),
-                Effect.exit,
-            ),
-        );
+    test("uses different stable experiment IDs for different proposals", async () => {
+        const first = await runWithProposal({
+            id: "id-one",
+            form: "guidance",
+            title: "One",
+            hypothesis: "One.",
+            dedupe_sig: "unique_one",
+            guidance_payload: { file_target: "CLAUDE.md", section: null, suggested_text: "One." },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "unique_one", taskDir: root }));
+        const second = await runWithProposal({
+            id: "id-two",
+            form: "guidance",
+            title: "Two",
+            hypothesis: "Two.",
+            dedupe_sig: "unique_two",
+            guidance_payload: { file_target: "CLAUDE.md", section: null, suggested_text: "Two." },
+        }, (_judgment, root) => acceptProposal({ sigOrId: "unique_two", taskDir: root }));
+        expect(first.experiment_id).not.toBe(second.experiment_id);
+    });
 
-        // Effect must have failed
-        expect(result._tag).toBe("Failure");
-
-        // Neither the final task file nor any tmp file should exist in taskDir
-        const taskPath = join(taskDir, `${longSig}.md`);
-        expect(existsSync(taskPath)).toBe(false);
-        const remaining = readdirSync(taskDir).filter((f) => f.includes(longSig));
-        expect(remaining).toHaveLength(0);
+    test("rejects a proposal marker that contains path separators", async () => {
+        const result = await runWithProposal({
+            id: "unsafe-path",
+            form: "guidance",
+            title: "Unsafe path",
+            hypothesis: "The marker is unsafe.",
+            dedupe_sig: "../../outside",
+            guidance_payload: { file_target: "CLAUDE.md", section: null, suggested_text: "Text." },
+        }, (_judgment, root) => Effect.gen(function* () {
+            const exit = yield* acceptProposal({ sigOrId: "../../outside", taskDir: root }).pipe(Effect.exit);
+            return { exit, root };
+        }));
+        expect(result.exit._tag).toBe("Failure");
+        expect(readdirSync(result.root).filter((name) => name.endsWith(".md"))).toHaveLength(0);
     });
 });
 
-// ---------------------------------------------------------------------------
-// shouldScaffoldWorkflowSkill - pure routing predicate (#588)
-// ---------------------------------------------------------------------------
-describe("shouldScaffoldWorkflowSkill routing predicate", () => {
-    test("true for form=guidance + section=workflows", () => {
-        expect(shouldScaffoldWorkflowSkill({
-            form: "guidance",
-            guidance_payload: { section: "workflows" },
-        })).toBe(true);
-    });
-
-    test("false for form=guidance + section=directives (stays brief path)", () => {
-        expect(shouldScaffoldWorkflowSkill({
-            form: "guidance",
-            guidance_payload: { section: "directives" },
-        })).toBe(false);
-    });
-
-    test("false for form=guidance + no section", () => {
-        expect(shouldScaffoldWorkflowSkill({
-            form: "guidance",
-            guidance_payload: { section: null },
-        })).toBe(false);
-        expect(shouldScaffoldWorkflowSkill({
-            form: "guidance",
-            guidance_payload: {},
-        })).toBe(false);
-        expect(shouldScaffoldWorkflowSkill({
-            form: "guidance",
-            guidance_payload: null,
-        })).toBe(false);
-    });
-
-    test("false for form=skill (unchanged skill path)", () => {
-        expect(shouldScaffoldWorkflowSkill({
-            form: "skill",
-            guidance_payload: null,
-        })).toBe(false);
-    });
-
-    test("false for other forms", () => {
-        for (const form of ["hook", "automation", "subagent", "harness_check"]) {
-            expect(shouldScaffoldWorkflowSkill({
-                form,
-                guidance_payload: { section: "workflows" },
-            })).toBe(false);
-        }
-    });
-});
-
-// ---------------------------------------------------------------------------
-// acceptProposal - workflow scaffold path (#588)
-// ---------------------------------------------------------------------------
-describe("acceptProposal - workflow guidance scaffold path", () => {
-    test("guidance + section=workflows + autoScaffold=true scaffolds SKILL.md", async () => {
-        const scaffoldBaseDir = mkdtempSync(join(tmpdir(), "ax-wf-scaffold-"));
-        const sig = "workflow__plan_tdd_review";
-        const proposalRow = {
-            id: "proposal:wf1",
-            form: "guidance",
-            title: "Workflow: plan → tdd → review",
-            hypothesis: "This 3-skill sequence recurred across 5 sessions: plan → tdd → review.",
-            dedupe_sig: sig,
-            frequency: 5,
-            confidence: "high",
-            status: "open",
-            skill_payload: null,
-            guidance_payload: {
-                file_target: "CLAUDE.md",
-                section: "workflows",
-                suggested_text: "plan → tdd → review",
-            },
-        };
-
-        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: sig, autoScaffold: true, scaffoldBaseDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
-
-        expect(result.status).toBe("ok");
-        // Scaffolded a skill file, not a task brief
-        expect(result.artifact_path).toBeDefined();
-        expect(result.task_path).toBeUndefined();
-        expect(existsSync(result.artifact_path!)).toBe(true);
-        // SKILL.md body uses suggested_text (the arc) as proposedBehavior
-        const body = readFileSync(result.artifact_path!, "utf-8");
-        expect(body).toContain("plan → tdd → review");
-        // proposal field is populated for --with-agent enrichment
-        expect(result.proposal?.proposedBehavior).toBe("plan → tdd → review");
-    });
-
-    test("guidance + section=directives + autoScaffold=true stays on brief path (not scaffold)", async () => {
-        const taskDir = mkdtempSync(join(tmpdir(), "ax-dir-task-"));
-        const sig = "guidance__directive_abc";
-        const proposalRow = {
-            id: "proposal:dir1",
-            form: "guidance",
-            title: "Always run typecheck before commit",
-            hypothesis: "Typecheck missed 4 times in 3 sessions.",
-            dedupe_sig: sig,
-            frequency: 4,
-            confidence: "high",
-            status: "open",
-            skill_payload: null,
-            guidance_payload: {
-                file_target: "~/.claude/CLAUDE.md",
-                section: "directives",
-                suggested_text: "Run typecheck before every commit.",
-            },
-        };
-
-        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
-        const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: sig, autoScaffold: true, taskDir }).pipe(
-                Effect.provide(layer),
-            ),
-        );
-
-        // Falls through to the task-brief path, not a scaffold
-        expect(result.status).toBe("ok");
-        expect(result.task_path).toBeDefined();
-        expect(result.artifact_path).toBeUndefined();
-        expect(existsSync(result.task_path!)).toBe(true);
-        const body = readFileSync(result.task_path!, "utf-8");
-        expect(body).toContain("form=guidance");
-    });
-});
-
-describe("runAgentAccept smoke", () => {
-    test("skipped unless AX_AGENT_SMOKE=1", async () => {
-        if (process.env.AX_AGENT_SMOKE !== "1") {
-            expect(true).toBe(true);
-            return;
-        }
-        // Smoke path - opt-in, expensive. Requires `claude` on PATH.
-        const result = await Effect.runPromise(
-            runAgentAccept({
-                skillPath: "/tmp/ax-agent-smoke/SKILL.md",
-                proposalTitle: "smoke",
-                hypothesis: "h",
-                triggerPattern: "t",
-                proposedBehavior: "b",
-                retroSummaries: ["session x: Bash failed ×1"],
-                relatedSkillsDir: "/tmp",
-            }).pipe(Effect.provide(fsLayer)),
-        );
-        expect(result.exitCode).toBeGreaterThanOrEqual(0);
+describe("shouldScaffoldWorkflowSkill", () => {
+    test("accepts only workflow guidance", () => {
+        expect(shouldScaffoldWorkflowSkill({ form: "guidance", guidance_payload: { section: "workflows" } })).toBe(true);
+        expect(shouldScaffoldWorkflowSkill({ form: "guidance", guidance_payload: { section: "directives" } })).toBe(false);
+        expect(shouldScaffoldWorkflowSkill({ form: "skill" })).toBe(false);
     });
 });

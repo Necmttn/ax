@@ -9,10 +9,13 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
 import { enrichRowsWithTelemetryLatency } from "../queries/telemetry-rollup.ts";
 import { fetchSkillHygiene, SKILL_HYGIENE_MIN_INVOCATIONS } from "../queries/skill-hygiene.ts";
+import { fetchSkillRoleWeights } from "./role-queries.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -144,19 +147,6 @@ ${whereClause}GROUP BY skill_id;`.trim();
 const DELETED_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE deleted_at IS NOT NONE;`;
 
 /**
- * Pass 2: per-skill role names + weights from plays_role edges.
- * Returns one row per skill that has at least one plays_role edge with the
- * qualifying sources. Skills with no rows get weight 1.0 in the merge step.
- */
-const ROLE_WEIGHT_SQL = `
-SELECT
-    in AS skill_id,
-    out.name AS role_name,
-    math::max([weight ?? out.weight ?? 1.0, 1.0]) AS effective_weight
-FROM plays_role
-WHERE source IN ["frontmatter", "brief", "user"];`.trim();
-
-/**
  * skill id -> display name. The record id is mangled (`skill:v2__<name>__<hash>`),
  * so derive the readable label from the `name` field instead. Small table,
  * direct scan, no derefs.
@@ -202,7 +192,7 @@ const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synt
 
 export const fetchSkillsWeighted = (
     params: SkillsWeightedParams = {},
-): Effect.Effect<SkillsWeightedResult, DbError, SurrealClient> =>
+): Effect.Effect<SkillsWeightedResult, DbError | JudgmentError, SurrealClient | Judgment | CacheRead> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const limit = params.limit ?? SKILLS_WEIGHTED_DEFAULT_LIMIT;
@@ -222,7 +212,7 @@ export const fetchSkillsWeighted = (
                     buildInvocationSql(params.windowDays),
                     { sparSessions: [...sparSessions] },
                 ),
-                db.query<[Array<Record<string, unknown>>]>(ROLE_WEIGHT_SQL),
+                fetchSkillRoleWeights(),
                 // Doctor count: the SAME source of truth `ax skills classify` uses,
                 // so the nudge count exactly matches what classify will brief (#481).
                 fetchSkillHygiene({
@@ -267,7 +257,7 @@ export const fetchSkillsWeighted = (
             string,
             { roles: string[]; weightSum: number }
         >();
-        for (const r of (roleRes?.[0] ?? []) as Array<Record<string, unknown>>) {
+        for (const r of roleRes) {
             const sid = String(r.skill_id ?? "");
             if (!sid) continue;
             const roleName = String(r.role_name ?? "");

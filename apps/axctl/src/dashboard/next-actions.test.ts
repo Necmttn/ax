@@ -20,6 +20,7 @@ import {
     toolFailureCards,
     verdictCards,
 } from "./next-actions.ts";
+import { EmptyCacheReadTestLayer, EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -641,21 +642,23 @@ describe("fetchNextActions", () => {
         const layer = Layer.succeed(SurrealClient, stub);
 
         const payload = await Effect.runPromise(
-            fetchNextActions().pipe(Effect.provide(layer)),
+            fetchNextActions().pipe(Effect.provide(layer), Effect.provide(EmptyJudgmentTestLayer), Effect.provide(EmptyCacheReadTestLayer)),
         );
 
         expect(payload.cards).toEqual([]);
         // tool_failure uses runQuery (internal fail-open), so it does NOT add a note
-        // on DB failure - it silently returns []. The other 4 sources use db.query
-        // directly and do add notes. Exact set: if runQuery's internal swallow ever
-        // changes and tool_failure starts noting, this surfaces it.
+        // on DB failure - it silently returns []. skill_hygiene is also silent, for
+        // a second reason: it reads the CACHE now, and `cacheRows` is defensive by
+        // policy - a failed read degrades to [] with an error channel of `never`,
+        // so there is nothing for this guard to catch. The remaining sources use
+        // db.query directly and do add notes.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "churn", "routing", "skill_hygiene", "housekeeping"]),
+            new Set(["churn", "routing"]),
         );
         expect(typeof payload.generatedAt).toBe("string");
     });
 
-    test("a hanging source (Effect.never) is timed out and noted; all 6 sources noted", async () => {
+    test("a hanging source (Effect.never) is timed out and noted", async () => {
         // db.query returns Effect.never - simulates a hung DB / slow query.
         // runQuery's internal Effect.catch only catches DbError failures; it does NOT
         // prevent fiber interruption from timeoutOrElse. The timeout fires, the
@@ -668,14 +671,16 @@ describe("fetchNextActions", () => {
         const layer = Layer.succeed(SurrealClient, stub);
 
         const payload = await Effect.runPromise(
-            fetchNextActions({ sourceTimeoutMs: 50 }).pipe(Effect.provide(layer)),
+            fetchNextActions({ sourceTimeoutMs: 50 }).pipe(Effect.provide(layer), Effect.provide(EmptyJudgmentTestLayer), Effect.provide(EmptyCacheReadTestLayer)),
         );
 
         expect(payload.cards).toEqual([]);
-        // All 6 direct-DB sources time out; tool_failure is also noted because
-        // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
+        // Every source that still reaches SurrealDB times out; tool_failure is
+        // noted too, because timeoutOrElse interrupts the fiber before runQuery's
+        // internal swallow fires. skill_hygiene is absent: it reads the cache, and
+        // this stub only hangs `db.query`.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene", "housekeeping"]),
+            new Set(["tool_failure", "churn", "routing"]),
         );
         // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
         expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);

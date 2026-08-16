@@ -6,10 +6,14 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import type { SessionDetailPayload, SessionLink } from "@ax/lib/shared/dashboard-types";
 import { fetchSessionShow } from "./session-show.ts";
+import { EmptyCacheReadTestLayer, EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+
+const showLayer = (surreal: ReturnType<typeof makeTestSurrealClient>["layer"]) =>
+    Layer.mergeAll(surreal, EmptyCacheReadTestLayer, EmptyJudgmentTestLayer);
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -63,10 +67,10 @@ describe("fetchSessionShow - call count", () => {
                 // fetchSessionDetail are irrelevant here because we focus on
                 // the routing logic: with no children, no expansion calls happen.
                 Effect.provide(
-                    makeTestSurrealClient({
+                    showLayer(makeTestSurrealClient({
                         denyWrites: true,
                         fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
-                    }).layer,
+                    }).layer),
                 ),
             ),
         ).catch(() => ({
@@ -163,10 +167,10 @@ describe("fetchSessionShow - byRole", () => {
                 byRole: false,
             }).pipe(
                 Effect.provide(
-                    makeTestSurrealClient({
+                    showLayer(makeTestSurrealClient({
                         denyWrites: true,
                         fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
-                    }).layer,
+                    }).layer),
                 ),
             ),
         ).catch(() => ({
@@ -190,10 +194,10 @@ describe("fetchSessionShow - byRole", () => {
                 byRole: true,
             }).pipe(
                 Effect.provide(
-                    makeTestSurrealClient({
+                    showLayer(makeTestSurrealClient({
                         denyWrites: true,
                         fallback: [[payloadNoSkills]],
-                    }).layer,
+                    }).layer),
                 ),
             ),
         ).catch(() => ({

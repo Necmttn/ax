@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
-import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 
 export interface InvocationRow {
   readonly ts: string;
@@ -91,7 +92,7 @@ const InvocationDbRow = Schema.Struct({
   ts: TimestampColumn,
   command: Schema.String,
   origin: Schema.Literals(["tty", "agent"]),
-  exit_code: Schema.Number,
+  exit_code: NumberFromBigIntColumn,
 });
 
 export const fetchInvocations = (windowDays: number): Effect.Effect<InvocationRow[], CacheReadError, CacheRead> =>
@@ -99,7 +100,7 @@ export const fetchInvocations = (windowDays: number): Effect.Effect<InvocationRo
     const cache = yield* CacheRead;
     const rows = yield* cache.rows(
       InvocationDbRow,
-      "SELECT ts, command, origin, exit_code FROM ax_invocation WHERE ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')",
+      `SELECT ts, command, origin, exit_code FROM ax_invocation WHERE ts > ${daysAgoExpr}`,
       [Math.max(1, Math.trunc(windowDays))],
     );
     return rows.map((row) => ({ ...row, ts: row.ts.toISOString() }));

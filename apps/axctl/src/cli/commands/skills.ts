@@ -411,8 +411,6 @@ const cmdSkillsWeighted = (input: SkillsWeightedInput) =>
                 doctorThreshold,
                 includeTools,
             }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills weighted"),
         );
 
         if (json) {
@@ -445,11 +443,10 @@ const cmdSkillsByRole = (input: SkillsByRoleInput) =>
         const json = wantsJsonFlag(input.json);
         const limit = requirePositiveInt("skills by-role", "limit", input.limit);
 
-        const result = yield* fetchSkillsByRole(
-            normalizeSkillsByRoleParams({ role, limit }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills by-role"),
-        );
+        // No `catchDbErrorAndExit`: this vertical is ported off SurrealDB, so
+        // its failures are `CacheReadError`/`JudgmentError`, not `DbError`. They
+        // bubble to the CLI edge exactly as `ax recall`'s do (the v2 template).
+        const result = yield* fetchSkillsByRole(normalizeSkillsByRoleParams({ role, limit }));
 
         if (json) {
             console.log(renderSkillsByRoleJson(result, role));
@@ -475,9 +472,7 @@ const cmdRolesForSkill = (input: RolesForSkillInput) =>
         const skill = input.skill;
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchRolesForSkill({ skill }).pipe(
-            catchDbErrorAndExit("axctl skills roles"),
-        );
+        const result = yield* fetchRolesForSkill({ skill });
 
         if (!result.skillExists) {
             fail(`axctl skills roles: unknown skill "${skill}"`);
@@ -503,9 +498,7 @@ const cmdRoles = (input: RolesInput) =>
     Effect.gen(function* () {
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchAllRoles().pipe(
-            catchDbErrorAndExit("axctl roles"),
-        );
+        const result = yield* fetchAllRoles();
 
         if (json) {
             console.log(renderAllRolesJson(result));
@@ -901,9 +894,7 @@ const tagCommand = Command.make(
             confidence,
             rationale: optionValue(rationale),
             remove,
-        }).pipe(
-            catchDbErrorAndExit("axctl skills tag"),
-        ),
+        }),
 ).pipe(
     Command.withDescription(
         "Manually assign a role to a skill (writes a plays_role edge with source=user). " +
@@ -924,7 +915,6 @@ const skillsLintCommand = Command.make(
             Effect.catchTag("PlatformError", (e) =>
                 stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
-            catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(
     Command.withDescription(
@@ -1065,6 +1055,42 @@ export const rolesCommand = Command.make(
 );
 
 export const skillsRuntime: RuntimeManifest = {
-    skills: "db",
-    roles: "db",
+    skills: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            search: "db",
+            stats: "db",
+            recent: "db",
+            unused: "db",
+            taste: "db",
+            weighted: "db",
+            pairs: "db",
+            recovery: "db",
+            classify: "db",
+            tag: "cache",
+            lint: "cache",
+            bloat: "db",
+            loaded: "db",
+            "by-role": "cache",
+            roles: "cache",
+            config: "none",
+            reconcile: "none",
+            scope: "none",
+            park: "none",
+            unpark: "none",
+            rm: "none",
+        },
+    },
+    // PORTED (c-sidecar-sqlite). `ax roles` is PURE JUDGMENT - the role
+    // vocabulary and the tag counts both live in the SQLite sidecar - so it needs
+    // neither SurrealDB nor a published snapshot, and answers on a machine that
+    // has never run an ingest. The `"cache"` runtime's throwing SurrealClient
+    // proxy is the acceptance signal; roles-no-surreal.test.ts spawns the real
+    // CLI with `AX_DB_URL` on a dead port AND a snapshot path that does not exist,
+    // which an in-process test cannot check.
+    //
+    // Ported subcommands route through the cache runtime above. The remaining
+    // query subcommands stay on SurrealDB until their own wave-2 ports land.
+    roles: "cache",
 };

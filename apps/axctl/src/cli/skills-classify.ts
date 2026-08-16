@@ -7,6 +7,8 @@
  */
 import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
@@ -69,7 +71,7 @@ export interface ClassifyOptions {
 
 export const cmdSkillsClassify = (
     opts: ClassifyOptions,
-): Effect.Effect<void, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, DbError | JudgmentError | PlatformError.PlatformError, SurrealClient | Judgment | CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;

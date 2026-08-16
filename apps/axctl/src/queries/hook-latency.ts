@@ -6,8 +6,9 @@
  * No new schema needed - reads existing hook_command_invocation telemetry.
  */
 import { Effect, Schema } from "effect";
-import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { percentiles } from "../hooks/bench.ts";
 
 // ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@ interface RawInvocationRow {
     readonly ts: string | Date;
     readonly duration_ms: number;
 }
-const RawInvocationDbRow = Schema.Struct({ hook_name: Schema.String, ts: TimestampColumn, duration_ms: Schema.Number });
+const RawInvocationDbRow = Schema.Struct({ hook_name: Schema.String, ts: TimestampColumn, duration_ms: NumberFromBigIntColumn });
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -206,7 +207,7 @@ export const fetchHookLatencyRegression = (opts: {
         const minSamples = opts.minSamples ?? 20;
         const totalDays = validDays(opts.recentDays) + validDays(opts.baselineDays);
 
-        const sql = "SELECT hook_name, ts, duration_ms FROM hook_command_invocation WHERE duration_ms IS NOT NULL AND ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day') ORDER BY ts DESC";
+        const sql = `SELECT hook_name, ts, duration_ms FROM hook_command_invocation WHERE duration_ms IS NOT NULL AND ts > ${daysAgoExpr} ORDER BY ts DESC`;
 
         const rawRows = yield* cache.rows(RawInvocationDbRow, sql, [totalDays]);
 

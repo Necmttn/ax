@@ -90,12 +90,82 @@ aggregates <200ms · traversals <50ms · cache file <1GB. Fixture: 524MB JSONL e
   this backlog file as part of the chunk).
   Acceptance: seam module + one working vertical on DuckDB + partition list committed.
 
-### Wave 2 - seam ports (partition emitted by w1-seam-design, 2026-08-15)
+### Wave 2 - seam ports (partition emitted by w1-seam-design 2026-08-15; REPARTITIONED 2026-08-15)
 
-248 non-test source files still import `SurrealClient` / `@ax/lib/db`. They split into five
+248 non-test source files still import `SurrealClient` / `@ax/lib/db`. They split into SIX
 mechanical chunks below, drawn along the SEAM ROLE each file plays, not along directory names -
 a writer and a reader need different seam calls, different tests, and different review, so a
 chunk that mixed them would have no single acceptance criterion.
+
+**RETRACTION - the first emission of this partition got the read chunk wrong.** It listed 53
+files as `w2-read-queries`, "pure read surfaces behind `CacheRead`". Seventeen of them are not
+pure snapshot readers: all seventeen RUN INSIDE INGEST, before the snapshot they would be reading
+has been published, and three of the seventeen also WRITE. A fourth writer
+(`queries/feedback-cases.ts`) writes from the CLI, outside ingest, and has nowhere to live under
+the current seam at all - it is flagged as an open ownership question rather than quietly moved.
+`w2-read-queries` returned BLOCKED on this and it holds up: the correction is below, and the
+sixth chunk (`w2-live-reads`) is what it adds. The
+inference that failed: seam role was read off the file's DIRECTORY and its function names
+(`queries/`, `fetch*`, `compute*`) instead of off the CALL GRAPH. `metrics/durability.ts` has no
+write in it and still cannot be a `CacheRead` reader, because the only thing that calls it is an
+ingest stage.
+
+**A file's chunk is decided by WHEN it runs, not by what it returns.**
+
+| runs | reads what | how it gets a handle | chunk |
+| --- | --- | --- | --- |
+| after publish (CLI, dashboard, MCP, hook) | the published snapshot | `yield* CacheRead` | `w2-read-queries`, `w2-dashboard`, `w2-cli-mcp` |
+| inside ingest, before publish | the LIVE database | a `CacheReadService` passed in as an ARGUMENT | `w2-live-reads` |
+| inside ingest, writing | the live database | `withCacheWrite` under `withIngestLock` | `w2-ingest-writers` |
+
+The three facts behind that table, each checked against the merged w1 seam:
+
+- **F1 - a `CacheRead` inside ingest answers from the PREVIOUS run.** `withCacheWrite` publishes
+  the snapshot after `body` succeeds and only then (`packages/lib/src/duckdb/seam.ts`, the
+  `publishSnapshot` call at the end of the `acquireUseRelease` body). A reader that opens the
+  snapshot mid-ingest therefore cannot see a single row the run has written. `derive-metrics`
+  computes `session_metrics` FROM those rows, so this is a wrong number, not an error - the
+  failure mode the no-fallback rule exists to prevent.
+- **F2 - the ingest runtime does not provide `CacheRead`.** `IngestRuntimeLayer` is
+  `AppLayer + StageRegistryDefault + StageSourceLayers` (`apps/axctl/src/ingest/stage/runtime.ts`)
+  and `AppLayer` is built from `SurrealClientLive` (`packages/lib/src/layers.ts`). Nothing in it
+  is a `CacheRead`. The CLI is NOT the problem here: `withDb` already provides
+  `Layer.mergeAll(AppLayer, CacheReadLive)` (`apps/axctl/src/cli/index.ts`), so a CLI caller
+  type-checks against either service, which is exactly why the defect surfaced at the ingest edge.
+- **F3 - the stage contract pins the ERROR channel.** `StageDef.run` is
+  `(ctx) => Effect.Effect<S, DbError, R>` (`apps/axctl/src/ingest/stage/types.ts`). `CacheReadError`
+  is not `DbError`, so ANY seam call inside a stage - read or write, service or argument - fails to
+  compile until `stage/types.ts` and `stage/runner.ts` widen that channel. Widening it is the FIRST
+  commit of `w2-live-reads`, not a fix-up discovered mid-port.
+
+The dependency graph the six chunks have to respect:
+
+```
+                    w2-lib-core  (dialect helpers; sequence FIRST)
+                          |
+        +-----------------+------------------+
+        |                                    |
+  w2-ingest-writers                    w2-read-queries
+  withCacheWrite, under the lock       yield* CacheRead -> published snapshot
+        |   ^                                    ^
+        |   | passes its CacheWriteService       | passes yield* CacheRead
+        v   |                                    |
+        w2-live-reads  ---------------------------
+        19 modules, 12 of them called from BOTH sides.
+        Take the reader as an ARGUMENT; hold no DB service in R.
+                          ^
+                          |
+        w2-dashboard, w2-cli-mcp (snapshot side, per-handler)
+```
+
+**Why an argument and not a service, for the live readers.** Twelve of the nineteen are called
+from an ingest stage AND from a CLI/dashboard/MCP surface. A service tag forces ONE answer for
+both callers, and either answer is wrong for the other: `CacheRead` gives ingest last run's
+numbers (F1), `CacheWriteService` in R makes every read surface demand the ingest lock.
+`CacheWriteService extends CacheReadService`, so a plain parameter lets the writer hand over the
+live connection it already holds and a reader hand over `yield* CacheRead`, with one
+implementation and one test seam. It also empties the R channel of those modules, which is worth
+saying out loud because it does NOT rescue F3 - the error channel still widens.
 
 Every chunk follows the template `ax recall` set in w1 (`apps/axctl/src/queries/recall.ts`,
 `apps/axctl/src/dashboard/recall.ts`, `apps/axctl/src/cli/commands/recall.ts`, and the two test
@@ -116,7 +186,7 @@ files beside them). Read it FIRST - it answers the four questions every port hit
   spelling `Schema.Date` / `Schema.String` per call site. Arrays and nested objects are JSON TEXT
   in a VARCHAR - the bun:ffi client cannot decode a native LIST.
 
-Shared rules for all five:
+Shared rules for all six:
 
 - Ports are REPLACEMENTS. No dual-run, no fallback to Surreal on a DuckDB miss - a fallback hides
   exactly the bug the port introduces.
@@ -139,11 +209,26 @@ Shared rules for all five:
 
 Chunk boundaries by seam role. Files listed exhaustively; a file appears in exactly one chunk.
 
+**Each chunk also carries a SUPPORT list.** Those files are not among the 248 - they never import
+`SurrealClient`, which is how the first emission missed them - but they hold SurrealQL text,
+Surreal record-id builders, or the type that the ported channel flows through, so they cannot
+survive their chunk unchanged. A chunk whose support files are left behind does not compile
+(`stage/types.ts`) or compiles and emits SurrealQL against DuckDB (`metrics/util.ts`,
+`queries/insights.ts`). They are named per chunk below.
+
+**And a CALLERS list, for the chunks whose ports change a caller's channel.** A caller that
+merely infers its type needs no edit but does need re-typechecking; a caller that must switch to
+passing a reader explicitly is named as work.
+
 - **w2-ingest-writers** [lane: mechanical] - 71 files. Every WRITE path: `withCacheWrite`
   under `withIngestLock`, `put`/`putMany` for row writes, `exec` for anything else. Watch for the
   three stamped columns (`WRITE_STAMPED_COLUMNS`) the DDL cannot express, and for rows missing an
   `id` - the upsert names `id` as its conflict target and refuses without one. FTS index builds
   (`buildFtsIndexes`) belong at ingest FINISH, after the last write.
+  DEPENDS ON `w2-live-reads`: eight of these files are the callers that hand the live reader over
+  (`ingest/derive-metrics.ts`, `ingest/derive-cost-backfill.ts`, `ingest/derive-proposals.ts`,
+  `ingest/derive-directive-ngrams.ts`, `ingest/harness.ts`, `digest/digest-stage.ts`,
+  `digest/snapshot.ts`, `digest/sources.ts`), so they land in one work unit with it.
   - `apps/axctl/src/advice/advice-stage.ts`
   - `apps/axctl/src/agents/cli.ts`
   - `apps/axctl/src/agents/config.ts`
@@ -215,41 +300,115 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   - `apps/axctl/src/skills/reconcile.ts`
   - `apps/axctl/src/skills/sources/registry.ts`
   - `apps/axctl/src/usage/usage-stage.ts`
-- **w2-read-queries** [lane: mechanical] - 53 files. Pure read surfaces behind `CacheRead`:
-  the analytics and metrics queries the CLI, dashboard and MCP all call. Each returns rows decoded
-  through an explicit `Schema.Struct` of column contracts. `count(*)` comes back as a BIGINT, so
-  it decodes as `Schema.BigInt` (or `NumberFromBigIntColumn`), never as `Schema.Number`.
+- **w2-live-reads** [lane: mechanical, but land it WITH `w2-ingest-writers`] - 19 files that
+  READ during ingest, before the snapshot exists. Twelve of them are also called from a snapshot
+  surface (marked `DUAL`), which is why the shape is a parameter and not a service:
+
+  ```ts
+  // before:  Effect.Effect<Durability, DbError, SurrealClient>
+  // after:   Effect.Effect<Durability, CacheReadError>            // R is empty
+  export const computeDurability = (read: CacheReadService, ids: ReadonlyArray<string>) => …
+  // ingest:  computeDurability(write, ids)      // write: CacheWriteService, live rows
+  // CLI:     computeDurability(yield* CacheRead, ids)  // published snapshot
+  ```
+
+  FIRST COMMIT, before any file below: widen the stage error channel (F3) -
+  `apps/axctl/src/ingest/stage/types.ts` + `apps/axctl/src/ingest/stage/runner.ts`. Nothing in
+  this chunk compiles until that lands. Do NOT reach for `CacheRead` in a stage instead (F1/F2):
+  it type-errors today, and adding `CacheReadLive` to `IngestRuntimeLayer` would turn the type
+  error into last-run's numbers, silently.
+  Acceptance additionally: one test per DUAL module proving the SAME function answers from a live
+  `CacheWriteService` and from a published `CacheRead` - that is the property the parameter buys,
+  and a test that only exercises one side cannot see the bug this chunk exists to fix.
+  - `apps/axctl/src/improve/recommend.ts` - DUAL (moved from w2-cli-mcp; `digest/sources.ts` calls
+    `recommend({limit:100})` inside the digest stage)
+  - `apps/axctl/src/metrics/cold-start-reads.ts`
+  - `apps/axctl/src/metrics/commit-reverted.ts` - ALSO WRITES (`commit.reverted` + the reverted
+    watermark via `advanceRevertedWatermark`); ingest-only, so it can take the writer directly
+  - `apps/axctl/src/metrics/cost-estimate.ts` - DUAL (`loadPricingCatalogForModels` queries;
+    `fillEstimatedCost` is pure and stays pure)
+  - `apps/axctl/src/metrics/delegation-ratio.ts`
+  - `apps/axctl/src/metrics/durability.ts`
+  - `apps/axctl/src/metrics/fragility-cascade.ts` - DUAL and ALSO WRITES. One file, two roles:
+    `deriveFragilityCascade`/`persistFragilityCascade` rewrite the `fragility_cascade` table at
+    ingest; `readFragilityCascade` serves `ax signals show` through `metrics/catalog.ts`. Give the
+    write half the `CacheWriteService` and the read half the passed-in reader - do not leave
+    `readFragilityCascade` behind in `w2-read-queries`, a same-file split is a merge conflict
+  - `apps/axctl/src/metrics/pr-merge-dirty.ts` - ALSO WRITES (PR-merge watermark rows, and DELETEs
+    them); ingest-only
+  - `apps/axctl/src/metrics/session-churn.ts` - DUAL (digest stage + `ax sessions churn`, MCP,
+    dojo, `dashboard/next-actions.ts`)
+  - `apps/axctl/src/metrics/session-loc.ts` - DUAL (via `session-churn.ts`)
+  - `apps/axctl/src/metrics/session-metrics-query.ts` - DUAL (`fetchSessionHealthMap` is called
+    from `session-churn.ts` inside the digest stage)
+  - `apps/axctl/src/metrics/time-to-first-edit.ts`
+  - `apps/axctl/src/metrics/time-to-land.ts`
+  - `apps/axctl/src/project/harness.ts` - DUAL (moved from w2-lib-core; `ingest/harness.ts` calls
+    `buildProjectHarnessReport` in the harness stage)
+  - `apps/axctl/src/queries/directive-ngrams.ts` - DUAL (`derive-directive-ngrams` + `ax directives`)
+  - `apps/axctl/src/queries/dispatch-analytics.ts` - DUAL, the widest fan-in in this chunk:
+    `derive-proposals` and `digest/sources` on the live side; `ax dispatches`, `ax routing`, MCP,
+    `dashboard/contract/insights.ts`, `dashboard/next-actions.ts`, `improve/impact.ts`,
+    `queries/advice-ledger.ts`, `queries/routing-backtest.ts`, `queries/routing-tune.ts`,
+    `nav/next-links.ts` on the snapshot side
+  - `apps/axctl/src/queries/image-context.ts` - DUAL (`derive-proposals` + `ax cost images`, MCP)
+  - `apps/axctl/src/queries/telemetry-rollup.ts` - DUAL (reached at ingest through
+    `fragility-cascade.ts` and `session-churn.ts`; `dashboard/skills-weighted.ts` +
+    `queries/insights-enrich.ts` on the snapshot side)
+  - `apps/axctl/src/queries/workflow-sequences.ts` - DUAL (`derive-proposals` + `ax directives
+    workflows`)
+
+  SUPPORT (not in the 248; must change with this chunk):
+  - `apps/axctl/src/ingest/stage/types.ts` - `StageDef.run`'s fixed `DbError` (F3)
+  - `apps/axctl/src/ingest/stage/runner.ts` - the same channel, four more sites
+  - `apps/axctl/src/ingest/stage/runtime.ts` - `IngestRuntimeLayer`; read F2 before touching it
+  - `apps/axctl/src/ingest/stage/registry.ts` - `StageDef<BaseStageStats, unknown>` composition
+  - `apps/axctl/src/metrics/util.ts` - `sessionRefList` + `recordLiteral`: Surreal record-list SQL
+    built for ten of the modules above and for `queries/advice-ledger.ts`
+  - `apps/axctl/src/metrics/session-filter.ts` - `sessionProjectClause`, SurrealQL text
+
+  CALLERS on the live side (in `w2-ingest-writers`, edited in the same work unit):
+  `ingest/derive-metrics.ts` (9 of these modules), `ingest/derive-cost-backfill.ts`,
+  `ingest/derive-proposals.ts` (3), `ingest/derive-directive-ngrams.ts`, `ingest/harness.ts`,
+  `digest/digest-stage.ts` -> `digest/snapshot.ts` -> `digest/sources.ts` (3).
+
+  CALLERS on the snapshot side (must pass `yield* CacheRead`; each is owned by the chunk in
+  brackets): `metrics/aggregates.ts`, `metrics/catalog.ts`, `queries/advice-ledger.ts`,
+  `queries/cost-analytics.ts`, `queries/insights-enrich.ts`, `queries/routing-backtest.ts`
+  [w2-read-queries]; `dashboard/contract/insights.ts`, `dashboard/next-actions.ts`,
+  `dashboard/session-compare.ts`, `dashboard/skills-weighted.ts` [w2-dashboard];
+  `cli/commands/ax-cost.ts`, `cli/commands/ax-directives.ts`, `cli/commands/ax-dispatches.ts`,
+  `cli/commands/ax-routing.ts`, `cli/commands/sessions.ts`, `cli/commands/signals.ts`,
+  `cli/session-compare-format.ts`, `cli/workflows-brief-template.ts`, `dojo/agenda.ts`,
+  `dojo/items.ts`, `dojo/spar.ts`, `improve/impact.ts`, `mcp/tools.ts`, `nav/next-links.ts`,
+  `queries/routing-tune.ts` [w2-cli-mcp].
+
+- **w2-read-queries** [lane: mechanical] - 36 files (was 53; 17 moved to `w2-live-reads`). Pure
+  SNAPSHOT read surfaces behind `CacheRead`: nothing here runs inside ingest, and nothing here
+  writes. Each returns rows decoded through an explicit `Schema.Struct` of column contracts.
+  `count(*)` comes back as a BIGINT, so it decodes as `Schema.BigInt` (or
+  `NumberFromBigIntColumn`), never as `Schema.Number`.
+  Entry check before porting a file: `rg -l "from \".*/<file>\.ts\"" apps packages scripts` must
+  show NO importer under `ingest/` or `digest/`, directly or transitively. That one command is
+  what the first partition skipped.
   - `apps/axctl/src/context/file-context-pack.ts`
   - `apps/axctl/src/context/file-evidence-rank.ts`
   - `apps/axctl/src/context/file-evidence.ts`
   - `apps/axctl/src/metrics/aggregates.ts`
-  - `apps/axctl/src/metrics/catalog.ts`
-  - `apps/axctl/src/metrics/cold-start-reads.ts`
-  - `apps/axctl/src/metrics/commit-reverted.ts`
-  - `apps/axctl/src/metrics/cost-estimate.ts`
-  - `apps/axctl/src/metrics/delegation-ratio.ts`
-  - `apps/axctl/src/metrics/durability.ts`
-  - `apps/axctl/src/metrics/fragility-cascade.ts`
-  - `apps/axctl/src/metrics/pr-merge-dirty.ts`
+  - `apps/axctl/src/metrics/catalog.ts` - reads `fragility_cascade` through
+    `readFragilityCascade` (w2-live-reads); pass it `yield* CacheRead`
   - `apps/axctl/src/metrics/reverted-commits.ts`
-  - `apps/axctl/src/metrics/session-churn.ts`
-  - `apps/axctl/src/metrics/session-loc.ts`
-  - `apps/axctl/src/metrics/session-metrics-query.ts`
-  - `apps/axctl/src/metrics/time-to-first-edit.ts`
-  - `apps/axctl/src/metrics/time-to-land.ts`
   - `apps/axctl/src/profile/queries.ts`
   - `apps/axctl/src/profile/render.ts`
   - `apps/axctl/src/queries/advice-ledger.ts`
   - `apps/axctl/src/queries/content-types.ts`
   - `apps/axctl/src/queries/context-budget.ts`
   - `apps/axctl/src/queries/cost-analytics.ts`
-  - `apps/axctl/src/queries/directive-ngrams.ts`
-  - `apps/axctl/src/queries/dispatch-analytics.ts`
   - `apps/axctl/src/queries/enriched-session.ts`
-  - `apps/axctl/src/queries/feedback-cases.ts`
+  - `apps/axctl/src/queries/feedback-cases.ts` - OPEN OWNERSHIP, read the note under this chunk
+    before porting it: it is the one CLI-invoked WRITE in the list
   - `apps/axctl/src/queries/hook-latency.ts`
   - `apps/axctl/src/queries/hooks.ts`
-  - `apps/axctl/src/queries/image-context.ts`
   - `apps/axctl/src/queries/ingest-staleness.ts`
   - `apps/axctl/src/queries/insights-enrich.ts`
   - `apps/axctl/src/queries/memory-ops.ts`
@@ -265,13 +424,44 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   - `apps/axctl/src/queries/skill-loaded.ts`
   - `apps/axctl/src/queries/skill-stats.ts`
   - `apps/axctl/src/queries/spar-sessions.ts`
-  - `apps/axctl/src/queries/telemetry-rollup.ts`
   - `apps/axctl/src/queries/thinking-analytics.ts`
   - `apps/axctl/src/queries/unused-skills.ts`
-  - `apps/axctl/src/queries/workflow-sequences.ts`
   - `apps/axctl/src/team/team-profile-queries.ts`
   - `apps/axctl/src/timeline/service.ts`
   - `apps/axctl/src/usage/query.ts`
+
+  SUPPORT (not in the 248; must change with this chunk):
+  - `apps/axctl/src/queries/insights.ts` - `SCHEMA_TABLES` + every `ax report` view's SurrealQL
+    text, consumed by `queries/insights-enrich.ts`, `dashboard/report.ts`,
+    `dashboard/router/table.ts`, `dashboard/contract/web-handler.ts`, `profile/render.ts`,
+    `cli/insights-format.ts`, `cli/commands/report.ts`, `scripts/classifier-smoke.ts`
+  - `apps/axctl/src/queries/session-detail.ts` - the `SESSION_*_SQL` constants behind
+    `queries/enriched-session.ts` and four `dashboard/session-*.ts` handlers
+
+  CALLERS that only INFER their types - 25 files that call a reader in this chunk and nothing in
+  `w2-live-reads`, so they need no edit, only a re-typecheck (none of them names `SurrealClient`
+  or `DbError` today, and `queries/routing-tune.ts` is the only unowned caller anywhere in wave 2
+  that carries an explicit `Effect.Effect<>` annotation - and its annotation is filesystem-only):
+  `cli/classifiers-explain-format.ts`,
+  `cli/commands/{ax-memory,ax-otel,ax-thinking,context,contribute,costs,hooks,profile,runs,usage,wrapped}.ts`,
+  `cli/{insights-format,session-show-format}.ts`, `dashboard/contract/{sessions,skills,usage}.ts`,
+  `dashboard/router/table.ts`, `profile/{insights,rig,taste}.ts`, `team/team-profile.ts`,
+  `timeline/{derive,segment}.ts`, `tui/queries.ts`.
+  The eleven unowned callers that DO reach a `w2-live-reads` module are real edits, not
+  re-typechecks; they are named in that chunk's snapshot-side caller list and owned in the SUPPORT
+  list of `w2-live-reads` (`metrics/util.ts`), `w2-dashboard` (`dashboard/contract/insights.ts`)
+  or `w2-cli-mcp` (the other nine).
+
+  OPEN OWNERSHIP - `queries/feedback-cases.ts` writes, and it is not ingest. `ax hooks cases`
+  persists `feedback_case_type` + `feedback_case_result` by default (`--no-persist` opts out), so
+  under the v2 seam it is neither a `CacheRead` reader nor a `withCacheWrite` writer: the write
+  constructor refuses without the ingest lock. Three ways out, operator picks: (a) the command
+  takes `withIngestLock` for the persist step - the lock is process-level and nothing says only
+  `ax ingest` may hold it, and these rows are DERIVED backtest output that belongs in the cache;
+  (b) the rows join the SQLite judgment sidecar in wave 3's `c-sidecar-sqlite` - but they are
+  deterministic, not judgment, so that widens a boundary this plan drew deliberately; (c) the
+  command becomes read-only and the rows are derived at ingest instead. Recommendation: (a).
+  Until it is decided the file stays listed here and is ported LAST.
 - **w2-dashboard** [lane: mechanical] - 42 files. HTTP route handlers and the OpenTUI views.
   Mostly a service swap - `CacheReadLive` is already merged into the web handler's layer - plus
   the timestamp boundary: the seam decodes TIMESTAMP to a `Date`, the JSON API contract carries
@@ -318,7 +508,21 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   - `apps/axctl/src/tui/hooks/useSkillDetail.ts`
   - `apps/axctl/src/tui/hooks/useSkills.ts`
   - `apps/axctl/src/tui/index.tsx`
-- **w2-cli-mcp** [lane: mechanical] - 54 files. Command handlers, the MCP tool registry, the
+
+  SUPPORT (not in the 248; must change with this chunk):
+  - `apps/axctl/src/dashboard/contract/insights.ts` - calls `queries/dispatch-analytics.ts`
+    (`w2-live-reads`), so it must pass `yield* CacheRead`: a real edit, not a re-typecheck
+  - `apps/axctl/src/dashboard/contract/{sessions,skills,usage}.ts`, `dashboard/router/table.ts` -
+    unowned dashboard surfaces over `w2-read-queries` readers; re-typecheck only
+  - `apps/axctl/src/dashboard/telemetry.ts` - builds the `ingest_run` / `ingest_stage` /
+    `ingest_event` statements as SurrealQL text; also called from `ingest/run.ts` and
+    `ingest/jsonl-work-unit.ts`, so agree the row shape with `w2-ingest-writers` first
+  - `apps/axctl/src/dashboard/loc-query.ts` is already in this chunk, but note that
+    `metrics/session-loc.ts` and `metrics/session-churn.ts` (both `w2-live-reads`) import its
+    PURE `editDelta`. Keep that export pure - the moment it needs a connection it belongs in
+    `w2-live-reads`, not here.
+- **w2-cli-mcp** [lane: mechanical] - 53 files (was 54; `improve/recommend.ts` moved to
+  `w2-live-reads`). Command handlers, the MCP tool registry, the
   improve/hooks/dojo surfaces. `CacheRead` is provided on all three CLI runtime paths already; the
   work is per-handler. NOTE `cli/commands/recall.ts` is in this list only for `resolveScope`,
   which still resolves a repository through `pwd.ts` (chunk E) - its recall query is ported.
@@ -367,7 +571,6 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   - `apps/axctl/src/improve/lint.ts`
   - `apps/axctl/src/improve/list.ts`
   - `apps/axctl/src/improve/propose.ts`
-  - `apps/axctl/src/improve/recommend.ts`
   - `apps/axctl/src/improve/report-queries.ts`
   - `apps/axctl/src/improve/show.ts`
   - `apps/axctl/src/improve/verdict-pending.ts`
@@ -376,13 +579,25 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   - `apps/axctl/src/self-improve/commands.ts`
   - `apps/axctl/src/share/exporter.ts`
   - `apps/axctl/src/share/recover.ts`
-- **w2-lib-core** [lane: judgment] - 28 files, and the one chunk that is NOT mechanical. It
+
+  SUPPORT (not in the 248; must change with this chunk):
+  - `apps/axctl/src/classifiers/package-operations.ts`, `apps/axctl/src/classifiers/workflow-candidate-helpers.ts`,
+    `apps/axctl/src/self-improve/guidance.ts` - SurrealQL statement builders behind
+    `cli/classifiers-package-operations.ts`, `cli/classifiers-workflow-candidates.ts` and
+    `self-improve/commands.ts`
+  - `apps/axctl/src/queries/routing-tune.ts` - the `ax routing tune` engine; calls
+    `fetchDispatches` (`w2-live-reads`) and must pass `yield* CacheRead`
+  - `apps/axctl/src/cli/commands/{ax-cost,ax-dispatches,ax-routing,signals}.ts`,
+    `apps/axctl/src/cli/{session-compare-format,workflows-brief-template}.ts`,
+    `apps/axctl/src/dojo/items.ts`, `apps/axctl/src/nav/next-links.ts` - the other unowned
+    snapshot-side callers of `w2-live-reads` modules; each passes `yield* CacheRead`
+- **w2-lib-core** [lane: judgment] - 27 files (was 28; `project/harness.ts` moved to
+  `w2-live-reads`), and the one chunk that is NOT mechanical. It
   holds the Surreal client itself (`packages/lib/src/db.ts`), the shared query/watermark helpers
   every other chunk sits on, `pwd.ts` (cwd -> repository, which several commands need), and the
-  one-off scripts. Sequence it FIRST for the helpers the other four import, and LAST for the
+  one-off scripts. Sequence it FIRST for the helpers the other five import, and LAST for the
   client deletion - which belongs to wave 3's `c-surreal-delete`, not here.
   - `apps/axctl/src/project/context.ts`
-  - `apps/axctl/src/project/harness.ts`
   - `apps/axctl/src/pwd.ts`
   - `apps/axctl/src/routing-impact/io.ts`
   - `packages/lib/src/blob-gc.ts`
@@ -413,6 +628,20 @@ Chunk boundaries by seam role. Files listed exhaustively; a file appears in exac
   raw `Surreal` client, so porting them before that module means duplicating its SQL. Port them in
   the same change that ports `insights.ts`; both are wired into `package.json`
   (`classifiers:smoke`, `classifiers:export-windows`), so neither can simply be dropped.
+
+  SUPPORT (not in the 248; the Surreal DIALECT itself - every other chunk imports these, so they
+  are the "sequence it FIRST" half of this chunk):
+  - `packages/lib/src/ids.ts` - `recordLiteral`; 40 importers across all six chunks
+  - `packages/lib/src/shared/surql.ts` - `surrealString` / `surrealDate` / `surrealJson`;
+    76 importers, the single widest edge in wave 2
+  - `packages/lib/src/shared/record-select.ts` - `recordListSource`, the 3.0.x record-list
+    workaround; it has no meaning against DuckDB and should DELETE, not port
+  - `packages/lib/src/shared/row-fields.ts` - `countField`, which exists because Surreal names a
+    `count()` column unpredictably; DuckDB aliases, so this should also shrink to nothing
+  - `packages/lib/src/{json,role-name}.ts`, `packages/lib/src/shared/{run-evidence,tool-classes}.ts`
+    - each emits SurrealQL text through the helpers above
+  - `scripts/check-record-select.ts` - the repo check guarding `recordListSource`; it retires with
+    the helper it guards
 
 ### Wave 3 - cut-over (FOG in detail; known shapes)
 

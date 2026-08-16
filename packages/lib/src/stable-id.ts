@@ -173,6 +173,18 @@ export function skillRowId(name: string): string {
     return stableId("skill", [name]);
 }
 
+/**
+ * A durable role, keyed on its normalized name.
+ *
+ * Role rows live in the SQLite judgment sidecar, but they use the same
+ * content-hash contract as cache rows. Every role writer must use this helper,
+ * so `plays_role.out_id` has one stable form across user, frontmatter and brief
+ * sources.
+ */
+export function roleRowId(name: string): string {
+    return stableId("role", [name]);
+}
+
 /** The provider-native row this derived row was built from: an existing
  *  graph row's own (already provider-native, already append-stable) id -
  *  never a file identity. */
@@ -223,6 +235,22 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
     agent_event: "agent_session row id + seq + provider event id (when present)",
     commit: "repo slug + commit sha (the commit_sha_uq unique index) - see commitRowId; NEVER the commit ts",
     skill: "the skill name alone (the skill_name_uq unique index) - see skillRowId; NEVER dir_path (absolute path)",
+    role: "the normalized role name alone - see roleRowId",
+    skill_triage_decision: "the skill name, so a decision survives uninstall and reinstall",
+    plays_role: "edgeRowId('plays_role', skill row id, role row id, source)",
+    proposal: "the proposal dedupe signature, with an optional source namespace for specialized producers",
+    skill_proposal: "the proposal row id",
+    subagent_proposal: "the proposal row id",
+    hook_proposal: "the proposal row id",
+    guidance_proposal: "the proposal row id",
+    automation_proposal: "the proposal row id",
+    experiment: "the accepted proposal row id; one experiment exists for each proposal",
+    checkpoint: "the experiment row id + checkpoint kind",
+    retro: "the reviewed session row id",
+    transcript_label_review: "the classifier candidate row id",
+    dogfood_run: "the dogfood run id",
+    session_label: "the session row id + label",
+    artifact: "the producing run id + artifact kind; dogfood transcripts use the dogfood run id + transcript",
     ingest_file_state:
         "source_kind + the watched path - see watermarkRowId (@ax/lib/duckdb/watermark). The absolute path IS the key here, the one place that is right: a watermark is a statement about one file on THIS machine, in a per-machine rebuildable cache, so it has no path-independent identity",
     invoked: "edgeRowId('invoked', turn row id, skill row id, JSON.stringify(args)) - args discriminates two invocations of the same skill in one turn",

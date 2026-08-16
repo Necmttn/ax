@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+    accessSync,
+    chmodSync,
+    constants,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,6 +35,75 @@ describe("custom DuckDB build", () => {
         expect(script).toContain("match_bm25");
         expect(script).toContain("json_extract");
         expect(script).toContain("smoke-duckdb-dylib.ts");
+    });
+
+    test("passes STATIC_LIBCPP from CI to the DuckDB make process", () => {
+        const workDir = mkdtempSync(join(tmpdir(), "ax-duckdb-build-script-"));
+        const binDir = join(workDir, "bin");
+        const buildRoot = join(workDir, "build");
+        const sourceDir = join(buildRoot, "src");
+        const distDir = join(workDir, "dist");
+        mkdirSync(join(sourceDir, ".git"), { recursive: true });
+        mkdirSync(join(sourceDir, "extension"));
+        mkdirSync(binDir);
+
+        const writeExecutable = (name: string, body: string) => {
+            const path = join(binDir, name);
+            writeFileSync(path, body);
+            chmodSync(path, 0o755);
+        };
+
+        writeExecutable(
+            "git",
+            `#!/bin/sh
+if [ "$3" = "rev-parse" ]; then
+    echo d8cdaa33fda8df955cc76ef58a280f68f4cd43fa
+fi
+`,
+        );
+        writeExecutable(
+            "make",
+            `#!/bin/sh
+set -eu
+test "\${STATIC_LIBCPP:-}" = 1
+test "\${GEN:-}" = ninja
+test "\${CORE_EXTENSIONS:-}" = json
+test "\${EXTENSION_STATIC_BUILD:-}" = 1
+test "$1" = -C
+mkdir -p "$2/build/release/src"
+printf placeholder > "$2/build/release/src/libduckdb.so"
+cat > "$2/build/release/duckdb" <<'EOF'
+#!/bin/sh
+printf '%s\n' 'fts=1:hello static world' 'json=42'
+EOF
+chmod +x "$2/build/release/duckdb"
+`,
+        );
+        writeExecutable(
+            "bun",
+            "#!/bin/sh\nprintf '%s\\n' 'DuckDB dynamic library air-gap smoke passed'\n",
+        );
+        writeExecutable("uname", "#!/bin/sh\nprintf '%s\\n' Linux\n");
+
+        try {
+            const result = spawnSync(join(repoRoot, "scripts/build-duckdb.sh"), [], {
+                cwd: repoRoot,
+                encoding: "utf8",
+                env: {
+                    ...process.env,
+                    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+                    DUCKDB_BUILD_ROOT: buildRoot,
+                    DUCKDB_DIST_DIR: distDir,
+                    STATIC_LIBCPP: "1",
+                },
+            });
+
+            expect(result.status).toBe(0);
+            expect(result.stderr).not.toContain("STATIC_LIBCPP=1: command not found");
+            expect(result.stdout).toContain("DuckDB air-gap smoke passed");
+        } finally {
+            rmSync(workDir, { recursive: true, force: true });
+        }
     });
 
     test("the release workflow builds all three target platforms and uploads each artifact", () => {

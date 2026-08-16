@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import type { Clause } from "@ax/lib/duckdb/clause";
+import { daysAgoExpr, type Clause } from "@ax/lib/duckdb/clause";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
 
@@ -47,7 +47,7 @@ function whereClause(opts: Pick<HookQueryOptions, "sinceDays" | "command" | "ses
         if (!Number.isFinite(opts.sinceDays) || opts.sinceDays <= 0) {
             throw new Error(`--since must be a positive integer, got ${opts.sinceDays}`);
         }
-        where.push("ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')");
+        where.push(`ts >= ${daysAgoExpr}`);
         params.push(Math.trunc(opts.sinceDays));
     }
     if (opts.command !== undefined) {
@@ -94,8 +94,8 @@ export function buildHookSessionQuery(sessionId: string): Clause {
     ].join("\n"), params: [sessionId.startsWith("session:") ? sessionId : `session:${sessionId}`] };
 }
 
-const HookSummaryDbRow = Schema.Struct({ command: Schema.String, hook_name: Schema.String, provider_status: Schema.String, effect: Schema.String, count: NumberFromBigIntColumn, avg_duration_ms: Schema.NullOr(Schema.Number), max_duration_ms: Schema.NullOr(Schema.Number), last_seen: Schema.NullOr(TimestampColumn) });
-const HookInvocationDbRow = Schema.Struct({ ts: TimestampColumn, session: Schema.String, event_name: Schema.String, hook_name: Schema.String, command: Schema.String, provider_status: Schema.String, effect: Schema.String, duration_ms: Schema.NullOr(Schema.Number), exit_code: Schema.NullOr(Schema.Number), stdout_excerpt: Schema.NullOr(Schema.String), stderr_excerpt: Schema.NullOr(Schema.String), blocking_error_excerpt: Schema.NullOr(Schema.String) });
+const HookSummaryDbRow = Schema.Struct({ command: Schema.String, hook_name: Schema.String, provider_status: Schema.String, effect: Schema.String, count: NumberFromBigIntColumn, avg_duration_ms: Schema.NullOr(Schema.Number), max_duration_ms: Schema.NullOr(NumberFromBigIntColumn), last_seen: Schema.NullOr(TimestampColumn) });
+const HookInvocationDbRow = Schema.Struct({ ts: TimestampColumn, session: Schema.String, event_name: Schema.String, hook_name: Schema.String, command: Schema.String, provider_status: Schema.String, effect: Schema.String, duration_ms: Schema.NullOr(NumberFromBigIntColumn), exit_code: Schema.NullOr(NumberFromBigIntColumn), stdout_excerpt: Schema.NullOr(Schema.String), stderr_excerpt: Schema.NullOr(Schema.String), blocking_error_excerpt: Schema.NullOr(Schema.String) });
 const HookSessionDbRow = Schema.Struct({ ...HookInvocationDbRow.fields, tool_call_id: Schema.NullOr(Schema.String) });
 
 export const queryHookSummary = Effect.fn("queries.queryHookSummary")(

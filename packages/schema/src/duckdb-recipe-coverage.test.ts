@@ -18,6 +18,7 @@ import { describe, expect, test } from "bun:test";
 import { NATURAL_KEY_RECIPES, PSEUDO_RECIPE_KEYS } from "@ax/lib/stable-id";
 import { DUCKDB_TABLE_NAMES } from "./parse-duckdb-schema.ts";
 import { DUCKDB_SCHEMA_TABLES } from "./duckdb-tables.ts";
+import { SIDECAR_TABLE_NAMES } from "./sidecar-tables.ts";
 
 /** Tables with no concrete natural-key recipe yet. */
 const recipeTodo: ReadonlySet<string> = new Set(
@@ -48,11 +49,13 @@ describe("natural-key recipe coverage (P2-4)", () => {
         expect([...recipeTodo].filter((table) => !known.has(table))).toEqual([]);
     });
 
-    test("every concrete recipe names a table that actually exists in the DDL", () => {
+    test("every concrete recipe names a table that exists in one storage DDL", () => {
         // The direction the old hand-listed constant could not check: a recipe
         // written for a table that was later renamed away silently covered
         // nothing, and its real successor fell into the todo set unnoticed.
-        expect(tablesWithRecipes.filter((table) => !DUCKDB_TABLE_NAMES.has(table))).toEqual([]);
+        expect(tablesWithRecipes.filter((table) =>
+            !DUCKDB_TABLE_NAMES.has(table) && !SIDECAR_TABLE_NAMES.has(table)
+        )).toEqual([]);
     });
 
     test("the documentation-only pseudo keys can never mask a real table", () => {

@@ -9,29 +9,37 @@
  * Spec: docs/superpowers/specs/2026-06-15-spar-exclusion-tag-design.md
  */
 import { Effect, Schema } from "effect";
-import { cacheRows } from "@ax/lib/duckdb/query";
-import { CacheRead } from "@ax/lib/duckdb/seam";
+import { RecordId } from "surrealdb";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 
 /**
- * Session ids tagged as spar variants for behavioral analytics exclusion.
- * Returns a flat array of bare provider session ids.
+ * RecordIds of sessions tagged as spar variants (behavioral-analytics
+ * exclusion). Returns a flat array of `RecordId` values (NOT strings).
  * Returns `[]` when no spar sessions exist.
  *
- * DuckDB stores the bare id in `session.id` and related edge columns.
+ * IMPORTANT: the ids are RAW `record<session>` values, not `type::string(id)`
+ * strings. `invoked.session` / `session.id` are record links, and SurrealDB
+ * compares `record<session> NOT IN [<string>...]` as ALWAYS-TRUE (the string
+ * IN-list silently matches nothing - documented rule, see
+ * @ax/lib/shared/record-select). The exclusion at the
+ * weighted aggregate binds these RecordIds so the comparison is
+ * record-vs-record and actually fires. Verified empirically on the live DB:
+ * a string[] param excludes 0 rows; a RecordId[] param excludes correctly.
+ *
+ * Deref-free: no graph traversal. Safe against the 87k-edge invoked hang
+ * (memory `weighted-query-per-edge-deref-hang`).
  */
-const SparSessionRow = Schema.Struct({ id: Schema.String });
-
-export const fetchSparSessionIds = (): Effect.Effect<readonly string[], never, CacheRead> =>
+export const fetchSparSessionIds = (): Effect.Effect<
+    readonly RecordId[],
+    JudgmentError,
+    Judgment
+> =>
     Effect.gen(function* () {
-        const rows = yield* cacheRows(
-            SparSessionRow,
-            {
-                sql: `SELECT id FROM session
-                      WHERE labels IS NOT NULL
-                        AND json_contains(labels, '"spar"')`,
-                params: [],
-            },
-            "spar sessions",
+        const judgment = yield* Judgment;
+        const rows = yield* judgment.rows(
+            Schema.Struct({ session_id: TextColumn }),
+            "SELECT session_id FROM session_label WHERE label = ? ORDER BY session_id",
+            ["spar"],
         );
-        return rows.map((row) => row.id);
+        return rows.map((row) => new RecordId("session", row.session_id));
     });

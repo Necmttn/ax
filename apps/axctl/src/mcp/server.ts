@@ -18,6 +18,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Layer } from "effect";
 import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import { AX_VERSION } from "../cli/version.ts";
 import { axMcpTools, type AxRuntime } from "./tools.ts";
 
@@ -53,7 +54,7 @@ export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
     // CacheReadLive opens nothing until a query arrives, so a server whose
     // client never calls `recall` pays nothing for it - and one that starts
     // before the first ingest picks the snapshot up when it appears.
-    const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive));
+    const runtime = ManagedRuntime.make(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive));
 
     const server = buildServer(runtime);
     const transport = new StdioServerTransport();

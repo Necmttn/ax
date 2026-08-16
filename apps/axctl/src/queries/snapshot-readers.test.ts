@@ -6,7 +6,10 @@ import { fetchSessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { fetchLastSuccessfulIngestAt } from "./ingest-staleness.ts";
 import { fetchSidecarUsageSummary } from "./sidecar-usage.ts";
 import { fetchSkillLoaded } from "./skill-loaded.ts";
-import { fetchSparSessionIds } from "./spar-sessions.ts";
+// NOTE: `fetchSparSessionIds` is deliberately absent. Session labels are a
+// DECISION, so w2-sidecar-judgments moved them out of the rebuildable cache and
+// into the SQLite sidecar's `session_label` table; the reader is covered by
+// spar-sessions.test.ts against the judgment seam, not by a cache fixture.
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("snapshot readers", {
     requireFts: true,
@@ -87,7 +90,6 @@ describe("snapshot-only readers", () => {
             Effect.all({
                 loaded: fetchSkillLoaded({ limit: 10 }),
                 sidecars: fetchSidecarUsageSummary(),
-                spar: fetchSparSessionIds(),
                 lastIngest: fetchLastSuccessfulIngestAt,
                 durability: fetchSessionDurabilityDetail("spar-session"),
             }).pipe(Effect.provide(layer)),
@@ -98,7 +100,6 @@ describe("snapshot-only readers", () => {
             artifacts: [{ kind: "plan", artifacts: 1 }],
             usage: [{ action: "read", sidecar_kind: "plan", edges: 1 }],
         });
-        expect(result.spar).toEqual(["spar-session"]);
         expect(result.lastIngest).toBe(Date.parse("2026-08-15T01:02:00.000Z"));
         expect(result.durability).toMatchObject({
             producedCommits: 1,

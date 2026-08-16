@@ -16,6 +16,7 @@
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { dateField } from "@ax/lib/shared/row-fields";
 
 const checkedDays = (days: number): number => {
@@ -31,7 +32,7 @@ checkedDays(days);
 return `
 SELECT out_id AS skill_id, count(*) AS recent
 FROM invoked
-WHERE ts > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+WHERE ts > ${daysAgoExpr}
 GROUP BY out_id;`;
 };
 

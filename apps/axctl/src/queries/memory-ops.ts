@@ -21,6 +21,7 @@
 import { Effect, Schema } from "effect";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -83,7 +84,7 @@ JOIN turn t ON t.id = e.in_id
 JOIN session s ON s.id = t.session
 WHERE contains(f.path, '/.claude/')
     AND contains(f.path, '/memory/')
-    AND e.ts >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
+    AND e.ts >= ${daysAgoExpr}
 ORDER BY e.ts DESC;
 `;
 

@@ -1,7 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import type { DbError } from "@ax/lib/errors";
-import type { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { dispatchInstallPlan } from "@ax/hooks-sdk/dispatch";
 import { GUARD_NAMES, DISPATCHER_NAME, SHIM_NAME } from "./guard-names.ts";
 import { addHook, readAllHooks, removeHook } from "./config.ts";
@@ -174,8 +173,8 @@ export const installDispatcher = (
     opts: { readonly repoRoot?: string | null | undefined } = {},
 ): Effect.Effect<
     DispatcherInstallResult,
-    PlatformError | DbError | import("./errors.ts").HookConfigParseError | import("./errors.ts").HookConfigSchemaError | import("./errors.ts").HookValidationError | import("./errors.ts").HookProviderNotFoundError | import("./errors.ts").HookNotFoundError,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    PlatformError | import("./errors.ts").HookConfigParseError | import("./errors.ts").HookConfigSchemaError | import("./errors.ts").HookValidationError | import("./errors.ts").HookProviderNotFoundError | import("./errors.ts").HookNotFoundError,
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
 > =>
     Effect.gen(function* () {
         const existing = yield* readAllHooks({

@@ -433,11 +433,15 @@ const latencyCommand = Command.make(
                     console.log(asJson ? prettyPrint(report) : renderHookLatency(report));
                 }),
             ),
-            Effect.catchTag("DbError", (e) =>
+            // The reader now answers from the published DuckDB snapshot, so its
+            // failures are cache failures - and the most common one by far is
+            // "nothing published yet", which names its own fix.
+            Effect.catch((e) =>
                 Effect.promise(async () => {
                     process.stderr.write(
-                        `DB unreachable or query failed: ${e.message}\n` +
-                        "Start the DB with 'axctl daemon start' and retry.\n",
+                        e._tag === "CacheUnavailableError"
+                            ? `${e.message}\nRun 'ax ingest' to publish a snapshot, then retry.\n`
+                            : `Cache query failed: ${e.message}\n`,
                     );
                     process.exit(1);
                 }),

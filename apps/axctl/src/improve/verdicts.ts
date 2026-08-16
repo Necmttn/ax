@@ -13,9 +13,13 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { surrealLiteral } from "@ax/lib/json";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import {
+    findStoredProposal,
+    listStoredProposals,
+    type StoredCheckpoint,
+    type StoredProposal,
+} from "./judgment-proposals.ts";
 
 /** One experiment row in the verdict listing, with its newest checkpoint
  *  inlined as `latest_checkpoint` (or `null` when none exists yet). */
@@ -31,23 +35,15 @@ export type VerdictShowRow = Record<string, unknown>;
  */
 export const listVerdicts = (): Effect.Effect<
     ReadonlyArray<VerdictListRow>,
-    DbError,
-    SurrealClient
+    JudgmentError,
+    Judgment
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT
-                proposal.title AS title,
-                proposal.dedupe_sig AS dedupe_sig,
-                artifact_path,
-                type::string(created_at) AS created_at,
-                type::string(scaffolded_at) AS scaffolded_at,
-                locked_verdict,
-                (SELECT kind, suggested, user_verdict, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
-            FROM experiment ORDER BY created_at DESC LIMIT 30;`,
-        );
-        return rows?.[0] ?? [];
+        const proposals = yield* listStoredProposals(1000);
+        return proposals.filter((row) => row.experiment !== null)
+            .sort((a, b) => b.experiment!.created_at.getTime() - a.experiment!.created_at.getTime())
+            .slice(0, 30)
+            .map(toVerdictListRow);
     });
 
 /**
@@ -57,24 +53,46 @@ export const listVerdicts = (): Effect.Effect<
  */
 export const showVerdict = (
     sigOrId: string,
-): Effect.Effect<VerdictShowRow | null, DbError, SurrealClient> =>
+): Effect.Effect<VerdictShowRow | null, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const idLiteral = surrealLiteral(sigOrId);
-        const sel = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT
-                id,
-                proposal.title AS title,
-                proposal.dedupe_sig AS dedupe_sig,
-                proposal.status AS proposal_status,
-                artifact_path,
-                type::string(created_at) AS created_at,
-                type::string(scaffolded_at) AS scaffolded_at,
-                locked_verdict,
-                (SELECT id, kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC) AS checkpoints
-            FROM experiment
-            WHERE proposal.dedupe_sig = ${idLiteral} OR id = ${idLiteral}
-            LIMIT 1;`,
-        );
-        return (sel?.[0] ?? [])[0] ?? null;
+        const proposal = yield* findStoredProposal(sigOrId);
+        return proposal?.experiment ? toVerdictShowRow(proposal) : null;
     });
+
+const checkpointRow = (checkpoint: StoredCheckpoint) => ({
+    id: checkpoint.id,
+    kind: checkpoint.kind,
+    suggested: checkpoint.suggested,
+    user_verdict: checkpoint.user_verdict,
+    measured: checkpoint.measured,
+    observed_at: checkpoint.observed_at.toISOString(),
+});
+
+const toVerdictListRow = (proposal: StoredProposal): VerdictListRow => {
+    const experiment = proposal.experiment!;
+    const latest = experiment.checkpoints.at(-1);
+    return {
+        title: proposal.title,
+        dedupe_sig: proposal.dedupe_sig,
+        artifact_path: experiment.artifact_path,
+        created_at: experiment.created_at.toISOString(),
+        scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
+        locked_verdict: experiment.locked_verdict,
+        latest_checkpoint: latest ? checkpointRow(latest) : null,
+    };
+};
+
+const toVerdictShowRow = (proposal: StoredProposal): VerdictShowRow => {
+    const experiment = proposal.experiment!;
+    return {
+        id: experiment.id,
+        title: proposal.title,
+        dedupe_sig: proposal.dedupe_sig,
+        proposal_status: proposal.status,
+        artifact_path: experiment.artifact_path,
+        created_at: experiment.created_at.toISOString(),
+        scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
+        locked_verdict: experiment.locked_verdict,
+        checkpoints: experiment.checkpoints.toReversed().map(checkpointRow),
+    };
+};

@@ -1,15 +1,19 @@
 /**
  * Skill-hygiene candidates query: unclassified skills with ≥N invocations.
  *
- * Uses three FLAT queries joined in JS - no record derefs inside aggregates.
- * The `invoked` edge table has ~87k rows; stacking `out.name` derefs inside
- * a GROUP BY aggregate caused a production hang. Lesson documented in CLAUDE.md.
+ * Uses three FLAT queries joined in JS - one per fact, none of them nested.
+ *
+ * THE ANSWER SPANS BOTH v2 ENGINES, so it is worth naming which half is which:
+ * (1) and (2) are DERIVED from transcripts and disk, so they come from the
+ * DuckDB cache (`CacheRead`); (3) is a DECISION the user made, so it comes from
+ * the SQLite judgment sidecar through `fetchClassifiedSkillIds` - never from the
+ * cache, which does not hold `plays_role` at all.
  *
  *   (1) Aggregate invocation + distinct-session counts from `invoked`, grouped
- *       by `out` (skill id). A single `in.session` deref is safe; the production
- *       hang was STACKED derefs (out.deleted_at + in.session) on 87k+ edges.
+ *       by the skill id.
  *   (2) Fetch all skill rows (id, name, dir_path, content_hash) - small table.
- *   (3) Fetch classified skill ids via plays_role (user/frontmatter/brief sources).
+ *   (3) Fetch classified skill ids via plays_role (user/frontmatter/brief
+ *       sources) from the judgment sidecar.
  *
  * JS join steps:
  *   - Build byId map from (2)
@@ -32,6 +36,7 @@
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
+import { fetchClassifiedSkillIds } from "../dashboard/role-queries.ts";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
@@ -65,7 +70,7 @@ export interface SkillHygieneInput {
 }
 
 // ---------------------------------------------------------------------------
-// SQL - deref-free, three flat statements
+// SQL - deref-free, two flat statements
 // ---------------------------------------------------------------------------
 
 // DuckDB stores ids as strings, so each result joins directly in JavaScript.
@@ -73,7 +78,6 @@ export interface SkillHygieneInput {
 // sinceDays window).
 const HygieneCountRow = Schema.Struct({ sid: Schema.String, invocations: NumberFromBigIntColumn, sessions: NumberFromBigIntColumn });
 const HygieneSkillRow = Schema.Struct({ id: Schema.String, name: Schema.String, dir_path: Schema.NullOr(Schema.String), content_hash: Schema.NullOr(Schema.String) });
-const ClassifiedSkillRow = Schema.Struct({ id: Schema.String });
 
 // ---------------------------------------------------------------------------
 // Query
@@ -82,14 +86,14 @@ const ClassifiedSkillRow = Schema.Struct({ id: Schema.String });
 export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function* (
     input: SkillHygieneInput,
 ) {
-    const [counts, skills, classifiedRows] = yield* Effect.all([
+    const [counts, skills, classified] = yield* Effect.all([
         cacheRows(HygieneCountRow, { sql: "SELECT out_id AS sid, count(*) AS invocations, count(DISTINCT session) AS sessions FROM invoked GROUP BY out_id", params: [] }, "skill hygiene counts"),
         cacheRows(HygieneSkillRow, { sql: "SELECT id, name, dir_path, content_hash FROM skill", params: [] }, "skill hygiene catalog"),
-        cacheRows(ClassifiedSkillRow, { sql: "SELECT DISTINCT in_id AS id FROM plays_role WHERE source IN ('frontmatter', 'brief', 'user')", params: [] }, "skill hygiene roles"),
+        fetchClassifiedSkillIds(),
     ]);
 
     // Build lookup structures from the flat result sets
-    const classifiedIds = new Set(classifiedRows.map((row) => row.id));
+    const classifiedIds = new Set(classified);
     const byId = new Map(
         skills.map((s) => [s.id, s]),
     );

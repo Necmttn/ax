@@ -694,15 +694,22 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
         const skillStmts = buildSkillProposalStatements(skillRows, existingSigs);
 
         // Phase C11: also derive guidance-form proposals from the harness
-        // report. buildProjectHarnessReport is project-doctor logic that
-        // identifies "you should add a guardrail" candidates; route those
-        // into the proposal pipeline as guidance-form proposals.
-        const { buildProjectHarnessReport } = yield* Effect.promise(() =>
+        // grounding - project-doctor logic that identifies "you should add a
+        // guardrail" candidates; route those into the proposal pipeline as
+        // guidance-form proposals.
+        //
+        // The GROUNDING, not the full report: `learningCandidates` comes from
+        // git plus the guidance sources (see `mainBranchLearning`), while the
+        // report's other half reads the published DuckDB snapshot. This stage
+        // writes SurrealDB, so taking the full report would make one ingest
+        // operation span both engines - and answer from a snapshot that omits
+        // whatever the run in progress has written.
+        const { buildHarnessGrounding } = yield* Effect.promise(() =>
             import("../project/harness.ts"),
         );
-        const harnessReport = yield* buildProjectHarnessReport();
+        const harnessGrounding = yield* buildHarnessGrounding();
         const { rows: guidanceRows, skipped: guidanceSkipped } =
-            deriveGuidanceProposalRows(harnessReport.learningCandidates);
+            deriveGuidanceProposalRows(harnessGrounding.learningCandidates);
         const guidanceStmts = buildGuidanceProposalStatements(guidanceRows, existingSigs);
 
         // Routing proposal (form='hook'): derive from dispatch candidate analytics.

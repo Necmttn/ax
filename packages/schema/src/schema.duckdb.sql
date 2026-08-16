@@ -882,30 +882,15 @@ CREATE INDEX IF NOT EXISTS classifier_graph_fact_kind ON classifier_graph_fact(k
 CREATE INDEX IF NOT EXISTS classifier_graph_fact_subject ON classifier_graph_fact(subject);
 CREATE INDEX IF NOT EXISTS classifier_graph_fact_theme ON classifier_graph_fact(kind, predicate);
 
--- Transcript label-mining: reviewed-status rows and embedding/vector rows.
--- Graph facts themselves reuse classifier_graph_* (node/edge/fact); these two
--- tables hold the reviewed-status provenance and the vector refs that join
--- candidates back to promotion-safe graph facts. Writes are idempotent (UPSERT
--- keyed by candidate_id / vector id).
-CREATE TABLE IF NOT EXISTS transcript_label_review (
-    id VARCHAR PRIMARY KEY,
-    candidate_id VARCHAR NOT NULL,
-    graph_fact_id VARCHAR,
-    label_family VARCHAR NOT NULL,
-    review_status VARCHAR NOT NULL,
-    promotion_safe BOOLEAN NOT NULL,
-    reviewed_label VARCHAR,
-    reviewed_target VARCHAR,
-    reviewer VARCHAR NOT NULL,
-    rationale VARCHAR NOT NULL,
-    evidence_paths_json VARCHAR NOT NULL,  -- JSON-encoded
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_review_candidate ON transcript_label_review(candidate_id);
-CREATE INDEX IF NOT EXISTS transcript_label_review_graph_fact ON transcript_label_review(graph_fact_id);
-CREATE INDEX IF NOT EXISTS transcript_label_review_family ON transcript_label_review(label_family);
-CREATE INDEX IF NOT EXISTS transcript_label_review_status ON transcript_label_review(review_status);
-
+-- Transcript label-mining: embedding/vector rows. Graph facts themselves reuse
+-- classifier_graph_* (node/edge/fact); this table holds the vector refs that
+-- join candidates back to promotion-safe graph facts. Writes are idempotent
+-- (UPSERT keyed by vector id).
+--
+-- MOVED TO THE SIDECAR: `transcript_label_review`. The vectors are mined and
+-- re-derivable; the REVIEW of a candidate (who decided what, and whether it is
+-- promotion-safe) is judgment, so it lives in schema.sidecar.sql. Its
+-- `candidate_id` / `graph_fact_id` are refs INTO this cache.
 CREATE TABLE IF NOT EXISTS transcript_label_vector (
     id VARCHAR PRIMARY KEY,
     candidate_id VARCHAR NOT NULL,
@@ -1440,32 +1425,13 @@ CREATE TABLE IF NOT EXISTS graph_health_check (
 );
 CREATE INDEX IF NOT EXISTS graph_health_kind_created ON graph_health_check(kind, created_at);
 
--- ==== Skill roles (P3.1) ====
--- Multi-role natural: one skill -> many plays_role edges. Weighted query
--- joins invoked -> skill -> plays_role -> role.
-CREATE TABLE IF NOT EXISTS role (
-    id VARCHAR PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    -- Surreal carried `VALUE $value ?? 1.0` here to stop a CONTENT-style upsert
-    -- from coercing weight to NONE. DuckDB has no NONE, and NOT NULL DEFAULT 1.0
-    -- gives the same guarantee; the Surreal repair UPDATE was one-time DML with
-    -- no legacy rows to repair in a fresh cache.
-    weight DOUBLE NOT NULL DEFAULT 1.0
-);
-CREATE UNIQUE INDEX IF NOT EXISTS role_name_uq ON role(name);
-
-CREATE TABLE IF NOT EXISTS plays_role (
-    id VARCHAR PRIMARY KEY,
-    in_id VARCHAR NOT NULL,  -- ref -> skill
-    out_id VARCHAR NOT NULL,  -- ref -> role
-    confidence DOUBLE NOT NULL DEFAULT 1.0,
-    source VARCHAR NOT NULL,
-    weight DOUBLE,
-    rationale VARCHAR,
-    since TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS plays_role_in ON plays_role(in_id);
-CREATE INDEX IF NOT EXISTS plays_role_out ON plays_role(out_id);
+-- ==== Skill roles (P3.1) - MOVED TO THE SIDECAR ====
+-- `role` (name + user-tuned weight) and `plays_role` (skill -> role) are both
+-- classifications a user or agent MADE, not facts derived from a transcript, so
+-- they live in schema.sidecar.sql. `plays_role.in_id` holds a skill id from THIS
+-- cache, which is why `ax skills weighted` joins across the two engines and why
+-- packages/lib/src/cache-integrity.ts counts the tags whose skill no longer
+-- exists after a re-derive.
 
 -- ==== Relations (taste graph) ====
 
@@ -1912,18 +1878,12 @@ CREATE INDEX IF NOT EXISTS agent_used_model_in ON agent_used_model(in_id);
 CREATE INDEX IF NOT EXISTS agent_used_model_out ON agent_used_model(out_id);
 
 -- ---------------------------------------------------------------------------
--- User-facing triage decisions on skills. The dashboard "Skill Triage" view
--- writes here; downstream queries can filter `archived` skills out of the
--- leaderboard. We never delete: keep history of decision flips with `decided_at`.
+-- MOVED TO THE SIDECAR: `skill_triage_decision`. The dashboard "Skill Triage"
+-- view's keep/archive/review call is a user decision, so it lives in
+-- schema.sidecar.sql; downstream queries still filter `archived` skills out of
+-- the leaderboard, now by joining the sidecar. It is keyed by skill NAME, not by
+-- a cache id, so it is the one judgment table that cannot dangle.
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS skill_triage_decision (
-    id VARCHAR PRIMARY KEY,
-    skill_name VARCHAR NOT NULL,
-    decision VARCHAR NOT NULL,  -- keep | archive | review
-    reason VARCHAR,
-    decided_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS skill_triage_decision_name ON skill_triage_decision(skill_name);
 
 -- ---------------------------------------------------------------------------
 -- Native agent-harness hook evidence. These rows describe the harness layer
@@ -2066,44 +2026,11 @@ CREATE INDEX IF NOT EXISTS hook_fire_by_ts ON hook_fire(ts);
 CREATE INDEX IF NOT EXISTS hook_fire_by_session ON hook_fire(session);
 CREATE INDEX IF NOT EXISTS hook_fire_by_file ON hook_fire(file);
 CREATE INDEX IF NOT EXISTS hook_fire_by_reason ON hook_fire(reason);
-CREATE TABLE IF NOT EXISTS proposal (
-    id VARCHAR PRIMARY KEY,
-    form VARCHAR NOT NULL,
-    -- skill | subagent | hook | guidance | automation
-    title VARCHAR NOT NULL,
-    hypothesis VARCHAR NOT NULL,
-    dedupe_sig VARCHAR NOT NULL,
-    frequency BIGINT NOT NULL DEFAULT 0,
-    confidence VARCHAR NOT NULL,
-    -- low | medium | high
-    status VARCHAR NOT NULL DEFAULT 'open',
-    -- open | accepted | rejected | superseded
-    -- mined (signal-derived) | agent (written via `ax improve propose`).
-    -- The VALUE clause coerces a NONE/absent write back to 'mined' so a bare
-    -- `UPDATE proposal SET ...` (accept/reject/housekeep/re-derive) that omits
-    -- `origin` can never re-coerce an old NONE row and crash with "Expected string
-    -- but found `NONE`" (issue #472). It tests `IS NONE` explicitly rather than the
-    -- broader `?? ` so an *explicit* NULL write still fails type coercion (a real
-    -- bug surfaces) instead of being silently relabeled 'mined'. DEFAULT still seeds
-    -- 'mined' on first create; an explicit origin='agent' write is preserved.
-    -- was: DEFINE FIELD OVERWRITE origin ... VALUE IF $value IS NONE THEN 'mined' ELSE $value END
-    -- (the NONE-coercion VALUE clause has no DuckDB equivalent and is dropped;
-    -- the DEFAULT alone covers the create-time seed)
-    origin VARCHAR NOT NULL DEFAULT 'mined',
-    hypothesis_template VARCHAR,
-    -- hypothesis with {{placeholders}} hydrated at serve time from
-    -- evidence_query's first row - numbers never expire
-    evidence_query VARCHAR,
-    -- read-only SurrealQL (SELECT/RETURN only, validated at write AND
-    -- serve) producing the row that fills hypothesis_template
-    reject_reason VARCHAR,
-    baseline VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS proposal_dedupe_uq ON proposal(dedupe_sig);
-CREATE INDEX IF NOT EXISTS proposal_status_freq ON proposal(status, frequency);
-CREATE INDEX IF NOT EXISTS proposal_form_status ON proposal(form, status, created_at);
+
+-- MOVED TO THE SIDECAR: `proposal`. The improve loop's shortlist is authored -
+-- mined by ingest, then accepted, rejected or superseded by a human - and a
+-- rejected proposal that a re-derive resurrected as `open` would ask the same
+-- question again forever. See schema.sidecar.sql.
 
 -- ==== Directive n-gram lift table (#587) ====
 -- Per-user lift table: which n-gram markers in user turns predict a captured
@@ -2125,69 +2052,10 @@ CREATE TABLE IF NOT EXISTS directive_ngram (
 CREATE UNIQUE INDEX IF NOT EXISTS directive_ngram_uq ON directive_ngram(ngram);
 CREATE INDEX IF NOT EXISTS directive_ngram_lift ON directive_ngram(lift);
 
--- ==== Per-form payload tables ====
--- One row per proposal of the matching form. Typed fields per form avoid
--- the JSON-blob trap that killed the prior orphan tables.
-
-CREATE TABLE IF NOT EXISTS skill_proposal (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    trigger_pattern VARCHAR NOT NULL,
-    suspected_gap VARCHAR NOT NULL,
-    proposed_behavior VARCHAR NOT NULL,
-    expected_impact VARCHAR
-);
-CREATE UNIQUE INDEX IF NOT EXISTS skill_proposal_uq ON skill_proposal(proposal);
-
-CREATE TABLE IF NOT EXISTS subagent_proposal (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    bounded_role VARCHAR NOT NULL,
-    delegation_trigger VARCHAR NOT NULL,
-    -- pattern matched against Task tool calls (see opportunity definition below)
-    example_task_patterns VARCHAR NOT NULL DEFAULT '[]'  -- JSON-encoded; P2-3 reverted: JSON, not native list
-);
-CREATE UNIQUE INDEX IF NOT EXISTS subagent_proposal_uq ON subagent_proposal(proposal);
-
-CREATE TABLE IF NOT EXISTS hook_proposal (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    event_name VARCHAR NOT NULL,
-    -- PreToolUse | PostToolUse | SessionStart | ...
-    target_tool VARCHAR,
-    hook_command VARCHAR NOT NULL,
-    recovery_path VARCHAR,
-    smoke_test_command VARCHAR,
-    disable_command VARCHAR,
-    failure_mode VARCHAR
-    -- fail_open | fail_closed
-);
-CREATE UNIQUE INDEX IF NOT EXISTS hook_proposal_uq ON hook_proposal(proposal);
-
-CREATE TABLE IF NOT EXISTS guidance_proposal (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    file_target VARCHAR NOT NULL,
-    -- e.g. "CLAUDE.md", "~/.claude/CLAUDE.md"
-    section VARCHAR,
-    suggested_text VARCHAR NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS guidance_proposal_uq ON guidance_proposal(proposal);
-
-CREATE TABLE IF NOT EXISTS automation_proposal (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    trigger_signal VARCHAR NOT NULL,
-    schedule VARCHAR,
-    -- cron expression, "weekly", etc; null = event-driven
-    action VARCHAR NOT NULL,
-    recovery_path VARCHAR,
-    smoke_test_command VARCHAR,
-    disable_command VARCHAR,
-    failure_mode VARCHAR
-    -- fail_open | fail_closed
-);
-CREATE UNIQUE INDEX IF NOT EXISTS automation_proposal_uq ON automation_proposal(proposal);
+-- MOVED TO THE SIDECAR: the five per-form payload tables (`skill_proposal`,
+-- `subagent_proposal`, `hook_proposal`, `guidance_proposal`,
+-- `automation_proposal`). One row per proposal of the matching form; they follow
+-- `proposal` because they ARE it, split by form.
 
 -- ==== Typed evidence edges ====
 -- Replaces the JSON-blob `evidence_refs` design that codex review flagged
@@ -2214,28 +2082,11 @@ CREATE INDEX IF NOT EXISTS cites_evidence_in ON cites_evidence(in_id);
 CREATE INDEX IF NOT EXISTS cites_evidence_out ON cites_evidence(out_id);
 CREATE INDEX IF NOT EXISTS cites_evidence_in_out ON cites_evidence(in_id, out_id);
 
--- ==== Experiment (created on accept) ====
--- One row per accepted proposal. `artifact` is a typed link to the
--- created skill row when form=skill; `artifact_path` carries the
--- on-disk path for hook/guidance/automation forms. `scaffolded_at`
--- records when the CLI wrote the stub file (Phase C3 scaffold-on-accept
--- fix for the manual-step dropout problem).
-CREATE TABLE IF NOT EXISTS experiment (
-    id VARCHAR PRIMARY KEY,
-    proposal VARCHAR NOT NULL,  -- ref -> proposal (was: REFERENCE ON DELETE CASCADE)
-    artifact VARCHAR,  -- ref -> skill
-    artifact_path VARCHAR,
-    scaffolded_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    locked_verdict VARCHAR,
-    status VARCHAR NOT NULL DEFAULT 'task_emitted',
-    -- task_emitted | scaffolded | regressed | retired
-    task_path VARCHAR
-    -- absolute path to .ax/tasks/<id>.md while pending
-);
-CREATE INDEX IF NOT EXISTS experiment_status_idx ON experiment(status);
-CREATE UNIQUE INDEX IF NOT EXISTS experiment_proposal_uq ON experiment(proposal);
-CREATE INDEX IF NOT EXISTS experiment_created ON experiment(created_at);
+-- ==== Experiment (created on accept) - MOVED TO THE SIDECAR ====
+-- One row per accepted proposal, carrying the locked verdict. `opportunity`
+-- below stays HERE: it is the mined denominator (every recurrence of the
+-- trigger pattern), re-derived from transcripts on each ingest, and its `in_id`
+-- is a ref into the sidecar's `experiment`.
 
 -- ==== Opportunity (verdict denominator) ====
 -- Each time a proposal's trigger pattern recurs after experiment.created_at,
@@ -2260,94 +2111,21 @@ CREATE INDEX IF NOT EXISTS opportunity_in_ts ON opportunity(in_id, matched_at);
 CREATE INDEX IF NOT EXISTS opportunity_out ON opportunity(out_id);
 CREATE INDEX IF NOT EXISTS opportunity_in ON opportunity(in_id);
 
--- ==== Checkpoint (decision support, never auto-verdict) ====
--- One row per (experiment, kind) snapshot at +3 / +10 / +30 sessions
--- since experiment.created_at (see issue #83 - calendar days are the wrong
--- cadence when an agent ships eight sessions a day). Legacy day-based
--- rows (t+7 / t+30 / t+90) are preserved as historical data; the kind
--- field is a free-form string so the two cadences coexist.
--- `measured` is the aggregate {built, invoked, opportunities, addressed,
--- friction_delta}. `suggested` is the algorithm's verdict guess. The
--- human-confirmed `user_verdict` is what gets locked into experiment.
--- locked_verdict at +30s. Algorithm proposes, human decides.
-CREATE TABLE IF NOT EXISTS checkpoint (
-    id VARCHAR PRIMARY KEY,
-    experiment VARCHAR NOT NULL,  -- ref -> experiment (was: REFERENCE ON DELETE CASCADE)
-    kind VARCHAR NOT NULL,
-    -- current: +3s | +10s | +30s | adhoc
-    -- legacy:  t+7 | t+30 | t+90 (calendar-day windows, pre-#83)
-    -- measured: JSON-encoded object {opportunities, addressed, ratio, built,
-    -- current_frequency, baseline_frequency} - was TYPE object with typed
-    -- sub-fields (DuckDB has no nested-field DEFINE, folded to one JSON column)
-    -- Frequency disambiguation for opportunities=0 verdicts: if the cluster
-    -- frequency has grown since the proposal was accepted, the artifact is
-    -- being ignored (still firing). Otherwise the pattern self-resolved.
-    measured VARCHAR NOT NULL,  -- JSON
-    suggested VARCHAR,
-    -- adopted | ignored | regressed | no_longer_needed | partial
-    user_verdict VARCHAR,
-    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS checkpoint_experiment_kind ON checkpoint(experiment, kind, observed_at);
+-- MOVED TO THE SIDECAR: `checkpoint`. Its `measured` aggregate is computable
+-- from this cache, but `user_verdict` - the human's answer, which the algorithm
+-- only ever SUGGESTS - is not, and the two belong to the same row.
 
--- ==== dogfood_run (Phase C12) ====
--- One row per dogfood scenario invocation. Owned by src/dogfood/wterm.ts.
-CREATE TABLE IF NOT EXISTS dogfood_run (
-    id VARCHAR PRIMARY KEY,
-    run_id VARCHAR NOT NULL,
-    scenario VARCHAR NOT NULL,
-    driver VARCHAR NOT NULL,       -- wterm | future drivers
-    status VARCHAR NOT NULL,       -- passed | failed | error
-    agent VARCHAR,
-    command VARCHAR,
-    command_source VARCHAR,
-    transport VARCHAR,
-    requested_transport VARCHAR,
-    transport_fallback_reason VARCHAR,
-    success_marker VARCHAR,
-    marker_found BOOLEAN NOT NULL DEFAULT FALSE,
-    timed_out BOOLEAN NOT NULL DEFAULT FALSE,
-    timeout_seconds BIGINT,
-    transcript_artifact VARCHAR,  -- ref -> artifact
-    cwd VARCHAR,
-    started_at TIMESTAMP NOT NULL,
-    ended_at TIMESTAMP NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS dogfood_run_id_uq ON dogfood_run(run_id);
-CREATE INDEX IF NOT EXISTS dogfood_run_status_ts ON dogfood_run(status, ended_at);
-CREATE INDEX IF NOT EXISTS dogfood_run_scenario ON dogfood_run(scenario, ended_at);
+-- MOVED TO THE SIDECAR: `dogfood_run`. A scenario's pass/fail is an observation
+-- of a terminal session that no longer exists; nothing on disk re-derives it.
 
 -- =====================================================================
--- Phase B: retro table (2026-05-26)
+-- Phase B: retro - MOVED TO THE SIDECAR (2026-05-26; moved 2026-08-15)
 -- =====================================================================
--- A structured reflection emitted by an agent at session-end. Four
--- canonical fields: tried (what the agent attempted), worked (what
--- landed), failed (what didn't), next (the experiment to run next).
--- See docs/language.md "retro" for the canonical definition.
---
--- Source enum:
---   claude_stop_hook   - Claude Code Stop hook ran `ax retro emit`
---   codex_rollout      - extracted from a Codex rollout summary
---   heuristic          - generated by ax from turn data (no LLM call)
---   manual             - user typed `ax retro emit --tried=... --worked=...`
---
--- One retro per session (UNIQUE index). Re-emitting overwrites; the raw
--- field preserves the original JSON for audit.
-CREATE TABLE IF NOT EXISTS retro (
-    id VARCHAR PRIMARY KEY,
-    session VARCHAR NOT NULL,  -- ref -> session (was: REFERENCE ON DELETE CASCADE)
-    source VARCHAR NOT NULL,
-    tried VARCHAR NOT NULL,
-    worked VARCHAR,
-    failed VARCHAR,
-    next VARCHAR,
-    raw VARCHAR,        -- original JSON payload
-    repository VARCHAR,  -- ref -> repository
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS retro_session_uq ON retro(session);
-CREATE INDEX IF NOT EXISTS retro_source_ts ON retro(source, created_at);
-CREATE INDEX IF NOT EXISTS retro_repository_ts ON retro(repository, created_at);
+-- The structured session-end reflection (tried/worked/failed/next) is written
+-- BY an agent, not derived from what it did, so it lives in schema.sidecar.sql.
+-- `retro.session` and `retro.repository` are refs into this cache. The
+-- `reviewed` edge below stays here: it is re-derivable from the retro rows plus
+-- the sessions, and it is what `ax retro pending` traverses.
 
 -- Graph edge: session got a retro. Lets queries traverse both directions
 -- (session->reviewed->retro, retro<-reviewed<-session) and ask

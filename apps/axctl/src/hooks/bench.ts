@@ -8,6 +8,7 @@
 
 import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { HOME } from "@ax/lib/paths";
@@ -289,7 +290,8 @@ const CHAIN_PROVIDER = "claude";
  * Best-effort + soft-fail: a failed config read or summary query degrades to
  * the default-estimate path and writes a notice to STDERR (so `--json` stdout
  * stays clean) - never a silent approximation. Deps: HookProviderRegistry |
- * FileSystem | Path | SurrealClient.
+ * FileSystem | Path | SurrealClient | CacheRead (`readAllHooks` reads the
+ * snapshot).
  */
 export const gatherChain = (
     meta: InstallableHookMeta,
@@ -298,7 +300,7 @@ export const gatherChain = (
 ): Effect.Effect<
     ChainSummary | null,
     never,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient | CacheRead
 > =>
     Effect.gen(function* () {
         const event = meta.events[0];
@@ -391,7 +393,7 @@ export const benchHook = (
 ): Effect.Effect<
     BenchLedger,
     never,
-    SurrealClient | FileSystem.FileSystem | Path.Path | HookProviderRegistry
+    SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path | HookProviderRegistry
 > =>
     Effect.gen(function* () {
         const path = yield* Path.Path;
