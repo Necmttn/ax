@@ -331,30 +331,28 @@ const ChildEdgeDbRow = Schema.Struct({
     tool: Schema.NullOr(Schema.String),
     nickname: Schema.NullOr(Schema.String),
 });
-/** Batched subagent run-metrics over a list of child session record-ids.
- *  Four grouped SELECTs in one round-trip (turns, tool_calls, token usage,
- *  session timestamps); stitched together in JS by bare session id. The
- *  `$ids` placeholder is replaced with an inline record-id array literal
- *  (each id validated + wrapped via toSessionRid). */
-const CHILD_STATS_SQL = `
-    SELECT session, count() AS turns
-    FROM turn
-    WHERE session IN $ids
-    GROUP BY session;
-
-    SELECT session, count() AS tool_calls
-    FROM tool_call
-    WHERE session IN $ids
-    GROUP BY session;
-
-    SELECT session, estimated_tokens, estimated_cost_usd
-    FROM session_token_usage
-    WHERE session IN $ids;
-
-    SELECT id AS session, started_at, ended_at
-    FROM session
-    WHERE id IN $ids;
-`;
+/** Batched subagent run-metrics over a list of child session ids. Four
+ *  grouped queries (turns, tool_calls, token usage, session timestamps),
+ *  one DuckDB statement per call (CacheRead has no multi-statement round
+ *  trip), stitched together in JS by session id. */
+const ChildTurnsDbRow = Schema.Struct({
+    session: Schema.String,
+    turns: NumberFromBigIntColumn,
+});
+const ChildToolCallsDbRow = Schema.Struct({
+    session: Schema.String,
+    tool_calls: NumberFromBigIntColumn,
+});
+const ChildTokenDbRow = Schema.Struct({
+    session: Schema.String,
+    estimated_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+});
+const ChildSessionDbRow = Schema.Struct({
+    session: Schema.String,
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+});
 const HOOK_FIRES_SQL = `
     SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
     FROM hook_fire
@@ -497,86 +495,78 @@ const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEd
         ),
     );
 
-/** A `session` record-id reference as returned by Surreal. The SDK hands
- *  these back either as a decorated string or a RecordId-like object; we only
- *  need its string form to re-bare. */
-type SurrealRef = string | { toString(): string };
-
-const refToBare = (ref: SurrealRef | null | undefined): string | null => {
-    if (ref == null) return null;
-    return toBareSessionId(typeof ref === "string" ? ref : String(ref));
-};
-
-interface ChildTurnsRow { readonly session: SurrealRef; readonly turns: number | null }
-interface ChildToolCallsRow { readonly session: SurrealRef; readonly tool_calls: number | null }
-interface ChildTokenRow {
-    readonly session: SurrealRef;
-    readonly estimated_tokens: number | null;
-    readonly estimated_cost_usd: number | null;
-}
-interface ChildSessionRow {
-    readonly session: SurrealRef;
-    readonly started_at: Date | string | null;
-    readonly ended_at: Date | string | null;
-}
-
-const toMs = (v: Date | string | null | undefined): number | null => {
+const toMs = (v: Date | null | undefined): number | null => {
     if (v == null) return null;
-    const ms = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    const ms = v.getTime();
     return Number.isFinite(ms) ? ms : null;
 };
 
-/** Resolve run metrics for every spawned child in ONE round-trip. Returns a
- *  map keyed by bare child session id. Defensive: any DB failure degrades to
- *  an empty map so the inspector still renders the spawn markers metric-less
- *  (mirrors resolveChildren's swallow-and-degrade contract). */
+/** Resolve run metrics for every spawned child. Four separate statements
+ *  (CacheRead has no multi-statement round trip), run concurrently, stitched
+ *  together in JS by session id. Returns a map keyed by child session id.
+ *  Defensive: cacheRows already degrades a failed query to [] so the
+ *  inspector still renders the spawn markers metric-less. */
 const resolveChildStats = (
     childIds: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyMap<string, ChildStats>, never, SurrealClient> =>
+): Effect.Effect<ReadonlyMap<string, ChildStats>, never, CacheRead> =>
     Effect.gen(function* () {
         if (childIds.length === 0) return new Map<string, ChildStats>();
-        const idList = childIds.map((id) => toSessionRid(toBareSessionId(id))).join(", ");
-        const sql = CHILD_STATS_SQL.split("$ids").join(`[${idList}]`);
-        const db = yield* SurrealClient;
-        const [turnRows, toolRows, tokenRows, sessionRows] = yield* db.query<[
-            ChildTurnsRow[],
-            ChildToolCallsRow[],
-            ChildTokenRow[],
-            ChildSessionRow[],
-        ]>(sql);
+        const placeholders = childIds.map(() => "?").join(", ");
+        const [turnRows, toolRows, tokenRows, sessionRows] = yield* Effect.all(
+            [
+                cacheRows(
+                    ChildTurnsDbRow,
+                    {
+                        sql: `SELECT session, count(*) AS turns FROM turn WHERE session IN (${placeholders}) GROUP BY session`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_turns",
+                ),
+                cacheRows(
+                    ChildToolCallsDbRow,
+                    {
+                        sql: `SELECT session, count(*) AS tool_calls FROM tool_call WHERE session IN (${placeholders}) GROUP BY session`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_tool_calls",
+                ),
+                cacheRows(
+                    ChildTokenDbRow,
+                    {
+                        sql: `SELECT session, estimated_tokens, estimated_cost_usd FROM session_token_usage WHERE session IN (${placeholders})`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_tokens",
+                ),
+                cacheRows(
+                    ChildSessionDbRow,
+                    {
+                        sql: `SELECT id AS session, started_at, ended_at FROM session WHERE id IN (${placeholders})`,
+                        params: [...childIds],
+                    },
+                    "session-inspect.child_sessions",
+                ),
+            ],
+            { concurrency: 4 },
+        );
 
         const turnsByChild = new Map<string, number>();
-        for (const r of turnRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) turnsByChild.set(id, Number(r.turns ?? 0));
-        }
+        for (const r of turnRows) turnsByChild.set(r.session, r.turns);
         const toolsByChild = new Map<string, number>();
-        for (const r of toolRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) toolsByChild.set(id, Number(r.tool_calls ?? 0));
-        }
+        for (const r of toolRows) toolsByChild.set(r.session, r.tool_calls);
         const tokensByChild = new Map<string, { est_tokens: number | null; cost_usd: number | null }>();
-        for (const r of tokenRows ?? []) {
-            const id = refToBare(r.session);
-            if (id) {
-                tokensByChild.set(id, {
-                    est_tokens: r.estimated_tokens == null ? null : Number(r.estimated_tokens),
-                    cost_usd: r.estimated_cost_usd == null ? null : Number(r.estimated_cost_usd),
-                });
-            }
+        for (const r of tokenRows) {
+            tokensByChild.set(r.session, { est_tokens: r.estimated_tokens, cost_usd: r.estimated_cost_usd });
         }
         const durationByChild = new Map<string, number | null>();
-        for (const r of sessionRows ?? []) {
-            const id = refToBare(r.session);
-            if (!id) continue;
+        for (const r of sessionRows) {
             const start = toMs(r.started_at);
             const end = toMs(r.ended_at);
-            durationByChild.set(id, start != null && end != null && end >= start ? end - start : null);
+            durationByChild.set(r.session, start != null && end != null && end >= start ? end - start : null);
         }
 
         const out = new Map<string, ChildStats>();
-        for (const rawId of childIds) {
-            const id = toBareSessionId(rawId);
+        for (const id of childIds) {
             const tokens = tokensByChild.get(id);
             out.set(id, {
                 turns: turnsByChild.get(id) ?? null,
@@ -587,14 +577,7 @@ const resolveChildStats = (
             });
         }
         return out;
-    }).pipe(
-        Effect.catch((err) =>
-            Effect.sync(() => {
-                console.error("axctl session-inspect resolveChildStats failed:", err);
-                return new Map<string, ChildStats>();
-            }),
-        ),
-    );
+    });
 
 /** Fetch every hook_fire row for the session, ts-ordered. N is small
  *  (tens-to-hundreds in practice) so fetching whole-session is fine; the
