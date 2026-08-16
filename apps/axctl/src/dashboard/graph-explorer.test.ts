@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import {
     FILE_ATTENTION_SQL,
+    fetchGraphExplorer,
     normalizeGraphMode,
     resolveGraphExplorerMode,
     rowsToGraphPayload,
     validateFileAttentionSql,
 } from "./graph-explorer.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("graph-explorer");
 
 describe("graph explorer", () => {
     test("normalizeGraphMode defaults unknown to file-attention", () => {
@@ -31,17 +38,18 @@ describe("graph explorer", () => {
 
     test("file attention query avoids invalid grouped decoration", () => {
         expect(validateFileAttentionSql()).toEqual([]);
-        expect(FILE_ATTENTION_SQL).toContain("$q");
-        expect(FILE_ATTENTION_SQL).toContain("$limit");
-        expect(FILE_ATTENTION_SQL).toContain("time::max(ts) AS last_seen");
-        expect(FILE_ATTENTION_SQL).toContain("GROUP BY session, file");
-        // issue #77: turn-derived metrics are precomputed on session_health,
-        // so the query must NOT scan the turn table per result row.
-        expect(FILE_ATTENTION_SQL).not.toContain("FROM turn");
+        // 3 lowercase-filter bindings (path / project, matched twice for the
+        // OR) + 1 limit binding, all bound `?` params under DuckDB.
+        expect((FILE_ATTENTION_SQL.match(/\?/g) ?? []).length).toBeGreaterThanOrEqual(4);
+        expect(FILE_ATTENTION_SQL).toContain("MAX(e.ts) AS last_seen");
+        expect(FILE_ATTENTION_SQL).toContain("GROUP BY t.session, e.out_id");
+        // issue #77: turn-derived metrics are precomputed on session_health;
+        // the turn table must be referenced exactly once (the aggregate
+        // subquery's JOIN), never scanned again per outer result row.
+        expect((FILE_ATTENTION_SQL.match(/\bturn\b/gi) ?? []).length).toBe(1);
         expect(FILE_ATTENTION_SQL).toContain("session_health");
         expect(FILE_ATTENTION_SQL).toContain("task_label");
         expect(FILE_ATTENTION_SQL).not.toContain("GROUP BY in.session");
-        expect(FILE_ATTENTION_SQL).not.toContain("math::max(ts)");
     });
 
     test("rowsToGraphPayload builds typed graph with inspector panels", () => {
@@ -214,5 +222,68 @@ describe("graph explorer", () => {
             files_touched: 2,
             top_files: ["src/dashboard/graph-explorer.ts", "src/dashboard/server.ts"],
         });
+    });
+});
+
+const FIXTURE = (w: CacheWriteService) =>
+    Effect.gen(function* () {
+        yield* w.putMany("session", [
+            { id: "s1", project: "ax", cwd: "/repo", started_at: new Date("2026-01-01T00:00:00Z"), ended_at: new Date("2026-01-01T01:00:00Z") },
+        ]);
+        yield* w.putMany("session_health", [
+            { id: "sh1", session: "s1", source: "claude", task_label: "fix the parser", user_turns: 5, assistant_turns: 6, correction_turns: 1, interruptions: 0 },
+        ]);
+        yield* w.putMany("file", [
+            { id: "f1", path: "src/dashboard/graph-explorer.ts", lang: "typescript" },
+            { id: "f2", path: "src/dashboard/other.ts", lang: "typescript" },
+        ]);
+        yield* w.putMany("turn", [
+            { id: "t1", session: "s1", seq: 1, ts: new Date("2026-01-01T00:00:30Z"), role: "assistant" },
+        ]);
+        yield* w.putMany("edited", [
+            { id: "e1", in_id: "t1", out_id: "f1", tool: "Edit", ts: new Date("2026-01-01T00:00:30Z") },
+            { id: "e2", in_id: "t1", out_id: "f1", tool: "Edit", ts: new Date("2026-01-01T00:00:45Z") },
+            { id: "e3", in_id: "t1", out_id: "f2", tool: "Edit", ts: new Date("2026-01-01T00:00:50Z") },
+        ]);
+        yield* w.putMany("produced", [
+            { id: "p1", in_id: "s1", out_id: "c1", ts: new Date("2026-01-01T00:30:00Z") },
+        ]);
+        yield* w.putMany("delivery_outcome", [
+            { id: "d1", session: "s1", status: "merged_to_main", review_pain: "low", pr_size: "small" },
+        ]);
+    });
+
+describe("fetchGraphExplorer (real DuckDB fixture)", () => {
+    dtest("file-attention mode joins edited/session/session_health/delivery_outcome into a graph payload", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-graph-explorer-"), dylibPath, FIXTURE));
+        const payload = await readThroughFixture(fixture, dylibPath, fetchGraphExplorer({ mode: "file-attention", limit: 50 }));
+
+        expect(payload.mode).toBe("file-attention");
+        const sessionNode = payload.nodes.find((n) => n.id === "s1");
+        expect(sessionNode?.label).toBe("fix the parser"); // from session_health.task_label
+        const fileEdge = payload.edges.find((e) => e.source === "s1" && e.target === "f1");
+        expect(fileEdge?.weight).toBe(2); // two edits of f1
+
+        const story = payload.story_cards.find((s) => s.session_id === "s1");
+        expect(story?.produced_commits).toBe(1);
+        expect(story?.merged_to_main).toBe(true);
+        expect(story?.files_touched).toBe(2);
+    });
+
+    dtest("q filters by lowercased file path substring", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-graph-explorer-q-"), dylibPath, FIXTURE));
+        const payload = await readThroughFixture(fixture, dylibPath, fetchGraphExplorer({ mode: "file-attention", q: "other", limit: 50 }));
+
+        expect(payload.edges.every((e) => e.target === "f2")).toBe(true);
+        expect(payload.edges.length).toBeGreaterThan(0);
+    });
+
+    dtest("an unimplemented mode returns an empty payload with a staged warning, no query fires", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-graph-explorer-staged-"), dylibPath, () => Effect.void));
+        const payload = await readThroughFixture(fixture, dylibPath, fetchGraphExplorer({ mode: "delivery" }));
+
+        expect(payload.mode).toBe("delivery");
+        expect(payload.nodes).toEqual([]);
+        expect(payload.warnings.length).toBeGreaterThan(0);
     });
 });
