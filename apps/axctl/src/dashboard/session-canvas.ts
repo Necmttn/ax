@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import type {
     SessionCanvasEdge,
     SessionCanvasNode,
@@ -22,49 +22,55 @@ import type {
 // subset orphaned every spawn parent/child that lacked a health row, dropping
 // their edges. `session_health` is now a per-row LEFT decoration for the size +
 // context-pressure signals only - same pattern as graph-explorer's FILE_ATTENTION_SQL.
+// SQL below is DuckDB (CacheRead), translated from the original SurrealQL -
+// see the per-query comments for the shape each still feeds into
+// `rowsToSessionCanvas`/`rowsToOrchestration` (both pure, engine-agnostic
+// `Record<string, unknown>` consumers, unchanged by this port).
 export const SESSION_NODES_SQL = `
-SELECT <string>id AS id, (project ?? NONE) AS project, (source ?? "claude") AS source, started_at, ended_at
+SELECT id, project, COALESCE(source, 'claude') AS source, started_at, ended_at
 FROM session
 ORDER BY started_at DESC
-LIMIT $limit;`;
+LIMIT ?;`;
 
 // session_health decoration (label / pressure / corrections), batched as ONE
 // scan + joined in TS - NOT 4 correlated subqueries per node (the issue-#77 trap
 // that made the node query ~27s once session_health grew via the backfill).
 export const SESSION_HEALTH_SQL = `
-SELECT <string>session AS s, task_label,
-       (context_pressure ?? "unknown") AS context_pressure,
-       (correction_turns ?? 0) AS corrections,
-       (interruptions ?? 0) AS interruptions
+SELECT session AS s, task_label,
+       COALESCE(context_pressure, 'unknown') AS context_pressure,
+       COALESCE(correction_turns, 0) AS corrections,
+       COALESCE(interruptions, 0) AS interruptions
 FROM session_health;`;
 
 // Spawn edges + child timing. `ts` = when the parent dispatched; child
 // started_at/ended_at give the subagent's run span. Used both for lineage edges
 // and to derive the parent's work/wait rail (blocked while a child runs).
+// LEFT JOIN (not INNER): an edge whose child session row is missing/not-yet-
+// ingested still renders (child_start/child_end simply come back null).
 export const SPAWNED_EDGES_SQL = `
-SELECT <string>in AS source, <string>out AS target, (nickname ?? NONE) AS label,
-       ts AS spawn_ts, out.started_at AS child_start, out.ended_at AS child_end
-FROM spawned;`;
+SELECT sp.in_id AS source, sp.out_id AS target, sp.nickname AS label,
+       sp.ts AS spawn_ts, s.started_at AS child_start, s.ended_at AS child_end
+FROM spawned sp LEFT JOIN session s ON s.id = sp.out_id;`;
 
 // Conversational turn volume per session, counted directly from `turn` (works
 // for ALL sessions, not just the ~quarter with a session_health row). One
 // grouped aggregate scan - NOT a correlated per-session subquery (the issue-#77
 // perf trap). Joined onto nodes by id in `rowsToSessionCanvas`.
 //
-// role IN ['user','assistant'] only: Codex writes a `turn` row per fine-grained
+// role IN ('user','assistant') only: Codex writes a `turn` row per fine-grained
 // provider event (tool_call, function_call_output, reasoning, ...), so an
 // unfiltered count inflates Codex sessions ~10x vs Claude and is not
 // cross-provider comparable. Conversational turns approximate real rounds. This
 // is still a v0 proxy - true size is context-token volume (pending token ingest).
 export const TURN_COUNTS_SQL = `
-SELECT <string>session AS s, count() AS turns
-FROM turn WHERE role IN ['user', 'assistant'] GROUP BY s;`;
+SELECT session AS s, count(*) AS turns
+FROM turn WHERE role IN ('user', 'assistant') GROUP BY session;`;
 
 // Context-token volume per session = the real "how much context did this burn"
 // size signal (cross-provider; session-health derives estimated_tokens for all
 // sources). One indexed scan of session_token_usage (UNIQUE on session).
 export const SESSION_TOKENS_SQL = `
-SELECT <string>session AS s, (estimated_tokens ?? 0) AS tokens
+SELECT session AS s, COALESCE(estimated_tokens, 0) AS tokens
 FROM session_token_usage;`;
 
 // Compaction boundaries per session (oldest-first via ts), for epoch notches.
@@ -72,7 +78,7 @@ FROM session_token_usage;`;
 // table is owned/ingested by the compaction-signal feature (all providers);
 // this is read-only consumption. Graceful when empty: nodes show epochs=1.
 export const COMPACTIONS_SQL = `
-SELECT <string>session AS s, ts, (tokens_before ?? 0) AS pre_tokens, (trigger ?? "auto") AS trigger
+SELECT session AS s, ts, COALESCE(tokens_before, 0) AS pre_tokens, COALESCE(trigger, 'auto') AS trigger
 FROM compaction ORDER BY ts ASC;`;
 
 const str = (row: Record<string, unknown>, key: string): string | null => {
@@ -299,27 +305,30 @@ const clampLimit = (limit: number | undefined): number => {
 
 export const ORCH_PARENT_SQL = `
 SELECT
-    <string>id AS id,
-    (
-        (SELECT task_label FROM session_health WHERE session = $parent.id LIMIT 1)[0].task_label
-        ?? project ?? <string>id
+    id,
+    COALESCE(
+        (SELECT task_label FROM session_health WHERE session = s.id LIMIT 1),
+        s.project, s.id
     ) AS label,
     started_at, ended_at
-FROM session WHERE <string>id = $id LIMIT 1;`;
+FROM session s WHERE s.id = ? LIMIT 1;`;
 
 export const ORCH_CHILDREN_SQL = `
-SELECT <string>out AS id, (nickname ?? NONE) AS nickname, ts,
-       out.started_at AS started_at, out.ended_at AS ended_at
-FROM spawned WHERE <string>in = $id ORDER BY ts ASC;`;
+SELECT sp.out_id AS id, sp.nickname AS nickname, sp.ts AS ts,
+       s.started_at AS started_at, s.ended_at AS ended_at
+FROM spawned sp LEFT JOIN session s ON s.id = sp.out_id
+WHERE sp.in_id = ? ORDER BY sp.ts ASC;`;
 
 // First user turn per child session = the subagent's dispatch task. Per-child
-// INDEXED `session = <ref>` LIMIT 1 (hits turn_session_seq) instead of
-// `turn WHERE session IN [<all children>]`, which is a membership scan over the
+// bound-parameter `session = ?` LIMIT 1 (hits the session index) instead of
+// `turn WHERE session IN (<all children>)`, which is a membership scan over the
 // 560k-row turn table (~1.3s for 117 children) - the same trap fixed in
-// enrichSessions. `childRef` is the exact `session:⟨uuid⟩` record-ref literal.
-const orchTaskSql = (childRef: string): string => `
-SELECT <string>session AS s, text_excerpt, seq
-FROM turn WHERE session = ${childRef} AND role = "user" ORDER BY seq ASC LIMIT 1;`;
+// enrichSessions. Plain equality now (DuckDB ids are bound params, not spliced
+// record-ref literals - the old "exact record-ref literal" indexing workaround
+// no longer applies).
+const ORCH_TASK_SQL = `
+SELECT session AS s, text_excerpt, seq
+FROM turn WHERE session = ? AND role = 'user' ORDER BY seq ASC LIMIT 1;`;
 
 /** Per-child fan-out width for the dispatch-task reads. */
 const ORCH_TASK_FANOUT = 16;
@@ -367,25 +376,45 @@ export function rowsToOrchestration(
     };
 }
 
+/** Undecoded raw() reads throughout this module: row shapes vary per query
+ *  and are already consumed by lenient, engine-agnostic `Record<string,
+ *  unknown>` helpers (`str`/`num`/`dateStr` above) shared with the JSONL/
+ *  Surreal-era pure functions - a typed Schema per query would just be
+ *  re-derived busywork these helpers already do defensively. Defensive: a
+ *  failed query degrades to `[]`, per-query (not batch-wide), matching the
+ *  `cacheRows` contract used throughout the rest of this port. */
+const rawRows = (
+    read: CacheReadService,
+    sql: string,
+    params?: ReadonlyArray<DuckDbParam>,
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, never> =>
+    read.raw(sql, params).pipe(
+        Effect.map((r) => r.rows as ReadonlyArray<Record<string, unknown>>),
+        Effect.catch((err) =>
+            Effect.sync(() => {
+                console.error(`ax session-canvas query failed (${sql.trim().slice(0, 60)}...):`, err);
+                return [] as ReadonlyArray<Record<string, unknown>>;
+            }),
+        ),
+    );
+
 export const fetchSessionOrchestration = (
     sessionId: string,
-): Effect.Effect<SessionOrchestration, DbError, SurrealClient> =>
+): Effect.Effect<SessionOrchestration, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const parent = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_PARENT_SQL, { id: sessionId });
-        const children = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_CHILDREN_SQL, { id: sessionId });
-        const childRows = children?.[0] ?? [];
-        // Per-child INDEXED task fetch (the `id` field is the exact
-        // `session:⟨uuid⟩` record-ref literal). Fanned out instead of a single
-        // `session IN [<all children>]` membership scan over the turn table.
-        const childRefs = childRows.map((r) => str(r, "id")).filter((s): s is string => !!s);
+        const read = yield* CacheRead;
+        const [parentRows, childRows] = yield* Effect.all([
+            rawRows(read, ORCH_PARENT_SQL, [sessionId]),
+            rawRows(read, ORCH_CHILDREN_SQL, [sessionId]),
+        ]);
+        // Per-child task fetch, fanned out instead of a single
+        // `session IN (<all children>)` membership scan over the turn table.
+        const childIds = childRows.map((r) => str(r, "id")).filter((s): s is string => !!s);
         const tasksById = new Map<string, string>();
-        if (childRefs.length > 0) {
+        if (childIds.length > 0) {
             const perChild = yield* Effect.forEach(
-                childRefs,
-                (ref) =>
-                    db.query<[Array<Record<string, unknown>>]>(orchTaskSql(ref), {})
-                        .pipe(Effect.map(([rows]) => rows?.[0])),
+                childIds,
+                (id) => rawRows(read, ORCH_TASK_SQL, [id]).pipe(Effect.map((rows) => rows[0])),
                 { concurrency: ORCH_TASK_FANOUT },
             );
             for (const r of perChild) {
@@ -395,7 +424,7 @@ export const fetchSessionOrchestration = (
                 if (s && ex && !tasksById.has(s)) tasksById.set(s, ex); // first (lowest seq) wins
             }
         }
-        return rowsToOrchestration(parent?.[0]?.[0], childRows, sessionId, tasksById);
+        return rowsToOrchestration(parentRows[0], childRows, sessionId, tasksById);
     });
 
 export interface SessionCanvasParams {
@@ -404,40 +433,17 @@ export interface SessionCanvasParams {
 
 export const fetchSessionCanvas = (
     params: SessionCanvasParams = {},
-): Effect.Effect<SessionCanvasPayload, DbError, SurrealClient> =>
+): Effect.Effect<SessionCanvasPayload, never, CacheRead> =>
     Effect.gen(function* () {
         const limit = clampLimit(params.limit);
-        const db = yield* SurrealClient;
-        const nodeRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            SESSION_NODES_SQL,
-            { limit },
-        );
-        const edgeRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            SPAWNED_EDGES_SQL,
-            {},
-        );
-        const turnRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            TURN_COUNTS_SQL,
-            {},
-        );
-        const tokenRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            SESSION_TOKENS_SQL,
-            {},
-        );
-        const compactionRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            COMPACTIONS_SQL,
-            {},
-        );
-        const healthRows = yield* db.query<[Array<Record<string, unknown>>]>(
-            SESSION_HEALTH_SQL,
-            {},
-        );
-        return rowsToSessionCanvas({
-            nodeRows: nodeRows?.[0] ?? [],
-            edgeRows: edgeRows?.[0] ?? [],
-            turnRows: turnRows?.[0] ?? [],
-            tokenRows: tokenRows?.[0] ?? [],
-            compactionRows: compactionRows?.[0] ?? [],
-            healthRows: healthRows?.[0] ?? [],
-        });
+        const read = yield* CacheRead;
+        const [nodeRows, edgeRows, turnRows, tokenRows, compactionRows, healthRows] = yield* Effect.all([
+            rawRows(read, SESSION_NODES_SQL, [limit]),
+            rawRows(read, SPAWNED_EDGES_SQL),
+            rawRows(read, TURN_COUNTS_SQL),
+            rawRows(read, SESSION_TOKENS_SQL),
+            rawRows(read, COMPACTIONS_SQL),
+            rawRows(read, SESSION_HEALTH_SQL),
+        ]);
+        return rowsToSessionCanvas({ nodeRows, edgeRows, turnRows, tokenRows, compactionRows, healthRows });
     });

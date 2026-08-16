@@ -1,12 +1,15 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { DuckDbQueryError } from "@ax/lib/duckdb/errors";
 import { AX_VERSION } from "../../cli/version.ts";
 import { API_VERSION } from "../capabilities.ts";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
-/** Stub DB: SELECT echoes a canned row set; "boom" SQL fails with DbError. */
+/** Stub DB: only graphHealth (still SurrealClient - see system.ts's module
+ *  doc) reads through this. */
 const stubDb = Layer.mock(SurrealClient, {
     query: <T extends unknown[] = unknown[]>(sql: string, _bindings?: Record<string, unknown> | undefined): Effect.Effect<T, DbError, never> =>
         sql.includes("boom")
@@ -17,12 +20,29 @@ const stubDb = Layer.mock(SurrealClient, {
     raw: null as never,
 });
 
+/** Stub CacheRead: `rows`/`first` (fetchWorktreesOverview's many small
+ *  queries) degrade to empty, same as a real dylib-less test run - that
+ *  view only asserts response shape, not content. `raw` (the /api/query
+ *  console + /api/self-improve) echoes a canned row, or fails with a
+ *  DuckDbQueryError for SQL containing "boom" - mirrors stubDb's contract. */
+const stubCacheReadService: CacheReadService = {
+    rows: () => Effect.succeed([]),
+    first: () => Effect.succeed(Option.none()),
+    raw: (sql) =>
+        sql.includes("boom")
+            ? Effect.fail(new DuckDbQueryError({ sql, message: "boom: db exploded" }))
+            : Effect.succeed({ columns: [], rows: [{ ok: true }], rowsChanged: 0 }),
+    snapshotPath: "(test stub)",
+};
+const stubCacheRead = Layer.succeed(CacheRead)(stubCacheReadService);
+
 const handlers: ContractWebHandler[] = [];
 function make(liveIngest = false): ContractWebHandler {
     // A truthy fake stream handle is enough: version only null-checks it.
     const h = makeContractWebHandler({
         ingestStream: liveIngest ? ({} as never) : null,
         services: stubDb,
+        cacheRead: stubCacheRead,
     });
     handlers.push(h);
     return h;
@@ -82,7 +102,7 @@ describe("contract system group", () => {
         const res = await handler(req("POST", "/api/query", { sql: "DELETE FROM session" }));
         expect(res.status).toBe(400);
         await expect(res.json()).resolves.toMatchObject({
-            error: "Only a single SELECT, RETURN, or INFO statement is allowed",
+            error: "Only a single SELECT or read-only DuckDB introspection statement is allowed",
         });
     });
 
@@ -113,7 +133,10 @@ describe("contract system group", () => {
         const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session" }));
         expect(res.status).toBe(200);
         const body = await res.json() as { result: unknown; durationMs: number };
-        expect(body.result).toEqual([[{ ok: true }]]);
+        // Shape changed with the engine: CacheRead.raw() returns an undecoded
+        // {columns, rows, rowsChanged} object, not SurrealDB's nested
+        // array-of-statement-results.
+        expect(body.result).toEqual({ columns: [], rows: [{ ok: true }], rowsChanged: 0 });
         expect(typeof body.durationMs).toBe("number");
     });
 

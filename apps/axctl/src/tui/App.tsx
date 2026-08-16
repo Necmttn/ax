@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useKeyboard } from "@opentui/react";
-import type { SurrealClientShape } from "@ax/lib/db";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import { useSkills, type SkillRow } from "./hooks/useSkills.ts";
 import { useSkillDetail } from "./hooks/useSkillDetail.ts";
 import { useLiveInvocations } from "./hooks/useLiveInvocations.ts";
@@ -53,7 +53,7 @@ const filterRows = (
 };
 
 interface AppProps {
-    readonly client: SurrealClientShape;
+    readonly client: CacheReadService;
     readonly onQuit: () => void;
 }
 

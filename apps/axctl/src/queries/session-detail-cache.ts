@@ -42,6 +42,7 @@ import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type {
     SessionAgentDelegation,
     SessionCompaction,
+    SessionHealthSummary,
     SessionLink,
     SessionOverview,
     SessionTokenUsageDetail,
@@ -474,4 +475,151 @@ export const sessionIdsByPrefixCacheQuery = defineCacheQuery<
         params: [p.prefix, Math.max(1, Math.trunc(p.limit))],
     }),
     mapRow: (row) => toBareSessionId(row.id),
+});
+
+// ---------------------------------------------------------------------------
+// compare view (dashboard/session-compare.ts, chunk 2c) - session_health,
+// commit-produced count, and the per-turn compare spine.
+// ---------------------------------------------------------------------------
+
+const HealthRow = Schema.Struct({
+    turns: NumberFromBigIntColumn,
+    tool_calls: NumberFromBigIntColumn,
+    tool_errors: NumberFromBigIntColumn,
+    user_corrections: NumberFromBigIntColumn,
+    interruptions: NumberFromBigIntColumn,
+    subagent_dispatches: NumberFromBigIntColumn,
+    task_label: NullableText,
+});
+
+export const sessionHealthCacheQuery = defineCacheSingleQuery<
+    SessionCacheParams,
+    typeof HealthRow,
+    SessionHealthSummary
+>({
+    name: "session-detail.health",
+    row: HealthRow,
+    clause: (p) => ({
+        sql: `SELECT turns, tool_calls, tool_errors, user_corrections, interruptions,
+                     subagent_dispatches, task_label
+              FROM session_health WHERE session = ? LIMIT 1`,
+        params: sid(p),
+    }),
+    mapRow: (row) => ({
+        turns: row.turns,
+        tool_calls: row.tool_calls,
+        tool_errors: row.tool_errors,
+        user_corrections: row.user_corrections,
+        interruptions: row.interruptions,
+        subagent_dispatches: row.subagent_dispatches,
+        task_label: row.task_label,
+    }),
+});
+
+const CountRow = Schema.Struct({ count: NumberFromBigIntColumn });
+
+/** Count of commits this session produced (session -> commit `produced` edge). */
+export const sessionProducedCountCacheQuery = defineCacheSingleQuery<
+    SessionCacheParams,
+    typeof CountRow,
+    number
+>({
+    name: "session-detail.produced_count",
+    row: CountRow,
+    clause: (p) => ({
+        sql: "SELECT count(*) AS count FROM produced WHERE in_id = ?",
+        params: sid(p),
+    }),
+    mapRow: (row) => row.count,
+});
+
+/** Lean per-turn row (seq + ts + error flag) for the compare spine. Token/cost
+ *  is merged in by seq on the caller side (not every turn has a usage row). */
+export interface CompareTurnRow {
+    readonly seq: number;
+    readonly ts: string | null;
+    readonly role: string | null;
+    readonly has_error: boolean;
+}
+
+const CompareTurnDbRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    ts: NullableTimestamp,
+    role: NullableText,
+    has_error: Schema.Boolean,
+});
+
+export const sessionCompareTurnsCacheQuery = defineCacheQuery<
+    SessionCacheParams,
+    typeof CompareTurnDbRow,
+    CompareTurnRow
+>({
+    name: "session-detail.compare_turns",
+    row: CompareTurnDbRow,
+    clause: (p) => ({
+        sql: `SELECT seq, ts, role, has_error
+              FROM turn WHERE session = ?
+              ORDER BY seq ASC
+              LIMIT 2000`,
+        params: sid(p),
+    }),
+    mapRow: (row) => ({
+        seq: row.seq,
+        ts: iso(row.ts),
+        role: row.role,
+        has_error: row.has_error,
+    }),
+});
+
+/** Every `turn_token_usage` row for a session, keyed by seq on the caller side
+ *  (mirrors `sessionTurnTokenUsageQuery`'s Surreal shape, minus the record-id
+ *  form). Used by the compare view's per-turn timeline. */
+const CompareTurnTokenUsageRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    model: NullableText,
+    prompt_tokens: NullableCount,
+    completion_tokens: NullableCount,
+    cache_creation_input_tokens: NullableCount,
+    cache_read_input_tokens: NullableCount,
+    fresh_input_tokens: NullableCount,
+    estimated_tokens: NullableCount,
+    estimated_input_cost_usd: NullableDouble,
+    estimated_output_cost_usd: NullableDouble,
+    estimated_cache_creation_cost_usd: NullableDouble,
+    estimated_cache_read_cost_usd: NullableDouble,
+    estimated_cost_usd: NullableDouble,
+    pricing_source: NullableText,
+    usage_source: NullableText,
+    usage_quality: NullableText,
+});
+
+export interface CompareTurnTokenUsage {
+    readonly seq: number;
+    readonly estimated_tokens: number | null;
+    readonly estimated_cost_usd: number | null;
+}
+
+export const sessionCompareTurnTokenUsageCacheQuery = defineCacheQuery<
+    SessionCacheParams,
+    typeof CompareTurnTokenUsageRow,
+    CompareTurnTokenUsage
+>({
+    name: "session-detail.compare_turn_token_usage",
+    row: CompareTurnTokenUsageRow,
+    clause: (p) => ({
+        sql: `SELECT seq, model, prompt_tokens, completion_tokens,
+                     cache_creation_input_tokens, cache_read_input_tokens,
+                     fresh_input_tokens, estimated_tokens, estimated_input_cost_usd,
+                     estimated_output_cost_usd, estimated_cache_creation_cost_usd,
+                     estimated_cache_read_cost_usd, estimated_cost_usd, pricing_source,
+                     usage_source, usage_quality
+              FROM turn_token_usage WHERE session = ?
+              ORDER BY seq ASC`,
+        params: sid(p),
+    }),
+    mapRow: (row) => ({
+        seq: row.seq,
+        estimated_tokens: row.estimated_tokens,
+        estimated_cost_usd: row.estimated_cost_usd,
+    }),
 });

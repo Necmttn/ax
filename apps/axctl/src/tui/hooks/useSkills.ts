@@ -1,13 +1,83 @@
 import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
-import type { SurrealClientShape } from "@ax/lib/db";
-import {
-    PRODUCED_BY_SESSION_SQL,
-    SKILL_LAST_PROJECT_SQL,
-    SKILL_SUMMARY_PROPOSED_ONLY_SQL,
-    SKILL_SUMMARY_SQL,
-} from "../queries.ts";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
+
+// Local DuckDB translations of queries/skill-summary.ts's SurrealQL
+// constants (unported, 2b's ownership - copy the shape, never import the
+// SurrealQL text). Mirrors the identical translation already landed in
+// dashboard/triage.ts's fetchSkillTriage - the TUI hot path and the web
+// dashboard's triage view compute the same skill-summary shape, but each
+// chunk-owned surface carries its own local copy rather than cross-importing
+// between dashboard/ and tui/.
+
+const SKILL_SUMMARY_SQL = `
+SELECT
+    sk.name AS name,
+    sk.scope AS scope,
+    sk.description AS description,
+    sk.dir_path AS dir_path,
+    sk.bytes AS bytes,
+    agg.total_inv AS total_inv,
+    agg.inv_7d AS inv_7d,
+    agg.inv_30d AS inv_30d,
+    agg.last_used AS last_used,
+    agg.corrections AS corrections,
+    (SELECT count(*) FROM proposed p WHERE p.out_id = sk.id) AS proposals,
+    COALESCE(
+        (SELECT to_json(list(DISTINCT iv2.session)) FROM invoked iv2 WHERE iv2.out_id = sk.id AND iv2.session IS NOT NULL)::VARCHAR,
+        '[]'
+    ) AS skill_sessions
+FROM (
+    SELECT
+        out_id AS skill_id,
+        count(*) AS total_inv,
+        SUM(CASE WHEN ts > ${daysAgoExpr} THEN 1 ELSE 0 END) AS inv_7d,
+        SUM(CASE WHEN ts > ${daysAgoExpr} THEN 1 ELSE 0 END) AS inv_30d,
+        MAX(ts) AS last_used,
+        SUM(CASE WHEN was_corrected = true THEN 1 ELSE 0 END) AS corrections
+    FROM invoked
+    GROUP BY out_id
+) agg
+JOIN skill sk ON sk.id = agg.skill_id;`;
+
+const SKILL_SUMMARY_PARAMS = [7, 30];
+
+const SKILL_LAST_PROJECT_SQL = `
+SELECT sk.name AS name, s.project AS project, iv.ts AS ts
+FROM invoked iv
+JOIN skill sk ON sk.id = iv.out_id
+LEFT JOIN session s ON s.id = iv.session
+ORDER BY iv.ts DESC
+LIMIT 50000;`;
+
+const PRODUCED_BY_SESSION_SQL = `
+SELECT in_id AS session, count(*) AS commits_after
+FROM produced
+GROUP BY in_id
+LIMIT 50000;`;
+
+/** Skills with `proposed` edges but no `invoked` edges. Union with the main
+ *  scan on the JS side. */
+const SKILL_SUMMARY_PROPOSED_ONLY_SQL = `
+SELECT
+    sk.name AS name,
+    sk.scope AS scope,
+    sk.description AS description,
+    sk.dir_path AS dir_path,
+    sk.bytes AS bytes,
+    0 AS total_inv,
+    0 AS inv_7d,
+    0 AS inv_30d,
+    NULL AS last_used,
+    0 AS corrections,
+    (SELECT count(*) FROM proposed p WHERE p.out_id = sk.id) AS proposals,
+    '[]' AS skill_sessions
+FROM skill sk
+WHERE NOT EXISTS (SELECT 1 FROM invoked iv WHERE iv.out_id = sk.id)
+    AND EXISTS (SELECT 1 FROM proposed p WHERE p.out_id = sk.id)
+    AND (sk.dir_path IS NULL OR sk.dir_path != '(synthetic)');`;
 
 export interface SkillRow {
     readonly name: string;
@@ -24,7 +94,7 @@ export interface SkillRow {
 interface SkillSummaryRawRow extends SkillRow {
     readonly corrections?: number;
     readonly proposals?: number;
-    readonly skill_sessions?: ReadonlyArray<unknown>;
+    readonly skill_sessions?: unknown;
 }
 
 interface ProducedBySessionRow {
@@ -50,7 +120,7 @@ export interface SkillsState {
  * the caller - re-querying on every keystroke would dominate latency for
  * the small skill counts we expect (low hundreds).
  */
-export function useSkills(client: SurrealClientShape): SkillsState {
+export function useSkills(read: CacheReadService): SkillsState {
     const [data, setData] = useState<ReadonlyArray<SkillRow>>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -66,29 +136,30 @@ export function useSkills(client: SurrealClientShape): SkillsState {
 
     useEffect(() => {
         let cancelled = false;
-        // Two queries because SurrealDB can't UNION SELECTs and the
-        // GROUP BY scan over `invoked` (the fast path post-#31) doesn't
-        // see skills that only have `proposed` edges. Both queries run
-        // in one round-trip from the SDK's perspective; the second is
-        // cheap (~tens of ms).
+        // Two queries because the GROUP BY scan over `invoked` (the fast
+        // path) doesn't see skills that only have `proposed` edges.
         Effect.runPromise(
             Effect.all(
                 [
-                    client.query<[Array<SkillSummaryRawRow>]>(SKILL_SUMMARY_SQL),
-                    client.query<[Array<SkillRow>]>(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
-                    client.query<[Array<ProducedBySessionRow>]>(PRODUCED_BY_SESSION_SQL),
-                    client.query<[Array<LastProjectRow>]>(SKILL_LAST_PROJECT_SQL),
+                    read.raw(SKILL_SUMMARY_SQL, SKILL_SUMMARY_PARAMS),
+                    read.raw(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
+                    read.raw(PRODUCED_BY_SESSION_SQL),
+                    read.raw(SKILL_LAST_PROJECT_SQL),
                 ],
                 { concurrency: 4 },
             ),
         )
             .then(([invokedResult, proposedResult, producedResult, lastProjectResult]) => {
                 if (cancelled || !aliveRef.current) return;
-                const commitCountsBySession = buildCommitCountsBySession(producedResult?.[0] ?? []);
-                const lastProjectBySkill = buildLastProjectBySkill(lastProjectResult?.[0] ?? []);
-                const invokedRows = ((invokedResult?.[0] ?? []) as Array<SkillSummaryRawRow>)
+                const commitCountsBySession = buildCommitCountsBySession(
+                    (producedResult.rows as unknown) as ProducedBySessionRow[],
+                );
+                const lastProjectBySkill = buildLastProjectBySkill(
+                    (lastProjectResult.rows as unknown) as LastProjectRow[],
+                );
+                const invokedRows = ((invokedResult.rows as unknown) as SkillSummaryRawRow[])
                     .map((row) => enrichSkillRow(row, commitCountsBySession, lastProjectBySkill));
-                const proposedRows = (proposedResult?.[0] ?? []) as Array<SkillRow>;
+                const proposedRows = (proposedResult.rows as unknown) as SkillRow[];
                 const rows = [...invokedRows, ...proposedRows].sort((a, b) => {
                     const ds = (b.taste_score ?? 0) - (a.taste_score ?? 0);
                     if (ds !== 0) return ds;
@@ -96,8 +167,8 @@ export function useSkills(client: SurrealClientShape): SkillsState {
                     if (d30 !== 0) return d30;
                     return (b.total_inv ?? 0) - (a.total_inv ?? 0);
                 });
-                // Coerce dates from RecordId/Date to ISO string so render code
-                // can treat the field as a primitive.
+                // Coerce dates from Date/BIGINT-string to ISO string so
+                // render code can treat the field as a primitive.
                 const normalised = rows.map((r) => ({
                     ...r,
                     last_used:
@@ -128,7 +199,7 @@ export function useSkills(client: SurrealClientShape): SkillsState {
         return () => {
             cancelled = true;
         };
-    }, [client, tick]);
+    }, [read, tick]);
 
     return {
         data,
@@ -170,14 +241,25 @@ const buildLastProjectBySkill = (
     return out;
 };
 
+const parseSessionsJson = (value: unknown): unknown[] => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "string") return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
 const enrichSkillRow = (
     row: SkillSummaryRawRow,
     commitCountsBySession: ReadonlyMap<string, number>,
     lastProjectBySkill: ReadonlyMap<string, string>,
 ): SkillRow => {
-    const sessions = Array.isArray(row.skill_sessions)
-        ? row.skill_sessions.map(recordKey).filter((v): v is string => v !== null)
-        : [];
+    const sessions = parseSessionsJson(row.skill_sessions)
+        .map(recordKey)
+        .filter((v): v is string => v !== null);
     const commitsAfter = sessions.reduce(
         (sum, session) => sum + (commitCountsBySession.get(session) ?? 0),
         0,

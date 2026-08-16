@@ -2,16 +2,27 @@
  * P3.6: ax skills weighted - pure data layer.
  *
  * Fetches per-skill invocation counts and role weights via two-pass approach
- * (SurrealDB v3 GROUP BY + role lookup merge in JS) and returns rows ranked
- * by score = invocations × role_weight_sum (min 1.0).
+ * (GROUP BY + role lookup merge in JS) and returns rows ranked by
+ * score = invocations × role_weight_sum (min 1.0).
  *
  * Also runs a doctor query to count unclassified skills with ≥3 invocations.
+ *
+ * PORT NOTES (Surreal -> DuckDB): the invocation aggregate, tombstone set, and
+ * synthetic-tool set all move onto `CacheRead`. The spar-session exclusion
+ * (`session NOT IN $sparSessions`) no longer needs the Surreal
+ * record-vs-string binding workaround `fetchSparSessionIds` was built for -
+ * DuckDB `session` is a plain VARCHAR, so the `RecordId[]` values it still
+ * returns (unchanged; `queries/spar-sessions.ts` is chunk 2b's) are unwrapped
+ * to their bare `.id` string here and bound as an ordinary `NOT IN (?, ...)`
+ * list. The recovery-latency pass's `in.session` turn deref became a real
+ * `JOIN turn`.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows, cacheRowsOrFail } from "@ax/lib/duckdb/query";
+import { withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
-import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
 import { enrichRowsWithTelemetryLatency } from "../queries/telemetry-rollup.ts";
 import { fetchSkillHygiene, SKILL_HYGIENE_MIN_INVOCATIONS } from "../queries/skill-hygiene.ts";
@@ -99,120 +110,70 @@ export const normalizeSkillsWeightedParams = (
 });
 
 // ---------------------------------------------------------------------------
-// SQL helpers
+// Query row shapes
 // ---------------------------------------------------------------------------
 
+const InvocationRow = Schema.Struct({
+    skill_id: Schema.String,
+    invocations: NumberFromBigIntColumn,
+    session_count: NumberFromBigIntColumn,
+});
+
+const IdRow = Schema.Struct({ id: Schema.String });
+const NamedSkillRow = Schema.Struct({ id: Schema.String, name: Schema.String });
+const RecoveryEdgeRow = Schema.Struct({ skill: Schema.String, session: Schema.NullOr(Schema.String) });
+
 /**
- * Pass 1: per-skill invocation aggregates from the invoked edge table.
- * GROUP BY out gives us count + distinct sessions. We avoid correlated
- * subqueries per row (perf lesson from cmdTaste issue #31).
+ * Pass 1: per-skill invocation aggregates from the `invoked` table. Excludes
+ * spar-variant sessions (`sparSessionIds`, bare session ids) and, when
+ * `windowDays` is set, invocations older than the window.
  *
- * Tombstone exclusion deliberately does NOT live in this WHERE clause.
- * `out.deleted_at IS NONE` dereferences the skill record for every invoked
- * edge; combined with the `in.session` deref in the SELECT, the planner walks
- * both graph edges per row and the query hangs past 120s on a populated graph
- * (87k+ invoked edges - the timeout the Pi dogfood hit, 2026-06-04). Instead we
- * fetch the small set of tombstoned skill ids once (DELETED_SKILLS_SQL) and
- * filter them out in JS during the merge.
+ * Tombstone exclusion deliberately does NOT live in this WHERE clause - a
+ * dropped skill row would require a JOIN against `skill` per invocation row,
+ * which is exactly the per-edge deref shape that hung `ax skills weighted`
+ * past 120s on 87k+ invoked rows (Pi dogfood, 2026-06-04). Instead the small
+ * set of tombstoned skill ids is fetched once and filtered out in JS below.
  */
-export function buildInvocationSql(windowDays: number | undefined): string {
-    const conditions: string[] = [];
-    if (windowDays !== undefined && windowDays > 0) {
-        conditions.push(`ts >= time::now() - ${windowDays}d`);
+const buildInvocationClause = (windowDays: number | undefined, sparSessionIds: ReadonlyArray<string>): Clause => {
+    const parts: Clause[] = [];
+    if (windowDays !== undefined && windowDays > 0) parts.push(withinDaysClause("ts", windowDays));
+    if (sparSessionIds.length > 0) {
+        parts.push({
+            sql: `AND session NOT IN (${sparSessionIds.map(() => "?").join(", ")})`,
+            params: [...sparSessionIds],
+        });
     }
-    // Exclude spar variant sessions using a flat NOT IN against the denormalized
-    // `session` field on `invoked` (no graph deref - safe on 87k+ edges).
-    // $sparSessions is bound as a RecordId[] (NOT a string[]) so the comparison
-    // is record-vs-record: `record<session> NOT IN [<string>...]` is always TRUE
-    // (excludes nothing) - the string IN-list silently matches nothing
-    // (see @ax/lib/shared/record-select record-id IN-list invariant). Verified on the live
-    // DB: RecordId[] excludes correctly; string[] excludes 0 of 31,734 rows.
-    // When $sparSessions is empty, NOT IN [] excludes nothing (intended).
-    conditions.push(`session NOT IN $sparSessions`);
-    const whereClause = `WHERE ${conditions.join("\n  AND ")}\n`;
-    return `
-SELECT
-    out AS skill_id,
-    count() AS invocations,
-    array::len(array::distinct(in.session)) AS session_count
-FROM invoked
-${whereClause}GROUP BY skill_id;`.trim();
-}
-
-/**
- * Tombstoned (reconcile soft-deleted) skill ids. The skill table is small, so
- * this direct field-filter scan is cheap - no graph derefs. Used to drop ghost
- * skills from the ranking in JS instead of via a per-edge WHERE deref.
- */
-const DELETED_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE deleted_at IS NOT NONE;`;
-
-/**
- * skill id -> display name. The record id is mangled (`skill:v2__<name>__<hash>`),
- * so derive the readable label from the `name` field instead. Small table,
- * direct scan, no derefs.
- */
-const SKILL_NAMES_SQL = `SELECT id, name FROM skill`;
-
-/**
- * Doctor query: count unclassified skills with >= 3 invocations.
- *
- * This MUST stay semantically in sync with the canonical predicate in
- * queries/skill-hygiene.ts (which `ax skills classify` uses): ≥3 invocations,
- * unclassified = no plays_role edge in (frontmatter|brief|user), synthetic tools
- * excluded unless includeTools. If the two drift, the doctor nudge ("run ax
- * skills classify") can point at a command that finds nothing - the dead-end
- * loop bug. (classify previously diverged via a broken correlated
- * `NOT (subquery)[0]` predicate - NONE, not false - and excluded every
- * unclassified skill; it now delegates to fetchSkillHygiene.)
- *
- * NON-correlated by construction: the original per-skill subqueries
- * (`... WHERE in = $parent.id`) ran two graph lookups for every skill row,
- * making this O(skills × edges) - it hung `ax skills weighted` past 120s on a
- * populated graph (Pi dogfood, 2026-06-04). Here the invocation GROUP BY and
- * the classified-skill set each evaluate once, then a single set-difference.
- */
-/**
- * Synthetic provider built-in tool skill ids. These rows are written by the
- * codex/pi/opencode/cursor ingest with `dir_path = '(synthetic)'` so tool usage
- * is trackable, but they are tool calls, not skills. The skill table is small,
- * so this direct field-filter scan is cheap - no graph derefs. Used to drop
- * tools from the ranking in JS (the doctor count excludes them via hygiene's
- * includeSynthetic flag instead).
- */
-const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)"`;
-
-// The doctor count delegates to fetchSkillHygiene (see the Effect.all below).
-// An earlier inline `buildUnclassifiedSql` drifted from it - missing the
-// content-hash dedup and counting orphan invoked-targets - so the nudge
-// over-reported vs what classify briefs (#481).
-
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
+    return { sql: parts.map((p) => p.sql).join(" "), params: parts.flatMap((p) => [...p.params]) };
+};
 
 export const fetchSkillsWeighted = (
     params: SkillsWeightedParams = {},
-): Effect.Effect<SkillsWeightedResult, DbError | CacheReadError | JudgmentError, SurrealClient | CacheRead | Judgment> =>
+): Effect.Effect<SkillsWeightedResult, CacheReadError | JudgmentError, CacheRead | Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const read = yield* CacheRead;
         const limit = params.limit ?? SKILLS_WEIGHTED_DEFAULT_LIMIT;
         const doctorThreshold =
             params.doctorThreshold ?? SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD;
         const includeTools = params.includeTools ?? false;
 
-        // Fetch spar variant session ids first (flat, deref-free).
-        // RecordId[] (NOT string[]) - bound as $sparSessions so the NOT IN
-        // comparison is record-vs-record and actually excludes spar traffic.
+        // Fetch spar variant session ids first (Judgment sqlite - untouched by
+        // this migration). `fetchSparSessionIds` still returns SurrealDB
+        // `RecordId` values (chunk 2b owns that file); only `.id` (the bare
+        // session key) is used here.
         const sparSessions = yield* fetchSparSessionIds();
+        const sparSessionIds = sparSessions.map((rid) => String(rid.id));
+
+        const where = buildInvocationClause(params.windowDays, sparSessionIds);
 
         // Run passes + doctor + tombstone + synthetic-tool id queries concurrently.
-        const [invRes, roleRes, doctorRes, deletedRes, toolRes, nameRes] = yield* Effect.all(
+        const [invRows, roleRes, doctorRes, deletedRows, toolRows, nameRows] = yield* Effect.all(
             [
-                db.query<[Array<Record<string, unknown>>]>(
-                    buildInvocationSql(params.windowDays),
-                    { sparSessions: [...sparSessions] },
-                ),
+                cacheRowsOrFail(InvocationRow, {
+                    sql: `SELECT out_id AS skill_id, count(*) AS invocations, count(DISTINCT session) AS session_count
+                          FROM invoked
+                          WHERE TRUE ${where.sql}
+                          GROUP BY out_id`,
+                    params: where.params,
+                }),
                 fetchSkillRoleWeights(),
                 // Doctor count: the SAME source of truth `ax skills classify` uses,
                 // so the nudge count exactly matches what classify will brief (#481).
@@ -220,34 +181,26 @@ export const fetchSkillsWeighted = (
                     minInvocations: SKILL_HYGIENE_MIN_INVOCATIONS,
                     includeSynthetic: includeTools,
                 }),
-                db.query<[Array<unknown>]>(DELETED_SKILLS_SQL),
-                db.query<[Array<unknown>]>(SYNTHETIC_SKILLS_SQL),
-                db.query<[Array<Record<string, unknown>>]>(SKILL_NAMES_SQL),
+                cacheRowsOrFail(IdRow, { sql: "SELECT id FROM skill WHERE deleted_at IS NOT NULL", params: [] }),
+                cacheRowsOrFail(IdRow, { sql: `SELECT id FROM skill WHERE dir_path = '(synthetic)'`, params: [] }),
+                cacheRowsOrFail(NamedSkillRow, { sql: "SELECT id, name FROM skill", params: [] }),
             ],
             { concurrency: 6 },
         );
 
         // skill id -> readable name (from the `name` field, not the mangled id).
         const skillNames = new Map<string, string>();
-        for (const r of (nameRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            const sid = String(r.id ?? "");
-            const nm = typeof r.name === "string" ? r.name : "";
-            if (sid && nm) skillNames.set(sid, nm);
+        for (const r of nameRows) {
+            if (r.id && r.name) skillNames.set(r.id, r.name);
         }
 
         // Synthetic provider tools (codex/pi/etc.) - excluded from the ranking
         // unless includeTools. Empty set when the caller opts in.
-        const toolSkills = includeTools
-            ? new Set<string>()
-            : new Set(
-                  ((toolRes?.[0] ?? []) as unknown[]).map((id) => String(id)),
-              );
+        const toolSkills = includeTools ? new Set<string>() : new Set(toolRows.map((r) => r.id));
 
         // Tombstoned skill ids - excluded from ranking in JS (see
-        // buildInvocationSql for why this isn't a per-edge WHERE deref).
-        const deletedSkills = new Set(
-            ((deletedRes?.[0] ?? []) as unknown[]).map((id) => String(id)),
-        );
+        // buildInvocationClause for why this isn't a per-row JOIN).
+        const deletedSkills = new Set(deletedRows.map((r) => r.id));
 
         // ---------------------------------------------------------------------------
         // Merge: per-skill role accumulation
@@ -279,8 +232,8 @@ export const fetchSkillsWeighted = (
 
         // Build rows from invocation aggregates
         const rows: WeightedSkillRow[] = [];
-        for (const r of (invRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            const skillId = String(r.skill_id ?? "");
+        for (const r of invRows) {
+            const skillId = r.skill_id;
             if (!skillId) continue;
             // Drop ghost (reconcile soft-deleted) skills - the tombstone filter
             // that used to live in the pass-1 WHERE clause as a per-edge deref.
@@ -288,18 +241,13 @@ export const fetchSkillsWeighted = (
             // Drop synthetic provider built-in tools unless includeTools.
             if (toolSkills.has(skillId)) continue;
 
-            // Prefer the real `name` field; fall back to stripping the record id
-            // (handles "skill:⟨caveman⟩" / "skill:caveman"; the mangled
-            // "skill:v2__name__hash" form has no clean name to derive, hence the map).
-            const skillName =
-                skillNames.get(skillId) ??
-                skillId
-                    .replace(/^skill:⟨/, "")
-                    .replace(/⟩$/, "")
-                    .replace(/^skill:/, "");
+            // Prefer the real `name` field; fall back to the row id itself
+            // (DuckDB skill ids are plain content-hashed keys, not a Surreal
+            // record-id form, so there is no decoration left to strip).
+            const skillName = skillNames.get(skillId) ?? skillId;
 
-            const invocations = Number(r.invocations ?? 0);
-            const sessionCount = Number(r.session_count ?? 0);
+            const invocations = r.invocations;
+            const sessionCount = r.session_count;
 
             const roleEntry = roleMap.get(skillId);
             const roles = roleEntry?.roles ?? [];
@@ -331,36 +279,32 @@ export const fetchSkillsWeighted = (
         // ---------------------------------------------------------------------------
         // Recovery latency pass (lens E) - separate batched queries, no per-row derefs
         //
-        // The `recovered_by` edge is TYPE RELATION FROM turn TO skill. We resolve
-        // turn→session via a one-hop deref (`in.session`) in a single batched query
-        // over the whole edge table. This is intentionally SEPARATE from the main
-        // weighted aggregate (which is deref-free) to avoid the stacked-deref hang
-        // that hit the invoked-edge query on 87k+ rows.
+        // The `recovered_by` edge points turn -> skill. Resolving turn -> session is
+        // a single JOIN over the whole edge table, kept SEPARATE from the main
+        // weighted aggregate (deref-free) to avoid the stacked-join hang that hit
+        // the invoked-edge query on 87k+ rows.
         // ---------------------------------------------------------------------------
 
-        /**
-         * SQL to fetch all recovered_by edges mapped to their skill and session.
-         * `in.session` dereferences the turn record's `session` field in one hop.
-         * If the live DB ever fails this deref, the fallback is a 2-query approach:
-         *   1. SELECT type::string(out) AS skill, type::string(in) AS turn FROM recovered_by
-         *   2. SELECT type::string(id) AS turn, type::string(session) AS session FROM turn WHERE id IN [...]
-         */
-        const RECOVERY_EDGES_SQL = `SELECT type::string(out) AS skill, type::string(in.session) AS session FROM recovered_by;`;
-
-        const recoveryEdgesRes = yield* db.query<[Array<Record<string, unknown>>]>(RECOVERY_EDGES_SQL);
-        const recoveryEdges = (recoveryEdgesRes?.[0] ?? []) as Array<Record<string, unknown>>;
+        const read = yield* CacheRead;
+        const recoveryEdges = yield* cacheRows(
+            RecoveryEdgeRow,
+            {
+                sql: `SELECT rb.out_id AS skill, t.session AS session
+                      FROM recovered_by rb JOIN turn t ON t.id = rb.in_id`,
+                params: [],
+            },
+            "skills-weighted.recovery_edges",
+        );
 
         // Build Map<skillId, sessionId[]>
         const skillToSessions = new Map<string, string[]>();
         for (const r of recoveryEdges) {
-            const skillId = String(r.skill ?? "");
-            const session = String(r.session ?? "");
-            if (!skillId || !session) continue;
-            const list = skillToSessions.get(skillId);
+            if (!r.skill || !r.session) continue;
+            const list = skillToSessions.get(r.skill);
             if (list) {
-                list.push(session);
+                list.push(r.session);
             } else {
-                skillToSessions.set(skillId, [session]);
+                skillToSessions.set(r.skill, [r.session]);
             }
         }
 
