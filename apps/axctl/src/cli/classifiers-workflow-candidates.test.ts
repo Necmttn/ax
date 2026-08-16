@@ -88,6 +88,7 @@ const { dylibPath: duckdbDylibPath, dtest: duckdbTest, tempDir: duckdbTempDir } 
     { requireFts: true },
 );
 
+
 const groups: WorkflowCandidateGroupRow[] = [
     {
         graph_id: "group:verify",

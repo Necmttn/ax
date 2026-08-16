@@ -397,9 +397,37 @@ export const duckdbTestSetup = async (
     const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
     const dtest = test.skipIf(dylibPath === null);
 
+    // Publish the resolved path into the environment.
+    //
+    // A suite gets the dylib as a PATH, and hands it to the read side
+    // explicitly (`CacheReadLayer({ assetPath })`). The WRITE side has no such
+    // argument: `withCacheWrite` / `withConfigWrite` open their own connection,
+    // and `resolveDylib` can only find the library through
+    // `AX_DUCKDB_DYLIB` or a default on-disk location. So any suite that reads
+    // through the layer and writes through a service resolved the library on
+    // one half and not the other.
+    //
+    // That never reproduced locally: a developer box has the library at the
+    // default cache path, so the write half resolved it anyway. On CI the
+    // library exists ONLY as a build artifact handed back as a path, and the
+    // write half failed with `no libduckdb available`. Three suites hit it
+    // separately (classifier package + label-mining services, workflow
+    // candidates) before it was fixed here instead of case by case.
+    //
+    // Setting it to the value `resolveTestDylib` just returned is idempotent -
+    // that function reads this same variable FIRST, so the next resolution is
+    // unchanged. It is deliberately NOT set when `dylibPath` is null: the FTS
+    // gate nulls the path to mean "unavailable", and exporting a library the
+    // gate rejected would defeat it. Suites that need the variable ABSENT
+    // (dylib fallback-order tests) delete it around their own case.
+    const previousDylibEnv = process.env.AX_DUCKDB_DYLIB;
+    if (dylibPath !== null) process.env.AX_DUCKDB_DYLIB = dylibPath;
+
     const createdTempDirs: string[] = [];
     afterAll(() => {
         for (const dir of createdTempDirs) rmSync(dir, { recursive: true, force: true });
+        if (previousDylibEnv === undefined) delete process.env.AX_DUCKDB_DYLIB;
+        else process.env.AX_DUCKDB_DYLIB = previousDylibEnv;
     });
     const tempDir = (prefix: string): string => {
         const dir = mkdtempSync(join(tmpdir(), prefix));
