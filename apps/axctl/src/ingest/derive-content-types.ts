@@ -13,22 +13,15 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { stableDigest } from "@ax/lib/ids";
-import {
-    executeStatementsWith,
-    recordKeyPart,
-    recordRef,
-    surrealDate,
-    surrealString,
-} from "@ax/lib/shared/surreal";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import {
     BaseStageStats,
     IngestContext,
     StageMeta,
     sinceDaysFromCtx,
-    sinceAndClause,
 } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -102,40 +95,27 @@ export const buildContentEdge = (row: ToolCallRow): ContentEdgeSpec => {
 };
 
 /** Upsert all 12 fixed taxonomy nodes. Idempotent; safe on every ingest run. */
-export const renderContentTypeNodes = (): string[] =>
-    ALL_CONTENT_CATEGORIES.map(
-        (c) =>
-            `UPSERT content_type:${c} SET category = ${surrealString(c)}, label = ${surrealString(c)};`,
-    );
+export const contentTypeRows = () =>
+    ALL_CONTENT_CATEGORIES.map((category) => cacheRow({ id: category, category, label: category }));
 
 /**
- * Render one `has_content` RELATE statement. The edge is keyed by a stable
+ * Build one `has_content` edge row. The edge uses a stable
  * digest of the full tool_call id, ensuring collision-free keys even for long
  * cursor/opencode ids that share a 96+ char common prefix.
  *
- * Returns `null` when the tool_call id cannot be decomposed into a valid
- * SurrealDB key (empty string, unrecognised shape).
+ * The function returns `null` for an empty or invalid tool call ID.
  */
-export const renderContentEdge = (e: ContentEdgeSpec): string | null => {
-    const tcKey = recordKeyPart(e.toolCallId, "tool_call");
-    if (!tcKey) return null;
-    // h-prefix distinguishes these keys from the old safeKeyPart-truncated scheme
-    // used in the first watcher run; existing edges are found via ALREADY_SQL
-    // (reads the `in` field, not the edge key), so no migration is needed.
-    const edgeKey = `h${stableDigest(e.toolCallId)}`;
-    const sessionKey = e.session ? recordKeyPart(e.session, "session") : null;
-    const sessionClause = sessionKey
-        ? `, session = ${recordRef("session", sessionKey)}`
-        : "";
-    const fineClause = e.fineLabel
-        ? `, fine_label = ${surrealString(e.fineLabel)}`
-        : "";
-    return (
-        `RELATE ${recordRef("tool_call", tcKey)}->${recordRef("has_content", edgeKey)}->content_type:${e.category} ` +
-        `SET method = ${surrealString(e.method)}, confidence = ${e.confidence}, bytes = ${e.bytes}, ` +
-        `ts = ${surrealDate(e.ts)}${sessionClause}${fineClause};`
-    );
-};
+export const contentEdgeRow = (edge: ContentEdgeSpec) => cacheRow({
+    id: stableId("has_content", [edge.toolCallId]),
+    in_id: edge.toolCallId,
+    out_id: edge.category,
+    method: edge.method,
+    confidence: edge.confidence,
+    fine_label: edge.fineLabel,
+    bytes: edge.bytes,
+    session: edge.session,
+    ts: tsParam(edge.ts),
+});
 
 // ---------------------------------------------------------------------------
 // Stage
@@ -144,15 +124,15 @@ export const renderContentEdge = (e: ContentEdgeSpec): string | null => {
 // Incremental: classify only tool_calls with no has_content edge yet.
 // Two flat queries (deref-free): already-classified id set, then the rows.
 // Edge ids are deterministic so re-running is a safe no-op upsert.
-const ALREADY_SQL = `SELECT type::string(in) AS tid FROM has_content;`;
+const ALREADY_SQL = `SELECT in_id AS tid FROM has_content`;
 
 /** ROWS_SQL scoped by an optional since window (watcher runs pass 1d; full
  *  re-derives pass undefined to scan everything). */
 export const rowsSql = (sinceDays: number | undefined): string => `
-SELECT type::string(id) AS id, type::string(session) AS session, name,
+SELECT id, session, name,
        input_json AS inputJson, output_excerpt AS outputExcerpt,
-       string::len(output_json) AS bytes, type::string(ts) AS ts
-FROM tool_call WHERE output_json != NONE ${sinceAndClause(sinceDays)};
+       length(output_json) AS bytes, ts
+FROM tool_call WHERE output_json IS NOT NULL ${sinceDays === undefined ? "" : "AND ts >= current_timestamp - (? * INTERVAL '1 day')"};
 `;
 
 export interface DeriveContentTypeStats {
@@ -160,33 +140,47 @@ export interface DeriveContentTypeStats {
     readonly skipped: number;
 }
 
-export const deriveContentTypes = (sinceDays?: number): Effect.Effect<
+const ToolCallDbRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.NullOr(Schema.String),
+    name: Schema.NullOr(Schema.String),
+    inputJson: Schema.NullOr(Schema.String),
+    outputExcerpt: Schema.NullOr(Schema.String),
+    bytes: Schema.BigInt,
+    ts: TimestampColumn,
+});
+
+export const deriveContentTypes = (write: CacheWriteService, sinceDays?: number): Effect.Effect<
     DeriveContentTypeStats,
-    DbError,
-    SurrealClient
+    CacheWriteError
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const already = yield* write.rows(Schema.Struct({ tid: Schema.String }), ALREADY_SQL);
+        const dbRows = yield* write.rows(ToolCallDbRow, rowsSql(sinceDays), sinceDays === undefined ? [] : [sinceDays]);
+        const rows: ToolCallRow[] = dbRows.map((row) => ({
+            id: row.id,
+            session: row.session,
+            name: row.name,
+            inputJson: row.inputJson,
+            outputExcerpt: row.outputExcerpt,
+            bytes: Number(row.bytes),
+            ts: row.ts.toISOString(),
+        }));
 
-        const [already] = yield* db.query<[Array<{ tid: string }>]>(ALREADY_SQL);
-        const [rows] = yield* db.query<[Array<ToolCallRow>]>(rowsSql(sinceDays));
-
-        const done = new Set((already ?? []).map((r) => r.tid));
-        const stmts: string[] = renderContentTypeNodes();
+        const done = new Set(already.map((r) => r.tid));
+        const edges = [];
         let written = 0;
         let skipped = 0;
-        for (const row of rows ?? []) {
+        for (const row of rows) {
             if (done.has(row.id)) {
                 skipped += 1;
                 continue;
             }
-            const sql = renderContentEdge(buildContentEdge(row));
-            if (sql) {
-                stmts.push(sql);
-                written += 1;
-            }
+            edges.push(contentEdgeRow(buildContentEdge(row)));
+            written += 1;
         }
-        yield* executeStatementsWith(db, stmts, { chunkSize: 250, label: "contentEdges" });
+        yield* write.putMany("content_type", contentTypeRows());
+        yield* write.putMany("has_content", edges);
         return { written, skipped } satisfies DeriveContentTypeStats;
     });
 
@@ -203,16 +197,16 @@ export class ContentTypeStats extends BaseStageStats.extend<ContentTypeStats>(
  * Depends on all four harness stages that produce tool_call rows.
  * Tags: derive.
  */
-export const contentTypesStage: StageDef<ContentTypeStats, SurrealClient> = {
+export const contentTypesStage: StageDef<ContentTypeStats, never, CacheWriteError> = {
     meta: StageMeta.make({
         key: "content-types",
         deps: ["claude", "codex", "pi", "omp", "cursor"],
         tags: ["derive"],
     }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveContentTypes(sinceDaysFromCtx(ctx));
+            const result = yield* deriveContentTypes(write, sinceDaysFromCtx(ctx));
             return ContentTypeStats.make({
                 durationMs: Date.now() - t0,
                 summary: `classified ${result.written} tool outputs (${result.skipped} already done)`,

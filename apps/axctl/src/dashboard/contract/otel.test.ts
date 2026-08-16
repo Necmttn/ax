@@ -1,13 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { handleOtlp } from "./otel.ts";
 import codexLogs from "../../otel/__fixtures__/codex-logs.json" with { type: "json" };
-
-const captured: string[] = [];
-const stubDb = Layer.succeed(SurrealClient, {
-    query: <T>(sql: string) => { captured.push(sql); return Effect.succeed([[]] as unknown as T); },
-} as never);
 
 const ccMetrics = JSON.stringify({
     resourceMetrics: [{
@@ -25,40 +23,33 @@ const toBuf = (s: string): ArrayBuffer => {
     return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 };
 
+const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const spoolDir = mkdtempSync(join(tmpdir(), "ax-otlp-contract-"));
+const now = new Date("2026-08-15T00:00:00.000Z");
+afterAll(() => rmSync(spoolDir, { recursive: true, force: true }));
+const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(platform as never)) as Effect.Effect<A, E, never>);
+
 describe("handleOtlp", () => {
-    test("metrics body → writer UPSERT, returns ack", async () => {
-        captured.length = 0;
-        const ack = await Effect.runPromise(
-            handleOtlp("metrics", toBuf(ccMetrics), undefined).pipe(Effect.provide(stubDb)),
-        );
-        expect(captured.join("\n")).toContain("UPSERT otel_metric_point:");
+    test("metrics body decodes and returns an ack without a database write", async () => {
+        const ack = await run(handleOtlp("metrics", toBuf(ccMetrics), undefined, { spoolDir, now: () => now }));
         expect(ack).toEqual({ partialSuccess: {} });
+        const line = readFileSync(join(spoolDir, "2026-08-15.jsonl"), "utf8");
+        expect(JSON.parse(line)).toMatchObject({ path: "/v1/metrics", body: ccMetrics });
     });
 
     test("malformed JSON → ack, no write (fail-open)", async () => {
-        captured.length = 0;
-        const ack = await Effect.runPromise(
-            handleOtlp("metrics", toBuf("not json"), undefined).pipe(Effect.provide(stubDb)),
-        );
-        expect(captured).toHaveLength(0);
+        const ack = await run(handleOtlp("metrics", toBuf("not json"), undefined, { spoolDir, now: () => now }));
         expect(ack).toEqual({ partialSuccess: {} });
     });
 
     test("logs signal → ack, no write", async () => {
-        captured.length = 0;
-        const ack = await Effect.runPromise(
-            handleOtlp("logs", toBuf("{}"), undefined).pipe(Effect.provide(stubDb)),
-        );
-        expect(captured).toHaveLength(0);
+        const ack = await run(handleOtlp("logs", toBuf("{}"), undefined, { spoolDir, now: () => now }));
         expect(ack).toEqual({ partialSuccess: {} });
     });
 });
 
-test("logs body → writer UPSERT into otel_log_event, returns ack", async () => {
-    captured.length = 0;
-    const ack = await Effect.runPromise(
-        handleOtlp("logs", toBuf(JSON.stringify(codexLogs)), undefined).pipe(Effect.provide(stubDb)),
-    );
-    expect(captured.join("\n")).toContain("UPSERT otel_log_event:");
+test("logs body decodes and returns an ack without a database write", async () => {
+    const ack = await run(handleOtlp("logs", toBuf(JSON.stringify(codexLogs)), undefined, { spoolDir, now: () => now }));
     expect(ack).toEqual({ partialSuccess: {} });
 });

@@ -23,14 +23,14 @@ import { Effect } from "effect";
 import type { SkillName } from "@ax/lib/brands";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { recordLiteral } from "@ax/lib/ids";
 import { skillRecordLookupKeys } from "@ax/lib/skill-id";
 import { dateField } from "@ax/lib/shared/row-fields";
-import { surrealDate } from "@ax/lib/shared/surql";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId, isoMs, metricPct, numOrNull, numOrZero, strOrNull } from "./util.ts";
-import { sessionProjectClause } from "./session-filter.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -350,12 +350,13 @@ const BOUNDED_JOIN_MAX_SESSIONS = 1000;
  */
 export const fetchAggregateRows = (
     input: { readonly since: Date | null; readonly project: string | null },
-): Effect.Effect<AggregateSessionRow[], DbError, SurrealClient> =>
+): Effect.Effect<AggregateSessionRow[], DbError | CacheReadError, SurrealClient | CacheRead> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const clauses: string[] = [];
         if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
-        if (input.project) clauses.push(sessionProjectClause(input.project, "session."));
+        if (input.project) clauses.push(`(session.project = ${surrealString(input.project)} OR session.cwd = ${surrealString(input.project)})`);
         const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
         const metrics = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT
@@ -373,8 +374,8 @@ ${where};`))?.[0] ?? [];
         )];
         const bound = sessionIds.length <= BOUNDED_JOIN_MAX_SESSIONS ? sessionIds : null;
         const [health, usage] = yield* Effect.all([
-            fetchSessionHealthMap(bound),
-            fetchSessionCostMap(bound),
+            fetchSessionHealthMap(read, bound),
+            fetchSessionCostMap(read, bound),
         ], { concurrency: 2 });
 
         return metrics

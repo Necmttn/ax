@@ -38,6 +38,7 @@ import {
 import { runIngest, type RunIngestOptions } from "../ingest/run.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry } from "../ingest/stage/registry.ts";
+import { withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ingestStreamEventFromTrace } from "../ingest/stream-events.ts";
 import type { IngestStreamBus } from "./ingest-stream.ts";
 
@@ -179,6 +180,14 @@ export const startIngestWorkflow = (
             );
         });
         const program = lockedIngest.pipe(
+            // F1/F2 on the DAEMON path. `serve-runtime`'s ManagedRuntime merges
+            // `CacheReadLive` because the HTTP handlers read the published
+            // snapshot through it - but this fiber is an INGEST run, and a
+            // `CacheRead` resolved here would answer from the snapshot the
+            // PREVIOUS run published. Applied inside the runtime's provide, so
+            // it shadows that service for this program only; the CLI entry point
+            // installs the same guard.
+            withoutCacheRead,
             // Single combined provide; `provideMerge` keeps the original
             // override order (the bus-backed TraceSink wins over any TraceSink
             // a caller's baseLayer happens to carry - see IngestBaseLayer docs).

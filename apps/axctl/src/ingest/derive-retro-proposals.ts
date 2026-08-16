@@ -20,20 +20,21 @@
  * so they bypass `skill_candidate` and write directly to `proposal` +
  * `skill_proposal`. The cluster -> proposal map is captured in
  * `proposal.baseline` JSON (tool + retroKeys + sessionKeys) since
- * `cites_evidence` doesn't yet support `retro` in its TO union.
+ * this stage does not create `cites_evidence` rows for retro records.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import {
-    recordRef,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { Effect, Schema } from "effect";
+import { jsonParam } from "@ax/lib/duckdb/row";
+import type {
+    CacheReadError,
+    CacheReadService,
+    CacheWriteError,
+    CacheWriteService,
+} from "@ax/lib/duckdb/seam";
+import { syncReviewedEdges } from "./retro.ts";
+import { Judgment, TextColumn, TimestampColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
+import { judgmentRow } from "../improve/judgment-proposals.ts";
+import { listStoredRetros } from "../queries/judgment-retros.ts";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { dedupeSig, normalizeTitle } from "./derive-proposals.ts";
 
@@ -44,6 +45,28 @@ export interface DeriveRetroProposalsStats {
     readonly clusters: number;
     readonly skipped: number;
 }
+
+interface RetroProposalWrite {
+    readonly table: string;
+    readonly row: Record<string, SidecarParam>;
+}
+
+const retroProposalWrite = (
+    row: { readonly proposalKey: string; readonly title: string; readonly hypothesis: string;
+        readonly sig: string; readonly frequency: number; readonly confidence: string },
+    form: string,
+    baseline: unknown,
+    exists: boolean,
+): RetroProposalWrite => ({ table: "proposal", row: judgmentRow(exists ? {
+    id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis,
+    dedupe_sig: row.sig, frequency: row.frequency, confidence: row.confidence,
+    updated_at: new Date(),
+} : {
+    id: row.proposalKey, form, title: row.title, hypothesis: row.hypothesis,
+    dedupe_sig: row.sig, frequency: row.frequency, confidence: row.confidence,
+    status: "open", origin: "mined", hypothesis_template: null, evidence_query: null,
+    reject_reason: null, baseline: jsonParam(baseline), created_at: new Date(), updated_at: new Date(),
+}) });
 
 /** A single failure mention parsed out of `retro.failed`. */
 export interface ParsedToolFailure {
@@ -375,71 +398,34 @@ export const deriveRetroProposalRows = (
 };
 
 /**
- * Build the SurrealQL statements for a batch of derived rows.
+ * Build cache writes for a batch of derived rows.
  *
- * Mirrors {@link buildSkillProposalStatements} in derive-proposals.ts:
- * a fresh dedupe_sig becomes a `CREATE proposal` with frozen baseline +
- * status='open'; an existing sig becomes a minimal `UPDATE` of mutable
- * fields only. The `skill_proposal` payload is UPSERT-ed in both paths.
+ * Mirrors {@link buildSkillProposalWrites} in derive-proposals.ts:
+ * a fresh dedupe_sig gets a frozen baseline and open status. An existing sig
+ * gets only mutable field updates. Both paths write the skill proposal payload.
  *
  * Unlike the skill_candidate-sourced version, this writer does NOT emit
- * `cites_evidence` edges - the `retro` table isn't in the
- * `cites_evidence TO` union yet. Provenance is captured in the
+ * `cites_evidence` rows for retro records. Provenance is captured in the
  * `baseline` JSON instead (`tool`, `retroKeys`, `sessionKeys`).
  */
-export const buildRetroSkillProposalStatements = (
+export const buildRetroSkillProposalWrites = (
     rows: readonly RetroSkillProposalRow[],
     existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
+): RetroProposalWrite[] => {
+    const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
-        const proposalRef = recordRef("proposal", row.proposalKey);
-        const payloadRef = recordRef("skill_proposal", row.proposalKey);
-        const baseline = JSON.stringify({
+        const baseline = {
             tool: row.tool,
             frequency: row.frequency,
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
-        });
-        const isNew = !existingSigs.has(row.sig);
-
-        if (isNew) {
-            stmts.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("skill")],
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["dedupe_sig", surrealString(row.sig)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        } else {
-            stmts.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        }
-
-        stmts.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_pattern", surrealString(row.triggerPattern)],
-                ["suspected_gap", surrealString(row.suspectedGap)],
-                ["proposed_behavior", surrealString(row.proposedBehavior)],
-                ["expected_impact", surrealOptionString(row.expectedImpact)],
-            ])};`,
-        );
+        };
+        writes.push(retroProposalWrite(row, "skill", baseline, existingSigs.has(row.sig)));
+        writes.push({ table: "skill_proposal", row: judgmentRow({ id: row.proposalKey, proposal: row.proposalKey,
+            trigger_pattern: row.triggerPattern, suspected_gap: row.suspectedGap,
+            proposed_behavior: row.proposedBehavior, expected_impact: row.expectedImpact }) });
     }
-    return stmts;
+    return writes;
 };
 
 /**
@@ -497,60 +483,28 @@ export const deriveRetroCorrectionProposalRows = (
 };
 
 /**
- * Mirror of {@link buildRetroSkillProposalStatements} but emits `form="guidance"`
+ * Mirror of {@link buildRetroSkillProposalWrites} but emits `form="guidance"`
  * + `guidance_proposal` payload. Baseline JSON encodes
  * `kind:"corrections"` so the verdict layer can recognize the source.
  */
-export const buildRetroCorrectionGuidanceStatements = (
+export const buildRetroCorrectionGuidanceWrites = (
     rows: readonly RetroGuidanceProposalRow[],
     existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
+): RetroProposalWrite[] => {
+    const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
-        const proposalRef = recordRef("proposal", row.proposalKey);
-        const payloadRef = recordRef("guidance_proposal", row.proposalKey);
-        const baseline = JSON.stringify({
+        const baseline = {
             kind: "corrections",
             totalCorrections: row.frequency,
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
-        });
-        const isNew = !existingSigs.has(row.sig);
-        if (isNew) {
-            stmts.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("guidance")],
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["dedupe_sig", surrealString(row.sig)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        } else {
-            stmts.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
-            );
-        }
-        stmts.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString(row.fileTarget)],
-                ["section", surrealOptionString(row.section)],
-                ["suggested_text", surrealString(row.suggestedText)],
-            ])};`,
-        );
+        };
+        writes.push(retroProposalWrite(row, "guidance", baseline, existingSigs.has(row.sig)));
+        writes.push({ table: "guidance_proposal", row: judgmentRow({ id: row.proposalKey,
+            proposal: row.proposalKey, file_target: row.fileTarget, section: row.section,
+            suggested_text: row.suggestedText }) });
     }
-    return stmts;
+    return writes;
 };
 
 /**
@@ -610,57 +564,25 @@ export const deriveRetroFrictionSkillRows = (
     return { rows, skipped };
 };
 
-export const buildRetroFrictionSkillStatements = (
+export const buildRetroFrictionSkillWrites = (
     rows: readonly RetroFrictionSkillProposalRow[],
     existingSigs: ReadonlySet<string> = new Set(),
-): string[] => {
-    const stmts: string[] = [];
+): RetroProposalWrite[] => {
+    const writes: RetroProposalWrite[] = [];
     for (const row of rows) {
-        const proposalRef = recordRef("proposal", row.proposalKey);
-        const payloadRef = recordRef("skill_proposal", row.proposalKey);
-        const baseline = JSON.stringify({
+        const baseline = {
             kind: row.kind,
             frequency: row.frequency,
             retroKeys: row.retroKeys,
             sessionKeys: row.sessionKeys,
-        });
-        const isNew = !existingSigs.has(row.sig);
-        if (isNew) {
-            stmts.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("skill")],
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["dedupe_sig", surrealString(row.sig)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        } else {
-            stmts.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(row.title)],
-                    ["hypothesis", surrealString(row.hypothesis)],
-                    ["frequency", String(row.frequency)],
-                    ["confidence", surrealString(row.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
-            );
-        }
-        stmts.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_pattern", surrealString(row.triggerPattern)],
-                ["suspected_gap", surrealString(row.suspectedGap)],
-                ["proposed_behavior", surrealString(row.proposedBehavior)],
-                ["expected_impact", surrealOptionString(row.expectedImpact)],
-            ])};`,
-        );
+        };
+        writes.push(retroProposalWrite(row, "skill", baseline, existingSigs.has(row.sig)));
+        writes.push({ table: "skill_proposal", row: judgmentRow({ id: row.proposalKey,
+            proposal: row.proposalKey, trigger_pattern: row.triggerPattern,
+            suspected_gap: row.suspectedGap, proposed_behavior: row.proposedBehavior,
+            expected_impact: row.expectedImpact }) });
     }
-    return stmts;
+    return writes;
 };
 
 export interface DeriveRetroProposalsOpts {
@@ -671,45 +593,60 @@ export interface DeriveRetroProposalsOpts {
     readonly minTotalCorrections?: number;
 }
 
-interface RetroFetchRow {
-    readonly id: string | { tb: string; id: string };
-    readonly session: string | { tb: string; id: string } | null;
-    readonly failed: string | null;
-}
+const ExistingProposalRow = Schema.Struct({
+    id: TextColumn,
+    dedupe_sig: TextColumn,
+    status: TextColumn,
+    baseline: Schema.NullOr(TextColumn),
+    created_at: Schema.NullOr(TimestampColumn),
+});
 
-interface SkillNameRow {
-    readonly name: string;
-}
-
-interface ProposalSigRow {
-    readonly dedupe_sig: string;
-}
-
+/**
+ * Two stores, split along "is this a judgment or is it re-derivable".
+ *
+ * The retros this clusters and the proposals it writes are durable judgment
+ * (SQLite sidecar). The installed-skill catalog it de-duplicates against is
+ * rebuildable graph data (DuckDB cache).
+ *
+ * DUAL, so the cache side is a PARAMETER, not a service tag. Its only cache use
+ * is one read of the skill catalog, and it has two callers: the ingest stage,
+ * which hands it the lock-held WRITER so the dedupe sees a skill the skills
+ * stage installed earlier in THIS run (F1); and `ax retro emit`, which runs at
+ * request time, outside the ingest lock, and hands it a plain `CacheRead` over
+ * the published snapshot. Taking a reader means the emit path never has to take
+ * the ingest lock for a read - it used to, and a busy watcher ingest then killed
+ * the command AFTER the retro had already been written.
+ *
+ * `Judgment` is a service tag rather than a parameter, unlike the cache reader:
+ * the sidecar has no snapshot and no publish step, so a row written inside a
+ * stage is visible to the next statement in the same stage.
+ */
 export const deriveRetroProposals = (
+    cache: CacheReadService,
     opts: DeriveRetroProposalsOpts = {},
-): Effect.Effect<DeriveRetroProposalsStats, DbError, SurrealClient> =>
+): Effect.Effect<DeriveRetroProposalsStats, CacheReadError | JudgmentError, Judgment> =>
     Effect.gen(function* () {
+        const judgment = yield* Judgment;
         const sinceDays = opts.sinceDays ?? 30;
         const minSessions = opts.minSessions ?? 2;
         const minRetros = opts.minRetros ?? 2;
         const minTotalCount = opts.minTotalCount ?? 3;
         const minTotalCorrections = opts.minTotalCorrections ?? 3;
-        const db = yield* SurrealClient;
-
+        const since = new Date(Date.now() - Math.trunc(sinceDays) * 86_400_000);
         const [retros, skills, existingProposals] = yield* Effect.all([
-            db.query<[RetroFetchRow[]]>(
-                `SELECT id, session, failed FROM retro WHERE failed != NONE AND created_at > time::now() - ${sinceDays}d;`,
-            ).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[SkillNameRow[]]>(`SELECT name FROM skill;`).pipe(
-                Effect.map((rows) => rows?.[0] ?? []),
-            ),
-            db.query<[ProposalSigRow[]]>(`SELECT dedupe_sig FROM proposal;`).pipe(
-                Effect.map((rows) => rows?.[0] ?? []),
+            listStoredRetros({ since, limit: 100_000 }),
+            cache.rows(Schema.Struct({ name: Schema.String }), "SELECT name FROM skill"),
+            judgment.rows(
+                ExistingProposalRow,
+                "SELECT id, dedupe_sig, status, baseline, created_at FROM proposal",
             ),
         ], { concurrency: 3 });
 
         const failureRows: RetroFailureRow[] = [];
         for (const r of retros) {
+            // The cache query filtered `failed IS NOT NULL` in SQL; the shared
+            // sidecar reader returns every retro, so the filter moves here.
+            if (r.failed === null) continue;
             const retroKey = recordKeyPart(r.id, "retro");
             const sessionKey = r.session ? recordKeyPart(r.session, "session") : null;
             if (!retroKey || !sessionKey) continue;
@@ -750,12 +687,27 @@ export const deriveRetroProposals = (
         const { rows: frictionRows, skipped: frictionSkipped } =
             deriveRetroFrictionSkillRows(frictionClusters, existingSkillNames);
 
-        const stmts = [
-            ...buildRetroSkillProposalStatements(toolRows, existingSigs),
-            ...buildRetroCorrectionGuidanceStatements(correctionRows, existingSigs),
-            ...buildRetroFrictionSkillStatements(frictionRows, existingSigs),
+        const writes = [
+            ...buildRetroSkillProposalWrites(toolRows, existingSigs),
+            ...buildRetroCorrectionGuidanceWrites(correctionRows, existingSigs),
+            ...buildRetroFrictionSkillWrites(frictionRows, existingSigs),
         ];
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        const existingBySig = new Map(existingProposals.map((row) => [row.dedupe_sig, row]));
+        for (const item of writes) {
+            if (item.table === "proposal") {
+                const existing = existingBySig.get(String(item.row.dedupe_sig));
+                if (existing) {
+                    // Re-derive must not resurrect a rejected proposal as `open`
+                    // or reset its captured baseline, so the durable columns are
+                    // carried over from the row already on disk.
+                    yield* judgment.put(item.table, judgmentRow({ ...item.row, id: existing.id,
+                        status: existing.status, baseline: existing.baseline,
+                        created_at: existing.created_at ?? new Date() }));
+                    continue;
+                }
+            }
+            yield* judgment.put(item.table, item.row);
+        }
         return {
             toolFailureProposals: toolRows.length,
             correctionProposals: correctionRows.length,
@@ -765,20 +717,10 @@ export const deriveRetroProposals = (
         };
     });
 
-if (import.meta.main) {
-    await Effect.runPromise(
-        deriveRetroProposals().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<DeriveRetroProposalsStats>,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { Schema } from "effect";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -794,16 +736,26 @@ export class RetroProposalsStats extends BaseStageStats.extend<RetroProposalsSta
     clusters: Schema.Number,
 }) {}
 
-export const retroProposalsStage: StageDef<RetroProposalsStats, SurrealClient> = {
+export const retroProposalsStage: StageDef<
+    RetroProposalsStats,
+    Judgment,
+    CacheReadError | CacheWriteError | JudgmentError
+> = {
     meta: StageMeta.make({ key: "retro-proposals", deps: ["proposals"], tags: ["derive", "retro"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveRetroProposals({ sinceDays });
+            const result = yield* deriveRetroProposals(write, { sinceDays });
+            // The retro rows live in the sidecar now, so the cache-resident
+            // `session -> reviewed -> retro` edge has no request-time writer.
+            // It is re-derived here, on the one stage that already holds both
+            // the sidecar retros and the write lock.
+            const reviewedEdges = yield* syncReviewedEdges(write);
             return RetroProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.toolFailureProposals} tool-failure proposals from ${result.clusters} clusters`,
+                summary: `derived ${result.toolFailureProposals} tool-failure proposals from ${result.clusters} clusters`
+                    + `, ${reviewedEdges} reviewed edge(s)`,
                 toolFailureProposals: result.toolFailureProposals,
                 clusters: result.clusters,
             });

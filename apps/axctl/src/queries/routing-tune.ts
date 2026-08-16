@@ -24,6 +24,7 @@
  * classes (with the same corrupt-file guard as `ax routing compile`).
  */
 import { Effect, FileSystem, Path } from "effect";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import {
     fetchDispatches,
     matchRoutingWith,
@@ -163,8 +164,8 @@ export const buildProposals = (
 
 /** Fetch window -> filter inherit+expensive+unmatched -> cluster -> proposals. */
 export const fetchTuneProposals = Effect.fn("queries.fetchTuneProposals")(
-    function* (opts: { readonly sinceDays: number; readonly table: RoutingTable }) {
-        const result = yield* fetchDispatches({
+    function* (read: CacheReadService, opts: { readonly sinceDays: number; readonly table: RoutingTable }) {
+        const result = yield* fetchDispatches(read, {
             sinceDays: opts.sinceDays,
             limit: Number.MAX_SAFE_INTEGER,
         });

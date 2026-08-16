@@ -2,20 +2,11 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import {
-    recordRef,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-    surrealValue,
-} from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -850,9 +841,6 @@ export const guidanceConfigRevisionKey = (
     record: Pick<GuidanceConfigArtifact, "safePath" | "contentHash"> & { readonly contentHash: string },
 ): string => `${safeKeyPart(record.safePath).slice(0, 72)}__${record.contentHash}`;
 
-const intLiteral = (value: number): string =>
-    Number.isFinite(value) ? Math.trunc(value).toString(10) : "0";
-
 const isClaudeMdArtifact = (record: GuidanceConfigArtifact): boolean =>
     (record.kind === "memory" || record.kind === "guidance_doc") &&
     record.safePath.endsWith("/CLAUDE.md") &&
@@ -865,8 +853,8 @@ export const buildClaudeMdGuidanceRevisionStatements = (
     records: readonly GuidanceConfigArtifact[],
     previousByPathHash: ReadonlyMap<string, PreviousGuidanceConfigArtifact>,
     existingRevisionKeys: ReadonlySet<string>,
-): string[] => {
-    const statements: string[] = [];
+): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => {
+    const rows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
     for (const record of records) {
         if (!isClaudeMdArtifact(record) || record.contentHash === null) continue;
         const previous = previousByPathHash.get(record.pathHash);
@@ -875,41 +863,28 @@ export const buildClaudeMdGuidanceRevisionStatements = (
         const isUnchanged = prevHash === record.contentHash;
         if (isUnchanged && existingRevisionKeys.has(revisionSetKey(record.safePath, record.contentHash))) continue;
         const change = prevHash !== null && !isUnchanged ? "changed" : "added";
-        statements.push(
-            `UPSERT ${recordRef("guidance_revision", guidanceConfigRevisionKey({ safePath: record.safePath, contentHash: record.contentHash }))} MERGE ${surrealObject([
-                ["source", "NONE"],
-                ["source_path", surrealString(record.safePath)],
-                ["scope", surrealString(record.scope)],
-                ["content_hash", surrealString(record.contentHash)],
-                ["prev_hash", surrealOptionString(prevHash)],
-                ["bytes", intLiteral(record.bytes)],
-                ["prev_bytes", prevBytes === null ? "NONE" : intLiteral(prevBytes)],
-                ["change", surrealString(change)],
-                ["evidence_strength", surrealString("observed")],
-                ["commit_evidence", "NONE"],
-                ["file_evidence", "NONE"],
-                ["observed_at", "time::now()"],
-            ])};`,
-        );
+        rows.push(cacheRow({ id: guidanceConfigRevisionKey({ safePath: record.safePath, contentHash: record.contentHash }),
+            source: null, source_path: record.safePath, scope: record.scope, content_hash: record.contentHash,
+            prev_hash: prevHash, bytes: Math.trunc(record.bytes), prev_bytes: prevBytes,
+            change, evidence_strength: "observed", commit_evidence: null, file_evidence: null,
+            observed_at: new Date() }));
     }
-    return statements;
+    return rows;
 };
 
 const claudeMdRecords = (records: readonly GuidanceConfigArtifact[]): GuidanceConfigArtifact[] =>
     records.filter(isClaudeMdArtifact);
 
 const fetchPreviousArtifacts = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     records: readonly GuidanceConfigArtifact[],
-): Effect.Effect<Map<string, PreviousGuidanceConfigArtifact>, DbError> =>
+): Effect.Effect<Map<string, PreviousGuidanceConfigArtifact>, CacheWriteError> =>
     Effect.gen(function* () {
         const hashes = uniqueSorted(claudeMdRecords(records).map((record) => record.pathHash));
         if (hashes.length === 0) return new Map();
-        const res = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT path_hash, content_hash, bytes FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = "claude" AND path_hash IN ${surrealValue(hashes)};`,
-        );
+        const res = yield* write.raw(`SELECT path_hash, content_hash, bytes FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND path_hash IN (${hashes.map(() => "?").join(",")})`, hashes);
         const out = new Map<string, PreviousGuidanceConfigArtifact>();
-        for (const row of res?.[0] ?? []) {
+        for (const row of res.rows as Array<Record<string, unknown>>) {
             const pathHash = typeof row.path_hash === "string" ? row.path_hash : null;
             if (pathHash === null) continue;
             out.set(pathHash, {
@@ -921,19 +896,17 @@ const fetchPreviousArtifacts = (
     });
 
 const fetchExistingRevisionKeys = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     records: readonly GuidanceConfigArtifact[],
-): Effect.Effect<Set<string>, DbError> =>
+): Effect.Effect<Set<string>, CacheWriteError> =>
     Effect.gen(function* () {
         const current = claudeMdRecords(records).filter((record) => record.contentHash !== null);
         const sourcePaths = uniqueSorted(current.map((record) => record.safePath));
         const hashes = uniqueSorted(current.map((record) => record.contentHash).filter((hash): hash is string => hash !== null));
         if (sourcePaths.length === 0 || hashes.length === 0) return new Set();
-        const res = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT source_path, content_hash FROM guidance_revision WHERE source_path IN ${surrealValue(sourcePaths)} AND content_hash IN ${surrealValue(hashes)};`,
-        );
+        const res = yield* write.raw(`SELECT source_path, content_hash FROM guidance_revision WHERE source_path IN (${sourcePaths.map(() => "?").join(",")}) AND content_hash IN (${hashes.map(() => "?").join(",")})`, [...sourcePaths, ...hashes]);
         const out = new Set<string>();
-        for (const row of res?.[0] ?? []) {
+        for (const row of res.rows as Array<Record<string, unknown>>) {
             if (typeof row.source_path !== "string" || typeof row.content_hash !== "string") continue;
             out.add(revisionSetKey(row.source_path, row.content_hash));
         }
@@ -942,85 +915,60 @@ const fetchExistingRevisionKeys = (
 
 export const buildGuidanceConfigStatements = (
     records: readonly GuidanceConfigArtifact[],
-): string[] =>
-    records.map((record) =>
-        `UPSERT ${recordRef(GUIDANCE_CONFIG_ARTIFACT_TABLE, guidanceConfigArtifactKey(record))} CONTENT ${surrealObject([
-            ["provider", surrealString(record.provider)],
-            ["kind", surrealString(record.kind)],
-            ["scope", surrealString(record.scope)],
-            ["safe_path", surrealString(record.safePath)],
-            ["path_hash", surrealString(record.pathHash)],
-            ["authority_kind", surrealString(record.authorityKind)],
-            ["authority_hash", surrealString(record.authorityHash)],
-            ["content_hash", surrealOptionString(record.contentHash)],
-            ["parse_status", surrealString(record.parseStatus)],
-            ["bytes", intLiteral(record.bytes)],
-            ["token_estimate", intLiteral(record.tokenEstimate)],
-            ["command_hashes_json", surrealJsonTextOption(record.commandHashes)],
-            ["hook_event_names_json", surrealJsonTextOption(record.hookEventNames)],
-            ["matcher_count", intLiteral(record.matcherCount)],
-            ["mcp_server_names_json", surrealJsonTextOption(record.mcpServerNames)],
-            ["env_keys_json", surrealJsonTextOption(record.envKeys)],
-            ["enabled_tool_count", record.enabledToolCount === null ? "NONE" : intLiteral(record.enabledToolCount)],
-            ["model", surrealOptionString(record.model)],
-            ["reasoning_effort", surrealOptionString(record.reasoningEffort)],
-            ["output_style", surrealOptionString(record.outputStyle)],
-            ["permission_allow_count", intLiteral(record.permissionAllowCount)],
-            ["permission_ask_count", intLiteral(record.permissionAskCount)],
-            ["permission_deny_count", intLiteral(record.permissionDenyCount)],
-            ["metadata_json", surrealJsonTextOption(record.metadata)],
-            ["observed_at", "time::now()"],
-        ])};`
-    );
+): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => records.map((record) => cacheRow({
+    id: guidanceConfigArtifactKey(record), provider: record.provider, kind: record.kind, scope: record.scope,
+    safe_path: record.safePath, path_hash: record.pathHash, authority_kind: record.authorityKind,
+    authority_hash: record.authorityHash, content_hash: record.contentHash, parse_status: record.parseStatus,
+    bytes: Math.trunc(record.bytes), token_estimate: Math.trunc(record.tokenEstimate),
+    command_hashes_json: jsonParam(record.commandHashes), hook_event_names_json: jsonParam(record.hookEventNames),
+    matcher_count: Math.trunc(record.matcherCount), mcp_server_names_json: jsonParam(record.mcpServerNames),
+    env_keys_json: jsonParam(record.envKeys), enabled_tool_count: record.enabledToolCount, model: record.model,
+    reasoning_effort: record.reasoningEffort, output_style: record.outputStyle,
+    permission_allow_count: Math.trunc(record.permissionAllowCount), permission_ask_count: Math.trunc(record.permissionAskCount),
+    permission_deny_count: Math.trunc(record.permissionDenyCount), metadata_json: jsonParam(record.metadata), observed_at: new Date(),
+}));
 
 export const buildGuidanceConfigReconcileStatements = (
     records: readonly GuidanceConfigArtifact[],
     authorityHashes = uniqueSorted(records.map((record) => record.authorityHash)),
-): string[] => {
+): { readonly authorityHashes: readonly string[]; readonly pathHashes: readonly string[] } => {
     const pathHashes = uniqueSorted(records.map((record) => record.pathHash));
-    const statements = [
-        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IS NONE;`,
-    ];
-    if (authorityHashes.length > 0) {
-        statements.unshift(
-            `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IN ${surrealValue(authorityHashes)} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
-        );
-    }
-    return statements;
+    return { authorityHashes, pathHashes };
 };
 
 export const buildGuidanceConfigPersistenceStatements = (
     records: readonly GuidanceConfigArtifact[],
-    authorityHashes?: readonly string[] | undefined,
-): string[] => [
-    ...buildGuidanceConfigReconcileStatements(records, authorityHashes ? uniqueSorted(authorityHashes) : undefined),
-    ...buildGuidanceConfigStatements(records),
-];
+    _authorityHashes?: readonly string[] | undefined,
+) => buildGuidanceConfigStatements(records);
 
-export const ingestClaudeConfigArtifacts = (): Effect.Effect<
+export const ingestClaudeConfigArtifacts = (write: CacheWriteService): Effect.Effect<
     IngestClaudeConfigStats,
-    DbError,
-    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
+    CacheWriteError,
+    AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const records = yield* discoverClaudeConfigArtifacts({
             home: cfg.paths.home,
             projectRoot: process.cwd(),
         });
         const [previousArtifacts, existingRevisionKeys] = yield* Effect.all([
-            fetchPreviousArtifacts(db, records),
-            fetchExistingRevisionKeys(db, records),
+            fetchPreviousArtifacts(write, records),
+            fetchExistingRevisionKeys(write, records),
         ], { concurrency: 2 });
-        const statements = buildGuidanceConfigPersistenceStatements(
-            records,
-            guidanceConfigAuthorityHashesForScan({
-                home: cfg.paths.home,
-                projectRoot: process.cwd(),
-            }),
-        ).concat(buildClaudeMdGuidanceRevisionStatements(records, previousArtifacts, existingRevisionKeys));
-        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeConfig" });
+        const authorityHashes = guidanceConfigAuthorityHashesForScan({ home: cfg.paths.home, projectRoot: process.cwd() });
+        const pathHashes = uniqueSorted(records.map((record) => record.pathHash));
+        if (authorityHashes.length > 0) {
+            const authoritySlots = authorityHashes.map(() => "?").join(",");
+            if (pathHashes.length > 0) {
+                yield* write.exec(`DELETE FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND authority_hash IN (${authoritySlots}) AND path_hash NOT IN (${pathHashes.map(() => "?").join(",")})`, [...authorityHashes, ...pathHashes]);
+            } else {
+                yield* write.exec(`DELETE FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND authority_hash IN (${authoritySlots})`, authorityHashes);
+            }
+        }
+        yield* write.exec(`DELETE FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND authority_hash IS NULL`);
+        yield* write.putMany(GUIDANCE_CONFIG_ARTIFACT_TABLE, buildGuidanceConfigStatements(records));
+        yield* write.putMany("guidance_revision", buildClaudeMdGuidanceRevisionStatements(records, previousArtifacts, existingRevisionKeys));
         return {
             discovered: records.length,
             written: records.length,
@@ -1034,13 +982,14 @@ export class ClaudeConfigStats extends BaseStageStats.extend<ClaudeConfigStats>(
 
 export const claudeConfigStage: StageDef<
     ClaudeConfigStats,
-    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
+    AxConfig | FileSystem.FileSystem | Path.Path,
+    CacheWriteError
 > = {
     meta: StageMeta.make({ key: "claude-config", deps: ["skills", "commands", "agent-def"], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestClaudeConfigArtifacts();
+            const result = yield* ingestClaudeConfigArtifacts(write);
             return ClaudeConfigStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.written} guidance/config artifacts`,

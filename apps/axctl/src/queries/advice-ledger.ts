@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { cleanSessionId } from "../metrics/util.ts";
 import { followedAdvice } from "../advice/model.ts";
 import { fetchDispatches, type DispatchRow } from "./dispatch-analytics.ts";
@@ -125,7 +126,8 @@ export const fetchAdviceLedger = Effect.fn("queries.fetchAdviceLedger")(
       suggested_model: r.suggested_model == null ? null : String(r.suggested_model),
     }));
 
-    const dispatched = yield* fetchDispatches({ sinceDays: opts.sinceDays, limit: 10_000 });
+    const read = yield* CacheRead;
+    const dispatched = yield* fetchDispatches(read, { sinceDays: opts.sinceDays, limit: 10_000 });
     return aggregateAdviceLedger(advice, dispatched.rows);
   },
 );

@@ -2,11 +2,10 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { decodeJsonOrNull, encodeJson } from "@ax/lib/decode";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { recordRef, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { recordLiteral, stableDigest } from "@ax/lib/ids";
+import { cacheRow } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { watermarkRow } from "@ax/lib/duckdb/watermark";
+import { stableDigest } from "@ax/lib/ids";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -54,11 +53,6 @@ export interface AgentModelPricingRow {
     readonly context_window?: number | null;
     readonly pricing_source?: string | null;
 }
-
-const sqlOptionUsd = (value: number | null | undefined): string =>
-    value === null || value === undefined || !Number.isFinite(value)
-        ? "NONE"
-        : Number(value.toFixed(8)).toString();
 
 const dollarsPerTokenToPerMillion = (value: unknown): number | null => {
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -602,31 +596,30 @@ export function estimateCost(input: {
     };
 }
 
-export function agentModelStatement(input: {
+export function agentModelRow(input: {
     readonly modelKey: string;
     readonly provider?: string | null;
     readonly displayName?: string | null;
     readonly pricingCatalog?: ReadonlyMap<string, ModelPricing>;
-}): string {
+}) {
     const pricing = pricingForModel(input.modelKey, input.pricingCatalog);
     const provider = pricing?.provider ?? input.provider ?? inferModelProvider(input.modelKey);
-    return `UPSERT ${recordRef("agent_model", input.modelKey)} MERGE ${surrealObject([
-        ["name", surrealString(input.modelKey)],
-        ["provider", surrealString(provider)],
-        ["display_name", surrealString(input.displayName ?? input.modelKey)],
-        ["input_per_million_usd", sqlOptionUsd(pricing?.inputPerMillionUsd)],
-        ["output_per_million_usd", sqlOptionUsd(pricing?.outputPerMillionUsd)],
-        ["cache_creation_per_million_usd", sqlOptionUsd(pricing?.cacheCreationPerMillionUsd)],
-        ["cache_read_per_million_usd", sqlOptionUsd(pricing?.cacheReadPerMillionUsd)],
-        ["input_above_200k_per_million_usd", sqlOptionUsd(pricing?.inputAbove200kPerMillionUsd)],
-        ["output_above_200k_per_million_usd", sqlOptionUsd(pricing?.outputAbove200kPerMillionUsd)],
-        ["cache_creation_above_200k_per_million_usd", sqlOptionUsd(pricing?.cacheCreationAbove200kPerMillionUsd)],
-        ["cache_read_above_200k_per_million_usd", sqlOptionUsd(pricing?.cacheReadAbove200kPerMillionUsd)],
-        ["fast_multiplier", sqlOptionUsd(pricing?.fastMultiplier)],
-        ["context_window", surrealOptionInt(pricing?.contextWindow)],
-        ["pricing_source", surrealOptionString(pricing?.pricingSource)],
-        ["updated_at", "time::now()"],
-    ])};`;
+    return cacheRow({
+        id: input.modelKey, name: input.modelKey, provider,
+        display_name: input.displayName ?? input.modelKey,
+        input_per_million_usd: pricing?.inputPerMillionUsd ?? null,
+        output_per_million_usd: pricing?.outputPerMillionUsd ?? null,
+        cache_creation_per_million_usd: pricing?.cacheCreationPerMillionUsd ?? null,
+        cache_read_per_million_usd: pricing?.cacheReadPerMillionUsd ?? null,
+        input_above_200k_per_million_usd: pricing?.inputAbove200kPerMillionUsd ?? null,
+        output_above_200k_per_million_usd: pricing?.outputAbove200kPerMillionUsd ?? null,
+        cache_creation_above_200k_per_million_usd: pricing?.cacheCreationAbove200kPerMillionUsd ?? null,
+        cache_read_above_200k_per_million_usd: pricing?.cacheReadAbove200kPerMillionUsd ?? null,
+        fast_multiplier: pricing?.fastMultiplier ?? null,
+        context_window: pricing?.contextWindow ?? null,
+        pricing_source: pricing?.pricingSource ?? null,
+        created_at: new Date(), updated_at: new Date(),
+    });
 }
 
 // OLD: `JSON.parse(await readFile)` in try/catch → null on ANY fault (missing
@@ -790,49 +783,41 @@ export interface PricingRefreshStats {
 const PRICING_WATERMARK_SOURCE = "pricing";
 const PRICING_WATERMARK_PATH = "__pricing__";
 
-const pricingWatermarkId = (): string =>
-    recordLiteral("ingest_file_state", stableDigest(`pricing|${PRICING_WATERMARK_PATH}`));
+const pricingRowsFingerprint = (rows: readonly Record<string, unknown>[]): string =>
+    stableDigest(JSON.stringify(rows), 32);
 
-const pricingStatementsFingerprint = (statements: readonly string[]): string =>
-    stableDigest(statements.join("\n"), 32);
-
-const loadPricingWatermark = (db: SurrealClientShape): Effect.Effect<string | undefined, DbError> =>
+const loadPricingWatermark = (write: CacheWriteService): Effect.Effect<string | undefined, CacheReadError> =>
     Effect.gen(function* () {
-        const rows = (yield* db.query<[Array<{ sha?: string }>]>(
-            `SELECT sha FROM ingest_file_state WHERE source_kind = ${surrealString(PRICING_WATERMARK_SOURCE)};`,
-        ))?.[0] ?? [];
+        const rows = yield* write.rows(
+            Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+            "SELECT sha FROM ingest_file_state WHERE source_kind = ? AND path = ?",
+            [PRICING_WATERMARK_SOURCE, PRICING_WATERMARK_PATH],
+        );
         const sha = rows[0]?.sha;
         return typeof sha === "string" ? sha : undefined;
     });
 
-const upsertPricingWatermark = (db: SurrealClientShape, digest: string): Effect.Effect<void, DbError> =>
-    executeStatementsWith(
-        db,
-        [
-            `UPSERT ${pricingWatermarkId()} CONTENT { path: ${surrealString(PRICING_WATERMARK_PATH)}, source_kind: ${surrealString(PRICING_WATERMARK_SOURCE)}, sha: ${surrealString(digest)}, ingested_at: time::now() };`,
-        ],
-        { chunkSize: 1 },
-    );
+const upsertPricingWatermark = (write: CacheWriteService, digest: string): Effect.Effect<void, CacheWriteError> =>
+    write.put("ingest_file_state", watermarkRow(PRICING_WATERMARK_SOURCE, PRICING_WATERMARK_PATH, { sha: digest }));
 
-export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
+export const refreshModelPricing = (write: CacheWriteService): Effect.Effect<PricingRefreshStats, CacheReadError | CacheWriteError, AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const cfg = yield* AxConfig;
         const forceRewrite = process.env.AX_REDERIVE_PRICING === "1";
         const result = yield* loadPricingCatalog(cfg.paths.dataDir);
-        const statements = [...result.catalog.entries()].map(([modelKey, pricing]) =>
-            agentModelStatement({
+        const rows = [...result.catalog.entries()].map(([modelKey, pricing]) =>
+            agentModelRow({
                 modelKey,
                 provider: pricing.provider,
                 displayName: modelKey,
                 pricingCatalog: result.catalog,
             })
         );
-        const digest = pricingStatementsFingerprint(statements);
-        const storedDigest = forceRewrite ? undefined : yield* loadPricingWatermark(db);
+        const digest = pricingRowsFingerprint(rows);
+        const storedDigest = forceRewrite ? undefined : yield* loadPricingWatermark(write);
         if (storedDigest !== digest) {
-            yield* executeStatementsWith(db, statements, { chunkSize: 500 });
-            yield* upsertPricingWatermark(db, digest);
+            yield* write.putMany("agent_model", rows);
+            yield* upsertPricingWatermark(write, digest);
         }
         return {
             models: result.catalog.size,
@@ -850,12 +835,12 @@ export class PricingStageStats extends BaseStageStats.extend<PricingStageStats>(
     modelsDevSource: Schema.String,
 }) {}
 
-export const pricingStage: StageDef<PricingStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const pricingStage: StageDef<PricingStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "pricing", deps: [], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* refreshModelPricing();
+            const result = yield* refreshModelPricing(write);
             return PricingStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `loaded ${result.models} model prices (litellm=${result.litellmSource}, models.dev=${result.modelsDevSource})`,

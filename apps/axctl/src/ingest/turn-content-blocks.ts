@@ -1,23 +1,20 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { surrealString } from "@ax/lib/shared/surql";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "./record-keys.ts";
-import { buildContentDocumentStatements, type ContentDocumentWrite } from "./content-blocks/persist.ts";
+import { type ContentDocumentWrite, writeContentDocument } from "./content-blocks/persist.ts";
 import { parseProviderTurn } from "./content-blocks/parse-turn.ts";
 import type { ContentDocumentInput } from "./content-blocks/types.ts";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const TurnContentBlocksKey = Schema.Literal("turn-content-blocks");
 export type TurnContentBlocksKey = typeof TurnContentBlocksKey.Type;
 
 export interface TurnContentBlockRow {
-    readonly id: unknown;
-    readonly session?: unknown;
-    readonly agent_event?: unknown;
+    readonly id: string;
+    readonly session?: string | null;
+    readonly agent_event?: string | null;
     readonly seq?: number;
     readonly role?: string | null;
     readonly message_kind?: string | null;
@@ -26,7 +23,7 @@ export interface TurnContentBlockRow {
     readonly text_excerpt?: string | null;
     readonly has_tool_use?: boolean | null;
     readonly has_error?: boolean | null;
-    readonly ts?: string | null;
+    readonly ts?: Date | null;
 }
 
 export interface TurnContentBlocksStats {
@@ -37,13 +34,13 @@ export interface TurnContentBlocksStats {
 }
 
 const turnKeyForRow = (row: TurnContentBlockRow): string =>
-    recordKeyPart(row.id, "turn") ?? String(row.id);
+    row.id;
 
 const sessionKeyForRow = (row: TurnContentBlockRow): string | null =>
-    recordKeyPart(row.session, "session");
+    row.session ?? null;
 
 const agentEventKeyForRow = (row: TurnContentBlockRow): string | null =>
-    recordKeyPart(row.agent_event, "agent_event");
+    row.agent_event ?? null;
 
 export function turnRowToContentDocumentWrite(row: TurnContentBlockRow): ContentDocumentWrite | null {
     const text = row.text ?? "";
@@ -92,41 +89,24 @@ export function buildTurnContentDocumentWrites(
         .filter((write): write is ContentDocumentWrite => write !== null);
 }
 
-export function buildTurnContentBlockStatements(
-    rows: readonly TurnContentBlockRow[],
-    opts: { readonly reset: boolean } = { reset: false },
-): string[] {
-    const reset = opts.reset
-        ? [
-            `DELETE content_atom WHERE source_kind = ${surrealString("turn")};`,
-            `DELETE content_block WHERE source_kind = ${surrealString("turn")};`,
-            `DELETE content_document WHERE source_kind = ${surrealString("turn")};`,
-        ]
-        : [];
-    return [
-        ...reset,
-        ...buildTurnContentDocumentWrites(rows).flatMap(buildContentDocumentStatements),
-    ];
-}
-
 const fetchTurnRows = (
+    write: CacheWriteService,
     sinceDays: number | undefined,
-): Effect.Effect<TurnContentBlockRow[], DbError, SurrealClient> =>
+): Effect.Effect<readonly TurnContentBlockRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceWhereClause(sinceDays);
-        const [rows] = yield* db.query<[TurnContentBlockRow[]]>(`
-SELECT id, session, agent_event, seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, type::string(ts) AS ts
+        const Row = Schema.Struct({
+            id: Schema.String, session: Schema.NullOr(Schema.String), agent_event: Schema.NullOr(Schema.String),
+            seq: Schema.Number, role: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
+            intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
+            text_excerpt: Schema.NullOr(Schema.String), has_tool_use: Schema.NullOr(Schema.Boolean),
+            has_error: Schema.NullOr(Schema.Boolean), ts: TimestampColumn,
+        });
+        return yield* write.rows(Row, `
+SELECT id, session, agent_event, CAST(seq AS DOUBLE) AS seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, ts
 FROM turn
-${since}
-ORDER BY session, seq;`);
-        return rows ?? [];
+${sinceDays === undefined ? "" : "WHERE ts >= current_timestamp - (? * INTERVAL '1 day')"}
+ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
-
-interface ExistingContentHashRow {
-    readonly source_ref?: string | null;
-    readonly content_hash?: string | null;
-}
 
 /**
  * Load the existing `(turn record key → content_hash)` map for already-derived
@@ -135,15 +115,14 @@ interface ExistingContentHashRow {
  * The map key is the document's `source_ref`, which is exactly the turn record
  * key produced by `turnKeyForRow` - so it lines up with the writer convention.
  */
-const loadExistingTurnContentHashes = (): Effect.Effect<
+const loadExistingTurnContentHashes = (write: CacheWriteService): Effect.Effect<
     Map<string, string>,
-    DbError,
-    SurrealClient
+    CacheReadError
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[ExistingContentHashRow[]]>(
-            `SELECT source_ref, content_hash FROM content_document WHERE source_kind = ${surrealString("turn")};`,
+        const rows = yield* write.rows(
+            Schema.Struct({ source_ref: Schema.String, content_hash: Schema.String }),
+            "SELECT source_ref, content_hash FROM content_document WHERE source_kind = 'turn'",
         );
         const map = new Map<string, string>();
         for (const row of rows ?? []) {
@@ -155,19 +134,21 @@ const loadExistingTurnContentHashes = (): Effect.Effect<
     });
 
 export const deriveAndPersistTurnContentBlocks = (
+    write: CacheWriteService,
     opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<TurnContentBlocksStats, DbError, SurrealClient> =>
+): Effect.Effect<TurnContentBlocksStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         // Escape hatch: when the derivation logic itself changes, force a full
         // reset + re-derive of every turn content document.
         const full = process.env.AX_REDERIVE_CONTENT === "1";
-        const rows = yield* fetchTurnRows(opts.sinceDays);
+        const rows = yield* fetchTurnRows(write, opts.sinceDays);
 
         if (full) {
             const writes = buildTurnContentDocumentWrites(rows);
-            const statements = buildTurnContentBlockStatements(rows, { reset: true });
-            yield* executeStatementsWith(db, statements, { chunkSize: 250 });
+            yield* write.exec("DELETE FROM content_atom WHERE source_kind = 'turn'");
+            yield* write.exec("DELETE FROM content_block WHERE source_kind = 'turn'");
+            yield* write.exec("DELETE FROM content_document WHERE source_kind = 'turn'");
+            for (const document of writes) yield* writeContentDocument(write, document);
             const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
             const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
             return { turns: rows.length, documents: writes.length, blocks, atoms };
@@ -179,12 +160,11 @@ export const deriveAndPersistTurnContentBlocks = (
         // DELETE). Turns whose hash matches are skipped - already derived and
         // output-equivalent. Turns are append-only, so changes are rare; this is
         // a near-no-op on warm runs.
-        const existing = yield* loadExistingTurnContentHashes();
+        const existing = yield* loadExistingTurnContentHashes(write);
         const writes = buildTurnContentDocumentWrites(rows).filter(
             (write) => existing.get(write.sourceRef) !== write.contentHash,
         );
-        const statements = writes.flatMap(buildContentDocumentStatements);
-        yield* executeStatementsWith(db, statements, { chunkSize: 250 });
+        for (const document of writes) yield* writeContentDocument(write, document);
         const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
         const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
         return {
@@ -202,16 +182,16 @@ export class TurnContentBlocksStageStats extends BaseStageStats.extend<TurnConte
     atoms: Schema.Number,
 }) {}
 
-export const turnContentBlocksStage: StageDef<TurnContentBlocksStageStats, SurrealClient> = {
+export const turnContentBlocksStage: StageDef<TurnContentBlocksStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({
         key: "turn-content-blocks",
         deps: ["claude", "codex", "pi", "omp", "opencode", "cursor"],
         tags: ["derive"],
     }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveAndPersistTurnContentBlocks({ sinceDays: sinceDaysFromCtx(ctx) });
+            const result = yield* deriveAndPersistTurnContentBlocks(write, { sinceDays: sinceDaysFromCtx(ctx) });
             return TurnContentBlocksStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `parsed ${result.documents} turn content documents into ${result.blocks} blocks and ${result.atoms} atoms`,

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Exit } from "effect";
 import {
     harnessOf,
     harnessFromResource,
@@ -8,24 +7,11 @@ import {
     decodeSignal,
 } from "./signal.ts";
 import { MetricsPayload } from "./otlp-schema.ts";
-import { OtelWriter, OtelWriterLive, metricStmt, spanStmt, logStmt } from "./writer.ts";
-import { metricPointKey, spanKey, logEventKey, type OtelMetricPointRow, type OtelSpanRow, type OtelLogEventRow } from "./rows.ts";
+import { metricPointKey, spanKey, logEventKey, type OtelMetricPointRow, type OtelSpanRow } from "./rows.ts";
 import { normalizeLogs } from "./normalize.ts";
 import { SIGNALS } from "./signals.ts";
 import { handleOtlp } from "../dashboard/contract/otel.ts";
-
-// ------------------------------------------------------------------ stub DB
-const captured: string[] = [];
-const stubDb = Layer.succeed(SurrealClient, {
-    query: <T>(sql: string) => { captured.push(sql); return Effect.succeed([[]] as unknown as T); },
-} as never);
-
-const writerEnv = OtelWriterLive.pipe(Layer.provide(stubDb));
-const runWrite = async (eff: Effect.Effect<void, unknown, OtelWriter>) => {
-    captured.length = 0;
-    await Effect.runPromise(eff.pipe(Effect.provide(writerEnv)) as Effect.Effect<void>);
-    return captured.join("\n");
-};
+import { FixturePlatform } from "@ax/lib/testing/cache-fixture";
 
 const metricRow = (o: Partial<OtelMetricPointRow> = {}): OtelMetricPointRow => ({
     harness: "claude", metric: "claude_code.cost.usage", value: 0.12, unit: "USD",
@@ -38,12 +24,6 @@ const spanRow = (o: Partial<OtelSpanRow> = {}): OtelSpanRow => ({
     started_at: new Date("2026-06-15T00:00:00Z"), ended_at: new Date("2026-06-15T00:00:01Z"),
     duration_ms: 1000, attrs: null, observed_at: new Date("2026-06-15T00:00:00Z"), ...o,
 });
-const logRow = (o: Partial<OtelLogEventRow> = {}): OtelLogEventRow => ({
-    harness: "codex", event_name: "codex.sse_event", session_id: "c1", model: "gpt-5.5",
-    input_tokens: 9994, output_tokens: 0, reasoning_tokens: 0, cached_tokens: 0, tool_tokens: 9994,
-    duration_ms: null, status_code: null, attrs: null, observed_at: new Date("2026-06-15T00:00:00Z"), ...o,
-});
-
 // ============================================================ shared seams
 
 describe("harness lift", () => {
@@ -97,51 +77,6 @@ describe("decodeSignal", () => {
         // the failure carries the signal label
         expect(JSON.stringify(err)).toContain("metrics");
         expect(JSON.stringify(err)).toContain("OtelDecodeError");
-    });
-});
-
-// ====================================================== column raw-vs-NONE
-
-describe("writer column SQL - NONE vs raw is load-bearing", () => {
-    test("metrics: value renders RAW, null option columns render NONE", async () => {
-        const sql = await runWrite(Effect.gen(function* () {
-            const w = yield* OtelWriter; yield* w.writeMetrics([metricRow({ model: null, skill_name: null, agent_name: null })]);
-        }));
-        expect(sql).toContain("value = 0.12");      // RAW number, never quoted/NONE
-        expect(sql).toContain("model = NONE");
-        expect(sql).toContain("skill_name = NONE");
-        expect(sql).toContain("agent_name = NONE");
-        expect(sql).toContain("unit = \"USD\"");
-    });
-
-    test("span: duration_ms renders RAW, null parent_span_id renders NONE", async () => {
-        const sql = await runWrite(Effect.gen(function* () {
-            const w = yield* OtelWriter; yield* w.writeSpans([spanRow({ parent_span_id: null })]);
-        }));
-        expect(sql).toContain("duration_ms = 1000");
-        expect(sql).toContain("parent_span_id = NONE");
-    });
-
-    test("logs: token columns optNum - 0 stays 0, null becomes NONE", async () => {
-        const sql = await runWrite(Effect.gen(function* () {
-            const w = yield* OtelWriter; yield* w.writeLogs([logRow({ input_tokens: 9994, output_tokens: 0, duration_ms: null, status_code: null })]);
-        }));
-        expect(sql).toContain("input_tokens = 9994");
-        expect(sql).toContain("output_tokens = 0");      // 0 is NOT NONE
-        expect(sql).toContain("duration_ms = NONE");
-        expect(sql).toContain("status_code = NONE");
-    });
-
-    test("attrs is a pre-encoded option<string> - quoted once, never re-encoded; null → NONE", async () => {
-        const sqlWith = await runWrite(Effect.gen(function* () {
-            const w = yield* OtelWriter; yield* w.writeMetrics([metricRow({ attrs: "{\"a\":1}" })]);
-        }));
-        // surrealOptionString JSON-quotes the already-JSON string exactly once
-        expect(sqlWith).toContain("attrs = \"{\\\"a\\\":1}\"");
-        const sqlNull = await runWrite(Effect.gen(function* () {
-            const w = yield* OtelWriter; yield* w.writeMetrics([metricRow({ attrs: null })]);
-        }));
-        expect(sqlNull).toContain("attrs = NONE");
     });
 });
 
@@ -207,51 +142,27 @@ describe("metric/span record-key uniqueness - characterized, see PR for gaps", (
 // ============================================ SIGNALS registry / column gate
 
 describe("SIGNALS registry", () => {
-    const samples: Record<string, OtelMetricPointRow | OtelSpanRow | OtelLogEventRow> = {
-        metrics: metricRow(), traces: spanRow(), logs: logRow(),
-    };
-    // Parse the `col = ` LHS tokens out of a rendered UPSERT (samples use attrs=null
-    // so no value contains a comma → split is safe).
-    const renderedCols = (sql: string): string[] =>
-        sql.slice(sql.indexOf(" SET ") + 5).replace(/;$/, "").split(", ").map((c) => c.split(" = ")[0]!.trim());
-
     test("dispatch keys cover exactly the 3 signals", () => {
         expect(Object.keys(SIGNALS).sort()).toEqual(["logs", "metrics", "traces"]);
     });
 
-    for (const signal of ["metrics", "traces", "logs"] as const) {
-        const spec = SIGNALS[signal];
-
-        test(`${signal}: declared columns ⊇ Row schema fields (HARD column gate)`, () => {
-            const schemaFields = Object.keys(spec.rowSchema.fields);
-            const colSet = new Set(spec.columns);
-            for (const f of schemaFields) expect(colSet.has(f)).toBe(true);
-        });
-
-        test(`${signal}: declared columns match what stmt actually renders (no drift)`, () => {
-            const cols = renderedCols(spec.stmt(samples[signal] as never, 0));
-            expect(cols.sort()).toEqual([...spec.columns].sort());
-        });
-
-        test(`${signal}: spec.stmt is the writer stmt builder`, () => {
-            const expected = { metrics: metricStmt, traces: spanStmt, logs: logStmt }[signal];
-            expect(spec.stmt).toBe(expected);
-        });
-    }
+    test("each signal maps to its DuckDB table and writer function", () => {
+        expect(Object.values(SIGNALS).map((spec) => spec.table).sort()).toEqual([
+            "otel_log_event", "otel_metric_point", "otel_span",
+        ]);
+        for (const spec of Object.values(SIGNALS)) expect(typeof spec.write).toBe("function");
+    });
 });
 
 // =================================================== malformed-gzip fail-open
 
 describe("malformed-gzip path (gunzip is OUTSIDE the JSON-parse fail-open try)", () => {
     test("gzip-flagged non-gzip body does not write; characterizes current behavior", async () => {
-        captured.length = 0;
         const notGzip = new TextEncoder().encode("not gzip at all");
         const buf = notGzip.buffer.slice(notGzip.byteOffset, notGzip.byteOffset + notGzip.byteLength) as ArrayBuffer;
         const exit = await Effect.runPromiseExit(
-            handleOtlp("metrics", buf, "gzip").pipe(Effect.provide(stubDb)),
+            handleOtlp("metrics", buf, "gzip").pipe(Effect.provide(FixturePlatform)),
         );
-        // Either way it must never write a malformed body.
-        expect(captured).toHaveLength(0);
         // CHARACTERIZATION: gunzip throws OUTSIDE the fail-open try, so it surfaces
         // as a defect (NOT the ACK fail-open the JSON/decode paths give). Pinned so
         // the registry refactor cannot silently change it; gap documented in the PR.

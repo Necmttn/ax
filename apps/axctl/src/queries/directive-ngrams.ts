@@ -1,5 +1,6 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import { tokens } from "../ingest/outcomes.ts";
 
 export interface NgramOutcomeRow {
@@ -151,7 +152,6 @@ export const tallyNgramOutcomes = (
 // Effect: fetchDirectiveLift
 // ---------------------------------------------------------------------------
 
-// SQL boundary guard
 const sqlDays = (n: number): number => Math.max(1, Math.trunc(n));
 
 /**
@@ -163,12 +163,14 @@ const sqlDays = (n: number): number => Math.max(1, Math.trunc(n));
  * this per-row at read time; performance is acceptable on 90d windows (tested
  * in derive-proposals with identical shape).
  */
-const userTurnsSql = (sinceDays: number) => `
-SELECT type::string(id) AS id, type::string(session) AS sid, seq, text_excerpt, type::string(ts) AS ts
-FROM turn
-WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
-  AND ts > time::now() - ${sqlDays(sinceDays)}d AND session.source != "claude-subagent";
-`;
+const UserTurnRow = Schema.Struct({
+  id: Schema.String,
+  sid: Schema.String,
+  seq: NumberFromBigIntColumn,
+  text_excerpt: Schema.String,
+  ts: TimestampColumn,
+});
+const OutcomeRow = Schema.Struct({ sid: Schema.String, ts: TimestampColumn });
 
 /**
  * Statement 2: Outcome markers from edited edges where the path targets a
@@ -182,58 +184,37 @@ WHERE role = "user" AND text_excerpt != NONE AND text_excerpt != ""
  * one, making a deref-free session mapping impossible without a third query.
  * Documented as a known limitation (NEEDS_CONTEXT for v2).
  */
-const outcomeMarkersSql = (sinceDays: number) => `
-SELECT type::string(in.session) AS sid, type::string(ts) AS ts
-FROM edited
-WHERE (absolute_path_seen CONTAINS '/memory/' OR path_seen CONTAINS '/memory/'
-    OR absolute_path_seen CONTAINS '/.ax/hooks/' OR path_seen CONTAINS '/.ax/hooks/')
-    AND ts > time::now() - ${sqlDays(sinceDays)}d AND in != NONE;
-`;
-
-interface RawUserTurn {
-  readonly id: unknown;
-  readonly sid: unknown;
-  readonly seq: unknown;
-  readonly text_excerpt: unknown;
-  readonly ts: unknown;
-}
-
-interface RawOutcomeMarker {
-  readonly sid: unknown;
-  readonly ts: unknown;
-}
-
 export const fetchDirectiveLift = Effect.fn("queries.fetchDirectiveLift")(
-  function* (input: FetchLiftInput) {
-    const db = yield* SurrealClient;
+  function* (read: CacheReadService, input: FetchLiftInput) {
     const sinceDays = input.sinceDays;
     const windowTurns = input.windowTurns ?? 20;
     const limit = input.limit ?? 200;
 
     // Query 1: user turns
-    const [rawTurns] = yield* db.query<[Array<RawUserTurn>]>(userTurnsSql(sinceDays));
+    const cutoff = new Date(Date.now() - sqlDays(sinceDays) * 86_400_000);
+    const rawTurns = yield* read.rows(UserTurnRow, `
+      SELECT t.id, t.session AS sid, t.seq, t.text_excerpt, t.ts
+      FROM turn t JOIN session s ON s.id = t.session
+      WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt <> ''
+        AND t.ts > ? AND s.source <> 'claude-subagent'`, [cutoff]);
 
     // Query 2: outcome markers (memory/hooks edited edges)
-    const [rawOutcomes] = yield* db.query<[Array<RawOutcomeMarker>]>(outcomeMarkersSql(sinceDays));
+    const rawOutcomes = yield* read.rows(OutcomeRow, `
+      SELECT t.session AS sid, e.ts
+      FROM edited e JOIN turn t ON t.id = e.in_id
+      WHERE (coalesce(e.absolute_path_seen, '') LIKE '%/memory/%'
+        OR coalesce(e.path_seen, '') LIKE '%/memory/%'
+        OR coalesce(e.absolute_path_seen, '') LIKE '%/.ax/hooks/%'
+        OR coalesce(e.path_seen, '') LIKE '%/.ax/hooks/%')
+        AND e.ts > ?`, [cutoff]);
 
     // Parse user turns
-    const turns: UserTurnInput[] = (rawTurns ?? [])
-      .filter((r) => r.id != null && r.sid != null && r.ts != null && typeof r.text_excerpt === "string" && r.text_excerpt.length > 0)
-      .map((r) => ({
-        id: String(r.id),
-        sid: String(r.sid),
-        seq: typeof r.seq === "number" ? r.seq : 0,
-        ts: String(r.ts),
-        text_excerpt: String(r.text_excerpt),
-      }));
+    const turns: UserTurnInput[] = rawTurns.map((r) => ({
+      id: r.id, sid: r.sid, seq: r.seq, ts: r.ts.toISOString(), text_excerpt: r.text_excerpt,
+    }));
 
     // Parse outcome markers
-    const outcomes: OutcomeMarker[] = (rawOutcomes ?? [])
-      .filter((r) => r.sid != null && r.ts != null)
-      .map((r) => ({
-        sid: String(r.sid),
-        ts: String(r.ts),
-      }));
+    const outcomes: OutcomeMarker[] = rawOutcomes.map((r) => ({ sid: r.sid, ts: r.ts.toISOString() }));
 
     // Pure: tally ngram × outcome co-occurrences
     const tallyRows = tallyNgramOutcomes(turns, outcomes, { windowTurns });

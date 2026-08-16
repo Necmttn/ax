@@ -2,14 +2,12 @@ import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
-import { SurrealClient } from "@ax/lib/db";
 import { stableDigest } from "@ax/lib/ids";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { fileWatermark } from "@ax/lib/duckdb/watermark";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
-import { fileWatermark, watermarkCommitStatement } from "@ax/lib/shared/watermark";
-import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -19,7 +17,7 @@ import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
-import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { identityPart, toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -909,10 +907,7 @@ const toCursorNormalizedBatch = (
     compactions: extract.compactions,
 });
 
-const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] =>
-    buildNormalizedTranscriptStatements(toCursorNormalizedBatch(extract, sourcePath));
-
-export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
+export const __testToCursorNormalizedBatch = toCursorNormalizedBatch;
 
 /**
  * Narrow a whole-store extract down to ONE session - the unit of isolation
@@ -999,40 +994,10 @@ const partitionCursorExtract = (
 
 export const __testPartitionCursorExtract = partitionCursorExtract;
 
-/** The session-record upsert as a statement. Replaces the per-session SDK
- *  `db.upsert(new RecordId("session", ...))` round trip so it can ride the
- *  same batched `executeStatements` call as the session's other statements.
- *  Field set + CONTENT(replace) semantics are identical to the SDK call it
- *  supersedes. */
-const buildCursorSessionUpsertStatement = (session: CursorSession): string =>
-    `UPSERT ${recordRef("session", session.id)} CONTENT { source: ${surrealString("cursor")}, started_at: ${surrealDate(session.started_at)}, ended_at: ${surrealDate(session.ended_at)}, raw_file: ${surrealString(session.sourcePath)} };`;
-
-export const __testBuildCursorSessionUpsertStatement = buildCursorSessionUpsertStatement;
-
-/** Statement-count budget per batched `executeStatements` call: aligned with
- *  the write chunkSize so a batch is ~one round trip. The fixed per-call
- *  commit cost dominated the old per-session path (~540ms/chat on a 1,838-chat
- *  store - "28 statements cost the same as 236"), so batches amortize it. */
-export const CURSOR_BATCH_STATEMENT_BUDGET = 500;
-
 const CURSOR_WATERMARK_SOURCE_KIND = "cursor_session";
 
-interface PendingCursorSession {
-    /** `<store path>#<session id>` - the #261 isolation locator AND the
-     *  watermark path key. */
-    readonly locator: string;
-    readonly session: CursorSession;
-    /** Session upsert + the session's full normalized-batch statements. */
-    readonly statements: readonly string[];
-    /** Content fingerprint packed into the (mtime_ms,size) watermark slots:
-     *  first 52 bits of the statement digest + statement count. */
-    readonly digestNum: number;
-    readonly turns: number;
-    readonly toolCalls: number;
-}
-
-const cursorSessionFingerprint = (statements: readonly string[]): number =>
-    Number.parseInt(stableDigest(statements.join("\n")).slice(0, 13), 16);
+const cursorSessionFingerprint = (batch: NormalizedTranscriptBatch): number =>
+    Number.parseInt(stableDigest(JSON.stringify(batch)).slice(0, 13), 16);
 
 const includeByMtime = (mtime: Option.Option<Date>, cutoffMs: number): boolean =>
     Option.match(mtime, {
@@ -1107,7 +1072,7 @@ interface CursorIngestOpts {
 }
 
 export const ingestCursor = Effect.fn("cursor.ingest")(
-    function* (opts: Partial<CursorIngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<CursorIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const dbPaths = yield* findCursorStateDbs(cfg.paths.cursorUserDir, cutoff);
@@ -1127,7 +1092,7 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
         // mark is skipped entirely, so a killed+resumed run does not restart
         // the store from zero. AX_REDERIVE_CURSOR=1 forces a full re-derive.
         const watermark = dbPaths.length > 0
-            ? yield* fileWatermark({ sourceKind: CURSOR_WATERMARK_SOURCE_KIND, forceEnv: "AX_REDERIVE_CURSOR" })
+            ? yield* fileWatermark(write, { sourceKind: CURSOR_WATERMARK_SOURCE_KIND, forceEnv: "AX_REDERIVE_CURSOR" })
             : null;
 
         for (const dbPath of dbPaths) {
@@ -1142,113 +1107,23 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             warnings += extract.warnings.length;
             if (extract.sessions.length === 0) continue;
 
-            const pending: PendingCursorSession[] = [];
             for (const { session, slice } of partitionCursorExtract(extract)) {
-                const statements = [
-                    buildCursorSessionUpsertStatement(session),
-                    ...buildCursorBatchStatements(slice, dbPath),
-                ];
+                const batch = toCursorNormalizedBatch(slice, dbPath);
                 const locator = `${dbPath}#${session.id}`;
-                const digestNum = cursorSessionFingerprint(statements);
-                if (watermark?.unchanged(locator, digestNum, statements.length)) {
+                const digestNum = cursorSessionFingerprint(batch);
+                const rowCount = slice.turns.length + slice.toolCalls.length + slice.providerEvents.length + 1;
+                if (watermark?.unchanged(locator, digestNum, rowCount)) {
                     skippedUnchanged += 1;
                     continue;
                 }
-                pending.push({
-                    locator,
-                    session,
-                    statements,
-                    digestNum,
-                    turns: slice.turns.length,
-                    toolCalls: slice.toolCalls.length,
-                });
-            }
-
-            // Greedy statement-budget batches: amortize the per-call commit
-            // cost across sessions. Watermark commits ride in a SEPARATE
-            // `executeStatements` call issued AFTER the group's data call -
-            // never combined into the same call. SurrealDB executes every
-            // statement inside one `query()` request independently
-            // (per-statement status, no transaction): if marks rode in the
-            // SAME request as data, a later mark statement could still
-            // commit server-side even though an earlier data statement in
-            // that same request errored, so a failing session's watermark
-            // could land despite its data being lost - and the next run's
-            // `watermark.unchanged()` would then skip it forever with
-            // missing data. Splitting into two sequenced calls means the
-            // marks call is only *reachable* (via `Effect.gen` sequencing)
-            // once the data call's Effect has already succeeded, so a failed
-            // session's mark can never precede - or survive without - its
-            // data. On any batch failure (data OR marks call), fall back to
-            // the per-session isolate path so one bad session skips only
-            // itself (#261).
-            let batch: PendingCursorSession[] = [];
-            let batchStatements = 0;
-
-            const markStatement = (p: PendingCursorSession): string =>
-                watermarkCommitStatement(CURSOR_WATERMARK_SOURCE_KIND, p.locator, p.digestNum, p.statements.length);
-
-            const ingestOne = (p: PendingCursorSession) =>
-                // Per-session failure isolation (#261): one undecodable /
-                // rejected session skips THIS session - retried next run (its
-                // watermark never commits) - instead of aborting the stage.
-                failures.isolate(p.locator, Effect.gen(function* () {
-                    yield* executeStatements(p.statements, { chunkSize: 500, label: "cursor" });
-                    yield* executeStatements([markStatement(p)], { chunkSize: 1, label: "cursor" });
+                yield* failures.isolate(locator, Effect.gen(function* () {
+                    yield* writeNormalizedTranscriptBatch(write, batch);
+                    if (watermark) yield* watermark.commit(locator, digestNum, rowCount);
                     sessionCount += 1;
-                    turnCount += p.turns;
-                    toolCallCount += p.toolCalls;
+                    turnCount += slice.turns.length;
+                    toolCallCount += slice.toolCalls.length;
                 }));
-
-            const flush = () =>
-                Effect.gen(function* () {
-                    if (batch.length === 0) return;
-                    const group = batch;
-                    batch = [];
-                    batchStatements = 0;
-                    const dataStatements = group.flatMap((p) => [...p.statements]);
-                    const markStatements = group.map(markStatement);
-                    // See the batching comment above: marks are a SEPARATE
-                    // call, sequenced strictly after data succeeds, so
-                    // `Effect.result` only observes "Success" once BOTH
-                    // calls landed - a data-only failure never lets a mark
-                    // through.
-                    const attempt = yield* Effect.result(
-                        Effect.gen(function* () {
-                            yield* executeStatements(dataStatements, { chunkSize: 500, label: "cursor" });
-                            yield* executeStatements(markStatements, { chunkSize: 500, label: "cursor" });
-                        }),
-                    );
-                    if (attempt._tag === "Success") {
-                        for (const p of group) {
-                            sessionCount += 1;
-                            turnCount += p.turns;
-                            toolCallCount += p.toolCalls;
-                        }
-                        return;
-                    }
-                    // Batch failed (data or marks call): retry each member
-                    // alone so only the truly bad session(s) skip. Statements
-                    // are idempotent UPSERTs, so partially-committed chunks
-                    // re-apply safely. A connection-level DbError rethrows
-                    // out of isolate and aborts the stage, exactly as before.
-                    yield* Effect.logDebug("cursor ingest: batch failed, falling back to per-session isolation", {
-                        sessions: group.length,
-                        message: attempt.failure.message,
-                    });
-                    for (const p of group) {
-                        yield* ingestOne(p);
-                    }
-                });
-
-            for (const p of pending) {
-                if (batch.length > 0 && batchStatements + p.statements.length > CURSOR_BATCH_STATEMENT_BUDGET) {
-                    yield* flush();
-                }
-                batch.push(p);
-                batchStatements += p.statements.length;
             }
-            yield* flush();
         }
         yield* failures.report;
 
@@ -1278,14 +1153,14 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
     failedFiles: Schema.Number,
 }) {}
 
-export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const cursorStage: StageDef<CursorStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
-        const result = yield* ingestCursor({ sinceDays });
+        const result = yield* ingestCursor(write, { sinceDays });
         return CursorStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +

@@ -1,38 +1,29 @@
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
-import {
-    recordRef,
-    surrealDate,
-    surrealObject,
-    surrealSet,
-    surrealString,
-} from "@ax/lib/shared/surql";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
     agentEventRecordKey,
-    buildAgentEventParentEdgeStatement,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventParentEdgeWrite,
     type AgentEventWrite,
     type AgentProviderName,
     type AgentProviderWrite,
     type AgentSessionWrite,
+    writeAgentEvents,
+    writeAgentProviders,
 } from "../provider-events.ts";
 import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildToolCallStatements,
-    buildToolFileEvidenceStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
     type ToolFileEvidenceWrite,
+    relateToolCallSkill,
+    writePlanSnapshot,
+    writeToolCalls,
+    writeToolFileEvidence,
 } from "../evidence-writers.ts";
-import { buildCompactionStatements, type CompactionWrite } from "../compaction.ts";
+import type { CompactionWrite } from "../compaction.ts";
 import type { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { skillRowId } from "@ax/lib/stable-id";
 import { invokedRelationRecordKey, turnRecordKey } from "../record-keys.ts";
 
 export interface NormalizedSessionWrite {
@@ -130,16 +121,11 @@ export interface NormalizedTranscriptBatch {
     readonly compactions: readonly CompactionWrite[];
 }
 
-export interface BuildNormalizedTranscriptStatementsOptions {
-    /** Forwarded to buildAgentEventStatements. Streaming parsers (codex) pass
+export interface WriteNormalizedTranscriptBatchOptions {
+    /** Forwarded to writeAgentEvents. Streaming parsers (codex) pass
      *  true on the FIRST batch per session, false afterwards. Default true. */
     readonly clearExisting?: boolean;
 }
-
-const optionalDate = (value: string | Date | null | undefined): Date | undefined => {
-    if (value === null || value === undefined) return undefined;
-    return value instanceof Date ? value : new Date(value);
-};
 
 const toAgentSession = (session: NormalizedSessionWrite): AgentSessionWrite => ({
     provider: session.provider,
@@ -160,115 +146,116 @@ const toAgentSession = (session: NormalizedSessionWrite): AgentSessionWrite => (
 });
 
 export const upsertNormalizedSessions = (
+    write: CacheWriteService,
     sessions: readonly NormalizedSessionWrite[],
-): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* Effect.forEach(
-            sessions,
-            (session) =>
-                db.upsert(new RecordId("session", session.id), {
-                    project: session.project ?? undefined,
-                    cwd: session.cwd ?? undefined,
-                    model: session.model ?? undefined,
-                    source: session.provider,
-                    started_at: optionalDate(session.startedAt),
-                    ended_at: optionalDate(session.endedAt),
-                    raw_file: session.rawFile ?? session.sourcePath ?? undefined,
-                }),
-            { concurrency: 4, discard: true },
-        );
-    });
-
-export const buildNormalizedTurnStatements = (
-    turns: readonly NormalizedTurnWrite[],
-): string[] =>
-    turns.map((turn) => {
-        const agentEventField = turn.agentEvent
-            ? `agent_event: ${recordRef("agent_event", agentEventRecordKey(turn.agentEvent))}, `
-            : "";
-        const thinkingFields =
-            turn.thinkingBlocks === undefined || turn.thinkingBlocks === null
-                ? ""
-                : `, thinking_blocks: ${Math.trunc(turn.thinkingBlocks)}, thinking_tokens: ${Math.trunc(turn.thinkingTokens ?? 0)}`;
-        return `UPSERT ${recordRef("turn", turnRecordKey(turn.sessionId, turn.seq))} CONTENT { session: ${recordRef("session", turn.sessionId)}, ${agentEventField}seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.messageKind)}, intent_kind: ${surrealString(turn.intentKind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.textExcerpt === null ? "NONE" : surrealString(turn.textExcerpt)}, has_tool_use: ${turn.hasToolUse}, has_error: ${turn.hasError}${thinkingFields} };`;
-    });
-
-export const buildNormalizedSyntheticSkillInvocationStatements = (
-    invocations: readonly NormalizedSyntheticSkillInvocationWrite[],
-): string[] => {
-    if (invocations.length === 0) return [];
-
-    const skills = new Map<string, NormalizedSyntheticSkillInvocationWrite>();
-    for (const invocation of invocations) {
-        if (!skills.has(invocation.skillName)) skills.set(invocation.skillName, invocation);
-    }
-
-    const skillStatements = [...skills.values()].map((invocation) => {
-        const ref = recordRef("skill", skillRecordKey(invocation.skillName));
-        const fields: ReadonlyArray<readonly [string, string]> = [
-            ["name", surrealString(invocation.skillName)],
-            ["scope", surrealString(invocation.skillScope ?? "unknown")],
-            ["dir_path", surrealString(invocation.skillDirPath ?? "(synthetic)")],
-            ["content_hash", surrealString(invocation.skillContentHash ?? "synthetic")],
-        ];
-        if (invocation.skillUpsert === "if_missing") {
-            // Create-if-absent, never clobber: `ON DUPLICATE KEY UPDATE name =
-            // name` is a no-op on an existing row, so a catalog skill keeps its
-            // real scope/dir_path/content_hash (#746).
-            return `INSERT INTO skill ${surrealObject([["id", ref], ...fields])} ON DUPLICATE KEY UPDATE name = name;`;
-        }
-        return `UPSERT ${ref} MERGE ${surrealObject(fields)};`;
-    });
-
-    const invocationStatements = invocations.map((invocation) => {
-        const turnKey = turnRecordKey(invocation.sessionId, invocation.seq);
-        const skillKey = skillRecordKey(invocation.skillName);
-        const args = JSON.stringify(invocation.args ?? {});
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-
-        return `RELATE ${recordRef("turn", turnKey)}->invoked:\`${edgeKey}\`->${recordRef("skill", skillKey)} SET ${surrealSet([
-            ["session", recordRef("session", invocation.sessionId)],
-            ["ts", surrealDate(invocation.ts)],
-            ["args", surrealString(args)],
-            ["turn_has_error", invocation.turnHasError ? "true" : "false"],
-            ["turn_index", (invocation.turnIndex ?? invocation.seq).toString(10)],
-        ])};`;
-    });
-
-    return [...skillStatements, ...invocationStatements];
-};
-
-export const buildNormalizedTranscriptStatements = (
-    batch: NormalizedTranscriptBatch,
-    options?: BuildNormalizedTranscriptStatementsOptions,
-): string[] => [
-    ...buildAgentProviderStatements(batch.providers),
-    ...buildAgentEventStatements(
-        { sessions: batch.sessions.map(toAgentSession), events: batch.events },
-        { clearExisting: options?.clearExisting ?? true },
-    ),
-    ...buildNormalizedTurnStatements(batch.turns),
-    ...buildToolCallStatements(batch.toolCalls),
-    ...buildToolFileEvidenceStatements(batch.toolFileEvidence),
-    ...batch.agentEventParentEdges.map(buildAgentEventParentEdgeStatement),
-    ...buildNormalizedSyntheticSkillInvocationStatements(batch.syntheticSkillInvocations),
-    ...batch.toolCallSkillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation)
-    ),
-    ...batch.planSnapshots.flatMap((snapshot) =>
-        buildPlanSnapshotStatements(snapshot)
-    ),
-    ...buildCompactionStatements(batch.compactions),
-];
+): Effect.Effect<void, CacheWriteError> =>
+    write.putMany("session", sessions.map((session) => cacheRow({
+        id: session.id,
+        project: session.project ?? null,
+        cwd: session.cwd ?? null,
+        model: session.model ?? null,
+        reasoning_effort: null,
+        source: session.provider,
+        started_at: tsParam(session.startedAt),
+        ended_at: tsParam(session.endedAt),
+        raw_file: session.rawFile ?? session.sourcePath ?? null,
+        labels: jsonParam(session.labels),
+        repository: null,
+        checkout: null,
+        workspace: null,
+    })));
 
 export const writeNormalizedTranscriptBatch = (
+    write: CacheWriteService,
     batch: NormalizedTranscriptBatch,
-    options?: BuildNormalizedTranscriptStatementsOptions,
-): Effect.Effect<void, DbError, SurrealClient> =>
+    options?: WriteNormalizedTranscriptBatchOptions,
+): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
-        yield* upsertNormalizedSessions(batch.sessions);
-        yield* executeStatements(buildNormalizedTranscriptStatements(batch, options), {
-            chunkSize: 500,
-        });
+        yield* upsertNormalizedSessions(write, batch.sessions);
+        yield* writeAgentProviders(write, batch.providers);
+        yield* writeAgentEvents(
+            write,
+            { sessions: batch.sessions.map(toAgentSession), events: batch.events },
+            { clearExisting: options?.clearExisting ?? true },
+        );
+        yield* write.putMany("turn", batch.turns.map((turn) => cacheRow({
+            id: turnRecordKey(turn.sessionId, turn.seq),
+            session: turn.sessionId,
+            agent_event: turn.agentEvent ? agentEventRecordKey(turn.agentEvent) : null,
+            seq: turn.seq,
+            ts: tsParam(turn.ts),
+            role: turn.role,
+            message_kind: turn.messageKind,
+            intent_kind: turn.intentKind,
+            text: turn.text,
+            text_excerpt: turn.textExcerpt,
+            has_tool_use: turn.hasToolUse,
+            has_error: turn.hasError,
+            thinking_blocks: turn.thinkingBlocks ?? null,
+            thinking_tokens: turn.thinkingTokens ?? null,
+        })));
+        yield* writeToolCalls(write, batch.toolCalls);
+        yield* writeToolFileEvidence(write, batch.toolFileEvidence);
+        for (const edge of batch.agentEventParentEdges) {
+            yield* write.put("agent_event_child", cacheRow({
+                id: Bun.hash(`${edge.parentEventKey}|${edge.childEventKey}|${edge.kind}`).toString(16),
+                in_id: edge.parentEventKey,
+                out_id: edge.childEventKey,
+                agent_session: `${edge.provider}__${edge.providerSessionId}`,
+                provider: edge.provider,
+                kind: edge.kind,
+                ts: tsParam(edge.ts),
+            }));
+        }
+        for (const invocation of batch.syntheticSkillInvocations) {
+            const skillKey = skillRowId(invocation.skillName);
+            if (invocation.skillUpsert === "if_missing") {
+                yield* write.exec(
+                    "INSERT INTO skill (id, name, scope, dir_path, content_hash) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    [skillKey, invocation.skillName, invocation.skillScope ?? "unknown", invocation.skillDirPath ?? "(synthetic)", invocation.skillContentHash ?? "synthetic"],
+                );
+            } else {
+                yield* write.put("skill", cacheRow({
+                    id: skillKey,
+                    name: invocation.skillName,
+                    scope: invocation.skillScope ?? "unknown",
+                    dir_path: invocation.skillDirPath ?? "(synthetic)",
+                    content_hash: invocation.skillContentHash ?? "synthetic",
+                }));
+            }
+            const turnKey = turnRecordKey(invocation.sessionId, invocation.seq);
+            const args = JSON.stringify(invocation.args ?? {});
+            yield* write.put("invoked", cacheRow({
+                id: invokedRelationRecordKey({ turnKey, skillKey, args }),
+                in_id: turnKey,
+                out_id: skillKey,
+                args,
+                ts: tsParam(invocation.ts),
+                session: invocation.sessionId,
+                turn_has_error: invocation.turnHasError ?? false,
+                was_corrected: false,
+                turn_index: invocation.turnIndex ?? invocation.seq,
+                total_turns: null,
+                is_first: null,
+            }));
+        }
+        for (const relation of batch.toolCallSkillRelations) yield* relateToolCallSkill(write, relation);
+        for (const snapshot of batch.planSnapshots) yield* writePlanSnapshot(write, snapshot);
+        yield* write.putMany("compaction", batch.compactions.map((compaction) => cacheRow({
+            id: compaction.compactionKey,
+            session: compaction.sessionId,
+            agent_event: compaction.agentEventKey ?? null,
+            harness: compaction.harness,
+            ts: tsParam(compaction.ts),
+            trigger: compaction.trigger ?? null,
+            strategy: compaction.strategy,
+            source_confidence: compaction.sourceConfidence,
+            summary: compaction.summary ?? null,
+            tokens_before: compaction.tokensBefore ?? null,
+            boundary_ref: compaction.boundaryRef ?? null,
+            kept_count: compaction.keptCount ?? null,
+            read_files: jsonParam(compaction.readFiles),
+            modified_files: jsonParam(compaction.modifiedFiles),
+            raw: jsonParam(compaction.raw),
+        })));
     });

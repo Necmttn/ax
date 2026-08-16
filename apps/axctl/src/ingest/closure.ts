@@ -1,18 +1,17 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { watermarkRow } from "@ax/lib/duckdb/watermark";
+import { stableId } from "@ax/lib/stable-id";
 import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
-import { recordLiteral, stableDigest } from "@ax/lib/ids";
+import { stableDigest } from "@ax/lib/ids";
 
 export type CommitKind = "feature" | "fix" | "refactor" | "test" | "docs" | "chore" | "unknown";
 
 interface CommitRow {
     readonly id: unknown;
-    readonly message?: string;
+    readonly message?: string | null;
     readonly repository?: unknown;
     readonly ts?: TimestampInput;
 }
@@ -30,6 +29,9 @@ interface SessionHealthRow {
     readonly interruptions?: number;
     readonly context_pressure?: string;
 }
+
+const keyPart = (value: unknown, table: string): string | null =>
+    recordKeyPart(value, table) ?? (typeof value === "string" && value.length > 0 ? value : null);
 
 export interface CommitClassification {
     readonly commitKey: string;
@@ -107,7 +109,7 @@ function candidateForPath(path: string): Omit<SkillCandidate, "key" | "evidenceC
             triggerPattern: "fix commits overlap graph query files",
             suspectedGap: "Query builders can pass string tests while returning slow or low-signal output.",
             proposedBehavior: "After query edits, run the live insight view and tune ranking against real rows before commit.",
-            expectedImpact: "More useful insight output and fewer slow SurrealQL reads.",
+            expectedImpact: "More useful insight output and fewer slow cache reads.",
         };
     }
     return {
@@ -129,12 +131,12 @@ export function deriveClosureRows(input: {
     readonly skillCandidates: SkillCandidate[];
 } {
     const classifications = input.commits.flatMap((commit) => {
-        const commitKey = recordKeyPart(commit.id, "commit");
+        const commitKey = keyPart(commit.id, "commit");
         if (!commitKey) return [];
         const kind = classifyCommitMessage(commit.message);
         return [{
             commitKey,
-            repositoryKey: recordKeyPart(commit.repository, "repository"),
+            repositoryKey: keyPart(commit.repository, "repository"),
             kind,
             confidence: kind === "unknown" ? "low" : "high",
             message: commit.message ?? null,
@@ -143,7 +145,7 @@ export function deriveClosureRows(input: {
     });
     const filesByCommit = new Map<string, Set<string>>();
     for (const touched of input.touched) {
-        const commitKey = recordKeyPart(touched.in, "commit");
+        const commitKey = keyPart(touched.in, "commit");
         if (!commitKey || !touched.path) continue;
         const files = filesByCommit.get(commitKey) ?? new Set<string>();
         files.add(touched.path);
@@ -205,84 +207,51 @@ export function deriveClosureRows(input: {
     return { classifications, fixChains, skillCandidates: [...candidatesByName.values()] };
 }
 
-function classificationStatement(row: CommitClassification): string {
-    return `UPSERT ${recordRef("commit_classification", safeKeyPart(row.commitKey))} MERGE ${surrealObject([
-        ["commit", recordRef("commit", row.commitKey)],
-        ["repository", row.repositoryKey ? recordRef("repository", row.repositoryKey) : "NONE"],
-        ["kind", surrealString(row.kind)],
-        ["confidence", surrealString(row.confidence)],
-        ["message", surrealOptionString(row.message)],
-        ["labels", surrealJsonOption({ source: "closure" })],
-        ["metrics", surrealJsonOption({})],
-        ["ts", surrealDate(row.ts)],
-    ])};`;
-}
-
-function fixChainStatements(row: FixChain): string[] {
-    const edgeKey = `${safeKeyPart(row.featureKey)}__${safeKeyPart(row.fixKey)}`;
-    return [
-        `DELETE ${recordRef("later_fixed_by", edgeKey)};`,
-        `RELATE ${recordRef("commit", row.featureKey)}->later_fixed_by:\`${edgeKey}\`->${recordRef("commit", row.fixKey)} SET ${[
-            ["repository", row.repositoryKey ? recordRef("repository", row.repositoryKey) : "NONE"],
-            ["overlap_files", surrealJsonOption(row.overlapFiles)],
-            ["overlap_count", row.overlapFiles.length.toString(10)],
-            ["days_between", Number(row.daysBetween.toFixed(3)).toString()],
-            ["confidence", surrealString(row.confidence)],
-            ["reason", surrealOptionString(row.reason)],
-            ["ts", surrealDate(row.ts)],
-        ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-    ];
-}
-
-function skillCandidateStatements(row: SkillCandidate): string[] {
-    const candidateRef = recordRef("skill_candidate", row.key);
-    const statements = [
-        `UPSERT ${candidateRef} MERGE ${surrealObject([
-            ["name", surrealString(row.name)],
-            ["trigger_pattern", surrealString(row.triggerPattern)],
-            ["suspected_gap", surrealString(row.suspectedGap)],
-            ["proposed_behavior", surrealString(row.proposedBehavior)],
-            ["confidence", surrealString(row.confidence)],
-            ["expected_impact", surrealOptionString(row.expectedImpact)],
-            ["status", surrealString("candidate")],
-            ["labels", surrealJsonOption({ source: "closure" })],
-            ["metrics", surrealJsonOption(row.metrics)],
-            ["created_at", "time::now()"],
-        ])};`,
-    ];
-    for (const commitKey of row.evidenceCommits) {
-        const edgeKey = `${safeKeyPart(commitKey)}__${row.key}`;
-        statements.push(
-            `DELETE ${recordRef("suggests_skill", edgeKey)};`,
-            `RELATE ${recordRef("commit", commitKey)}->suggests_skill:\`${edgeKey}\`->${candidateRef} SET reason = ${surrealOptionString(row.triggerPattern)}, evidence = ${surrealJsonOption(row.metrics)}, confidence = ${surrealString(row.confidence)}, ts = time::now();`,
-        );
-    }
-    return statements;
-}
+const closureRows = (rows: ReturnType<typeof deriveClosureRows>) => ({
+    classifications: rows.classifications.map((row) => cacheRow({
+        id: stableId("commit_classification", [row.commitKey]), commit: row.commitKey,
+        repository: row.repositoryKey, kind: row.kind, confidence: row.confidence,
+        message: row.message, labels: jsonParam({ source: "closure" }), metrics: jsonParam({}), ts: tsParam(row.ts),
+    })),
+    fixChains: rows.fixChains.map((row) => cacheRow({
+        id: stableId("later_fixed_by", [row.featureKey, row.fixKey]), in_id: row.featureKey,
+        out_id: row.fixKey, repository: row.repositoryKey, overlap_files: jsonParam(row.overlapFiles),
+        overlap_count: row.overlapFiles.length, days_between: Number(row.daysBetween.toFixed(3)),
+        confidence: row.confidence, reason: row.reason, ts: tsParam(row.ts),
+    })),
+    candidates: rows.skillCandidates.map((row) => cacheRow({
+        id: stableId("skill_candidate", [row.name]), name: row.name, trigger_pattern: row.triggerPattern,
+        suspected_gap: row.suspectedGap, proposed_behavior: row.proposedBehavior, confidence: row.confidence,
+        expected_impact: row.expectedImpact, status: "candidate", labels: jsonParam({ source: "closure" }),
+        metrics: jsonParam(row.metrics), created_at: new Date(),
+    })),
+    suggestions: rows.skillCandidates.flatMap((row) => row.evidenceCommits.map((commitKey) => cacheRow({
+        id: stableId("suggests_skill", [commitKey, row.name]), in_id: commitKey,
+        out_id: stableId("skill_candidate", [row.name]), reason: row.triggerPattern,
+        evidence: jsonParam(row.metrics), confidence: row.confidence, ts: new Date(),
+    }))),
+});
 
 // ---------- skip-unchanged watermark (hypothesis 008) ----------
 //
-// The closure stage blanket-DELETEs and fully re-derives its output
+// The closure stage deletes all prior rows and fully re-derives its output
 // (commit_classification + later_fixed_by + suggests_skill + skill_candidate)
-// on every run - the dominant warm cost (the later_fixed_by DELETE + RELATE of
+// on every run - the dominant warm cost (the later_fixed_by row replacement for
 // thousands of edges). But the closure output is a deterministic function of
 // its inputs (commit + touched + session_health) and `sinceDays`. On the warm
 // path those inputs are unchanged (git skip-unchanged means no new commits), so
 // the re-derive reproduces identical rows. We cache a single fingerprint of the
 // loaded inputs in the shared `ingest_file_state` table (source_kind='closure',
 // fixed sentinel path). On the next run, if the fingerprint matches the stored
-// digest the output already persists ⇒ skip the blanket DELETE + write entirely
+// digest the output already persists ⇒ skip the full delete and write entirely
 // (output-equivalent). Any input change (or a wider sinceDays) yields a new
 // digest, forcing a full re-derive. The reads still run (they are the cheap
-// part); only the costly DELETE + RELATE writes are skipped. NEVER `NOT IN`:
-// the watermark is one indexed read. `AX_REDERIVE_CLOSURE=1` forces a full
+// part); only the costly replacement writes are skipped. The watermark uses
+// one indexed read. `AX_REDERIVE_CLOSURE=1` forces a full
 // re-derive (ignores the watermark).
 
 const CLOSURE_WATERMARK_SOURCE = "closure";
 const CLOSURE_WATERMARK_PATH = "__closure__";
-
-const closureWatermarkId = (): string =>
-    recordLiteral("ingest_file_state", stableDigest(`closure|${CLOSURE_WATERMARK_PATH}`));
 
 const closureInputFingerprint = (input: {
     readonly commits: readonly CommitRow[];
@@ -293,64 +262,64 @@ const closureInputFingerprint = (input: {
     const parts: string[] = [`since=${input.sinceDays ?? ""}`];
     parts.push(`commits=${input.commits.length}`);
     for (const c of input.commits) {
-        parts.push(`c|${recordKeyPart(c.id, "commit") ?? ""}|${isoTimestamp(c.ts)}|${c.message ?? ""}|${recordKeyPart(c.repository, "repository") ?? ""}`);
+        parts.push(`c|${keyPart(c.id, "commit") ?? ""}|${isoTimestamp(c.ts)}|${c.message ?? ""}|${keyPart(c.repository, "repository") ?? ""}`);
     }
     parts.push(`touched=${input.touched.length}`);
     for (const t of input.touched) {
-        parts.push(`t|${recordKeyPart(t.in, "commit") ?? ""}|${t.path ?? ""}`);
+        parts.push(`t|${keyPart(t.in, "commit") ?? ""}|${t.path ?? ""}`);
     }
     parts.push(`health=${input.sessionHealth.length}`);
     for (const h of input.sessionHealth) {
-        parts.push(`h|${recordKeyPart(h.session, "session") ?? ""}|${h.tool_errors ?? ""}|${h.user_corrections ?? ""}|${h.interruptions ?? ""}|${h.context_pressure ?? ""}`);
+        parts.push(`h|${keyPart(h.session, "session") ?? ""}|${h.tool_errors ?? ""}|${h.user_corrections ?? ""}|${h.interruptions ?? ""}|${h.context_pressure ?? ""}`);
     }
     // 32-hex digest keeps collisions astronomically unlikely for this corpus.
     return stableDigest(parts.join("\n"), 32);
 };
 
 const loadClosureWatermark = (
-    db: SurrealClientShape,
-): Effect.Effect<string | undefined, DbError> =>
+    write: CacheWriteService,
+): Effect.Effect<string | undefined, CacheReadError> =>
     Effect.gen(function* () {
-        const rows = (yield* db.query<[Array<{ sha?: string }>]>(
-            `SELECT sha FROM ingest_file_state WHERE source_kind = ${surrealString(CLOSURE_WATERMARK_SOURCE)};`,
-        ))?.[0] ?? [];
+        const rows = yield* write.rows(
+            Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+            "SELECT sha FROM ingest_file_state WHERE source_kind = ? AND path = ?",
+            [CLOSURE_WATERMARK_SOURCE, CLOSURE_WATERMARK_PATH],
+        );
         const sha = rows[0]?.sha;
         return typeof sha === "string" ? sha : undefined;
     });
 
 const upsertClosureWatermark = (
-    db: SurrealClientShape,
+    write: CacheWriteService,
     digest: string,
-): Effect.Effect<void, DbError> =>
-    executeStatementsWith(
-        db,
-        [
-            `UPSERT ${closureWatermarkId()} CONTENT { path: ${surrealString(CLOSURE_WATERMARK_PATH)}, source_kind: ${surrealString(CLOSURE_WATERMARK_SOURCE)}, sha: ${surrealString(digest)}, ingested_at: time::now() };`,
-        ],
-        { chunkSize: 1 },
-    );
+): Effect.Effect<void, CacheWriteError> =>
+    write.put("ingest_file_state", watermarkRow(CLOSURE_WATERMARK_SOURCE, CLOSURE_WATERMARK_PATH, { sha: digest }));
 
 export const deriveClosure = (
+    write: CacheWriteService,
     opts: { sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<ClosureStats, DbError, SurrealClient> =>
+): Effect.Effect<ClosureStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const forceRederive = process.env.AX_REDERIVE_CLOSURE === "1";
         const [commits, touched, sessionHealth, storedDigest] = yield* Effect.all([
-            db.query<[CommitRow[]]>(`
-SELECT id, message, repository, type::string(ts) AS ts
+            write.rows(Schema.Struct({ id: Schema.String, message: Schema.NullOr(Schema.String), repository: Schema.NullOr(Schema.String), ts: TimestampColumn }), `
+SELECT id, message, repository, ts
 FROM commit
-${sinceWhereClause(opts.sinceDays)}
-ORDER BY ts ASC;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[TouchedRow[]]>(`
-SELECT in, out, out.path AS path
-FROM touched;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[SessionHealthRow[]]>(`
+${opts.sinceDays === undefined ? "" : "WHERE ts >= current_timestamp - (? * INTERVAL '1 day')"}
+ORDER BY ts ASC`, opts.sinceDays === undefined ? [] : [opts.sinceDays]),
+            write.rows(Schema.Struct({ in: Schema.String, out: Schema.String, path: Schema.String }), `
+SELECT t.in_id AS in, t.out_id AS out, f.path
+FROM touched t JOIN file f ON f.id = t.out_id`),
+            write.rows(Schema.Struct({
+                session: Schema.String, tool_errors: NumberFromBigIntColumn,
+                user_corrections: NumberFromBigIntColumn, interruptions: NumberFromBigIntColumn,
+                context_pressure: Schema.String,
+            }), `
 SELECT session, tool_errors, user_corrections, interruptions, context_pressure
-FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+FROM session_health`),
             forceRederive
                 ? (Effect.undefined as Effect.Effect<string | undefined>)
-                : loadClosureWatermark(db),
+                : loadClosureWatermark(write),
         ], { concurrency: 4 }).pipe(Effect.withSpan("closure.fetch"));
         const rows = deriveClosureRows({ commits, touched, sessionHealth });
         const stats: ClosureStats = {
@@ -364,35 +333,23 @@ FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             // blanket DELETE + full re-write entirely (output-equivalent).
             return stats;
         }
-        const statements = [
-            ...rows.classifications.map(classificationStatement),
-            ...rows.fixChains.flatMap(fixChainStatements),
-            ...rows.skillCandidates.flatMap(skillCandidateStatements),
-        ];
-        yield* db.query("DELETE later_fixed_by;DELETE suggests_skill;DELETE skill_candidate;DELETE commit_classification;").pipe(
-            Effect.withSpan("closure.delete"),
-        );
-        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "closure" });
-        yield* upsertClosureWatermark(db, digest);
+        for (const table of ["later_fixed_by", "suggests_skill", "skill_candidate", "commit_classification"]) {
+            yield* write.exec(`DELETE FROM ${table}`);
+        }
+        const persisted = closureRows(rows);
+        yield* write.putMany("commit_classification", persisted.classifications);
+        yield* write.putMany("later_fixed_by", persisted.fixChains);
+        yield* write.putMany("skill_candidate", persisted.candidates);
+        yield* write.putMany("suggests_skill", persisted.suggestions);
+        yield* upsertClosureWatermark(write, digest);
         return stats;
     });
-
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        deriveClosure({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<ClosureStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ClosureKey = Schema.Literal("closure");
@@ -408,13 +365,13 @@ export class ClosureStageStats extends BaseStageStats.extend<ClosureStageStats>(
     skillCandidates: Schema.Number,
 }) {}
 
-export const closureStage: StageDef<ClosureStageStats, SurrealClient> = {
+export const closureStage: StageDef<ClosureStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "closure", deps: ["signals"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveClosure({ sinceDays });
+            const result = yield* deriveClosure(write, { sinceDays });
             return ClosureStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `classified ${result.commitClassifications} commits, ${result.skillCandidates} skill candidates`,

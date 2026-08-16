@@ -13,11 +13,11 @@
  * is unchanged (stranded = heartbeat past ingest timeout + grace, so a live
  * concurrent run is never touched) - only the trigger is new.
  */
-import { Duration, Effect, Schedule } from "effect";
+import { Duration, Effect, FileSystem, Path, Schedule } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import { reapStaleIngestRuns } from "../ingest/reap-runs.ts";
+import { withConfigWrite } from "../config-core/reconcile.ts";
 
 /** Default gap between sweeps. Cheap (one indexed query over
  *  `status = 'running'`, normally 0-1 rows), so 5min is generous and still
@@ -40,10 +40,20 @@ export const reapIntervalSeconds = (env: NodeJS.ProcessEnv = process.env): numbe
  * are back to #697. Logged at debug - a transient reap failure is not something
  * a user needs on their terminal.
  */
+export const runReapSchedule = <A, E, R>(
+    tick: Effect.Effect<A, E, R>,
+    intervalSeconds: number,
+): Effect.Effect<void, never, R> =>
+    tick.pipe(
+        Effect.catchCause((cause) => Effect.logDebug("ax serve: ingest_run reap tick failed", cause)),
+        Effect.repeat(Schedule.spaced(Duration.seconds(intervalSeconds))),
+        Effect.asVoid,
+    );
+
 export const runReapLoop = (opts: {
     readonly intervalSeconds: number;
-}): Effect.Effect<void, never, SurrealClient | AxConfig> =>
-    reapStaleIngestRuns().pipe(
+}): Effect.Effect<void, never, AxConfig | FileSystem.FileSystem | Path.Path> =>
+    runReapSchedule(withConfigWrite((write) => reapStaleIngestRuns(write)).pipe(
         Effect.tap((result) =>
             result.reaped > 0
                 ? Effect.logWarning(
@@ -52,10 +62,7 @@ export const runReapLoop = (opts: {
                 )
                 : Effect.void,
         ),
-        Effect.catchCause((cause) => Effect.logDebug("ax serve: ingest_run reap tick failed", cause)),
-        Effect.repeat(Schedule.spaced(Duration.seconds(opts.intervalSeconds))),
-        Effect.asVoid,
-    );
+    ), opts.intervalSeconds);
 
 /**
  * Re-arm `run` on rejection instead of dropping it for the daemon's whole

@@ -26,13 +26,9 @@
  *   session, ~thousands) with a hard row cap; UPDATEs by primary record id in
  *   chunks. No edge derefs (hang safety).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
     fillEstimatedCost,
     isEstimatedPricingSource,
@@ -53,37 +49,39 @@ export interface CostBackfillStats {
  *  rows heal on the next derive run, which the daemon triggers per ingest). */
 const MAX_ROWS_PER_RUN = 20_000;
 
-interface NullCostUsageRow {
-    readonly id: string;
-    readonly model: string | null;
-    readonly prompt_tokens: number | null;
-    readonly completion_tokens: number | null;
-    readonly cache_creation_input_tokens: number | null;
-    readonly cache_read_input_tokens: number | null;
-    readonly estimated_tokens: number;
-    readonly estimated_cost_usd: number | null;
-    readonly pricing_source: string | null;
-}
+const UsageRow = Schema.Struct({
+    id: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_tokens: NumberFromBigIntColumn,
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String),
+});
 
 /**
  * Compute + persist `estimated_cost_usd` for stored token-usage rows that were
  * never priced. Returns counts for the stage summary.
  */
-export const deriveCostBackfill = (): Effect.Effect<CostBackfillStats, DbError, SurrealClient> =>
+export const deriveCostBackfill = (
+    write: CacheWriteService,
+): Effect.Effect<CostBackfillStats, CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = (yield* db.query<[NullCostUsageRow[]]>(
-            `SELECT type::string(id) AS id, model, prompt_tokens, completion_tokens,`
+        const rows = yield* write.rows(
+            UsageRow,
+            `SELECT id, model, prompt_tokens, completion_tokens,`
             + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
             + ` estimated_cost_usd, pricing_source`
-            + ` FROM session_token_usage WHERE estimated_cost_usd IS NONE`
-            + ` LIMIT ${MAX_ROWS_PER_RUN};`,
-        ))?.[0] ?? [];
+            + ` FROM session_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
+            [MAX_ROWS_PER_RUN],
+        );
         if (rows.length === 0) return { scanned: 0, backfilled: 0, unpriced: 0 };
 
-        const catalog = yield* loadPricingCatalogForModels(rows.map((r) => strOrNull(r.model)));
+        const catalog = yield* loadPricingCatalogForModels(write, rows.map((r) => strOrNull(r.model)));
 
-        const stmts: string[] = [];
+        let backfilled = 0;
         let unpriced = 0;
         for (const row of rows) {
             const storedCost = numOrNull(row.estimated_cost_usd);
@@ -93,8 +91,6 @@ export const deriveCostBackfill = (): Effect.Effect<CostBackfillStats, DbError, 
             // an already-estimated row (idempotency: catalog drift must not make
             // every derive run rewrite the whole table).
             if (storedCost !== null || isEstimatedPricingSource(storedSource)) continue;
-            const key = recordKeyPart(row.id, "session_token_usage");
-            if (!key) continue;
             const filled = fillEstimatedCost({
                 model: strOrNull(row.model),
                 prompt_tokens: numOrNull(row.prompt_tokens),
@@ -112,13 +108,12 @@ export const deriveCostBackfill = (): Effect.Effect<CostBackfillStats, DbError, 
             // UPDATE by primary record id (never DELETE/UPDATE-WHERE over an
             // indexed field - ghost-index drift, PR #141); the IS NONE guard
             // re-checks at write time so a concurrent ingest-priced cost wins.
-            stmts.push(
-                `UPDATE ${recordLiteral("session_token_usage", key)} SET`
-                + ` estimated_cost_usd = ${filled.estimatedCostUsd.toFixed(8)},`
-                + ` pricing_source = ${surrealString(filled.pricingSource)}`
-                + ` WHERE estimated_cost_usd IS NONE;`,
+            yield* write.exec(
+                `UPDATE session_token_usage SET estimated_cost_usd = ?, pricing_source = ?`
+                    + ` WHERE id = ? AND estimated_cost_usd IS NULL`,
+                [filled.estimatedCostUsd, filled.pricingSource, row.id],
             );
+            backfilled += 1;
         }
-        yield* executeStatementsWith(db, stmts, { chunkSize: 200 });
-        return { scanned: rows.length, backfilled: stmts.length, unpriced };
+        return { scanned: rows.length, backfilled, unpriced };
     });

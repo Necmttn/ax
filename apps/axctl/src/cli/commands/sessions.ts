@@ -5,8 +5,10 @@ import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError } from "@ax/lib/duckdb/seam";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -22,6 +24,7 @@ import {
     type SessionRow,
 } from "../../dashboard/sessions-query.ts";
 import { ingestTranscripts } from "../../ingest/transcripts.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import {
     AGGREGATE_LEGEND,
     GROUP_BY_KEYS,
@@ -138,7 +141,7 @@ const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
     opts: StaleCheckOpts,
-): Effect.Effect<void, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, DbError | CacheWriteError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (opts.noStaleCheck) return;
         const threshold =
@@ -169,7 +172,7 @@ const maybeAutoIngestStale = (
             // whole query indefinitely. On timeout we interrupt it and fall
             // through to the read with possibly-stale data, telling the user how
             // to finish the backfill explicitly.
-            const outcome = yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
+            const outcome = yield* withConfigWrite((write) => ingestTranscripts(write, { project, sinceDays: 7 })).pipe(
                 Effect.catchTag("PlatformError", (e) => Effect.die(e)),
                 Effect.timeoutOption(`${AUTO_BACKFILL_TIMEOUT_SECONDS} seconds`),
             );
@@ -718,7 +721,8 @@ const cmdSessionsMetrics = (input: {
             return;
         }
 
-        const rows = yield* fetchSessionMetrics({ since, limit: input.limit, project });
+        const read = yield* CacheRead;
+        const rows = yield* fetchSessionMetrics(read, { since, limit: input.limit, project });
         if (input.json) {
             console.log(prettyPrint(rows));
             return;
@@ -800,7 +804,8 @@ export const cmdSessionsChurn = (input: {
         const sinceDays = input.sinceDays ?? 30;
         const since = new Date(Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86400 * 1000);
 
-        const summary = yield* fetchSessionChurnSummary({
+        const read = yield* CacheRead;
+        const summary = yield* fetchSessionChurnSummary(read, {
             since,
             project,
             source: input.source,

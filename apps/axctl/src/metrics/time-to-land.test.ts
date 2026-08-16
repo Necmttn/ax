@@ -1,17 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { computeTimeToLand } from "./time-to-land.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { computeTimeToLand as computeTimeToLandWithRead } from "./time-to-land.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 // Two-query join: route `FROM pull_request` vs `FROM produced`.
 const db = (produced: Array<Record<string, unknown>>, prs: Array<Record<string, unknown>>) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            if (/FROM pull_request/.test(sql)) return Effect.succeed([prs] as unknown as T);
-            if (/FROM produced/.test(sql)) return Effect.succeed([produced] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
+    makeTestCacheRead({ routes: [
+        { match: /FROM pull_request/, rows: prs },
+        { match: /FROM produced/, rows: produced },
+    ] }).layer;
+const computeTimeToLand = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* computeTimeToLandWithRead(yield* CacheRead, ids);
+});
 
 describe("computeTimeToLand", () => {
     test("ms from the commit's ts to the merged_at of the PR matching its sha", async () => {

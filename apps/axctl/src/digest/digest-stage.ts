@@ -1,6 +1,6 @@
 import { Cause, Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { Judgment } from "@ax/lib/sqlite";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { Judgment } from "@ax/lib/sqlite";
 import { BaseStageStats, type IngestContext, StageMeta } from "../ingest/stage/types.ts";
 import type { StageDef } from "../ingest/stage/registry.ts";
 import { buildAndWrite } from "./snapshot.ts";
@@ -19,12 +19,12 @@ export class DigestStats extends BaseStageStats.extend<DigestStats>("DigestStats
  *  recovers from the full cause, defects included): a DB hiccup or a
  *  full/read-only disk on the digest write logs a warning and yields a zero-item
  *  stats row, never failing the surrounding ingest run. */
-export const digestStage: StageDef<DigestStats, SurrealClient | Judgment> = {
+export const digestStage: StageDef<DigestStats, Judgment, CacheWriteError> = {
   meta: StageMeta.make({ key: "digest", deps: ["proposals", "derive-metrics"], tags: ["derive"] }),
-  run: (_ctx: IngestContext) =>
+  run: (_ctx: IngestContext, write: CacheWriteService) =>
     Effect.gen(function* () {
       const t0 = Date.now();
-      const snap = yield* buildAndWrite(new Date(), 14);
+      const snap = yield* buildAndWrite(write, new Date(), 14);
       return DigestStats.make({
         durationMs: Date.now() - t0,
         summary: `wrote digest with ${snap.items.length} items`,

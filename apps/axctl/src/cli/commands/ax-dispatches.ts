@@ -27,6 +27,7 @@
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { printNextLinks } from "../next-format.ts";
 import {
     fetchDispatches,
@@ -59,7 +60,8 @@ const cmdDispatches = (input: {
     Effect.gen(function* () {
         if (input.economy) {
             const table = yield* loadEffectiveRoutingTable();
-            const result = yield* fetchDispatchEconomy({ sinceDays: input.sinceDays, table });
+            const read = yield* CacheRead;
+            const result = yield* fetchDispatchEconomy(read, { sinceDays: input.sinceDays, table });
 
             if (input.json) {
                 console.log(prettyPrint(result));
@@ -134,7 +136,8 @@ const cmdDispatches = (input: {
 
         if (input.candidates) {
             const table = yield* loadEffectiveRoutingTable();
-            const result = yield* fetchDispatchCandidates({ sinceDays: input.sinceDays, table });
+            const read = yield* CacheRead;
+            const result = yield* fetchDispatchCandidates(read, { sinceDays: input.sinceDays, table });
 
             if (input.json) {
                 console.log(prettyPrint(result));
@@ -229,7 +232,8 @@ const cmdDispatches = (input: {
         }
 
         // Default: full dispatch table
-        const result = yield* fetchDispatches({ sinceDays: input.sinceDays, limit: input.limit });
+        const read = yield* CacheRead;
+        const result = yield* fetchDispatches(read, { sinceDays: input.sinceDays, limit: input.limit });
 
         if (input.json) {
             console.log(prettyPrint(result));

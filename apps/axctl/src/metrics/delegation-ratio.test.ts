@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { computeDelegationRatio } from "./delegation-ratio.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { computeDelegationRatio as computeDelegationRatioWithRead } from "./delegation-ratio.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 // Route the reads. The direct query and the descendant-produced query both hit
 // `FROM produced ... GROUP BY session`; they differ by which session keys are in
@@ -15,29 +16,31 @@ const db = (opts: {
     childProduced: Array<Record<string, unknown>>;
     childKeyPattern: RegExp;
 }) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+    makeTestCacheRead({ fallback: (sql, params) => {
             if (/FROM spawned/.test(sql)) {
-                // Only return edges whose parent key is present in this read's IN-list.
-                const rows = opts.spawnEdges
-                    .filter((e) => new RegExp("`" + e.parentKey + "`").test(sql))
+                return opts.spawnEdges
+                    .filter((e) => params?.includes(e.parent))
                     .map((e) => ({ parent: e.parent, child: e.child }));
-                return Effect.succeed([rows] as unknown as T);
             }
             if (/FROM produced/.test(sql)) {
-                if (opts.childKeyPattern.test(sql)) return Effect.succeed([opts.childProduced] as unknown as T);
-                return Effect.succeed([opts.direct] as unknown as T);
+                const rootIds = new Set(opts.direct.map((row) => String(row.session)));
+                if (params?.some((value) => typeof value === "string" && rootIds.has(value))) return opts.direct;
+                const childIds = new Set(opts.spawnEdges.map((edge) => edge.child));
+                if (params?.some((value) => typeof value === "string" && childIds.has(value))) return opts.childProduced;
+                return opts.direct;
             }
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
+            return [];
+        } }).layer;
+const computeDelegationRatio = (ids: readonly string[]) => Effect.gen(function* () {
+    return yield* computeDelegationRatioWithRead(yield* CacheRead, ids);
+});
 
 describe("computeDelegationRatio", () => {
     test("ratio = sub / (direct + sub)", async () => {
         const out = await Effect.runPromise(
             computeDelegationRatio(["session:`p1`"]).pipe(
                 Effect.provide(db({
-                    direct: [{ session: "session:`p1`", direct: 1 }],
+                    direct: [{ session: "session:`p1`", produced: 1 }],
                     spawnEdges: [
                         { parent: "session:`p1`", child: "session:`c1`", parentKey: "p1" },
                         { parent: "session:`p1`", child: "session:`c2`", parentKey: "p1" },
@@ -58,7 +61,7 @@ describe("computeDelegationRatio", () => {
         const out = await Effect.runPromise(
             computeDelegationRatio(["session:`A`"]).pipe(
                 Effect.provide(db({
-                    direct: [{ session: "session:`A`", direct: 0 }],
+                    direct: [{ session: "session:`A`", produced: 0 }],
                     spawnEdges: [
                         { parent: "session:`A`", child: "session:`B`", parentKey: "A" },
                         { parent: "session:`B`", child: "session:`C`", parentKey: "B" },
@@ -77,7 +80,7 @@ describe("computeDelegationRatio", () => {
         const out = await Effect.runPromise(
             computeDelegationRatio(["session:`p2`"]).pipe(
                 Effect.provide(db({
-                    direct: [{ session: "session:`p2`", direct: 3 }],
+                    direct: [{ session: "session:`p2`", produced: 3 }],
                     spawnEdges: [],
                     childProduced: [],
                     childKeyPattern: /never/,
@@ -118,7 +121,7 @@ describe("computeDelegationRatio", () => {
         const out = await Effect.runPromise(
             computeDelegationRatio(["session:`r`"]).pipe(
                 Effect.provide(db({
-                    direct: [{ session: "session:`r`", direct: 1 }],
+                    direct: [{ session: "session:`r`", produced: 1 }],
                     spawnEdges: [
                         { parent: "session:`r`", child: "session:`k`", parentKey: "r" },
                         // k spawns back to r (cycle) and to itself.

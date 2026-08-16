@@ -1,16 +1,21 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
 import { editDelta } from "../dashboard/loc-query.ts";
 import {
     canonicalEditToolName,
-    editToolSqlFilter,
     isApplyPatchCall,
     isEditTool,
     toolClassInputOf,
 } from "@ax/lib/shared/tool-classes";
-import { fillDefaults, sessionRefList } from "./util.ts";
+import { fillDefaults, sessionIdsClause } from "./util.ts";
+
+const LocToolRow = Schema.Struct({
+    session: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    input_json: Schema.NullOr(Schema.String),
+});
 
 export interface SessionLoc { readonly added: number; readonly removed: number; }
 
@@ -55,17 +60,18 @@ export const applyPatchDelta = (inputJson: string | null): SessionLoc => {
  * fetched rows (see @ax/lib/shared/tool-classes).
  */
 export const computeSessionLoc = (
+    read: CacheReadService,
     sessionIds: readonly string[],
-): Effect.Effect<Map<string, SessionLoc>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, SessionLoc>, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const map = new Map<string, SessionLoc>();
         if (sessionIds.length === 0) return map;
-        const refs = sessionRefList(sessionIds);
-        const rows = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(session) AS session, name, command_norm, input_json
-FROM tool_call
-WHERE session IN [${refs}] AND ${editToolSqlFilter};`))?.[0] ?? [];
+        const sessions = sessionIdsClause("session", sessionIds);
+        const rows = yield* read.rows(
+            LocToolRow,
+            `SELECT session, name, command_norm, input_json FROM tool_call WHERE TRUE ${sessions.sql}`,
+            sessions.params,
+        );
         for (const r of rows) {
             const call = toolClassInputOf(r);
             if (!isEditTool(call)) continue;

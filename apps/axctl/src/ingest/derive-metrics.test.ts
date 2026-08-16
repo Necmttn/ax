@@ -1,150 +1,56 @@
-import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { deriveMetrics } from "./derive-metrics.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { describe, expect } from "bun:test";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { deriveMetrics, deriveMetricsStage } from "./derive-metrics.ts";
 
-// Capture UPSERTs to session_metrics; serve canned reads. The query-routing
-// order matters: the dirty-set query (`... FROM session WHERE ... OR id IN
-// (SELECT VALUE in FROM produced WHERE out.reverted = true)`) contains BOTH
-// `FROM session` and `FROM produced`, so it must be matched (by `FROM session
-// WHERE`) BEFORE the durability/time-to-land `FROM produced` branch.
-const makeDb = (sink: string[]) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade|UPDATE session_token_usage/.test(sql)) {
-                sink.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            }
-            // cost-backfill selection (step 0): one never-priced claude row.
-            if (/FROM session_token_usage WHERE estimated_cost_usd IS NONE/.test(sql)) {
-                return Effect.succeed([[{
-                    id: "session_token_usage:`s1`",
-                    model: "claude-opus-4-5",
-                    prompt_tokens: null,
-                    completion_tokens: null,
-                    cache_creation_input_tokens: null,
-                    cache_read_input_tokens: null,
-                    estimated_tokens: 1_000_000,
-                    estimated_cost_usd: null,
-                    pricing_source: null,
-                }]] as unknown as T);
-            }
-            if (/agent_model/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            // commit-reverted existing-true set; "WHERE out.reverted" won't match.
-            if (/WHERE reverted = true/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            // dirty-set: a VALUE select returning one dirty session id.
-            if (/FROM session WHERE/.test(sql)) return Effect.succeed([["session:`s1`"]] as unknown as T);
-            if (/FROM commit\b/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            if (/FROM touched/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            if (/FROM session_health/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            // durability (and time-to-land, harmlessly) aggregate.
-            if (/FROM produced/.test(sql)) {
-                return Effect.succeed([[{ session: "session:`s1`", produced: 2, reverted: 0 }]] as unknown as T);
-            }
-            if (/FROM tool_call/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            // wave-2: delegation spawn edges (none) - keeps the compute deref-free.
-            if (/FROM spawned/.test(sql)) return Effect.succeed([[]] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("derived metrics", { requireFts: true });
 
-describe("deriveMetrics", () => {
-    test("recomputes commit.reverted then UPSERTs one row per dirty session", async () => {
-        const sink: string[] = [];
-        const stats = await Effect.runPromise(deriveMetrics({ sinceDays: 1 }).pipe(Effect.provide(makeDb(sink))));
-        expect(sink.some((s) => /UPSERT session_metrics/.test(s) && s.includes("session:`s1`"))).toBe(true);
-        // wave-2 fields are present in the UPSERT CONTENT.
-        expect(sink.some((s) => /cold_start_reads:/.test(s) && /delegation_ratio:/.test(s) && /time_to_first_edit_ms:/.test(s)))
-            .toBe(true);
-        expect(stats.sessionsWritten).toBe(1);
-        // Fragility-cascade precompute runs on the dirty path: with no reverted
-        // commits it writes 0 edges but still rewrites (clears) the table.
-        expect(stats.cascadeEdges).toBe(0);
-        expect(sink.some((s) => /DELETE fragility_cascade;/.test(s))).toBe(true);
-        // Step 0 cost backfill ran and persisted the estimated cost (review
-        // must-fix: stored backfill, not read-time-only fillEstimatedCost).
-        expect(stats.costBackfilled).toBe(1);
-        expect(sink.some((s) =>
-            /UPDATE session_token_usage:`s1` SET/.test(s)
-            && s.includes('pricing_source = "estimated:')
-            && s.includes("WHERE estimated_cost_usd IS NONE"))).toBe(true);
+describe("deriveMetrics on real DuckDB", () => {
+    dtest("handles an empty cache and writes no metric rows", async () => {
+        let stats: unknown;
+        let count = -1;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-metrics-empty-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                stats = yield* deriveMetrics(write, { sinceDays: 1 });
+                count = (yield* write.rows(Schema.Struct({ count: Schema.Number }),
+                    "SELECT count(*)::INTEGER AS count FROM session_metrics"))[0]!.count;
+            }),
+        ));
+        expect(stats).toEqual({ sessionsWritten: 0, revertedCommits: 0, cascadeEdges: 0, costBackfilled: 0 });
+        expect(count).toBe(0);
     });
 
-    // PR-driven dirty source (issue #172): an OLD session (outside the window)
-    // whose PR merge state changed must land in the dirty set, and the
-    // pr_merge watermark must advance only AFTER session_metrics is written.
-    test("PR merge-state change pulls an out-of-window session into the dirty set", async () => {
-        const sink: string[] = [];
-        const db = Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
-                if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade|UPSERT ingest_file_state|DELETE ingest_file_state/.test(sql)) {
-                    sink.push(sql);
-                    return Effect.succeed([[]] as unknown as T);
-                }
-                if (/WHERE reverted = true/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                // PR snapshot: one merged PR, never seen by the watermark.
-                if (/FROM pull_request/.test(sql)) {
-                    return Effect.succeed([[{ id: "pull_request:`p1`", merge_sha: "abc123", merged_at: "2026-06-01T00:00:00Z" }]] as unknown as T);
-                }
-                if (/FROM ingest_file_state/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                // sha → commit resolution for the changed merge sha (resolves,
-                // so the PR's watermark row is advanceable).
-                if (/FROM commit WHERE sha IN/.test(sql)) {
-                    return Effect.succeed([[{ id: "commit:`c9`", sha: "abc123" }]] as unknown as T);
-                }
-                // The windowed dirty query returns NOTHING - the session is old.
-                if (/FROM session WHERE/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                if (/FROM commit\b/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                if (/FROM touched/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                if (/FROM session_health/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                // commit → producing session (the pr-merge dirty resolution).
-                if (/SELECT VALUE type::string\(in\) FROM produced WHERE out IN/.test(sql)) {
-                    return Effect.succeed([["session:`oldS`"]] as unknown as T);
-                }
-                if (/FROM produced/.test(sql)) {
-                    return Effect.succeed([[{ session: "session:`oldS`", produced: 1, reverted: 0 }]] as unknown as T);
-                }
-                if (/FROM tool_call|FROM spawned/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                return Effect.succeed([[]] as unknown as T);
-            },
-        } as never);
-
-        const stats = await Effect.runPromise(deriveMetrics({ sinceDays: 1 }).pipe(Effect.provide(db)));
-        expect(stats.sessionsWritten).toBe(1);
-        const metricsIdx = sink.findIndex((s) => /UPSERT session_metrics/.test(s) && s.includes("session:`oldS`"));
-        expect(metricsIdx).toBeGreaterThanOrEqual(0);
-        // Crash-safety: the pr_merge watermark advances AFTER the rollup write.
-        const watermarkIdx = sink.findIndex((s) => /UPSERT ingest_file_state:/.test(s) && s.includes("metrics:pr_merge"));
-        expect(watermarkIdx).toBeGreaterThan(metricsIdx);
+    dtest("writes a recent session rollup and backfills its cost", async () => {
+        let stats: unknown;
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-metrics-session-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session", { id: "s1", source: "claude", started_at: new Date() });
+                yield* write.put("session_token_usage", {
+                    id: "usage-s1", session: "s1", source: "claude", model: "claude-opus-4-5",
+                    estimated_tokens: 1_000_000, transcript_bytes: 4_000_000,
+                });
+                stats = yield* deriveMetrics(write, { sinceDays: 1 });
+                row = (yield* write.rows(Schema.Struct({
+                    session: Schema.String,
+                    lines_added: Schema.Number,
+                    cold_start_reads: Schema.Number,
+                    cost: Schema.Number,
+                }), `SELECT m.session, m.lines_added::INTEGER AS lines_added,
+                    m.cold_start_reads::INTEGER AS cold_start_reads,
+                    (SELECT estimated_cost_usd FROM session_token_usage WHERE session = m.session) AS cost
+                    FROM session_metrics m WHERE m.session = ?`, ["s1"]))[0];
+            }),
+        ));
+        expect(stats).toMatchObject({ sessionsWritten: 1, cascadeEdges: 0, costBackfilled: 1 });
+        expect(row).toEqual({ session: "s1", lines_added: 0, cold_start_reads: 0, cost: 5 });
     });
+});
 
-    // Remote-merge race: gh saw the merge but git ingest hasn't fetched the
-    // commit yet. The PR's watermark row must NOT advance (it would record the
-    // PR as handled with no recompute) - the empty-dirty path advances only the
-    // resolved diff, which excludes the deferred PR.
-    test("PR with an unresolvable merge sha does NOT advance the pr_merge watermark", async () => {
-        const sink: string[] = [];
-        const db = Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
-                if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade|UPSERT ingest_file_state|DELETE ingest_file_state/.test(sql)) {
-                    sink.push(sql);
-                    return Effect.succeed([[]] as unknown as T);
-                }
-                if (/WHERE reverted = true/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                if (/FROM pull_request/.test(sql)) {
-                    return Effect.succeed([[{ id: "pull_request:`p1`", merge_sha: "notLocalYet", merged_at: "2026-06-01T00:00:00Z" }]] as unknown as T);
-                }
-                if (/FROM ingest_file_state/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                // The merge sha is NOT in the local commit graph.
-                if (/FROM commit WHERE sha IN/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                if (/FROM session WHERE/.test(sql)) return Effect.succeed([[]] as unknown as T);
-                return Effect.succeed([[]] as unknown as T);
-            },
-        } as never);
-
-        const stats = await Effect.runPromise(deriveMetrics({ sinceDays: 1 }).pipe(Effect.provide(db)));
-        expect(stats.sessionsWritten).toBe(0);
-        // No pr_merge watermark row was written - the PR re-diffs next run.
-        expect(sink.some((s) => /UPSERT ingest_file_state:/.test(s) && s.includes("metrics:pr_merge"))).toBe(false);
+describe("deriveMetricsStage", () => {
+    dtest("keeps the required stage order", () => {
+        expect(deriveMetricsStage.meta.key).toBe("derive-metrics");
+        expect(deriveMetricsStage.meta.deps).toEqual(["git", "session-health", "spawned"]);
     });
 });

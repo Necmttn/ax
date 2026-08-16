@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { computeDurability } from "./durability.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { computeDurability as computeDurabilityWithRead } from "./durability.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 
 const db = (rows: Array<Record<string, unknown>>) =>
-    Layer.succeed(SurrealClient, { query: <T>(_sql: string) => Effect.succeed([rows] as unknown as T) } as never);
+    makeTestCacheRead({ fallback: rows }).layer;
+const computeDurability = (ids: readonly string[]) => Effect.gen(function* () {
+    const read = yield* CacheRead;
+    return yield* computeDurabilityWithRead(read, ids);
+});
 
 describe("computeDurability", () => {
     test("ratio = durable / produced, reading commit.reverted", async () => {

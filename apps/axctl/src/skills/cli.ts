@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { optionValue } from "../config-core/cli-util.ts";
-import { formatReconcileScoped } from "../config-core/reconcile.ts";
+import { formatReconcileScoped, withConfigWrite } from "../config-core/reconcile.ts";
 import { reconcileSkills } from "./reconcile.ts";
 import { SkillSourceRegistryLive } from "./sources/registry.ts";
 import {
@@ -22,7 +22,7 @@ import { findAgent } from "../agents/config.ts";
  * `ax skills` lifecycle subcommands: config (list+status), reconcile, scope,
  * park/unpark, rm. Spliced into the existing `skillsCommand` group. Handlers
  * provide SkillSourceRegistryLive (+ AgentSourceRegistryLive for scope);
- * SurrealClient/FileSystem/Path come from AppLayer.
+ * FileSystem and Path come from AppLayer.
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));
@@ -68,7 +68,7 @@ const reconcileCommand = Command.make(
     "reconcile",
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
-        reconcileSkills({ dryRun }).pipe(
+        withConfigWrite((write) => reconcileSkills(write, { dryRun })).pipe(
             Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcileScoped(report))),
             Effect.provide(SkillSourceRegistryLive),
         ),

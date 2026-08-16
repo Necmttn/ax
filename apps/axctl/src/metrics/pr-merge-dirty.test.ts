@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     advancePrMergeWatermark,
     computePrMergeDirtySessions,
     diffPrMergeStates,
     encodePrMergeState,
     mergeShaOfEncoded,
-    prMergeWatermarkPath,
 } from "./pr-merge-dirty.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("PR merge dirty", {
+    requireFts: true,
+});
 
 const savedForce = process.env.AX_REDERIVE_METRICS;
 afterEach(() => {
@@ -16,257 +20,84 @@ afterEach(() => {
     else process.env.AX_REDERIVE_METRICS = savedForce;
 });
 
-describe("encodePrMergeState / mergeShaOfEncoded", () => {
-    test("round-trips the merge sha (raw, recoverable)", () => {
+describe("PR merge state", () => {
+    test("encodes and decodes merge state", () => {
         expect(mergeShaOfEncoded(encodePrMergeState("abc123", "2026-06-01T00:00:00Z"))).toBe("abc123");
+        expect(mergeShaOfEncoded(encodePrMergeState(null, "2026-06-01T00:00:00Z"))).toBeNull();
+        expect(mergeShaOfEncoded(encodePrMergeState("abc123", null))).toBe("abc123");
     });
 
-    test("null sha encodes to an empty segment and decodes to null", () => {
-        expect(encodePrMergeState(null, "2026-06-01T00:00:00Z")).toBe("|2026-06-01T00:00:00Z");
-        expect(mergeShaOfEncoded("|2026-06-01T00:00:00Z")).toBe(null);
-    });
-
-    test("null merged_at keeps the sha intact", () => {
-        expect(encodePrMergeState("abc123", null)).toBe("abc123|");
-        expect(mergeShaOfEncoded("abc123|")).toBe("abc123");
-    });
-});
-
-describe("diffPrMergeStates", () => {
-    const enc = encodePrMergeState;
-
-    test("identical snapshots → empty diff", () => {
-        const snap = new Map([["pr1", enc("abc", "2026-06-01T00:00:00Z")]]);
-        const diff = diffPrMergeStates(snap, new Map(snap));
-        expect(diff.changedShas).toEqual([]);
-        expect(diff.upserts).toEqual([]);
-        expect(diff.deletes).toEqual([]);
-    });
-
-    test("newly merged PR (not stored) → upsert + its merge sha is dirty", () => {
-        const diff = diffPrMergeStates(new Map(), new Map([["pr1", enc("abc", "2026-06-01T00:00:00Z")]]));
-        expect(diff.changedShas).toEqual(["abc"]);
-        expect(diff.upserts).toEqual([{ prKey: "pr1", encoded: "abc|2026-06-01T00:00:00Z" }]);
-        expect(diff.deletes).toEqual([]);
-    });
-
-    test("merge sha changed → BOTH old and new shas are dirty", () => {
-        const diff = diffPrMergeStates(
-            new Map([["pr1", enc("old111", "2026-06-01T00:00:00Z")]]),
-            new Map([["pr1", enc("new222", "2026-06-02T00:00:00Z")]]),
-        );
-        expect([...diff.changedShas].sort()).toEqual(["new222", "old111"]);
-        expect(diff.upserts).toHaveLength(1);
-    });
-
-    test("merged_at changed with the same sha → one dirty sha, one upsert", () => {
-        const diff = diffPrMergeStates(
-            new Map([["pr1", enc("abc", "2026-06-01T00:00:00Z")]]),
-            new Map([["pr1", enc("abc", "2026-06-03T00:00:00Z")]]),
-        );
-        expect(diff.changedShas).toEqual(["abc"]);
-        expect(diff.upserts).toEqual([{ prKey: "pr1", encoded: "abc|2026-06-03T00:00:00Z" }]);
-        expect(diff.deletes).toEqual([]);
-    });
-
-    test("PR lost its merge state → delete + the OLD sha is dirty", () => {
-        const diff = diffPrMergeStates(new Map([["pr1", enc("abc", "2026-06-01T00:00:00Z")]]), new Map());
-        expect(diff.changedShas).toEqual(["abc"]);
-        expect(diff.upserts).toEqual([]);
-        expect(diff.deletes).toEqual(["pr1"]);
-    });
-
-    test("a merged_at-only PR (sha null) still produces an upsert but no dirty sha", () => {
-        const diff = diffPrMergeStates(new Map(), new Map([["pr1", enc(null, "2026-06-01T00:00:00Z")]]));
-        expect(diff.changedShas).toEqual([]);
-        expect(diff.upserts).toHaveLength(1);
+    test("detects new, changed, and deleted merge states", () => {
+        const oldState = encodePrMergeState("old", "2026-06-01T00:00:00Z");
+        const newState = encodePrMergeState("new", "2026-06-02T00:00:00Z");
+        const changed = diffPrMergeStates(new Map([["pr1", oldState]]), new Map([["pr1", newState]]));
+        expect([...changed.changedShas].sort()).toEqual(["new", "old"]);
+        expect(changed.upserts).toEqual([{ prKey: "pr1", encoded: newState }]);
+        expect(diffPrMergeStates(new Map([["pr1", oldState]]), new Map()).deletes).toEqual(["pr1"]);
     });
 });
 
-// ---------------------------------------------------------------------------
-// Effectful: computePrMergeDirtySessions
-// ---------------------------------------------------------------------------
+describe("real DuckDB PR watermark", () => {
+    dtest("writes and deletes a watermark after dependent rows resolve", async () => {
+        let result: Record<string, unknown> = {};
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-watermark-delete-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const mergedAt = new Date("2026-06-01T00:00:00.000Z");
+                yield* write.put("session", { id: "session-1", source: "claude", started_at: mergedAt });
+                yield* write.put("pull_request", {
+                    id: "pr1", repository: "repo", number: 1, title: "PR 1", state: "merged",
+                    merge_sha: "abc123", merged_at: mergedAt,
+                });
+                yield* write.put("commit", { id: "commit-1", sha: "abc123", repo: "repo", message: "merge", ts: mergedAt });
+                yield* write.put("produced", { id: "produced-1", in_id: "session-1", out_id: "commit-1", ts: mergedAt });
 
-interface MockOpts {
-    readonly prRows?: Array<Record<string, unknown>>;
-    readonly storedRows?: Array<Record<string, unknown>>;
-    /** Rows for the sha→commit resolution: `{ id, sha }` objects. */
-    readonly commitRows?: Array<Record<string, unknown>>;
-    readonly sessionIds?: string[];
-}
+                const first = yield* computePrMergeDirtySessions(write);
+                yield* advancePrMergeWatermark(write, first.diff);
+                const written = yield* write.rows(
+                    Schema.Struct({ count: Schema.BigInt }),
+                    "SELECT count(*) AS count FROM ingest_file_state WHERE source_kind = 'metrics:pr_merge'",
+                );
 
-const makeDb = (opts: MockOpts) => {
-    const captured: string[] = [];
-    const layer = Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            captured.push(sql);
-            if (/FROM pull_request/.test(sql)) return Effect.succeed([opts.prRows ?? []] as unknown as T);
-            if (/FROM ingest_file_state/.test(sql)) return Effect.succeed([opts.storedRows ?? []] as unknown as T);
-            if (/FROM commit WHERE sha IN/.test(sql)) return Effect.succeed([opts.commitRows ?? []] as unknown as T);
-            if (/FROM produced WHERE out IN/.test(sql)) return Effect.succeed([opts.sessionIds ?? []] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
-    return { layer, captured };
-};
-
-const run = (layer: Layer.Layer<SurrealClient>) =>
-    Effect.runPromise(computePrMergeDirtySessions().pipe(Effect.provide(layer)));
-
-describe("computePrMergeDirtySessions", () => {
-    test("unchanged snapshot → skipped, no commit/produced resolution queries", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        const { layer, captured } = makeDb({
-            prRows: [{ id: "pull_request:`pr1`", merge_sha: "abc", merged_at: "2026-06-01T00:00:00Z" }],
-            storedRows: [{ path: prMergeWatermarkPath("pr1"), sha: "abc|2026-06-01T00:00:00Z" }],
-        });
-        const result = await run(layer);
-        expect(result.skipped).toBe(true);
-        expect(result.dirtySessionIds).toEqual([]);
-        expect(result.changedPrs).toBe(0);
-        expect(captured.some((s) => /FROM commit WHERE sha IN/.test(s))).toBe(false);
-        expect(captured.some((s) => /FROM produced/.test(s))).toBe(false);
+                yield* write.exec("DELETE FROM pull_request WHERE id = ?", ["pr1"]);
+                const second = yield* computePrMergeDirtySessions(write);
+                yield* advancePrMergeWatermark(write, second.diff);
+                const deleted = yield* write.rows(
+                    Schema.Struct({ count: Schema.BigInt }),
+                    "SELECT count(*) AS count FROM ingest_file_state WHERE source_kind = 'metrics:pr_merge'",
+                );
+                result = {
+                    dirty: first.dirtySessionIds,
+                    written: written[0]?.count,
+                    deletes: second.diff.deletes,
+                    deleted: deleted[0]?.count,
+                };
+            }),
+        ));
+        expect(result).toEqual({ dirty: ["session-1"], written: 1n, deletes: ["pr1"], deleted: 0n });
     });
 
-    test("newly merged PR → dirty sessions resolved sha → commit → produced.in", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        const { layer, captured } = makeDb({
-            prRows: [{ id: "pull_request:`pr1`", merge_sha: "abc123", merged_at: "2026-06-01T00:00:00Z" }],
-            storedRows: [],
-            commitRows: [{ id: "commit:`c9`", sha: "abc123" }],
-            sessionIds: ["session:`oldSession`"],
-        });
-        const result = await run(layer);
-        expect(result.skipped).toBe(false);
-        expect(result.changedPrs).toBe(1);
-        expect(result.dirtySessionIds).toEqual(["session:`oldSession`"]);
-        // The sha resolved, so the PR's watermark row IS advanceable.
-        expect(result.diff.upserts).toHaveLength(1);
-        expect(result.deferredPrs).toBe(0);
-        // The sha lookup is bounded to the changed shas (IN-list, not a scan of all).
-        const shaQuery = captured.find((s) => /FROM commit WHERE sha IN/.test(s));
-        expect(shaQuery).toBeDefined();
-        expect(shaQuery!).toContain('"abc123"');
-        // The session resolution anchors on produced.out (indexed), no derefs.
-        const prodQuery = captured.find((s) => /FROM produced WHERE out IN/.test(s));
-        expect(prodQuery).toBeDefined();
-        expect(prodQuery!).not.toContain("in.session");
-    });
-
-    test("changed sha absent from the commit graph → not skipped, watermark row HELD BACK", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        const { layer, captured } = makeDb({
-            prRows: [{ id: "pull_request:`pr1`", merge_sha: "notIngested", merged_at: "2026-06-01T00:00:00Z" }],
-            storedRows: [],
-            commitRows: [],
-        });
-        const result = await run(layer);
-        expect(result.skipped).toBe(false);
-        expect(result.changedPrs).toBe(1);
-        expect(result.dirtySessionIds).toEqual([]);
-        // The unresolved PR must NOT advance: gh saw the remote merge before
-        // git ingest fetched the commit. Advancing would record the PR as
-        // handled with no session_metrics recompute, leaving time_to_land_ms
-        // stale forever (no re-diff once the commit finally lands).
-        expect(result.diff.upserts).toHaveLength(0);
-        expect(result.deferredPrs).toBe(1);
-        expect(captured.some((s) => /FROM produced/.test(s))).toBe(false);
-    });
-
-    test("deferred PR re-diffs next run: once the commit lands, sessions go dirty and the mark advances", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        const prRows = [{ id: "pull_request:`pr1`", merge_sha: "abc123", merged_at: "2026-06-01T00:00:00Z" }];
-
-        // Run 1: merge sha not yet in the local commit graph.
-        const run1 = await run(makeDb({ prRows, storedRows: [], commitRows: [] }).layer);
-        expect(run1.diff.upserts).toEqual([]); // held back → nothing to advance
-        expect(run1.deferredPrs).toBe(1);
-
-        // Run 2: the commit arrived via git ingest; the watermark row was never
-        // written (run 1 advanced an empty diff), so the PR diffs again.
-        const run2 = await run(makeDb({
-            prRows,
-            storedRows: [], // still empty - run 1 advanced nothing for pr1
-            commitRows: [{ id: "commit:`c9`", sha: "abc123" }],
-            sessionIds: ["session:`oldSession`"],
-        }).layer);
-        expect(run2.dirtySessionIds).toEqual(["session:`oldSession`"]);
-        expect(run2.diff.upserts).toHaveLength(1); // now advanceable
-        expect(run2.deferredPrs).toBe(0);
-    });
-
-    test("merged_at-only PR (null sha) advances - nothing to resolve", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        const { layer } = makeDb({
-            prRows: [{ id: "pull_request:`pr1`", merge_sha: null, merged_at: "2026-06-01T00:00:00Z" }],
-            storedRows: [],
-        });
-        const result = await run(layer);
-        expect(result.diff.upserts).toHaveLength(1);
-        expect(result.deferredPrs).toBe(0);
-    });
-
-    test("AX_REDERIVE_METRICS=1 forces the diff against an empty snapshot", async () => {
-        process.env.AX_REDERIVE_METRICS = "1";
-        const { layer, captured } = makeDb({
-            prRows: [{ id: "pull_request:`pr1`", merge_sha: "abc", merged_at: "2026-06-01T00:00:00Z" }],
-            // Stored matches exactly - would be skipped without the force.
-            storedRows: [{ path: prMergeWatermarkPath("pr1"), sha: "abc|2026-06-01T00:00:00Z" }],
-            commitRows: [],
-        });
-        const result = await run(layer);
-        expect(result.skipped).toBe(false);
-        expect(result.changedPrs).toBe(1);
-        // Forced ⇒ the stored snapshot read is skipped entirely.
-        expect(captured.some((s) => /FROM ingest_file_state/.test(s))).toBe(false);
-    });
-});
-
-describe("advancePrMergeWatermark", () => {
-    const collect = () => {
-        const stmts: string[] = [];
-        const layer = Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
-                stmts.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-        } as never);
-        return { layer, stmts };
-    };
-
-    test("UPSERTs the per-PR rows with the raw encoded merge state", async () => {
-        const { layer, stmts } = collect();
-        await Effect.runPromise(advancePrMergeWatermark({
-            changedShas: ["abc"],
-            upserts: [{ prKey: "pr1", encoded: "abc|2026-06-01T00:00:00Z" }],
-            deletes: [],
-        }).pipe(Effect.provide(layer)));
-        const all = stmts.join("\n");
-        expect(all).toContain("UPSERT ingest_file_state:");
-        expect(all).toContain(`"${prMergeWatermarkPath("pr1")}"`);
-        expect(all).toContain('"metrics:pr_merge"');
-        expect(all).toContain('"abc|2026-06-01T00:00:00Z"');
-    });
-
-    test("deletes go by PRIMARY record id, never DELETE ... WHERE", async () => {
-        const { layer, stmts } = collect();
-        await Effect.runPromise(advancePrMergeWatermark({
-            changedShas: ["abc"],
-            upserts: [],
-            deletes: ["pr1"],
-        }).pipe(Effect.provide(layer)));
-        const all = stmts.join("\n");
-        expect(all).toMatch(/DELETE ingest_file_state:/);
-        expect(all).not.toMatch(/DELETE[^;]*WHERE/);
-    });
-
-    test("empty diff → no statements issued", async () => {
-        const { layer, stmts } = collect();
-        await Effect.runPromise(advancePrMergeWatermark({
-            changedShas: [],
-            upserts: [],
-            deletes: [],
-        }).pipe(Effect.provide(layer)));
-        expect(stmts).toEqual([]);
+    dtest("defers a watermark until the merge commit exists", async () => {
+        let result: Record<string, unknown> = {};
+        await runWithPlatform(publishCacheFixture(tempDir("ax-pr-watermark-defer-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("pull_request", {
+                    id: "pr2",
+                    repository: "repo",
+                    number: 2,
+                    title: "PR 2",
+                    state: "merged",
+                    merge_sha: "missing",
+                    merged_at: new Date("2026-06-01T00:00:00.000Z"),
+                });
+                const dirty = yield* computePrMergeDirtySessions(write);
+                yield* advancePrMergeWatermark(write, dirty.diff);
+                const rows = yield* write.rows(
+                    Schema.Struct({ count: Schema.BigInt }),
+                    "SELECT count(*) AS count FROM ingest_file_state WHERE source_kind = 'metrics:pr_merge'",
+                );
+                result = { deferred: dirty.deferredPrs, upserts: dirty.diff.upserts.length, rows: rows[0]?.count };
+            }),
+        ));
+        expect(result).toEqual({ deferred: 1, upserts: 0, rows: 0n });
     });
 });

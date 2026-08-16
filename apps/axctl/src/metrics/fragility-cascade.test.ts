@@ -1,18 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { localPathFileRecordKey, stableDigest } from "@ax/lib/ids";
+import { Effect } from "effect";
+import { localPathFileRecordKey } from "@ax/lib/ids";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import {
     DEFAULT_FRAGILITY_LIMITS,
     computeFragilityCascade,
-    deriveFragilityCascade,
     joinCascadeEdges,
     localPathTwinKeys,
-    persistFragilityCascade,
     readFragilityCascade,
     type CascadeEdge,
     type FragilityLimits,
 } from "./fragility-cascade.ts";
-import { SurrealClient } from "@ax/lib/db";
 
 // Bounded queries, routed by their FROM clause. Mutating statements (DELETE /
 // UPSERT fragility_cascade / UPSERT ingest_file_state) land in `sink`.
@@ -27,43 +25,32 @@ interface Fixture {
     /** turn → session resolution rows for the record-list fetch on `turn`. */
     turns?: Array<Record<string, unknown>>;
     cascadeRows?: Array<Record<string, unknown>>;
-    /** Stored cascade watermark rows (ingest_file_state). */
-    watermarkRows?: Array<Record<string, unknown>>;
     /** OTLP metric point rows (otel_metric_point) for sessionTelemetryCost. */
     otelMetricRows?: Array<Record<string, unknown>>;
     /** OTLP log event rows (otel_log_event) for sessionTelemetryCost. */
     otelLogRows?: Array<Record<string, unknown>>;
-    sink?: string[];
     seenSql?: string[];
 }
 
-const db = (fx: Fixture) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+const db = (fx: Fixture) => makeTestCacheRead({
+    fallback: (sql) => {
             fx.seenSql?.push(sql);
-            if (/DELETE fragility_cascade|UPSERT fragility_cascade|UPSERT ingest_file_state/.test(sql)) {
-                fx.sink?.push(...sql.split("\n").filter((s) => s.length > 0));
-                return Effect.succeed([[]] as unknown as T);
-            }
-            if (/FROM ingest_file_state/.test(sql)) return Effect.succeed([fx.watermarkRows ?? []] as unknown as T);
-            if (/FROM fragility_cascade/.test(sql)) return Effect.succeed([fx.cascadeRows ?? []] as unknown as T);
-            if (/FROM commit WHERE reverted = true/.test(sql)) return Effect.succeed([fx.commits ?? []] as unknown as T);
-            if (/FROM checkout/.test(sql)) return Effect.succeed([fx.checkouts ?? []] as unknown as T);
-            if (/FROM touched/.test(sql)) return Effect.succeed([fx.touched ?? []] as unknown as T);
-            // file-info fetch is a record-list selection: SELECT ... FROM [file:`a`, ...]
-            if (/FROM \[file:/.test(sql)) return Effect.succeed([fx.files ?? []] as unknown as T);
-            // turn → session hop is a record-list selection: SELECT ... FROM [turn:`t1`, ...]
-            if (/FROM \[turn:/.test(sql)) return Effect.succeed([fx.turns ?? []] as unknown as T);
-            if (/FROM produced/.test(sql)) return Effect.succeed([fx.produced ?? []] as unknown as T);
-            if (/FROM edited/.test(sql)) return Effect.succeed([fx.edited ?? []] as unknown as T);
-            if (/FROM otel_metric_point/.test(sql)) return Effect.succeed([fx.otelMetricRows ?? []] as unknown as T);
-            if (/FROM otel_log_event/.test(sql)) return Effect.succeed([fx.otelLogRows ?? []] as unknown as T);
-            return Effect.succeed([[]] as unknown as T);
-        },
-    } as never);
+            if (/FROM fragility_cascade/.test(sql)) return fx.cascadeRows ?? [];
+            if (/FROM "commit" WHERE reverted = true/.test(sql)) return fx.commits ?? [];
+            if (/FROM checkout/.test(sql)) return fx.checkouts ?? [];
+            if (/FROM touched/.test(sql)) return fx.touched ?? [];
+            if (/FROM file/.test(sql)) return fx.files ?? [];
+            if (/FROM turn/.test(sql)) return fx.turns ?? [];
+            if (/FROM produced/.test(sql)) return fx.produced ?? [];
+            if (/FROM edited/.test(sql)) return fx.edited ?? [];
+            if (/FROM otel_metric_point/.test(sql)) return fx.otelMetricRows ?? [];
+            if (/FROM otel_log_event/.test(sql)) return fx.otelLogRows ?? [];
+            return [];
+    },
+}).service;
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, fx: Fixture): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(db(fx))));
+const run = <A>(fn: (read: ReturnType<typeof db>) => Effect.Effect<A, unknown>, fx: Fixture): Promise<A> =>
+    Effect.runPromise(fn(db(fx)));
 
 const T0 = "2026-01-01T00:00:00Z";
 const T1 = "2026-01-02T00:00:00Z";
@@ -97,10 +84,10 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             touched: [{ commit: "commit:remote_r__c1", file: "file:remote_r__src_a_ts", ts: T0 }],
             files: [{ id: "file:remote_r__src_a_ts", path: "src/a.ts", repository: "repository:remote_r" }],
             produced: [{ commit: "commit:remote_r__c1", session: "session:`A`" }],
-            edited: [{ file: `file:${twin}`, turn: "turn:`tB`", ts: T1 }],
+            edited: [{ file: twin, turn: "turn:`tB`", ts: T1 }],
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
-        const edges = await run(computeFragilityCascade(), fx);
+        const edges = await run((read) => computeFragilityCascade(read), fx);
         expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1, downstream_cost_usd: null, downstream_tokens: null }]);
     });
 
@@ -128,7 +115,7 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
                 { id: "turn:`tC`", session: "session:`C`" },
             ],
         };
-        const edges = await run(computeFragilityCascade(), fx);
+        const edges = await run((read) => computeFragilityCascade(read), fx);
         const a = edges.filter((e: CascadeEdge) => e.origin === "session:`A`");
         expect(new Set(a.map((e) => e.downstream))).toEqual(new Set(["session:`B`", "session:`C`"]));
         expect(a.length).toBe(2); // deduped to distinct (origin,downstream) pairs
@@ -152,12 +139,12 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
                 { id: "turn:`tB2`", session: "session:`B`" },
             ],
         };
-        const edges = await run(computeFragilityCascade(), fx);
+        const edges = await run((read) => computeFragilityCascade(read), fx);
         expect(edges).toEqual([]);
     });
 
     test("no reverted commits → no edges (and no downstream queries needed)", async () => {
-        const edges = await run(computeFragilityCascade(), {});
+        const edges = await run((read) => computeFragilityCascade(read), {});
         expect(edges).toEqual([]);
     });
 
@@ -177,7 +164,7 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             edited: [{ file: "file:`f1`", turn: "turn:`tB`", ts: T1 }],
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
-        expect(await run(computeFragilityCascade(limits), fx)).toEqual([]);
+        expect(await run((read) => computeFragilityCascade(read, limits), fx)).toEqual([]);
     });
 
     test("dedupes per-checkout touched duplicates so the file cap counts DISTINCT files", async () => {
@@ -194,7 +181,7 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             edited: [{ file: "file:`f1`", turn: "turn:`tB`", ts: T1 }],
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
-        const edges = await run(computeFragilityCascade(limits), fx);
+        const edges = await run((read) => computeFragilityCascade(read, limits), fx);
         expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1, downstream_cost_usd: null, downstream_tokens: null }]);
     });
 
@@ -209,28 +196,18 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             edited: [{ file: "file:`f1`", turn: "turn:`tB`", ts: T1 }],
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
-        await run(computeFragilityCascade(), fx);
+        await run((read) => computeFragilityCascade(read), fx);
         const editedSql = seenSql.filter((s) => /FROM edited/.test(s));
         expect(editedSql.length).toBeGreaterThan(0);
         for (const s of seenSql) expect(s).not.toContain("in.session"); // the documented hang shape
         // The turn → session hop is a record-list selection on `turn`.
-        expect(seenSql.some((s) => /FROM \[turn:/.test(s))).toBe(true);
+        expect(seenSql.some((s) => /FROM turn/.test(s))).toBe(true);
     });
 
     test("anchor query carries the maxRevertedCommits LIMIT", async () => {
         const seen: string[] = [];
-        const layer = Layer.succeed(SurrealClient, {
-            query: <T>(sql: string) => {
-                seen.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-        } as never);
-        await Effect.runPromise(
-            computeFragilityCascade({ ...DEFAULT_FRAGILITY_LIMITS, maxRevertedCommits: 123 }).pipe(
-                Effect.provide(layer),
-            ),
-        );
-        expect(seen.some((s) => /FROM commit WHERE reverted = true ORDER BY ts DESC LIMIT 123;/.test(s))).toBe(true);
+        await run((read) => computeFragilityCascade(read, { ...DEFAULT_FRAGILITY_LIMITS, maxRevertedCommits: 123 }), { seenSql: seen });
+        expect(seen.some((s) => /FROM "commit" WHERE reverted = true ORDER BY ts DESC LIMIT \?/.test(s))).toBe(true);
     });
 });
 
@@ -252,96 +229,11 @@ describe("joinCascadeEdges (pure)", () => {
     });
 });
 
-describe("persist + read (derive-stage precompute)", () => {
-    test("persistFragilityCascade rewrites the table: DELETE then keyed UPSERTs", async () => {
-        const sink: string[] = [];
-        const written = await run(
-            persistFragilityCascade([
-                { origin: "session:`A`", downstream: "session:`B`", weight: 2, downstream_cost_usd: null, downstream_tokens: null },
-                { origin: "session:⟨a-b-c⟩", downstream: "session:`D`", weight: 1, downstream_cost_usd: null, downstream_tokens: null },
-            ]),
-            { sink },
-        );
-        expect(written).toBe(2);
-        const all = sink.join("\n");
-        expect(all).toContain("DELETE fragility_cascade;");
-        expect(all).toContain("origin: session:`A`, downstream: session:`B`, weight: 2");
-        // ⟨⟩-wrapped (uuid-style) ids are unwrapped then re-quoted safely.
-        expect(all).toContain("origin: session:`a-b-c`, downstream: session:`D`, weight: 1");
-        expect(/UPSERT fragility_cascade:`[0-9a-f]{16}` CONTENT/.test(all)).toBe(true);
-    });
-
-    test("deriveFragilityCascade computes then persists (empty → only the DELETE)", async () => {
-        const sink: string[] = [];
-        const written = await run(deriveFragilityCascade(), { sink });
-        expect(written).toBe(0);
-        expect(sink.join("\n")).toContain("DELETE fragility_cascade;");
-    });
-
-    test("advances the anchor-fingerprint watermark only AFTER the rows are persisted", async () => {
-        const sink: string[] = [];
-        const fx: Fixture = {
-            sink,
-            commits: [{ id: "commit:`C`" }],
-            touched: [{ commit: "commit:`C`", file: "file:`f1`", ts: T0 }],
-            files: [{ id: "file:`f1`", path: "f1", repository: null }],
-            produced: [{ commit: "commit:`C`", session: "session:`A`" }],
-            edited: [{ file: "file:`f1`", turn: "turn:`tB`", ts: T1 }],
-            turns: [{ id: "turn:`tB`", session: "session:`B`" }],
-        };
-        const written = await run(deriveFragilityCascade(), fx);
-        expect(written).toBe(1);
-        const all = sink.join("\n");
-        expect(all).toContain('"metrics:fragility_cascade"');
-        const persistIdx = sink.findIndex((s) => /UPSERT fragility_cascade:/.test(s));
-        const watermarkIdx = sink.findIndex((s) => /UPSERT ingest_file_state:/.test(s));
-        expect(persistIdx).toBeGreaterThanOrEqual(0);
-        expect(watermarkIdx).toBeGreaterThan(persistIdx); // crash-safe ordering
-    });
-
-    test("unchanged reverted-anchor fingerprint → recompute SKIPPED (returns stored row count)", async () => {
-        delete process.env.AX_REDERIVE_METRICS;
-        // The fingerprint deriveFragilityCascade computes for anchor ["C"].
-        const fingerprint = stableDigest("1|C", 32);
-        const sink: string[] = [];
-        const seenSql: string[] = [];
-        const fx: Fixture = {
-            sink,
-            seenSql,
-            commits: [{ id: "commit:`C`" }],
-            watermarkRows: [{ sha: fingerprint }],
-            cascadeRows: [{ n: 7 }],
-        };
-        const written = await run(deriveFragilityCascade(), fx);
-        expect(written).toBe(7); // stored count, no rewrite
-        expect(sink).toEqual([]); // no DELETE, no UPSERTs, no watermark write
-        expect(seenSql.some((s) => /FROM touched|FROM edited/.test(s))).toBe(false);
-    });
-
-    test("AX_REDERIVE_METRICS=1 forces the recompute past a matching fingerprint", async () => {
-        const saved = process.env.AX_REDERIVE_METRICS;
-        process.env.AX_REDERIVE_METRICS = "1";
-        try {
-            const fingerprint = stableDigest("1|C", 32);
-            const sink: string[] = [];
-            const fx: Fixture = {
-                sink,
-                commits: [{ id: "commit:`C`" }],
-                watermarkRows: [{ sha: fingerprint }],
-            };
-            await run(deriveFragilityCascade(), fx);
-            expect(sink.join("\n")).toContain("DELETE fragility_cascade;");
-        } finally {
-            if (saved === undefined) delete process.env.AX_REDERIVE_METRICS;
-            else process.env.AX_REDERIVE_METRICS = saved;
-        }
-    });
-
+describe("readFragilityCascade", () => {
     test("readFragilityCascade maps stored rows to CascadeEdge", async () => {
-        const edges = await run(readFragilityCascade(), {
+        const edges = await run((read) => readFragilityCascade(read), {
             cascadeRows: [
                 { origin: "session:`A`", downstream: "session:`B`", weight: 3 },
-                { origin: null, downstream: "session:`B`", weight: 1 }, // malformed → dropped
             ],
         });
         expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 3, downstream_cost_usd: null, downstream_tokens: null }]);
@@ -360,7 +252,7 @@ describe("persist + read (derive-stage precompute)", () => {
             ],
             otelLogRows: [],
         };
-        const edges = await run(readFragilityCascade(), fx);
+        const edges = await run((read) => readFragilityCascade(read), fx);
         const edgeB = edges.find((e) => e.downstream === "session:`B`")!;
         const edgeC = edges.find((e) => e.downstream === "session:`C`")!;
         expect(edgeB.downstream_cost_usd).toBeCloseTo(0.042);

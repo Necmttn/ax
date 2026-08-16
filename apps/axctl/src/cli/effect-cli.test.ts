@@ -10,11 +10,11 @@ import {
 import { classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
 import { entryHidden, entryRuntime, resolveRuntime, type DbConditionalRuntime } from "./commands/manifest.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
-import type { StageRegistryShape } from "../ingest/stage/registry.ts";
+import type { IngestStageError, StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
 
 // widened to the registry's canonical erased-R shape (matches StageRegistryLive's parameter)
-const stages: ReadonlyArray<StageDef<BaseStageStats, unknown>> = ALL_STAGES;
+const stages: ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> = ALL_STAGES;
 
 const testRegistry: StageRegistryShape = {
     all: () => stages,

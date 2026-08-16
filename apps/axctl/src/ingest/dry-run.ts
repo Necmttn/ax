@@ -17,13 +17,14 @@
  * The pure ETA math (`computeEstimate`, `formatDuration`) is separated from the
  * effectful counting/sampling so it can be unit-tested without a DB or disk.
  */
-import { Effect, FileSystem, Option, Path, PlatformError } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
-import { SurrealClient } from "@ax/lib/db";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import type { DbError } from "@ax/lib/errors";
 import { ingestTranscripts } from "./transcripts.ts";
 import { ingestCodex } from "./codex.ts";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 
 /** Wall-clock budget for the calibration sample. Keeps the dry-run snappy even
  *  when individual transcripts are large (one fat session can take seconds). */
@@ -170,17 +171,17 @@ const EMPTY_TALLY: SessionTally = { claude: 0, codex: 0, pi: 0, total: 0 };
  *  on-disk counts to size the REMAINING backfill - a binary "has any session?"
  *  probe is useless in practice because the watcher LaunchAgent seeds sessions
  *  within seconds of install. */
-const dbSessionCounts = (): Effect.Effect<SessionTally, never, SurrealClient> =>
+const dbSessionCounts = (write: CacheWriteService): Effect.Effect<SessionTally, never> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = (yield* db.query<[Array<{ source?: string; n?: number }>]>(
-            "SELECT source, count() AS n FROM session GROUP BY source;",
-        ))?.[0] ?? [];
+        const rows = yield* write.rows(
+            Schema.Struct({ source: Schema.String, n: NumberFromBigIntColumn }),
+            "SELECT source, count(*) AS n FROM session GROUP BY source",
+        );
         let claude = 0;
         let codex = 0;
         let pi = 0;
         for (const row of rows) {
-            const n = typeof row.n === "number" ? row.n : 0;
+            const n = row.n;
             // `claude-subagent` sessions are derived from separate
             // `<sessionId>/subagents/agent-*.jsonl` files that the recursive
             // on-disk walk also counts, so they fold into the claude tally to
@@ -219,11 +220,12 @@ export interface EstimateOptions {
 
 /** Count sources, then time a small real slice to project the full ETA. */
 export const estimateIngest = (
+    write: CacheWriteService,
     opts: EstimateOptions = {},
 ): Effect.Effect<
     DryRunResult,
-    DbError | PlatformError.PlatformError,
-    AxConfig | FileSystem.FileSystem | Path.Path | SurrealClient
+    DbError | CacheWriteError | PlatformError.PlatformError,
+    AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
@@ -248,7 +250,7 @@ export const estimateIngest = (
         // source. An empty graph means remaining == total (first run, exact
         // ETA); a watcher-seeded graph still has nearly everything pending, so
         // it gets a remaining-scaled ETA instead of a blanket "populated" skip.
-        const inGraph = yield* dbSessionCounts();
+        const inGraph = yield* dbSessionCounts(write);
         const populated = inGraph.total > 0;
         const remaining = computeRemaining(sources, inGraph);
 
@@ -278,8 +280,8 @@ export const estimateIngest = (
         const t0 = now();
         const deadlineMs = t0 + budgetMs;
         const items = useCodex
-            ? (yield* ingestCodex({ sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions
-            : (yield* ingestTranscripts({ sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions;
+            ? (yield* ingestCodex(write, { sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions
+            : (yield* ingestTranscripts(write, { sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions;
         const seconds = (now() - t0) / 1000;
 
         const { ratePerSec, etaSeconds } = computeEstimate(remaining.total, items, seconds);

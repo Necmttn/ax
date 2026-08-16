@@ -1,16 +1,13 @@
 import { homedir } from "node:os";
 import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
-import { AppLayer } from "@ax/lib/layers";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "@ax/lib/shared/surql";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { nonEmptyString } from "@ax/lib/shared/derive-keys";
+import { edgeRowId } from "@ax/lib/stable-id";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -364,86 +361,54 @@ function sessionEndTime(meta: JsonRecord | null): string | null {
     return new Date(new Date(startedAt).getTime() + duration * 60_000).toISOString();
 }
 
-function sessionPlaceholderStatement(
+function sessionPlaceholderRow(
     sessionId: string,
     meta: JsonRecord | null,
-): string {
+): Record<string, import("@ax/lib/duckdb/types").DuckDbParam> {
     const projectPath = nonEmptyString(meta?.project_path);
     const projectName = projectPath ? posixPath.basename(projectPath) : null;
     const startedAt = metaStartTime(meta);
     const endedAt = sessionEndTime(meta);
-    const fields: Array<readonly [string, string]> = [["source", surrealString("claude")]];
-
-    if (projectName) fields.push(["project", surrealOptionString(projectName)]);
-    if (projectPath) fields.push(["cwd", surrealOptionString(projectPath)]);
-    if (startedAt) fields.push(["started_at", surrealOptionDate(startedAt)]);
-    if (endedAt) fields.push(["ended_at", surrealOptionDate(endedAt)]);
-
-    return `UPSERT ${recordRef("session", sessionId)} MERGE ${surrealObject(fields)};`;
+    return cacheRow({ id: sessionId, source: "claude", project: projectName, cwd: projectPath,
+        started_at: tsParam(startedAt), ended_at: tsParam(endedAt) });
 }
 
-export function buildClaudeInsightStatements(
+export const writeClaudeInsightConversion = (
+    write: CacheWriteService,
     conversion: ClaudeInsightConversion,
     meta?: unknown,
-): string[] {
-    const statements: string[] = [];
+): Effect.Effect<void, CacheWriteError> => Effect.gen(function* () {
     const metaRecord = isRecord(meta) ? meta : null;
     const insight = conversion.insight;
-    const insightRef = recordRef("insight", insight.key);
 
     if (insight.sessionId) {
-        statements.push(sessionPlaceholderStatement(insight.sessionId, metaRecord));
+        yield* write.put("session", sessionPlaceholderRow(insight.sessionId, metaRecord));
     }
 
-    const insightFields: Array<readonly [string, string]> = [
-        ["subject_type", surrealString(insight.subjectType)],
-        ["subject_id", surrealOptionString(insight.subjectId)],
-        ["kind", surrealOptionString(insight.kind)],
-        ["text", surrealString(insight.text)],
-        ["labels", surrealJsonTextOption(insight.labels)],
-        ["metrics", surrealJsonTextOption(insight.metrics)],
-    ];
-    if (insight.createdAt) {
-        insightFields.push(["created_at", surrealDate(insight.createdAt)]);
-    }
-
-    statements.push(
-        `UPSERT ${insightRef} MERGE ${surrealObject(insightFields)};`,
-    );
+    yield* write.put("insight", cacheRow({
+        id: insight.key, subject_type: insight.subjectType, subject_id: insight.subjectId,
+        kind: insight.kind, text: insight.text, labels: jsonParam(insight.labels),
+        metrics: jsonParam(insight.metrics), created_at: tsParam(insight.createdAt) ?? new Date(),
+    }));
 
     if (insight.sessionId) {
-        const sessionRef = recordRef("session", insight.sessionId);
-        statements.push(
-            `DELETE concerns WHERE in = ${insightRef} AND out = ${sessionRef} AND kind = "session_classification";`,
-            `RELATE ${insightRef}->concerns->${sessionRef} SET ${surrealSet([
-                ["kind", surrealString("session_classification")],
-                ["reason", surrealOptionString("Claude /insights classified this session")],
-                ["labels", surrealJsonTextOption({ source: "claude_insights" })],
-                ["metrics", surrealJsonTextOption(insight.metrics)],
-                ["ts", insight.createdAt ? surrealDate(insight.createdAt) : "time::now()"],
-            ])};`,
-        );
+        yield* write.put("concerns", cacheRow({
+            id: edgeRowId("concerns", insight.key, insight.sessionId, "session_classification"),
+            in_id: insight.key, out_id: insight.sessionId, in_table: "insight", out_table: "session",
+            kind: "session_classification", weight: null, reason: "Claude /insights classified this session",
+            labels: jsonParam({ source: "claude_insights" }), metrics: jsonParam(insight.metrics),
+            ts: tsParam(insight.createdAt) ?? new Date(),
+        }));
     }
 
     for (const event of conversion.frictionEvents) {
-        const fields: Array<readonly [string, string]> = [
-            ["session", surrealOptionRecord("session", event.sessionId)],
-            ["turn", "NONE"],
-            ["kind", surrealString(event.kind)],
-            ["text", surrealOptionString(event.text)],
-            ["labels", surrealJsonTextOption(event.labels)],
-            ["metrics", surrealJsonTextOption(event.metrics)],
-            ["raw", surrealJsonTextOption(event.raw)],
-            ["ts", event.ts ? surrealDate(event.ts) : "time::now()"],
-        ];
-
-        statements.push(
-            `UPSERT ${recordRef("friction_event", event.key)} MERGE ${surrealObject(fields)};`,
-        );
+        yield* write.put("friction_event", cacheRow({
+            id: event.key, session: event.sessionId, turn: null, kind: event.kind, text: event.text,
+            labels: jsonParam(event.labels), metrics: jsonParam(event.metrics), raw: jsonParam(event.raw),
+            ts: tsParam(event.ts) ?? new Date(),
+        }));
     }
-
-    return statements;
-}
+});
 
 const jsonFiles = (
     dir: string,
@@ -506,17 +471,6 @@ function sessionIdForFile(filePath: string, record: JsonRecord): string {
     return nonEmptyString(record.session_id) ?? posixPath.basename(filePath, ".json");
 }
 
-const queryStatements = (
-    statements: readonly string[],
-): Effect.Effect<void, DbError, SurrealClient> =>
-    executeStatements(statements);
-
-const writeClaudeInsightConversion = (
-    conversion: ClaudeInsightConversion,
-    meta: JsonRecord | null,
-): Effect.Effect<void, DbError, SurrealClient> =>
-    queryStatements(buildClaudeInsightStatements(conversion, meta));
-
 export const readClaudeInsightConversions = (
     usageDir: string = defaultUsageDir(),
 ): Effect.Effect<
@@ -576,11 +530,12 @@ export const readClaudeInsightConversions = (
     });
 
 export const ingestClaudeInsights = (
+    write: CacheWriteService,
     opts: Partial<ClaudeInsightIngestOpts> = {},
 ): Effect.Effect<
     ClaudeInsightIngestStats,
-    DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheWriteError,
+    FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const loaded = yield* readClaudeInsightConversions(
@@ -590,7 +545,7 @@ export const ingestClaudeInsights = (
         let frictionEvents = 0;
 
         for (const item of loaded.items) {
-            yield* writeClaudeInsightConversion(item.conversion, item.meta);
+            yield* writeClaudeInsightConversion(write, item.conversion, item.meta);
             insights += 1;
             frictionEvents += item.conversion.frictionEvents.length;
         }
@@ -611,12 +566,3 @@ export const ingestClaudeInsights = (
             frictionEvents,
         };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        ingestClaudeInsights().pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<ClaudeInsightIngestStats>,
-    );
-}

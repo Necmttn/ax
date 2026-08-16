@@ -5,11 +5,10 @@ import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.t
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     __testExtractClaudeJsonlLines,
-    buildClaudeTokenUsageStatements,
-    buildClaudeTurnTokenUsageStatements,
     claudeConcurrency,
     transcriptEditFileRecordKey,
 } from "./transcripts.ts";
+import { estimateCost, normalizeModelName } from "./model-pricing.ts";
 
 // Fixture skill names are plain string literals; brand via the schema constructor.
 const sn = (s: string): SkillName => SkillName.make(s);
@@ -1640,13 +1639,20 @@ describe("claude token usage", () => {
             "-tmp",
             "cl-tok",
         );
-        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
-        expect(stmt).toContain("UPSERT session_token_usage:");
-        expect(stmt).toContain("pricing_source:");
+        const usage = extracted!.tokenUsage!;
+        const cost = estimateCost({
+            modelKey: normalizeModelName(usage.model),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            aggregated: true,
+        });
         // fresh 110 @ $5/M + output 55 @ $25/M + cacheCreate 200 @ $6.25/M
         // + cacheRead 3000 @ $0.5/M = 0.00055 + 0.001375 + 0.00125 + 0.0015
-        expect(stmt).toContain("estimated_cost_usd: 0.004675");
-        expect(stmt).toContain('source: "claude"');
+        expect(cost.totalUsd).toBe(0.004675);
+        expect(cost.pricingSource).not.toBeNull();
     });
 
     test("never triggers the long-context tier on a session's summed tokens above 200k", () => {
@@ -1684,23 +1690,20 @@ describe("claude token usage", () => {
             }),
         ];
         const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-tiered");
-        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
+        const usage = extracted!.tokenUsage!;
+        const cost = estimateCost({
+            modelKey: normalizeModelName(usage.model),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            aggregated: true,
+        });
         // Base rate only: 300k fresh input @ $2/M = $0.6. The tiered rate
         // ($4/M) would give $1.2 - if this ever regresses to that, the
         // `aggregated: true` marking was lost.
-        expect(stmt).toContain("estimated_cost_usd: 0.6");
-    });
-
-    test("subagent source override lands on session and turn usage rows", () => {
-        const extracted = __testExtractClaudeJsonlLines(
-            usageLines("claude-opus-4-8"),
-            "-tmp",
-            "claude-subagent-abc",
-        );
-        const [stmt] = buildClaudeTokenUsageStatements(extracted!, "claude-subagent");
-        expect(stmt).toContain('source: "claude-subagent"');
-        const [turnStmt] = buildClaudeTurnTokenUsageStatements(extracted!, "claude-subagent");
-        expect(turnStmt).toContain('source: "claude-subagent"');
+        expect(cost.totalUsd).toBe(0.6);
     });
 
     test("emits no statements when the transcript carries no usage", () => {
@@ -1719,7 +1722,7 @@ describe("claude token usage", () => {
             "cl-none",
         );
         expect(extracted?.tokenUsage).toBeNull();
-        expect(buildClaudeTokenUsageStatements(extracted!)).toEqual([]);
+        expect(extracted?.turnTokenUsages).toEqual([]);
     });
 
     test("leaves cost null for an unknown model but still records tokens", () => {
@@ -1728,10 +1731,19 @@ describe("claude token usage", () => {
             "-tmp",
             "cl-tok",
         );
-        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
-        expect(stmt).toContain("estimated_cost_usd: NONE");
-        expect(stmt).toContain("pricing_source: NONE");
-        expect(stmt).toContain("prompt_tokens: 3310");
+        const usage = extracted!.tokenUsage!;
+        const cost = estimateCost({
+            modelKey: normalizeModelName(usage.model),
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            aggregated: true,
+        });
+        expect(cost.totalUsd).toBeNull();
+        expect(cost.pricingSource).toBeNull();
+        expect(usage.promptTokens).toBe(3310);
     });
 
     test("emits a priced turn_token_usage row per assistant message", () => {
@@ -1740,15 +1752,22 @@ describe("claude token usage", () => {
             "-tmp",
             "cl-tok",
         );
-        const stmts = buildClaudeTurnTokenUsageStatements(extracted!);
+        const turns = extracted!.turnTokenUsages;
         // Two assistant messages -> two per-turn rows.
-        expect(stmts).toHaveLength(2);
-        expect(stmts[0]).toContain("UPSERT turn_token_usage:");
-        expect(stmts[0]).toContain("usage_source: \"claude_transcript.message_usage\"");
+        expect(turns).toHaveLength(2);
         // First turn: fresh 100 @ $5/M + output 50 @ $25/M + cacheCreate 200
         // @ $6.25/M + cacheRead 1000 @ $0.5/M = 0.0005+0.00125+0.00125+0.0005
-        expect(stmts[0]).toContain("estimated_cost_usd: 0.0035");
-        expect(stmts[0]).toContain("prompt_tokens: 1300");
+        const first = turns[0]!;
+        const cost = estimateCost({
+            modelKey: normalizeModelName(first.model),
+            promptTokens: first.promptTokens,
+            completionTokens: first.completionTokens,
+            cacheCreationInputTokens: first.cacheCreationInputTokens,
+            cacheReadInputTokens: first.cacheReadInputTokens,
+            estimatedTokens: first.estimatedTokens,
+        });
+        expect(cost.totalUsd).toBe(0.0035);
+        expect(first.promptTokens).toBe(1300);
     });
 
     test("emits no turn rows when the transcript carries no usage", () => {
@@ -1766,7 +1785,7 @@ describe("claude token usage", () => {
             "-tmp",
             "cl-none",
         );
-        expect(buildClaudeTurnTokenUsageStatements(extracted!)).toEqual([]);
+        expect(extracted?.turnTokenUsages).toEqual([]);
     });
 
     test("counts malformed lines at the decode boundary without dropping valid ones", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { edgeRowId, skillRowId } from "@ax/lib/stable-id";
 // Task 4 flipped these imports from "../derive-signals.ts" to "./core.ts" /
 // "./types.ts" - that flip was the before/after behavior-preservation
 // harness. Assertions are characterization-pinned; do not edit them.
@@ -204,7 +204,7 @@ describe("deriveProposed", () => {
         expect(edges).toEqual([
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey(sn("superpowers:test-driven-development")),
+                skillKey: skillRowId("superpowers:test-driven-development"),
                 skillName: "superpowers:test-driven-development",
                 ts: "2026-06-01T10:00:00.000Z",
                 contextExcerpt: mention, // short text: +/-40 chars covers it all
@@ -233,8 +233,8 @@ describe("deriveProposed", () => {
 
 describe("deriveSkillPairs", () => {
     const keysSorted = (a: string, b: string): [string, string] => {
-        const ka = skillRecordKey(sn(a));
-        const kb = skillRecordKey(sn(b));
+        const ka = skillRowId(a);
+        const kb = skillRowId(b);
         return ka < kb ? [ka, kb] : [kb, ka];
     };
 
@@ -279,15 +279,15 @@ describe("deriveSkillPairs", () => {
     });
 
     test("skillPairedEdgeId is symmetric and orders keys lexicographically", () => {
-        const a = skillRecordKey(sn("commit"));
-        const b = skillRecordKey(sn("diagnose"));
+        const a = skillRowId("commit");
+        const b = skillRowId("diagnose");
         const fwd = skillPairedEdgeId(a, b);
         const rev = skillPairedEdgeId(b, a);
         expect(fwd).toEqual(rev);
         const [lo, hi] = a < b ? [a, b] : [b, a];
         expect(fwd.fromKey).toBe(lo);
         expect(fwd.toKey).toBe(hi);
-        expect(fwd.edgeId.startsWith(`${lo.slice(0, 24)}__${hi.slice(0, 24)}__`)).toBe(true);
+        expect(fwd.edgeId).toBe(edgeRowId("skill_paired", lo, hi));
     });
 });
 
@@ -311,14 +311,14 @@ describe("deriveRecovered", () => {
         expect(edges).toEqual([
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey(sn("diagnose")),
+                skillKey: skillRowId("diagnose"),
                 skillName: "diagnose",
                 ts: "2026-06-01T10:01:00.000Z",
                 errorExcerpt: "TypeError: Cannot read properties of undefined (reading 'turns')",
             },
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey(sn("failure-recovery")),
+                skillKey: skillRowId("failure-recovery"),
                 skillName: "failure-recovery",
                 ts: "2026-06-01T10:01:00.000Z",
                 errorExcerpt: "TypeError: Cannot read properties of undefined (reading 'turns')",

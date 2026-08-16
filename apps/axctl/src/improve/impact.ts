@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import type { ImpactEstimate, ProposalDto } from "@ax/lib/shared/dashboard-types";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { interventionFormSpec } from "./intervention-forms.ts";
@@ -37,7 +38,8 @@ const isRoutingProposal = (p: ProposalDto): boolean =>
     p.form === "hook" && p.title === ROUTING_PROPOSAL_TITLE;
 
 const routingImpact = Effect.fn("improve.routingImpact")(function* () {
-    const result = yield* fetchDispatchCandidates({ sinceDays: ROUTING_WINDOW_DAYS });
+    const read = yield* CacheRead;
+    const result = yield* fetchDispatchCandidates(read, { sinceDays: ROUTING_WINDOW_DAYS });
     const total = result.total_est_savings_usd;
     const top = result.top_classes
         .slice(0, 3)
