@@ -294,11 +294,42 @@ export const loadTouches = (fileIds: readonly string[]) =>
         }));
     });
 
+const MentionQueryRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    intent_kind: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+    score: NumberFromBigIntColumn,
+    why: Schema.String,
+});
+type MentionQueryRowType = typeof MentionQueryRow.Type;
+
+const mentionRowToTurn = (row: MentionQueryRowType): Omit<MentionTurn, "score" | "why"> & { score: number; why: string } => ({
+    id: row.id,
+    session: row.session,
+    source: row.source,
+    seq: row.seq,
+    ts: row.ts.toISOString(),
+    intent_kind: row.intent_kind,
+    text_excerpt: row.text_excerpt,
+    score: row.score,
+    why: row.why,
+});
+
+/**
+ * `mentioned_file`/`mentioned_symbol`/`mentioned_error` are `(turn) -in->
+ * edge -out-> (target)` edges. `why` was `string::concat(source, ": ", ...)`
+ * self-referencing the `source` alias defined earlier in the same SELECT -
+ * DuckDB (standard SQL) cannot do that, so the expression is repeated.
+ */
 export const loadMentions = (signals: MentionSignals, files: readonly FileRow[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const scored = new Map<string, MentionTurn>();
-        const addRows = (rows: Array<Omit<MentionTurn, "score" | "why"> & { readonly score: number; readonly why: string }>) => {
+        const addRows = (rows: readonly (Omit<MentionTurn, "score" | "why"> & { readonly score: number; readonly why: string })[]) => {
             for (const row of rows) {
                 if (row.source === "claude-subagent") continue;
                 if (!["organic_task", "correction", "preference"].includes(row.intent_kind ?? "")) continue;
@@ -313,47 +344,56 @@ export const loadMentions = (signals: MentionSignals, files: readonly FileRow[])
 
         const fileIds = files.map((file) => file.id);
         if (fileIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       8 AS score, string::concat(source, ": ", out.path) AS why
-                FROM mentioned_file
-                WHERE out IN [${fileIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       8 AS score, (s.source || ': ' || f.path) AS why
+                FROM mentioned_file mf
+                JOIN turn t ON t.id = mf.in_id
+                JOIN session s ON s.id = t.session
+                JOIN file f ON f.id = mf.out_id
+                WHERE mf.out_id IN (${fileIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, fileIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
-        const symbolIds = signals.symbols.map((symbol) => `symbol:\`${symbolRecordKey(symbol)}\``);
+        const symbolIds = signals.symbols.map((symbol) => `symbol:${symbolRecordKey(symbol)}`);
         if (symbolIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       5 AS score, string::concat(source, ": ", out.name) AS why
-                FROM mentioned_symbol
-                WHERE out IN [${symbolIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       5 AS score, (s.source || ': ' || sym.name) AS why
+                FROM mentioned_symbol ms
+                JOIN turn t ON t.id = ms.in_id
+                JOIN session s ON s.id = t.session
+                JOIN symbol sym ON sym.id = ms.out_id
+                WHERE ms.out_id IN (${symbolIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, symbolIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
-        const errorIds = signals.errors.map((error) => `error_signature:\`${errorSignatureRecordKey(normalizeErrorSignature(error))}\``);
+        const errorIds = signals.errors.map((error) => `error_signature:${errorSignatureRecordKey(normalizeErrorSignature(error))}`);
         if (errorIds.length > 0) {
-            const [rows] = yield* db.query<[Array<Omit<MentionTurn, "score" | "why"> & { score: number; why: string }>]>(`
-                SELECT <string>in.id AS id, <string>in.session AS session, in.session.source AS source, in.seq AS seq,
-                       <string>in.ts AS ts, in.intent_kind AS intent_kind, in.text_excerpt AS text_excerpt,
-                       10 AS score, string::concat(source, ": ", out.text) AS why
-                FROM mentioned_error
-                WHERE out IN [${errorIds.join(", ")}]
-                  AND in.session.source != "claude-subagent"
-                ORDER BY ts DESC
-                LIMIT 40;
-            `);
-            addRows(rows);
+            const rows = yield* read.rows(MentionQueryRow, `
+                SELECT t.id AS id, t.session AS session, s.source AS source, t.seq AS seq,
+                       t.ts AS ts, t.intent_kind AS intent_kind, t.text_excerpt AS text_excerpt,
+                       10 AS score, (s.source || ': ' || es.text) AS why
+                FROM mentioned_error me
+                JOIN turn t ON t.id = me.in_id
+                JOIN session s ON s.id = t.session
+                JOIN error_signature es ON es.id = me.out_id
+                WHERE me.out_id IN (${errorIds.map(() => "?").join(", ")})
+                  AND s.source <> 'claude-subagent'
+                ORDER BY t.ts DESC
+                LIMIT 40
+            `, errorIds);
+            addRows(rows.map(mentionRowToTurn));
         }
 
         return Array.from(scored.values())
