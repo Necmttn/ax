@@ -146,6 +146,13 @@ const runCli = (args: ReadonlyArray<string>, snapshotPath: string, sidecarPath: 
     const child = Bun.spawnSync(["bun", CLI, ...args], {
         env: {
             ...process.env,
+            // The dylib `duckdbTestSetup` resolved is NOT necessarily in
+            // `process.env` - CI builds it as an artifact and hands back a path.
+            // Spreading `process.env` alone therefore passes locally (the dev
+            // shell exports AX_DUCKDB_DYLIB) and fails in CI with
+            // `CacheUnavailableError: no libduckdb available`. Forward it
+            // explicitly, exactly as recall/sessions-show/ingest-no-surreal do.
+            ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
             AX_DUCKDB_SNAPSHOT: snapshotPath,
             AX_SIDECAR_PATH: sidecarPath,
             AX_DB_URL: DEAD_DB_URL,
