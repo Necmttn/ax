@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 import {
     estimateImpactCached,
@@ -7,28 +7,7 @@ import {
     ROUTING_PROPOSAL_TITLE,
 } from "../improve/impact.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
-
-// Experiment-loop shortlist + verdict state. Reads proposal +
-// per-form payloads + the active experiment + newest checkpoint.
-// See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
-// (Phase C10). Moved verbatim from server.ts queryApi (166-182).
-const PROPOSALS_SQL = `
-SELECT id, form, title, hypothesis, hypothesis_template, evidence_query, dedupe_sig, frequency, confidence, status, origin, baseline, reject_reason,
-    type::string(created_at) AS created_at,
-    (SELECT trigger_pattern, suspected_gap, proposed_behavior, expected_impact FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-    (SELECT bounded_role, delegation_trigger, example_task_patterns FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
-    (SELECT event_name, target_tool, hook_command, recovery_path, smoke_test_command, disable_command, failure_mode FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-    (SELECT file_target, section, suggested_text FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
-    (SELECT trigger_signal, schedule, action, recovery_path, smoke_test_command, disable_command, failure_mode FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
-    (SELECT id, artifact_path, status, task_path, locked_verdict,
-        type::string(created_at) AS created_at,
-        type::string(scaffolded_at) AS scaffolded_at,
-        (SELECT kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint,
-        (SELECT kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at ASC) AS checkpoints
-        FROM experiment WHERE proposal = $parent.id LIMIT 1)[0] AS experiment
-FROM proposal
-ORDER BY frequency DESC, created_at DESC
-LIMIT 100;`;
+import { listStoredProposals, type StoredCheckpoint, type StoredProposal } from "../improve/judgment-proposals.ts";
 
 /** Brief shown for an open proposal - shared by /api/improve rows and next-action cards. */
 export const proposalReviewBrief = (p: ProposalDto): string =>
@@ -135,17 +114,17 @@ const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
     }
     const template = p.hypothesis_template;
     const query = p.evidence_query;
-    if (!template || !query || !/^(SELECT|RETURN)\b/i.test(query.trim())) return p;
+    if (!template || !query || !/^SELECT\b/i.test(query.trim())) return p;
     const cache = deps.hydrationCache ?? defaultHydrationCache;
     const nowMs = currentMs(deps);
     const hit = cache.get(p.dedupe_sig, nowMs);
     if (hit !== null) {
         return { ...p, hypothesis: hit };
     }
-    const db = yield* SurrealClient;
-    const hydrated = yield* db.query<[Array<Record<string, unknown>>]>(query).pipe(
+    const read = yield* CacheRead;
+    const hydrated = yield* read.raw(query).pipe(
         Effect.map((result) => {
-            const row = result[0]?.[0];
+            const row = result.rows[0];
             return row ? renderHypothesisTemplate(template, row) : null;
         }),
         Effect.catch(() => Effect.succeed(null)),
@@ -155,13 +134,69 @@ const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
     return { ...p, hypothesis: hydrated };
 });
 
+const checkpointDto = (checkpoint: StoredCheckpoint) => {
+    const measured = checkpoint.measured;
+    const typedMeasured =
+        typeof measured.opportunities === "number" &&
+        typeof measured.addressed === "number" &&
+        typeof measured.ratio === "number" &&
+        typeof measured.built === "boolean"
+            ? {
+                opportunities: measured.opportunities,
+                addressed: measured.addressed,
+                ratio: measured.ratio,
+                built: measured.built,
+            }
+            : null;
+    return {
+        kind: checkpoint.kind,
+        suggested: checkpoint.suggested,
+        user_verdict: checkpoint.user_verdict,
+        measured: typedMeasured,
+        observed_at: checkpoint.observed_at.toISOString(),
+    };
+};
+
+const proposalDto = (proposal: StoredProposal): ProposalDto => {
+    const checkpoints = proposal.experiment?.checkpoints.map(checkpointDto) ?? [];
+    return {
+        id: proposal.id,
+        form: proposal.form,
+        title: proposal.title,
+        hypothesis: proposal.hypothesis,
+        hypothesis_template: proposal.hypothesis_template,
+        evidence_query: proposal.evidence_query,
+        dedupe_sig: proposal.dedupe_sig,
+        frequency: proposal.frequency,
+        confidence: proposal.confidence,
+        status: proposal.status,
+        origin: proposal.origin,
+        baseline: proposal.baseline,
+        reject_reason: proposal.reject_reason,
+        created_at: proposal.created_at.toISOString(),
+        skill_payload: proposal.skill_payload,
+        subagent_payload: proposal.subagent_payload,
+        hook_payload: proposal.hook_payload,
+        guidance_payload: proposal.guidance_payload,
+        automation_payload: proposal.automation_payload,
+        experiment: proposal.experiment === null ? null : {
+            id: proposal.experiment.id,
+            artifact_path: proposal.experiment.artifact_path,
+            status: proposal.experiment.status,
+            task_path: proposal.experiment.task_path,
+            locked_verdict: proposal.experiment.locked_verdict,
+            created_at: proposal.experiment.created_at.toISOString(),
+            scaffolded_at: proposal.experiment.scaffolded_at?.toISOString() ?? null,
+            latest_checkpoint: checkpoints.at(-1) ?? null,
+            checkpoints,
+        },
+    };
+};
+
 /** Raw proposal rows, loosely typed at the edge like the legacy queryApi endpoints. */
 export const fetchImproveProposals = Effect.fn("dashboard.fetchImproveProposals")(
     function* (deps: ImproveProposalHydrationDeps = {}) {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(PROPOSALS_SQL);
-        // TODO: replace with schema decode when the proposal wire shape stabilizes
-        const rows = (result[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
+        const rows = (yield* listStoredProposals()).map(proposalDto);
         const hydrated = yield* Effect.all(rows.map((p) => hydrateHypothesis(p, deps)), {
             concurrency: 4,
         });

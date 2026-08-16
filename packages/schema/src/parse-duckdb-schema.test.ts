@@ -2,18 +2,20 @@
 import { describe, expect, test } from "bun:test";
 import { DUCKDB_TABLE_NAMES, parseDuckdbColumnDefs, parseDuckdbTables } from "./parse-duckdb-schema.ts";
 
-// Mirrors duckdb-parity.test.ts's EXPECTED_TABLES_COMPARED - kept as a
-// separate literal (not an import) so a change to either constant is a
-// visible two-file diff, not a silent shared mutation.
-const EXPECTED_TABLES_COMPARED = 138;
+// Mirrors duckdb-parity.test.ts's EXPECTED_DUCKDB_TABLES - kept as a separate
+// literal (not an import) so a change to either constant is a visible two-file
+// diff, not a silent shared mutation. It is 138 minus the fourteen judgment
+// tables that now live in schema.sidecar.sql; the FULL 138 is still compared
+// against the Surreal schema, across both engines, in duckdb-parity.test.ts.
+const EXPECTED_DUCKDB_TABLES = 124;
 
 describe("parse-duckdb-schema", () => {
     test("parseDuckdbTables finds every table in the committed DDL", () => {
-        expect(parseDuckdbTables().length).toBe(EXPECTED_TABLES_COMPARED);
+        expect(parseDuckdbTables().length).toBe(EXPECTED_DUCKDB_TABLES);
     });
 
     test("DUCKDB_TABLE_NAMES is parsed once from the committed DDL and matches parseDuckdbTables", () => {
-        expect(DUCKDB_TABLE_NAMES.size).toBe(EXPECTED_TABLES_COMPARED);
+        expect(DUCKDB_TABLE_NAMES.size).toBe(EXPECTED_DUCKDB_TABLES);
         expect([...DUCKDB_TABLE_NAMES].sort()).toEqual([...parseDuckdbTables()].sort());
     });
 

@@ -3,12 +3,11 @@ import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
 import { QuotaEnvTest } from "../quota/quota-env.ts";
 import { writeDraft } from "./outbox.ts";
 import { gatherReport, renderReport } from "./report.ts";
 import type { ReportData } from "./report.ts";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const data: ReportData = {
     date: "2026-06-13",
@@ -41,12 +40,9 @@ describe("renderReport", () => {
     });
 });
 
-// Fake SurrealClient: serves verdict-query rows then proposal-query rows.
 const fakeDb = (...fixtures: unknown[][]) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.succeed([(fixtures[i++] ?? [])] as unknown as T),
-    } as never);
+    return judgmentTestLayer(() => fixtures[i++] ?? []);
 };
 
 describe("gatherReport", () => {
@@ -58,8 +54,8 @@ describe("gatherReport", () => {
         // gatherReport queries verdicts first, then proposals.
         const layer = Layer.mergeAll(
             fakeDb(
-                [{ verdict: "confirmed", title: "Stop bare bun test", sig: "stop-bare-bun", observed_at: "2026-06-13T03:00:00Z" }],
-                [{ id: "proposal:p1", title: "Guard merges", form: "hook", dedupe_sig: "guard-merges", created_at: "2026-06-13T03:00:00Z" }],
+                [{ verdict: "confirmed", title: "Stop bare bun test", sig: "stop-bare-bun", observed_at: new Date("2026-06-13T03:00:00Z") }],
+                [{ id: "proposal:p1", title: "Guard merges", form: "hook", dedupe_sig: "guard-merges", created_at: new Date("2026-06-13T03:00:00Z") }],
             ),
             BunFileSystem.layer,
             QuotaEnvTest({ token: null }).layer, // no token -> budget degrades, never aborts
@@ -75,18 +71,15 @@ describe("gatherReport", () => {
         expect(out.date).toBe("2026-06-13");
         expect(out.since).toBe(new Date(sinceMs).toISOString());
         expect(out.notes).toBe("ran 4 laps");
-        expect(out.verdicts).toEqual([{ verdict: "confirmed", title: "Stop bare bun test", sig: "stop-bare-bun" }]);
-        expect(out.proposals).toEqual([{ id: "proposal:p1", title: "Guard merges", form: "hook", dedupe_sig: "guard-merges" }]);
+        expect(out.verdicts[0]).toMatchObject({ verdict: "confirmed", title: "Stop bare bun test", sig: "stop-bare-bun" });
+        expect(out.proposals[0]).toMatchObject({ id: "proposal:p1", title: "Guard merges", form: "hook", dedupe_sig: "guard-merges" });
         expect(out.drafts).toHaveLength(1);
         expect(out.drafts[0]).toMatchObject({ title: "Fix X", kind: "bug" });
         expect(out.budgetLine).toContain("spendable");
     });
 
 	test("DB failure degrades to empty verdicts/proposals, never aborts", async () => {
-	    const failDb = Layer.succeed(SurrealClient, {
-	        query: <T>(_: string) =>
-	            Effect.fail(new DbError({ operation: "query", message: "db down" })) as Effect.Effect<T, DbError>,
-	    } as never);
+	    const failDb = judgmentTestLayer(() => []);
         const nowMs = Date.parse("2026-06-13T05:00:00.000Z");
         const out = await Effect.runPromise(
             gatherReport({ sinceMs: nowMs - 3_600_000, nowMs, notes: "", outboxDir: "/no/such/dir" }).pipe(

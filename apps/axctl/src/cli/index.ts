@@ -6,7 +6,8 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheRead, CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheRead, CacheReadLive, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
@@ -234,7 +235,7 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive)),
+        Effect.provide(Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive)),
         Effect.scoped,
     );
 
@@ -302,14 +303,12 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
-    const layer = Layer.mergeAll(
-        transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
-        CacheReadLive,
-    );
+    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
     return runCli(args).pipe(
         // After ingest completes successfully, link orphan OTLP rows to their
         // sessions via telemetry_of edges. Best-effort: never fails the ingest.
         Effect.tap(() => Effect.ignore(correlateOrphanOtel())),
+        Effect.provideService(CacheRead, throwingCacheRead()),
         Effect.provide(layer),
         Effect.scoped,
     );
@@ -330,6 +329,15 @@ const throwingSurrealClient = (): SurrealClientShape =>
         },
     });
 
+const throwingCacheRead = (): CacheReadService =>
+    new Proxy({} as CacheReadService, {
+        get(_target, prop) {
+            throw new Error(
+                `axctl: CacheRead.${String(prop)} accessed inside the ingest runtime`,
+            );
+        },
+    });
+
 /**
  * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
  * commands (install/daemon/doctor/uninstall/version/update) and unknown
@@ -343,7 +351,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
     // SurrealClient connect path.
     runCli(args).pipe(
         Effect.provideService(SurrealClient, throwingSurrealClient()),
-        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive)),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive, JudgmentLive)),
     );
 
 /**
@@ -366,6 +374,7 @@ const withCache = (args: ReadonlyArray<string>): CliProgram =>
                 AxConfigLive.pipe(Layer.provideMerge(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
                 ProcessServiceLive,
                 CacheReadLive,
+                JudgmentLive,
             ),
         ),
         Effect.scoped,

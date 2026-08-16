@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { SurrealClient } from "@ax/lib/db";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { DigestItem } from "./model.ts";
 import { salience } from "./rank.ts";
 import { recommend } from "../improve/recommend.ts";
@@ -75,7 +76,7 @@ export const quotaToItem = (
 
 export const improveItems = (
     now: Date,
-): Effect.Effect<DigestItem[], DbError, SurrealClient> =>
+): Effect.Effect<DigestItem[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const proposals = yield* recommend({ limit: 100 });
         const item = improveToItem(proposals.length, now);

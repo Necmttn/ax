@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildRetroReflectQuery,
     renderReflectDetail,
     renderReflectTable,
     type RetroReflectRow,
@@ -69,36 +68,5 @@ describe("renderReflectDetail", () => {
         expect(out).toContain("Bash failed 7 times across 3 sessions.");
         expect(out).toContain("freq=7");
         expect(out).toContain("conf=medium");
-    });
-});
-
-describe("buildRetroReflectQuery", () => {
-    test("filters on the retro proposal-key marker prefix", () => {
-        const sql = buildRetroReflectQuery({ sinceDays: 30, status: "open" });
-        expect(sql).toContain("skill__retro__");
-        expect(sql).toMatch(/string::contains\(<string>id/);
-    });
-
-    test("includes a sub-SELECT against skill_proposal", () => {
-        const sql = buildRetroReflectQuery({ sinceDays: 30, status: "open" });
-        expect(sql).toMatch(/SELECT[\s\S]+FROM skill_proposal/);
-        expect(sql).toContain("proposal = $parent.id");
-    });
-
-    test("filters by status='open' by default but allows --status=all", () => {
-        const open = buildRetroReflectQuery({ sinceDays: 30, status: "open" });
-        expect(open).toContain("status = 'open'");
-        const all = buildRetroReflectQuery({ sinceDays: 30, status: "all" });
-        expect(all).not.toContain("status =");
-    });
-
-    test("orders by frequency DESC", () => {
-        const sql = buildRetroReflectQuery({ sinceDays: 30, status: "open" });
-        expect(sql).toMatch(/ORDER BY\s+frequency\s+DESC/);
-    });
-
-    test("respects sinceDays in the WHERE clause", () => {
-        const sql = buildRetroReflectQuery({ sinceDays: 7, status: "open" });
-        expect(sql).toContain("time::now() - 7d");
     });
 });

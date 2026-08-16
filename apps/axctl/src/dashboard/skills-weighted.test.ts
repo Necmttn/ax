@@ -11,25 +11,41 @@
  * Query order (call index):
  *   0 → fetchSparSessionIds (spar exclusion ids)
  *   1 → invocation aggregate (pass 1)
- *   2 → role weights (pass 2)
- *   3 → doctor query
- *   4 → deleted skill ids
- *   5 → synthetic skill ids
- *   6 → skill names
- *   7 → recovered_by edges (skill → session mapping)
- *   8 → otel_log_event latency (from sessionTelemetryLatency, when sessions found)
+ * Role weights and spar labels come from the judgment test service.
+ *   1 → doctor query
+ *   2 → deleted skill ids
+ *   3 → synthetic skill ids
+ *   4 → skill names
+ *   5 → recovered_by edges (skill → session mapping)
+ *   6 → otel_log_event latency (from sessionTelemetryLatency, when sessions found)
  */
 import { describe, it, expect } from "bun:test";
+import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
+import type { SurrealClient } from "@ax/lib/db";
+import type { Judgment } from "@ax/lib/sqlite";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
+
+const runWithMock = <A, E>(
+    db: TestSurrealClient,
+    effect: Effect.Effect<A, E, SurrealClient | Judgment>,
+    sparSessions: readonly string[] = [],
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(
+    db.layer,
+    judgmentTestLayer((sql) => {
+        if (sql.includes("FROM session_label")) return sparSessions.map((session_id) => ({ session_id }));
+        if (sql.includes("JOIN role")) return mockRoleRows[0];
+        return [];
+    }),
+))));
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 /** Empty spar-session result - prepend to every positional response list. */
-const noSparSessions = [[]];
 
 // invocation response (pass 1)
 const mockInvRows = [
@@ -49,14 +65,14 @@ const mockRoleRows = [
     ],
 ];
 
-// The doctor count now delegates to fetchSkillHygiene (#481), whose ONE db.query
-// returns a 3-statement tuple: [invocation counts, skill rows, classified ids].
+// The doctor count now delegates to fetchSkillHygiene (#481), whose graph query
+// returns invocation counts and skill rows. Role decisions come from SQLite.
 // Build N distinct unclassified skills (≥3 invocations, real dir_path, unique
 // content_hash, none classified) so the hygiene join yields exactly N rows.
 function hygieneResp(n: number): unknown[] {
     const counts = Array.from({ length: n }, (_, i) => ({ sid: `skill:u${i}`, invocations: 5, sessions: 4 }));
     const skills = Array.from({ length: n }, (_, i) => ({ id: `skill:u${i}`, name: `u${i}`, dir_path: "/skills", content_hash: `h${i}` }));
-    return [counts, skills, []];
+    return [counts, skills];
 }
 
 // doctor response - 3 unclassified (below threshold=5)
@@ -71,7 +87,7 @@ const mockDoctorAbove = hygieneResp(7);
 
 describe("fetchSkillsWeighted", () => {
     it("returns rows sorted by score DESC", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow]);
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
         const result = await runWithMock(db, fetchSkillsWeighted());
 
         // tdd: 124 × 2.0 = 248, caveman: 87 × 1.0 = 87, worktree: 62 × 1.0 = 62
@@ -84,7 +100,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("sums role weights for multi-role skills", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow]);
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
         const result = await runWithMock(db, fetchSkillsWeighted());
 
         const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
@@ -93,7 +109,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("gives unclassified skills weight 1.0", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow]);
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
         const result = await runWithMock(db, fetchSkillsWeighted());
 
         const worktree = result.rows.find((r) => r.skill_name === "worktree-read-strategy")!;
@@ -102,7 +118,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("respects limit param", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow]);
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
         const result = await runWithMock(db, fetchSkillsWeighted({ limit: 2 }));
         expect(result.rows.length).toBe(2);
     });
@@ -129,7 +145,7 @@ describe("fetchSkillsWeighted", () => {
 
     it("excludes synthetic provider tools by default and uses the name field", async () => {
         const db = makeMockDb([
-            noSparSessions, invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
+            invWithTool, mockDoctorBelow, [[]], synthIds, nameRows,
         ]);
         const result = await runWithMock(db, fetchSkillsWeighted());
 
@@ -139,7 +155,7 @@ describe("fetchSkillsWeighted", () => {
 
     it("includeTools=true keeps tools in the ranking", async () => {
         const db = makeMockDb([
-            noSparSessions, invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
+            invWithTool, mockDoctorBelow, [[]], synthIds, nameRows,
         ]);
 
         const result = await runWithMock(db, fetchSkillsWeighted({ includeTools: true }));
@@ -159,7 +175,7 @@ describe("fetchSkillsWeighted", () => {
             { id: "skill:real", name: "real", dir_path: "/skills", content_hash: "h1" },
             { id: "skill:synthtool", name: "tool", dir_path: "(synthetic)", content_hash: "h2" },
         ];
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, [counts, skills, []]]);
+        const db = makeMockDb([mockInvRows, [counts, skills]]);
         const result = await runWithMock(db, fetchSkillsWeighted());
         // Only the real unclassified skill counts; the synthetic tool is excluded.
         expect(result.doctor.unclassified_count).toBe(1);
@@ -176,7 +192,7 @@ describe("fetchSkillsWeighted", () => {
             { id: "skill:real", name: "real", dir_path: "/skills", content_hash: "h1" },
             { id: "skill:synthtool", name: "tool", dir_path: "(synthetic)", content_hash: "h2" },
         ];
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, [counts, skills, []]]);
+        const db = makeMockDb([mockInvRows, [counts, skills]]);
         const result = await runWithMock(db, fetchSkillsWeighted({ includeTools: true }));
         expect(result.doctor.unclassified_count).toBe(2);
     });
@@ -186,7 +202,7 @@ describe("fetchSkillsWeighted", () => {
 
         await runWithMock(db, fetchSkillsWeighted({ windowDays: 30 }));
         // Invocation query is at index 1 (after spar query at 0)
-        expect(db.captured[1]).toContain("ts >= time::now() - 30d");
+        expect(db.captured[0]).toContain("ts >= time::now() - 30d");
     });
 
     it("omits window clause when windowDays is not set", async () => {
@@ -194,18 +210,18 @@ describe("fetchSkillsWeighted", () => {
 
         await runWithMock(db, fetchSkillsWeighted());
         // Invocation query at index 1 must not have a time window
-        expect(db.captured[1]).not.toContain("ts >= time::now()");
+        expect(db.captured[0]).not.toContain("ts >= time::now()");
     });
 
     it("doctor: no advice when count < threshold", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorBelow]);
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
         const result = await runWithMock(db, fetchSkillsWeighted({ doctorThreshold: 5 }));
         expect(result.doctor.advice).toBeNull();
         expect(result.doctor.unclassified_count).toBe(3);
     });
 
     it("doctor: advice present when count >= threshold", async () => {
-        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, mockDoctorAbove]);
+        const db = makeMockDb([mockInvRows, mockDoctorAbove]);
         const result = await runWithMock(db, fetchSkillsWeighted({ doctorThreshold: 5 }));
         expect(result.doctor.advice).not.toBeNull();
         expect(result.doctor.advice).toContain("axctl skills classify");
@@ -213,7 +229,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("handles empty invocation result gracefully", async () => {
-        const db = makeMockDb([noSparSessions, [[]], [[]], hygieneResp(0)]);
+        const db = makeMockDb([[[]], hygieneResp(0)]);
         const result = await runWithMock(db, fetchSkillsWeighted());
         expect(result.rows).toHaveLength(0);
         expect(result.doctor.unclassified_count).toBe(0);
@@ -237,18 +253,16 @@ describe("fetchSkillsWeighted", () => {
     it("invocation SQL contains NOT IN $sparSessions clause", async () => {
         const db = makeMockDb();
         await runWithMock(db, fetchSkillsWeighted());
-        // Invocation query at index 1
-        expect(db.captured[1]).toContain("session NOT IN $sparSessions");
+        expect(db.captured[0]).toContain("session NOT IN $sparSessions");
     });
 
     it("binds $sparSessions as RecordId values (record-typed, not strings)", async () => {
         // Spar query (index 0) returns raw RecordIds via SELECT VALUE id; assert
         // they are passed through to the invocation call's binding unchanged and
         // are RecordId instances - the only form NOT IN actually evaluates.
-        const sparRid = new RecordId("session", "spar-abc");
-        const db = makeMockDb([[[sparRid]], mockInvRows, mockRoleRows, mockDoctorBelow]);
-        await runWithMock(db, fetchSkillsWeighted());
-        const invCall = db.calls[1];
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
+        await runWithMock(db, fetchSkillsWeighted(), ["spar-abc"]);
+        const invCall = db.calls[0];
         const bound = invCall?.bindings?.sparSessions as unknown[];
         expect(Array.isArray(bound)).toBe(true);
         expect(bound).toHaveLength(1);
@@ -261,10 +275,9 @@ describe("fetchSkillsWeighted", () => {
         // End-to-end (within the stub): the RecordIds emitted by the spar
         // query (call 0) appear verbatim as $sparSessions on the invocation
         // query (call 1). On the live DB this is what drops spar invocations.
-        const sparRid = new RecordId("session", "spar-variant");
-        const db = makeMockDb([[[sparRid]], mockInvRows, mockRoleRows, mockDoctorBelow]);
-        await runWithMock(db, fetchSkillsWeighted());
-        const invCall = db.calls[1];
+        const db = makeMockDb([mockInvRows, mockDoctorBelow]);
+        await runWithMock(db, fetchSkillsWeighted(), ["spar-variant"]);
+        const invCall = db.calls[0];
         const bound = invCall?.bindings?.sparSessions as unknown[];
         expect(bound.some((b) => b instanceof RecordId && String(b) === "session:⟨spar-variant⟩")).toBe(true);
     });
@@ -293,15 +306,13 @@ describe("recovery latency (lens E)", () => {
 
     it("computes median_recovery_ms as median of recovery session durations", async () => {
         const db = makeMockDb([
-            noSparSessions,    // 0 - spar ids
             mockInvRows,       // 1 - invocation aggregate
-            mockRoleRows,      // 2 - role weights
-            mockDoctorBelow,   // 3 - doctor
-            [[]],              // 4 - deleted
-            [[]],              // 5 - synthetic
-            [[]],              // 6 - names
-            mockRecoveryEdges, // 7 - recovered_by
-            mockLatencyRows,   // 8 - otel_log_event latency
+            mockDoctorBelow,   // 2 - doctor
+            [[]],              // 3 - deleted
+            [[]],              // 4 - synthetic
+            [[]],              // 5 - names
+            mockRecoveryEdges, // 6 - recovered_by
+            mockLatencyRows,   // 7 - otel_log_event latency
         ]);
 
         const result = await runWithMock(db, fetchSkillsWeighted());
@@ -313,9 +324,7 @@ describe("recovery latency (lens E)", () => {
 
     it("sets median_recovery_ms=null for skills with no recovery edges", async () => {
         const db = makeMockDb([
-            noSparSessions,
             mockInvRows,
-            mockRoleRows,
             mockDoctorBelow,
             [[]],
             [[]],
@@ -332,9 +341,7 @@ describe("recovery latency (lens E)", () => {
 
     it("sets median_recovery_ms=null for all rows when no recovery edges exist", async () => {
         const db = makeMockDb([
-            noSparSessions,
             mockInvRows,
-            mockRoleRows,
             mockDoctorBelow,
             [[]],
             [[]],
@@ -351,15 +358,13 @@ describe("recovery latency (lens E)", () => {
 
     it("recovered_by query is issued as a separate pass (index 7)", async () => {
         const db = makeMockDb([
-            noSparSessions,
             mockInvRows,
-            mockRoleRows,
             mockDoctorBelow,
         ]);
 
         await runWithMock(db, fetchSkillsWeighted());
 
-        expect(db.captured[7]).toContain("recovered_by");
+        expect(db.captured[5]).toContain("recovered_by");
     });
 
     it("single recovery session: median_recovery_ms equals its duration", async () => {
@@ -367,9 +372,7 @@ describe("recovery latency (lens E)", () => {
         const singleLatency = [[{ session_id: "only-one", d: 3750, n: 2 }]];
 
         const db = makeMockDb([
-            noSparSessions,
             mockInvRows,
-            mockRoleRows,
             mockDoctorBelow,
             [[]],
             [[]],
@@ -398,9 +401,7 @@ describe("recovery latency (lens E)", () => {
         ]];
 
         const db = makeMockDb([
-            noSparSessions,
             mockInvRows,
-            mockRoleRows,
             mockDoctorBelow,
             [[]],
             [[]],

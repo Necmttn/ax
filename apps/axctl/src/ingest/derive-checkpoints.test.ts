@@ -1,10 +1,26 @@
 import { describe, expect, test } from "bun:test";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, Layer, Schema } from "effect";
+import { join } from "node:path";
+import { SurrealClient } from "@ax/lib/db";
+import { CacheReadLayer, withCacheWrite } from "@ax/lib/duckdb/seam";
+import { withIngestLock } from "@ax/lib/ingest-lock";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { Judgment, JudgmentLayer, TextColumn } from "@ax/lib/sqlite";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import {
-    buildCheckpointStatement,
     checkpointKey,
     computeSuggestedVerdict,
+    deriveCheckpoints,
     dueCheckpointKinds,
 } from "./derive-checkpoints.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("derive checkpoints");
+const Platform = Layer.merge(BunFileSystem.layer, BunPath.layer);
+const CACHE_DDL = `
+CREATE TABLE opportunity (id VARCHAR PRIMARY KEY, in_id VARCHAR NOT NULL, was_addressed BOOLEAN NOT NULL);
+CREATE TABLE session (id VARCHAR PRIMARY KEY, created_at TIMESTAMP);
+`;
 
 describe("computeSuggestedVerdict", () => {
     test("opportunities=0 + no frequency info -> no_longer_needed", () => {
@@ -82,28 +98,70 @@ describe("checkpointKey", () => {
         expect(checkpointKey("exp_a", "+3s")).not.toBe(checkpointKey("exp_a", "+10s"));
     });
 
-    test("escapes the + so the key is a safe SurrealDB identifier", () => {
+    test("uses a typed content hash ID", () => {
         const key = checkpointKey("exp_a", "+3s");
         expect(key).not.toContain("+");
-        expect(key).toContain("_plus_3s");
+        expect(key).toMatch(/^[0-9a-f]{32}$/);
     });
 });
 
-describe("buildCheckpointStatement", () => {
-    test("emits UPSERT with NONE user_verdict + json measured + recorded suggested", () => {
-        const sql = buildCheckpointStatement({
-            experimentKey: "exp_demo",
-            kind: "+3s",
-            measured: { opportunities: 4, addressed: 3, ratio: 0.75, built: true },
-            suggested: "adopted",
-            observedAt: new Date("2026-05-25T00:00:00.000Z"),
+dtest("deriveCheckpoints uses DuckDB facts and SQLite judgments", async () => {
+    const root = tempDir("ax-checkpoint-sidecar-");
+    const lockPath = join(root, "ingest.lock");
+    const snapshotPath = join(root, "snapshot.duckdb");
+    const publish = withIngestLock({
+        lockPath,
+        command: "derive-checkpoints-test",
+        staleMs: 60_000,
+        onBusy: () => Effect.die("unexpected busy lock"),
+    }, withCacheWrite({
+        livePath: join(root, "live.duckdb"),
+        lockPath,
+        snapshotPath,
+        schemaSql: CACHE_DDL,
+        ...(dylibPath === null ? {} : { assetPath: dylibPath }),
+    }, (write) => Effect.gen(function* () {
+        yield* write.putMany("session", [1, 2, 3].map((n) => ({
+            id: `session-${n}`,
+            created_at: new Date(`2026-01-0${n + 1}T00:00:00Z`),
+        })));
+        yield* write.putMany("opportunity", [
+            { id: "o1", in_id: "experiment-one", was_addressed: true },
+            { id: "o2", in_id: "experiment-one", was_addressed: true },
+            { id: "o3", in_id: "experiment-one", was_addressed: false },
+        ]);
+    })));
+    await Effect.runPromise(publish.pipe(Effect.provide(Platform)));
+
+    const deadSurreal = Layer.succeed(SurrealClient, new Proxy({} as never, {
+        get() { throw new Error("SurrealDB must stay unused"); },
+    }));
+    const layer = Layer.mergeAll(
+        CacheReadLayer({ snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) }),
+        JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
+        deadSurreal,
+    );
+    const result = await Effect.runPromise(Effect.gen(function* () {
+        const judgment = yield* Judgment;
+        const now = new Date("2026-01-01T00:00:00Z");
+        yield* judgment.put("proposal", {
+            id: "proposal-one", form: "guidance", title: "T", hypothesis: "H", dedupe_sig: "sig",
+            frequency: 3, confidence: "high", status: "accepted", origin: "agent",
+            hypothesis_template: null, evidence_query: null, reject_reason: null,
+            baseline: JSON.stringify({ frequency: 3 }), created_at: now, updated_at: now,
         });
-        expect(sql).toContain("UPSERT checkpoint:");
-        expect(sql).toContain("experiment: experiment:");
-        expect(sql).toContain("kind: \"+3s\"");
-        expect(sql).toContain("suggested: \"adopted\"");
-        expect(sql).toContain("user_verdict: NONE");
-        expect(sql).toContain("\"opportunities\":4");
-        expect(sql).toContain("\"addressed\":3");
-    });
+        yield* judgment.put("experiment", {
+            id: "experiment-one", proposal: "proposal-one", artifact: null,
+            artifact_path: "/tmp/plan.md", scaffolded_at: now, created_at: now,
+            locked_verdict: null, status: "scaffolded", task_path: null,
+        });
+        const stats = yield* deriveCheckpoints({ now: new Date("2026-02-01T00:00:00Z") });
+        const rows = yield* judgment.rows(
+            Schema.Struct({ kind: TextColumn, suggested: TextColumn }),
+            "SELECT kind, suggested FROM checkpoint ORDER BY kind",
+        );
+        return { stats, rows };
+    }).pipe(Effect.provide(layer), Effect.scoped));
+    expect(result.stats.checkpointsInserted).toBe(1);
+    expect(result.rows).toEqual([{ kind: "+3s", suggested: "adopted" }]);
 });

@@ -1,7 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { surrealLiteral } from "@ax/lib/json";
+import { Judgment, TextColumn, TimestampColumn, type JudgmentError } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import {
     PRODUCED_BY_SESSION_SQL,
     SKILL_LAST_PROJECT_SQL,
@@ -18,7 +19,12 @@ import type {
     TriageDecision,
 } from "@ax/lib/shared/dashboard-types";
 
-const TRIAGE_DECISIONS_SQL = `SELECT skill_name, decision, reason, decided_at FROM skill_triage_decision;`;
+const TriageDecisionRow = Schema.Struct({
+    skill_name: TextColumn,
+    decision: TextColumn,
+    reason: Schema.NullOr(TextColumn),
+    decided_at: TimestampColumn,
+});
 
 const RAW_SCORE_THRESHOLD_KEEP = 30;       // strong taste signal
 const STAPLE_INV_30D = 10;                 // workhorse threshold (frequent use)
@@ -273,41 +279,42 @@ export function recommendForSkill(row: SkillRow): {
 }
 
 
-const parseDecisionRow = (raw: Record<string, unknown>): SkillTriageNote | null => {
-    const name = stringField(raw, "skill_name");
-    const decision = stringField(raw, "decision");
-    if (!name || !decision) return null;
-    if (decision !== "keep" && decision !== "archive" && decision !== "review") return null;
+const triageNote = (raw: typeof TriageDecisionRow.Type): SkillTriageNote | null => {
+    if (raw.decision !== "keep" && raw.decision !== "archive" && raw.decision !== "review") return null;
     return {
-        skill_name: name,
-        decision,
-        reason: stringField(raw, "reason"),
-        // dateField handles strings, Date instances, AND SurrealDB DateTime
-        // (via toJSON). Falling back to `new Date().toISOString()` here was
-        // the original R1 bug, regressed because R3 reused the same path.
-        decided_at: dateField(raw, "decided_at") ?? new Date().toISOString(),
+        skill_name: raw.skill_name,
+        decision: raw.decision,
+        reason: raw.reason,
+        decided_at: raw.decided_at.toISOString(),
     };
 };
 
+const triageDecisionId = (name: string): string =>
+    stableId("skill_triage_decision", [name]);
+
 export const fetchSkillTriage = (): Effect.Effect<
     SkillTriageResponse,
-    DbError,
-    SurrealClient
+    DbError | JudgmentError,
+    SurrealClient | Judgment
 > =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const judgment = yield* Judgment;
         const [main, proposedOnly, decisions, commitCounts, lastProjects] = yield* Effect.all([
             db.query<[Array<Record<string, unknown>>]>(SKILL_SUMMARY_SQL),
             db.query<[Array<Record<string, unknown>>]>(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
-            db.query<[Array<Record<string, unknown>>]>(TRIAGE_DECISIONS_SQL),
+            judgment.rows(
+                TriageDecisionRow,
+                "SELECT skill_name, decision, reason, decided_at FROM skill_triage_decision",
+            ),
             db.query<[Array<Record<string, unknown>>]>(PRODUCED_BY_SESSION_SQL),
             db.query<[Array<Record<string, unknown>>]>(SKILL_LAST_PROJECT_SQL),
         ]);
         const commitCountsBySession = buildCommitCountsBySession(commitCounts?.[0] ?? []);
         const lastProjectBySkill = buildLastProjectBySkill(lastProjects?.[0] ?? []);
         const decisionByName = new Map<string, SkillTriageNote>();
-        for (const raw of decisions?.[0] ?? []) {
-            const parsed = parseDecisionRow(raw);
+        for (const raw of decisions) {
+            const parsed = triageNote(raw);
             if (parsed) decisionByName.set(parsed.skill_name, parsed);
         }
         const rows: SkillTriageEntry[] = [];
@@ -350,31 +357,22 @@ export const setSkillDecision = (
     name: string,
     decision: TriageDecision,
     reason: string | null,
-): Effect.Effect<SkillTriageNote, DbError, SurrealClient> =>
+): Effect.Effect<SkillTriageNote, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const reasonLit = reason === null ? "NONE" : surrealLiteral(reason);
-        const sql = `UPSERT skill_triage_decision SET
-    skill_name = ${surrealLiteral(name)},
-    decision = ${surrealLiteral(decision)},
-    reason = ${reasonLit},
-    decided_at = time::now()
-WHERE skill_name = ${surrealLiteral(name)} RETURN AFTER;`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const row = result?.[0]?.[0];
-        if (!row) {
-            return {
-                skill_name: name,
-                decision,
-                reason,
-                decided_at: new Date().toISOString(),
-            };
-        }
-        return parseDecisionRow(row) ?? {
+        const judgment = yield* Judgment;
+        const decidedAt = new Date();
+        yield* judgment.put("skill_triage_decision", {
+            id: triageDecisionId(name),
             skill_name: name,
             decision,
             reason,
-            decided_at: new Date().toISOString(),
+            decided_at: decidedAt,
+        });
+        return {
+            skill_name: name,
+            decision,
+            reason,
+            decided_at: decidedAt.toISOString(),
         };
     });
 
@@ -384,16 +382,18 @@ WHERE skill_name = ${surrealLiteral(name)} RETURN AFTER;`;
  */
 export const listSkillDecisions = (): Effect.Effect<
     ReadonlyArray<SkillTriageNote>,
-    DbError,
-    SurrealClient
+    JudgmentError,
+    Judgment
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `SELECT skill_name, decision, reason, decided_at FROM skill_triage_decision ORDER BY decided_at DESC;`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
+        const judgment = yield* Judgment;
+        const rows = yield* judgment.rows(
+            TriageDecisionRow,
+            "SELECT skill_name, decision, reason, decided_at FROM skill_triage_decision ORDER BY decided_at DESC",
+        );
         const out: SkillTriageNote[] = [];
-        for (const raw of result?.[0] ?? []) {
-            const parsed = parseDecisionRow(raw);
+        for (const raw of rows) {
+            const parsed = triageNote(raw);
             if (parsed) out.push(parsed);
         }
         return out;
@@ -401,45 +401,45 @@ export const listSkillDecisions = (): Effect.Effect<
 
 export const clearSkillDecision = (
     name: string,
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sql = `DELETE FROM skill_triage_decision WHERE skill_name = ${surrealLiteral(name)};`;
-        yield* db.query(sql);
+        const judgment = yield* Judgment;
+        yield* judgment.exec("DELETE FROM skill_triage_decision WHERE skill_name = ?", [name]);
     });
 
 /**
  * Apply a decision to many skills in a single round-trip. Used by the bulk
  * triage toolbar - "select 30 archive candidates, archive them all". Each name
- * upserts independently so partial failures don't roll back the rest.
+ * upserts in one transaction, so callers never observe a partial bulk decision.
  */
 export const setSkillDecisionsBulk = (
     names: ReadonlyArray<string>,
     decision: TriageDecision,
     reason: string | null,
-): Effect.Effect<ReadonlyArray<SkillTriageNote>, DbError, SurrealClient> =>
+): Effect.Effect<ReadonlyArray<SkillTriageNote>, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         if (names.length === 0) return [];
-        const reasonLit = reason === null ? "NONE" : surrealLiteral(reason);
-        const decisionLit = surrealLiteral(decision);
-        // Use a single multi-statement query; SurrealDB executes them in order.
-        const statements = names
-            .map(
-                (name) =>
-                    `UPSERT skill_triage_decision SET skill_name = ${surrealLiteral(name)}, decision = ${decisionLit}, reason = ${reasonLit}, decided_at = time::now() WHERE skill_name = ${surrealLiteral(name)} RETURN AFTER;`,
-            )
-            .join("\n");
-        const result = yield* db.query<unknown[]>(statements);
-        const out: SkillTriageNote[] = [];
-        for (let i = 0; i < (result?.length ?? 0); i += 1) {
-            const block = result?.[i];
-            const row = Array.isArray(block) ? block[0] : block;
-            if (!row || typeof row !== "object") continue;
-            const parsed = parseDecisionRow(row as Record<string, unknown>);
-            if (parsed) out.push(parsed);
-        }
-        return out;
+        const judgment = yield* Judgment;
+        const decidedAt = new Date();
+        const uniqueNames = [...new Set(names)];
+        yield* judgment.transaction((transaction) =>
+            transaction.putMany(
+                "skill_triage_decision",
+                uniqueNames.map((name) => ({
+                    id: triageDecisionId(name),
+                    skill_name: name,
+                    decision,
+                    reason,
+                    decided_at: decidedAt,
+                })),
+            ),
+        );
+        return uniqueNames.map((name) => ({
+            skill_name: name,
+            decision,
+            reason,
+            decided_at: decidedAt.toISOString(),
+        }));
     });
 
 export const isTriageDecision = (value: unknown): value is TriageDecision =>

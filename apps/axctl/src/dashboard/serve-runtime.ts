@@ -17,8 +17,10 @@
  * fresh one is swapped in for the next request. A rejection AFTER a
  * successful build is a handler error and never triggers a swap.
  */
-import { Effect, ManagedRuntime, type Layer } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { JudgmentLive } from "../judgment.ts";
 import type { DashboardEnv, EffectRunner } from "./router/router.ts";
 
 /**
@@ -56,7 +58,10 @@ export interface ServeRuntimeHandle {
 export const defaultRuntimeFactory = (
     options?: { readonly memoMap?: Layer.MemoMap },
 ): (() => RuntimeLike) =>
-() => ManagedRuntime.make(IngestRuntimeLayer, options?.memoMap ? { memoMap: options.memoMap } : undefined);
+() => ManagedRuntime.make(
+    Layer.mergeAll(IngestRuntimeLayer, CacheReadLive, JudgmentLive),
+    options?.memoMap ? { memoMap: options.memoMap } : undefined,
+);
 
 export function makeServeRuntime(make: () => RuntimeLike = defaultRuntimeFactory()): ServeRuntimeHandle {
     let runtime = make();
