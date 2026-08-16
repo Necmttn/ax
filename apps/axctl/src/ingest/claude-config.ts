@@ -875,14 +875,26 @@ export const buildClaudeMdGuidanceRevisionStatements = (
 const claudeMdRecords = (records: readonly GuidanceConfigArtifact[]): GuidanceConfigArtifact[] =>
     records.filter(isClaudeMdArtifact);
 
-const fetchPreviousArtifacts = (
+/**
+ * The previously-stored CLAUDE.md artifacts for these path hashes, keyed by
+ * path hash - the "before" side of the guidance-revision diff.
+ *
+ * `bytes` is CAST to DOUBLE rather than selected bare. `write.raw` applies no
+ * column decoder, so a BIGINT cell arrives as a JS `bigint`, and the
+ * `typeof row.bytes === "number"` guard below then reads FALSE and stores
+ * `null` - no error, no warning, just `guidance_revision.prev_bytes` empty on
+ * every revision forever. Casting at the projection is what makes the guard
+ * tell the truth. (Exported for the real-DuckDB test that pins this; it is
+ * otherwise internal to the stage.)
+ */
+export const fetchPreviousArtifacts = (
     write: CacheWriteService,
     records: readonly GuidanceConfigArtifact[],
 ): Effect.Effect<Map<string, PreviousGuidanceConfigArtifact>, CacheWriteError> =>
     Effect.gen(function* () {
         const hashes = uniqueSorted(claudeMdRecords(records).map((record) => record.pathHash));
         if (hashes.length === 0) return new Map();
-        const res = yield* write.raw(`SELECT path_hash, content_hash, bytes FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND path_hash IN (${hashes.map(() => "?").join(",")})`, hashes);
+        const res = yield* write.raw(`SELECT path_hash, content_hash, CAST(bytes AS DOUBLE) AS bytes FROM ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = 'claude' AND path_hash IN (${hashes.map(() => "?").join(",")})`, hashes);
         const out = new Map<string, PreviousGuidanceConfigArtifact>();
         for (const row of res.rows as Array<Record<string, unknown>>) {
             const pathHash = typeof row.path_hash === "string" ? row.path_hash : null;
