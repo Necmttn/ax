@@ -3,7 +3,8 @@ import { prettyPrint } from "@ax/lib/json";
 import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
-import { recordRef, surrealJson, surrealJsonText, surrealJsonTextOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { recordRef, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import type {
     WorkflowCandidatePromotionMode,
     WorkflowCandidateProposalStatusFilter,
@@ -122,16 +123,20 @@ import type {
     WorkflowCandidateProposalPlan,
     CandidateBuildInput,
     WorkflowCandidateGuidancePendingReviewTaskSummary,
+    WorkflowCandidateGraphWriteRow,
 } from "./workflow-candidate-types.ts";
 import { workflowCandidateGuidancePendingReviewTaskSchema } from "./workflow-candidate-types.ts";
-export const workflowCandidateSql = `
-SELECT graph_id, label, properties_json
-FROM classifier_graph_node
-WHERE source_kind = $sourceKind AND kind = "classifier_candidate_group";
-SELECT graph_id, subject, object, properties_json
-FROM classifier_graph_fact
-WHERE source_kind = $sourceKind AND kind = "classifier_candidate_evidence";
-`;
+/**
+ * The two-statement `workflowCandidateSql` query this replaced returned BOTH
+ * result sets from one SurrealQL call; DuckDB's `CacheRead.rows` answers one
+ * query at a time, so it is split into a group query and an evidence query -
+ * every call site now issues both and zips them the same way it already
+ * zipped the old two-element result tuple.
+ */
+export const workflowCandidateGroupSql =
+    "SELECT graph_id, label, properties_json FROM classifier_graph_node WHERE source_kind = ? AND kind = 'classifier_candidate_group'";
+export const workflowCandidateEvidenceSql =
+    "SELECT graph_id, subject, object, properties_json FROM classifier_graph_fact WHERE source_kind = ? AND kind = 'classifier_candidate_evidence'";
 
 export const WORKFLOW_CANDIDATE_PROPOSAL_PREFIX = "guidance__workflow_candidate__" as const;
 export const WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX = "harness_check__workflow_candidate__" as const;
@@ -2531,36 +2536,19 @@ export function renderWorkflowCandidateGuidancePendingReviewContextRepairText(
     return `${lines.join("\n").trimEnd()}\n`;
 }
 
-export const workflowCandidateTurnContextRowSql = (turnId: string): string => {
-    const turnKey = recordKeyPart(turnId, "turn") ?? turnId;
-    return `
-SELECT
-    type::string(id) AS id,
-    type::string(session) AS session_id,
-    seq,
-    role,
-    text,
-    text_excerpt
-FROM ${recordRef("turn", turnKey)};
-`.trim();
-};
+/**
+ * DuckDB `turn` lookup by bare id, keyed via `CacheRead.rows`. `turnKey` (the
+ * `?` binding) is `recordKeyPart(turnId, "turn")` - the ax-wide record-key
+ * parser, still used as-is: it just strips a `table:` prefix a caller may
+ * still be carrying, it never builds SurrealQL syntax.
+ */
+export const workflowCandidateTurnContextRowSql =
+    "SELECT id, session AS session_id, seq, role, text, text_excerpt FROM turn WHERE id = ?";
 
-export const workflowCandidatePreviousAssistantSql = (sessionId: string, seq: number): string => {
-    const sessionKey = recordKeyPart(sessionId, "session") ?? sessionId;
-    return `
-SELECT
-    type::string(id) AS id,
-    type::string(session) AS session_id,
-    seq,
-    role,
-    text,
-    text_excerpt
-FROM turn
-WHERE session = ${recordRef("session", sessionKey)} AND seq < ${Math.trunc(seq)} AND role = "assistant"
-ORDER BY seq DESC
-LIMIT 1;
-`.trim();
-};
+/** Most recent assistant turn strictly before `seq` in `sessionId`. */
+export const workflowCandidatePreviousAssistantSql =
+    "SELECT id, session AS session_id, seq, role, text, text_excerpt FROM turn " +
+    "WHERE session = ? AND seq < ? AND role = 'assistant' ORDER BY seq DESC LIMIT 1";
 
 export const pendingReviewTaskDecisionSummary = (input: {
     readonly parsed: WorkflowCandidateGuidancePendingReviewTaskParsed;
@@ -3514,58 +3502,85 @@ export function buildWorkflowCandidateTopicHarnessGraphProjection(
     };
 }
 
+/**
+ * Shared row-builder for both graph write plans below (harness-check and
+ * candidate-review) - identical node/edge/fact shapes, differing only in the
+ * `sourceKind` tag stamped onto every row. `id` and `graph_id` both carry the
+ * projection's id (mirroring the SurrealQL this replaced, which used the same
+ * value as both the record id and the `graph_id` field).
+ */
+const buildWorkflowCandidateGraphWriteRows = (
+    projection: {
+        readonly nodes: readonly { readonly id: string; readonly kind: string; readonly label: string; readonly properties: Record<string, unknown> }[];
+        readonly edges: readonly { readonly id: string; readonly kind: string; readonly from: string; readonly to: string; readonly evidence_path: string; readonly properties: Record<string, unknown> }[];
+        readonly facts: readonly { readonly id: string; readonly kind: string; readonly subject: string; readonly predicate: string; readonly object: string | null; readonly value: unknown; readonly evidence_edges: readonly string[]; readonly properties: Record<string, unknown> }[];
+    },
+    sourceKind: string,
+): { readonly nodeRows: WorkflowCandidateGraphWriteRow[]; readonly edgeRows: WorkflowCandidateGraphWriteRow[]; readonly factRows: WorkflowCandidateGraphWriteRow[] } => {
+    const nodeRows = projection.nodes.map((node) => ({
+        table: "classifier_graph_node" as const,
+        row: cacheRow({
+            id: node.id,
+            graph_id: node.id,
+            kind: node.kind,
+            label: node.label,
+            properties_json: jsonParam(node.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_node ${node.id}`,
+    }));
+    const edgeRows = projection.edges.map((edge) => ({
+        table: "classifier_graph_edge" as const,
+        row: cacheRow({
+            id: edge.id,
+            graph_id: edge.id,
+            kind: edge.kind,
+            from_id: edge.from,
+            to_id: edge.to,
+            evidence_path: edge.evidence_path,
+            properties_json: jsonParam(edge.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_edge ${edge.id}`,
+    }));
+    const factRows = projection.facts.map((fact) => ({
+        table: "classifier_graph_fact" as const,
+        row: cacheRow({
+            id: fact.id,
+            graph_id: fact.id,
+            kind: fact.kind,
+            subject: fact.subject,
+            predicate: fact.predicate,
+            object: fact.object ?? null,
+            value_json: jsonParam(fact.value ?? null),
+            evidence_edges_json: jsonParam(fact.evidence_edges),
+            properties_json: jsonParam(fact.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_fact ${fact.id}`,
+    }));
+    return { nodeRows, edgeRows, factRows };
+};
+
 export function buildWorkflowCandidateTopicHarnessGraphWritePlan(
     projection: WorkflowCandidateTopicHarnessGraphProjection,
 ): WorkflowCandidateTopicHarnessGraphWritePlan {
     const sourceKind = "workflow_topic_harness_check";
-    const nodeStatements = projection.nodes.map((node) =>
-        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(node.id)],
-            ["kind", surrealString(node.kind)],
-            ["label", surrealString(node.label)],
-            ["properties_json", surrealJson(node.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const edgeStatements = projection.edges.map((edge) =>
-        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(edge.id)],
-            ["kind", surrealString(edge.kind)],
-            ["from_id", surrealString(edge.from)],
-            ["to_id", surrealString(edge.to)],
-            ["evidence_path", surrealString(edge.evidence_path)],
-            ["properties_json", surrealJson(edge.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const factStatements = projection.facts.map((fact) =>
-        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(fact.id)],
-            ["kind", surrealString(fact.kind)],
-            ["subject", surrealString(fact.subject)],
-            ["predicate", surrealString(fact.predicate)],
-            ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonTextOption(fact.value)],
-            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
-            ["properties_json", surrealJson(fact.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    const { nodeRows, edgeRows, factRows } = buildWorkflowCandidateGraphWriteRows(projection, sourceKind);
+    const rows = [...nodeRows, ...edgeRows, ...factRows];
+    const statements = rows.map((entry) => entry.label);
     return {
         schema: "ax.workflow_topic_harness_graph_write_plan.v1",
         source_projection_schema: projection.schema,
         topic: projection.topic,
         statements,
+        rows,
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         totals: {
             statement_count: statements.length,
-            node_statement_count: nodeStatements.length,
-            edge_statement_count: edgeStatements.length,
-            fact_statement_count: factStatements.length,
+            node_statement_count: nodeRows.length,
+            edge_statement_count: edgeRows.length,
+            fact_statement_count: factRows.length,
         },
     };
 }
@@ -5427,54 +5442,21 @@ export function buildWorkflowCandidateTopicReviewGraphWritePlan(
     projection: WorkflowCandidateTopicReviewGraphProjection,
 ): WorkflowCandidateTopicReviewGraphWritePlan {
     const sourceKind = "workflow_topic_candidate_review";
-    const nodeStatements = projection.nodes.map((node) =>
-        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(node.id)],
-            ["kind", surrealString(node.kind)],
-            ["label", surrealString(node.label)],
-            ["properties_json", surrealJson(node.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const edgeStatements = projection.edges.map((edge) =>
-        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(edge.id)],
-            ["kind", surrealString(edge.kind)],
-            ["from_id", surrealString(edge.from)],
-            ["to_id", surrealString(edge.to)],
-            ["evidence_path", surrealString(edge.evidence_path)],
-            ["properties_json", surrealJson(edge.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const factStatements = projection.facts.map((fact) =>
-        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(fact.id)],
-            ["kind", surrealString(fact.kind)],
-            ["subject", surrealString(fact.subject)],
-            ["predicate", surrealString(fact.predicate)],
-            ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonTextOption(fact.value)],
-            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
-            ["properties_json", surrealJson(fact.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    const { nodeRows, edgeRows, factRows } = buildWorkflowCandidateGraphWriteRows(projection, sourceKind);
+    const rows = [...nodeRows, ...edgeRows, ...factRows];
+    const statements = rows.map((entry) => entry.label);
     return {
         schema: "ax.workflow_topic_review_graph_write_plan.v1",
         source_projection_schema: projection.schema,
         topic: projection.topic,
         statements,
+        rows,
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         totals: {
             statement_count: statements.length,
-            node_statement_count: nodeStatements.length,
-            edge_statement_count: edgeStatements.length,
-            fact_statement_count: factStatements.length,
+            node_statement_count: nodeRows.length,
+            edge_statement_count: edgeRows.length,
+            fact_statement_count: factRows.length,
         },
     };
 }

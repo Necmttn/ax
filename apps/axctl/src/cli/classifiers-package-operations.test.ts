@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { AxConfigTest } from "@ax/lib/config";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { ClassifierPackageService, type ClassifierQualityStatusReport } from "../classifiers/package-service.ts";
 import {
@@ -209,7 +209,8 @@ describe("classifiers package-operations format", () => {
                     json: false,
                 } as never).pipe(
                     Effect.provideService(ClassifierPackageService, service),
-                    Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                    Effect.provide(AxConfigTest()),
+                    Effect.provide(BunPath.layer),
                     Effect.provide(makeTestCacheRead().layer),
                     Effect.provide(BunFileSystem.layer),
                 ),
@@ -314,7 +315,8 @@ describe("classifiers package-operations format", () => {
                 json: false,
             } as never).pipe(
                 Effect.provideService(ClassifierPackageService, service),
-                Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                Effect.provide(AxConfigTest()),
+                Effect.provide(BunPath.layer),
                 Effect.provide(makeTestCacheRead().layer),
                 Effect.provide(BunFileSystem.layer),
             ),
@@ -390,7 +392,8 @@ describe("classifiers package-operations format", () => {
                     json: false,
                 } as never).pipe(
                     Effect.provideService(ClassifierPackageService, service),
-                    Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                    Effect.provide(AxConfigTest()),
+                    Effect.provide(BunPath.layer),
                     Effect.provide(makeTestCacheRead().layer),
                     Effect.provide(BunFileSystem.layer),
                 ),
@@ -773,10 +776,11 @@ describe("classifiers package-operations format", () => {
             root: ".ax/experiments",
             source_projection_schema: "ax.classifier_package_execution_fact_projection.v1",
             statements: [
-                "UPSERT classifier_graph_node:`n1` CONTENT { graph_id: \"n1\" };",
-                "UPSERT classifier_graph_edge:`e1` CONTENT { graph_id: \"e1\" };",
-                "UPSERT classifier_graph_fact:`f1` CONTENT { graph_id: \"f1\" };",
+                "PUT classifier_graph_node n1",
+                "PUT classifier_graph_edge e1",
+                "PUT classifier_graph_fact f1",
             ],
+            rows: [],
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
             totals: {
                 statement_count: 3,
@@ -791,7 +795,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("classifier package execution write plan: .ax/experiments");
         expect(output).toContain("nodes/edges/facts: 1/1/1");
         expect(output).toContain("tables: classifier_graph_node, classifier_graph_edge, classifier_graph_fact");
-        expect(output).toContain("UPSERT classifier_graph_node");
+        expect(output).toContain("PUT classifier_graph_node");
     });
 
     test("renders execution apply reports", () => {

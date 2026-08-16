@@ -872,9 +872,9 @@ describe("classifier package operations report", () => {
         expect(writePlan.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
         expect(writePlan.tables).toEqual(["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"]);
         expect(writePlan.totals.statement_count).toBe(writePlan.totals.node_statement_count + writePlan.totals.edge_statement_count + writePlan.totals.fact_statement_count);
-        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_node:"))).toBe(true);
-        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_edge:"))).toBe(true);
-        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_fact:"))).toBe(true);
+        expect(writePlan.statements.some((statement) => statement.startsWith("PUT classifier_graph_node "))).toBe(true);
+        expect(writePlan.statements.some((statement) => statement.startsWith("PUT classifier_graph_edge "))).toBe(true);
+        expect(writePlan.statements.some((statement) => statement.startsWith("PUT classifier_graph_fact "))).toBe(true);
     });
 
     test("writes Surreal write plan reports", async () => {
@@ -911,7 +911,12 @@ describe("classifier package operations report", () => {
 
         const report = await applyExecutionSurrealWritePlanReport({
             ...writePlan,
-            statements: ["UPSERT classifier_graph_node:`n` CONTENT {};"],
+            statements: ["PUT classifier_graph_node n"],
+            rows: [{
+                table: "classifier_graph_node",
+                row: { id: "n", graph_id: "n", kind: "x", label: "x", properties_json: "{}", source_kind: "test", updated_at: new Date() },
+                label: "PUT classifier_graph_node n",
+            }],
             totals: {
                 statement_count: 1,
                 node_statement_count: 1,
@@ -947,15 +952,27 @@ describe("classifier package operations report", () => {
 
         const report = await applyExecutionSurrealWritePlanReport({
             ...writePlan,
-            statements: ["UPSERT ok", "UPSERT bad"],
+            statements: ["PUT classifier_graph_node ok", "PUT classifier_graph_node bad"],
+            rows: [
+                {
+                    table: "classifier_graph_node",
+                    row: { id: "ok", graph_id: "ok", kind: "x", label: "x", properties_json: "{}", source_kind: "test", updated_at: new Date() },
+                    label: "PUT classifier_graph_node ok",
+                },
+                {
+                    table: "classifier_graph_node",
+                    row: { id: "bad", graph_id: "bad", kind: "x", label: "x", properties_json: "{}", source_kind: "test", updated_at: new Date() },
+                    label: "PUT classifier_graph_node bad",
+                },
+            ],
             totals: {
                 statement_count: 2,
                 node_statement_count: 2,
                 edge_statement_count: 0,
                 fact_statement_count: 0,
             },
-        }, async (statement) => {
-            if (statement.includes("bad")) throw new Error("db rejected statement");
+        }, async (entry) => {
+            if (entry.label.includes("bad")) throw new Error("db rejected statement");
         });
 
         expect(report.decision).toBe("failed");
@@ -971,6 +988,7 @@ describe("classifier package operations report", () => {
             root: ".ax/experiments",
             source_projection_schema: "ax.classifier_package_execution_fact_projection.v1",
             statements: [],
+            rows: [],
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
             totals: {
                 statement_count: 0,

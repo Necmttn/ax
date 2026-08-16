@@ -576,12 +576,13 @@ describe("projectReviewedLabelsToGraph", () => {
         const a = projectReviewedLabelsToGraph(input);
         const b = projectReviewedLabelsToGraph(input);
         expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-        // every write statement is an idempotent UPSERT keyed by a stable id
+        // every write is an idempotent PUT keyed by a stable id
         expect(a.statements.length).toBeGreaterThan(0);
         for (const stmt of a.statements) {
-            expect(stmt.startsWith("UPSERT ")).toBe(true);
+            expect(stmt.startsWith("PUT ")).toBe(true);
         }
         expect(a.statements).toEqual(b.statements);
+        expect(a.rows).toEqual(b.rows);
     });
 
     test("a vector with no matching reviewed candidate yields no graph fact link", () => {

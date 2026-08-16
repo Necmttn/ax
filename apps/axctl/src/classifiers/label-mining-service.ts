@@ -1,7 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { jsonArrayField, jsonField } from "@ax/lib/decode";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { AxConfig } from "@ax/lib/config";
 import {
     BooleanColumn,
     Judgment,
@@ -10,11 +9,12 @@ import {
     type JudgmentError,
 } from "@ax/lib/sqlite";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
-import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheWriteError } from "@ax/lib/duckdb/seam";
 import { withinDaysClause } from "@ax/lib/duckdb/clause";
 import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { stableId } from "@ax/lib/stable-id";
 import { prettyPrint } from "@ax/lib/json";
+import { withConfigWrite } from "../config-core/reconcile.ts";
 import {
     buildReviewQueue,
     mineTranscriptLabelCandidates,
@@ -52,7 +52,7 @@ export class LabelMiningReportWriteError extends Schema.TaggedErrorClass<LabelMi
     message: Schema.String,
 }) {}
 
-export type LabelMiningError = DbError | CacheReadError | JudgmentError | LabelMiningReportWriteError;
+export type LabelMiningError = CacheWriteError | JudgmentError | LabelMiningReportWriteError;
 
 export interface LabelMiningReportInput {
     /** Lookback window in days for transcript turns. */
@@ -505,9 +505,10 @@ const buildReport = (input: {
 };
 
 export interface LabelMiningServiceShape {
-    // NOTE: SurrealClient is resolved once at Layer creation
-    // (LabelMiningServiceLive), so it is deliberately NOT part of the method
-    // signatures - callers only owe the file-writing capabilities.
+    // NOTE: CacheRead/Judgment are resolved once at Layer creation
+    // (LabelMiningServiceLive), so they are deliberately NOT part of the
+    // method signatures - callers only owe the file-writing capabilities
+    // (plus `AxConfig` on `projectReviewed`, see its doc comment below).
     readonly miningReport: (
         input: LabelMiningReportInput,
     ) => Effect.Effect<LabelMiningReport, LabelMiningError>;
@@ -523,12 +524,16 @@ export interface LabelMiningServiceShape {
     ) => Effect.Effect<LabelMiningSelfImproveResult, LabelMiningError, FileSystem.FileSystem | Path.Path>;
     /**
      * Project persisted reviewed rows + vector rows into classifier graph facts.
-     * Only `accepted` reviews become promotion-safe. With `apply`, the idempotent
-     * Graph statements use SurrealDB. Review decisions use the sidecar.
+     * Only `accepted` reviews become promotion-safe. With `apply`, the graph
+     * writes (+ `transcript_label_vector`) go through `withConfigWrite` (the
+     * main DuckDB cache); review decisions go through the judgment sidecar.
+     * `withConfigWrite` opens a fresh write session PER CALL (it is not a
+     * connection to resolve once like `CacheRead`), so `AxConfig` is threaded
+     * through THIS method's own R channel rather than the Layer's.
      */
     readonly projectReviewed: (
         input: LabelMiningProjectInput,
-    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, FileSystem.FileSystem | Path.Path>;
+    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, AxConfig | FileSystem.FileSystem | Path.Path>;
 }
 
 export class LabelMiningService extends Context.Service<LabelMiningService, LabelMiningServiceShape>()(
@@ -676,21 +681,22 @@ const writeReport = (
     });
 
 /**
- * `db` (SurrealClient) is retained ONLY for `projectReviewed`'s apply-write
- * path: the UPSERT statements it plays back are built by
- * `projectReviewedLabelsToGraph` in `./label-mining.ts` (owned by a different
- * wave-3 chunk), which emits SurrealQL-specific syntax (`UPSERT table:id SET
- * ...`). Porting that write to DuckDB would mean rewriting that builder, which
- * is out of this chunk's file ownership - and even ported, a CLI-invoked apply
- * cannot obtain a `CacheWriteService` at all (writes are ingest-lock-gated;
- * `label-mining --project-reviewed --apply` never runs under ingest). See the
- * chunk report for the full argument; every READ in this file is on `CacheRead`.
+ * `projectReviewed`'s apply-write path now writes through `withConfigWrite`
+ * (config-core/reconcile.ts) instead of SurrealClient: `projectReviewedLabelsToGraph`
+ * (./label-mining.ts) builds structured `classifier_graph_*` /
+ * `transcript_label_vector` rows (LabelMiningGraphWriteRow) rather than raw
+ * SurrealQL, and `withConfigWrite` is the established "a CLI command, not
+ * ingest, needs a CacheWriteService" front door - it takes the shared ingest
+ * lock itself, so `label-mining --project-reviewed --apply` (never run under
+ * `ax ingest`) can still obtain write access. `withConfigWrite` opens a fresh
+ * session PER CALL, so it is invoked inside `projectReviewed` itself (see that
+ * method's own R channel) rather than resolved once here alongside
+ * `CacheRead`/`Judgment`. Every READ in this file is on `CacheRead`.
  */
-export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient | CacheRead | Judgment> =
+export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, CacheRead | Judgment> =
     Layer.effect(
         LabelMiningService,
         Effect.gen(function* () {
-            const db = yield* SurrealClient;
             const read = yield* CacheRead;
             const judgment = yield* Judgment;
 
@@ -809,11 +815,15 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                 const projection = projectReviewedLabelsToGraph({ candidates, reviews, vectors });
 
                 if (input.apply) {
-                    // `db` (SurrealClient) is intentionally still used here - see the
-                    // module doc comment on LabelMiningServiceLive.
-                    for (const statement of projection.statements.filter((sql) => !sql.startsWith("UPSERT transcript_label_review:"))) {
-                        yield* db.query(statement);
-                    }
+                    // `projection.rows` already excludes `transcript_label_review`
+                    // (that write goes through `judgment.transaction` below, into
+                    // the sidecar) - see the module doc comment on
+                    // LabelMiningServiceLive.
+                    yield* withConfigWrite((write) =>
+                        Effect.forEach(projection.rows, (entry) => write.put(entry.table, entry.row), {
+                            discard: true,
+                        }),
+                    );
                     yield* judgment.transaction((transaction) =>
                         Effect.forEach(projection.review_rows, (row) => transaction.put("transcript_label_review", {
                             id: stableId("transcript_label_review", [row.candidate_id]),
