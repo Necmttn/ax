@@ -7,11 +7,12 @@
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { withinDaysClause } from "@ax/lib/duckdb/clause";
 import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
@@ -225,38 +226,43 @@ export interface DailyActivityRow {
 
 // Session-based: count() per day from the session table - avoids the full
 // turn-table scan (array::distinct(session) over millions of Codex turns = 3s+).
-const DAILY_SESSIONS_SQL = (d: number) => `
+const DAILY_SESSIONS_SQL = `
 SELECT
-    time::format(started_at, "%Y-%m-%d") AS date,
-    count() AS sessions
+    strftime(started_at, '%Y-%m-%d') AS date,
+    count(*) AS sessions
 FROM session
-WHERE started_at > time::now() - ${win(d)} AND started_at IS NOT NONE
-GROUP BY date ORDER BY date ASC;`;
+WHERE started_at IS NOT NULL`;
 
-const DAILY_TOKENS_SQL = (d: number) => `
+const DAILY_TOKENS_SQL = `
 SELECT
-    time::format(ts, "%Y-%m-%d") AS date,
-    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+    strftime(ts, '%Y-%m-%d') AS date,
+    SUM(COALESCE(prompt_tokens, 0)) + SUM(COALESCE(completion_tokens, 0)) AS tokens
 FROM session_token_usage
-WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
-GROUP BY date
-ORDER BY date ASC;`;
+WHERE ts IS NOT NULL`;
 
 export const fetchDailyActivityFull = Effect.fn("profile.fetchDailyActivityFull")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const withinStarted = withinDaysClause("started_at", opts.windowDays);
+        const withinTs = withinDaysClause("ts", opts.windowDays);
         const sessionRows = yield* timedQuery(
             "dailySessions",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_SESSIONS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_SESSIONS_SQL} ${withinStarted.sql} GROUP BY date ORDER BY date ASC`,
+                withinStarted.params,
+            ),
         );
         const tokenRows = yield* timedQuery(
             "dailyTokens",
-            db.query<[Array<Record<string, unknown>>]>(DAILY_TOKENS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            rawRows(
+                read,
+                `${DAILY_TOKENS_SQL} ${withinTs.sql} GROUP BY date ORDER BY date ASC`,
+                withinTs.params,
+            ),
         );
-        // Join tokens onto session rows in JS (two grouped queries; SurrealDB
-        // 3.x grouped aggregates stay deref-free per the hang rule).
+        // Join tokens onto session rows in JS (two grouped queries; mirrors
+        // the deref-free-aggregate discipline the SurrealDB era established).
         const tokenMap = new Map(
             tokenRows
                 .map((r) => [String(r.date), Number(r.tokens ?? 0)] as const)
@@ -278,27 +284,34 @@ export interface SessionDurationRow {
     readonly ended_at: string;
 }
 
-const SESSION_DURATIONS_SQL = (d: number) => `
-SELECT
-    type::string(started_at) AS started_at,
-    type::string(ended_at) AS ended_at
+const SESSION_DURATIONS_SQL = `
+SELECT started_at, ended_at
 FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-  AND ended_at IS NOT NONE;`;
+WHERE started_at IS NOT NULL
+  AND ended_at IS NOT NULL`;
+
+// `started_at`/`ended_at` are TIMESTAMP columns - `raw()` would hand back
+// native `Date`s, and `String(date)` is NOT an ISO string (it's the JS
+// default toString() format). Decode through Schema + toISOString() so the
+// string contract this row type promises actually holds.
+const SessionDurationDbRow = Schema.Struct({
+    started_at: TimestampColumn,
+    ended_at: TimestampColumn,
+});
 
 export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SESSION_DURATIONS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return rows
-            .filter((r) => r.started_at != null && r.ended_at != null)
-            .map((r) => ({
-                started_at: String(r.started_at),
-                ended_at: String(r.ended_at),
-            })) satisfies SessionDurationRow[];
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            SessionDurationDbRow,
+            `${SESSION_DURATIONS_SQL} ${within.sql}`,
+            within.params,
+        );
+        return rows.map((r) => ({
+            started_at: r.started_at.toISOString(),
+            ended_at: r.ended_at.toISOString(),
+        })) satisfies SessionDurationRow[];
     },
 );
 

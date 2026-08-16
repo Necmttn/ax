@@ -127,54 +127,56 @@ describe("fetchAcceptedProposals", () => {
 
 describe("fetchDailyActivityFull", () => {
     test("returns date+sessions+tokens rows, window applied", async () => {
-        const db = makeMockDb([
-            [[{ date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 3 }]],
-            [[{ date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 80_000 }]],
-        ]);
-        const r = await runWithMock(db, fetchDailyActivityFull({ windowDays: 30 }));
+        const cache = cacheRead({
+            "FROM session\nWHERE": [{ date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 3 }],
+            "FROM session_token_usage": [{ date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 80_000 }],
+        });
+        const r = await runCache(fetchDailyActivityFull({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(2);
         expect(r[0]).toEqual({ date: "2026-06-11", sessions: 5, tokens: 100_000 });
         expect(r[1]).toEqual({ date: "2026-06-12", sessions: 3, tokens: 80_000 });
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
         // Fix 1b: must use session table (fast) not turn table full-scan
-        expect(db.captured[0]).toContain("FROM session");
-        expect(db.captured[0]).toContain("count() AS sessions");
-        expect(db.captured[0]).not.toContain("array::len(array::distinct(session))");
+        expect(cache.captured[0]).toContain("FROM session");
+        expect(cache.captured[0]).toContain("count(*) AS sessions");
+        expect(cache.captured[0]).not.toContain("array::len(array::distinct(session))");
     });
 
     test("day with no tokens entry gets tokens=0", async () => {
-        const db = makeMockDb([
-            [[{ date: "2026-06-11", sessions: 5 }]],
-            [[]],
-        ]);
-        const r = await runWithMock(db, fetchDailyActivityFull({ windowDays: 30 }));
+        const cache = cacheRead({
+            "FROM session\nWHERE": [{ date: "2026-06-11", sessions: 5 }],
+            "FROM session_token_usage": [],
+        });
+        const r = await runCache(fetchDailyActivityFull({ windowDays: 30 }), cache.layer);
         expect(r[0]).toEqual({ date: "2026-06-11", sessions: 5, tokens: 0 });
     });
 
     test("empty window -> empty array", async () => {
-        const db = makeMockDb([[[]], [[]]]);
-        const r = await runWithMock(db, fetchDailyActivityFull({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchDailyActivityFull({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });
 
 describe("fetchSessionDurations", () => {
     test("returns started_at+ended_at as ISO strings, window applied", async () => {
-        const db = makeMockDb([[[
-            { started_at: "2026-06-11T10:00:00Z", ended_at: "2026-06-11T12:30:00Z" },
-            { started_at: "2026-06-12T09:00:00Z", ended_at: "2026-06-12T10:00:00Z" },
-        ]]]);
-        const r = await runWithMock(db, fetchSessionDurations({ windowDays: 30 }));
-        expect(r[0]!.started_at).toBe("2026-06-11T10:00:00Z");
-        expect(r[0]!.ended_at).toBe("2026-06-11T12:30:00Z");
-        expect(db.captured[0]).toContain("ended_at IS NOT NONE");
-        expect(db.captured[0]).toContain("started_at IS NOT NONE");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        const cache = cacheRead({
+            "FROM session": [
+                { started_at: "2026-06-11T10:00:00.000Z", ended_at: "2026-06-11T12:30:00.000Z" },
+                { started_at: "2026-06-12T09:00:00.000Z", ended_at: "2026-06-12T10:00:00.000Z" },
+            ],
+        });
+        const r = await runCache(fetchSessionDurations({ windowDays: 30 }), cache.layer);
+        expect(r[0]!.started_at).toBe("2026-06-11T10:00:00.000Z");
+        expect(r[0]!.ended_at).toBe("2026-06-11T12:30:00.000Z");
+        expect(cache.captured[0]).toContain("ended_at IS NOT NULL");
+        expect(cache.captured[0]).toContain("started_at IS NOT NULL");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 
     test("empty window -> empty array", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchSessionDurations({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchSessionDurations({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });
