@@ -6,8 +6,17 @@ describe("isSingleReadStatement", () => {
         expect(isSingleReadStatement("SELECT * FROM session")).toBe(true);
         expect(isSingleReadStatement("SELECT * FROM session;")).toBe(true);
         expect(isSingleReadStatement("  select 1  ")).toBe(true);
-        expect(isSingleReadStatement("RETURN 1;")).toBe(true);
-        expect(isSingleReadStatement("INFO FOR DB")).toBe(true);
+        // DuckDB's read-only introspection forms (the engine under this guard
+        // is DuckDB, not SurrealDB, as of wave 3 `c-ingest-cutover`).
+        expect(isSingleReadStatement("SHOW TABLES")).toBe(true);
+        expect(isSingleReadStatement("DESCRIBE session")).toBe(true);
+        expect(isSingleReadStatement("PRAGMA database_list")).toBe(true);
+        expect(isSingleReadStatement("EXPLAIN SELECT 1")).toBe(true);
+    });
+
+    test("rejects SurrealQL-only read prefixes that do not parse under DuckDB", () => {
+        expect(isSingleReadStatement("RETURN 1;")).toBe(false);
+        expect(isSingleReadStatement("INFO FOR DB")).toBe(false);
     });
 
     test("rejects a stacked write after a read", () => {

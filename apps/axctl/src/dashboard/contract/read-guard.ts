@@ -64,11 +64,17 @@ function stripLiteralsAndComments(sql: string): string {
     return out;
 }
 
-const READ_PREFIX_RE = /^(SELECT|RETURN|INFO)\b/i;
+// SELECT/RETURN/INFO were the SurrealQL read prefixes; the underlying engine
+// is now DuckDB (wave 3, `c-ingest-cutover`), whose read-only statement forms
+// are SELECT plus a handful of introspection statements. RETURN and INFO no
+// longer parse and are dropped; SHOW/DESCRIBE/PRAGMA/EXPLAIN are added since
+// they are genuinely read-only under DuckDB.
+const READ_PREFIX_RE = /^(SELECT|SHOW|DESCRIBE|PRAGMA|EXPLAIN)\b/i;
 
 /**
- * True only when `sql` is a single read statement (SELECT/RETURN/INFO), with at
- * most one optional trailing `;`. Multi-statement input is rejected outright.
+ * True only when `sql` is a single read statement (SELECT and DuckDB's
+ * read-only introspection forms), with at most one optional trailing `;`.
+ * Multi-statement input is rejected outright.
  */
 export function isSingleReadStatement(sql: string): boolean {
     const trimmed = sql.trim();
