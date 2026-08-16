@@ -1,8 +1,8 @@
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
+import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { _resetBaselineCacheForTests, fetchSessionBaselines, median, p90 } from "./session-baselines.ts";
-import { publishDashboardFixture, runDashboardRead } from "./testing/duckdb.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session baselines");
 
@@ -13,7 +13,7 @@ describe("session baseline math", () => {
         expect(p90(Array.from({ length: 100 }, (_, i) => i + 1))).toBe(90);
         _resetBaselineCacheForTests();
         const now = new Date();
-        const fixture = await publishDashboardFixture(tempDir("ax-baselines-"), dylibPath, (db) => Effect.gen(function* () {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-baselines-"), dylibPath, (db) => Effect.gen(function* () {
             for (let i = 1; i <= 3; i += 1) yield* db.put("session", { id: `s${i}`, source: "claude" });
             yield* db.putMany("session_token_usage", [
                 { id: "u1", session: "s1", source: "claude", estimated_tokens: 1000, transcript_bytes: 1, estimated_cost_usd: 3, ts: now },
@@ -28,8 +28,8 @@ describe("session baseline math", () => {
                 { id: "m1", session: "s1", time_to_land_ms: 1000, ts: now },
                 { id: "m2", session: "s2", time_to_land_ms: 5000, ts: now },
             ]);
-        }));
-        const value = await runDashboardRead(fixture, fetchSessionBaselines());
+        })));
+        const value = await readThroughFixture(fixture, dylibPath, fetchSessionBaselines());
         expect(value).toEqual({ median_cost_usd: 3, median_friction: 4, median_time_to_land_ms: 3000, burn_p90: 1000 });
     });
 });

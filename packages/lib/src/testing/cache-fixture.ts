@@ -24,7 +24,7 @@
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
-import { CacheReadLayer, withCacheWrite, type CacheWriteService } from "@ax/lib/duckdb/seam";
+import { CacheRead, CacheReadLayer, withCacheWrite, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { withIngestLock } from "@ax/lib/ingest-lock";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 
@@ -93,3 +93,27 @@ export const publishCacheFixture = (
 /** A `CacheRead` layer over a published fixture snapshot. */
 export const readFixture = (snapshotPath: string, dylibPath: string | null) =>
     CacheReadLayer({ snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) });
+
+/**
+ * Run `effect` against the `CacheRead` service backed by an already-published
+ * `fixture`. Every consumer of `publishCacheFixture` + `readFixture` needs
+ * the same three lines (`Effect.provide(readFixture(...))`,
+ * `Effect.runPromise`, the `as Effect.Effect<A, unknown>` cast to drop the
+ * now-satisfied error channel) - kept here so that wiring has ONE home
+ * instead of being re-derived per test file. The dashboard chunk once had a
+ * from-scratch copy of this exact "publish once, read a few times" shape
+ * (`apps/axctl/src/dashboard/testing/duckdb.ts`) that silently dropped the
+ * `buildFtsIndexes` call `publishCacheFixture` makes below - a fixture that
+ * cannot build FTS indexes still "works" for every non-FTS read, so nothing
+ * failed until a BM25 read went through it and quietly returned zero rows.
+ * Routing every consumer through this one function is what keeps that from
+ * happening again.
+ */
+export const readThroughFixture = <A>(
+    fixture: CacheFixture,
+    dylibPath: string | null,
+    effect: Effect.Effect<A, unknown, CacheRead>,
+): Promise<A> =>
+    Effect.runPromise(
+        effect.pipe(Effect.provide(readFixture(fixture.snapshotPath, dylibPath))) as Effect.Effect<A, unknown>,
+    );
