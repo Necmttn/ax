@@ -8,6 +8,7 @@ import {
     snapshotHookFireSpool,
 } from "../hooks/spool.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 
 export interface DrainHookFireSpoolOptions {
     readonly spoolDir?: string;
@@ -88,26 +89,54 @@ export class HookFireSpoolStageStats extends BaseStageStats.extend<HookFireSpool
     malformedRows: Schema.Number,
 }) {}
 
+const EMPTY_DRAIN: DrainHookFireSpoolResult = { files: 0, rows: 0, malformed: 0 };
+
 /**
- * Write-aware stage definition.
+ * Write-aware stage definition, registered in `ALL_STAGES`.
  *
- * The current stage runner does not pass `CacheWriteService` yet. The live
- * writer stack can register this descriptor without changing the drain or
- * granting a writer to request paths.
+ * The runner hands every stage the `CacheWriteService` (see `StageDef.run`), so
+ * the drain runs on the ordinary ingest pass - the same shape `otelSpoolStage`
+ * uses. Without the registration nothing ever reads the spool and `ax hook log`
+ * reads an empty table forever, because this wave removed the direct write.
+ *
+ * Two error kinds, handled differently, because `runPipeline` aborts the WHOLE
+ * run on either a stage failure or a defect:
+ *   - `PlatformError` is a genuine filesystem fault -> `Effect.die`, as
+ *     `otelSpoolStage` does.
+ *   - `HookFireSpoolError` is dominated by spool-lock contention (a hook firing
+ *     while ingest runs). The spool is never truncated and the drain is
+ *     idempotent, so the right response is to defer to the next pass, not to
+ *     kill an ingest run. Fail OPEN with the reason in the stage summary.
  */
-export const hookFireSpoolStage = {
+export const hookFireSpoolStage: StageDef<
+    HookFireSpoolStageStats,
+    FileSystem.FileSystem | Path.Path,
+    CacheWriteError
+> = {
     meta: StageMeta.make({ key: "hook-fire-spool", deps: [], tags: ["ingest"] }),
     run: Effect.fn(function* (_ctx: IngestContext, write: CacheWriteService) {
         const started = Date.now();
-        const result = yield* drainHookFireSpool(write);
+        const outcome = yield* drainHookFireSpool(write).pipe(
+            Effect.map((result) => ({ result, deferred: null as string | null })),
+            Effect.catchTag("PlatformError", (error) => Effect.die(error)),
+            Effect.catchTag("HookFireSpoolError", (error) =>
+                Effect.logWarning(
+                    `ingest: hook fire spool not drained this pass - ${error.message}. ` +
+                        `The spool is retained; the next ingest replays it.`,
+                ).pipe(Effect.as({ result: EMPTY_DRAIN, deferred: error.message as string | null })),
+            ),
+        );
         return HookFireSpoolStageStats.make({
             durationMs: Date.now() - started,
-            summary:
-                `ingested ${result.rows} hook fire rows` +
-                (result.malformed > 0 ? `, ${result.malformed} malformed rows skipped` : ""),
-            filesRead: result.files,
-            rowsIngested: result.rows,
-            malformedRows: result.malformed,
+            summary: outcome.deferred !== null
+                ? `deferred: ${outcome.deferred}`
+                : `ingested ${outcome.result.rows} hook fire rows` +
+                    (outcome.result.malformed > 0
+                        ? `, ${outcome.result.malformed} malformed rows skipped`
+                        : ""),
+            filesRead: outcome.result.files,
+            rowsIngested: outcome.result.rows,
+            malformedRows: outcome.result.malformed,
         });
     }),
 };

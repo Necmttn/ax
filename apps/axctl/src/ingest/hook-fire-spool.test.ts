@@ -9,7 +9,9 @@ import { withCacheWrite, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { withIngestLock } from "@ax/lib/ingest-lock";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { HOOK_FIRE_SPOOL_FILE, type HookFireSpoolEnvelope, type HookFireSpoolRow } from "../hooks/spool.ts";
-import { drainHookFireSpool, hookFireSpoolStage } from "./hook-fire-spool.ts";
+import { drainHookFireSpool, hookFireSpoolStage, type HookFireSpoolStageStats } from "./hook-fire-spool.ts";
+import { ALL_STAGES } from "./stage/registry.ts";
+import { IngestContext } from "./stage/types.ts";
 
 // `requireFts: true` because the drain cases publish through
 // `publishCacheFixture`, which builds the FTS indexes for EVERY fixture - so
@@ -90,6 +92,61 @@ describe("hook-fire-spool ingest stage", () => {
         expect(hookFireSpoolStage.meta.key).toBe("hook-fire-spool");
         expect(hookFireSpoolStage.meta.tags).toEqual(["ingest"]);
     });
+
+    // The spool is the ONLY hook_fire write path (this wave deleted
+    // `writeTelemetryRow`), so an unregistered stage means rows accumulate on
+    // disk and `ax hook log` reads an empty table forever. Asserting membership
+    // in ALL_STAGES alone would not catch a stage whose run cannot actually
+    // write, so this drives the REGISTERED descriptor's own `run` against a
+    // real temp DuckDB and reads the row back.
+    dtest(
+        "is registered in ALL_STAGES and drains the spool when its run executes",
+        async () => {
+            // Identity, not key equality: the descriptor exercised below IS the
+            // one the production registry runs.
+            expect(ALL_STAGES).toContain(hookFireSpoolStage);
+
+            const spoolDir = await mkdtemp(join(tmpdir(), "ax-hook-stage-"));
+            roots.push(spoolDir);
+            await mkdir(spoolDir, { recursive: true });
+            await writeFile(join(spoolDir, HOOK_FIRE_SPOOL_FILE), `${envelope(row("staged-row"))}\n`);
+
+            // The stage takes no spoolDir option - it resolves
+            // `defaultHookFireSpoolDir()`, which reads this env var.
+            const priorSpoolDir = process.env.AX_HOOK_SPOOL_DIR;
+            process.env.AX_HOOK_SPOOL_DIR = spoolDir;
+
+            const ctx = IngestContext.make({
+                cwd: spoolDir,
+                since: new Date(0),
+                debug: false,
+            });
+            let stats: HookFireSpoolStageStats | undefined;
+            let stored: Readonly<Record<string, unknown>> | undefined;
+
+            try {
+                await runWithPlatform(
+                    publishCacheFixture(tempDir("ax-hook-stage-db-"), dylibPath, (write) =>
+                        Effect.gen(function* () {
+                            stats = yield* hookFireSpoolStage
+                                .run(ctx, write)
+                                .pipe(Effect.provide(FixturePlatform));
+                            stored = (yield* write.raw("SELECT id, file_path, harness FROM hook_fire")).rows[0];
+                        }),
+                    ),
+                );
+            } finally {
+                if (priorSpoolDir === undefined) delete process.env.AX_HOOK_SPOOL_DIR;
+                else process.env.AX_HOOK_SPOOL_DIR = priorSpoolDir;
+            }
+
+            expect(stats?.rowsIngested).toBe(1);
+            expect(stats?.filesRead).toBe(1);
+            expect(stats?.malformedRows).toBe(0);
+            expect(stored).toMatchObject({ id: "staged-row", file_path: "src/a.ts", harness: "claude" });
+        },
+        60_000,
+    );
 
     dtest(
         "replays all rows after a process dies during a partial drain",
