@@ -424,26 +424,28 @@ export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
 
 // --- peak hour ---------------------------------------------------------------
 
-const PEAK_HOUR_SQL = (d: number) => `
-SELECT
-    time::format(started_at, "%H") AS hour,
-    count() AS count
+// time::format(started_at, "%H") -> DuckDB strftime; both return a
+// zero-padded 24h hour string ("00".."23").
+const PEAK_HOUR_SQL = `
+SELECT strftime(started_at, '%H') AS hour, count(*) AS count
 FROM session
-WHERE started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE
-GROUP BY hour
-ORDER BY count DESC
-LIMIT 1;`;
+WHERE TRUE`;
+
+const PeakHourRow = Schema.Struct({ hour: Schema.String, count: NumberFromBigIntColumn });
 
 export const fetchPeakHour = Effect.fn("profile.fetchPeakHour")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(PEAK_HOUR_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            PeakHourRow,
+            `${PEAK_HOUR_SQL} ${within.sql} AND started_at IS NOT NULL `
+                + "GROUP BY hour ORDER BY count DESC LIMIT 1",
+            within.params,
+        );
         const row = rows[0];
         if (row == null) return null;
-        return Number(row.hour ?? 0);
+        return Number(row.hour);
     },
 );
 

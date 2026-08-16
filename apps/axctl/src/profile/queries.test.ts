@@ -214,16 +214,16 @@ describe("fetchDeepSessionCount", () => {
 
 describe("fetchPeakHour", () => {
     test("returns the peak hour as a number", async () => {
-        const db = makeMockDb([[[{ hour: "13", count: 42 }]]]);
-        const r = await runWithMock(db, fetchPeakHour({ windowDays: 30 }));
+        const cache = cacheRead({ "strftime(started_at, '%H')": [{ hour: "13", count: 42 }] });
+        const r = await runCache(fetchPeakHour({ windowDays: 30 }), cache.layer);
         expect(r).toBe(13);
-        expect(db.captured[0]).toContain("time::format(started_at");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain("strftime(started_at");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 
     test("empty window -> null", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchPeakHour({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchPeakHour({ windowDays: 30 }), cache.layer);
         expect(r).toBeNull();
     });
 });
