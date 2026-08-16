@@ -15,7 +15,7 @@
  * because a stub can't prove the child process can actually open the
  * snapshot the way a real `ax studio` invocation does.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { Effect } from "effect";
