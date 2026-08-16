@@ -391,12 +391,21 @@ const TurnTokenUsageDbRow = Schema.Struct({
     usage_quality: Schema.NullOr(Schema.String),
 });
 type TurnTokenUsageRow = typeof TurnTokenUsageDbRow.Type;
+const GraphTurnDbRow = Schema.Struct({
+    seq: NumberFromBigIntColumn,
+    role: Schema.String,
+    ts: Schema.NullOr(TimestampColumn),
+    text: Schema.NullOr(Schema.String),
+});
 interface GraphTurnRow {
     readonly seq: number;
     readonly role: string;
     readonly ts: string | Date | null;
     readonly text: string | null;
 }
+const GraphSessionHealthDbRow = Schema.Struct({
+    turns: Schema.NullOr(NumberFromBigIntColumn),
+});
 interface GraphSessionHealthRow {
     readonly turns?: number | null;
 }
@@ -646,28 +655,28 @@ const turnSourceRefsForWindow = (
     return Array.from({ length: turnLimit }, (_, i) => turnRecordKey(bare, turnOffset + i + 1));
 };
 
+/** The same contiguous-seq-window equivalence as resolveTurnTokenUsageForWindow:
+ *  turn ids in the old materialized `FROM $refs` list are exactly
+ *  seq in [offset+1, offset+limit]. */
 const resolveGraphTurnWindow = (
     sessionId: string,
     turnOffset: number,
     turnLimit: number,
-): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, SurrealClient> => {
-    const turnRefs = turnSourceRefsForWindow(sessionId, turnOffset, turnLimit);
-    if (turnRefs.length === 0) return Effect.succeed([]);
-    // pick: turn rows carry full message text in several fields; materialize
-    // only what the projection + WHERE touch (text itself is selected).
-    const from = refListSource(
-        turnRefs.map((key) => recordRef("turn", key)),
-        ["seq", "role", "ts", "text", "has_tool_use"],
-    );
-    return queryMany<GraphTurnRow, GraphTurnRow>(
-        `
-            SELECT seq, role, type::string(ts) AS ts, text
-            FROM ${from}
-            WHERE text IS NOT NONE OR has_tool_use = true
-            ORDER BY seq ASC;
-        `,
-        (row) => row,
-        "session-inspect resolveGraphTurnWindow",
+): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, CacheRead> => {
+    if (turnLimit <= 0) return Effect.succeed([]);
+    const minSeq = turnOffset + 1;
+    const maxSeq = turnOffset + turnLimit;
+    return cacheRows(
+        GraphTurnDbRow,
+        {
+            sql: `SELECT seq, role, ts, text FROM turn
+                  WHERE session = ? AND seq BETWEEN ? AND ? AND (text IS NOT NULL OR has_tool_use = true)
+                  ORDER BY seq ASC`,
+            params: [sessionId, minSeq, maxSeq],
+        },
+        "session-inspect.graph_turn_window",
+    ).pipe(
+        Effect.map((rows) => rows.map((row) => ({ ...row, ts: row.ts ? row.ts.toISOString() : null }))),
     );
 };
 
