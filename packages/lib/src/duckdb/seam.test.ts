@@ -11,6 +11,7 @@ import { encodeLockPayload, withIngestLock } from "../ingest-lock.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { TimestampColumn } from "./columns.ts";
 import { buildFtsIndexes, matchBm25Sql, type FtsTarget } from "./fts.ts";
+import { NUL } from "./nul-strip.ts";
 import {
     CacheRead,
     CacheReadLayer,
@@ -262,6 +263,97 @@ describe("CacheWrite: the semantics the DDL cannot express", () => {
             // 600 rows crosses the 500-row batch boundary.
             expect(value?.count).toBe(600n);
             expect(value?.ragged._tag).toBe("Failure");
+        });
+    });
+
+    /**
+     * #790, the half wave 2 shipped without. The client REFUSES to bind a
+     * VARCHAR carrying U+0000 (it would truncate silently at the first NUL and
+     * the length-less read accessor could never tell), and real transcripts
+     * carry them - so an unrestricted `ax ingest` died on
+     * `INSERT INTO "turn" - parameter 6743 contains a NUL byte`. The write seam
+     * now scrubs on the way in. Without that scrub every case below fails with
+     * that exact refusal.
+     */
+    dtest("strips NUL bytes out of every bound write value, and counts what it stripped", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-nul-");
+            // A genuine U+0000 in the middle of otherwise ordinary text - the
+            // shape a JSON transcript's "\\u0000" decodes to.
+            const dirty = `before${NUL}after`;
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("note", { id: "n1", body: dirty });
+                        // putMany's batched multi-row insert binds through the
+                        // same choke point...
+                        yield* write.putMany("note", [
+                            { id: "n2", body: `two${NUL}` },
+                            { id: "n3", body: "clean" },
+                        ]);
+                        // ...and so does a hand-written statement.
+                        yield* write.exec("UPDATE note SET body = ? WHERE id = ?", [
+                            `${NUL}lead${NUL}`,
+                            "n3",
+                        ]);
+
+                        const rows = yield* write.rows(
+                            Schema.Struct({
+                                id: Schema.String,
+                                body: Schema.String,
+                                len: Schema.BigInt,
+                            }),
+                            "SELECT id, body, length(body) AS len FROM note ORDER BY id",
+                        );
+                        return { rows, stripped: write.nulStripped() };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+
+            // Stored text is the NUL-free text - NOT truncated at the first NUL
+            // (which is what an unguarded bind would have stored), and NOT an
+            // escape sequence no source ever contained. `length` is read by
+            // DuckDB itself, so it proves what is IN the column rather than what
+            // the CString accessor could render.
+            expect(value?.rows).toEqual([
+                { id: "n1", body: "beforeafter", len: 11n },
+                { id: "n2", body: "two", len: 3n },
+                { id: "n3", body: "lead", len: 4n },
+            ]);
+
+            // Observable, not silent: three dirty values across three
+            // statements. `putMany` bound two rows and only ONE of them was
+            // dirty, so the clean row and every `id` parameter go uncounted -
+            // the number is "values we changed", not "values we looked at".
+            expect(value?.stripped).toEqual({ values: 3, statements: 3 });
+        });
+    });
+
+    dtest("a write with no NUL anywhere reports nothing stripped", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-nul-clean-");
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        // The six characters a transcript literally spells are
+                        // TEXT, and must survive byte-for-byte.
+                        yield* write.put("note", { id: "n1", body: "escaped \\u0000 stays" });
+                        const rows = yield* write.rows(
+                            Schema.Struct({ body: Schema.String }),
+                            "SELECT body FROM note",
+                        );
+                        return { rows, stripped: write.nulStripped() };
+                    }),
+                ),
+            );
+
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.rows[0]?.body).toBe("escaped \\u0000 stays");
+            expect(value?.stripped).toEqual({ values: 0, statements: 0 });
         });
     });
 
