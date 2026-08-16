@@ -5,8 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import type { Surreal } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { assembleAgenda, collectAgendaItems } from "./agenda.ts";
@@ -77,21 +75,10 @@ describe("assembleAgenda", () => {
 });
 
 describe("collectAgendaItems", () => {
-    // Every query returns one empty result set - an empty graph. fetchTuneProposals
-    // (which calls fetchDispatches internally) destructures a 4-tuple, but each
-    // missing slot degrades to [] internally.
-    const emptyClient: SurrealClientShape = {
-        query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
-            Effect.succeed([[]] as unknown[] as T),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: null as unknown as Surreal, // never touched by read-only agenda sources
-    };
-    const surrealLayer = Layer.succeed(SurrealClient, emptyClient);
+    // Every DuckDB query returns one empty result set - an empty graph.
+    // fetchTuneProposals (which calls fetchDispatches internally) destructures
+    // a 4-tuple, but each missing slot degrades to [] internally.
     const env = Layer.mergeAll(
-        surrealLayer,
         makeTestCacheRead().layer,
         BunFileSystem.layer,
         EmptyJudgmentTestLayer,
@@ -115,12 +102,6 @@ describe("collectAgendaItems", () => {
 
     test("records which agenda sources failed while preserving degraded items", async () => {
         const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
-        const failingClient: SurrealClientShape = {
-            ...emptyClient,
-            query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
-                Effect.fail("db offline") as unknown as Effect.Effect<T>,
-        };
-        const failingSurreal = Layer.succeed(SurrealClient, failingClient);
         const fail = Effect.fail("db offline") as never;
         const failingCache: CacheReadService = {
             rows: () => fail,
@@ -129,7 +110,6 @@ describe("collectAgendaItems", () => {
             snapshotPath: "(failing-test-cache)",
         };
         const failingEnv = Layer.mergeAll(
-            failingSurreal,
             Layer.succeed(CacheRead, failingCache),
             BunFileSystem.layer,
             EmptyJudgmentTestLayer,
