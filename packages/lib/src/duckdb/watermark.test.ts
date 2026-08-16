@@ -268,7 +268,7 @@ describe("fileWatermark", () => {
         // It is pinned here so a future writer that picks a colliding sentinel
         // path meets this test instead of a mysterious ingest failure. Widening
         // the index to (source_kind, path) is the real fix and belongs to
-        // whoever needs it - see REPORT.md.
+        // whoever needs it.
         const dir = tempDir("ax-wm-collide-");
         const outcome = await asIngestRun(dir, (write) =>
             Effect.result(

@@ -112,8 +112,8 @@ export const ingestOtelSpool = (
                     // re-read in full whenever it changes. The work-unit
                     // watermark (jsonl-work-unit.ts) skips UNCHANGED files, so a
                     // quiescent day is not re-read; only a file that grew is read
-                    // whole. A real offset tail is a larger change tracked in
-                    // REPORT.md (wave-1 seam).
+                    // whole. A real offset tail is a larger change, deferred
+                    // past the wave-1 seam.
                     const text = yield* fs.readFileString(candidate.path);
                     const writer = yield* OtelWriter;
                     for (const line of text.split("\n")) {
