@@ -52,25 +52,33 @@ export const fetchSessionBaselines = (): Effect.Effect<SessionBaselines, CacheRe
         }
 
         const db = yield* CacheRead;
+        // CAST to naive TIMESTAMP before subtracting: DuckDB's bare
+        // CURRENT_TIMESTAMP is TIMESTAMP WITH TIME ZONE, and ax's own icu-less
+        // build has no `-(TIMESTAMP WITH TIME ZONE, INTERVAL)` overload (that
+        // arithmetic is registered by the icu extension, which this build
+        // doesn't link) - only `-(TIMESTAMP, INTERVAL)`. Every `ts` column here
+        // is a plain UTC TIMESTAMP (see schema.duckdb.sql), so casting the
+        // comparison side to match is correct, not a workaround. Same idiom as
+        // `assertUtcClock` in packages/lib/src/duckdb/seam.ts.
         const [costRows, frictionRows, timeToLandRows, burnRows] = yield* Effect.all([
             db.rows(CostRowSchema, `
             SELECT estimated_cost_usd
             FROM session_token_usage
-            WHERE ts > CURRENT_TIMESTAMP - INTERVAL 30 DAY
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
               AND estimated_cost_usd IS NOT NULL`),
             db.rows(FrictionRowSchema, `
             SELECT (user_corrections + tool_errors) AS friction
             FROM session_health
-            WHERE ts > CURRENT_TIMESTAMP - INTERVAL 30 DAY`),
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY`),
             db.rows(TimeToLandRowSchema, `
             SELECT time_to_land_ms
             FROM session_metrics
-            WHERE ts > CURRENT_TIMESTAMP - INTERVAL 30 DAY
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
               AND time_to_land_ms IS NOT NULL`),
             db.rows(BurnRowSchema, `
             SELECT estimated_tokens, turns
             FROM session_health
-            WHERE ts > CURRENT_TIMESTAMP - INTERVAL 30 DAY
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
               AND turns > 0
               AND estimated_tokens > 0`),
         ]);

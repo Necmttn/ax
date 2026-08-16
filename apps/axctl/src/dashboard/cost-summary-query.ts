@@ -42,7 +42,15 @@ const buildWhereClause = (params: CostSummaryParams): { sql: string; params: Rea
     if (params.source) { where.push("source = ?"); bindings.push(params.source); }
     if (params.sinceDays !== null) {
         const since = Math.min(Math.max(Math.trunc(params.sinceDays), 1), 3650);
-        where.push("ts > CURRENT_TIMESTAMP - (? * INTERVAL 1 DAY)");
+        // CAST to naive TIMESTAMP before subtracting: DuckDB's bare
+        // CURRENT_TIMESTAMP is TIMESTAMP WITH TIME ZONE, and ax's own icu-less
+        // build has no `-(TIMESTAMP WITH TIME ZONE, INTERVAL)` overload (that
+        // arithmetic is registered by the icu extension, which this build
+        // doesn't link) - only `-(TIMESTAMP, INTERVAL)`. `ts` itself is a plain
+        // UTC TIMESTAMP column (see schema.duckdb.sql), so casting the
+        // comparison side to match is correct, not a workaround. Same idiom as
+        // `assertUtcClock` in packages/lib/src/duckdb/seam.ts.
+        where.push("ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (? * INTERVAL 1 DAY)");
         bindings.push(since);
     }
     return { sql: `WHERE ${where.join(" AND ")}`, params: bindings };
