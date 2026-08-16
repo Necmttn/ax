@@ -531,7 +531,7 @@ const improveListTool: AxMcpTool = defineMcpTool({
 
 const sessionMetricsTool: AxMcpTool = defineMcpTool({
     name: "session_metrics",
-    runtime: "legacy",
+    runtime: "cache",
     description:
         "Graph-derived per-session metrics: durability ratio (commits not later reverted), produced commits, time-to-land (commit -> PR merge), lines added/removed, first-edit latency, cold-start reads, delegation ratio, estimated cost, and user corrections. Sorted by produced commits (desc), then most fragile first.",
     inputSchema: {
@@ -572,7 +572,7 @@ const sessionMetricsTool: AxMcpTool = defineMcpTool({
 
 const sessionsChurnTool: AxMcpTool = defineMcpTool({
     name: "sessions_churn",
-    runtime: "legacy",
+    runtime: "cache",
     description:
         `Verification-churn rollup by session and source: landed vs edit vs repair LOC, failed/passed checks, and episodes (a failure after an edit opens one, a same-family pass closes it, 30min expiry). Returns an envelope { generatedAt, filters, aggregates, hotSessions, next } - aggregates roll up per provider, hotSessions are the highest-churn sessions with per-row drill-in links. Mirrors \`ax sessions churn\`. Pass \`project\` (a repo root / cwd path) to scope - the git-resolved \`--here\` form is CLI-only. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -707,7 +707,7 @@ const costSplitTool: AxMcpTool = defineMcpTool({
 
 const costImagesTool: AxMcpTool = defineMcpTool({
     name: "cost_images",
-    runtime: "legacy",
+    runtime: "cache",
     description:
         "Per-session image-read context (content_type:binary tool outputs), split main-thread vs subagent. High main-thread MB = screenshots persisting in the main context window and re-billing across turns; route visual judgment to a subagent.",
     inputSchema: {
@@ -795,6 +795,10 @@ const costRoutabilityTool: AxMcpTool = defineMcpTool({
 
 const dispatchesTool: AxMcpTool = defineMcpTool({
     name: "dispatches",
+    // Stays `legacy`: the `candidates` branch calls `loadEffectiveRoutingTable()`,
+    // which needs `FileSystem` - a service the MCP `cache` runtime does not carry.
+    // The dispatch QUERY itself is cache-only now; the routing-table file read is
+    // what pins this tool, so it flips when that read gets a home in the pool.
     runtime: "legacy",
     description:
         `Subagent dispatch analytics over the spawned relation. Without candidates: table of dispatches sorted by child cost (ts, agent_type, description, dispatch_model, child_model, child_cost_usd) + summary (count, inherit%, total cost). With candidates=true: only inherit dispatches on expensive models (fable/opus) that match a routing class, with suggested model + est savings. ${NEXT_PROTOCOL_HINT}`,

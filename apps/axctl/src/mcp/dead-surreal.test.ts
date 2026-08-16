@@ -1,11 +1,13 @@
 /**
  * MCP process coverage with SurrealDB deliberately unreachable.
  *
- * This starts the real stdio command and calls one tool per non-legacy
- * runtime kind: `"cache"` (recall), `"judgment"` (roles), and
- * `"cache-judgment"` (skills_by_role - the runtime behind skills_by_role /
- * skills_roles, the one join surface that spans both engines). Any call fails
- * if server startup or tool dispatch resolves the legacy `AppLayer` union.
+ * This starts the real stdio command and calls at least one tool per non-legacy
+ * runtime kind: `"cache"` (recall, plus session_metrics / sessions_churn /
+ * cost_images, which the w2-live-reads merge moved off SurrealDB),
+ * `"judgment"` (roles), and `"cache-judgment"` (skills_by_role - the runtime
+ * behind skills_by_role / skills_roles, the one join surface that spans both
+ * engines). Any call fails if server startup or tool dispatch resolves the
+ * legacy `AppLayer` union.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
@@ -150,6 +152,30 @@ describe("MCP per-tool runtimes", () => {
             expect(skillsByRoleBody.rows).toEqual([
                 expect.objectContaining({ skill_id: "skill:tdd", skill_name: "tdd", source: "user" }),
             ]);
+
+            // The three tools the w2-live-reads merge moved onto the cache:
+            // their queries stopped taking SurrealClient, so their declarations
+            // dropped from `legacy` to `cache`. On this runtime there is NO
+            // SurrealClient at all - not even the throwing proxy - so a residual
+            // reach would surface here as a tool error, which an in-process test
+            // over the query function alone could never show.
+            const metrics = await client.callTool({ name: "session_metrics", arguments: {} });
+            expect(metrics.isError).not.toBe(true);
+            expect(Array.isArray(bodyOf(metrics))).toBe(true);
+
+            const churn = await client.callTool({ name: "sessions_churn", arguments: {} });
+            expect(churn.isError).not.toBe(true);
+            expect(bodyOf(churn)).toMatchObject({
+                aggregates: expect.any(Array),
+                hotSessions: expect.any(Array),
+            });
+
+            const images = await client.callTool({ name: "cost_images", arguments: {} });
+            expect(images.isError).not.toBe(true);
+            expect(bodyOf(images)).toMatchObject({
+                rows: expect.any(Array),
+                totals: expect.any(Object),
+            });
         } finally {
             await client.close().catch(() => undefined);
         }

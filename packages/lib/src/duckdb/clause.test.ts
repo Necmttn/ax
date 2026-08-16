@@ -17,8 +17,14 @@ import {
     withinHoursClause,
 } from "./clause.ts";
 
+// `requireFts: true` because the real-DuckDB case below goes through
+// `publishCacheFixture`, which builds the FTS indexes for EVERY fixture it
+// publishes - so this suite needs an FTS-capable libduckdb even though it
+// never searches. Declaring `false` would let the suite skip silently in CI
+// instead of failing once, actionably, on a broken dylib (the anti-drift
+// gate in scripts/check-ci-duckdb.test.ts enforces this pairing).
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("clause ago-expressions", {
-    requireFts: false,
+    requireFts: true,
 });
 
 /** Every clause builder must be injection-proof by construction: values are

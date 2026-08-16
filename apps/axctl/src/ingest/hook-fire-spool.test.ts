@@ -11,7 +11,14 @@ import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { HOOK_FIRE_SPOOL_FILE, type HookFireSpoolEnvelope, type HookFireSpoolRow } from "../hooks/spool.ts";
 import { drainHookFireSpool, hookFireSpoolStage } from "./hook-fire-spool.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("hook fire spool drain");
+// `requireFts: true` because the drain cases publish through
+// `publishCacheFixture`, which builds the FTS indexes for EVERY fixture - so
+// this suite needs an FTS-capable libduckdb even though it never searches.
+// Without the declaration the suite skips silently on a non-FTS dylib instead
+// of failing once, actionably (scripts/check-ci-duckdb.test.ts enforces it).
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("hook fire spool drain", {
+    requireFts: true,
+});
 const roots: string[] = [];
 
 afterEach(async () => {
