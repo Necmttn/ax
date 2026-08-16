@@ -199,19 +199,22 @@ export function repositoryOverviewSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    name,
-    remote_url,
-    root_path,
-    initial_commit,
-    default_branch,
-    created_at,
-    updated_at,
-    (updated_at ?? created_at) AS last_seen,
-    array::len(->has_checkout->checkout) AS checkout_count,
-    ->has_checkout->checkout.path AS checkout_paths,
-    ->has_checkout->checkout.branch AS checkout_branches
-FROM repository
+    r.id AS id,
+    r.name AS name,
+    r.remote_url AS remote_url,
+    r.root_path AS root_path,
+    r.initial_commit AS initial_commit,
+    r.default_branch AS default_branch,
+    r.created_at AS created_at,
+    r.updated_at AS updated_at,
+    COALESCE(r.updated_at, r.created_at) AS last_seen,
+    COUNT(c.id) AS checkout_count,
+    array_agg(c.path) FILTER (WHERE c.path IS NOT NULL) AS checkout_paths,
+    array_agg(c.branch) FILTER (WHERE c.branch IS NOT NULL) AS checkout_branches
+FROM repository r
+LEFT JOIN has_checkout hc ON hc.in_id = r.id
+LEFT JOIN checkout c ON c.id = hc.out_id
+GROUP BY r.id, r.name, r.remote_url, r.root_path, r.initial_commit, r.default_branch, r.created_at, r.updated_at
 ORDER BY last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -220,25 +223,28 @@ export function checkoutActivitySql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    repository,
-    repository.name AS repository_name,
-    repository.remote_url AS remote_url,
-    path,
-    branch,
-    worktree_name,
-    head_sha,
-    dirty,
-    created_at,
-    updated_at,
-    (updated_at ?? created_at) AS last_seen,
-    array::len((SELECT id FROM session WHERE checkout = $parent.id)) AS session_count,
-    array::len((SELECT id FROM turn WHERE session.checkout = $parent.id)) AS turn_count,
-    array::len((SELECT id FROM tool_call WHERE session.checkout = $parent.id)) AS tool_call_count,
-    array::len((SELECT id FROM tool_call WHERE session.checkout = $parent.id AND has_error = true)) AS tool_failure_count,
-    array::len((SELECT id FROM produced WHERE in.checkout = $parent.id)) AS produced_count,
-    array::len((SELECT id FROM touched WHERE checkout = $parent.id)) AS touched_count
-FROM checkout
+    c.id AS id,
+    c.repository AS repository,
+    r.name AS repository_name,
+    r.remote_url AS remote_url,
+    c.path AS path,
+    c.branch AS branch,
+    c.worktree_name AS worktree_name,
+    c.head_sha AS head_sha,
+    c.dirty AS dirty,
+    c.created_at AS created_at,
+    c.updated_at AS updated_at,
+    COALESCE(c.updated_at, c.created_at) AS last_seen,
+    (SELECT COUNT(*) FROM session s WHERE s.checkout = c.id) AS session_count,
+    (SELECT COUNT(*) FROM turn t JOIN session s ON s.id = t.session WHERE s.checkout = c.id) AS turn_count,
+    (SELECT COUNT(*) FROM tool_call tc JOIN session s ON s.id = tc.session WHERE s.checkout = c.id) AS tool_call_count,
+    (SELECT COUNT(*) FROM tool_call tc JOIN session s ON s.id = tc.session WHERE s.checkout = c.id AND tc.has_error = TRUE) AS tool_failure_count,
+    -- produced denormalises checkout directly onto the edge (see schema) -
+    -- equivalent to the original's in.checkout deref, no join needed.
+    (SELECT COUNT(*) FROM produced p WHERE p.checkout = c.id) AS produced_count,
+    (SELECT COUNT(*) FROM touched WHERE checkout = c.id) AS touched_count
+FROM checkout c
+LEFT JOIN repository r ON r.id = c.repository
 ORDER BY session_count DESC, turn_count DESC, produced_count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -247,18 +253,20 @@ export function gitCorrelationSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    name,
-    remote_url,
-    root_path,
-    (updated_at ?? created_at) AS last_seen,
-    array::len(->has_checkout->checkout) AS checkout_count,
-    array::len((SELECT id FROM session WHERE repository = $parent.id)) AS session_count,
-    array::len((SELECT id FROM session WHERE repository = $parent.id AND checkout IS NOT NONE)) AS checkout_linked_session_count,
-    array::len((SELECT id FROM commit WHERE repository = $parent.id)) AS commit_count,
-    array::len((SELECT id FROM touched WHERE repository = $parent.id)) AS touched_count,
-    array::len((SELECT id FROM produced WHERE out.repository = $parent.id)) AS produced_count
-FROM repository
+    r.id AS id,
+    r.name AS name,
+    r.remote_url AS remote_url,
+    r.root_path AS root_path,
+    COALESCE(r.updated_at, r.created_at) AS last_seen,
+    (SELECT COUNT(*) FROM has_checkout hc WHERE hc.in_id = r.id) AS checkout_count,
+    (SELECT COUNT(*) FROM session s WHERE s.repository = r.id) AS session_count,
+    (SELECT COUNT(*) FROM session s WHERE s.repository = r.id AND s.checkout IS NOT NULL) AS checkout_linked_session_count,
+    (SELECT COUNT(*) FROM "commit" cm WHERE cm.repository = r.id) AS commit_count,
+    (SELECT COUNT(*) FROM touched WHERE repository = r.id) AS touched_count,
+    -- produced denormalises repository directly onto the edge - equivalent
+    -- to the original's out.repository (the commit's repository) deref.
+    (SELECT COUNT(*) FROM produced WHERE repository = r.id) AS produced_count
+FROM repository r
 ORDER BY session_count DESC, produced_count DESC, commit_count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -267,21 +275,23 @@ export function recentFrictionSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    ts,
-    kind,
-    text,
-    labels,
-    metrics,
-    raw,
-    session,
-    type::string(session) AS session_ref,
-    session.project AS project,
-    session.cwd AS cwd,
-    turn,
-    turn.seq AS turn_seq
-FROM friction_event
-ORDER BY ts DESC
+    fe.id AS id,
+    fe.ts AS ts,
+    fe.kind AS kind,
+    fe.text AS text,
+    fe.labels AS labels,
+    fe.metrics AS metrics,
+    fe.raw AS raw,
+    fe.session AS session,
+    fe.session AS session_ref,
+    s.project AS project,
+    s.cwd AS cwd,
+    fe.turn AS turn,
+    t.seq AS turn_seq
+FROM friction_event fe
+LEFT JOIN session s ON s.id = fe.session
+LEFT JOIN turn t ON t.id = fe.turn
+ORDER BY fe.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -293,11 +303,11 @@ SELECT
     command_norm,
     command_tool,
     exit_code,
-    count() AS failure_count,
-    time::max(ts) AS last_seen,
-    math::sum(IF status = "error" THEN 1 ELSE 0 END) AS status_error_count
+    COUNT(*) AS failure_count,
+    MAX(ts) AS last_seen,
+    COUNT(*) FILTER (WHERE status = 'error') AS status_error_count
 FROM tool_call
-WHERE has_error = true
+WHERE has_error = TRUE
 GROUP BY name, command_norm, command_tool, exit_code
 ORDER BY failure_count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
@@ -307,76 +317,82 @@ export function sessionEvidenceSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    project,
-    cwd,
-    model,
-    started_at,
-    ended_at,
-    repository,
-    checkout,
-    (ended_at ?? started_at) AS last_seen,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id)) AS tool_call_count,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id AND has_error = true)) AS tool_failure_count,
-    array::len((SELECT id FROM friction_event WHERE session = $parent.id)) AS friction_event_count,
-    array::len((SELECT id FROM plan_snapshot WHERE session = $parent.id)) AS plan_snapshot_count
-FROM session
+    s.id AS id,
+    s.project AS project,
+    s.cwd AS cwd,
+    s.model AS model,
+    s.started_at AS started_at,
+    s.ended_at AS ended_at,
+    s.repository AS repository,
+    s.checkout AS checkout,
+    COALESCE(s.ended_at, s.started_at) AS last_seen,
+    (SELECT COUNT(*) FROM tool_call tc WHERE tc.session = s.id) AS tool_call_count,
+    (SELECT COUNT(*) FROM tool_call tc WHERE tc.session = s.id AND tc.has_error = TRUE) AS tool_failure_count,
+    (SELECT COUNT(*) FROM friction_event fe WHERE fe.session = s.id) AS friction_event_count,
+    (SELECT COUNT(*) FROM plan_snapshot ps WHERE ps.session = s.id) AS plan_snapshot_count
+FROM session s
 ORDER BY last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+/**
+ * SurrealDB's original was one `RETURN [{relation, rows: (subquery)}, ...]`
+ * statement - a nested array-of-objects-with-embedded-result-set shape DuckDB
+ * has no equivalent for in a single statement. This UNIONs the three grouped
+ * queries into one flat rowset instead, with `relation` as the discriminator
+ * column (each caller filters/groups by it client-side). SHAPE CHANGE - flag
+ * for whichever chunk ports the dashboard/CLI consumer of this view.
+ */
 export function fileEvidenceSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
-RETURN [
-    {
-        relation: "edited",
-        rows: (
-            SELECT
-                "edited" AS relation,
-                session.source AS source,
-                tool,
-                count() AS edge_count,
-                time::max(ts) AS last_seen
-            FROM edited
-            GROUP BY source, tool
-            ORDER BY edge_count DESC, last_seen DESC
-            LIMIT ${safeLimit}
-        )
-    },
-    {
-        relation: "read_file",
-        rows: (
-            SELECT
-                "read_file" AS relation,
-                in.session.source AS source,
-                in.name AS tool,
-                evidence,
-                count() AS edge_count,
-                time::max(ts) AS last_seen
-            FROM read_file
-            GROUP BY source, tool, evidence
-            ORDER BY edge_count DESC, last_seen DESC
-            LIMIT ${safeLimit}
-        )
-    },
-    {
-        relation: "searched_file",
-        rows: (
-            SELECT
-                "searched_file" AS relation,
-                in.session.source AS source,
-                in.name AS tool,
-                evidence,
-                count() AS edge_count,
-                time::max(ts) AS last_seen
-            FROM searched_file
-            GROUP BY source, tool, evidence
-            ORDER BY edge_count DESC, last_seen DESC
-            LIMIT ${safeLimit}
-        )
-    }
-];`.trim();
+SELECT * FROM (
+    SELECT
+        'edited' AS relation,
+        s.source AS source,
+        e.tool AS tool,
+        CAST(NULL AS VARCHAR) AS evidence,
+        COUNT(*) AS edge_count,
+        MAX(e.ts) AS last_seen
+    FROM edited e
+    JOIN turn t ON t.id = e.in_id
+    JOIN session s ON s.id = t.session
+    GROUP BY s.source, e.tool
+    ORDER BY edge_count DESC, last_seen DESC
+    LIMIT ${safeLimit}
+)
+UNION ALL
+SELECT * FROM (
+    SELECT
+        'read_file' AS relation,
+        s.source AS source,
+        tc.name AS tool,
+        rf.evidence AS evidence,
+        COUNT(*) AS edge_count,
+        MAX(rf.ts) AS last_seen
+    FROM read_file rf
+    JOIN tool_call tc ON tc.id = rf.in_id
+    JOIN session s ON s.id = tc.session
+    GROUP BY s.source, tc.name, rf.evidence
+    ORDER BY edge_count DESC, last_seen DESC
+    LIMIT ${safeLimit}
+)
+UNION ALL
+SELECT * FROM (
+    SELECT
+        'searched_file' AS relation,
+        s.source AS source,
+        tc.name AS tool,
+        sf.evidence AS evidence,
+        COUNT(*) AS edge_count,
+        MAX(sf.ts) AS last_seen
+    FROM searched_file sf
+    JOIN tool_call tc ON tc.id = sf.in_id
+    JOIN session s ON s.id = tc.session
+    GROUP BY s.source, tc.name, sf.evidence
+    ORDER BY edge_count DESC, last_seen DESC
+    LIMIT ${safeLimit}
+);`.trim();
 }
 
 export function feedbackLoopsSql(limit: number): string {
@@ -385,11 +401,11 @@ export function feedbackLoopsSql(limit: number): string {
 SELECT
     kind,
     command_norm,
-    count() AS runs,
-    math::sum(IF status = "error" THEN 1 ELSE 0 END) AS errors,
-    time::max(ts) AS last_seen
+    COUNT(*) AS runs,
+    COUNT(*) FILTER (WHERE status = 'error') AS errors,
+    MAX(ts) AS last_seen
 FROM command_outcome
-WHERE kind != "success" AND command_norm IS NOT NONE
+WHERE kind != 'success' AND command_norm IS NOT NULL
 GROUP BY kind, command_norm
 ORDER BY errors DESC, runs DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
@@ -397,40 +413,36 @@ LIMIT ${safeLimit};`.trim();
 
 export function verificationGapsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
-    // "Sessions that edited but never verified." The old form ran a correlated
-    // `command_outcome WHERE session = $parent.session` subquery per edited
-    // session (thousands) - $parent.session can't use an index, so ~16s. This
-    // instead: (1) anti-join against the verified-session set computed ONCE
-    // (`session NOT IN (... GROUP BY session)`); (2) filter + limit on the cheap
-    // (session, edits) projection, deref session meta only for the final N rows.
-    // verification_commands is 0 by construction of the filter. ~16s -> ~6s; the
-    // residual is the `in.session` deref over the edited edge table.
+    // "Sessions that edited but never verified." (1) anti-join against the
+    // verified-session set computed ONCE; (2) filter + limit on the cheap
+    // (session, edits) projection, join session meta only for the final N
+    // rows. verification_commands is 0 by construction of the filter. `edited`
+    // has no denormalised session (unlike `invoked`), so `in.session` is a
+    // join through `turn`, same as the original's deref.
     return `
 SELECT
-    id,
-    id.project AS project,
-    id.cwd AS cwd,
-    id.started_at AS started_at,
-    id.ended_at AS ended_at,
-    edits,
+    x.session AS id,
+    s.project AS project,
+    s.cwd AS cwd,
+    s.started_at AS started_at,
+    s.ended_at AS ended_at,
+    x.edits AS edits,
     0 AS verification_commands
 FROM (
-    SELECT session AS id, edits
-    FROM (
-        SELECT in.session AS session, count() AS edits
-        FROM edited
-        GROUP BY session
-    )
-    WHERE edits > 0
-      AND session NOT IN (
-        SELECT VALUE session FROM command_outcome
-        WHERE kind IN ["expected_feedback", "product_bug_signal", "guardrail"]
-        GROUP BY session
-      )
-    ORDER BY edits DESC
-    LIMIT ${safeLimit}
-)
-ORDER BY edits DESC, ended_at DESC;`.trim();
+    SELECT t.session AS session, COUNT(*) AS edits
+    FROM edited e
+    JOIN turn t ON t.id = e.in_id
+    GROUP BY t.session
+) x
+JOIN session s ON s.id = x.session
+WHERE x.edits > 0
+  AND x.session NOT IN (
+    SELECT session FROM command_outcome
+    WHERE kind IN ('expected_feedback', 'product_bug_signal', 'guardrail')
+    GROUP BY session
+  )
+ORDER BY x.edits DESC, s.ended_at DESC
+LIMIT ${safeLimit};`.trim();
 }
 
 export function userLanguageSql(limit: number): string {
@@ -456,28 +468,26 @@ export function feedbackLanguageSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id AS signal,
-    kind,
-    label,
-    canonical_text,
-    array::len((SELECT id FROM expresses WHERE out = $parent.id AND in.role = "user")) AS turns,
-    array::len((SELECT session FROM expresses WHERE out = $parent.id AND in.role = "user" GROUP BY session)) AS sessions,
-    last_seen,
+    ss.id AS signal,
+    ss.kind AS kind,
+    ss.label AS label,
+    ss.canonical_text AS canonical_text,
+    (SELECT COUNT(*) FROM expresses e JOIN turn t ON t.id = e.in_id WHERE e.out_id = ss.id AND t.role = 'user') AS turns,
+    (SELECT COUNT(DISTINCT e.session) FROM expresses e JOIN turn t ON t.id = e.in_id WHERE e.out_id = ss.id AND t.role = 'user') AS sessions,
+    ss.last_seen AS last_seen,
     (
-        SELECT
-            in AS turn,
-            in.session AS session,
-            in.seq AS seq,
-            in.text_excerpt AS text,
-            ts
-        FROM expresses
-        WHERE out = $parent.id AND in.role = "user"
-        ORDER BY ts DESC
-        LIMIT 5
+        SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+            SELECT t.id AS turn, e.session AS session, t.seq AS seq, t.text_excerpt AS text, e.ts AS ts
+            FROM expresses e
+            JOIN turn t ON t.id = e.in_id
+            WHERE e.out_id = ss.id AND t.role = 'user'
+            ORDER BY e.ts DESC
+            LIMIT 5
+        ) x
     ) AS examples
-FROM semantic_signal
-WHERE kind IN ["feedback", "correction"]
-ORDER BY turns DESC, sessions DESC, last_seen DESC
+FROM semantic_signal ss
+WHERE ss.kind IN ('feedback', 'correction')
+ORDER BY turns DESC, sessions DESC, ss.last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -485,30 +495,27 @@ export function messageSignalsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id AS signal,
-    kind,
-    label,
-    canonical_text,
-    array::len((SELECT id FROM expresses WHERE out = $parent.id)) AS turns,
-    array::len((SELECT session FROM expresses WHERE out = $parent.id GROUP BY session)) AS sessions,
-    array::len((SELECT id FROM turn_analysis WHERE turn IN (SELECT in FROM expresses WHERE out = $parent.id).in)) AS analyses,
-    math::mean((SELECT confidence FROM expresses WHERE out = $parent.id).confidence) AS avg_confidence,
-    last_seen,
+    ss.id AS signal,
+    ss.kind AS kind,
+    ss.label AS label,
+    ss.canonical_text AS canonical_text,
+    (SELECT COUNT(*) FROM expresses e WHERE e.out_id = ss.id) AS turns,
+    (SELECT COUNT(DISTINCT e.session) FROM expresses e WHERE e.out_id = ss.id) AS sessions,
+    (SELECT COUNT(*) FROM turn_analysis ta WHERE ta.turn IN (SELECT e.in_id FROM expresses e WHERE e.out_id = ss.id)) AS analyses,
+    (SELECT AVG(e.confidence) FROM expresses e WHERE e.out_id = ss.id) AS avg_confidence,
+    ss.last_seen AS last_seen,
     (
-        SELECT
-            in AS turn,
-            in.session AS session,
-            in.role AS role,
-            in.seq AS seq,
-            in.text_excerpt AS text,
-            ts
-        FROM expresses
-        WHERE out = $parent.id
-        ORDER BY ts DESC
-        LIMIT 5
+        SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+            SELECT t.id AS turn, e.session AS session, t.role AS role, t.seq AS seq, t.text_excerpt AS text, e.ts AS ts
+            FROM expresses e
+            JOIN turn t ON t.id = e.in_id
+            WHERE e.out_id = ss.id
+            ORDER BY e.ts DESC
+            LIMIT 5
+        ) x
     ) AS examples
-FROM semantic_signal
-ORDER BY turns DESC, sessions DESC, last_seen DESC
+FROM semantic_signal ss
+ORDER BY turns DESC, sessions DESC, ss.last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -516,56 +523,67 @@ export function reactionsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    polarity,
-    act,
-    confidence,
-    signal.label AS signal,
-    session,
-    in AS user_turn,
-    in.seq AS user_seq,
-    in.text_excerpt AS user_text,
-    out AS assistant_turn,
-    out.seq AS assistant_seq,
-    out.text_excerpt AS assistant_text,
-    ts
-FROM reacts_to
-ORDER BY ts DESC
+    rt.id AS id,
+    rt.polarity AS polarity,
+    rt.act AS act,
+    rt.confidence AS confidence,
+    ss.label AS signal,
+    rt.session AS session,
+    rt.in_id AS user_turn,
+    ut.seq AS user_seq,
+    ut.text_excerpt AS user_text,
+    rt.out_id AS assistant_turn,
+    at.seq AS assistant_seq,
+    at.text_excerpt AS assistant_text,
+    rt.ts AS ts
+FROM reacts_to rt
+LEFT JOIN semantic_signal ss ON ss.id = rt.signal
+LEFT JOIN turn ut ON ut.id = rt.in_id
+LEFT JOIN turn at ON at.id = rt.out_id
+ORDER BY rt.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
 export function reactionThemesSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
-SELECT
-    id AS signal,
-    kind,
-    label,
-    canonical_text,
-    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id)) AS reactions,
-    array::len((SELECT session FROM reacts_to WHERE signal = $parent.id GROUP BY session)) AS sessions,
-    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "accept")) AS accept,
-    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "revise")) AS revise,
-    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "reject")) AS reject,
-    time::max((SELECT ts FROM reacts_to WHERE signal = $parent.id).ts) AS last_seen,
-    (
-        SELECT
-            polarity,
-            act,
-            in AS user_turn,
-            in.seq AS user_seq,
-            in.text_excerpt AS user_text,
-            out AS assistant_turn,
-            out.seq AS assistant_seq,
-            out.text_excerpt AS assistant_text,
-            ts
-        FROM reacts_to
-        WHERE signal = $parent.id
-        ORDER BY ts DESC
-        LIMIT 3
-    ) AS examples
-FROM semantic_signal
-WHERE kind IN ["feedback", "correction"] AND array::len((SELECT id FROM reacts_to WHERE signal = $parent.id)) > 0
+SELECT signal, kind, label, canonical_text, reactions, sessions, accept, revise, reject, last_seen, examples
+FROM (
+    SELECT
+        ss.id AS signal,
+        ss.kind AS kind,
+        ss.label AS label,
+        ss.canonical_text AS canonical_text,
+        (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id) AS reactions,
+        (SELECT COUNT(DISTINCT rt.session) FROM reacts_to rt WHERE rt.signal = ss.id) AS sessions,
+        (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id AND rt.polarity = 'accept') AS accept,
+        (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id AND rt.polarity = 'revise') AS revise,
+        (SELECT COUNT(*) FROM reacts_to rt WHERE rt.signal = ss.id AND rt.polarity = 'reject') AS reject,
+        (SELECT MAX(rt.ts) FROM reacts_to rt WHERE rt.signal = ss.id) AS last_seen,
+        (
+            SELECT array_agg(x ORDER BY x.ts DESC) FROM (
+                SELECT
+                    rt.polarity AS polarity,
+                    rt.act AS act,
+                    rt.in_id AS user_turn,
+                    ut.seq AS user_seq,
+                    ut.text_excerpt AS user_text,
+                    rt.out_id AS assistant_turn,
+                    at.seq AS assistant_seq,
+                    at.text_excerpt AS assistant_text,
+                    rt.ts AS ts
+                FROM reacts_to rt
+                LEFT JOIN turn ut ON ut.id = rt.in_id
+                LEFT JOIN turn at ON at.id = rt.out_id
+                WHERE rt.signal = ss.id
+                ORDER BY rt.ts DESC
+                LIMIT 3
+            ) x
+        ) AS examples
+    FROM semantic_signal ss
+    WHERE ss.kind IN ('feedback', 'correction')
+) y
+WHERE reactions > 0
 ORDER BY reactions DESC, sessions DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -600,10 +618,10 @@ SELECT
     reaction_type,
     target,
     durability,
-    count() AS events,
-    array::len(array::distinct(session)) AS sessions,
-    math::mean(confidence) AS avg_confidence,
-    time::max(ts) AS last_seen
+    COUNT(*) AS events,
+    COUNT(DISTINCT session) AS sessions,
+    AVG(confidence) AS avg_confidence,
+    MAX(ts) AS last_seen
 FROM reaction_event
 GROUP BY reaction_type, target, durability
 ORDER BY events DESC, sessions DESC, last_seen DESC
@@ -644,28 +662,30 @@ export function classifierFactsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    classifier_key,
-    classifier_version,
-    label,
-    target,
-    polarity,
-    durability,
-    confidence,
-    subject_type,
-    subject_id,
-    turn,
-    turn.seq AS user_seq,
-    turn.text_excerpt AS user_text,
-    session,
-    session.project AS project,
-    session.cwd AS cwd,
-    evidence_json,
-    signals,
-    ts
-FROM classifier_result
-WHERE turn IS NOT NONE
-ORDER BY ts DESC
+    cr.id AS id,
+    cr.classifier_key AS classifier_key,
+    cr.classifier_version AS classifier_version,
+    cr.label AS label,
+    cr.target AS target,
+    cr.polarity AS polarity,
+    cr.durability AS durability,
+    cr.confidence AS confidence,
+    cr.subject_type AS subject_type,
+    cr.subject_id AS subject_id,
+    cr.turn AS turn,
+    t.seq AS user_seq,
+    t.text_excerpt AS user_text,
+    cr.session AS session,
+    s.project AS project,
+    s.cwd AS cwd,
+    cr.evidence_json AS evidence_json,
+    cr.signals AS signals,
+    cr.ts AS ts
+FROM classifier_result cr
+LEFT JOIN turn t ON t.id = cr.turn
+LEFT JOIN session s ON s.id = cr.session
+WHERE cr.turn IS NOT NULL
+ORDER BY cr.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -673,26 +693,28 @@ export function correctionContextsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    classifier_key,
-    classifier_version,
-    label,
-    target,
-    polarity,
-    durability,
-    confidence,
-    turn,
-    turn.seq AS user_seq,
-    turn.text_excerpt AS user_text,
-    session,
-    session.project AS project,
-    session.cwd AS cwd,
-    evidence_json,
-    signals,
-    ts
-FROM classifier_result
-WHERE classifier_key = "correction-event" OR label = "correction"
-ORDER BY ts DESC
+    cr.id AS id,
+    cr.classifier_key AS classifier_key,
+    cr.classifier_version AS classifier_version,
+    cr.label AS label,
+    cr.target AS target,
+    cr.polarity AS polarity,
+    cr.durability AS durability,
+    cr.confidence AS confidence,
+    cr.turn AS turn,
+    t.seq AS user_seq,
+    t.text_excerpt AS user_text,
+    cr.session AS session,
+    s.project AS project,
+    s.cwd AS cwd,
+    cr.evidence_json AS evidence_json,
+    cr.signals AS signals,
+    cr.ts AS ts
+FROM classifier_result cr
+LEFT JOIN turn t ON t.id = cr.turn
+LEFT JOIN session s ON s.id = cr.session
+WHERE cr.classifier_key = 'correction-event' OR cr.label = 'correction'
+ORDER BY cr.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -700,24 +722,26 @@ export function classifierOutcomesSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    id,
-    classifier_key,
-    classifier_version,
-    label,
-    target,
-    polarity,
-    durability,
-    confidence,
-    turn,
-    turn.seq AS user_seq,
-    turn.text_excerpt AS user_text,
-    session,
-    session.project AS project,
-    session.cwd AS cwd,
-    ts
-FROM classifier_result
-WHERE turn IS NOT NONE
-ORDER BY ts DESC
+    cr.id AS id,
+    cr.classifier_key AS classifier_key,
+    cr.classifier_version AS classifier_version,
+    cr.label AS label,
+    cr.target AS target,
+    cr.polarity AS polarity,
+    cr.durability AS durability,
+    cr.confidence AS confidence,
+    cr.turn AS turn,
+    t.seq AS user_seq,
+    t.text_excerpt AS user_text,
+    cr.session AS session,
+    s.project AS project,
+    s.cwd AS cwd,
+    cr.ts AS ts
+FROM classifier_result cr
+LEFT JOIN turn t ON t.id = cr.turn
+LEFT JOIN session s ON s.id = cr.session
+WHERE cr.turn IS NOT NULL
+ORDER BY cr.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -729,10 +753,10 @@ SELECT
     label,
     target,
     durability,
-    count() AS results,
-    array::len(array::distinct(session)) AS sessions,
-    math::mean(confidence) AS avg_confidence,
-    time::max(ts) AS last_seen
+    COUNT(*) AS results,
+    COUNT(DISTINCT session) AS sessions,
+    AVG(confidence) AS avg_confidence,
+    MAX(ts) AS last_seen
 FROM classifier_result
 GROUP BY classifier_key, label, target, durability
 ORDER BY results DESC, sessions DESC, last_seen DESC
@@ -743,56 +767,62 @@ export function harnessCandidatesSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    ["classifier_harness_candidate", classifier_key, label, target, durability] AS candidate_id,
-    [classifier_key, label, target, durability] AS dedupe_signature,
-    classifier_key,
-    label,
-    target,
-    durability,
-    facts,
-    sessions,
-    avg_confidence,
-    last_seen,
-    IF target IN ["test_required", "output_required", "regression_guard", "verification"] OR label = "verification_request" THEN "verification"
-    ELSE IF target IN ["tooling_preference", "dev_environment", "environment_setup"] THEN "environment"
-    ELSE IF target IN ["wrong_artifact", "wrong_output", "missing_context", "misclassified_intent", "prototype_completeness"] OR label = "correction" THEN "representation"
-    ELSE IF durability IN ["repo_preference", "global_preference"] OR label = "direction" THEN "guidance"
-    ELSE "triage" END AS proposed_layer,
-    IF target IN ["test_required", "output_required", "regression_guard", "verification"] OR label = "verification_request" THEN "add_verification_gate"
-    ELSE IF target IN ["tooling_preference", "dev_environment", "environment_setup"] THEN "record_environment_preference"
-    ELSE IF target IN ["wrong_artifact", "wrong_output", "missing_context", "misclassified_intent", "prototype_completeness"] OR label = "correction" THEN "add_context_guardrail"
-    ELSE IF durability IN ["repo_preference", "global_preference"] OR label = "direction" THEN "record_guidance"
-    ELSE "review_pattern" END AS proposed_action,
+    ['classifier_harness_candidate', g.classifier_key, g.label, g.target, g.durability] AS candidate_id,
+    [g.classifier_key, g.label, g.target, g.durability] AS dedupe_signature,
+    g.classifier_key AS classifier_key,
+    g.label AS label,
+    g.target AS target,
+    g.durability AS durability,
+    g.facts AS facts,
+    g.sessions AS sessions,
+    g.avg_confidence AS avg_confidence,
+    g.last_seen AS last_seen,
+    CASE
+        WHEN g.target IN ('test_required', 'output_required', 'regression_guard', 'verification') OR g.label = 'verification_request' THEN 'verification'
+        WHEN g.target IN ('tooling_preference', 'dev_environment', 'environment_setup') THEN 'environment'
+        WHEN g.target IN ('wrong_artifact', 'wrong_output', 'missing_context', 'misclassified_intent', 'prototype_completeness') OR g.label = 'correction' THEN 'representation'
+        WHEN g.durability IN ('repo_preference', 'global_preference') OR g.label = 'direction' THEN 'guidance'
+        ELSE 'triage'
+    END AS proposed_layer,
+    CASE
+        WHEN g.target IN ('test_required', 'output_required', 'regression_guard', 'verification') OR g.label = 'verification_request' THEN 'add_verification_gate'
+        WHEN g.target IN ('tooling_preference', 'dev_environment', 'environment_setup') THEN 'record_environment_preference'
+        WHEN g.target IN ('wrong_artifact', 'wrong_output', 'missing_context', 'misclassified_intent', 'prototype_completeness') OR g.label = 'correction' THEN 'add_context_guardrail'
+        WHEN g.durability IN ('repo_preference', 'global_preference') OR g.label = 'direction' THEN 'record_guidance'
+        ELSE 'review_pattern'
+    END AS proposed_action,
     (
-        SELECT
-            id,
-            classifier_key,
-            label,
-            target,
-            durability,
-            confidence,
-            turn,
-            turn.seq AS user_seq,
-            turn.text_excerpt AS user_text,
-            session,
-            ts,
-            (
-                SELECT
-                    kind,
-                    out AS evidence,
-                    ts
-                FROM cites_evidence
-                WHERE in = $parent.id
-                ORDER BY ts DESC
-                LIMIT 3
-            ) AS evidence
-        FROM classifier_result
-        WHERE classifier_key = $parent.classifier_key
-          AND label = $parent.label
-          AND target = $parent.target
-          AND durability = $parent.durability
-        ORDER BY ts DESC
-        LIMIT 3
+        SELECT array_agg(ex ORDER BY ex.ts DESC) FROM (
+            SELECT
+                cr2.id AS id,
+                cr2.classifier_key AS classifier_key,
+                cr2.label AS label,
+                cr2.target AS target,
+                cr2.durability AS durability,
+                cr2.confidence AS confidence,
+                cr2.turn AS turn,
+                t2.seq AS user_seq,
+                t2.text_excerpt AS user_text,
+                cr2.session AS session,
+                cr2.ts AS ts,
+                (
+                    SELECT array_agg(ev ORDER BY ev.ts DESC) FROM (
+                        SELECT ce.kind AS kind, ce.out_id AS evidence, ce.ts AS ts
+                        FROM cites_evidence ce
+                        WHERE ce.in_id = cr2.id
+                        ORDER BY ce.ts DESC
+                        LIMIT 3
+                    ) ev
+                ) AS evidence
+            FROM classifier_result cr2
+            LEFT JOIN turn t2 ON t2.id = cr2.turn
+            WHERE cr2.classifier_key = g.classifier_key
+              AND cr2.label = g.label
+              AND cr2.target = g.target
+              AND cr2.durability = g.durability
+            ORDER BY cr2.ts DESC
+            LIMIT 3
+        ) ex
     ) AS examples
 FROM (
     SELECT
@@ -800,19 +830,19 @@ FROM (
         label,
         target,
         durability,
-        count() AS facts,
-        array::len(array::distinct(session)) AS sessions,
-        math::mean(confidence) AS avg_confidence,
-        time::max(ts) AS last_seen
+        COUNT(*) AS facts,
+        COUNT(DISTINCT session) AS sessions,
+        AVG(confidence) AS avg_confidence,
+        MAX(ts) AS last_seen
     FROM classifier_result
-    WHERE turn IS NOT NONE
+    WHERE turn IS NOT NULL
       AND (
-        durability IN ["candidate_guidance", "repo_preference", "global_preference"]
-        OR label IN ["correction", "direction", "verification_request"]
+        durability IN ('candidate_guidance', 'repo_preference', 'global_preference')
+        OR label IN ('correction', 'direction', 'verification_request')
       )
     GROUP BY classifier_key, label, target, durability
-)
-ORDER BY facts DESC, sessions DESC, avg_confidence DESC, last_seen DESC
+) g
+ORDER BY g.facts DESC, g.sessions DESC, g.avg_confidence DESC, g.last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -820,15 +850,16 @@ export function tokenImpactSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    workflow_epoch.name AS workflow_epoch,
-    source,
-    count() AS sessions,
-    math::mean(estimated_tokens) AS avg_estimated_tokens,
-    math::sum(estimated_tokens) AS total_estimated_tokens,
-    math::mean(prompt_tokens ?? estimated_tokens) AS avg_prompt_or_estimated_tokens,
-    time::max(ts) AS last_seen
-FROM session_token_usage
-GROUP BY workflow_epoch, source
+    we.name AS workflow_epoch,
+    stu.source AS source,
+    COUNT(*) AS sessions,
+    AVG(stu.estimated_tokens) AS avg_estimated_tokens,
+    CAST(SUM(stu.estimated_tokens) AS BIGINT) AS total_estimated_tokens,
+    AVG(COALESCE(stu.prompt_tokens, stu.estimated_tokens)) AS avg_prompt_or_estimated_tokens,
+    MAX(stu.ts) AS last_seen
+FROM session_token_usage stu
+LEFT JOIN workflow_epoch we ON we.id = stu.workflow_epoch
+GROUP BY we.name, stu.source
 ORDER BY last_seen DESC, sessions DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -837,22 +868,23 @@ export function cacheHealthSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    session,
-    source,
-    workflow_epoch.name AS workflow_epoch,
-    model,
-    prompt_tokens,
-    completion_tokens,
-    cache_read_input_tokens,
-    cache_creation_input_tokens,
-    cache_read_input_tokens / prompt_tokens AS cache_read_ratio,
-    cache_creation_input_tokens / prompt_tokens AS cache_creation_ratio,
-    estimated_tokens,
-    transcript_bytes,
-    ts
-FROM session_token_usage
-WHERE prompt_tokens IS NOT NONE OR cache_read_input_tokens IS NOT NONE OR estimated_tokens > 40000
-ORDER BY cache_read_ratio ASC, estimated_tokens DESC, ts DESC
+    stu.session AS session,
+    stu.source AS source,
+    we.name AS workflow_epoch,
+    stu.model AS model,
+    stu.prompt_tokens AS prompt_tokens,
+    stu.completion_tokens AS completion_tokens,
+    stu.cache_read_input_tokens AS cache_read_input_tokens,
+    stu.cache_creation_input_tokens AS cache_creation_input_tokens,
+    CAST(stu.cache_read_input_tokens AS DOUBLE) / NULLIF(stu.prompt_tokens, 0) AS cache_read_ratio,
+    CAST(stu.cache_creation_input_tokens AS DOUBLE) / NULLIF(stu.prompt_tokens, 0) AS cache_creation_ratio,
+    stu.estimated_tokens AS estimated_tokens,
+    stu.transcript_bytes AS transcript_bytes,
+    stu.ts AS ts
+FROM session_token_usage stu
+LEFT JOIN workflow_epoch we ON we.id = stu.workflow_epoch
+WHERE stu.prompt_tokens IS NOT NULL OR stu.cache_read_input_tokens IS NOT NULL OR stu.estimated_tokens > 40000
+ORDER BY cache_read_ratio ASC, stu.estimated_tokens DESC, stu.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -860,19 +892,20 @@ export function workflowImpactSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    workflow_epoch.name AS workflow_epoch,
-    source,
-    count() AS sessions,
-    math::mean(turns) AS avg_turns,
-    math::mean(tool_calls) AS avg_tool_calls,
-    math::mean(tool_errors) AS avg_tool_errors,
-    math::mean(user_corrections) AS avg_user_corrections,
-    math::mean(interruptions) AS avg_interruptions,
-    math::mean(subagent_dispatches) AS avg_subagent_dispatches,
-    math::mean(estimated_tokens) AS avg_estimated_tokens,
-    time::max(ts) AS last_seen
-FROM session_health
-GROUP BY workflow_epoch, source
+    we.name AS workflow_epoch,
+    sh.source AS source,
+    COUNT(*) AS sessions,
+    AVG(sh.turns) AS avg_turns,
+    AVG(sh.tool_calls) AS avg_tool_calls,
+    AVG(sh.tool_errors) AS avg_tool_errors,
+    AVG(sh.user_corrections) AS avg_user_corrections,
+    AVG(sh.interruptions) AS avg_interruptions,
+    AVG(sh.subagent_dispatches) AS avg_subagent_dispatches,
+    AVG(sh.estimated_tokens) AS avg_estimated_tokens,
+    MAX(sh.ts) AS last_seen
+FROM session_health sh
+LEFT JOIN workflow_epoch we ON we.id = sh.workflow_epoch
+GROUP BY we.name, sh.source
 ORDER BY last_seen DESC, sessions DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -881,20 +914,21 @@ export function codexHealthSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    session,
-    workflow_epoch.name AS workflow_epoch,
-    turns,
-    tool_calls,
-    tool_errors,
-    interruptions,
-    subagent_dispatches,
-    plan_snapshots,
-    estimated_tokens,
-    context_pressure,
-    ts
-FROM session_health
-WHERE source IN ${CODEX_SOURCES_SQL} AND estimated_tokens > 0
-ORDER BY estimated_tokens DESC, tool_errors DESC, turns DESC, ts DESC
+    sh.session AS session,
+    we.name AS workflow_epoch,
+    sh.turns AS turns,
+    sh.tool_calls AS tool_calls,
+    sh.tool_errors AS tool_errors,
+    sh.interruptions AS interruptions,
+    sh.subagent_dispatches AS subagent_dispatches,
+    sh.plan_snapshots AS plan_snapshots,
+    sh.estimated_tokens AS estimated_tokens,
+    sh.context_pressure AS context_pressure,
+    sh.ts AS ts
+FROM session_health sh
+LEFT JOIN workflow_epoch we ON we.id = sh.workflow_epoch
+WHERE sh.source IN ${CODEX_SOURCES_SQL} AND sh.estimated_tokens > 0
+ORDER BY sh.estimated_tokens DESC, sh.tool_errors DESC, sh.turns DESC, sh.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -903,9 +937,9 @@ export function closureSql(limit: number): string {
     return `
 SELECT
     kind,
-    count() AS commits,
-    math::sum(IF confidence = "high" THEN 1 ELSE 0 END) AS high_confidence,
-    time::max(ts) AS last_seen
+    COUNT(*) AS commits,
+    COUNT(*) FILTER (WHERE confidence = 'high') AS high_confidence,
+    MAX(ts) AS last_seen
 FROM commit_classification
 GROUP BY kind
 ORDER BY commits DESC, last_seen DESC
@@ -916,19 +950,21 @@ export function postFeatureFixesSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    in AS feature_commit,
-    in.message AS feature_message,
-    out AS fix_commit,
-    out.message AS fix_message,
-    repository,
-    overlap_count,
-    overlap_files,
-    days_between,
-    confidence,
-    reason,
-    ts
-FROM later_fixed_by
-ORDER BY overlap_count DESC, days_between ASC, ts DESC
+    lfb.in_id AS feature_commit,
+    fc.message AS feature_message,
+    lfb.out_id AS fix_commit,
+    xc.message AS fix_message,
+    lfb.repository AS repository,
+    lfb.overlap_count AS overlap_count,
+    lfb.overlap_files AS overlap_files,
+    lfb.days_between AS days_between,
+    lfb.confidence AS confidence,
+    lfb.reason AS reason,
+    lfb.ts AS ts
+FROM later_fixed_by lfb
+LEFT JOIN "commit" fc ON fc.id = lfb.in_id
+LEFT JOIN "commit" xc ON xc.id = lfb.out_id
+ORDER BY lfb.overlap_count DESC, lfb.days_between ASC, lfb.ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -942,7 +978,7 @@ SELECT
     suspected_gap,
     proposed_behavior,
     confidence,
-    IF confidence = "high" THEN 3 ELSE IF confidence = "medium" THEN 2 ELSE 1 END AS confidence_score,
+    CASE WHEN confidence = 'high' THEN 3 WHEN confidence = 'medium' THEN 2 ELSE 1 END AS confidence_score,
     expected_impact,
     status,
     metrics,
@@ -952,19 +988,26 @@ ORDER BY confidence_score DESC, created_at DESC
 LIMIT ${safeLimit};`.trim();
 }
 
-const sqlString = (value: string): string =>
-    `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+// DuckDB string literals are SINGLE-quoted (double quotes denote an
+// IDENTIFIER); doubling an embedded quote is the standard SQL escape - no
+// backslash processing.
+const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
+/**
+ * SurrealDB's original was one `RETURN [{table, stage, note, count: (...)}]`
+ * statement building ~140 inline correlated-subquery counts. DuckDB has no
+ * equivalent literal-array-of-objects construction; this UNIONs one
+ * `SELECT '<table>', ..., (SELECT COUNT(*) FROM <table>)` per registered
+ * table instead - same information, flat rowset. Every table name is
+ * double-quoted since `"commit"` is a reserved word DuckDB requires quoted
+ * (harmless for the rest).
+ */
 export function schemaCoverageSql(): string {
     const rows = SCHEMA_TABLES.map(
         (spec) =>
-            `{ table: ${sqlString(spec.table)}, stage: ${sqlString(
-                spec.stage,
-            )}, note: ${sqlString(
-                spec.note,
-            )}, count: ((SELECT count() AS count FROM ${spec.table} GROUP ALL)[0].count ?? 0) }`,
-    ).join(", ");
-    return `RETURN [${rows}];`;
+            `SELECT ${sqlString(spec.table)} AS table_name, ${sqlString(spec.stage)} AS stage, ${sqlString(spec.note)} AS note, (SELECT COUNT(*) FROM "${spec.table}") AS count`,
+    ).join("\nUNION ALL\n");
+    return `${rows};`;
 }
 
 export function insightSqlForView(view: InsightView, limit: number): string {
