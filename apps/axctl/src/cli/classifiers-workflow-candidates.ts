@@ -1,17 +1,20 @@
-import { Effect, FileSystem, Path, type PlatformError } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, FileSystem, Path, Schema, type PlatformError } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
+import { withConfigWrite } from "../config-core/reconcile.ts";
 import { Judgment } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
-import { recordRef, surrealString } from "@ax/lib/shared/surql";
 import { ClassifierReviewPipelineService, ClassifierReviewPipelineServiceLive, type ClassifierReviewPipelineInputValues, nodeFileOutputVerifier } from "../classifiers/review-pipeline-service.ts";
-import { catchDbErrorAndExit } from "./output.ts";
+import { catchDbErrorAndExit, catchCacheReadErrorAndExit } from "./output.ts";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import {
-    workflowCandidateSql,
+    workflowCandidateGroupSql,
+    workflowCandidateEvidenceSql,
     WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES,
     isObject,
     topicFromPropertiesJson,
@@ -90,14 +93,235 @@ import type {
     WorkflowCandidateEmbeddingHelperGraphFactRow,
     WorkflowCandidateEmbeddingHelperGraphEdgeRow,
     WorkflowCandidateHelperFixtureRow,
-    WorkflowCandidateGroupRow,
-    WorkflowCandidateEvidenceRow,
     WorkflowCandidateReviewCoverageReport,
     WorkflowCandidateReviewPipelineLifecycleOptions,
-    WorkflowCandidatePendingReviewTurnRow,
+    WorkflowCandidateGraphWriteRow,
 } from "../classifiers/workflow-candidate-types.ts";
 export * from "../classifiers/workflow-candidate-types.ts";
 export * from "../classifiers/workflow-candidate-helpers.ts";
+
+/**
+ * DuckDB decode shapes for the `classifier_graph_{node,edge,fact}` /
+ * `cites_evidence` / `turn` reads this dispatcher issues directly (every
+ * `db.query` call this file used to make against SurrealDB). `updated_at` was
+ * `type::string(updated_at)` under SurrealQL - already an ISO string; DuckDB
+ * stores it as a real TIMESTAMP, so it decodes through `TimestampColumn` and
+ * gets re-stringified with `.toISOString()` at the call site, keeping every
+ * downstream row-shape contract (`updated_at?: string | null`) unchanged.
+ */
+const GroupRowSchema = Schema.Struct({
+    graph_id: Schema.String,
+    label: Schema.String,
+    properties_json: Schema.String,
+});
+const EvidenceRowSchema = Schema.Struct({
+    graph_id: Schema.String,
+    subject: Schema.String,
+    object: Schema.NullOr(Schema.String),
+    properties_json: Schema.String,
+});
+const FactRowSchema = Schema.Struct({
+    graph_id: Schema.String,
+    subject: Schema.String,
+    predicate: Schema.String,
+    object: Schema.NullOr(Schema.String),
+    value_json: Schema.NullOr(Schema.String),
+    properties_json: Schema.String,
+    updated_at: TimestampColumn,
+});
+const EdgeRowSchema = Schema.Struct({
+    graph_id: Schema.String,
+    kind: Schema.String,
+    from_id: Schema.String,
+    to_id: Schema.String,
+    evidence_path: Schema.String,
+    properties_json: Schema.String,
+    updated_at: TimestampColumn,
+});
+const HelperFactRowSchema = Schema.Struct({
+    graph_id: Schema.String,
+    subject: Schema.String,
+    predicate: Schema.String,
+    object: Schema.NullOr(Schema.String),
+    value_json: Schema.NullOr(Schema.String),
+    evidence_edges_json: Schema.String,
+    properties_json: Schema.String,
+    updated_at: TimestampColumn,
+});
+const ProposalEvidenceEdgeRowSchema = Schema.Struct({
+    in_id: Schema.String,
+    out_id: Schema.String,
+});
+const PendingReviewTurnRowSchema = Schema.Struct({
+    id: Schema.String,
+    session_id: Schema.String,
+    seq: NumberFromBigIntColumn,
+    role: Schema.String,
+    text: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+});
+
+const toFactRow = (row: typeof FactRowSchema.Type): WorkflowCandidateTopicHarnessGraphFactRow => ({
+    graph_id: row.graph_id,
+    subject: row.subject,
+    predicate: row.predicate,
+    object: row.object,
+    value_json: row.value_json,
+    properties_json: row.properties_json,
+    updated_at: row.updated_at.toISOString(),
+});
+const toEdgeRow = (row: typeof EdgeRowSchema.Type): WorkflowCandidateTopicHarnessGraphEdgeRow => ({
+    graph_id: row.graph_id,
+    kind: row.kind,
+    from_id: row.from_id,
+    to_id: row.to_id,
+    evidence_path: row.evidence_path,
+    properties_json: row.properties_json,
+    updated_at: row.updated_at.toISOString(),
+});
+const toHelperFactRow = (row: typeof HelperFactRowSchema.Type): WorkflowCandidateEmbeddingHelperGraphFactRow => ({
+    graph_id: row.graph_id,
+    subject: row.subject,
+    predicate: row.predicate,
+    object: row.object,
+    value_json: row.value_json,
+    evidence_edges_json: row.evidence_edges_json,
+    properties_json: row.properties_json,
+    updated_at: row.updated_at.toISOString(),
+});
+const toEmbeddingHelperEdgeRow = (row: typeof EdgeRowSchema.Type): WorkflowCandidateEmbeddingHelperGraphEdgeRow => ({
+    graph_id: row.graph_id,
+    kind: row.kind,
+    from_id: row.from_id,
+    to_id: row.to_id,
+    evidence_path: row.evidence_path,
+    properties_json: row.properties_json,
+    updated_at: row.updated_at.toISOString(),
+});
+
+/** Every read this dispatcher issues propagates a `CacheReadError` straight to
+ *  a hard process exit, matching `catchDbErrorAndExit`'s exit-on-failure policy
+ *  for the SurrealDB reads it replaces - a report command should never print a
+ *  silently-empty result because a read degraded, so this deliberately does
+ *  NOT use the defensive `cacheRows` helper (which degrades to `[]`). */
+const readRows = <S extends Schema.Top>(
+    schema: S,
+    sql: string,
+    params: ReadonlyArray<DuckDbParam> = [],
+): Effect.Effect<ReadonlyArray<S["Type"]>, never, CacheRead | S["DecodingServices"]> =>
+    Effect.gen(function* () {
+        const cache = yield* CacheRead;
+        return yield* cache.rows(schema, sql, params);
+    }).pipe(catchCacheReadErrorAndExit("axctl classifiers workflow-candidates") as (
+        eff: Effect.Effect<ReadonlyArray<S["Type"]>, CacheReadError, CacheRead | S["DecodingServices"]>,
+    ) => Effect.Effect<ReadonlyArray<S["Type"]>, never, CacheRead | S["DecodingServices"]>);
+
+/** `(kind = ? AND source_kind = ?)` OR-combined over `kinds`, optionally
+ *  narrowed by a case-insensitive `properties_json` substring match - the
+ *  DuckDB equivalent of the SurrealQL `string::lowercase(properties_json)
+ *  CONTAINS ...` filter every topic-scoped fact read used. */
+const workflowFactsByKindsSql = (kindCount: number, withTopic: boolean): string => {
+    const kindFrag = Array.from({ length: kindCount }, () => "(kind = ? AND source_kind = ?)").join(" OR ");
+    const where = kindCount > 1 ? `(${kindFrag})` : kindFrag;
+    const topicFrag = withTopic ? " AND LOWER(properties_json) LIKE ?" : "";
+    return `SELECT graph_id, subject, predicate, object, value_json, properties_json, updated_at ` +
+        `FROM classifier_graph_fact WHERE ${where}${topicFrag} ORDER BY updated_at DESC LIMIT ?`;
+};
+const workflowEdgesBySourceKindSql = (withTopic: boolean): string => {
+    const topicFrag = withTopic ? " AND LOWER(properties_json) LIKE ?" : "";
+    return `SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, updated_at ` +
+        `FROM classifier_graph_edge WHERE source_kind = ?${topicFrag} ORDER BY updated_at DESC LIMIT ?`;
+};
+const topicLikeParam = (topic: string): string => `%${topic.toLowerCase()}%`;
+
+/** Read the persisted facts + edges for a single `(kind, source_kind)` pair
+ *  (harness-check or candidate-review), optionally narrowed by a topic
+ *  substring - the shared shape behind every `persisted_*_facts` read. */
+const readWorkflowGraphFactsAndEdges = (input: {
+    readonly kind: string;
+    readonly topic?: string;
+    readonly factLimit: number;
+    readonly edgeLimit: number;
+}) => Effect.gen(function* () {
+    const withTopic = input.topic !== undefined;
+    const factParams: DuckDbParam[] = [input.kind, input.kind];
+    const edgeParams: DuckDbParam[] = [input.kind];
+    if (withTopic) {
+        factParams.push(topicLikeParam(input.topic!));
+        edgeParams.push(topicLikeParam(input.topic!));
+    }
+    factParams.push(input.factLimit);
+    edgeParams.push(input.edgeLimit);
+    const facts = yield* readRows(FactRowSchema, workflowFactsByKindsSql(1, withTopic), factParams);
+    const edges = yield* readRows(EdgeRowSchema, workflowEdgesBySourceKindSql(withTopic), edgeParams);
+    return { facts: facts.map(toFactRow), edges: edges.map(toEdgeRow) };
+});
+
+/** Plain `workflow_topic_candidate_review` facts, no topic filter - the
+ *  `reviewFactRows` shape reused by `guidanceDecisionBatch`'s refresh,
+ *  `reviewCoverage`'s baseline read, and its post-apply recheck. */
+const readWorkflowReviewFacts = (limit: number) =>
+    Effect.map(
+        readRows(FactRowSchema, workflowFactsByKindsSql(1, false), ["workflow_topic_candidate_review", "workflow_topic_candidate_review", limit]),
+        (rows) => rows.map(toFactRow),
+    );
+
+/** Read the `classifier_candidate_group` / `classifier_candidate_evidence`
+ *  rows this dispatcher's every top-level report starts from - the DuckDB
+ *  split of the old two-statement `workflowCandidateSql`. */
+const readWorkflowCandidateGroupsAndEvidence = (sourceKind: string) => Effect.gen(function* () {
+    const groupRows = yield* readRows(GroupRowSchema, workflowCandidateGroupSql, [sourceKind]);
+    const evidenceRows = yield* readRows(EvidenceRowSchema, workflowCandidateEvidenceSql, [sourceKind]);
+    return [groupRows, evidenceRows] as const;
+});
+
+/** `graph_id IN (candidateIds)` against `classifier_candidate_group` /
+ *  `classifier_candidate_evidence` - the evidence expansion read used by
+ *  every proposal-list evidence attach. */
+const readWorkflowCandidateEvidenceByIds = (candidateIds: readonly string[]) => Effect.gen(function* () {
+    const placeholders = candidateIds.map(() => "?").join(", ");
+    const groupRows = yield* readRows(
+        GroupRowSchema,
+        `SELECT graph_id, label, properties_json FROM classifier_graph_node WHERE kind = 'classifier_candidate_group' AND graph_id IN (${placeholders})`,
+        candidateIds,
+    );
+    const evidenceRows = yield* readRows(
+        EvidenceRowSchema,
+        `SELECT graph_id, subject, object, properties_json FROM classifier_graph_fact WHERE kind = 'classifier_candidate_evidence' AND subject IN (${placeholders}) ORDER BY graph_id`,
+        candidateIds,
+    );
+    return [groupRows, evidenceRows] as const;
+});
+
+/** `cites_evidence` rows citing `kind = 'workflow_candidate'` FROM one of
+ *  `proposalKeys` (bare `proposal` ids) - reconstructs the `proposal:<id>` /
+ *  bare-graph-id shape `attachWorkflowCandidateProposalEvidence` expects, since
+ *  DuckDB's `in_id`/`out_id` are bare (no SurrealDB `table:id` ref). */
+const readWorkflowCandidateProposalEvidenceEdges = (
+    proposalKeys: readonly string[],
+): Effect.Effect<readonly WorkflowCandidateProposalEvidenceEdgeRow[], never, CacheRead> =>
+    Effect.gen(function* () {
+        if (proposalKeys.length === 0) return [];
+        const placeholders = proposalKeys.map(() => "?").join(", ");
+        const rows = yield* readRows(
+            ProposalEvidenceEdgeRowSchema,
+            `SELECT in_id, out_id FROM cites_evidence WHERE kind = 'workflow_candidate' AND in_id IN (${placeholders})`,
+            proposalKeys,
+        );
+        return rows.map((row) => ({
+            proposal_id: `proposal:${row.in_id}`,
+            candidate_ref: row.out_id,
+        }));
+    });
+
+/** Apply a `classifier_graph_{node,edge,fact}` write plan (harness-check or
+ *  candidate-review) through the DuckDB write seam - the `db.query(plan.
+ *  statements.join("\n"))` this replaces, under the ingest lock via
+ *  `withConfigWrite` since this is a CLI-invoked (non-ingest) write. */
+export const applyGraphWriteRows = (rows: readonly WorkflowCandidateGraphWriteRow[]) =>
+    withConfigWrite((write) =>
+        Effect.forEach(rows, (entry) => write.put(entry.table, entry.row), { discard: true }),
+    ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
 
 const loadWorkflowProposalRows = (input: {
     readonly status: string;
@@ -206,26 +430,26 @@ const persistHarnessProposalPlan = (
     }));
 });
 const loadWorkflowCandidatePendingReviewTurnContexts = (
-    db: SurrealClientShape,
     turnIds: readonly string[],
-): Effect.Effect<readonly WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[], unknown> =>
+): Effect.Effect<readonly WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[], never, CacheRead> =>
     Effect.gen(function* () {
         const contexts: WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[] = [];
         for (const turnId of [...new Set(turnIds)]) {
-            const [turnRows] = yield* db.query<[WorkflowCandidatePendingReviewTurnRow[]]>(
-                workflowCandidateTurnContextRowSql(turnId),
-            );
-            const turn = turnRows?.[0];
+            const turnKey = recordKeyPart(turnId, "turn") ?? turnId;
+            const turnRows = yield* readRows(PendingReviewTurnRowSchema, workflowCandidateTurnContextRowSql, [turnKey]);
+            const turn = turnRows[0];
             if (turn === undefined) {
                 contexts.push({ turn_id: turnId });
                 continue;
             }
             let previousAssistantText: string | null | undefined;
             if (typeof turn.session_id === "string" && typeof turn.seq === "number") {
-                const [previousRows] = yield* db.query<[WorkflowCandidatePendingReviewTurnRow[]]>(
-                    workflowCandidatePreviousAssistantSql(turn.session_id, turn.seq),
+                const previousRows = yield* readRows(
+                    PendingReviewTurnRowSchema,
+                    workflowCandidatePreviousAssistantSql,
+                    [turn.session_id, turn.seq],
                 );
-                previousAssistantText = previousRows?.[0]?.text ?? previousRows?.[0]?.text_excerpt;
+                previousAssistantText = previousRows[0]?.text ?? previousRows[0]?.text_excerpt;
             }
             contexts.push({
                 turn_id: turnId,
@@ -357,7 +581,6 @@ export const withWorkflowCandidateReviewCoverageApplySummaryLifecycle = (
 
 export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommandInput) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const taskDir = input.taskDir ?? ".ax/tasks";
@@ -414,7 +637,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             const turnIds = rows
                 .map((row) => row.turn)
                 .filter((turn): turn is string => typeof turn === "string" && turn.length > 0);
-            const turnContexts = yield* loadWorkflowCandidatePendingReviewTurnContexts(db, turnIds);
+            const turnContexts = yield* loadWorkflowCandidatePendingReviewTurnContexts(turnIds);
             const report = buildWorkflowCandidateGuidancePendingReviewContextRepairReport({
                 fixturePackPath: task.fixture_pack_path,
                 ...(task.review_brief_path === undefined ? {} : { reviewBriefPath: task.review_brief_path }),
@@ -446,35 +669,21 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     limit: input.limit,
                 }).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
                 if (proposalListRows.length > 0) {
-                    const proposalRefs = proposalListRows
+                    const proposalKeys = proposalListRows
                         .map((row) => recordKeyPart(row.proposal_id, "proposal"))
-                        .filter((key): key is string => key !== null)
-                        .map((key) => recordRef("proposal", key));
-                    if (proposalRefs.length > 0) {
-                        const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
-                            SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
-                            FROM cites_evidence
-                            WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
-                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                        const edges = edgeRows?.[0] ?? [];
+                        .filter((key): key is string => key !== null);
+                    if (proposalKeys.length > 0) {
+                        const edges = yield* readWorkflowCandidateProposalEvidenceEdges(proposalKeys);
                         const candidateIds = [...new Set(edges
                             .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
                             .filter((id): id is string => id !== null))].sort();
                         if (candidateIds.length > 0) {
-                            const evidenceRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
-                                SELECT graph_id, label, properties_json
-                                FROM classifier_graph_node
-                                WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
-                                SELECT graph_id, subject, object, properties_json
-                                FROM classifier_graph_fact
-                                WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
-                                ORDER BY graph_id;
-                            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                            const [candidateRows, factRows] = yield* readWorkflowCandidateEvidenceByIds(candidateIds);
                             proposalListRows = attachWorkflowCandidateProposalEvidence({
                                 rows: proposalListRows,
                                 edges,
-                                candidateRows: evidenceRows?.[0] ?? [],
-                                factRows: evidenceRows?.[1] ?? [],
+                                candidateRows,
+                                factRows,
                                 examplesPerCandidate: input.examples,
                             });
                         }
@@ -487,13 +696,10 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     expandEvidence: true,
                     search: topic,
                 });
-                const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-                    workflowCandidateSql,
-                    { sourceKind: input.sourceKind },
-                ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const [groupRows, evidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
                 const candidateReport = buildWorkflowCandidateReport({
-                    groupRows: candidateRows[0] ?? [],
-                    evidenceRows: candidateRows[1] ?? [],
+                    groupRows,
+                    evidenceRows,
                     sourceKind: input.sourceKind,
                     limit: input.limit,
                     examplesPerGroup: input.examples,
@@ -508,57 +714,32 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     proposals: proposalReport,
                     candidates: candidateReport,
                 });
-                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
-                const persistedHarnessRows = yield* db.query<[
-                    WorkflowCandidateTopicHarnessGraphFactRow[],
-                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
-                ]>(`
-                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_fact
-                    WHERE kind = "workflow_topic_harness_check"
-                      AND source_kind = "workflow_topic_harness_check"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit)};
-                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_edge
-                    WHERE source_kind = "workflow_topic_harness_check"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 3)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const persistedHarness = yield* readWorkflowGraphFactsAndEdges({
+                    kind: "workflow_topic_harness_check",
+                    topic,
+                    factLimit: Math.max(1, input.limit),
+                    edgeLimit: Math.max(1, input.limit * 3),
+                });
                 topicReport = withWorkflowCandidateTopicHarnessEvidence({
                     ...topicReport,
                     persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
                         topic,
-                        facts: persistedHarnessRows?.[0] ?? [],
-                        edges: persistedHarnessRows?.[1] ?? [],
+                        facts: persistedHarness.facts,
+                        edges: persistedHarness.edges,
                     }),
                 });
-                const persistedReviewRows = yield* db.query<[
-                    WorkflowCandidateTopicHarnessGraphFactRow[],
-                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
-                ]>(`
-                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_fact
-                    WHERE kind = "workflow_topic_candidate_review"
-                      AND source_kind = "workflow_topic_candidate_review"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit)};
-                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_edge
-                    WHERE source_kind = "workflow_topic_candidate_review"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 3)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const persistedReview = yield* readWorkflowGraphFactsAndEdges({
+                    kind: "workflow_topic_candidate_review",
+                    topic,
+                    factLimit: Math.max(1, input.limit),
+                    edgeLimit: Math.max(1, input.limit * 3),
+                });
                 topicReport = {
                     ...topicReport,
                     persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
                         topic,
-                        facts: persistedReviewRows?.[0] ?? [],
-                        edges: persistedReviewRows?.[1] ?? [],
+                        facts: persistedReview.facts,
+                        edges: persistedReview.edges,
                     }),
                 };
                 topicReport = withWorkflowCandidateTopicPersistedReviewCandidates(topicReport);
@@ -567,20 +748,23 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             });
 
         if (input.guidanceDecisionBatch) {
-            const topicRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                FROM classifier_graph_fact
-                WHERE (kind = "workflow_topic_candidate_review" AND source_kind = "workflow_topic_candidate_review")
-                   OR (kind = "workflow_topic_harness_check" AND source_kind = "workflow_topic_harness_check")
-                ORDER BY updated_at DESC
-                LIMIT ${Math.max(1, input.limit * 50)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            let reviewFactRows = (topicRows?.[0] ?? []).filter((row) =>
+            const topicRows = (yield* readRows(
+                FactRowSchema,
+                workflowFactsByKindsSql(2, false),
+                [
+                    "workflow_topic_candidate_review",
+                    "workflow_topic_candidate_review",
+                    "workflow_topic_harness_check",
+                    "workflow_topic_harness_check",
+                    Math.max(1, input.limit * 50),
+                ],
+            )).map(toFactRow);
+            let reviewFactRows = topicRows.filter((row) =>
                 row.graph_id?.startsWith("fact:workflow_topic_candidate_review__") ||
                 row.subject?.startsWith("workflow_topic_candidate_review:")
             );
             const search = input.search?.trim().toLowerCase();
-            const topics = [...new Set((topicRows?.[0] ?? [])
+            const topics = [...new Set(topicRows
                 .map((row) => topicFromPropertiesJson(row.properties_json))
                 .filter((topic): topic is string => topic !== undefined)
                 .filter((topic) => search === undefined || topic.toLowerCase().includes(search))
@@ -589,13 +773,10 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 .slice(0, Math.max(1, input.limit));
             const reports: WorkflowCandidateTopicReport[] = [];
             for (const topic of topics) reports.push(yield* loadTopicReport(topic));
-            const pendingRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-                workflowCandidateSql,
-                { sourceKind: input.sourceKind },
-            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const [pendingGroupRows, pendingEvidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
             let pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
-                groupRows: pendingRows[0] ?? [],
-                evidenceRows: pendingRows[1] ?? [],
+                groupRows: pendingGroupRows,
+                evidenceRows: pendingEvidenceRows,
                 sourceKind: input.sourceKind,
                 limit: input.limit,
                 examplesPerGroup: input.examples,
@@ -760,9 +941,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 });
                 let applySummary = pendingApplySummary;
                 if (input.applyReviewFacts && pendingApplySummary.can_apply) {
-                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
-                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
-                    );
+                    yield* applyGraphWriteRows(reviewWritePlan.rows);
                     applySummary = buildWorkflowCandidateReviewCoverageApplySummary({
                         rows: reviewedRows,
                         sourcePath: input.coverageReviewPack,
@@ -785,18 +964,10 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         commandMode: "guidance_decision_batch",
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
                     });
-                    const refreshedReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                        SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                        FROM classifier_graph_fact
-                        WHERE kind = "workflow_topic_candidate_review"
-                          AND source_kind = "workflow_topic_candidate_review"
-                        ORDER BY updated_at DESC
-                        LIMIT ${Math.max(1, input.limit * 50)};
-                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                    reviewFactRows = refreshedReviewRows?.[0] ?? [];
+                    reviewFactRows = yield* readWorkflowReviewFacts(Math.max(1, input.limit * 50));
                     pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
-                        groupRows: pendingRows[0] ?? [],
-                        evidenceRows: pendingRows[1] ?? [],
+                        groupRows: pendingGroupRows,
+                        evidenceRows: pendingEvidenceRows,
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         examplesPerGroup: input.examples,
@@ -858,31 +1029,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         }
         if (input.listHarnessFacts) {
             const topic = input.search?.trim();
-            const topicWhere = topic && topic.length > 0
-                ? `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`
-                : "";
-            const result = yield* db.query<[
-                WorkflowCandidateTopicHarnessGraphFactRow[],
-                WorkflowCandidateTopicHarnessGraphEdgeRow[],
-            ]>(`
-                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                FROM classifier_graph_fact
-                WHERE kind = "workflow_topic_harness_check"
-                  AND source_kind = "workflow_topic_harness_check"
-                  ${topicWhere}
-                ORDER BY updated_at DESC
-                LIMIT ${Math.max(1, input.limit)};
-                SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                FROM classifier_graph_edge
-                WHERE source_kind = "workflow_topic_harness_check"
-                  ${topicWhere}
-                ORDER BY updated_at DESC
-                LIMIT ${Math.max(1, input.limit * 3)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const result = yield* readWorkflowGraphFactsAndEdges({
+                kind: "workflow_topic_harness_check",
+                ...(topic !== undefined && topic.length > 0 ? { topic } : {}),
+                factLimit: Math.max(1, input.limit),
+                edgeLimit: Math.max(1, input.limit * 3),
+            });
             const report = buildWorkflowCandidateTopicHarnessGraphListReport({
                 ...(topic === undefined ? {} : { topic }),
-                facts: result?.[0] ?? [],
-                edges: result?.[1] ?? [],
+                facts: result.facts,
+                edges: result.edges,
             });
             if (input.out) {
                 yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
@@ -892,22 +1048,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             return;
         }
         if (input.reviewCoverage) {
-            const rows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-                workflowCandidateSql,
-                { sourceKind: input.sourceKind },
-            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const reviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                FROM classifier_graph_fact
-                WHERE kind = "workflow_topic_candidate_review"
-                  AND source_kind = "workflow_topic_candidate_review"
-                ORDER BY updated_at DESC
-                LIMIT ${Math.max(1, input.limit * 50)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const reviewFacts = reviewRows?.[0] ?? [];
+            const [groupRows, evidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
+            const reviewFacts = yield* readWorkflowReviewFacts(Math.max(1, input.limit * 50));
             let report = buildWorkflowCandidateReviewCoverageReport({
-                groupRows: rows[0] ?? [],
-                evidenceRows: rows[1] ?? [],
+                groupRows,
+                evidenceRows,
                 reviewFactRows: reviewFacts,
                 sourceKind: input.sourceKind,
                 limit: input.limit,
@@ -915,8 +1060,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             });
             if (input.coverageFixturePack) {
                 const candidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
-                    groupRows: rows[0] ?? [],
-                    evidenceRows: rows[1] ?? [],
+                    groupRows,
+                    evidenceRows,
                     sourceKind: input.sourceKind,
                     limit: input.limit,
                     examplesPerGroup: input.examples,
@@ -1012,9 +1157,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     ...(input.out === undefined ? {} : { outputPath: input.out }),
                 });
                 if (input.applyReviewFacts && pendingApplySummary.can_apply) {
-                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
-                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
-                    );
+                    yield* applyGraphWriteRows(reviewWritePlan.rows);
                 }
                 const applied = Boolean(input.applyReviewFacts && pendingApplySummary.can_apply);
                 let applySummary = pendingApplySummary;
@@ -1041,22 +1184,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         limit: input.limit,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
                     });
-                    const postRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-                        workflowCandidateSql,
-                        { sourceKind: input.sourceKind },
-                    ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                    const postReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                        SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                        FROM classifier_graph_fact
-                        WHERE kind = "workflow_topic_candidate_review"
-                          AND source_kind = "workflow_topic_candidate_review"
-                        ORDER BY updated_at DESC
-                        LIMIT ${Math.max(1, input.limit * 50)};
-                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    const [postGroupRows, postEvidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
+                    const postReviewFacts = yield* readWorkflowReviewFacts(Math.max(1, input.limit * 50));
                     const postReport = buildWorkflowCandidateReviewCoverageReport({
-                        groupRows: postRows[0] ?? [],
-                        evidenceRows: postRows[1] ?? [],
-                        reviewFactRows: postReviewRows?.[0] ?? [],
+                        groupRows: postGroupRows,
+                        evidenceRows: postEvidenceRows,
+                        reviewFactRows: postReviewFacts,
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         ...(input.search === undefined ? {} : { search: input.search }),
@@ -1144,35 +1277,21 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 limit: input.limit,
             }).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
             if (proposalListRows.length > 0) {
-                const proposalRefs = proposalListRows
+                const proposalKeys = proposalListRows
                     .map((row) => recordKeyPart(row.proposal_id, "proposal"))
-                    .filter((key): key is string => key !== null)
-                    .map((key) => recordRef("proposal", key));
-                if (proposalRefs.length > 0) {
-                    const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
-                        SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
-                        FROM cites_evidence
-                        WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
-                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                    const edges = edgeRows?.[0] ?? [];
+                    .filter((key): key is string => key !== null);
+                if (proposalKeys.length > 0) {
+                    const edges = yield* readWorkflowCandidateProposalEvidenceEdges(proposalKeys);
                     const candidateIds = [...new Set(edges
                         .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
                         .filter((id): id is string => id !== null))].sort();
                     if (candidateIds.length > 0) {
-                        const evidenceRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
-                            SELECT graph_id, label, properties_json
-                            FROM classifier_graph_node
-                            WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
-                            SELECT graph_id, subject, object, properties_json
-                            FROM classifier_graph_fact
-                            WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
-                            ORDER BY graph_id;
-                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                        const [candidateRows, factRows] = yield* readWorkflowCandidateEvidenceByIds(candidateIds);
                         proposalListRows = attachWorkflowCandidateProposalEvidence({
                             rows: proposalListRows,
                             edges,
-                            candidateRows: evidenceRows?.[0] ?? [],
-                            factRows: evidenceRows?.[1] ?? [],
+                            candidateRows,
+                            factRows,
                             examplesPerCandidate: input.examples,
                         });
                     }
@@ -1185,13 +1304,10 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 expandEvidence: true,
                 search: topic,
             });
-            const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-                workflowCandidateSql,
-                { sourceKind: input.sourceKind },
-            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const [candidateGroupRows, candidateEvidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
             const candidateReport = buildWorkflowCandidateReport({
-                groupRows: candidateRows[0] ?? [],
-                evidenceRows: candidateRows[1] ?? [],
+                groupRows: candidateGroupRows,
+                evidenceRows: candidateEvidenceRows,
                 sourceKind: input.sourceKind,
                 limit: input.limit,
                 examplesPerGroup: input.examples,
@@ -1207,83 +1323,55 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 candidates: candidateReport,
             });
             if (input.includeHarnessFacts) {
-                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
-                const persistedHarnessRows = yield* db.query<[
-                    WorkflowCandidateTopicHarnessGraphFactRow[],
-                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
-                ]>(`
-                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_fact
-                    WHERE kind = "workflow_topic_harness_check"
-                      AND source_kind = "workflow_topic_harness_check"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit)};
-                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_edge
-                    WHERE source_kind = "workflow_topic_harness_check"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 3)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const persistedHarness = yield* readWorkflowGraphFactsAndEdges({
+                    kind: "workflow_topic_harness_check",
+                    topic,
+                    factLimit: Math.max(1, input.limit),
+                    edgeLimit: Math.max(1, input.limit * 3),
+                });
                 topicReport = withWorkflowCandidateTopicHarnessEvidence({
                     ...topicReport,
                     persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
                         topic,
-                        facts: persistedHarnessRows?.[0] ?? [],
-                        edges: persistedHarnessRows?.[1] ?? [],
+                        facts: persistedHarness.facts,
+                        edges: persistedHarness.edges,
                     }),
                 });
             }
             if (input.includeReviewFacts) {
-                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
-                const persistedReviewRows = yield* db.query<[
-                    WorkflowCandidateTopicHarnessGraphFactRow[],
-                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
-                ]>(`
-                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_fact
-                    WHERE kind = "workflow_topic_candidate_review"
-                      AND source_kind = "workflow_topic_candidate_review"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit)};
-                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_edge
-                    WHERE source_kind = "workflow_topic_candidate_review"
-                      ${topicWhere}
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 3)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const persistedReview = yield* readWorkflowGraphFactsAndEdges({
+                    kind: "workflow_topic_candidate_review",
+                    topic,
+                    factLimit: Math.max(1, input.limit),
+                    edgeLimit: Math.max(1, input.limit * 3),
+                });
                 topicReport = {
                     ...topicReport,
                     persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
                         topic,
-                        facts: persistedReviewRows?.[0] ?? [],
-                        edges: persistedReviewRows?.[1] ?? [],
+                        facts: persistedReview.facts,
+                        edges: persistedReview.edges,
                     }),
                 };
                 topicReport = withWorkflowCandidateTopicPersistedReviewCandidates(topicReport);
             }
             if (input.includeHelperFacts) {
-                const helperRows = yield* db.query<[
-                    WorkflowCandidateEmbeddingHelperGraphFactRow[],
-                    WorkflowCandidateEmbeddingHelperGraphEdgeRow[],
-                ]>(`
-                    SELECT graph_id, subject, predicate, object, value_json, evidence_edges_json, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_fact
-                    WHERE source_kind = "embedding_helper_review_projection"
-                      AND kind = "embedding_helper_hard_negative_candidate"
-                      AND predicate = "promoted_hard_negative_fixture"
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 5)};
-                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
-                    FROM classifier_graph_edge
-                    WHERE source_kind = "embedding_helper_review_projection"
-                      AND kind IN ["nearest_reviewed_fixture", "promoted_as_fixture"]
-                    ORDER BY updated_at DESC
-                    LIMIT ${Math.max(1, input.limit * 25)};
-                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const helperFactRows = yield* readRows(
+                    HelperFactRowSchema,
+                    `SELECT graph_id, subject, predicate, object, value_json, evidence_edges_json, properties_json, updated_at
+                     FROM classifier_graph_fact
+                     WHERE source_kind = ? AND kind = ? AND predicate = ?
+                     ORDER BY updated_at DESC LIMIT ?`,
+                    ["embedding_helper_review_projection", "embedding_helper_hard_negative_candidate", "promoted_hard_negative_fixture", Math.max(1, input.limit * 5)],
+                );
+                const helperEdgeRows = yield* readRows(
+                    EdgeRowSchema,
+                    `SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, updated_at
+                     FROM classifier_graph_edge
+                     WHERE source_kind = ? AND kind IN (?, ?)
+                     ORDER BY updated_at DESC LIMIT ?`,
+                    ["embedding_helper_review_projection", "nearest_reviewed_fixture", "promoted_as_fixture", Math.max(1, input.limit * 25)],
+                );
                 const helperFixtures = yield* readWorkflowCandidateHelperFixtures(
                     path.join(process.cwd(), "packages", "ax-classifier-session-sections", "eval-fixtures", "chunks.jsonl"),
                 );
@@ -1291,8 +1379,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     ...topicReport,
                     helper_explanations: buildWorkflowCandidateTopicHelperExplanations({
                         report: topicReport,
-                        facts: helperRows?.[0] ?? [],
-                        edges: helperRows?.[1] ?? [],
+                        facts: helperFactRows.map(toHelperFactRow),
+                        edges: helperEdgeRows.map(toEmbeddingHelperEdgeRow),
                         fixtures: helperFixtures,
                     }),
                 };
@@ -1364,9 +1452,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     yield* fs.writeFileString(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`);
                 }
                 if (input.applyReviewFacts && reviewWritePlan.statements.length > 0) {
-                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
-                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
-                    );
+                    yield* applyGraphWriteRows(reviewWritePlan.rows);
                 }
             }
             if (input.harnessFacts || input.harnessWritePlan || input.applyHarnessFacts) {
@@ -1381,9 +1467,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     yield* fs.writeFileString(input.harnessWritePlan, `${prettyPrint(harnessWritePlan)}\n`);
                 }
                 if (input.applyHarnessFacts && harnessWritePlan.statements.length > 0) {
-                    yield* db.query(harnessWritePlan.statements.join("\n")).pipe(
-                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
-                    );
+                    yield* applyGraphWriteRows(harnessWritePlan.rows);
                 }
             }
             console.log(input.json ? prettyPrint(topicReport) : renderWorkflowCandidateTopicReportText(topicReport));
@@ -1408,32 +1492,18 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 const proposalKeys = rows
                     .map((row) => recordKeyPart(row.proposal_id, "proposal"))
                     .filter((key): key is string => key !== null);
-                const proposalRefs = proposalKeys.map((key) => recordRef("proposal", key));
-                if (proposalRefs.length > 0) {
-                    const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
-                        SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
-                        FROM cites_evidence
-                        WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
-                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-                    const edges = edgeRows?.[0] ?? [];
+                if (proposalKeys.length > 0) {
+                    const edges = yield* readWorkflowCandidateProposalEvidenceEdges(proposalKeys);
                     const candidateIds = [...new Set(edges
                         .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
                         .filter((id): id is string => id !== null))].sort();
                     if (candidateIds.length > 0) {
-                        const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
-                            SELECT graph_id, label, properties_json
-                            FROM classifier_graph_node
-                            WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
-                            SELECT graph_id, subject, object, properties_json
-                            FROM classifier_graph_fact
-                            WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
-                            ORDER BY graph_id;
-                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                        const [candidateRows, factRows] = yield* readWorkflowCandidateEvidenceByIds(candidateIds);
                         rows = attachWorkflowCandidateProposalEvidence({
                             rows,
                             edges,
-                            candidateRows: candidateRows?.[0] ?? [],
-                            factRows: candidateRows?.[1] ?? [],
+                            candidateRows,
+                            factRows,
                             examplesPerCandidate: input.examples,
                         });
                     }
@@ -1453,13 +1523,10 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             console.log(input.json ? prettyPrint(listReport) : renderWorkflowCandidateProposalListText(listReport));
             return;
         }
-        const rows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
-            workflowCandidateSql,
-            { sourceKind: input.sourceKind },
-        ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+        const [groupRows, evidenceRows] = yield* readWorkflowCandidateGroupsAndEvidence(input.sourceKind);
         let report = buildWorkflowCandidateReport({
-            groupRows: rows[0] ?? [],
-            evidenceRows: rows[1] ?? [],
+            groupRows,
+            evidenceRows,
             sourceKind: input.sourceKind,
             limit: input.limit,
             examplesPerGroup: input.examples,
@@ -1470,16 +1537,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         });
         if (input.includeReviewFacts && report.candidates.length > 0) {
             const candidateIds = report.candidates.map((candidate) => candidate.group_id);
-            const persistedReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
-                FROM classifier_graph_fact
-                WHERE kind = "workflow_topic_candidate_review"
-                  AND source_kind = "workflow_topic_candidate_review"
-                  AND object IN [${candidateIds.map(surrealString).join(", ")}]
-                ORDER BY updated_at DESC
-                LIMIT ${Math.max(1, input.limit * 3)};
-            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            report = attachWorkflowCandidatePersistedReviewFacts(report, persistedReviewRows?.[0] ?? []);
+            const placeholders = candidateIds.map(() => "?").join(", ");
+            const persistedReviewRows = yield* readRows(
+                FactRowSchema,
+                `SELECT graph_id, subject, predicate, object, value_json, properties_json, updated_at
+                 FROM classifier_graph_fact
+                 WHERE kind = ? AND source_kind = ? AND object IN (${placeholders})
+                 ORDER BY updated_at DESC LIMIT ?`,
+                ["workflow_topic_candidate_review", "workflow_topic_candidate_review", ...candidateIds, Math.max(1, input.limit * 3)],
+            );
+            report = attachWorkflowCandidatePersistedReviewFacts(report, persistedReviewRows.map(toFactRow));
         }
         if (input.syncBrief) {
             report = syncWorkflowCandidateReportFromBrief(
