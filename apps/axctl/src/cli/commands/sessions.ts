@@ -861,6 +861,36 @@ export const sessionsCommand = Command.make("sessions").pipe(
     ]),
 );
 
+/**
+ * `sessions` splits across runtimes, so the family declares its routing per
+ * subcommand rather than as one static entry.
+ *
+ * `show` is PORTED (wave 3 `c-read-seam`): its whole chain -
+ * `fetchEnrichedSession` -> `fetchSessionView` -> `fetchSessionDetail` plus
+ * `fetchSessionDurabilityDetail` and the prefix fallback - reads the published
+ * snapshot, so it routes through `withCache` and gets the throwing no-DB
+ * SurrealClient proxy. That proxy is the ACCEPTANCE SIGNAL: any sub-path that
+ * still reaches for SurrealDB now fails loudly instead of quietly answering
+ * `[]` from a write-frozen engine.
+ *
+ * Everything else stays `"db"` until its own chunk lands: `here`/`around`/`near`
+ * are SurrealQL in `dashboard/sessions-query.ts`, `compare` is SurrealQL in
+ * `dashboard/session-compare.ts`, and `metrics`/`churn` are on `CacheRead`
+ * already but share the family's `maybeAutoIngestStale` preflight, whose
+ * remaining Surreal legs (`runIngest`) belong to chunk 1.
+ */
 export const sessionsRuntime: RuntimeManifest = {
-    sessions: "db",
+    sessions: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            here: "db",
+            around: "db",
+            near: "db",
+            show: "cache",
+            compare: "db",
+            metrics: "db",
+            churn: "db",
+        },
+    },
 };

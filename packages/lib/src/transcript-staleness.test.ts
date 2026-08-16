@@ -23,7 +23,7 @@ import {
 import type { CacheRead, CacheWriteService } from "./duckdb/seam.ts";
 import { detectStaleness } from "./transcript-staleness.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("transcript-staleness");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("transcript-staleness", { requireFts: true });
 
 const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 

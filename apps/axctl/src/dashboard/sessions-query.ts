@@ -9,6 +9,9 @@ import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
+import { runCacheQuery } from "@ax/lib/duckdb/query";
+import { sessionIdsByPrefixCacheQuery } from "../queries/session-detail-cache.ts";
 
 // ---------------------------------------------------------------------------
 // Row shape
@@ -127,21 +130,14 @@ const enrichSessions = (
  * in listings (dogfood retro R2: `sessions show 5f4a02e9` → not-found →
  * wasted a recall round-trip recovering the full uuid).
  *
- * Full scan over `session` (record::id can't use an index), but it only runs
- * on the not-found fallback path, never on the happy path.
+ * Full scan over `session`, but it only runs on the not-found fallback path,
+ * never on the happy path.
  */
 export const findSessionIdsByPrefix = (
     prefix: string,
     limit = 5,
-): Effect.Effect<string[], DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[string[]]>(
-            `SELECT VALUE record::id(id) FROM session WHERE string::starts_with(record::id(id), $prefix) LIMIT ${Math.max(1, Math.trunc(limit))};`,
-            { prefix },
-        );
-        return (result?.[0] ?? []).map(String);
-    });
+): Effect.Effect<ReadonlyArray<string>, never, CacheRead> =>
+    runCacheQuery(sessionIdsByPrefixCacheQuery, { prefix, limit });
 
 // ---------------------------------------------------------------------------
 // listSessionsHere

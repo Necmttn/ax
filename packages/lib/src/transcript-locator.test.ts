@@ -16,7 +16,7 @@ import {
     TranscriptNotFoundError,
 } from "./transcript-locator.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("transcript-locator");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("transcript-locator", { requireFts: true });
 
 // EXISTING tests of now-Effect fns: provide the REAL Bun-backed FileSystem +
 // Path against the tmp-dir fixtures (never the in-memory mock).
