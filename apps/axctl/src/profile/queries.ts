@@ -470,19 +470,17 @@ export const fetchSpawnedCount = Effect.fn("profile.fetchSpawnedCount")(
 // --- commit count ------------------------------------------------------------
 // commit table uses `ts` (datetime) - confirmed in packages/schema/src/schema.surql.
 
-const COMMIT_COUNT_SQL = (d: number) => `
-SELECT count() AS count
-FROM commit
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+const COMMIT_COUNT_SQL = `
+SELECT count(*) AS count
+FROM "commit"
+WHERE TRUE`;
 
 export const fetchCommitCount = Effect.fn("profile.fetchCommitCount")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(COMMIT_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return Number(rows[0]?.count ?? 0);
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(CountRow, `${COMMIT_COUNT_SQL} ${within.sql}`, within.params);
+        return rows[0]?.count ?? 0;
     },
 );
 

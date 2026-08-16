@@ -246,17 +246,17 @@ describe("fetchSpawnedCount", () => {
 
 describe("fetchCommitCount", () => {
     test("returns commit count using ts field", async () => {
-        const db = makeMockDb([[[{ count: 1000 }]]]);
-        const r = await runWithMock(db, fetchCommitCount({ windowDays: 30 }));
+        const cache = cacheRead({ 'FROM "commit"': [{ count: 1000 }] });
+        const r = await runCache(fetchCommitCount({ windowDays: 30 }), cache.layer);
         expect(r).toBe(1000);
-        expect(db.captured[0]).toContain("FROM commit");
-        expect(db.captured[0]).toContain("ts >");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain('FROM "commit"');
+        expect(cache.captured[0]).toContain("ts >=");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 
     test("empty -> 0", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchCommitCount({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchCommitCount({ windowDays: 30 }), cache.layer);
         expect(r).toBe(0);
     });
 });
