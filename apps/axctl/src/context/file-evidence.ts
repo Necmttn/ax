@@ -401,9 +401,20 @@ export const loadMentions = (signals: MentionSignals, files: readonly FileRow[])
             .slice(0, 12);
     });
 
+const SessionTurnQueryRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+    message_kind: Schema.NullOr(Schema.String),
+    intent_kind: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String),
+});
+
 export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const sessionIds = Array.from(
             new Set(
                 touches.flatMap((touch) =>
@@ -414,33 +425,40 @@ export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
             ),
         ).slice(0, 8);
         if (sessionIds.length === 0) return [] as SessionTurn[];
-        const [rows] = yield* db.query<[SessionTurn[]]>(`
+        const rows = yield* read.rows(SessionTurnQueryRow, `
             SELECT
-                <string>id AS id,
-                <string>session AS session,
-                session.source AS source,
-                seq,
-                <string>ts AS ts,
-                message_kind,
-                intent_kind,
-                text_excerpt
-            FROM turn
-            WHERE session IN [${sessionIds.join(", ")}]
-              AND text_excerpt IS NOT NONE
-              AND message_kind = "task"
-              AND session.source != "claude-subagent"
-            ORDER BY ts ASC
-            LIMIT 40;
-        `);
+                t.id AS id,
+                t.session AS session,
+                s.source AS source,
+                t.seq AS seq,
+                t.ts AS ts,
+                t.message_kind AS message_kind,
+                t.intent_kind AS intent_kind,
+                t.text_excerpt AS text_excerpt
+            FROM turn t
+            JOIN session s ON s.id = t.session
+            WHERE t.session IN (${sessionIds.map(() => "?").join(", ")})
+              AND t.text_excerpt IS NOT NULL
+              AND t.message_kind = 'task'
+              AND s.source <> 'claude-subagent'
+            ORDER BY t.ts ASC
+            LIMIT 40
+        `, sessionIds);
         return rows
-            .map((row) => ({
-                ...row,
+            .map((row): SessionTurn => ({
+                id: row.id,
+                session: row.session,
+                source: row.source,
+                seq: row.seq,
+                ts: row.ts.toISOString(),
+                message_kind: row.message_kind,
                 intent_kind: row.intent_kind ?? classifyTurnIntent({
                     role: "user",
                     messageKind: row.message_kind ?? "task",
                     source: row.source ?? null,
                     text: row.text_excerpt ?? null,
                 }),
+                text_excerpt: row.text_excerpt,
             }))
             .filter((row) => ["organic_task", "correction", "preference"].includes(row.intent_kind ?? ""));
     });
