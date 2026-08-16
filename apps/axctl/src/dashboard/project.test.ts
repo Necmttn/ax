@@ -5,7 +5,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchProject } from "./project.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("project");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("project", { requireFts: true });
 
 const now = new Date();
 const earlier = new Date(now.getTime() - 3_600_000);

@@ -7,7 +7,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { applySkillDecisionToDisk, readSkillSource } from "./skill-source.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill-source");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill-source", { requireFts: true });
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 /** Write a real SKILL.md under a fresh temp dir, return the dir path. */

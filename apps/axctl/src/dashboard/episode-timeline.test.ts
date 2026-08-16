@@ -5,7 +5,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("episode-timeline");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("episode-timeline", { requireFts: true });
 
 const PARENT_ID = "parent-session-1";
 

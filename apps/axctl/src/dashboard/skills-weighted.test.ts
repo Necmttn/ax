@@ -17,7 +17,7 @@ import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testi
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { fetchSkillsWeighted, type SkillsWeightedParams } from "./skills-weighted.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills-weighted");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills-weighted", { requireFts: true });
 
 interface RoleRow { readonly skill_id: string; readonly role_name: string; readonly effective_weight: number }
 

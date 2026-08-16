@@ -5,7 +5,7 @@ import { CacheRead, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { computeWorkflow, fetchWorkflow, refreshWorkflowSnapshot } from "./workflow.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("workflow");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("workflow", { requireFts: true });
 
 const now = new Date();
 

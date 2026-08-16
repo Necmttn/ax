@@ -16,7 +16,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchSessionOrchestration } from "./session-canvas.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-canvas");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-canvas", { requireFts: true });
 
 const FIXTURE = (w: CacheWriteService) =>
     Effect.gen(function* () {

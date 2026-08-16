@@ -15,7 +15,7 @@ import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testi
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { fetchSkillTriage } from "./triage.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("triage-fetch");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("triage-fetch", { requireFts: true });
 
 const FIXTURE = (w: CacheWriteService) =>
     Effect.gen(function* () {

@@ -7,7 +7,7 @@ import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testi
 import type { DashboardData } from "./report.ts";
 import { renderDashboardHtml, writeDashboard } from "./report.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("dashboard report");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("dashboard report", { requireFts: true });
 
 /**
  * `writeDashboard` is PARTIALLY ported (see report.ts's module doc): its own

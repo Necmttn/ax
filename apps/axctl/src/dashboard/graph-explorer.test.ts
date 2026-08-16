@@ -12,7 +12,7 @@ import {
     validateFileAttentionSql,
 } from "./graph-explorer.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("graph-explorer");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("graph-explorer", { requireFts: true });
 
 describe("graph explorer", () => {
     test("normalizeGraphMode defaults unknown to file-attention", () => {

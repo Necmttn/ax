@@ -11,7 +11,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchWrapped } from "./wrapped.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("wrapped-fetch");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("wrapped-fetch", { requireFts: true });
 
 const now = new Date();
 

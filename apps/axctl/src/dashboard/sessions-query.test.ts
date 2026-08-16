@@ -13,7 +13,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { listSessionsAround, listSessionsHere, listSessionsNear } from "./sessions-query.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("sessions-query");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("sessions-query", { requireFts: true });
 
 const NOW = new Date();
 const daysAgo = (n: number): Date => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);

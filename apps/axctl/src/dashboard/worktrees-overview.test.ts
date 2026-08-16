@@ -5,7 +5,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchWorktreesOverview } from "./worktrees-overview.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("worktrees-overview");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("worktrees-overview", { requireFts: true });
 
 const FIXTURE = (w: CacheWriteService) =>
     Effect.gen(function* () {

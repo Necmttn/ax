@@ -8,7 +8,7 @@ import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspector
 import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-inspect");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-inspect", { requireFts: true });
 
 // resolveTurnContentForSourceRefs (queries/session-turn-content.ts, chunk 2b's)
 // is not yet ported off SurrealClient - see the module-doc note in

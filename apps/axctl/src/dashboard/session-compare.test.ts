@@ -80,7 +80,7 @@ describe("computeWinners - cheapest with unknown costs (#175)", () => {
     });
 });
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-compare");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-compare", { requireFts: true });
 
 describe("fetchSessionCompare (DuckDB fixture)", () => {
     dtest("joins overview, token usage, health and produced count per session; flags a missing id", async () => {

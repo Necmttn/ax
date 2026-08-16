@@ -5,7 +5,7 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { fetchSkillGraph } from "./skill-graph.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill-graph");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skill-graph", { requireFts: true });
 
 const now = new Date();
 
