@@ -835,32 +835,40 @@ export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
 
 // --- guardrail receipts -----------------------------------------------------
 
-const GUARDRAIL_HOOK_EVIDENCE_SQL = (d: number) => `
+const GUARDRAIL_HOOK_EVIDENCE_SQL = `
 SELECT
     hook_name,
-    count() AS fires,
-    math::sum(IF effect = "blocked" OR provider_status = "blocking_error" THEN 1 ELSE 0 END) AS blocked,
-    math::sum(IF effect IN ["notified", "injected_context", "modified_input"] THEN 1 ELSE 0 END) AS warned
+    count(*) AS fires,
+    SUM(CASE WHEN effect = 'blocked' OR provider_status = 'blocking_error' THEN 1 ELSE 0 END) AS blocked,
+    SUM(CASE WHEN effect IN ('notified', 'injected_context', 'modified_input') THEN 1 ELSE 0 END) AS warned
 FROM hook_command_invocation
-WHERE ts > time::now() - ${win(d)}
-  AND hook_name IS NOT NONE
-GROUP BY hook_name
-ORDER BY fires DESC
-LIMIT 1000;`;
+WHERE TRUE`;
+
+const GuardrailHookDbRow = Schema.Struct({
+    hook_name: Schema.String,
+    fires: NumberFromBigIntColumn,
+    blocked: NumberFromBigIntColumn,
+    warned: NumberFromBigIntColumn,
+});
 
 export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookEvidence")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
         const rows = yield* timedQuery(
             "guardrailHookEvidence",
-            db.query<[Array<Record<string, unknown>>]>(GUARDRAIL_HOOK_EVIDENCE_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+            read.rows(
+                GuardrailHookDbRow,
+                `${GUARDRAIL_HOOK_EVIDENCE_SQL} ${within.sql} AND hook_name IS NOT NULL `
+                    + "GROUP BY hook_name ORDER BY fires DESC LIMIT 1000",
+                within.params,
+            ),
         );
         return rows.map((r) => ({
-            hook_name: String(r.hook_name ?? ""),
-            fires: Number(r.fires ?? 0),
-            blocked: Number(r.blocked ?? 0),
-            warned: Number(r.warned ?? 0),
+            hook_name: r.hook_name,
+            fires: r.fires,
+            blocked: r.blocked,
+            warned: r.warned,
         })).filter((r) => r.hook_name.length > 0) satisfies GuardrailHookEvidenceRow[];
     },
 );

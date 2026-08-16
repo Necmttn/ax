@@ -497,20 +497,22 @@ describe("fetchWindowedSessions", () => {
 
 describe("fetchGuardrailHookEvidence", () => {
     test("returns per-hook fire/block/warn counts from hook evidence", async () => {
-        const db = makeMockDb([[[
-            { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
-            { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
-        ]]]);
-        const rows = await runWithMock(db, fetchGuardrailHookEvidence({ windowDays: 14 }));
+        const cache = cacheRead({
+            "FROM hook_command_invocation": [
+                { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
+                { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
+            ],
+        });
+        const rows = await runCache(fetchGuardrailHookEvidence({ windowDays: 14 }), cache.layer);
         expect(rows).toEqual([
             { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
             { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
         ]);
-        expect(db.captured[0]).toContain("FROM hook_command_invocation");
-        expect(db.captured[0]).toContain("time::now() - 14d");
-        expect(db.captured[0]).toContain("GROUP BY hook_name");
-        expect(db.captured[0]).toContain('effect = "blocked"');
-        expect(db.captured[0]).toContain('"injected_context"');
+        expect(cache.captured[0]).toContain("FROM hook_command_invocation");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+        expect(cache.captured[0]).toContain("GROUP BY hook_name");
+        expect(cache.captured[0]).toContain("effect = 'blocked'");
+        expect(cache.captured[0]).toContain("'injected_context'");
     });
 });
 

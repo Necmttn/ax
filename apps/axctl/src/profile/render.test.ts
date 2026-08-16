@@ -5,14 +5,14 @@ import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-
 import { buildProfile } from "./render.ts";
 
 // buildProfile's own queries.ts fetch* calls are now served by CacheRead (see
-// the wave-3 queries.ts port history). Only 3 statements still resolve
+// the wave-3 queries.ts port history). Only 2 statements still resolve
 // SurrealClient: fetchCostModels' main query (queries/cost-analytics.ts - a
 // different wave-3 chunk's file, only its OPTIONAL pricing-catalog lookup
 // reads CacheRead, skipped here since no fixture row needs repricing) and
 // fetchWindowedInvocations (deliberately left unported - porting it breaks
-// apps/axctl/src/team/team-profile.ts, out of this chunk's ownership) and
-// fetchGuardrailHookEvidence (not yet reached). `surrealResults` replays
-// ONLY those three, in call order (see buildProfile's own ordering comment).
+// apps/axctl/src/team/team-profile.ts, out of this chunk's ownership).
+// `surrealResults` replays ONLY those two, in call order (see buildProfile's
+// own ordering comment).
 const surrealResults = [
     // fetchCostModels (queries/cost-analytics.ts COST_MODELS_SQL)
     [[{
@@ -27,12 +27,6 @@ const surrealResults = [
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
         { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
-    ]],
-    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
-    [[
-        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
-        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
-        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
     ]],
 ];
 
@@ -143,6 +137,12 @@ const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown
             s: new Date("2026-06-12T09:00:00Z"),
             e: new Date("2026-06-12T10:30:00Z"),
         },
+    ],
+    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
+    "FROM hook_command_invocation": [
+        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
+        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
+        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
     ],
 };
 
