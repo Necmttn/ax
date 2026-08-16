@@ -6,6 +6,7 @@ import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
 import { withIngestLock } from "@ax/lib/ingest-lock";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import { duckdbAssetPathOption } from "../duckdb-embed-wiring.ts";
 
 export const withConfigWrite = <A, E, R>(
     use: (write: CacheWriteService) => Effect.Effect<A, E, R>,
@@ -25,6 +26,7 @@ export const withConfigWrite = <A, E, R>(
                     livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
                     lockPath,
                     schemaSql: DUCKDB_SCHEMA_SQL,
+                    ...duckdbAssetPathOption(),
                 },
                 (write) => use(write).pipe(Effect.tap(() => buildFtsIndexes(write))),
             ),

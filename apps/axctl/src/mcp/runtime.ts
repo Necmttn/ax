@@ -1,7 +1,7 @@
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Layer, ManagedRuntime } from "effect";
 import { AppLayer } from "@ax/lib/layers";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { JudgmentLive } from "../judgment.ts";
 
 /**
