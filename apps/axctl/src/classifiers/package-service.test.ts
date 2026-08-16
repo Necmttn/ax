@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, type FileSystem, Layer, type Path, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -130,6 +130,19 @@ const { dylibPath: duckdbDylibPath, dtest: duckdbTest, tempDir: duckdbTempDir } 
     "classifier package service write plan apply",
     { requireFts: true },
 );
+
+// The service opens its OWN write connection through `withCacheWrite`, so there
+// is no `assetPath` argument to hand it - the environment is the only channel.
+// `duckdbTestSetup` resolves the dylib as a BUILD-ARTIFACT PATH, not necessarily
+// an env var, so locally the dev shell's export made this pass by accident while
+// CI failed with `CacheUnavailableError: no libduckdb available`. Sibling:
+// `contract/usage.test.ts`.
+const previousDuckdbDylibEnv = process.env.AX_DUCKDB_DYLIB;
+if (duckdbDylibPath !== null) process.env.AX_DUCKDB_DYLIB = duckdbDylibPath;
+afterAll(() => {
+    if (previousDuckdbDylibEnv === undefined) delete process.env.AX_DUCKDB_DYLIB;
+    else process.env.AX_DUCKDB_DYLIB = previousDuckdbDylibEnv;
+});
 
 describe("ClassifierPackageService", () => {
     test("loads pending review task list reports through the service layer", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, type FileSystem, Layer, type Path, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -247,6 +247,21 @@ describe("LabelMiningService.writeMiningReport", () => {
 // path is what this chunk ported.
 const { dylibPath: labelMiningDylibPath, dtest: labelMiningDuckdbTest, tempDir: labelMiningTempDir } =
     await duckdbTestSetup("label mining service projectReviewed apply", { requireFts: true });
+
+// `projectReviewed` opens its OWN write connection through `withCacheWrite`, so
+// there is no `assetPath` argument to hand it - the only channel is the
+// environment. `duckdbTestSetup` resolves the dylib as a BUILD-ARTIFACT PATH,
+// which is not necessarily already an env var: locally the dev shell exports it
+// and the test passes by accident, while CI has nothing to inherit and fails
+// with `CacheUnavailableError: no libduckdb available`. Same defect as the
+// skills-family no-surreal tests. `contract/usage.test.ts` sets it exactly this
+// way for the same reason.
+const labelMiningPreviousDylibEnv = process.env.AX_DUCKDB_DYLIB;
+if (labelMiningDylibPath !== null) process.env.AX_DUCKDB_DYLIB = labelMiningDylibPath;
+afterAll(() => {
+    if (labelMiningPreviousDylibEnv === undefined) delete process.env.AX_DUCKDB_DYLIB;
+    else process.env.AX_DUCKDB_DYLIB = labelMiningPreviousDylibEnv;
+});
 
 describe("LabelMiningService.projectReviewed", () => {
     labelMiningDuckdbTest(
