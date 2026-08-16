@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { Judgment, checkSidecarRefs, collectSidecarRefs, fetchCacheIds } from "@ax/lib/sqlite";
 import {
-    cmdDaemon,
     collectDoctorReport,
     formatDoctorReport,
     cmdInstall,
@@ -58,7 +57,7 @@ export const installCommand = Command.make("install", {
     const conflict = telemetryConsentConflict(telemetry, noTelemetry);
     if (conflict !== null) fail(conflict);
     return cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry) });
-}).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
+}).pipe(Command.withDescription("One-shot setup: symlink, optional OTLP receiver (then runs `ax setup`)"));
 
 export const setupCommand = Command.make(
     "setup",
@@ -78,34 +77,6 @@ export const setupCommand = Command.make(
         "Install the agent skills and verify; hands ingest to your agent via the onboarding brief. " +
         "--agents=claude-code,codex  --yes  --agent-prompt (print just the paste-to-agent block)",
     ),
-);
-
-const daemonStatusCommand = Command.make(
-    "status",
-    { json: jsonFlag },
-    ({ json }) => cmdDaemon(["status", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Show daemon and watcher status"));
-
-const daemonStartCommand = Command.make("start", {}, () =>
-    cmdDaemon(["start"]),
-).pipe(Command.withDescription("Start the daemon and watcher"));
-
-const daemonStopCommand = Command.make("stop", {}, () =>
-    cmdDaemon(["stop"]),
-).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
-
-const daemonRestartCommand = Command.make("restart", {}, () =>
-    cmdDaemon(["restart"]),
-).pipe(Command.withDescription("Restart the daemon and watcher"));
-
-export const daemonCommand = Command.make("daemon").pipe(
-    Command.withDescription("Manage local launchd services"),
-    Command.withSubcommands([
-        daemonStatusCommand,
-        daemonStartCommand,
-        daemonStopCommand,
-        daemonRestartCommand,
-    ]),
 );
 
 export const collectSidecarDoctorCheck = Effect.gen(function* () {
@@ -137,13 +108,61 @@ export const doctorCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Check local installation health"));
 
+/**
+ * `ax daemon status` - a RETIREMENT STUB, not a feature.
+ *
+ * v2 runs no background daemons: the CLI opens a published DuckDB snapshot and
+ * ingest writes the live DB under a lock. The five LaunchAgents this command
+ * used to report on are gone (see the plist removal in this chunk).
+ *
+ * It survives as a stub for two reasons:
+ *
+ *  1. `.github/workflows/ci.yml` smoke-tests `axctl daemon status --json`. That
+ *     file cannot be edited from this branch - the push token lacks the
+ *     `workflow` scope, and GitHub rejects the WHOLE push when any commit
+ *     touches `.github/workflows/`. Deleting the verb outright turns CI red with
+ *     no in-branch way to fix it.
+ *  2. A user with the old command in muscle memory deserves a clear answer
+ *     rather than `Unknown subcommand "daemon"`.
+ *
+ * It reports the truth - an empty daemon list - so nothing here can be mistaken
+ * for a working daemon surface. REMOVE THIS in wave 4, in the same change that
+ * updates ci.yml, once the `workflow` scope is available.
+ */
+export const daemonCommand = Command.make(
+    "daemon",
+    { json: jsonFlag },
+    ({ json }) =>
+        Effect.sync(() => {
+            const note = "ax no longer runs background daemons; the CLI reads a snapshot file directly.";
+            if (json) {
+                console.log(JSON.stringify({ daemons: [], retired: true, note }, null, 2));
+                return;
+            }
+            console.log(note);
+        }),
+).pipe(
+    Command.withSubcommands([
+        Command.make("status", { json: jsonFlag }, ({ json }) =>
+            Effect.sync(() => {
+                const note = "ax no longer runs background daemons; the CLI reads a snapshot file directly.";
+                if (json) {
+                    console.log(JSON.stringify({ daemons: [], retired: true, note }, null, 2));
+                    return;
+                }
+                console.log(note);
+            })),
+    ]),
+    Command.withDescription("Retired: ax runs no background daemons (kept so the old command answers clearly)"),
+);
+
 export const uninstallCommand = Command.make(
     "uninstall",
     { purge: Flag.boolean("purge").pipe(Flag.withDefault(false)) },
     ({ purge }) => cmdUninstall(purge),
 ).pipe(
     Command.withDescription(
-        "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
+        "Remove the otlpd LaunchAgent and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
     ),
 );
 
@@ -152,7 +171,8 @@ export const lifecycleRuntime: RuntimeManifest = {
     update: { runtime: "none", hidden: true },
     install: "none",
     setup: "none",
-    daemon: { runtime: "none", hidden: true },
     doctor: { runtime: "cache", hidden: true },
     uninstall: { runtime: "none", hidden: true },
+    // Retirement stub - hidden so it never appears in help; see daemonCommand.
+    daemon: { runtime: "none", hidden: true },
 };

@@ -19,3 +19,14 @@ export function isAllowedHost(host: string | null): boolean {
         : host.split(":")[0]!;
     return LOOPBACK_HOSTS.has(hostname);
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Narrow an unknown throw to the listen-failure `Bun.serve` raises when the
+ *  port is already held by someone else. Dep-free so both the studio server
+ *  and the OTLP spool server (its own loopback port) can share it without
+ *  pulling in the rest of the dashboard runtime. */
+export function isAddrInUse(err: unknown): boolean {
+    return isRecord(err) && (err as { code?: string }).code === "EADDRINUSE";
+}

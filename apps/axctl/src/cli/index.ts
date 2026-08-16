@@ -68,7 +68,7 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
-import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
+import { BackgroundIngestSpawnerLive, withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -181,8 +181,8 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     timelineCommand,
     versionCommand,
     updateCommand,
-    daemonCommand,
     doctorCommand,
+    daemonCommand,
     uninstallCommand,
     starCommand,
     ...devOnlyCommands,
@@ -227,15 +227,20 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
  *
- * Every such command also gets the stale-graph warning (#697): one indexed
- * query, stderr only, before the command body. This is deliberately a
- * pre-flight rather than an `ensuring` finalizer because legacy handlers that
- * call `process.exit` bypass Effect finalizers; the warning must still cover
- * those stale-graph symptom paths.
+ * Every such command also gets the stale-graph warning (#697) and the
+ * freshness drive it now feeds (wave-3 daemon subtraction: with no
+ * ax-watch LaunchAgent, a stale graph forks its own background `ax ingest`,
+ * debounced - see `queries/ingest-staleness.ts`): one indexed query, stderr
+ * only, before the command body. This is deliberately a pre-flight rather
+ * than an `ensuring` finalizer because legacy handlers that call
+ * `process.exit` bypass Effect finalizers; both must still cover those
+ * stale-graph symptom paths.
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive)),
+        Effect.provide(
+            Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive, BackgroundIngestSpawnerLive),
+        ),
         Effect.scoped,
     );
 
@@ -348,12 +353,12 @@ const throwingSurrealClient = (): SurrealClientShape =>
 
 /**
  * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
- * commands (install/daemon/doctor/uninstall/version/update) and unknown
+ * commands (install/doctor/uninstall/version/update) and unknown
  * commands / typos - none of these should reach the DB, so accidental
  * access is a bug worth surfacing loudly.
  */
 const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
-    // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
+    // Lifecycle commands (install/setup/doctor/uninstall) are now
     // @effect/platform-native and require FileSystem + Path. Provide the real
     // Bun-backed layers here (no DB), so they run without dragging in LegacySurrealAppLayer's
     // SurrealClient connect path.

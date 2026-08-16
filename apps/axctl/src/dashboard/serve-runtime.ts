@@ -1,25 +1,33 @@
 /**
- * Server-scoped Effect runtime for the dashboard server (Insights Surface).
+ * Server-scoped Effect runtime for the studio server (Insights Surface).
  *
- * One `ManagedRuntime` over `IngestRuntimeLayer` (a superset of `AppLayer`)
- * serves BOTH route handlers and the detached ingest daemon fibers that
- * `startIngestWorkflow` forks - so the SurrealDB connection, trace sink, and
- * stage registry are built once per server lifetime instead of once per
- * HTTP request (the old `appLayerRunner` paid a fresh WebSocket handshake +
- * signin on every request).
+ * One `ManagedRuntime` serves every route handler, so `CacheRead`'s
+ * published-snapshot connection (and the trace sink) is built once per
+ * server lifetime instead of once per HTTP request.
+ *
+ * Studio ephemeral (wave 3, `c-daemon-studio`) dropped what this runtime used
+ * to ALSO host: `IngestRuntimeLayer` merged with a live `SurrealClientLive`
+ * connection, because this same runtime forked the detached ingest daemon
+ * fiber the in-browser "trigger ingest" button started (`ingest-workflow.ts`,
+ * now deleted). An on-demand process that exits when its client disconnects
+ * cannot own that fiber's lifecycle, so the trigger was retired - studio now
+ * only ever READS the published snapshot, and background freshness is a
+ * separate concern (chunk 3a's freshness drive spawns `ax ingest`
+ * independently of any studio invocation). No `SurrealClient` merge remains
+ * anywhere in this runtime.
  *
  * Self-healing: v4 `ManagedRuntime` caches its layer-build fiber forever -
- * including a FAILED build (e.g. SurrealDB down when the server boots). A
- * naive shared runtime would stay bricked until restart, where the old
- * per-request runner healed as soon as the DB came up. `makeServeRuntime`
- * restores that behavior: when a run rejects while `cachedContext` is still
- * undefined (the build never succeeded), the failed runtime is disposed and a
- * fresh one is swapped in for the next request. A rejection AFTER a
- * successful build is a handler error and never triggers a swap.
+ * including a FAILED build (e.g. no snapshot published yet when the server
+ * boots). A naive shared runtime would stay bricked until restart, where the
+ * old per-request runner healed as soon as a snapshot appeared.
+ * `makeServeRuntime` restores that behavior: when a run rejects while
+ * `cachedContext` is still undefined (the build never succeeded), the failed
+ * runtime is disposed and a fresh one is swapped in for the next request. A
+ * rejection AFTER a successful build is a handler error and never triggers a
+ * swap.
  */
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { SurrealClientLive } from "@ax/lib/db";
-import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { JudgmentLive } from "../judgment.ts";
 import type { DashboardEnv, EffectRunner } from "./router/router.ts";
@@ -60,15 +68,10 @@ export const defaultRuntimeFactory = (
     options?: { readonly memoMap?: Layer.MemoMap },
 ): (() => RuntimeLike) =>
 () => ManagedRuntime.make(
-    // `SurrealClientLive` is merged HERE, not inherited from `AppLayer` (wave 3,
-    // `c-ingest-cutover`): the ingest fibers this runtime forks are Surreal-free,
-    // and only the un-ported route handlers still need a client. It is
-    // `provideMerge`d onto the ingest layer because it depends on `AxConfig`,
-    // which `Layer.mergeAll` (parallel) would not satisfy.
     Layer.mergeAll(
-        SurrealClientLive.pipe(Layer.provideMerge(IngestRuntimeLayer)),
         CacheReadLive,
         JudgmentLive,
+        AppLayer,
     ),
     options?.memoMap ? { memoMap: options.memoMap } : undefined,
 );

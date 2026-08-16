@@ -204,7 +204,14 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         label: "Plans",
         sharedRecords: ["plan", "plan_item", "plan_snapshot"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/insights.ts", contains: "SELECT id FROM plan_snapshot WHERE session = $parent.id" },
+            // Updated for the DuckDB port (`c-read-analytics`): the SurrealQL
+            // sub-select `SELECT id FROM plan_snapshot WHERE session = $parent.id`
+            // became a correlated COUNT. This entry is a SQL-TEXT assertion, so it
+            // breaks on any rewrite of the statement it names - that is its whole
+            // value here (it proves the read path still exists in that file) and
+            // also its limit (it is not coverage; it cannot tell a working query
+            // from a broken one).
+            { path: "apps/axctl/src/queries/insights.ts", contains: "FROM plan_snapshot ps WHERE ps.session = s.id" },
             { path: "apps/axctl/src/dashboard/report.ts", contains: "plan_snapshot" },
         ],
         providers: {

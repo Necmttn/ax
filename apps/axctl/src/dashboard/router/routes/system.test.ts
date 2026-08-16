@@ -11,10 +11,11 @@ describe("systemRoutes", () => {
         expect(matchRoute(systemRoutes, "POST", "/api/query").kind).toBe("unmatched");
     });
 
-    test("GET /api/version reports live_ingest=false without a streaming sidecar", async () => {
-        // No serveDashboard boot in tests => no Durable Streams sidecar, the
-        // same shape as the compiled binary. The studio reads this flag to
-        // engage its polling fallback instead of hitting the 503.
+    test("GET /api/version reports live_ingest and otlp_receiver as retired (false)", async () => {
+        // Studio ephemeral (wave 3): the in-browser ingest trigger + its
+        // Durable Streams sidecar are gone (live_ingest), and the OTLP
+        // receiver moved to its own long-lived daemon (ax otlpd) - this
+        // router registers zero /v1/* routes now (otlp_receiver).
         const matched = matchRoute(systemRoutes, "GET", "/api/version");
         if (matched.kind !== "matched") throw new Error("expected /api/version to match");
         const res = await matched.match.route.run(
@@ -29,7 +30,9 @@ describe("systemRoutes", () => {
         expect(res.status).toBe(200);
         const body = await res.json() as { live_ingest: boolean; otlp_receiver: boolean; capabilities: string[] };
         expect(body.live_ingest).toBe(false);
-        expect(body.otlp_receiver).toBe(true);
-        expect(body.capabilities).toContain("ingest");
+        expect(body.otlp_receiver).toBe(false);
+        expect(body.capabilities).toContain("sessions");
+        // Retired alongside the live-ingest trigger (studio ephemeral, wave 3).
+        expect(body.capabilities).not.toContain("ingest");
     });
 });

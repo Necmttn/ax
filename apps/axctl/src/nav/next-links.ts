@@ -55,8 +55,8 @@ export const NEXT_PROTOCOL_HINT =
 
 /**
  * Where a Studio deeplink points. Resolved by the caller (CLI handler / MCP
- * tool) via `resolveStudioTarget` so these builders stay pure - the dashboard
- * module owns pidfile/port discovery.
+ * tool) via `resolveStudioTarget` (cli/banner.ts) so these builders stay
+ * pure.
  */
 export interface StudioDeeplink {
     /** `http://localhost:<port>` - no trailing slash. */
@@ -75,8 +75,10 @@ export const studioSessionUrl = (baseUrl: string, sessionId: string): string =>
 
 /**
  * "Open in Studio" deeplink for a session. Carries the URL as the transport;
- * when no daemon is up the URL still uses the default port (stable route) and
- * the description points the user at `ax serve`. Works for normal and
+ * studio is ephemeral (wave 3) - `studio.live` is always `false` now (there
+ * is no persistent daemon record to check), so the description always points
+ * the user at `ax studio` rather than claiming one is already open. The URL
+ * still uses the stable default port either way. Works for normal and
  * subagent sessions alike - the route renders both.
  */
 export const studioSessionLink = (
@@ -86,7 +88,7 @@ export const studioSessionLink = (
 ): NavLink => ({
     description: studio.live
         ? "Open this session in ax Studio"
-        : "Open this session in ax Studio (start the daemon first: ax serve)",
+        : "Open this session in ax Studio (start it first: ax studio)",
     url: studioSessionUrl(studio.baseUrl, sessionId),
     ui: { priority, group: "navigate" },
 });

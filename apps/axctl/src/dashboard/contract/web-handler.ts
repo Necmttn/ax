@@ -17,43 +17,63 @@
  * routes recover once the DB comes up (mirrors serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
- * (serve-runtime.ts), so LegacySurrealAppLayer's services - the SurrealDB connection,
- * trace sink - are built ONCE and reused by both the contract routes and
- * the legacy routes' runner.
+ * (serve-runtime.ts), so `AppLayer`'s services - AxConfig, the trace sink -
+ * are built ONCE and reused by both the contract routes and the legacy
+ * routes' runner. No SurrealDB connection: see {@link InertSurrealLayer}.
  */
 import { Layer } from "effect";
 import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
 import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
-import type { SurrealClient } from "@ax/lib/db";
-import { LegacySurrealAppLayer } from "@ax/lib/layers";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
 import { errorText } from "./common.ts";
 import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
-import { LiveGroupLive } from "./live.ts";
 import { OtelGroupLive } from "./otel.ts";
 import { RoutingGroupLive } from "./routing.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
-import { ContractServeInfo, SystemGroupLive } from "./system.ts";
+import { SystemGroupLive } from "./system.ts";
 import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
 import { JudgmentLive } from "../../judgment.ts";
 
-/** Everything the contract handlers reach for; widens as families join. */
+/**
+ * Everything the contract handlers reach for. Kept as `SurrealClient` for
+ * test-seam compatibility (existing per-group test files inject a
+ * `Layer.mock(SurrealClient, ...)` here) even though, as of studio ephemeral
+ * (wave 3), NO route handler in this contract still resolves the tag - the
+ * last consumer (system.ts's `graphHealth`/`query` rows) was retired. See
+ * {@link InertSurrealLayer}.
+ */
 export type ContractServices = SurrealClient;
+
+/**
+ * Studio is ephemeral now: it must serve `GET /api/sessions` etc. with zero
+ * running daemons, and building a REAL `SurrealClient` (`LegacySurrealAppLayer`,
+ * the previous default here) opens a websocket and blocks on
+ * `CONNECT_TIMEOUT_MS` (~5s) waiting for a daemon that no longer exists -
+ * every handler test that omitted `services` paid that timeout and then a 500
+ * (see `usage.test.ts`'s module doc). Nothing calls `.query()`/`.upsert()`/etc
+ * on this anymore, so the default is inert: every effectful member dies
+ * loudly if something regresses and starts reaching for it again, rather than
+ * silently opening a connection or (worse) answering `[]` from a write-frozen
+ * database - the "dead reader" trap this migration is watching for.
+ */
+const InertSurrealLayer: Layer.Layer<SurrealClient> = Layer.mock(SurrealClient, {
+    raw: null as never,
+});
 
 /** Migrated exact (method, path) pairs the contract router owns. */
 const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
-    // system (GET /api/version deliberately absent - see module doc)
-    "POST /api/query",
-    "GET /api/graph-health",
+    // system (GET /api/version deliberately absent - see module doc; POST
+    // /api/query and GET /api/graph-health retired - see system.ts)
     "GET /api/worktrees",
     "GET /api/self-improve",
     // insights
@@ -91,8 +111,9 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/usage",
     // team
     "GET /api/team",
-    // live (SSE /api/events + binary /api/image stay raw legacy routes)
-    "POST /api/ingest",
+    // live: SSE /api/events + binary /api/image stay raw legacy routes; the
+    // trigger POST /api/ingest was retired in studio ephemeral, wave 3 - see
+    // api-contract.ts's module doc.
     // otel receiver
     "POST /v1/metrics",
     "POST /v1/traces",
@@ -133,10 +154,14 @@ export interface ContractWebHandler {
 }
 
 export interface MakeContractWebHandlerOptions {
-    /** Durable Streams sidecar handle, or null when it could not start
-     *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
-    readonly ingestStream: DurableIngestStream | null;
-    /** Share with the server runtime so LegacySurrealAppLayer builds once (see above). */
+    /**
+     * Retired with the live-ingest trigger (studio ephemeral, wave 3) - the
+     * Durable Streams sidecar this used to identify no longer exists. Kept
+     * accepting `null` only so existing call sites (every group's test file
+     * passes `ingestStream: null`) compile unchanged; the value is not read.
+     */
+    readonly ingestStream?: null;
+    /** Share with the server runtime so `AppLayer` builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
     /** Test seam: services the handlers need (default: production LegacySurrealAppLayer). */
     readonly services?: Layer.Layer<ContractServices, unknown>;
@@ -170,14 +195,19 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
     const routesLayer = Layer.mergeAll(
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
-        Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
-        opts.services ?? LegacySurrealAppLayer,
+        opts.services ?? InertSurrealLayer,
         // v2: the recall vertical reads the published DuckDB snapshot, not
         // SurrealDB. The layer opens nothing until a query actually arrives
         // (see @ax/lib/duckdb/seam), so adding it here costs a daemon that
         // never serves a recall request exactly nothing.
         opts.cacheRead ?? CacheReadLive,
         JudgmentLive,
+        // AxConfig/ProcessService/live-trace sink - Surreal-free since wave 3's
+        // `c-ingest-cutover` (see @ax/lib/layers's module doc). Some handler
+        // call chains (worktrees overview, self-improve) still reach for these
+        // transitively; merging it here is what `LegacySurrealAppLayer` used to
+        // do beneath its now-retired `SurrealClientLive` merge.
+        AppLayer,
     ).pipe(
         Layer.provide([
             SystemGroupLive,
@@ -186,7 +216,6 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             SkillsGroupLive,
             ImproveGroupLive,
             UsageGroupLive,
-            LiveGroupLive,
             OtelGroupLive,
             RoutingGroupLive,
             TeamGroupLive,
