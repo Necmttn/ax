@@ -3,10 +3,18 @@
  * `daily` sparkline buckets), the web dashboard's "click recommendation
  * reason → see evidence" expand panel, and `GET /api/skills/:name/detail`.
  *
- * Bindings: $name (skill name).
+ * `fetchSkillDetail` (the dashboard-facing entry point) is ported onto the
+ * DuckDB CacheRead seam below as five straightforward indexed lookups keyed
+ * off the resolved skill id, rather than one SurrealQL `LET/RETURN` blob.
+ * `SKILL_DETAIL_BASIC_SQL`/`SKILL_DETAIL_SQL` (built from
+ * `skill-invocations-sql.ts`) are kept UNCHANGED and still exported: the TUI
+ * (`tui/hooks/useSkillDetail.ts`, out of scope for this port) executes that
+ * raw SurrealQL text directly against a live `SurrealClient` - it is a real,
+ * still-live consumer, not dead code, so the string builder stays as-is.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { dateField, countField, stringField } from "@ax/lib/shared/row-fields";
 import type {
     SkillDetailPayload,
@@ -137,39 +145,188 @@ export const mapSkillProposalRow = (raw: unknown): SkillProposalEvidence | null 
     };
 };
 
+const SkillRowSchema = Schema.Struct({
+    id: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+});
+
+const SKILL_ROW_SQL = `SELECT id, scope, description, dir_path FROM skill WHERE name = ?;`;
+
+const InvocationSummarySchemaRow = Schema.Struct({
+    total: NumberFromBigIntColumn,
+    d7: NumberFromBigIntColumn,
+    d30: NumberFromBigIntColumn,
+    last: Schema.NullOr(TimestampColumn),
+});
+
+/** `d7`/`d30` FILTER thresholds bind first (in text order), the skill id last. */
+const INVOCATION_SUMMARY_SQL = `
+SELECT
+    COUNT(*) AS total,
+    COUNT(*) FILTER (WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')) AS d7,
+    COUNT(*) FILTER (WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')) AS d30,
+    MAX(ts) AS last
+FROM invoked
+WHERE out_id = ?;
+`;
+
+const RecentInvocationSchemaRow = Schema.Struct({
+    ts: TimestampColumn,
+    project: Schema.NullOr(Schema.String),
+    turn_has_error: Schema.NullOr(Schema.Boolean),
+});
+
+/** `invoked.session` is denormalised onto the edge - no need to dereference
+ *  the source turn to reach the session's project. */
+const RECENT_INVOCATIONS_SQL = `
+SELECT i.ts AS ts, s.project AS project, i.turn_has_error AS turn_has_error
+FROM invoked i
+LEFT JOIN session s ON s.id = i.session
+WHERE i.out_id = ?
+ORDER BY i.ts DESC
+LIMIT 10;
+`;
+
+const CorrectionSchemaRow = Schema.Struct({
+    ts: TimestampColumn,
+    project: Schema.NullOr(Schema.String),
+});
+
+const CORRECTIONS_SQL = `
+SELECT i.ts AS ts, s.project AS project
+FROM invoked i
+LEFT JOIN session s ON s.id = i.session
+WHERE i.out_id = ? AND i.was_corrected = TRUE
+ORDER BY i.ts DESC
+LIMIT 5;
+`;
+
+const ProposalSchemaRow = Schema.Struct({
+    ts: TimestampColumn,
+    project: Schema.NullOr(Schema.String),
+    context_excerpt: Schema.NullOr(Schema.String),
+});
+
+/** `proposed` has no denormalised session, so `project` goes through the
+ *  source turn. Some legacy `proposed` edges have `ts = epoch` (ingest used to
+ *  skip the field) - fall back to the source turn's ts, same as the original
+ *  SurrealQL `IF ts > d"1970-01-02" ...`. */
+const PROPOSALS_SQL = `
+SELECT
+    CASE WHEN p.ts > TIMESTAMP '1970-01-02' THEN p.ts ELSE t.ts END AS ts,
+    s.project AS project,
+    p.context_excerpt AS context_excerpt
+FROM proposed p
+JOIN turn t ON t.id = p.in_id
+LEFT JOIN session s ON s.id = t.session
+WHERE p.out_id = ?
+ORDER BY ts DESC
+LIMIT 5;
+`;
+
+const PairedSchemaRow = Schema.Struct({
+    partner: Schema.NullOr(Schema.String),
+    count: NumberFromBigIntColumn,
+    last_seen: Schema.NullOr(TimestampColumn),
+});
+
+/** Undirected pair: check both endpoints, surface the partner's name. Some
+ *  legacy edges have `last_seen = epoch`; null those out (same as the
+ *  original `IF last_seen > d"1970-01-02" ... ELSE NONE`). Skill id binds 3x:
+ *  once to pick the partner side, twice for the endpoint filter. */
+const PAIRED_SQL = `
+SELECT
+    CASE WHEN sp.in_id = ? THEN so.name ELSE si.name END AS partner,
+    sp.count AS count,
+    CASE WHEN sp.last_seen > TIMESTAMP '1970-01-02' THEN sp.last_seen ELSE NULL END AS last_seen
+FROM skill_paired sp
+LEFT JOIN skill si ON si.id = sp.in_id
+LEFT JOIN skill so ON so.id = sp.out_id
+WHERE sp.in_id = ? OR sp.out_id = ?
+ORDER BY sp.count DESC
+LIMIT 5;
+`;
+
+const EMPTY_SKILL_DETAIL_INVOCATIONS = { total: 0, d7: 0, d30: 0, last: null };
+
 export const fetchSkillDetail = Effect.fn("queries.fetchSkillDetail")(
     function* (name: string) {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<unknown[]>(SKILL_DETAIL_SQL, { name });
-        // RETURN { ... } gives us [block] where block is the object.
-        const payload = Array.isArray(result)
-            ? ([...result].reverse().find((r) => r != null) as Record<string, unknown> | undefined)
-            : (result as Record<string, unknown> | undefined);
-        const skill = (payload?.skill ?? null) as Record<string, unknown> | null;
-        const invocations = (payload?.invocations ?? {}) as Record<string, unknown>;
-        const recent = Array.isArray(payload?.recent) ? payload.recent : [];
-        const corrections = Array.isArray(payload?.corrections) ? payload.corrections : [];
-        const proposals = Array.isArray(payload?.proposals) ? payload.proposals : [];
-        const paired = Array.isArray(payload?.paired) ? payload.paired : [];
+        const skillRows = yield* cacheRows(
+            SkillRowSchema,
+            { sql: SKILL_ROW_SQL, params: [name] },
+            "skill detail skill row",
+        );
+        const skill = skillRows[0] ?? null;
+
+        if (!skill) {
+            return {
+                name,
+                scope: null,
+                description: null,
+                dir_path: null,
+                invocations: EMPTY_SKILL_DETAIL_INVOCATIONS,
+                recent: [],
+                corrections: [],
+                proposals: [],
+                paired: [],
+            } satisfies SkillDetailPayload;
+        }
+
+        const [invocationRows, recentRows, correctionRows, proposalRows, pairedRows] = yield* Effect.all([
+            cacheRows(
+                InvocationSummarySchemaRow,
+                { sql: INVOCATION_SUMMARY_SQL, params: [7, 30, skill.id] },
+                "skill detail invocations",
+            ),
+            cacheRows(
+                RecentInvocationSchemaRow,
+                { sql: RECENT_INVOCATIONS_SQL, params: [skill.id] },
+                "skill detail recent",
+            ),
+            cacheRows(
+                CorrectionSchemaRow,
+                { sql: CORRECTIONS_SQL, params: [skill.id] },
+                "skill detail corrections",
+            ),
+            cacheRows(
+                ProposalSchemaRow,
+                { sql: PROPOSALS_SQL, params: [skill.id] },
+                "skill detail proposals",
+            ),
+            cacheRows(
+                PairedSchemaRow,
+                { sql: PAIRED_SQL, params: [skill.id, skill.id, skill.id] },
+                "skill detail paired",
+            ),
+        ], { concurrency: 5 });
+
+        const invocations = invocationRows[0];
+
         return {
             name,
-            scope: skill ? stringField(skill, "scope") : null,
-            description: skill ? stringField(skill, "description") : null,
-            dir_path: skill ? stringField(skill, "dir_path") : null,
-            invocations: {
-                total: countField(invocations, "total"),
-                d7: countField(invocations, "d7"),
-                d30: countField(invocations, "d30"),
-                last: dateField(invocations, "last"),
-            },
-            recent: recent.map(mapSkillRecentRow).filter((r): r is SkillRecentInvocation => r !== null),
-            corrections: corrections
+            scope: skill.scope,
+            description: skill.description,
+            dir_path: skill.dir_path,
+            invocations: invocations
+                ? {
+                    total: invocations.total,
+                    d7: invocations.d7,
+                    d30: invocations.d30,
+                    last: dateField(invocations, "last"),
+                }
+                : EMPTY_SKILL_DETAIL_INVOCATIONS,
+            recent: recentRows
                 .map(mapSkillRecentRow)
                 .filter((r): r is SkillRecentInvocation => r !== null),
-            proposals: proposals
+            corrections: correctionRows
+                .map(mapSkillRecentRow)
+                .filter((r): r is SkillRecentInvocation => r !== null),
+            proposals: proposalRows
                 .map(mapSkillProposalRow)
                 .filter((r): r is SkillProposalEvidence => r !== null),
-            paired: paired
+            paired: pairedRows
                 .map(mapSkillPairRow)
                 .filter((r): r is SkillPair => r !== null),
         } satisfies SkillDetailPayload;
