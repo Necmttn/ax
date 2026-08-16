@@ -1031,58 +1031,61 @@ describe("ClassifierPackageService", () => {
             skipped_proposal_count: 1,
             failures: [],
         })}\n`);
-        const tc = makeTestSurrealClient({
-            fallback: [
-                [
-                    {
-                        graph_id: "classifier_operation:session-section-chunks/blind-review-refresh",
-                        kind: "classifier_operation",
-                        label: "blind-review-refresh",
-                        properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
-                    },
-                    {
-                        graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        kind: "classifier_lifecycle",
-                        label: "workflow candidate review pipeline lifecycle",
-                        properties_json: "{}",
-                    },
-                ],
-                [
-                    {
-                        graph_id: "edge:run",
-                        kind: "ran_operation",
-                        from_id: "classifier_execution:.ax/experiments/run.json",
-                        to_id: "classifier_operation:session-section-chunks/blind-review-refresh",
-                        evidence_path: ".ax/experiments/run.json",
-                        properties_json: "{}",
-                    },
-                    {
-                        graph_id: "edge:lifecycle",
-                        kind: "has_evidence",
-                        from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
-                    },
-                ],
-                [
-                    {
-                        graph_id: "fact:phase",
-                        kind: "classifier_lifecycle_status",
-                        subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
-                        predicate: "review_pipeline_recommended_action_execution_phase",
-                        value_json: "\"bind_inputs\"",
-                        evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
-                        properties_json: JSON.stringify({
-                            lifecycle_key: "review_pipeline_lifecycle",
-                            artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
-                        }),
-                    },
-                ],
+        const tc = graphHealthCacheRead(
+            [
+                {
+                    graph_id: "classifier_operation:session-section-chunks/blind-review-refresh",
+                    kind: "classifier_operation",
+                    label: "blind-review-refresh",
+                    properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
+                    source_kind: "classifier_package_execution",
+                },
+                {
+                    graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    kind: "classifier_lifecycle",
+                    label: "workflow candidate review pipeline lifecycle",
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
             ],
-        });
+            [
+                {
+                    graph_id: "edge:run",
+                    kind: "ran_operation",
+                    from_id: "classifier_execution:.ax/experiments/run.json",
+                    to_id: "classifier_operation:session-section-chunks/blind-review-refresh",
+                    evidence_path: ".ax/experiments/run.json",
+                    properties_json: "{}",
+                    source_kind: "classifier_package_execution",
+                },
+                {
+                    graph_id: "edge:lifecycle",
+                    kind: "has_evidence",
+                    from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+            [
+                {
+                    graph_id: "fact:phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                    properties_json: JSON.stringify({
+                        lifecycle_key: "review_pipeline_lifecycle",
+                        artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    }),
+                    source_kind: "classifier_package_execution",
+                },
+            ],
+        );
 
-        const result = await runWithServiceAndDb(Effect.gen(function* () {
+        const result = await runWithServiceAndCacheRead(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             const input = {
                 workflowStatusPath: statusPath,
@@ -1095,7 +1098,7 @@ describe("ClassifierPackageService", () => {
             const report = yield* packages.lifecycleInsightReport(input);
             const routing = yield* packages.lifecycleRoutingSummaryReport(input);
             return { report, routing };
-        }), tc.client);
+        }), tc.layer);
         const { report, routing } = result;
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
