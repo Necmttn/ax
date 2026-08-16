@@ -9,6 +9,10 @@ import {
     TimestampColumn,
     type JudgmentError,
 } from "@ax/lib/sqlite";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { stableId } from "@ax/lib/stable-id";
 import { prettyPrint } from "@ax/lib/json";
 import {
@@ -48,7 +52,7 @@ export class LabelMiningReportWriteError extends Schema.TaggedErrorClass<LabelMi
     message: Schema.String,
 }) {}
 
-export type LabelMiningError = DbError | JudgmentError | LabelMiningReportWriteError;
+export type LabelMiningError = DbError | CacheReadError | JudgmentError | LabelMiningReportWriteError;
 
 export interface LabelMiningReportInput {
     /** Lookback window in days for transcript turns. */
@@ -296,9 +300,9 @@ interface TranscriptWindowRow {
     readonly user_intent_kind?: string | null;
     readonly user_text?: string | null;
     readonly user_evidence_path?: string | null;
-    readonly prev_turn_id?: string | null;
-    readonly prev_text?: string | null;
-    readonly prev_evidence_path?: string | null;
+    readonly prev_turn_id?: string | null | undefined;
+    readonly prev_text?: string | null | undefined;
+    readonly prev_evidence_path?: string | null | undefined;
 }
 
 const str = (value: unknown): string => (typeof value === "string" ? value : String(value ?? ""));
@@ -326,28 +330,41 @@ const EXCLUDED_INTENT_KINDS = [
  * `session` + `seq - 1` so correction/direction candidates carry the assistant
  * action they reacted to.
  */
-const transcriptWindowSql = (sinceDays: number, limit: number): string => `
+interface DuckDbQuery {
+    readonly sql: string;
+    readonly params: ReadonlyArray<DuckDbParam>;
+}
+
+const transcriptWindowQuery = (sinceDays: number, limit: number): DuckDbQuery => {
+    const sinceClause = withinDaysClause("t.ts", Math.max(0, Math.trunc(sinceDays)));
+    const excludedPlaceholders = EXCLUDED_INTENT_KINDS.map(() => "?").join(", ");
+    const sql = `
 SELECT
-    type::string(id) AS window_key,
-    type::string(id) AS subject_id,
-    type::string(session) AS session_id,
-    type::string(id) AS user_turn_id,
-    ts,
-    seq AS user_seq,
-    role AS user_role,
-    message_kind AS user_message_kind,
-    intent_kind AS user_intent_kind,
-    text AS user_text,
-    type::string(id) AS user_evidence_path
-FROM turn
-WHERE role = 'user'
-    AND message_kind = 'task'
-    AND session.source != 'claude-subagent'
-    AND (intent_kind IS NONE OR intent_kind NOT IN ${JSON.stringify([...EXCLUDED_INTENT_KINDS])})
-    AND text IS NOT NONE
-    AND ts >= time::now() - ${Math.max(0, Math.trunc(sinceDays))}d
-ORDER BY ts DESC
-LIMIT ${Math.max(1, Math.trunc(limit))};`.trim();
+    t.id AS window_key,
+    t.id AS subject_id,
+    t.session AS session_id,
+    t.id AS user_turn_id,
+    t.seq AS user_seq,
+    t.role AS user_role,
+    t.message_kind AS user_message_kind,
+    t.intent_kind AS user_intent_kind,
+    t.text AS user_text,
+    t.id AS user_evidence_path
+FROM turn t
+JOIN session s ON s.id = t.session
+WHERE t.role = 'user'
+    AND t.message_kind = 'task'
+    AND s.source <> 'claude-subagent'
+    AND (t.intent_kind IS NULL OR t.intent_kind NOT IN (${excludedPlaceholders}))
+    AND t.text IS NOT NULL
+    ${sinceClause.sql}
+ORDER BY t.ts DESC
+LIMIT ?`.trim();
+    return {
+        sql,
+        params: [...EXCLUDED_INTENT_KINDS, ...sinceClause.params, Math.max(1, Math.trunc(limit))],
+    };
+};
 
 /**
  * Batch-fetch the immediately-preceding turn for each user-turn window, keyed by
@@ -355,22 +372,73 @@ LIMIT ${Math.max(1, Math.trunc(limit))};`.trim();
  * keeps the previous-assistant join fast on large `turn` tables. The unique
  * index `turn_session_seq` answers each `(session, seq)` membership cheaply.
  */
-const prevTurnSql = (sessionIds: readonly string[], prevSeqs: readonly number[]): string => `
+const prevTurnQuery = (sessionIds: readonly string[], prevSeqs: readonly number[]): DuckDbQuery => {
+    const uniqueSessions = [...new Set(sessionIds)];
+    const uniqueSeqs = [...new Set(prevSeqs)];
+    const sql = `
 SELECT
-    type::string(id) AS prev_turn_id,
-    type::string(session) AS prev_session_id,
+    id AS prev_turn_id,
+    session AS prev_session_id,
     seq AS prev_seq,
     text AS prev_text
 FROM turn
-WHERE type::string(session) IN ${JSON.stringify([...new Set(sessionIds)])}
-    AND seq IN ${JSON.stringify([...new Set(prevSeqs)])};`.trim();
+WHERE session IN (${uniqueSessions.map(() => "?").join(", ")})
+    AND seq IN (${uniqueSeqs.map(() => "?").join(", ")})`.trim();
+    return { sql, params: [...uniqueSessions, ...uniqueSeqs] };
+};
 
-interface PrevTurnRow {
-    readonly prev_turn_id?: string | null;
-    readonly prev_session_id?: string | null;
-    readonly prev_seq?: number | null;
-    readonly prev_text?: string | null;
-}
+/**
+ * DuckDB decode contract for {@link transcriptWindowQuery}'s result rows. The
+ * `prev_*` fields are `optional` because the real read query never selects
+ * them - only test fixtures supply a previous turn inline (see the merge loop
+ * in `miningReport` below).
+ */
+const CacheTranscriptWindowRow = Schema.Struct({
+    window_key: Schema.NullOr(Schema.String),
+    subject_id: Schema.NullOr(Schema.String),
+    session_id: Schema.NullOr(Schema.String),
+    user_turn_id: Schema.NullOr(Schema.String),
+    user_seq: Schema.NullOr(NumberFromBigIntColumn),
+    user_role: Schema.NullOr(Schema.String),
+    user_message_kind: Schema.NullOr(Schema.String),
+    user_intent_kind: Schema.NullOr(Schema.String),
+    user_text: Schema.NullOr(Schema.String),
+    user_evidence_path: Schema.NullOr(Schema.String),
+    prev_turn_id: Schema.optional(Schema.NullOr(Schema.String)),
+    prev_text: Schema.optional(Schema.NullOr(Schema.String)),
+    prev_evidence_path: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+/** DuckDB decode contract for {@link prevTurnQuery}'s result rows. */
+const CachePrevTurnRow = Schema.Struct({
+    prev_turn_id: Schema.NullOr(Schema.String),
+    prev_session_id: Schema.NullOr(Schema.String),
+    prev_seq: Schema.NullOr(NumberFromBigIntColumn),
+    prev_text: Schema.NullOr(Schema.String),
+});
+
+/** DuckDB decode contract for the reviewed `classifier_graph_fact` read. */
+const CacheGraphFactRow = Schema.Struct({
+    graph_id: Schema.String,
+    kind: Schema.String,
+    subject: Schema.String,
+    predicate: Schema.String,
+    object: Schema.NullOr(Schema.String),
+    value_json: Schema.NullOr(Schema.String),
+    properties_json: Schema.String,
+    source_kind: Schema.String,
+});
+
+/** DuckDB decode contract for the `transcript_label_vector` read. */
+const CacheVectorRow = Schema.Struct({
+    id: Schema.String,
+    candidate_id: Schema.String,
+    embedding_model: Schema.NullOr(Schema.String),
+    embedding_dim: Schema.NullOr(NumberFromBigIntColumn),
+    embedding_ref: Schema.NullOr(Schema.String),
+    nearest_reviewed_candidate_ids_json: Schema.NullOr(Schema.String),
+    nearest_scores_json: Schema.NullOr(Schema.String),
+});
 
 const rowToWindow = (row: TranscriptWindowRow): EventWindowLike | null => {
     const userTurnId = str(row.user_turn_id ?? row.subject_id);
@@ -500,7 +568,7 @@ FROM transcript_label_review;`.trim();
 /** Read all reviewed-source classifier graph facts. */
 const reviewedFactSql = `
 SELECT
-    type::string(graph_id) AS graph_id,
+    graph_id,
     kind,
     subject,
     predicate,
@@ -509,19 +577,19 @@ SELECT
     properties_json,
     source_kind
 FROM classifier_graph_fact
-WHERE source_kind = '${REVIEWED_SOURCE_KIND}';`.trim();
+WHERE source_kind = ?`.trim();
 
 /** Read persisted vector rows for re-projection. */
 const vectorProjectionSql = `
 SELECT
-    record::id(id) AS id,
+    id,
     candidate_id,
     embedding_model,
     embedding_dim,
     embedding_ref,
     nearest_reviewed_candidate_ids_json,
     nearest_scores_json
-FROM transcript_label_vector;`.trim();
+FROM transcript_label_vector`.trim();
 
 interface VectorTableRow {
     readonly id: string;
@@ -607,20 +675,31 @@ const writeReport = (
         );
     });
 
-export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient | Judgment> =
+/**
+ * `db` (SurrealClient) is retained ONLY for `projectReviewed`'s apply-write
+ * path: the UPSERT statements it plays back are built by
+ * `projectReviewedLabelsToGraph` in `./label-mining.ts` (owned by a different
+ * wave-3 chunk), which emits SurrealQL-specific syntax (`UPSERT table:id SET
+ * ...`). Porting that write to DuckDB would mean rewriting that builder, which
+ * is out of this chunk's file ownership - and even ported, a CLI-invoked apply
+ * cannot obtain a `CacheWriteService` at all (writes are ingest-lock-gated;
+ * `label-mining --project-reviewed --apply` never runs under ingest). See the
+ * chunk report for the full argument; every READ in this file is on `CacheRead`.
+ */
+export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient | CacheRead | Judgment> =
     Layer.effect(
         LabelMiningService,
         Effect.gen(function* () {
             const db = yield* SurrealClient;
+            const read = yield* CacheRead;
             const judgment = yield* Judgment;
 
             const miningReport = Effect.fn("LabelMiningService.miningReport")(function* (
                 input: LabelMiningReportInput,
             ) {
                 const reviewLimit = Math.min(input.reviewLimit, EXPORT_REVIEW_LIMIT);
-                const sql = transcriptWindowSql(input.sinceDays, input.limit);
-                const [rows] = yield* db.query<[TranscriptWindowRow[]]>(sql);
-                const windowRows = rows ?? [];
+                const windowQuery = transcriptWindowQuery(input.sinceDays, input.limit);
+                const windowRows = yield* read.rows(CacheTranscriptWindowRow, windowQuery.sql, windowQuery.params);
 
                 // Batch-fetch previous turns in ONE statement (correlated subquery
                 // per row is O(rows * full-scan) on a large `turn` table).
@@ -641,10 +720,9 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                     }
                 }
                 if (sessionIds.length > 0) {
-                    const [prevRows] = yield* db.query<[PrevTurnRow[]]>(
-                        prevTurnSql(sessionIds, prevSeqs),
-                    );
-                    for (const prev of prevRows ?? []) {
+                    const prevQuery = prevTurnQuery(sessionIds, prevSeqs);
+                    const prevRows = yield* read.rows(CachePrevTurnRow, prevQuery.sql, prevQuery.params);
+                    for (const prev of prevRows) {
                         if (
                             prev.prev_session_id != null &&
                             typeof prev.prev_seq === "number" &&
@@ -709,10 +787,10 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                 input: LabelMiningSelfImproveInput,
             ) {
                 const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewTableSql);
-                const [factRows] = yield* db.query<[LabelMiningGraphFactRow[]]>(reviewedFactSql);
+                const factRows = yield* read.rows(CacheGraphFactRow, reviewedFactSql, [REVIEWED_SOURCE_KIND]);
                 const result = buildSelfImproveQuery({
                     review_rows: [...reviewRows],
-                    fact_rows: factRows ?? [],
+                    fact_rows: [...factRows],
                 });
                 if (input.out === undefined) return result;
                 const withPath: LabelMiningSelfImproveResult = { ...result, out_path: input.out };
@@ -724,13 +802,15 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                 input: LabelMiningProjectInput,
             ) {
                 const reviewRows = yield* judgment.rows(ReviewTableRowSchema, reviewTableSql);
-                const [vectorRows] = yield* db.query<[VectorTableRow[]]>(vectorProjectionSql);
+                const vectorRows = yield* read.rows(CacheVectorRow, vectorProjectionSql);
                 const reviews = reviewRows.map(reviewRowToReviewedLabel);
                 const candidates = reviewRows.map(reviewRowToCandidate);
-                const vectors = (vectorRows ?? []).map(vectorRowToVector);
+                const vectors = vectorRows.map(vectorRowToVector);
                 const projection = projectReviewedLabelsToGraph({ candidates, reviews, vectors });
 
                 if (input.apply) {
+                    // `db` (SurrealClient) is intentionally still used here - see the
+                    // module doc comment on LabelMiningServiceLive.
                     for (const statement of projection.statements.filter((sql) => !sql.startsWith("UPSERT transcript_label_review:"))) {
                         yield* db.query(statement);
                     }

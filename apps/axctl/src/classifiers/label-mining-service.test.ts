@@ -4,8 +4,9 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import type { Judgment } from "@ax/lib/sqlite";
 import {
@@ -13,6 +14,17 @@ import {
     LabelMiningService,
     LabelMiningServiceLive,
 } from "./label-mining-service.ts";
+
+/**
+ * `SurrealClient` is still resolved once at `LabelMiningServiceLive` layer
+ * construction (see the module doc comment on the layer - it backs ONLY the
+ * `projectReviewed --apply` write path). None of the cases below exercise
+ * that path, so a client that dies if ever queried is enough to prove it: a
+ * passing suite is evidence the read paths never touch it.
+ */
+const deadSurrealClient = SurrealClient.of({
+    query: () => Effect.die("label-mining-service.test.ts: SurrealClient must not be queried by a read path"),
+} as never);
 
 /**
  * Persisted-turn fake rows. The service reads transcript windows from the
