@@ -5,7 +5,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
-import type { CacheWriteError } from "@ax/lib/duckdb/seam";
+import type { CacheReadError, CacheWriteError } from "@ax/lib/duckdb/seam";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { prettyPrint } from "@ax/lib/json";
 import { CacheRead } from "@ax/lib/duckdb/seam";
@@ -141,7 +141,11 @@ const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
     opts: StaleCheckOpts,
-): Effect.Effect<void, DbError | CacheWriteError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<
+    void,
+    DbError | CacheReadError | CacheWriteError,
+    SurrealClient | CacheRead | AxConfig | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         if (opts.noStaleCheck) return;
         const threshold =

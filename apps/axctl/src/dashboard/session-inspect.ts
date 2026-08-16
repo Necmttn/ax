@@ -12,6 +12,7 @@ import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnToken
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
 import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
 import { sessionShareTurnToolCallsQuery, type ShareTurnToolCall } from "../queries/session-detail.ts";
@@ -1138,7 +1139,7 @@ export const fetchSessionInspect = (
 ): Effect.Effect<
     SessionInspectPayload,
     SessionInspectReadError | TranscriptNotFoundError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         // Normalise inbound id at the seam so the rest of the function operates
