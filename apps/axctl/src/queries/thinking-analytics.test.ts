@@ -1,49 +1,25 @@
 /**
- * Tests for thinking-analytics.ts: pure rollup + fetch join via mock DB.
+ * Tests for thinking-analytics.ts: pure rollup + fetchThinking over a real
+ * published DuckDB snapshot (spar exclusion still routes through the
+ * SQLite-backed `Judgment` test layer - fetchSparSessionIds was ported off
+ * SurrealDB in an earlier chunk and is untouched here).
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import type { Judgment } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 
 import { fetchThinking, reasoningCostUsd, rollupThinkingByModel } from "./thinking-analytics.ts";
 
-type QueryResult = Array<Record<string, unknown>>;
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("thinking analytics", { requireFts: true });
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient | Judgment>, layer: Layer.Layer<SurrealClient | Judgment>) =>
+const run = <A>(eff: Effect.Effect<A, unknown, Judgment | CacheRead>, layer: Layer.Layer<Judgment | CacheRead>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
-/**
- * Build a test layer for fetchThinking that routes:
- *   - The spar-sessions query (contains "string::contains") → sparRids
- *   - Everything else (the batched 5-statement thinking SQL) → batchResults
- *
- * Route response shape:
- *   spar query is `SELECT VALUE id ...` → flat array of RecordId values, so the
- *     route rows = [sparRids] (one statement result wrapping the RecordId array).
- *   batch query returns `[thinking, sessions, efforts, reasoning, models]` → fallback = batchResults
- */
-const makeThinkingMock = (
-    batchResults: QueryResult[],
-    sparRids: RecordId[] = [],
-): Layer.Layer<SurrealClient | Judgment> => {
-    const tc = makeTestSurrealClient({
-        denyWrites: true,
-        routes: {
-            // spar query: SELECT VALUE id ... WHERE string::contains(labels, 'spar')
-            // returns [Array<RecordId>] - one statement result
-            "string::contains(labels": [sparRids] as unknown as Array<unknown[]>,
-        },
-        // fallback: the batched 5-statement query returns batchResults tuple
-        fallback: batchResults as unknown as Array<unknown[]>,
-    });
-    return Layer.merge(tc.layer, judgmentTestLayer(() => sparRids.map((id) => ({
-        session_id: String(id).replace(/^session:[`⟨]?/, "").replace(/[`⟩]$/, ""),
-    }))));
-};
+const hoursAgo = (h: number): Date => new Date(Date.now() - h * 60 * 60 * 1000);
 
 describe("rollupThinkingByModel", () => {
     it("aggregates per model with pct and avg tokens", () => {
@@ -151,73 +127,97 @@ describe("reasoningCostUsd", () => {
 });
 
 describe("fetchThinking", () => {
-    // fetchThinking now issues two db.query() calls:
-    //   1. fetchSparSessionIds (SQL contains "string::contains(labels")
-    //   2. the batched 5-statement thinking/session/effort/reasoning/model SQL
-    //
-    // makeThinkingMock routes by SQL pattern so each call gets the right data.
+    const S1 = "019e2531-b552-7b53-a029-c780adbb6560";
+    const T1 = "019e2531-b552-7b53-a029-c780adbb6561";
+    const CODEX_SESSION = "019e2531-b552-7b53-a029-c780adbb6562";
 
-    it("joins thinking rows to session models and maps codex signals", async () => {
-        const thinking = [
-            { session_id: "session:`s1`", blocks: 2, tokens: 800, assistant_turns: 4, thinking_turns: 2 },
-        ];
-        const sessions = [
-            { session_id: "session:`s1`", model: "claude-fable-5", source: "claude" },
-        ];
-        const efforts = [
-            { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
-            { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 3 },
-        ];
-        const reasoning = [
-            { model: "gpt-5.5", sessions: 7, reasoning_tokens: 5000, completion_tokens: 20000 },
-        ];
-        const agentModels = [
-            { name: "claude-fable-5", output_per_million_usd: 15 },
-            { name: "gpt-5.5", output_per_million_usd: 20 },
-        ];
-        const result = await run(
-            fetchThinking({ sinceDays: 14 }),
-            makeThinkingMock([thinking, sessions, efforts, reasoning, agentModels]),
+    dtest("joins thinking rows to session models and maps codex signals", async () => {
+        const dir = tempDir("thinking-join");
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("session", {
+                        id: S1, model: "claude-fable-5", source: "claude", reasoning_effort: "high",
+                        started_at: hoursAgo(1),
+                    });
+                    yield* write.put("session", {
+                        id: CODEX_SESSION, model: "gpt-5.5", source: "codex", reasoning_effort: "medium",
+                        started_at: hoursAgo(1),
+                    });
+                    yield* write.put("turn", {
+                        id: T1, session: S1, seq: 1n, ts: hoursAgo(1), role: "assistant",
+                        thinking_blocks: 2n, thinking_tokens: 800n,
+                    });
+                    yield* write.put("session_token_usage", {
+                        id: "stu:1", session: CODEX_SESSION, source: "codex", model: "gpt-5.5",
+                        reasoning_output_tokens: 5000n, completion_tokens: 20000n,
+                        estimated_tokens: 25000n, transcript_bytes: 4096n, ts: hoursAgo(1),
+                    });
+                    yield* write.put("agent_model", {
+                        id: "agent_model:claude-fable-5", name: "claude-fable-5", provider: "anthropic",
+                        display_name: "Claude Fable 5", output_per_million_usd: 15,
+                    });
+                    yield* write.put("agent_model", {
+                        id: "agent_model:gpt-5.5", name: "gpt-5.5", provider: "openai",
+                        display_name: "GPT 5.5", output_per_million_usd: 20,
+                    });
+                }),
+            ),
         );
+        const layer = Layer.merge(readFixture(fixture.snapshotPath, dylibPath), judgmentTestLayer());
+
+        const result = await run(fetchThinking({ sinceDays: 14 }), layer);
+
         expect(result.models).toHaveLength(1);
         expect(result.models[0].model).toBe("claude-fable-5");
         expect(result.models[0].thinking_tokens).toBe(800);
         // 800 thinking tokens x $15/M -> $0.012
         expect(result.models[0].thinking_cost_usd).toBeCloseTo(0.012);
-        expect(result.efforts).toEqual([
-            { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
-            { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 3 },
-        ]);
-        expect(result.codex_reasoning[0].reasoning_share_pct).toBeCloseTo(25);
+        expect(result.efforts).toEqual(
+            expect.arrayContaining([
+                { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 1 },
+                { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 1 },
+            ]),
+        );
+        expect(result.codex_reasoning).toHaveLength(1);
+        expect(result.codex_reasoning[0]!.reasoning_share_pct).toBeCloseTo(25);
         // 5000 reasoning tokens x $20/M -> $0.1
-        expect(result.codex_reasoning[0].reasoning_cost_usd).toBeCloseTo(0.1);
+        expect(result.codex_reasoning[0]!.reasoning_cost_usd).toBeCloseTo(0.1);
         expect(result.window_days).toBe(14);
     });
 
-    it("excludes a spar-tagged session from thinking totals", async () => {
+    dtest("excludes a spar-tagged session from thinking totals", async () => {
         // s1 is a normal session; spar-s2 is a spar variant that should be dropped.
-        const thinking = [
-            { session_id: "session:s1", blocks: 2, tokens: 800, assistant_turns: 4, thinking_turns: 2 },
-            { session_id: "session:spar-s2", blocks: 5, tokens: 5000, assistant_turns: 10, thinking_turns: 5 },
-        ];
-        const sessions = [
-            { session_id: "session:s1", model: "claude-fable-5", source: "claude" },
-            { session_id: "session:spar-s2", model: "claude-fable-5", source: "claude" },
-        ];
-        const agentModels = [
-            { name: "claude-fable-5", output_per_million_usd: 15 },
-        ];
-        const result = await run(
-            fetchThinking({ sinceDays: 14 }),
-            // sparRids: spar-s2 flagged as a RecordId (matches the SELECT VALUE id
-            // form). makeThinkingMock routes the spar query to [sparRids].
-            // String(RecordId) -> "session:⟨spar-s2⟩" -> cleanSessionId -> "spar-s2",
-            // which matches the thinking row's session_id "session:spar-s2".
-            makeThinkingMock(
-                [thinking, sessions, [], [], agentModels],
-                [new RecordId("session", "spar-s2")],
+        const SPAR_SESSION = "019e2531-b552-7b53-a029-c780adbb6563";
+        const SPAR_TURN = "019e2531-b552-7b53-a029-c780adbb6564";
+        const dir = tempDir("thinking-spar");
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("session", { id: S1, model: "claude-fable-5", source: "claude", started_at: hoursAgo(1) });
+                    yield* write.put("session", { id: SPAR_SESSION, model: "claude-fable-5", source: "claude", started_at: hoursAgo(1) });
+                    yield* write.put("turn", {
+                        id: T1, session: S1, seq: 1n, ts: hoursAgo(1), role: "assistant",
+                        thinking_blocks: 2n, thinking_tokens: 800n,
+                    });
+                    yield* write.put("turn", {
+                        id: SPAR_TURN, session: SPAR_SESSION, seq: 1n, ts: hoursAgo(1), role: "assistant",
+                        thinking_blocks: 5n, thinking_tokens: 5000n,
+                    });
+                    yield* write.put("agent_model", {
+                        id: "agent_model:claude-fable-5", name: "claude-fable-5", provider: "anthropic",
+                        display_name: "Claude Fable 5", output_per_million_usd: 15,
+                    });
+                }),
             ),
         );
+        // fetchSparSessionIds reads `session_label` through the Judgment sidecar
+        // (already ported off SurrealDB); route it to flag SPAR_SESSION.
+        const sparLayer = judgmentTestLayer(() => [{ session_id: SPAR_SESSION }]);
+        const layer = Layer.merge(readFixture(fixture.snapshotPath, dylibPath), sparLayer);
+
+        const result = await run(fetchThinking({ sinceDays: 14 }), layer);
+
         // Only s1's thinking tokens (800) should appear; spar-s2's 5000 excluded.
         expect(result.models).toHaveLength(1);
         expect(result.models[0].thinking_tokens).toBe(800);

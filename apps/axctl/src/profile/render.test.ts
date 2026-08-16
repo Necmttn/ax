@@ -14,14 +14,12 @@ import { buildProfile } from "./render.ts";
 // `surrealResults` replays ONLY those two, in call order (see buildProfile's
 // own ordering comment).
 const surrealResults = [
-    // fetchCostModels (queries/cost-analytics.ts COST_MODELS_SQL)
-    [[{
-        model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
-        cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
-    }, {
-        model: "haiku", sessions: 42, prompt_tokens: 1, completion_tokens: 1,
-        cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
-    }]],
+    // fetchCostModels MOVED to CACHE_ROUTES below: `c-read-analytics` ported
+    // queries/cost-analytics.ts onto the CacheRead seam, so this function no
+    // longer reaches the Surreal mock at all. Leaving its fixture here would
+    // not fail loudly - `surrealResults` replays IN CALL ORDER, so a stale
+    // leading entry silently feeds fetchCostModels' rows to the next Surreal
+    // caller instead. Removed rather than commented out for that reason.
     // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL)
     [[
         { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
@@ -47,6 +45,20 @@ const contentTypeRows = [
 // real `Date` here, not a string - everything else here is read via
 // Number(...)/String(...) at the call site, so plain values are safe.
 const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
+    // fetchCostModels (COST_MODELS_SQL) - ported off SurrealQL by
+    // `c-read-analytics`. Keyed on `GROUP BY model`, which no other statement
+    // in this file uses; the `FROM session_token_usage` fragment alone would
+    // collide with fetchTokenTotals below.
+    "GROUP BY model": [
+        {
+            model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
+        },
+        {
+            model: "haiku", sessions: 42, prompt_tokens: 1, completion_tokens: 1,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
+        },
+    ],
     // fetchTokenTotals (TOKEN_TOTALS_SQL)
     "count(*) AS sessions\nFROM session_token_usage": [
         { prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 },

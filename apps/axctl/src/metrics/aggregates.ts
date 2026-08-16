@@ -19,18 +19,14 @@
  * `error_recovery_efficacy`) add a new partition-set fetcher + reuse
  * `aggregateRows`/`computeComparison` - do NOT fork the math.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { SkillName } from "@ax/lib/brands";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
-import { recordLiteral } from "@ax/lib/ids";
 import { skillRecordLookupKeys } from "@ax/lib/skill-id";
-import { dateField } from "@ax/lib/shared/row-fields";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
-import { cleanSessionId, isoMs, metricPct, numOrNull, numOrZero, strOrNull } from "./util.ts";
+import { metricPct } from "./util.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -326,10 +322,20 @@ export const formatSkillEfficacy = (eff: SkillEfficacy): string => {
 // Fetchers (Effect; each one bounded scan or indexed lookup - see header)
 // ---------------------------------------------------------------------------
 
-/** Datetime values come back as the SDK's Datetime object (`toJSON`), a JS
- *  Date, or an ISO string depending on the client path - `dateField` handles
- *  all three; epoch ms for week bucketing. */
-const tsMs = (row: Record<string, unknown>, key: string): number | null => isoMs(dateField(row, key));
+const nnum = Schema.NullOr(NumberFromBigIntColumn);
+
+const AggregateMetricsRow = Schema.Struct({
+    session: Schema.String,
+    source: Schema.NullOr(Schema.String),
+    project: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    durability_ratio: Schema.NullOr(Schema.Number),
+    produced_commits: nnum,
+    reverted_commits: nnum,
+    lines_added: nnum,
+    lines_removed: nnum,
+});
 
 /**
  * When `--since`/`--project` narrow the metrics scan to at most this many
@@ -350,28 +356,40 @@ const BOUNDED_JOIN_MAX_SESSIONS = 1000;
  */
 export const fetchAggregateRows = (
     input: { readonly since: Date | null; readonly project: string | null },
-): Effect.Effect<AggregateSessionRow[], DbError | CacheReadError, SurrealClient | CacheRead> =>
+): Effect.Effect<AggregateSessionRow[], CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const read = yield* CacheRead;
+        const params: Array<Date | string> = [];
         const clauses: string[] = [];
-        if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
-        if (input.project) clauses.push(`(session.project = ${surrealString(input.project)} OR session.cwd = ${surrealString(input.project)})`);
-        const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-        const metrics = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT
-  type::string(session) AS session,
-  session.source AS source,
-  session.project AS project,
-  session.cwd AS cwd,
-  session.started_at AS started_at,
-  durability_ratio, produced_commits, reverted_commits, lines_added, lines_removed
-FROM session_metrics
-${where};`))?.[0] ?? [];
+        if (input.since) {
+            clauses.push("s.started_at >= ?");
+            params.push(input.since);
+        }
+        if (input.project) {
+            clauses.push("(s.project = ? OR s.cwd = ?)");
+            params.push(input.project, input.project);
+        }
+        const where = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
+        const metrics = yield* read.rows(
+            AggregateMetricsRow,
+            `SELECT
+  sm.session AS session,
+  s.source AS source,
+  s.project AS project,
+  s.cwd AS cwd,
+  s.started_at AS started_at,
+  sm.durability_ratio AS durability_ratio,
+  sm.produced_commits AS produced_commits,
+  sm.reverted_commits AS reverted_commits,
+  sm.lines_added AS lines_added,
+  sm.lines_removed AS lines_removed
+FROM session_metrics sm
+LEFT JOIN session s ON s.id = sm.session
+WHERE 1 = 1 ${where};`,
+            params,
+        );
 
-        const sessionIds = [...new Set(
-            metrics.map((r) => String(r.session ?? "")).filter((s) => s.length > 0),
-        )];
+        const sessionIds = [...new Set(metrics.map((r) => r.session).filter((s) => s.length > 0))];
         const bound = sessionIds.length <= BOUNDED_JOIN_MAX_SESSIONS ? sessionIds : null;
         const [health, usage] = yield* Effect.all([
             fetchSessionHealthMap(read, bound),
@@ -380,20 +398,20 @@ ${where};`))?.[0] ?? [];
 
         return metrics
             .map((r): AggregateSessionRow | null => {
-                const session = cleanSessionId(String(r.session ?? ""));
+                const session = r.session;
                 if (session.length === 0) return null;
                 const u = usage.get(session);
                 return {
                     session,
-                    source: strOrNull(r.source),
-                    repo: strOrNull(r.project) ?? strOrNull(r.cwd),
+                    source: r.source,
+                    repo: r.project ?? r.cwd,
                     model: u?.model ?? null,
-                    startedAtMs: tsMs(r, "started_at"),
-                    durabilityRatio: numOrNull(r.durability_ratio),
-                    producedCommits: numOrZero(r.produced_commits),
-                    revertedCommits: numOrZero(r.reverted_commits),
-                    linesAdded: numOrZero(r.lines_added),
-                    linesRemoved: numOrZero(r.lines_removed),
+                    startedAtMs: r.started_at === null ? null : r.started_at.getTime(),
+                    durabilityRatio: r.durability_ratio,
+                    producedCommits: r.produced_commits ?? 0,
+                    revertedCommits: r.reverted_commits ?? 0,
+                    linesAdded: r.lines_added ?? 0,
+                    linesRemoved: r.lines_removed ?? 0,
                     userCorrections: health.get(session)?.userCorrections ?? null,
                     estimatedCostUsd: u?.estimatedCostUsd ?? null,
                     costEstimated: u?.estimated ?? false,
@@ -409,23 +427,24 @@ ${where};`))?.[0] ?? [];
  * (no `in.session` deref; rows predating the denormalisation backfill are
  * repaired by the schema's UPDATE, NONE rows are skipped here).
  */
+const SkillSessionRow = Schema.Struct({ session: Schema.NullOr(Schema.String) });
+
 export const fetchSkillSessionSet = (
     skillName: SkillName,
-): Effect.Effect<Set<string>, DbError, SurrealClient> =>
+): Effect.Effect<Set<string>, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const refs = skillRecordLookupKeys(skillName)
-            .filter((k) => k.length > 0 && !/[`\n\u0000]/.test(k))
-            .map((k) => recordLiteral("skill", k))
-            .join(", ");
-        if (refs.length === 0) return new Set();
-        const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(session) AS session FROM invoked WHERE out IN [${refs}] AND session != NONE;`,
-        ))?.[0] ?? [];
+        const read = yield* CacheRead;
+        const keys = skillRecordLookupKeys(skillName).filter((k) => k.length > 0);
+        if (keys.length === 0) return new Set();
+        const placeholders = keys.map(() => "?").join(", ");
+        const rows = yield* read.rows(
+            SkillSessionRow,
+            `SELECT session FROM invoked WHERE out_id IN (${placeholders}) AND session IS NOT NULL;`,
+            keys,
+        );
         const out = new Set<string>();
         for (const r of rows) {
-            const key = cleanSessionId(String(r.session ?? ""));
-            if (key.length > 0) out.add(key);
+            if (r.session && r.session.length > 0) out.add(r.session);
         }
         return out;
     });
