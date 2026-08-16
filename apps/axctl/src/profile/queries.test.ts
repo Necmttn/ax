@@ -287,27 +287,26 @@ describe("fetchTopTools", () => {
 
 describe("fetchWrappedCounts", () => {
     test("aggregates tool_calls, failures, distinct_tools and pattern-matches in JS", async () => {
-        const db = makeMockDb([
-            // 1: toolAgg rows
-            [[
-                { tool: "bun test", count: 900, failures: 10 },
-                { tool: "Read", count: 2000, failures: 5 },
-                { tool: "Bash", count: 3000, failures: 50 },
-            ]],
-            // 2: turnCount
-            [[{ count: 41200 }]],
-            // 3: distinctSkills
-            [[{ count: 56 }]],
-            // 4: reposCount
-            [[{ count: 12 }]],
-            // 5: verifyAgg (full command_text labels)
-            [[
-                { cmd: "bun test", count: 900 },
-                { cmd: "Read", count: 2000 },
-                { cmd: "Bash", count: 3000 },
-            ]],
-        ]);
-        const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
+        const cache = makeTestCacheRead({
+            // Positional, mirroring fetchWrappedCounts' fixed query order:
+            // toolAgg, turnCount, distinctSkills, reposCount, verifyAgg.
+            responses: [
+                [
+                    { tool: "bun test", count: 900, failures: 10 },
+                    { tool: "Read", count: 2000, failures: 5 },
+                    { tool: "Bash", count: 3000, failures: 50 },
+                ],
+                [{ count: 41200 }],
+                [{ count: 56 }],
+                [{ count: 12 }],
+                [
+                    { cmd: "bun test", count: 900 },
+                    { cmd: "Read", count: 2000 },
+                    { cmd: "Bash", count: 3000 },
+                ],
+            ],
+        });
+        const r = await runCache(fetchWrappedCounts({ windowDays: 30 }), cache.layer);
         expect(r.turns).toBe(41200);
         expect(r.tool_calls).toBe(5900); // 900+2000+3000
         expect(r.tool_failures).toBe(65); // 10+5+50
@@ -319,18 +318,18 @@ describe("fetchWrappedCounts", () => {
         // "Read" -> context via tool-taxonomy isContextTool (verifyAgg)
         expect(r.context_calls).toBe(2000);
         // SQL contains window clause
-        expect(db.captured[0]).toContain("time::now() - 30d");
-        expect(db.captured[0]).toContain("FROM tool_call");
-        expect(db.captured[1]).toContain("FROM turn");
-        expect(db.captured[2]).toContain("FROM invoked");
-        expect(db.captured[3]).toContain("FROM session");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
+        expect(cache.captured[0]).toContain("FROM tool_call");
+        expect(cache.captured[1]).toContain("FROM turn");
+        expect(cache.captured[2]).toContain("FROM invoked");
+        expect(cache.captured[3]).toContain("FROM session");
         // 5th query classifies the full command text
-        expect(db.captured[4]).toContain("command_text");
+        expect(cache.captured[4]).toContain("command_text");
     });
 
     test("empty tables -> all zeros", async () => {
-        const db = makeMockDb([[[]], [[]], [[]], [[]], [[]]]);
-        const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
+        const cache = makeTestCacheRead({ responses: [[], [], [], [], []] });
+        const r = await runCache(fetchWrappedCounts({ windowDays: 30 }), cache.layer);
         expect(r.turns).toBe(0);
         expect(r.tool_calls).toBe(0);
         expect(r.tool_failures).toBe(0);
@@ -342,23 +341,24 @@ describe("fetchWrappedCounts", () => {
     });
 
     test("verification + context patterns are exclusive of non-matching tools", async () => {
-        const db = makeMockDb([
-            [[
-                { tool: "lint", count: 500, failures: 0 },   // verification
-                { tool: "grep", count: 300, failures: 2 },   // context
-                { tool: "Agent", count: 200, failures: 0 },  // neither
-            ]],
-            [[{ count: 1000 }]],
-            [[{ count: 10 }]],
-            [[{ count: 5 }]],
-            // verifyAgg (full command_text labels)
-            [[
-                { cmd: "lint", count: 500 },   // verification
-                { cmd: "grep", count: 300 },   // context
-                { cmd: "Agent", count: 200 },  // neither
-            ]],
-        ]);
-        const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
+        const cache = makeTestCacheRead({
+            responses: [
+                [
+                    { tool: "lint", count: 500, failures: 0 }, // verification
+                    { tool: "grep", count: 300, failures: 2 }, // context
+                    { tool: "Agent", count: 200, failures: 0 }, // neither
+                ],
+                [{ count: 1000 }],
+                [{ count: 10 }],
+                [{ count: 5 }],
+                [
+                    { cmd: "lint", count: 500 }, // verification
+                    { cmd: "grep", count: 300 }, // context
+                    { cmd: "Agent", count: 200 }, // neither
+                ],
+            ],
+        });
+        const r = await runCache(fetchWrappedCounts({ windowDays: 30 }), cache.layer);
         expect(r.verification_calls).toBe(500);
         expect(r.context_calls).toBe(300);
         expect(r.tool_calls).toBe(1000);

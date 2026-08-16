@@ -539,17 +539,19 @@ export interface WrappedCounts {
 // via tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
 
 // Per-tool rows (name, count, failures) - same shape as WRAPPED_TOOLS_SQL but windowed.
-const TOOL_AGG_SQL = (d: number) => `
+const TOOL_AGG_SQL = `
 SELECT
-    (command_norm ?? name) AS tool,
-    count() AS count,
-    math::sum(IF has_error = true THEN 1 ELSE 0 END) AS failures
+    COALESCE(command_norm, name) AS tool,
+    count(*) AS count,
+    SUM(CASE WHEN has_error THEN 1 ELSE 0 END) AS failures
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_norm ?? name) IS NOT NONE
-GROUP BY tool
-ORDER BY count DESC
-LIMIT 200;`;
+WHERE TRUE`;
+
+const ToolAggRow = Schema.Struct({
+    tool: Schema.String,
+    count: NumberFromBigIntColumn,
+    failures: NumberFromBigIntColumn,
+});
 
 // Verification / context counts classify on the FULL command (`command_text`),
 // not the collapsed `command_norm` - `normalizeCommand` strips the subcommand
@@ -557,79 +559,92 @@ LIMIT 200;`;
 // `npm run`, `bundle exec rspec` -> `bundle`), so the normalized label alone
 // can't see the verifier. Grouped to keep cardinality sane; the command text
 // is classified in-process and never returned (counts-only privacy invariant).
-const VERIFY_AGG_SQL = (d: number) => `
-SELECT
-    (command_text ?? command_norm ?? name) AS cmd,
-    count() AS count
+const VERIFY_AGG_SQL = `
+SELECT COALESCE(command_text, command_norm, name) AS cmd, count(*) AS count
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_text ?? command_norm ?? name) IS NOT NONE
-GROUP BY cmd;`;
+WHERE TRUE`;
+
+const VerifyAggRow = Schema.Struct({ cmd: Schema.String, count: NumberFromBigIntColumn });
 
 // Total turn count in window.
-const TURN_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const TURN_COUNT_SQL = `
+SELECT count(*) AS count
 FROM turn
-WHERE ts > time::now() - ${win(d)}
-GROUP ALL;`;
+WHERE TRUE`;
 
-// Distinct invoked skill names in window.
-const DISTINCT_SKILLS_SQL = (d: number) => `
-SELECT count() AS count
+// Distinct invoked skill names in window. DuckDB is bare-ref, so the old
+// `out.name` deref through `invoked` becomes an explicit JOIN against `skill`.
+const DISTINCT_SKILLS_SQL = `
+SELECT count(*) AS count
 FROM (
-    SELECT out.name AS skill
-    FROM invoked
-    WHERE ts > time::now() - ${win(d)} AND out.name IS NOT NONE
-    GROUP BY skill
-) GROUP ALL;`;
+    SELECT sk.name AS skill
+    FROM invoked i
+    JOIN skill sk ON sk.id = i.out_id
+    WHERE TRUE`;
 
 // Count of distinct non-null repositories in window (count only, never names).
-const REPOS_COUNT_SQL = (d: number) => `
-SELECT count() AS count
+const REPOS_COUNT_SQL = `
+SELECT count(*) AS count
 FROM (
     SELECT repository
     FROM session
-    WHERE started_at > time::now() - ${win(d)} AND repository IS NOT NONE
-    GROUP BY repository
-) GROUP ALL;`;
+    WHERE TRUE`;
 
 export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const toolRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TOOL_AGG_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const turnRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TURN_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const skillRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(DISTINCT_SKILLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const repoRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(REPOS_COUNT_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        const verifyRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(VERIFY_AGG_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const toolWithin = withinDaysClause("ts", opts.windowDays);
+        const verifyWithin = withinDaysClause("ts", opts.windowDays);
+        const turnWithin = withinDaysClause("ts", opts.windowDays);
+        const skillWithin = withinDaysClause("i.ts", opts.windowDays);
+        const repoWithin = withinDaysClause("started_at", opts.windowDays);
 
-        const tool_calls = toolRows.reduce((s, r) => s + Number(r.count ?? 0), 0);
-        const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
+        const toolRows = yield* read.rows(
+            ToolAggRow,
+            `${TOOL_AGG_SQL} ${toolWithin.sql} AND COALESCE(command_norm, name) IS NOT NULL `
+                + "GROUP BY tool ORDER BY count DESC LIMIT 200",
+            toolWithin.params,
+        );
+        const turnRows = yield* read.rows(
+            CountRow,
+            `${TURN_COUNT_SQL} ${turnWithin.sql}`,
+            turnWithin.params,
+        );
+        const skillRows = yield* read.rows(
+            CountRow,
+            `${DISTINCT_SKILLS_SQL} ${skillWithin.sql} AND sk.name IS NOT NULL GROUP BY skill) t`,
+            skillWithin.params,
+        );
+        const repoRows = yield* read.rows(
+            CountRow,
+            `${REPOS_COUNT_SQL} ${repoWithin.sql} AND repository IS NOT NULL GROUP BY repository) t`,
+            repoWithin.params,
+        );
+        const verifyRows = yield* read.rows(
+            VerifyAggRow,
+            `${VERIFY_AGG_SQL} ${verifyWithin.sql} AND COALESCE(command_text, command_norm, name) IS NOT NULL `
+                + "GROUP BY cmd",
+            verifyWithin.params,
+        );
+
+        const tool_calls = toolRows.reduce((s, r) => s + r.count, 0);
+        const tool_failures = toolRows.reduce((s, r) => s + r.failures, 0);
         const distinct_tools = toolRows.length;
 
         // Verification/context classify on the full command text (verifyRows),
         // not the collapsed command_norm tool label (toolRows).
         const cmdCount = (pred: (label: string) => boolean): number =>
             verifyRows
-                .filter((r) => pred(String(r.cmd ?? "")))
-                .reduce((s, r) => s + Number(r.count ?? 0), 0);
+                .filter((r) => pred(r.cmd))
+                .reduce((s, r) => s + r.count, 0);
 
         return {
-            turns: Number(turnRows[0]?.count ?? 0),
+            turns: turnRows[0]?.count ?? 0,
             tool_calls,
             tool_failures,
             distinct_tools,
-            distinct_skills: Number(skillRows[0]?.count ?? 0),
-            repos_count: Number(repoRows[0]?.count ?? 0),
+            distinct_skills: skillRows[0]?.count ?? 0,
+            repos_count: repoRows[0]?.count ?? 0,
             verification_calls: cmdCount(isVerificationTool),
             context_calls: cmdCount(isContextTool),
         } satisfies WrappedCounts;
