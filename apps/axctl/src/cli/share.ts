@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
@@ -269,7 +270,12 @@ const liveShareDeps: ShareCommandDeps = {
     locateTranscript: (sessionId) =>
         Effect.runPromise(
             locateShareTranscript(sessionId).pipe(
-                Effect.provide(AppLayer),
+                // The `raw_file` hint now comes off the published snapshot, so
+                // the cache layer rides alongside AppLayer here. (`ax share`
+                // self-providing AppLayer at all is the wave-3 finding in the
+                // partition doc's §2d - it is declared `"none"` in the manifest;
+                // that removal belongs to the runtime flip, not here.)
+                Effect.provide(Layer.merge(AppLayer, CacheReadLive)),
                 Effect.scoped,
             ),
         ),

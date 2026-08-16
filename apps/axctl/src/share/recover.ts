@@ -17,6 +17,7 @@
 import { Effect, FileSystem, Option, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
@@ -54,7 +55,7 @@ export const locateShareTranscript = (
 ): Effect.Effect<
     ShareTranscriptHit | null,
     never,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheRead | FileSystem.FileSystem | Path.Path
 > =>
     locateTranscript(toBareSessionId(sessionId)).pipe(
         Effect.map((found): ShareTranscriptHit | null => ({
