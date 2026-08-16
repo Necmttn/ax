@@ -1,6 +1,7 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { prettyPrint } from "@ax/lib/json";
 import { SurrealClient } from "@ax/lib/db";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     applyExecutionSurrealWritePlanReport,
