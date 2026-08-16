@@ -5,6 +5,7 @@ import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import { duckdbAssetPathOption } from "../duckdb-embed-wiring.ts";
 import type { FileSystem } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
@@ -332,6 +333,7 @@ export const runIngest = (
                 livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
                 lockPath: posixPath.join(cfg.paths.dataDir, "ingest.lock"),
                 schemaSql: DUCKDB_SCHEMA_SQL,
+                ...duckdbAssetPathOption(),
             },
             (write) => Effect.gen(function* () {
         yield* reapStaleIngestRuns(write).pipe(Effect.ignore);

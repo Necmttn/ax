@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeManifestFromDylib, writeStub } from "./gen-duckdb-embed.ts";
+import {
+    duckdbDistDir,
+    writeManifestFromDylib,
+    writeManifestReusingBuild,
+    writeStub,
+} from "./gen-duckdb-embed.ts";
 
 const repoRoot = join(import.meta.dir, "..");
 
@@ -54,5 +59,40 @@ describe("DuckDB embed code generation", () => {
         expect(manifest).toContain(
             "export const DUCKDB_DYLIB: string | undefined = duckdbDylib;",
         );
+    });
+
+    describe("writeManifestReusingBuild", () => {
+        const originalDistDir = process.env.DUCKDB_DIST_DIR;
+
+        afterEach(() => {
+            if (originalDistDir === undefined) delete process.env.DUCKDB_DIST_DIR;
+            else process.env.DUCKDB_DIST_DIR = originalDistDir;
+        });
+
+        test("duckdbDistDir honours DUCKDB_DIST_DIR", () => {
+            process.env.DUCKDB_DIST_DIR = "/tmp/some-duckdb-dist";
+            expect(duckdbDistDir()).toBe("/tmp/some-duckdb-dist");
+        });
+
+        test("reuses an already-provisioned library instead of shelling out to build-duckdb.sh", () => {
+            workDir = mkdtempSync(join(tmpdir(), "ax-duckdb-embed-"));
+            const distDir = join(workDir, "dist-duckdb");
+            const target = join(workDir, "duckdb-embed.gen.ts");
+            const libraryName = process.platform === "darwin" ? "libduckdb.dylib" : "libduckdb.so";
+            mkdirSync(distDir, { recursive: true });
+            writeFileSync(join(distDir, libraryName), "fixture");
+
+            process.env.DUCKDB_DIST_DIR = distDir;
+            // If this fell through to writeManifest() it would spawn
+            // scripts/build-duckdb.sh (a 20-60 minute real build) and this
+            // test would hang/timeout instead of finishing instantly.
+            writeManifestReusingBuild(target);
+
+            const manifest = readFileSync(target, "utf8");
+            expect(manifest).toContain('with { type: "file" }');
+            expect(manifest).toContain(
+                "export const DUCKDB_DYLIB: string | undefined = duckdbDylib;",
+            );
+        });
     });
 });

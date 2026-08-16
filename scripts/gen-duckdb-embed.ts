@@ -8,7 +8,10 @@
  * Both flags are required explicitly - there is no default action - so a bare
  * invocation can never silently overwrite the committed stub.
  *
- * A later cutover will connect these functions to scripts/build-axctl.ts.
+ * scripts/build-axctl.ts wraps a binary build in writeManifest() -> compile ->
+ * writeStub(), mirroring gen-studio-embed.ts / gen-hooks-embed.ts exactly, so
+ * the committed copy of apps/axctl/src/duckdb-embed.gen.ts stays the empty
+ * stub.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
@@ -18,8 +21,20 @@ import { dirname, join, relative } from "node:path";
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GEN_FILE = join(REPO_ROOT, "apps/axctl/src/duckdb-embed.gen.ts");
 
-const STUB = `// AUTO-GENERATED stub - replaced during a custom DuckDB embed build, then
-// restored so source builds do not require a platform-specific library.
+const STUB = `// AUTO-GENERATED stub - replaced during a custom DuckDB embed build
+// (scripts/build-axctl.ts -> scripts/gen-duckdb-embed.ts writeManifest()),
+// then restored to this stub afterwards so source builds and \`bun test\` do
+// not require a platform-specific library.
+//
+// Wiring (#791, wave 3 c-binary-embed): \`packages/lib\` cannot import from
+// \`apps/axctl\` (this file), so every apps-side consumer that reads the
+// published DuckDB snapshot threads this value in as \`assetPath\` instead of
+// reaching for a bare \`DuckDbLive\` - see \`apps/axctl/src/duckdb-embed-wiring.ts\`
+// (the shared \`CacheReadLive\` wired via \`CacheReadLayer({ assetPath:
+// DUCKDB_DYLIB })\`, and \`duckdbAssetPathOption()\` for the
+// \`withCacheWrite\`/\`withConfigWrite\` call sites in
+// \`apps/axctl/src/ingest/run.ts\`, \`apps/axctl/src/cli/commands/ingest.ts\`, and
+// \`apps/axctl/src/config-core/reconcile.ts\`).
 export const DUCKDB_DYLIB: string | undefined = undefined;
 `;
 
@@ -50,6 +65,20 @@ export function writeManifestFromDylib(dylibPath: string, targetFile: string = G
     writeFileSync(targetFile, manifest);
 }
 
+/** Platform-specific library filename, mirroring build-duckdb.sh's `case
+ *  $(uname -s)` branch. */
+const libraryName = (): string => (process.platform === "darwin" ? "libduckdb.dylib" : "libduckdb.so");
+
+/**
+ * The dist dir `scripts/build-duckdb.sh` writes to and reads
+ * `DUCKDB_DIST_DIR` from - kept in sync with that script's own
+ * `dist_dir=${DUCKDB_DIST_DIR:-"$repo_root/dist/duckdb"}` default so both
+ * sides agree on where a provisioned build lives.
+ */
+export function duckdbDistDir(): string {
+    return process.env.DUCKDB_DIST_DIR?.trim() || join(REPO_ROOT, "dist/duckdb");
+}
+
 /** Build the custom DuckDB library, then emit its Bun file import. */
 export function writeManifest(targetFile: string = GEN_FILE): void {
     const build = spawnSync(join(REPO_ROOT, "scripts/build-duckdb.sh"), [], {
@@ -58,10 +87,30 @@ export function writeManifest(targetFile: string = GEN_FILE): void {
     });
     if (build.status !== 0) throw new Error("custom DuckDB build failed");
 
-    const libraryName = process.platform === "darwin" ? "libduckdb.dylib" : "libduckdb.so";
-    const dylibPath = join(REPO_ROOT, "dist/duckdb", libraryName);
+    const dylibPath = join(duckdbDistDir(), libraryName());
     writeManifestFromDylib(dylibPath, targetFile);
     console.log(`[gen-duckdb-embed] embedded ${dylibPath} → ${targetFile}`);
+}
+
+/**
+ * `writeManifest()`, but skips the (20-60 minute) `build-duckdb.sh` rebuild
+ * when a matching library already sits at `duckdbDistDir()` - the case for
+ * every `bun run build` invoked after CI's separate `duckdb` job has already
+ * built and downloaded the artifact (or after a developer has run
+ * `scripts/build-duckdb.sh` once locally). `build-duckdb.sh` itself always
+ * rebuilds unconditionally (a fresh clone + `make`, no dist-dir short
+ * circuit), so `scripts/build-axctl.ts` calls THIS, not `writeManifest()`
+ * directly, to avoid silently doubling every CI run's wall-clock time by
+ * rebuilding an artifact that is already sitting on disk.
+ */
+export function writeManifestReusingBuild(targetFile: string = GEN_FILE): void {
+    const dylibPath = join(duckdbDistDir(), libraryName());
+    if (existsSync(dylibPath)) {
+        writeManifestFromDylib(dylibPath, targetFile);
+        console.log(`[gen-duckdb-embed] reused existing build at ${dylibPath} → ${targetFile}`);
+        return;
+    }
+    writeManifest(targetFile);
 }
 
 function printUsage(): void {

@@ -1,6 +1,6 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { Effect, Layer } from "effect";
-import { CacheReadLive } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import {
     isContractRequest,
     makeContractWebHandler,
