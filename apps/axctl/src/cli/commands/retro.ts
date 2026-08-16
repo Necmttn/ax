@@ -71,7 +71,7 @@ const runInlineRetroDerive = () =>
 
 const LatestSessionRow = Schema.Struct({ id: Schema.String });
 
-const cmdRetroEmit = (input: {
+export const cmdRetroEmit = (input: {
     readonly session: string | undefined;
     readonly fromFile: string | undefined;
     readonly source: string | undefined;
@@ -199,7 +199,7 @@ const cmdRetroEmit = (input: {
         }
     });
 
-const cmdRetroList = (input: {
+export const cmdRetroList = (input: {
     readonly limit: number;
     readonly since: string | undefined;
     readonly json: boolean;
@@ -357,7 +357,7 @@ const queryPendingSessions = (opts: PendingQueryOpts) =>
         return out.slice(0, opts.limit);
     });
 
-const cmdRetroPending = (input: {
+export const cmdRetroPending = (input: {
     readonly since: number;
     readonly idleMin: number;
     readonly limit: number;
@@ -496,7 +496,7 @@ const RetroBriefSessionRow = Schema.Struct({
     turns: NumberFromBigIntColumn,
 });
 
-const cmdRetroBrief = (input: {
+export const cmdRetroBrief = (input: {
     readonly session: string;
     readonly outDir: string | undefined;
     readonly json: boolean;
