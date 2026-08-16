@@ -68,7 +68,7 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
-import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
+import { BackgroundIngestSpawnerLive, withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -227,15 +227,20 @@ type CliProgram = Effect.Effect<void, unknown, never>;
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
  *
- * Every such command also gets the stale-graph warning (#697): one indexed
- * query, stderr only, before the command body. This is deliberately a
- * pre-flight rather than an `ensuring` finalizer because legacy handlers that
- * call `process.exit` bypass Effect finalizers; the warning must still cover
- * those stale-graph symptom paths.
+ * Every such command also gets the stale-graph warning (#697) and the
+ * freshness drive it now feeds (wave-3 daemon subtraction: with no
+ * ax-watch LaunchAgent, a stale graph forks its own background `ax ingest`,
+ * debounced - see `queries/ingest-staleness.ts`): one indexed query, stderr
+ * only, before the command body. This is deliberately a pre-flight rather
+ * than an `ensuring` finalizer because legacy handlers that call
+ * `process.exit` bypass Effect finalizers; both must still cover those
+ * stale-graph symptom paths.
  */
 const withDb = (args: ReadonlyArray<string>): CliProgram =>
     withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive)),
+        Effect.provide(
+            Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive, BackgroundIngestSpawnerLive),
+        ),
         Effect.scoped,
     );
 
