@@ -9,12 +9,11 @@
  * would fight the plugin manager or has no real file at all.
  */
 import { spawn } from "node:child_process";
-import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, FileSystem, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { cacheFirst } from "@ax/lib/duckdb/query";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { surrealLiteral } from "@ax/lib/json";
 import type {
     SkillSourcePayload,
     SkillSourceState,
@@ -106,22 +105,28 @@ interface SkillRowMeta {
     readonly dir_path: string | null;
 }
 
+const SkillMetaDbRow = Schema.Struct({
+    scope: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+});
+
 const fetchSkillMeta = (
     name: string,
-): Effect.Effect<SkillRowMeta | null, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT scope, dir_path FROM skill WHERE name = ${surrealLiteral(name)} LIMIT 1;`,
-        );
-        const row = result?.[0]?.[0];
-        if (!row) return null;
-        const dir = row.dir_path;
-        return {
-            scope: typeof row.scope === "string" && row.scope.length > 0 ? row.scope : "unknown",
-            dir_path: typeof dir === "string" && dir.length > 0 ? dir : null,
-        };
-    });
+): Effect.Effect<SkillRowMeta | null, never, CacheRead> =>
+    cacheFirst(
+        SkillMetaDbRow,
+        { sql: `SELECT scope, dir_path FROM skill WHERE name = ? LIMIT 1`, params: [name] },
+        "skill-source.meta",
+    ).pipe(
+        Effect.map((row) =>
+            row
+                ? {
+                      scope: row.scope && row.scope.length > 0 ? row.scope : "unknown",
+                      dir_path: row.dir_path && row.dir_path.length > 0 ? row.dir_path : null,
+                  }
+                : null,
+        ),
+    );
 
 const isSyntheticDir = (dirPath: string | null): boolean =>
     dirPath === null || dirPath === "(synthetic)";
@@ -130,7 +135,7 @@ const isSyntheticDir = (dirPath: string | null): boolean =>
  *  tools, claude builtins) come back `missing` / non-editable. */
 export const readSkillSource = (
     name: string,
-): Effect.Effect<SkillSourcePayload, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<SkillSourcePayload, never, CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const meta = yield* fetchSkillMeta(name);
         const scope = meta?.scope ?? "unknown";
@@ -202,7 +207,7 @@ export const setSkillDiskState = (
 export const applySkillDecisionToDisk = (
     name: string,
     decision: TriageDecision | null,
-): Effect.Effect<SkillSourceState | null, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<SkillSourceState | null, never, CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const meta = yield* fetchSkillMeta(name);
         if (!meta || isSyntheticDir(meta.dir_path) || !isEditableScope(meta.scope)) {
@@ -252,7 +257,7 @@ const launchViewer = async (
 export const openSkillTarget = (
     name: string,
     target: "finder" | "editor",
-): Effect.Effect<{ launched: string }, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<{ launched: string }, never, CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const source = yield* readSkillSource(name);
         const path = source.file_path ?? source.dir_path;
