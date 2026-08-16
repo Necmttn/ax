@@ -625,49 +625,34 @@ FROM skill_candidate`),
             deriveGuidanceProposalRows(harnessGrounding.learningCandidates);
         const guidanceWrites = buildGuidanceProposalWrites(guidanceRows, existingSigs);
 
+        // WHY THERE IS NO `Effect.orElseSucceed` ANYWHERE BELOW. Every read in
+        // this stage goes through the lock-held cache writer, whose only error
+        // channel is a STORE error - a missing table, a binder error, a decode
+        // mismatch. Absent DATA is not an error here: an empty table returns an
+        // empty row list. So a fallback could only ever convert a real defect
+        // into "no proposals", which is exactly how this stage sat writing
+        // nothing into the wrong store for a whole chunk without anyone noticing.
+        // Any failure below fails the stage, loudly.
+
         // Routing proposal (form='hook'): derive from dispatch candidate analytics.
-        // Query failure is tolerated - if dispatch data isn't available the stage
-        // still writes skill + guidance proposals successfully.
         const sinceDays = opts.sinceDays ?? 14;
-        const dispatchResult = yield* Effect.orElseSucceed(
-            fetchDispatchCandidates(write, { sinceDays }).pipe(
-                Effect.map((r) => ({
-                    candidateCount: r.candidates.length,
-                    totalEstSavingsUsd: r.total_est_savings_usd,
-                    topClasses: r.top_classes,
-                } as {
-                    candidateCount: number;
-                    totalEstSavingsUsd: number;
-                    topClasses: ReadonlyArray<{ classId: string; savings_usd: number }>;
-                } | null)),
-            ),
-            () => null as {
-                candidateCount: number;
-                totalEstSavingsUsd: number;
-                topClasses: ReadonlyArray<{ classId: string; savings_usd: number }>;
-            } | null,
-        );
-        const routingRow = dispatchResult
-            ? deriveRoutingProposalRow({
-                candidateCount: dispatchResult.candidateCount,
-                totalEstSavingsUsd: dispatchResult.totalEstSavingsUsd,
-                sinceDays,
-                topClasses: dispatchResult.topClasses,
-            })
-            : null;
+        const dispatchResult = yield* fetchDispatchCandidates(write, { sinceDays });
+        const routingRow = deriveRoutingProposalRow({
+            candidateCount: dispatchResult.candidates.length,
+            totalEstSavingsUsd: dispatchResult.total_est_savings_usd,
+            sinceDays,
+            topClasses: dispatchResult.top_classes,
+        });
         const routingWrites = routingRow
             ? buildRoutingProposalWrites(routingRow, existingSigs)
             : [];
 
         // Image context proposal (form='subagent'): derive from image-read analytics.
-        // Query failure is tolerated - same pattern as the routing proposal.
-        const imageContextResult = yield* Effect.orElseSucceed(
-            fetchImageContext(write, { sinceDays, limit: 0 }),
-            () => null as ImageContextResult | null,
-        );
-        const imageContextRow = imageContextResult
-            ? deriveImageContextProposalRow(imageContextResult, sinceDays)
-            : null;
+        const imageContextResult: ImageContextResult = yield* fetchImageContext(write, {
+            sinceDays,
+            limit: 0,
+        });
+        const imageContextRow = deriveImageContextProposalRow(imageContextResult, sinceDays);
         const imageContextWrites = imageContextRow
             ? buildImageContextProposalWrites(imageContextRow, existingSigs)
             : [];
@@ -675,37 +660,33 @@ FROM skill_candidate`),
         // Directive proposals (form='guidance'): mine proactive standing
         // instructions from user turns. Scoped to a fixed 90d window (not
         // ctx.sinceDays) so cross-session recurrence is captured consistently
-        // whether this is a --since=1 watcher run or a full ingest. Tolerant:
-        // a query failure leaves the other proposal forms unaffected.
+        // whether this is a --since=1 watcher run or a full ingest.
         // Exclude claude-subagent-source turns: a subagent's first user turn is
         // the dispatch PROMPT ("You are implementing ONE task..."), not a user
         // directive - the other dominant false-positive class from the smoke.
-        const directiveTurns = yield* Effect.orElseSucceed(
-            write.rows(Schema.Struct({ id: Schema.String, session: Schema.String, text_excerpt: Schema.String, ts: Schema.String }), `
+        // The CAST is load-bearing: `CURRENT_TIMESTAMP` is TIMESTAMPTZ, and
+        // TIMESTAMPTZ - INTERVAL needs the ICU extension, which the shipped
+        // static build does not carry.
+        const directiveTurns: ReadonlyArray<DirectiveTurnRow> = yield* write.rows(
+            Schema.Struct({ id: Schema.String, session: Schema.String, text_excerpt: Schema.String, ts: Schema.String }), `
 SELECT t.id, t.session, t.text_excerpt, CAST(t.ts AS VARCHAR) AS ts
 FROM turn t JOIN session s ON s.id = t.session
 WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
-  AND t.ts > CURRENT_TIMESTAMP - INTERVAL '90 days' AND s.source != 'claude-subagent'`),
-            () => [] as DirectiveTurnRow[],
-        );
+  AND t.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '90 days' AND s.source != 'claude-subagent'`);
         const directiveCandidates = deriveDirectiveCandidates(directiveTurns);
 
         // A5: Load the per-user directive lift table (built by the directive-ngrams
         // stage) and score candidates so the limit in deriveDirectiveProposalRows
-        // keeps the highest-signal ones. Tolerant: if the table is empty or the
-        // query fails, scoring falls back to seed order (v1 ordering preserved).
-        const directiveLiftMap = yield* Effect.orElseSucceed(
-            write.rows(Schema.Struct({ ngram: Schema.String, lift: Schema.Number }),
-                "SELECT ngram, lift FROM directive_ngram WHERE lift > 0")
-                .pipe(Effect.map((rows) => {
-                    const map = new Map<string, number>();
-                    for (const r of rows) {
-                        map.set(r.ngram, r.lift);
-                    }
-                    return map as ReadonlyMap<string, number>;
-                })),
-            () => new Map<string, number>() as ReadonlyMap<string, number>,
+        // keeps the highest-signal ones. An EMPTY table is normal (the ngrams
+        // stage may not have run yet) and scoring falls back to seed order; a
+        // failed query is not, and stops the stage.
+        const liftRows = yield* write.rows(
+            Schema.Struct({ ngram: Schema.String, lift: Schema.Number }),
+            "SELECT ngram, lift FROM directive_ngram WHERE lift > 0",
         );
+        const liftMap = new Map<string, number>();
+        for (const row of liftRows) liftMap.set(row.ngram, row.lift);
+        const directiveLiftMap: ReadonlyMap<string, number> = liftMap;
         const scoredDirectiveCandidates = scoreDirectiveCandidates(directiveCandidates, directiveLiftMap);
 
         const { rows: directiveRows, skipped: directiveSkipped } =
@@ -714,11 +695,7 @@ WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
 
         // Workflow proposals (form='guidance', section='workflows'): derive recurring
         // skill-arc patterns into codification suggestions (milestone B, #588).
-        // Query failure is tolerated - other proposal forms are unaffected.
-        const workflowArcs = yield* Effect.orElseSucceed(
-            fetchWorkflowArcs(write),
-            () => [] as ArcCandidate[],
-        );
+        const workflowArcs: ReadonlyArray<ArcCandidate> = yield* fetchWorkflowArcs(write);
         const { rows: workflowRows, skipped: workflowSkipped } =
             deriveWorkflowProposalRows(workflowArcs);
         const workflowWrites = workflowRows.length > 0

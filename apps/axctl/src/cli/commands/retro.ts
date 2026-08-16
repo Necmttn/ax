@@ -7,7 +7,6 @@ import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { recordRef } from "@ax/lib/shared/surql";
 import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
-import { withConfigWrite } from "../../config-core/reconcile.ts";
 import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
@@ -40,17 +39,35 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * retro and then seeing an unchanged proposal queue reads as a broken loop, so
  * emit runs the derivation itself.
  *
- * It reads the installed-skill catalog from the cache (hence the lock-held
- * write scope) and reads + writes proposals in the sidecar. Best-effort: the
- * retro is already committed, and a derivation failure must not turn a
- * successful emit into a non-zero exit. Returns the number of proposals derived.
+ * It reads the installed-skill catalog from the PUBLISHED SNAPSHOT and reads +
+ * writes proposals in the sidecar - so it takes NO ingest lock. It used to take
+ * one (`withConfigWrite`), and that was wrong twice over: the lock's `onBusy` is
+ * an `Effect.die`, which `orElseSucceed` cannot recover, so a background watcher
+ * ingest holding the lock crashed `ax retro emit` AFTER the retro was already
+ * committed; and the write scope rebuilt every FTS index and republished the
+ * snapshot for what is, on this path, a single `SELECT name FROM skill`.
+ *
+ * Best-effort by intent, but never SILENT: the retro is already committed and a
+ * derivation failure must not turn a successful emit into a non-zero exit, so
+ * the failure is printed and the count returns 0.
  */
-const runInlineRetroDerive = () => withConfigWrite((write) => deriveRetroProposals(write)).pipe(
-    Effect.map((stats) =>
-        stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
-    ),
-    Effect.orElseSucceed(() => 0),
-);
+const runInlineRetroDerive = () =>
+    Effect.gen(function* () {
+        const cache = yield* CacheRead;
+        const stats = yield* deriveRetroProposals(cache);
+        return stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals;
+    }).pipe(
+        Effect.catchCause((cause) =>
+            Effect.sync(() => {
+                console.error(
+                    "ax retro emit: the retro was saved, but deriving proposals from it failed - "
+                    + "the next 'ax ingest' will retry.\n  "
+                    + String(cause),
+                );
+                return 0;
+            })
+        ),
+    );
 
 const cmdRetroEmit = (input: {
     readonly session: string | undefined;

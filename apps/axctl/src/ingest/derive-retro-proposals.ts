@@ -25,7 +25,12 @@
 
 import { Effect, Schema } from "effect";
 import { jsonParam } from "@ax/lib/duckdb/row";
-import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type {
+    CacheReadError,
+    CacheReadService,
+    CacheWriteError,
+    CacheWriteService,
+} from "@ax/lib/duckdb/seam";
 import { syncReviewedEdges } from "./retro.ts";
 import { Judgment, TextColumn, TimestampColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
 import { judgmentRow } from "../improve/judgment-proposals.ts";
@@ -601,16 +606,23 @@ const ExistingProposalRow = Schema.Struct({
  *
  * The retros this clusters and the proposals it writes are durable judgment
  * (SQLite sidecar). The installed-skill catalog it de-duplicates against is
- * rebuildable graph data (DuckDB cache), and it is read through the lock-held
- * WRITER because the skills stage of THIS run may just have installed the very
- * skill a proposal would otherwise re-propose (F1).
+ * rebuildable graph data (DuckDB cache).
+ *
+ * DUAL, so the cache side is a PARAMETER, not a service tag. Its only cache use
+ * is one read of the skill catalog, and it has two callers: the ingest stage,
+ * which hands it the lock-held WRITER so the dedupe sees a skill the skills
+ * stage installed earlier in THIS run (F1); and `ax retro emit`, which runs at
+ * request time, outside the ingest lock, and hands it a plain `CacheRead` over
+ * the published snapshot. Taking a reader means the emit path never has to take
+ * the ingest lock for a read - it used to, and a busy watcher ingest then killed
+ * the command AFTER the retro had already been written.
  *
  * `Judgment` is a service tag rather than a parameter, unlike the cache reader:
  * the sidecar has no snapshot and no publish step, so a row written inside a
  * stage is visible to the next statement in the same stage.
  */
 export const deriveRetroProposals = (
-    write: CacheWriteService,
+    cache: CacheReadService,
     opts: DeriveRetroProposalsOpts = {},
 ): Effect.Effect<DeriveRetroProposalsStats, CacheReadError | JudgmentError, Judgment> =>
     Effect.gen(function* () {
@@ -623,7 +635,7 @@ export const deriveRetroProposals = (
         const since = new Date(Date.now() - Math.trunc(sinceDays) * 86_400_000);
         const [retros, skills, existingProposals] = yield* Effect.all([
             listStoredRetros({ since, limit: 100_000 }),
-            write.rows(Schema.Struct({ name: Schema.String }), "SELECT name FROM skill"),
+            cache.rows(Schema.Struct({ name: Schema.String }), "SELECT name FROM skill"),
             judgment.rows(
                 ExistingProposalRow,
                 "SELECT id, dedupe_sig, status, baseline, created_at FROM proposal",
