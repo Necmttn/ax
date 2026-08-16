@@ -100,8 +100,20 @@ export const timelineCommand = Command.make(
     "Highlight/event timeline for a session (segments + ranked events, LLM-free). --json for the full structure.",
 ));
 
+/**
+ * `timeline` flips; `report` and `insights` do NOT, and the throwing proxy is
+ * what settled it - both were flipped, run, and reverted on the failure:
+ *
+ * - `insights` reads through `insightSqlForView` (queries/insights.ts), ~1100
+ *   lines of SurrealQL across 31 views. That is its own port, not a flip.
+ * - `report` calls `writeDashboard` (dashboard/report.ts), which is still on
+ *   the old engine.
+ *
+ * Both must be ported (or dropped) before the SurrealDB deletion chunk can
+ * land - flipping them now would only trade a working command for a throw.
+ */
 export const reportRuntime: RuntimeManifest = {
     report: { runtime: "db", hidden: true },
     insights: { runtime: "db", hidden: true },
-    timeline: { runtime: "db", hidden: true },
+    timeline: { runtime: "cache", hidden: true },
 };

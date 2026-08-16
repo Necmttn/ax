@@ -58,5 +58,5 @@ export const usageCommand = Command.make(
 );
 
 export const usageRuntime: RuntimeManifest = {
-    usage: { runtime: "db", hidden: false },
+    usage: { runtime: "cache", hidden: false },
 };

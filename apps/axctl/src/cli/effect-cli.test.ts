@@ -289,7 +289,11 @@ describe("effect cli", () => {
         expect(context).toBeDefined();
         const subNames = context!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["file"]));
-        expect(DB_COMMANDS.has("context")).toBe(true);
+        // Ported to the v2 cache runtime. `DB_COMMANDS` is what decides whether
+        // AppLayer (and its SurrealDB connect) is built, so a ported command
+        // MUST be absent from it - same acceptance shape as `recall` below.
+        expect(entryRuntime(RUNTIME_BY_COMMAND["context"]!)).toBe("cache");
+        expect(DB_COMMANDS.has("context")).toBe(false);
     });
 
     test("hook group exposes file-context and log, declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
@@ -322,15 +326,17 @@ describe("effect cli", () => {
         expect(DB_COMMANDS.has("hooks")).toBe(false);
     });
 
-    test("cost and pricing commands are routed through DB", () => {
+    test("cost and pricing commands are routed on the v2 cache runtime", () => {
         const costs = rootCommand.subcommands
             .flatMap((g) => g.commands)
             .find((c) => c.name === "costs");
         expect(costs).toBeDefined();
         const subNames = costs!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["summary", "for"]));
-        expect(DB_COMMANDS.has("costs")).toBe(true);
-        expect(DB_COMMANDS.has("pricing")).toBe(true);
+        expect(entryRuntime(RUNTIME_BY_COMMAND["costs"]!)).toBe("cache");
+        expect(entryRuntime(RUNTIME_BY_COMMAND["pricing"]!)).toBe("cache");
+        expect(DB_COMMANDS.has("costs")).toBe(false);
+        expect(DB_COMMANDS.has("pricing")).toBe(false);
     });
 
     test("recall is routed on the v2 cache runtime, and never opens SurrealDB", () => {
