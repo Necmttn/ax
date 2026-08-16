@@ -132,7 +132,7 @@ export const rowsSql = (sinceDays: number | undefined): string => `
 SELECT id, session, name,
        input_json AS inputJson, output_excerpt AS outputExcerpt,
        length(output_json) AS bytes, ts
-FROM tool_call WHERE output_json IS NOT NULL ${sinceDays === undefined ? "" : "AND ts >= current_timestamp - (? * INTERVAL '1 day')"};
+FROM tool_call WHERE output_json IS NOT NULL ${sinceDays === undefined ? "" : "AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"};
 `;
 
 export interface DeriveContentTypeStats {

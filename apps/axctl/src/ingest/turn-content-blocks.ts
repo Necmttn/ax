@@ -104,7 +104,7 @@ const fetchTurnRows = (
         return yield* write.rows(Row, `
 SELECT id, session, agent_event, CAST(seq AS DOUBLE) AS seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, ts
 FROM turn
-${sinceDays === undefined ? "" : "WHERE ts >= current_timestamp - (? * INTERVAL '1 day')"}
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
 ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
