@@ -106,3 +106,29 @@ export const formatStaleIngestWarning = (input: {
     return `ax: graph is stale - last successful ingest ${formatAge(ageMs)} ago; ` +
         `results may be incomplete. Run 'ax ingest' ('ax doctor' to diagnose).`;
 };
+
+/**
+ * Freshness drive (wave 3, daemon subtraction): with no LaunchAgent watcher
+ * to tail transcripts in the background, a stale graph now has nothing
+ * standing between "the user ran `ax cost`" and "the graph fixes itself" -
+ * so a read command that finds the graph stale spawns a background `ax
+ * ingest` itself (see `apps/axctl/src/queries/ingest-staleness.ts`).
+ *
+ * Debounced so a burst of commands (a shell alias, a script, a human mashing
+ * `ax cost` while it "isn't working") forks at most one ingest per window,
+ * not one per invocation.
+ */
+export const FRESHNESS_SPAWN_DEBOUNCE_MS = 15 * 60_000;
+
+/**
+ * Pure debounce decision: should a background ingest be spawned right now?
+ * `lastSpawnAtMs` is `null` when nothing has been recorded yet (always
+ * spawns). Dep-free so it is unit-testable without touching a filesystem or
+ * a real subprocess - the caller supplies both.
+ */
+export const shouldSpawnBackgroundIngest = (input: {
+    readonly lastSpawnAtMs: number | null;
+    readonly nowMs: number;
+    readonly debounceMs: number;
+}): boolean =>
+    input.lastSpawnAtMs === null || input.nowMs - input.lastSpawnAtMs >= input.debounceMs;

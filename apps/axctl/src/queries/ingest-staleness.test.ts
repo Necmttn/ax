@@ -1,13 +1,47 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { cacheReadResults, runWithCacheRead } from "../testing/cache-read.ts";
 import {
+    BackgroundIngestSpawner,
     fetchLastSuccessfulIngestAt,
+    maybeSpawnBackgroundIngest,
     staleIngestThresholdMs,
     warnIfIngestStale,
     withIngestStalenessPreflight,
 } from "./ingest-staleness.ts";
+
+/** node:fs is fine here - test fixture, not runtime source (check:no-node-fs
+ *  only scans non-test files). */
+const withScratchDataDir = async <A>(fn: (dir: string) => Promise<A>): Promise<A> => {
+    const dir = mkdtempSync(join(tmpdir(), "ax-freshness-drive-test-"));
+    const original = process.env.AX_DATA_DIR;
+    process.env.AX_DATA_DIR = dir;
+    try {
+        return await fn(dir);
+    } finally {
+        if (original === undefined) delete process.env.AX_DATA_DIR;
+        else process.env.AX_DATA_DIR = original;
+        rmSync(dir, { recursive: true, force: true });
+    }
+};
+
+/** Records spawn() calls instead of forking a real subprocess - the
+ *  silent-failure guard named in the wave-3 brief: assert the spawn
+ *  happened, not merely that the CLI returned. */
+const fakeSpawner = (calls: number[]): Layer.Layer<BackgroundIngestSpawner> =>
+    Layer.succeed(BackgroundIngestSpawner, {
+        spawn: () =>
+            Effect.sync(() => {
+                calls.push(Date.now());
+            }),
+    });
+
+const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 describe("staleIngestThresholdMs", () => {
     test("uses the default and accepts an explicit disable", () => {
@@ -136,25 +170,100 @@ describe("warnIfIngestStale (real seam)", () => {
         // Seeded STALE on purpose. With a FRESH run no warning fires at all, so
         // the resulting `["command"]` would be equally consistent with the
         // preflight running last, or never - proving nothing about ordering.
-        const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
-        const originalStderr = process.stderr.write.bind(process.stderr);
-        const events: string[] = [];
-        process.stderr.write = () => {
-            events.push("warning");
-            return true;
-        };
-        try {
-            await Effect.runPromise(
-                withIngestStalenessPreflight(
-                    Effect.sync(() => {
-                        events.push("command");
-                    }),
-                ).pipe(Effect.provide(db)),
-            );
-        } finally {
-            process.stderr.write = originalStderr;
-        }
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const spawnCalls: number[] = [];
+            const layer = Layer.mergeAll(db, fakeSpawner(spawnCalls), PlatformLayer);
+            const originalStderr = process.stderr.write.bind(process.stderr);
+            const events: string[] = [];
+            process.stderr.write = () => {
+                events.push("warning");
+                return true;
+            };
+            try {
+                await Effect.runPromise(
+                    withIngestStalenessPreflight(
+                        Effect.sync(() => {
+                            events.push("command");
+                        }),
+                    ).pipe(Effect.provide(layer)),
+                );
+            } finally {
+                process.stderr.write = originalStderr;
+            }
 
-        expect(events).toEqual(["warning", "command"]);
+            expect(events).toEqual(["warning", "command"]);
+            // The freshness drive also ran ahead of the command body.
+            expect(spawnCalls).toHaveLength(1);
+        });
+    });
+});
+
+describe("maybeSpawnBackgroundIngest (freshness drive)", () => {
+    const okRunFrom = (at: Date): Layer.Layer<CacheRead> => cacheReadResults([[{ ended_at: at, started_at: at }]]);
+    const runDrive = (db: Layer.Layer<CacheRead>, spawnCalls: number[]): Promise<void> =>
+        Effect.runPromise(
+            maybeSpawnBackgroundIngest.pipe(
+                Effect.provide(Layer.mergeAll(db, fakeSpawner(spawnCalls), PlatformLayer)),
+            ),
+        );
+
+    test("spawns once when the graph is stale and nothing was recorded yet", async () => {
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("does not spawn when the graph is fresh", async () => {
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 3_600_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(0);
+        });
+    });
+
+    test("debounces: a second stale read within the window does not spawn again", async () => {
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("AX_NO_AUTO_INGEST=1 disables the drive without touching the warning", async () => {
+        await withScratchDataDir(async () => {
+            process.env.AX_NO_AUTO_INGEST = "1";
+            try {
+                const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+                const calls: number[] = [];
+                await runDrive(db, calls);
+                expect(calls).toHaveLength(0);
+            } finally {
+                delete process.env.AX_NO_AUTO_INGEST;
+            }
+        });
+    });
+
+    test("degrades silently when the cache cannot be opened", async () => {
+        await withScratchDataDir(async () => {
+            const unopenable: Layer.Layer<CacheRead> = Layer.succeed(CacheRead, {
+                snapshotPath: "(test)",
+                rows: () =>
+                    Effect.fail(new CacheUnavailableError({ path: "(test)", message: "no snapshot published" })),
+                first: () =>
+                    Effect.fail(new CacheUnavailableError({ path: "(test)", message: "no snapshot published" })),
+                raw: () =>
+                    Effect.fail(new CacheUnavailableError({ path: "(test)", message: "no snapshot published" })),
+            } as unknown as CacheReadService);
+            const calls: number[] = [];
+            await runDrive(unopenable, calls);
+            expect(calls).toHaveLength(0);
+        });
     });
 });

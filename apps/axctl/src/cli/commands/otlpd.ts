@@ -1,7 +1,7 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { Console, Effect, FileSystem, Path, PlatformError } from "effect";
 import { Command } from "effect/unstable/cli";
-import { isAddrInUse } from "../../dashboard/serve-instance.ts";
+import { isAddrInUse } from "../../dashboard/host-guard.ts";
 import {
     OtlpSpoolServerError,
     startOtlpSpoolServer,
@@ -11,14 +11,17 @@ import type { RuntimeManifest } from "./manifest.ts";
 
 /**
  * One-line, no-stack-trace message for an otlpd port collision - mirrors
- * `ax serve`'s `formatServePortBusy` (dashboard/server.ts), but names
- * `ax serve` specifically: it runs its own OTLP receiver on the same port
- * until the spool-first receiver cutover, so it's the likely current owner.
+ * `ax studio`'s `formatStudioPortBusy` (cli/banner.ts), but names
+ * `ax studio` specifically: its contract still ALSO registers the /v1/*
+ * OTLP endpoints (dashboard/contract/otel.ts, unchanged by studio ephemeral -
+ * removing that duplication is a separate cutover this chunk did not take
+ * on), so it's the likely current owner if it happened to be running on this
+ * port when otlpd started.
  */
 export function formatOtlpdPortBusy(port: number): string {
     return [
         `[ax] otlpd: port ${port} is already in use.`,
-        "  ax serve may already own it - it runs its own OTLP receiver on this port until the otlpd cutover",
+        "  ax studio may already own it - it runs its own OTLP receiver on this port until the otlpd cutover",
         `  see who holds it  lsof -nP -iTCP:${port} -sTCP:LISTEN`,
     ].join("\n");
 }

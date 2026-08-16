@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
     formatStaleIngestWarning,
+    FRESHNESS_SPAWN_DEBOUNCE_MS,
     isStrandedRun,
     REAP_GRACE_SECONDS,
+    shouldSpawnBackgroundIngest,
     STALE_INGEST_AFTER_HOURS,
 } from "./ingest-staleness.ts";
 
@@ -118,5 +120,41 @@ describe("isStrandedRun accepts what each engine hands it", () => {
 
     test("a row with no heartbeat at all is stranded", () => {
         expect(isStrandedRun({}, now, staleAfterMs)).toBe(true);
+    });
+});
+
+describe("shouldSpawnBackgroundIngest", () => {
+    const now = Date.parse("2026-08-16T12:00:00.000Z");
+
+    test("always spawns when nothing has been recorded yet", () => {
+        expect(shouldSpawnBackgroundIngest({
+            lastSpawnAtMs: null,
+            nowMs: now,
+            debounceMs: FRESHNESS_SPAWN_DEBOUNCE_MS,
+        })).toBe(true);
+    });
+
+    test("refuses a second spawn inside the debounce window", () => {
+        expect(shouldSpawnBackgroundIngest({
+            lastSpawnAtMs: now - 1_000,
+            nowMs: now,
+            debounceMs: FRESHNESS_SPAWN_DEBOUNCE_MS,
+        })).toBe(false);
+    });
+
+    test("spawns again once the debounce window has fully elapsed", () => {
+        expect(shouldSpawnBackgroundIngest({
+            lastSpawnAtMs: now - FRESHNESS_SPAWN_DEBOUNCE_MS,
+            nowMs: now,
+            debounceMs: FRESHNESS_SPAWN_DEBOUNCE_MS,
+        })).toBe(true);
+    });
+
+    test("is exclusive at the boundary minus one ms", () => {
+        expect(shouldSpawnBackgroundIngest({
+            lastSpawnAtMs: now - FRESHNESS_SPAWN_DEBOUNCE_MS + 1,
+            nowMs: now,
+            debounceMs: FRESHNESS_SPAWN_DEBOUNCE_MS,
+        })).toBe(false);
     });
 });
