@@ -8,7 +8,10 @@
  *
  * This module is intentionally free of any surreal / ax-serve specifics: the
  * caller supplies the executable, args, cwd, env, and a readiness URL. Task 2.3
- * instantiates this twice (surreal, ax-serve).
+ * originally instantiated this twice (surreal, ax-serve); wave 3
+ * (`c-desktop-realign`) collapsed `AxBackendManager` down to a single
+ * `ax studio` instance, but the generic single-process shape here is
+ * unchanged - it never assumed two.
  *
  * The patterns (Scope / Fiber / Ref / Semaphore lifecycle, exponential backoff,
  * HTTP readiness via `HttpClient.filterStatusOk` + `Schedule.spaced`) mirror

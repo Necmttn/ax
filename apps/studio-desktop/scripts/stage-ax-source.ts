@@ -1,20 +1,29 @@
 #!/usr/bin/env bun
 /**
  * stage-ax-source.ts - populate `apps/studio-desktop/resources/` with everything
- * the packaged Electron app needs to run `<bunBinary> <axSourceEntry> serve`
- * (see `DesktopEnvironment`):
+ * the packaged Electron app needs to run `<bunBinary> <axSourceEntry> studio`
+ * and `<bunBinary> <axSourceEntry> ingest` (see `DesktopEnvironment`,
+ * `AxBackendManager`, `DesktopIngestScheduler`):
  *
  *   1. `resources/ax-src/`  - the minimal runnable ax source tree (workspace
- *      packages that `apps/axctl/src/cli/index.ts serve` actually imports) plus
- *      a self-contained host-arch `node_modules`, so the staged `ax serve`
- *      resolves `surrealdb`, `@durable-streams/*`, `lmdb` (pulled by
- *      durable-streams), `node-pty`, effect, etc.
+ *      packages `apps/axctl/src/cli/index.ts studio`/`ingest` actually import)
+ *      plus a self-contained host-arch `node_modules`, so the staged commands
+ *      resolve `@ax/schema` (still a runtime dep of `apps/axctl/src/ingest/
+ *      run.ts`, independent of the desktop app's own retired schema-apply
+ *      step), `node-pty`, effect, etc.
  *   2. `resources/studio/`  - the built studio SPA (`apps/studio/dist-desktop`),
  *      served over the custom protocol from `<resourcesPath>/studio`.
  *
- * Why from-source (not the `--compile` binary): the compiled binary can't host
- * the Durable Streams sidecar (native lmdb) -> live ingest 503s. Live ingest is
- * required, so we ship bun (vendored by fetch-binaries.ts) + this source tree.
+ * Why from-source (not the `--compile` binary): historically, the compiled
+ * binary couldn't host the Durable Streams live-ingest sidecar (native lmdb) -
+ * the desktop app's `POST /api/ingest` trigger would 503. Studio ephemeral
+ * (wave 3) retired that whole endpoint (the desktop app now spawns
+ * `ax ingest` as its own short-lived process instead - see
+ * `DesktopIngestScheduler.ts`), so this specific blocker is gone; whether the
+ * `--compile` binary is now a viable lighter-weight packaging alternative to
+ * staging source is an open question this port did not investigate or change
+ * - it ships bun (vendored by fetch-binaries.ts) + this source tree exactly
+ * as before.
  *
  * Native-dep strategy (a): we copy a tailored root `package.json` + the real
  * `bun.lock` + the needed workspace packages into `resources/ax-src/`, then run
@@ -77,10 +86,13 @@ const die = (msg: string): never => {
 
 /**
  * Workspace packages copied into `resources/ax-src/`. This is the minimal set
- * `apps/axctl/src/cli/index.ts serve` resolves at runtime:
- *   - apps/axctl                         the CLI / serve entrypoint
+ * `apps/axctl/src/cli/index.ts studio`/`ingest` resolve at runtime:
+ *   - apps/axctl                         the CLI / studio+ingest entrypoint
  *   - packages/lib (@ax/lib)             db client, paths, layers, live-traces
- *   - packages/schema (@ax/schema)       schema.surql (imported as text) + types
+ *   - packages/schema (@ax/schema)       still a runtime dep of
+ *                                        apps/axctl/src/ingest/run.ts (NOT the
+ *                                        desktop app's own retired schema-apply
+ *                                        step - DesktopSchema.ts is gone)
  *   - packages/hooks-sdk (@ax/hooks-sdk) declared `workspace:*` dep of apps/axctl;
  *                                        `bun install` fails to resolve without it
  *   - packages/onboarding-prompt (@ax/onboarding-prompt) transitive `workspace:*`
@@ -90,7 +102,7 @@ const die = (msg: string): never => {
  *
  * `packages/ax-classifier-session-sections` is python-only (referenced solely by
  * string manifest paths, never imported as a module) and is intentionally
- * skipped - it is not needed for `serve`.
+ * skipped - it is not needed for `studio`/`ingest`.
  *
  * NOTE: this list is hand-maintained - any NEW `@ax/*` workspace dep of axctl OR
  * of a staged package must be added here or `bun install` in resources/ax-src
@@ -221,22 +233,30 @@ function dereferenceSymlink(link: string): void {
  * abort on a dangling symlink (the original ENOENT defect).
  */
 /**
- * Top-level node_modules trees the bundled `ax serve` never loads, removed to
- * shrink the .app. These are the TUI render stack + dev-tools: axctl lazy-loads
- * the TUI (`await import("../tui/...")`) and project/dogfood commands, none of
- * which `serve` touches. Verified by booting `ax serve` from the pruned tree.
- * Adding a serve-path import of any of these will fail the stage boot-check.
+ * Top-level node_modules trees the bundled `ax studio`/`ax ingest` never load,
+ * removed to shrink the .app. These are the TUI render stack + dev-tools:
+ * axctl lazy-loads the TUI (`await import("../tui/...")`, verified against
+ * `ax ingest`'s own progress renderer - `cli/ingest-trace-progress.ts` only
+ * `import type`s `progress-tui.tsx` at the top and dynamically `import()`s it
+ * behind a TTY check, so a piped/non-TTY spawn - exactly how
+ * `DesktopIngestScheduler` spawns it - never touches this tree either) and
+ * project/dogfood commands, none of which `studio`/`ingest` touch. Originally
+ * verified by booting `ax serve` from the pruned tree; adding a studio- or
+ * ingest-path import of any of these will fail the stage boot-check.
  */
 const SERVE_IRRELEVANT_PACKAGES: ReadonlyArray<string> = [
     // TUI render stack (lazy-loaded via `await import("../tui/...")`)
-    "node-pty", // dogfood pty sidecar (terminal); not on the serve path
+    "node-pty", // dogfood pty sidecar (terminal); not on the studio/ingest path
     "@opentui", // TUI renderer (lazy)
-    // NB: do NOT prune @tanstack - @durable-streams/state (the live-ingest
-    // sidecar, which serve DOES load) depends on @tanstack/db.
+    // NB: do NOT prune @tanstack - carried over from the old `ax serve`
+    // daemon, whose Durable Streams live-ingest sidecar (@tanstack/db dep) is
+    // now RETIRED (studio ephemeral, wave 3 - see DesktopIngestScheduler.ts's
+    // module doc). Left un-pruned pending re-verification against a real
+    // package build under #821 rather than removed speculatively here.
     "react-devtools-core",
     "react-devtools-shared",
     "react-reconciler", // opentui's react renderer
-    "react-dom", // project/stack + studio (not serve)
+    "react-dom", // project/stack + studio SPA build (not the desktop's own studio/ingest spawn)
     "react", // only the above pull it
     "scheduler", // react peer
     // Type-only / build-time (bun transpiles TS at runtime; no tsc needed)
@@ -403,13 +423,15 @@ async function main() {
                     "Native deps were not staged - investigate before relying on this bundle.",
             );
         }
-        // Prune heavy packages the bundled `ax serve` never loads. axctl is a
-        // monolithic CLI (serve + TUI + mcp + dogfood), but the desktop only runs
-        // `ax serve`, and the TUI is lazy-loaded (`await import("../tui/...")`), so
-        // its render stack is never required. Removing these top-level trees from
-        // the hoisted node_modules is safe FOR SERVE (verified: `serve` boots from
-        // the pruned tree). Saves ~115MB. If you add a serve-path import of any of
-        // these, the stage boot-check / release will surface it.
+        // Prune heavy packages the bundled `ax studio`/`ax ingest` never load.
+        // axctl is a monolithic CLI (studio + ingest + TUI + mcp + dogfood),
+        // but the desktop only spawns `studio` and `ingest`, and the TUI is
+        // lazy-loaded (`await import("../tui/...")`), so its render stack is
+        // never required. Removing these top-level trees from the hoisted
+        // node_modules is safe (originally verified booting `ax serve`; see
+        // SERVE_IRRELEVANT_PACKAGES's doc comment for the studio/ingest
+        // re-verification). Saves ~115MB. If you add a studio- or ingest-path
+        // import of any of these, the stage boot-check / release will surface it.
         pruneServeIrrelevant(join(AX_SRC, "node_modules"));
         // Backstop: keep self-contained internal links, dereference/abort any
         // symlink that escapes the staged tree (the original ENOENT defect).

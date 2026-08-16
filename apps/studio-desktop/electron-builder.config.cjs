@@ -35,10 +35,12 @@
 //
 // IMPORTANT - macOS code-signing / SIGKILL failure mode (see memory:
 // dogfood-compiled-binary-codesign):
-//   The bundled `surreal` + `bun` Mach-O binaries placed under
-//   Contents/Resources/bin MUST be codesigned. An unsigned or ad-hoc-copied
-//   Mach-O is SIGKILL'd by macOS Gatekeeper on first spawn (no error, the
-//   child just dies), which breaks the supervised surreal/ax-serve boot.
+//   The bundled `bun` Mach-O binary placed under Contents/Resources/bin MUST
+//   be codesigned. An unsigned or ad-hoc-copied Mach-O is SIGKILL'd by macOS
+//   Gatekeeper on first spawn (no error, the child just dies), which breaks
+//   the supervised `ax studio` boot (wave 3, `c-desktop-realign`: the desktop
+//   app used to also vendor + spawn `surreal` here; ax moved to embedded
+//   DuckDB and `ax studio` is the only spawned process now).
 //
 //   electron-builder WILL sign every Mach-O it finds under Contents/Resources
 //   automatically - but only when `hardenedRuntime` is on AND a real
@@ -46,14 +48,14 @@
 //   In that path no manual step is needed.
 //
 //   For LOCAL UNSIGNED dev builds (no Apple cert, CSC_IDENTITY_AUTO_DISCOVERY
-//   =false), electron-builder does NOT sign the vendored binaries, so you must
-//   ad-hoc sign them yourself before launching the app, e.g.:
+//   =false), electron-builder does NOT sign the vendored binary, so you must
+//   ad-hoc sign it yourself before launching the app, e.g.:
 //
 //     codesign --force --sign - \
-//       "dist-release/mac-arm64/ax studio.app/Contents/Resources/bin/arm64/"{surreal,bun}
+//       "dist-release/mac-arm64/ax studio.app/Contents/Resources/bin/arm64/bun"
 //
 //   (Adjust mac-arm64 / arch dir for x64 builds.) Without this the app launches
-//   but the surreal/bun children are killed on spawn.
+//   but the bun child is killed on spawn.
 
 module.exports = {
   appId: "com.necmttn.ax-studio",
