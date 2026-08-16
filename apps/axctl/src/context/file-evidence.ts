@@ -1,5 +1,4 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
@@ -820,33 +819,38 @@ export const loadRecentCommitsForFile = (fileIds: readonly string[], limit: numb
  *  hidden coupling that single-commit `git log` can't see. */
 export const loadCoTouchedFiles = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         if (fileIds.length === 0) return [] as FileMemoryCoTouch[];
         const cap = Math.max(1, Math.min(limit, 20));
         const targetSet = new Set(fileIds);
 
-        // Stage 1: top sessions that edited the target file. `count()` must
-        // appear in SELECT to be sortable in ORDER BY under SurrealDB v3.
-        const [sessionsRows] = yield* db.query<[Array<{ session: string; n: number }>]>(`
-            SELECT <string>in.session AS session, count() AS n
-            FROM edited
-            WHERE out IN [${fileIds.join(", ")}]
-              AND in.session.source != "claude-subagent"
-            GROUP BY session
+        // Stage 1: top sessions that edited the target file.
+        const sessionsRows = yield* read.rows(Schema.Struct({ session: Schema.String, n: NumberFromBigIntColumn }), `
+            SELECT t.session AS session, count(*) AS n
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN session s ON s.id = t.session
+            WHERE e.out_id IN (${fileIds.map(() => "?").join(", ")})
+              AND s.source <> 'claude-subagent'
+            GROUP BY t.session
             ORDER BY n DESC
-            LIMIT 15;
-        `);
+            LIMIT 15
+        `, fileIds);
         const sessionIds = sessionsRows.map((r) => r.session).filter(Boolean);
         if (sessionIds.length === 0) return [] as FileMemoryCoTouch[];
 
         // Stage 2: all files those sessions touched. Aggregate per file in JS.
-        const [editedRows] = yield* db.query<[
-            Array<{ session: string; file: string; path: string | null }>
-        ]>(`
-            SELECT <string>in.session AS session, <string>out AS file, out.path AS path
-            FROM edited
-            WHERE in.session IN [${sessionIds.join(", ")}];
-        `);
+        const editedRows = yield* read.rows(Schema.Struct({
+            session: Schema.String,
+            file: Schema.String,
+            path: Schema.NullOr(Schema.String),
+        }), `
+            SELECT t.session AS session, e.out_id AS file, f.path AS path
+            FROM edited e
+            JOIN turn t ON t.id = e.in_id
+            JOIN file f ON f.id = e.out_id
+            WHERE t.session IN (${sessionIds.map(() => "?").join(", ")})
+        `, sessionIds);
 
         // Count distinct sessions per co-touched file (not total edits, to
         // weight files that show up across MANY sessions over heavy churn in
