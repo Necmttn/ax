@@ -491,26 +491,26 @@ export interface TopToolRow {
     readonly runs: number;
 }
 
-const TOP_TOOLS_SQL = (d: number) => `
-SELECT
-    (command_norm ?? name) AS tool,
-    count() AS count
+const TOP_TOOLS_SQL = `
+SELECT COALESCE(command_norm, name) AS tool, count(*) AS count
 FROM tool_call
-WHERE ts > time::now() - ${win(d)}
-  AND (command_norm ?? name) IS NOT NONE
-GROUP BY tool
-ORDER BY count DESC
-LIMIT 10;`;
+WHERE TRUE`;
+
+const TopToolDbRow = Schema.Struct({ tool: Schema.String, count: NumberFromBigIntColumn });
 
 export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(TOP_TOOLS_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            TopToolDbRow,
+            `${TOP_TOOLS_SQL} ${within.sql} AND COALESCE(command_norm, name) IS NOT NULL `
+                + "GROUP BY tool ORDER BY count DESC LIMIT 10",
+            within.params,
+        );
         return rows.map((r) => ({
-            name: String(r.tool),
-            runs: Number(r.count ?? 0),
+            name: r.tool,
+            runs: r.count,
         })) satisfies TopToolRow[];
     },
 );

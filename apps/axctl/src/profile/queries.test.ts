@@ -263,22 +263,24 @@ describe("fetchCommitCount", () => {
 
 describe("fetchTopTools", () => {
     test("returns top 10 tools by run count, window applied", async () => {
-        const db = makeMockDb([[[
-            { tool: "Bash", count: 5000 },
-            { tool: "Read", count: 3200 },
-        ]]]);
-        const r = await runWithMock(db, fetchTopTools({ windowDays: 30 }));
+        const cache = cacheRead({
+            "FROM tool_call": [
+                { tool: "Bash", count: 5000 },
+                { tool: "Read", count: 3200 },
+            ],
+        });
+        const r = await runCache(fetchTopTools({ windowDays: 30 }), cache.layer);
         expect(r[0]).toEqual({ name: "Bash", runs: 5000 });
         expect(r[1]).toEqual({ name: "Read", runs: 3200 });
-        expect(db.captured[0]).toContain("FROM tool_call");
-        expect(db.captured[0]).toContain("command_norm ?? name");
-        expect(db.captured[0]).toContain("LIMIT 10");
-        expect(db.captured[0]).toContain("time::now() - 30d");
+        expect(cache.captured[0]).toContain("FROM tool_call");
+        expect(cache.captured[0]).toContain("COALESCE(command_norm, name)");
+        expect(cache.captured[0]).toContain("LIMIT 10");
+        expect(cache.captured[0]).toContain("INTERVAL '1 day'");
     });
 
     test("empty -> empty array", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchTopTools({ windowDays: 30 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchTopTools({ windowDays: 30 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });
