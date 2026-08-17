@@ -188,6 +188,15 @@ const EMPTY_TALLY: SessionTally = { claude: 0, codex: 0, pi: 0, total: 0 };
  * timed-out run had stages cut short, so its durations would under-predict in
  * exactly the case that matters. Unsettled stages (`ended_at IS NULL`) are
  * excluded for the same reason.
+ *
+ * KNOWN ERROR BAR, stated rather than hidden. `ingest_stage.source` is the stage
+ * KEY, so `source <> 'claude'` drops every claude-keyed row - the sampled
+ * `transcripts` stage AND the `subagents` stage the sample does not measure
+ * (183s and 131s respectively on the cold run). So the uncovered term is
+ * slightly LOW, by whatever the non-sampled siblings of the sampled source cost:
+ * about 7% of the term on the measured warm run. That direction is the same one
+ * the original bug ran in, so it is worth naming; splitting it needs a stage-key
+ * column the sample can match on, which does not exist yet.
  */
 const dbPriorUncovered = (
     write: CacheWriteService,
