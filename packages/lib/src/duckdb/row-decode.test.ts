@@ -144,6 +144,42 @@ describe("coerceValue", () => {
     test("leaves an unparseable timestamp as its original text rather than an Invalid Date", () => {
         expect(coerceValue(DuckDbTypeId.TIMESTAMP, "infinity")).toBe("infinity");
     });
+
+    /**
+     * `sum(BIGINT)` in DuckDB is HUGEINT, and int128 is read through the varchar
+     * accessor because the FFI cannot pass 128 bits by value. Without the
+     * bigint conversion the cell reached the caller's Schema as a STRING and
+     * every aggregate broke: `ax cost models` / `ax cost split` died with
+     * `Expected number | bigint | null, got "4274534509"`. The promotion is by
+     * TYPE, not magnitude, so small fixtures could not surface it.
+     */
+    test("a HUGEINT arrives as text and becomes a bigint, so sum() decodes", () => {
+        expect(coerceValue(DuckDbTypeId.HUGEINT, "4274534509")).toBe(4274534509n);
+        expect(coerceValue(DuckDbTypeId.UHUGEINT, "10071891479")).toBe(10071891479n);
+        expect(coerceValue(DuckDbTypeId.HUGEINT, "-42")).toBe(-42n);
+        expect(coerceValue(DuckDbTypeId.HUGEINT, "0")).toBe(0n);
+    });
+
+    test("keeps int128 precision beyond what a JS number can hold", () => {
+        // Past 2^53: converting via Number would silently round. The whole
+        // point of routing this to bigint is that it cannot.
+        expect(coerceValue(DuckDbTypeId.HUGEINT, "170141183460469231731687303715884105727"))
+            .toBe(170141183460469231731687303715884105727n);
+    });
+
+    test("non-integer HUGEINT text keeps its raw form so the Schema fails loudly", () => {
+        // Never guess. A caller's Schema rejecting a string is a typed decode
+        // error naming what it found; a guessed number would be a wrong answer.
+        for (const text of ["", "  ", "1.5", "1e9", "nan", "infinity", "12abc", "+7"]) {
+            expect(coerceValue(DuckDbTypeId.HUGEINT, text)).toBe(text);
+        }
+    });
+
+    test("does not convert integer-looking text on a genuine VARCHAR column", () => {
+        // Only int128 columns get this treatment - a VARCHAR holding digits is
+        // still a string (ids and hashes are stored as text).
+        expect(coerceValue(DuckDbTypeId.VARCHAR, "4274534509")).toBe("4274534509");
+    });
 });
 
 describe("unsupportedColumns", () => {

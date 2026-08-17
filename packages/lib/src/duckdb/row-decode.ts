@@ -124,13 +124,50 @@ const finishTimestamp = (iso: string, original: string): Date | string => {
     return Number.isNaN(date.getTime()) ? original : date;
 };
 
+/** Canonical optionally-signed decimal integer - what DuckDB prints for a
+ *  HUGEINT. Deliberately strict: anything else keeps its raw text so the
+ *  caller's Schema fails loudly instead of receiving a guessed number. */
+const HUGEINT_TEXT_RE = /^-?\d+$/;
+
+/**
+ * A HUGEINT/UHUGEINT arrives as TEXT and must become a `bigint`.
+ *
+ * `VARCHAR_TYPES` routes int128 through the varchar accessor because the FFI
+ * cannot pass a 128-bit value by value - that part is correct and stays. What
+ * was missing is this second half: without it the cell reached the caller's
+ * Schema as a STRING, and every `sum()` over an integer column broke, because
+ * **`sum(BIGINT)` in DuckDB is HUGEINT, not BIGINT.** `ax cost models` and
+ * `ax cost split` both died on real data with
+ * `Expected number | bigint | null, got "4274534509"` - a total that fits a JS
+ * number twice over, rejected purely because of its wrapper. Small fixtures hid
+ * it: the promotion is by TYPE, not by magnitude, so it needed a real
+ * aggregate over a real store to show up, and it failed loudly only because
+ * `NumberFromBigIntColumn` refuses to guess.
+ *
+ * A JS `bigint` is arbitrary-precision, so an int128 converts without loss, and
+ * `NumberFromBigIntColumn` / `Schema.BigInt` then work unchanged - which is why
+ * this belongs here and not in a cast on every aggregate projection.
+ */
+const parseHugeint = (text: string): bigint | string => {
+    if (!HUGEINT_TEXT_RE.test(text)) return text;
+    try {
+        return BigInt(text);
+    } catch {
+        return text;
+    }
+};
+
 /** Raw accessor output -> the JS value callers see. */
 export const coerceValue = (
     typeId: number,
     raw: boolean | bigint | number | string,
 ): DuckDbValue => {
     if (typeof raw === "string") {
-        return typeId === DuckDbTypeId.TIMESTAMP ? parseTimestamp(raw) : raw;
+        if (typeId === DuckDbTypeId.TIMESTAMP) return parseTimestamp(raw);
+        if (typeId === DuckDbTypeId.HUGEINT || typeId === DuckDbTypeId.UHUGEINT) {
+            return parseHugeint(raw);
+        }
+        return raw;
     }
     if (typeof raw === "bigint") {
         // 64-bit columns stay bigint so a row's TS type never depends on the
