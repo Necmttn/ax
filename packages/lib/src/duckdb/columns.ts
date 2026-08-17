@@ -27,6 +27,11 @@ import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect";
 
 export { NumberFromBigIntColumn } from "./bigint-column.ts";
 
+/** JS safe-integer bounds as bigints - the range a BIGINT can cross into a
+ *  `number` without losing exactness. Used by {@link LooseCellColumn}. */
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+
 /**
  * A `TIMESTAMP` column.
  *
@@ -132,3 +137,44 @@ export const JsonObjectColumn = <S extends Schema.Top>(shape: S) =>
             encode: SchemaGetter.transform((value: S["Encoded"]) => JSON.stringify(value)),
         }),
     );
+
+/**
+ * One cell of a row whose column set is not known at compile time.
+ *
+ * Most readers name their columns and type them, and a BIGINT column gets
+ * {@link NumberFromBigIntColumn}. Two surfaces cannot do that: `ax insights`
+ * runs one of 30 differently-shaped views chosen at runtime, and the evidence
+ * report renders whatever columns those views return. They decode rows as
+ * `Record<string, unknown>`, which means nothing declares the BIGINT columns -
+ * and a `COUNT(*)` cell arrives as a JS `bigint` (see `coerceValue` in
+ * row-decode.ts: 64-bit widths stay `bigint`).
+ *
+ * That is the undecoded-BIGINT trap, and its usual shape is a WRONG ANSWER
+ * rather than an error: the report serializes its rows with `JSON.stringify`,
+ * which THROWS on a bigint, while a `typeof x === "number"` guard elsewhere
+ * would simply read false and drop the value.
+ *
+ * So the conversion is declared here, at the read boundary, rather than hidden
+ * in a `JSON.stringify` replacer - a replacer would make the symptom go away
+ * while leaving every other consumer of the same row holding a bigint.
+ *
+ * An out-of-range bigint becomes its DECIMAL STRING, not a rounded number.
+ * `NumberFromBigIntColumn` fails instead, which is right for a named column a
+ * caller can retype as `Schema.BigInt`; here there is no such caller, and a
+ * whole report must not die because one cell exceeded 2^53.
+ */
+export const LooseCellColumn = Schema.Unknown.pipe(
+    Schema.decodeTo(Schema.Unknown, {
+        decode: SchemaGetter.transform((value: unknown): unknown => {
+            if (typeof value !== "bigint") return value;
+            return value >= MIN_SAFE_BIGINT && value <= MAX_SAFE_BIGINT
+                ? Number(value)
+                : value.toString();
+        }),
+        encode: SchemaGetter.transform((value: unknown): unknown => value),
+    }),
+);
+
+/** A row whose columns are not known at compile time. See {@link LooseCellColumn}. */
+export const LooseRowSchema = Schema.Record(Schema.String, LooseCellColumn);
+export type LooseRow = typeof LooseRowSchema.Type;

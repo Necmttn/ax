@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { JsonArrayColumn, JsonObjectColumn, TimestampColumn } from "./columns.ts";
+import { JsonArrayColumn, JsonObjectColumn, LooseRowSchema, TimestampColumn } from "./columns.ts";
 import { UTC_CLOCK_TOLERANCE_MS, utcClockOk } from "./seam.ts";
 
 const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
@@ -142,5 +142,50 @@ describe("utcClockOk", () => {
         for (const minutes of [15, -15, 30, -30, 45, 60, -60, 330, 840, -720]) {
             expect(utcClockOk(offset(minutes * 60_000), base)).toBe(false);
         }
+    });
+});
+
+describe("LooseRowSchema", () => {
+    test("a BIGINT cell in an untyped row becomes a number", async () => {
+        // The reason it exists: `ax insights` picks one of 30 differently-shaped
+        // views at runtime, so no schema names the COUNT columns, and an
+        // undecoded BIGINT reaches `JSON.stringify` - which throws on bigints.
+        const exit = await decode(LooseRowSchema, { table_name: "session", count: 42n });
+        expect(exit._tag).toBe("Success");
+        const row = (exit as { value: Record<string, unknown> }).value;
+        expect(row.count).toBe(42);
+        expect(typeof row.count).toBe("number");
+    });
+
+    test("non-bigint cells pass through untouched, null included", async () => {
+        const at = new Date("2026-08-16T00:00:00.000Z");
+        const exit = await decode(LooseRowSchema, {
+            name: "tdd",
+            ratio: 0.5,
+            ok: true,
+            ts: at,
+            missing: null,
+        });
+        expect(exit._tag).toBe("Success");
+        expect((exit as { value: Record<string, unknown> }).value).toEqual({
+            name: "tdd",
+            ratio: 0.5,
+            ok: true,
+            ts: at,
+            missing: null,
+        });
+    });
+
+    test("an out-of-range bigint becomes its decimal STRING, never a rounded number", async () => {
+        // `NumberFromBigIntColumn` fails here instead, which is right for a
+        // named column the caller can retype as `Schema.BigInt`. A whole report
+        // must not die because one cell exceeded 2^53, and silently rounding
+        // would be the wrong-answer failure this migration keeps hitting.
+        const huge = BigInt(Number.MAX_SAFE_INTEGER) + 10n;
+        const exit = await decode(LooseRowSchema, { total: huge });
+        expect(exit._tag).toBe("Success");
+        const row = (exit as { value: Record<string, unknown> }).value;
+        expect(row.total).toBe(huge.toString());
+        expect(JSON.stringify(row)).toBe(`{"total":"${huge}"}`);
     });
 });

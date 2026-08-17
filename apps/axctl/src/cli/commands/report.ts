@@ -6,7 +6,8 @@
 import { Effect } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import { Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
+import { LooseRowSchema } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { prettyPrint } from "@ax/lib/json";
 import { INSIGHT_VIEWS, insightSqlForView } from "../../queries/insights.ts";
 import { enrichInsightRows } from "../../queries/insights-enrich.ts";
@@ -24,13 +25,18 @@ const cmdInsights = (input: { readonly view: InsightView; readonly limit: number
         // at parse time - the old isInsightView/exit(2) guard was dead code
         // through the CLI and is intentionally gone.
         const limit = requirePositiveInt("insights", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            insightSqlForView(input.view, limit),
+        // The view is chosen at runtime out of 30 differently-shaped queries,
+        // so the column set is not known here and rows decode as
+        // `LooseRowSchema` - which is also what turns each view's `COUNT(*)`
+        // BIGINT cells into numbers before they reach the formatter.
+        const result = yield* cacheRows(
+            LooseRowSchema,
+            { sql: insightSqlForView(input.view, limit), params: [] },
+            `insights.${input.view}`,
         );
         // Classifier views resolve their per-row context here via indexed
         // lookups (the correlated $parent.session form scanned ~1s/row).
-        const rows = yield* enrichInsightRows(input.view, result?.[0] ?? []);
+        const rows = yield* enrichInsightRows(input.view, [...result] as Array<Record<string, unknown>>);
         console.log(formatInsightRows(input.view, [...rows], { json: input.json }));
     });
 
@@ -101,19 +107,16 @@ export const timelineCommand = Command.make(
 ));
 
 /**
- * `timeline` flips; `report` and `insights` do NOT, and the throwing proxy is
- * what settled it - both were flipped, run, and reverted on the failure:
- *
- * - `insights` reads through `insightSqlForView` (queries/insights.ts), ~1100
- *   lines of SurrealQL across 31 views. That is its own port, not a flip.
- * - `report` calls `writeDashboard` (dashboard/report.ts), which is still on
- *   the old engine.
- *
- * Both must be ported (or dropped) before the SurrealDB deletion chunk can
- * land - flipping them now would only trade a working command for a throw.
+ * All three are on the v2 cache runtime. c8 left `report` and `insights` on
+ * `"db"` and recorded them as blocked on "~1100 lines of SurrealQL across 31
+ * views" - **that reading was wrong**. `queries/insights.ts` was already DuckDB
+ * dialect (chunk 2b, #819); what still reached SurrealDB was the two HANDLERS,
+ * `cmdInsights` above and the five statements in `dashboard/report.ts`. The
+ * throwing proxy reports only that SOME path touched `SurrealClient` - it does
+ * not name the layer, and the SQL was not opened before the size was asserted.
  */
 export const reportRuntime: RuntimeManifest = {
-    report: { runtime: "db", hidden: true },
-    insights: { runtime: "db", hidden: true },
+    report: { runtime: "cache", hidden: true },
+    insights: { runtime: "cache", hidden: true },
     timeline: { runtime: "cache", hidden: true },
 };
