@@ -120,19 +120,19 @@ export function FeaturesPage() {
 
         <div className="section-body">
           <p>
-            A LaunchAgent (<code>com.necmttn.ax-watch</code>) tails your Claude and Codex transcript
-            directories and runs <code>ax ingest --since=1</code> in the background within seconds of a
-            new turn. A weekly self-improve cron for deep-scan backfill is on the roadmap (wire-up
-            pending). Nothing is uploaded, queued, or phoned home - every read stays on the same
-            filesystem your agent already writes to.
+            Reading drives the refresh: a command that finds the graph stale quietly forks a
+            catch-up <code>ax ingest --since=1</code> in the background, debounced - no LaunchAgent,
+            no tailing, nothing running while you're not using ax. A weekly self-improve cron for
+            deep-scan backfill is on the roadmap (wire-up pending). Nothing is uploaded, queued, or
+            phoned home - every read stays on the same filesystem your agent already writes to.
           </p>
         </div>
 
         <div className="cadence">
           <div className="item">
-            <span className="k">live</span>
+            <span className="k">read-driven</span>
             <span className="v">
-              <b>LaunchAgent</b> tails new turns, ingests in ~2s
+              <b>ax ingest</b> forks quietly when a read finds the graph stale
             </span>
           </div>
           <div className="item">
@@ -640,7 +640,7 @@ export function FeaturesPage() {
             <span className="desc">Walk the intervention queue. Accept emits a task brief; lint reconciles the marker.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">ax serve</span>
+            <span className="cmd">ax studio</span>
             <span className="desc">
               Local web dashboard at <code className="inline">127.0.0.1:1738</code> with the same data the TUI sees.
             </span>
@@ -659,7 +659,7 @@ export function FeaturesPage() {
             <span className="cmd">
               ax ingest <span className="arg">--since=N</span>
             </span>
-            <span className="desc">What the LaunchAgent calls on every new transcript. Idempotent; safe to rerun.</span>
+            <span className="desc">What a stale read forks automatically, or you call it yourself. Idempotent; safe to rerun.</span>
           </div>
         </div>
       </section>

@@ -20,7 +20,7 @@ export function ActWhy() {
           <article className="how-why-card">
             <span className="how-why-chip">
               <span className="how-why-chip-dot" aria-hidden="true" />
-              127.0.0.1:8521
+              127.0.0.1:1738
             </span>
             <h3 className="how-why-title">Local-first by construction.</h3>
             <p className="how-why-body">

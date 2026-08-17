@@ -44,7 +44,7 @@ const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
 
 const ENDPOINT_KEY = "ax-studio-endpoint";
 
-// Allow auto-connect via ?endpoint=<url> query param. When ax serve prints
+// Allow auto-connect via ?endpoint=<url> query param. When ax studio prints
 // "open in studio    https://ax.necmttn.com/studio/?endpoint=http://...",
 // clicking the link writes the endpoint to localStorage and strips the
 // query so reloads don't re-trigger the path.

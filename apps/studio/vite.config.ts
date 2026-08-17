@@ -16,7 +16,7 @@ const STUDIO_VERSION = ((): string => {
 /**
  * Studio SPA build with 3 targets, selected via STUDIO_TARGET:
  *
- *   daemon  - served by `ax serve` (base `/`, real /api proxy, emits ./dist)
+ *   daemon  - served by `ax studio` (base `/`, real /api proxy, emits ./dist)
  *   web     - hosted at ax.necmttn.com/studio/ (base `/studio/`, mock fixtures,
  *             emits ./dist-studio; staged into the site by scripts/stage-studio.ts)
  *   desktop - bundled into the desktop shell (origin-root base `/`, mock fixtures,

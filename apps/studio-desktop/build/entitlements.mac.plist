@@ -12,7 +12,7 @@
 	     lmdb / other dylibs whose signing identity differs from the app's. -->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
-	<!-- ax serve / surreal are launched with env vars (DYLD_*, AX_*) set -->
+	<!-- ax studio is launched with env vars (DYLD_*, AX_*) set -->
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<true/>
 </dict>

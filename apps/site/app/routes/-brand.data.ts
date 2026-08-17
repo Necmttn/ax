@@ -137,7 +137,7 @@ export const NAMING_CANON: readonly NamingEntry[] = [
   { command: "ax doctor", desc: "System check.", status: "shipped" },
   { command: "ax retro", desc: "Session retrospective.", status: "shipped" },
   { command: "ax wrapped", desc: "Annual recap cards.", status: "shipped" },
-  { command: "ax serve", desc: "The dashboard daemon (ax studio lives at /studio).", status: "shipped" },
+  { command: "ax studio", desc: "Opens the local studio over your snapshot; runs only while a client is attached.", status: "shipped" },
   { command: "ax improve", desc: "Rank proposals, accept them, track verdicts.", status: "shipped" },
   { command: "ax routing", desc: "Mine dispatch history, route mechanical work to cheaper models.", status: "shipped" },
 ];

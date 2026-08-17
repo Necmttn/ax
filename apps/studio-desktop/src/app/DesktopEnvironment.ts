@@ -58,7 +58,7 @@ export interface DesktopEnvironmentShape {
      */
     readonly preloadPath: string;
     /**
-     * Entry point for `ax serve` source.
+     * Entry point for `ax studio` source.
      * Packaged -> `<appRoot>/ax-src/apps/axctl/src/cli/index.ts`;
      * dev -> repo path.
      */

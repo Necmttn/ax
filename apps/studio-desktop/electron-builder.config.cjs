@@ -69,15 +69,15 @@ module.exports = {
     // `if (relative === "node_modules") return false` - it drops the top-level
     // node_modules of any copy root (electron-userland/electron-builder#867).
     // So this entry copies everything UNDER ax-src EXCEPT its node_modules; the
-    // staged `bun install` tree (effect, surrealdb, durable-streams, lmdb, ...)
-    // would silently vanish and the bundled `ax serve` dies with
+    // staged `bun install` tree (effect, @opentui/react, ...)
+    // would silently vanish and the bundled `ax studio` dies with
     // `Cannot find package 'effect'` (#616, defect #1). The hardcoded check
     // fires on the literal relative path "node_modules", and runs BEFORE any
     // `filter` patterns, so no include glob can rescue it.
     { from: "resources/ax-src", to: "ax-src" },
     // ...so we copy node_modules via a SEPARATE entry whose copy ROOT is the
     // node_modules dir itself. Its children have relative paths like "effect" /
-    // "surrealdb" (never the literal "node_modules"), so the exclusion never
+    // "@opentui" (never the literal "node_modules"), so the exclusion never
     // fires, and nested package node_modules (relative "effect/node_modules")
     // are copied too - only the COPY-ROOT node_modules is special-cased.
     // Reproduces the runtime layout Resources/ax-src/node_modules verbatim.

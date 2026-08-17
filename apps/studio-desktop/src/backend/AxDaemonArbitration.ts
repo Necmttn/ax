@@ -8,7 +8,7 @@
  * answering healthily on the studio port?
  *
  * - healthy   -> ATTACH. Something (another desktop instance, or a manually
- *   run `ax studio`/`ax serve` from the CLI) already owns the port; do not
+ *   run `ax studio` from the CLI) already owns the port; do not
  *   spawn a second one. Open the window against it.
  * - unhealthy -> SPAWN. Bring up our own supervised `ax studio` process. If
  *   the port turns out to be genuinely occupied by something unrelated, the

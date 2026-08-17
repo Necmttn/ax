@@ -601,7 +601,7 @@ describe("CacheRead", () => {
         await dylibEnv(async () => {
             const p = paths("ax-seam-lazy-");
             // No snapshot exists at all. Building and releasing the layer must
-            // still succeed - this is the `ax serve` / `ax mcp` startup shape.
+            // still succeed - this is the `ax studio` / `ax mcp` startup shape.
             await run(
                 Effect.gen(function* () {
                     const read = yield* CacheRead;
@@ -678,10 +678,10 @@ describe("CacheRead", () => {
 
     /**
      * The long-lived-reader case, and the reason the memoized connection cannot
-     * simply be kept: `ax serve` and `ax mcp` hold ONE `CacheRead` for the whole
+     * simply be kept: `ax studio` and `ax mcp` hold ONE `CacheRead` for the whole
      * process lifetime. A publish renames a NEW file over the snapshot path, so a
      * reader that keeps its first handle keeps reading the old inode - every
-     * request after the first ingest answered stale data until the daemon
+     * request after the first ingest answered stale data until the process
      * restarted. The reader must notice the swap and reopen.
      */
     dtest("a long-lived reader observes a republished snapshot", async () => {

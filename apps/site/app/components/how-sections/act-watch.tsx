@@ -2,7 +2,8 @@ import { PROVIDERS } from "~/components/landing-v2/supports-strip";
 
 // ACT 1 - WATCH. The five harnesses as a designed row of transcript sources
 // feeding one local graph. Static, designed (no animation) - the LIVE badge
-// carries the "it's running right now" energy.
+// marks the graph as current: a stale read quietly forks a catch-up ingest,
+// there is no standing daemon watching it.
 
 type Source = {
   key: string;
@@ -85,15 +86,15 @@ export function ActWatch() {
               <span className="how-sink-title">typed local graph</span>
               <span className="how-sink-host">duckdb &middot; local file</span>
               <span className="how-sink-sub">
-                a background watcher ingests new runs the moment they land
+                a stale read quietly forks a catch-up ingest
               </span>
             </div>
           </div>
         </div>
 
         <p className="how-act-note">
-          The watcher tails your session dirs and ingests in the background
-          &mdash; the loop is pull-based, never a per-turn hook that blocks your
+          Read a stale graph and ax quietly forks a catch-up ingest in the
+          background &mdash; pull-based, never a per-turn hook that blocks your
           agent.
         </p>
       </div>

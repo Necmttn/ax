@@ -304,7 +304,7 @@ claude-sonnet-4             54          120   18.7%        201,330`,
         job: "Your ranked digest board - the ax signal a session-start hook pushes into the agent's context so value arrives without being asked for.",
         signature: "ax digest [--json] [--refresh]",
         flags: [
-          { flag: "--refresh", desc: "recompute the snapshot now instead of waiting for the watcher" },
+          { flag: "--refresh", desc: "recompute the snapshot now instead of waiting for the background catch-up ingest" },
           { flag: "--json", desc: "print the raw snapshot JSON" },
         ],
         receipt: `$ ax digest
@@ -406,7 +406,7 @@ top commands:
   session:9b2c1f4a  [claude-code]  acme-api  idle=2026-06-12T11:02:14Z
   session:71d0e8aa  [codex]        acme-api  ended_at=2026-06-11T16:40:08Z`,
         detail: [
-          "The retro loop is pull-based: a watcher surfaces the backlog and the /retro skill drains it. ax does not use a Stop hook.",
+          "The retro loop is pull-based: /retro surfaces and drains the backlog when you run it. ax does not use a Stop hook.",
           "ax retro pending lists sessions with no `reviewed` edge yet (idle or ended); claude-subagent rows are hidden by default.",
           "ax retro brief --session=<id> writes .ax/tasks/retro/<key>.md for the retro-reviewer subagent.",
           "ax retro reflect walks clustered retro-derived proposals interactively; meta emits a JSON snapshot for a deep retro; plan registers an agent-drafted plan as a proposal.",
@@ -623,7 +623,7 @@ ax profile - @octocat  (last 30d)
         detail: [
           "ax profile publish creates a public gist once and PATCHes it in place; the first run shows the exact JSON, asks for consent, then opens a community registration PR.",
           "ax profile widget creates or updates `username/username` README.md with a marker-delimited block; re-runs replace only the ax markers.",
-          "--if-stale=<hours> is the watcher path: a no-op until first consent, then it republishes/refreshes when stale.",
+          "--if-stale=<hours> guards repeat runs: a no-op until first consent, then it republishes/refreshes only once the gist is that stale.",
           "ax profile unpublish deletes the gist and local publish state (and resets the sticky --no-cost).",
           "ax profile interview emits a brief; an agent interviews you (draft-then-confirm) and pipes the result to `ax profile interview submit`, which validates it into ~/.ax/profile-highlights.json. The next `ax profile publish` folds these user-authored highlights into your gist.",
         ],
@@ -687,7 +687,7 @@ pattern PR: https://github.com/Necmttn/ax/pull/999`,
         receipt: `$ ax otlpd
 ax otlpd listening on http://127.0.0.1:1738`,
         detail: [
-          "A standalone micro-listener that spools OTLP JSON to disk without booting the full serve daemon; a LaunchAgent (com.necmttn.ax-otlpd) can keep it running.",
+          "A standalone micro-listener that spools OTLP JSON to disk without opening the full ax studio session; a LaunchAgent (com.necmttn.ax-otlpd) can keep it running.",
         ],
       },
       {
@@ -763,14 +763,16 @@ verified install - hand the onboarding brief to your agent`,
       },
       {
         name: "doctor",
-        job: "Check local installation health (daemon, watcher, DB, skills).",
+        job: "Check local installation health (paths, cache freshness, skills).",
         signature: "ax doctor [--json]",
         flags: [{ flag: "--json", desc: "machine output" }],
         receipt: `$ ax doctor
-daemon     ok (pid 48213)
-watcher    ok
-database   ok (127.0.0.1:8521)
-skills     3 installed`,
+axctl doctor
+  ok   platform: darwin - no daemon required; otlpd (macOS launchd) is available
+  ok   binary: /Users/you/.local/bin/axctl
+  ok   data-dir: /Users/you/.local/share/ax
+  ok   cache: last successful ingest: 2026-08-17T06:06:49.861Z
+  ok   otlpd: not installed (telemetry consent not granted; 'ax install --telemetry' opts in)`,
       },
       {
         name: "version",
@@ -790,13 +792,11 @@ update available: 0.29.0 -> 0.30.0`,
       },
       {
         name: "daemon",
-        sub: ["status", "start", "stop", "restart"],
-        job: "Manage the local launchd services (DB + watcher).",
-        signature: "ax daemon status|start|stop|restart",
+        job: "Retired. ax runs no background daemons; kept so the old command answers clearly.",
+        signature: "ax daemon status",
         flags: [],
         receipt: `$ ax daemon status
-daemon   running (pid 48213)
-watcher  running`,
+ax no longer runs background daemons; the CLI reads a snapshot file directly.`,
       },
       {
         name: "uninstall",
