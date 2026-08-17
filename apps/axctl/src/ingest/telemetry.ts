@@ -27,7 +27,7 @@
  */
 import { Effect } from "effect";
 import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
-import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 
 export type IngestEventLevel = "debug" | "info" | "warn" | "error";
 
@@ -155,6 +155,41 @@ export const writeIngestStageStart = (
         yield* writeIngestRunHeartbeat(write, input.runId);
     });
 
+/**
+ * The terminal statuses a stage row can carry, and the ONE non-terminal one.
+ *
+ * `running` is written by {@link writeIngestStageStart} and must be replaced by
+ * one of the others on EVERY exit path. It was not, for a long time: the stage
+ * wrapper settled the row on success and on a typed failure but had no
+ * interruption arm, so the derive watchdog and the outer run deadline both
+ * stranded rows at `running` with no `ended_at` and no reason. 38 such rows
+ * accumulated, 3 of them inside a run that reported `ok` (#840).
+ *
+ * The four non-`ok` statuses are deliberately distinct, because they are
+ * distinct operator questions:
+ *  - `error`       -> the stage's own work failed; read `error_text`
+ *  - `timeout`     -> the derive watchdog capped it; the cap is the thing to raise
+ *  - `skipped`     -> never attempted, no budget left before the run deadline
+ *  - `interrupted` -> something outside the stage ended the run (deadline, SIGINT)
+ * Collapsing these into `error` would tell an operator to debug a stage that
+ * worked fine and simply ran out of clock.
+ */
+export type IngestStageTerminalStatus = "ok" | "error" | "timeout" | "skipped" | "interrupted";
+
+/**
+ * A settled stage outcome. `ok` carries counts; every non-`ok` status REQUIRES
+ * `errorText`, enforced by the union rather than by a convention someone has to
+ * remember - a terminal row with no reason is the defect this type exists to
+ * prevent.
+ */
+export type IngestStageOutcome =
+    | { readonly status: "ok"; readonly counts?: Record<string, number> }
+    | {
+        readonly status: Exclude<IngestStageTerminalStatus, "ok">;
+        readonly errorText: string;
+        readonly counts?: Record<string, number>;
+    };
+
 /** Settle a stage row and bump the run heartbeat. */
 export const writeIngestStageFinish = (
     write: CacheWriteService,
@@ -162,10 +197,7 @@ export const writeIngestStageFinish = (
         readonly runId: string;
         readonly source: string;
         readonly stage: string;
-        readonly status: "ok" | "error";
-        readonly counts?: Record<string, number>;
-        readonly errorText?: string;
-    },
+    } & IngestStageOutcome,
 ): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         yield* write.exec(
@@ -173,12 +205,37 @@ export const writeIngestStageFinish = (
             [
                 input.status,
                 jsonParam(input.counts ?? {}),
-                input.errorText ?? null,
+                input.status === "ok" ? null : input.errorText,
                 ingestStageId(input.runId, input.source, input.stage),
             ],
         );
         yield* writeIngestRunHeartbeat(write, input.runId);
     });
+
+/**
+ * Reconcile stage rows that a previous run left at `running`.
+ *
+ * A finalizer cannot run if the process was hard-killed (SIGKILL, power loss),
+ * so "settle on every exit path" can never be complete on its own - the next
+ * run has to clean up after the one that could not. Scoped to rows whose PARENT
+ * RUN is already terminal, so a genuinely concurrent run's live stages are never
+ * touched, and excludes the caller's own run id for the same reason.
+ *
+ * Returns the number of rows reconciled. Idempotent: a second call finds none.
+ */
+export const reconcileStrandedIngestStages = (
+    write: CacheWriteService,
+    currentRunId: string,
+): Effect.Effect<number, CacheReadError> =>
+    write.raw(
+        `UPDATE ingest_stage
+         SET status = 'interrupted',
+             ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+             error_text = COALESCE(error_text, 'interrupted - the run ended without settling this stage; reconciled by a later run')
+         WHERE status = 'running' AND run <> ?
+           AND run IN (SELECT id FROM ingest_run WHERE status <> 'running')`,
+        [currentRunId],
+    ).pipe(Effect.map((result) => result.rowsChanged));
 
 /**
  * Append one ledger event AND fan it out to in-process subscribers.

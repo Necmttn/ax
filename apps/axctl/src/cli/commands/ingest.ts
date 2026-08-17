@@ -1,5 +1,5 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, Layer, Option, Path, References } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Command, Flag } from "effect/unstable/cli";
 import { gcFileBuckets, type BlobGcResult } from "@ax/lib/blob-gc";
@@ -13,6 +13,8 @@ import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { duckdbAssetPathOption } from "../../duckdb-embed-wiring.ts";
 import { runIngest, withIngestRunFinish, type RunIngestResult } from "../../ingest/run.ts";
+import { resolveIngestDeadlineSeconds } from "../../ingest/deadline.ts";
+import { snapshotPath } from "@ax/lib/duckdb/client";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import type { OtelRetentionResult } from "../../otel/retention.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
@@ -323,7 +325,21 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         const commandName = opts.command ?? "ingest";
         const cfg = yield* AxConfig;
         const path = yield* Path.Path;
-        const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
+        // The wall-clock budget is resolved PER RUN, not baked in: a warm
+        // incremental run wants the 900s tripwire, and a first-run backfill
+        // legitimately needs hours. One constant cannot be both, which is why
+        // every first ingest used to fail (#830). "First run" = no published
+        // snapshot yet; `fs.exists` is fail-open to false, so a filesystem
+        // hiccup degrades to today's behaviour rather than granting hours.
+        const deadline = resolveIngestDeadlineSeconds({
+            configuredSeconds: cfg.knobs.ingestTimeoutSeconds,
+            knobExplicitlySet: (process.env.AX_INGEST_TIMEOUT_SECONDS ?? "").trim().length > 0,
+            firstRun: !(yield* (yield* FileSystem.FileSystem)
+                .exists(snapshotPath())
+                .pipe(Effect.orElseSucceed(() => true))),
+        });
+        const timeoutSeconds = deadline.seconds;
+        if (deadline.upgraded) yield* Effect.logInfo(`ingest: ${deadline.reason}`);
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.
         const runId = runIdFor(commandName);

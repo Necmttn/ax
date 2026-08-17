@@ -625,15 +625,109 @@ export const withCacheWrite = <A, E, R>(
                     // its body succeeding says nothing about the state of the
                     // database it would be publishing.
                     if (options.publish !== false) {
-                        yield* opened.db
-                            .publishSnapshot(options.livePath, target, { from: conn })
-                            .pipe(Effect.mapError((err) => toPublishError(err, target)));
+                        const safe = yield* publishWouldNotDestroyData(fs, conn, target);
+                        if (safe) {
+                            yield* opened.db
+                                .publishSnapshot(options.livePath, target, { from: conn })
+                                .pipe(Effect.mapError((err) => toPublishError(err, target)));
+                        }
                     }
                     return value;
                 }),
             (conn) => conn.close.pipe(Effect.andThen(Effect.sync(opened.close))),
         );
     });
+
+/** Escape hatch for the empty-publish guard below. Only a caller that MEANS to
+ *  replace a populated snapshot with an empty one should set it. */
+const ALLOW_EMPTY_PUBLISH_ENV = "AX_ALLOW_EMPTY_PUBLISH";
+
+/**
+ * Refuse to replace a POPULATED snapshot with an EMPTY one.
+ *
+ * This is a data-loss backstop, and it is here because the failure it prevents
+ * has now happened five times to a real store. The published snapshot went to
+ * zero rows while the live database kept everything, and every read surface
+ * afterwards answered "no data" instead of failing - the worst shape of bug this
+ * project produces, because exit code 0 makes it look like an answer.
+ *
+ * `snapshotPath()` honouring `AX_DATA_DIR` (the fix for the first four) closed
+ * the path-asymmetry route. It did NOT close the class: ANY process that opens a
+ * fresh live database and publishes with the default target still overwrites the
+ * real snapshot, and on the fifth occurrence the culprit could not be identified
+ * afterwards at all. So this guard deliberately does not care WHO is publishing
+ * or WHY. It compares outcomes, which is the only thing that reliably
+ * distinguishes a rebuild from a wipe.
+ *
+ * THE RULE IS NARROW ON PURPOSE: refuse only when the incoming database has zero
+ * sessions and the existing snapshot has some. That cannot fire on any honest
+ * run - a store with data keeps publishing normally, a first publish onto no
+ * snapshot is allowed, an empty-onto-empty publish is allowed, and `ax ingest
+ * --reset` only clears skill tables so its sessions survive. A "refuse if much
+ * smaller" heuristic was rejected: it needs a threshold, and a threshold is a
+ * guess that either fires on a legitimate prune or misses a partial wipe.
+ *
+ * Failure to EVALUATE the guard is not failure to publish: an unreadable or
+ * corrupt existing snapshot returns `true` (publish proceeds), because refusing
+ * to publish over a file we cannot read would wedge recovery.
+ */
+const publishWouldNotDestroyData = (
+    fs: FileSystem.FileSystem,
+    conn: DuckDbConnection,
+    target: string,
+): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+        if ((process.env[ALLOW_EMPTY_PUBLISH_ENV] ?? "").trim().length > 0) return true;
+
+        const exists = yield* fs.exists(target).pipe(Effect.orElseSucceed(() => false));
+        if (!exists) return true; // first publish - nothing to lose
+
+        const incoming = yield* sessionCount(conn).pipe(Effect.orElseSucceed(() => -1));
+        // Only an unambiguously EMPTY incoming database can trip the guard. -1
+        // means the count could not be read, which is not evidence of emptiness.
+        if (incoming !== 0) return true;
+
+        const existing = yield* countSessionsIn(conn, target).pipe(Effect.orElseSucceed(() => 0));
+        if (existing <= 0) return true; // empty over empty: no loss either way
+
+        yield* Effect.logError(
+            `ax cache: REFUSED to publish an empty snapshot over a populated one - ` +
+                `the incoming database has 0 sessions and ${target} has ${existing}. ` +
+                `The existing snapshot is untouched and your data is safe. ` +
+                `This usually means a process opened a FRESH live database and published ` +
+                `with the default target: pin AX_DUCKDB_SNAPSHOT (or AX_DATA_DIR) for ` +
+                `isolated runs, or pass 'publish: false' for a maintenance write. ` +
+                `Set ${ALLOW_EMPTY_PUBLISH_ENV}=1 if replacing it is genuinely what you want.`,
+        );
+        return false;
+    });
+
+/** Sessions in the database this connection is attached to. */
+const sessionCount = (
+    conn: DuckDbConnection,
+): Effect.Effect<number, DuckDbQueryError | DuckDbUnsupportedTypeError> =>
+    conn.query("SELECT CAST(count(*) AS DOUBLE) AS n FROM session").pipe(
+        // Rows are keyed by COLUMN NAME, not position - `rows[0][0]` is
+        // `undefined`, which would silently read every count as 0 and turn this
+        // guard into a no-op. The projection casts to DOUBLE so no BIGINT
+        // reaches JS as a bigint (see CLAUDE.md on `raw`).
+        Effect.map((result) => Number(result.rows[0]?.n ?? 0)),
+    );
+
+/** Sessions in ANOTHER database file, read-only, without disturbing it. The
+ *  alias is unlikely to collide and is detached on every exit path. */
+const countSessionsIn = (
+    conn: DuckDbConnection,
+    path: string,
+): Effect.Effect<number, DuckDbQueryError | DuckDbUnsupportedTypeError> =>
+    Effect.acquireUseRelease(
+        conn.exec(`ATTACH '${path.replace(/'/g, "''")}' AS ax_publish_guard (READ_ONLY)`),
+        () =>
+            conn.query("SELECT CAST(count(*) AS DOUBLE) AS n FROM ax_publish_guard.session").pipe(
+                Effect.map((result) => Number(result.rows[0]?.n ?? 0)),
+            ),
+        () => conn.exec("DETACH ax_publish_guard").pipe(Effect.ignore),
+    );
 
 /**
  * Say out loud what the writer changed. Silent sanitisation is the failure mode

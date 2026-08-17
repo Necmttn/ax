@@ -15,8 +15,27 @@ import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 const runPipeline = <S extends BaseStageStats, R, E>(
     stages: ReadonlyArray<StageDef<S, R, E>>,
     ctx: IngestContext,
-    opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
+    opts: {
+        readonly deadlineMs?: number;
+        readonly reserveMs?: number;
+        readonly recordStageOutcome?: (
+            stageKey: string,
+            outcome: { readonly status: "timeout" | "skipped"; readonly errorText: string },
+        ) => Effect.Effect<void>;
+    } = {},
 ) => runPipelineWithWrite(stages, ctx, {} as CacheWriteService, opts);
+
+/** Collect what the runner reports about outcomes only IT can describe. */
+const outcomeRecorder = () => {
+    const seen: Array<{ key: string; status: string; errorText: string }> = [];
+    const recordStageOutcome = (
+        key: string,
+        outcome: { readonly status: "timeout" | "skipped"; readonly errorText: string },
+    ) => Effect.sync(() => {
+        seen.push({ key, status: outcome.status, errorText: outcome.errorText });
+    });
+    return { seen, recordStageOutcome };
+};
 
 const stage = (key: string, deps: string[]): StageDef => ({
     meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
@@ -408,6 +427,54 @@ describe("derive-stage watchdog (#671)", () => {
         });
     });
 
+    it("reports the capped stage as `timeout`, naming the cap that fired (#840)", async () => {
+        // Without this, the stage's own finalizer can only say "interrupted" -
+        // it cannot know a watchdog cap was the reason. The precise status is
+        // the difference between "raise AX_STAGE_TIMEOUT_SECONDS" and "debug a
+        // stage that was working fine".
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const rec = outcomeRecorder();
+            const hang: StageDef = {
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                run: () => Effect.never,
+            };
+            await Effect.runPromise(
+                runPipeline([hang], ctx(), { recordStageOutcome: rec.recordStageOutcome }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(rec.seen).toHaveLength(1);
+            expect(rec.seen[0]!.key).toBe("hang");
+            expect(rec.seen[0]!.status).toBe("timeout");
+            expect(rec.seen[0]!.errorText).toContain("AX_STAGE_TIMEOUT_SECONDS");
+        });
+    });
+
+    it("reports nothing when no stage is capped", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const rec = outcomeRecorder();
+            const fine: StageDef = {
+                meta: StageMeta.make({ key: "fine", deps: [], tags: ["derive"] }),
+                run: () => Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: "fine" })),
+            };
+            await Effect.runPromise(
+                runPipeline([fine], ctx(), { recordStageOutcome: rec.recordStageOutcome }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(rec.seen).toEqual([]);
+        });
+    });
+
+    it("still completes when no recorder is supplied (the hook is optional)", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const hang: StageDef = {
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                run: () => Effect.never,
+            };
+            const results = await Effect.runPromise(
+                runPipeline([hang], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(results[0]!.summary).toBe("timed out (watchdog)");
+        });
+    });
+
     it("does NOT watchdog a non-derive (ingest) stage that runs past the cap", async () => {
         await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const slowIngest: StageDef = {
@@ -458,6 +525,29 @@ describe("runPipeline derive budget (#697)", () => {
         const derive = stats.find((s) => s.summary.includes("skipped"));
         expect(derive).toBeDefined();
         expect(stats.some((s) => s.summary === "claude ok")).toBe(true);
+    });
+
+    it("records a budget-skipped stage as `skipped` so it is not invisible (#840)", async () => {
+        // A skipped stage never starts, so it produces no Exit and, before this,
+        // no row at all - indistinguishable from a stage that was never
+        // configured. That ambiguity is what made a blank skill graph read as a
+        // broken feature rather than a starved derive.
+        const rec = outcomeRecorder();
+        await Effect.runPromise(
+            runPipeline([instant("claude", ["ingest"]), hangs("derive-metrics", ["derive"])], ctx, {
+                deadlineMs: Date.now() - 1,
+                reserveMs: 0,
+                recordStageOutcome: rec.recordStageOutcome,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+        );
+        expect(rec.seen).toHaveLength(1);
+        expect(rec.seen[0]!.key).toBe("derive-metrics");
+        expect(rec.seen[0]!.status).toBe("skipped");
+        // The reason must survive into the row, not just the log line.
+        expect(rec.seen[0]!.errorText.length).toBeGreaterThan(0);
+        // An `ingest`-tagged stage is exempt from the budget and must not be
+        // reported as skipped.
+        expect(rec.seen.some((s) => s.key === "claude")).toBe(false);
     });
 
     it("a derive stage is capped by the time left, not its static 300s cap", async () => {
