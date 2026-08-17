@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
-    buildRetroPlanStatements,
+    buildRetroPlanKeys,
+    cmdRetroPlan,
     parseRetroPlanArgs,
     type RetroPlanArgs,
 } from "./retro-plan.ts";
@@ -151,139 +156,19 @@ describe("parseRetroPlanArgs", () => {
     });
 });
 
-describe("buildRetroPlanStatements dedupeSig", () => {
+describe("buildRetroPlanKeys dedupeSig", () => {
     test("matches dedupeSig(form, normalizeTitle(title)) from derive-proposals", () => {
         const args = baseArgs();
-        const built = buildRetroPlanStatements(args, 1_700_000_000_000);
+        const built = buildRetroPlanKeys(args, 1_700_000_000_000);
         const expectedSig = dedupeSig(args.form, normalizeTitle(args.title));
         expect(built.sig).toBe(expectedSig);
     });
 });
 
-describe("buildRetroPlanStatements SQL shape", () => {
-    test("emits CREATE proposal + payload + experiment", () => {
-        const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        expect(built.statements.length).toBe(3);
-        const sql = built.statements.join("\n");
-        expect(sql).toMatch(/CREATE proposal:`[^`]+` CONTENT/);
-        expect(sql).toMatch(/CREATE skill_proposal:`[^`]+` CONTENT/);
-        expect(sql).toMatch(/CREATE experiment:`[^`]+` CONTENT/);
-    });
-
-    test("proposal row uses status='accepted'", () => {
-        const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        expect(built.proposalStatus).toBe("accepted");
-        expect(built.statements[0]).toContain('status: "accepted"');
-    });
-
-    test("baseline JSON embeds plan_path + evidence_retros", () => {
-        const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        const proposalStmt = built.statements[0];
-        expect(proposalStmt).toContain("plan_path");
-        expect(proposalStmt).toContain("/tmp/ax-plan.md");
-        expect(proposalStmt).toContain("retro:r1");
-        expect(proposalStmt).toContain("retro:r2");
-        expect(proposalStmt).toContain("retro_meta_plan");
-    });
-
-    test("guidance form writes guidance_proposal payload", () => {
-        const built = buildRetroPlanStatements(
-            baseArgs({ form: "guidance", title: "Add rule X" }),
-            1,
-        );
-        expect(built.statements[1]).toMatch(/CREATE guidance_proposal:/);
-        expect(built.statements[1]).toContain("file_target");
-    });
-
-    test("hook form writes hook_proposal payload", () => {
-        const built = buildRetroPlanStatements(
-            baseArgs({
-                form: "hook",
-                title: "Pre-Bash guard hook",
-                safety: {
-                    recoveryPath: "Remove the hook entry from settings.json",
-                    smokeTestCommand: "bun test src/improve/lifecycle.test.ts",
-                    disableCommand: "mv hook.sh hook.sh.disabled",
-                    failureMode: "fail_open",
-                },
-            }),
-            1,
-        );
-        expect(built.proposalStatus).toBe("open");
-        expect(built.experimentKey).toBeNull();
-        expect(built.safetyMessage).toBe(
-            "hook proposal has complete safety gates; run ax improve accept to emit a manual task brief",
-        );
-        expect(built.statements[1]).toMatch(/CREATE hook_proposal:/);
-        expect(built.statements[1]).toContain("event_name");
-        expect(built.statements[1]).toContain("recovery_path");
-        expect(built.statements[1]).toContain("Remove the hook entry from settings.json");
-        expect(built.statements[1]).toContain("bun test src/improve/lifecycle.test.ts");
-        expect(built.statements[1]).toContain("mv hook.sh hook.sh.disabled");
-        expect(built.statements[1]).toContain("fail_open");
-        expect(built.statements[1]).toContain("failure_mode");
-        expect(built.statements.length).toBe(2);
-    });
-
-    test("hook form without safety values stays open with missing gates", () => {
-        const built = buildRetroPlanStatements(
-            baseArgs({ form: "hook", title: "Pre-Bash guard hook" }),
-            1,
-        );
-        expect(built.safetyMessage).toBe(
-            "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
-        );
-    });
-
-    test("automation form writes automation_proposal payload", () => {
-        const built = buildRetroPlanStatements(
-            baseArgs({
-                form: "automation",
-                title: "Weekly cleanup",
-                safety: {
-                    recoveryPath: "Unload the LaunchAgent",
-                    smokeTestCommand: "launchctl print gui/$UID/com.ax.weekly",
-                    disableCommand: "launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist",
-                    failureMode: "fail_open",
-                },
-            }),
-            1,
-        );
-        expect(built.proposalStatus).toBe("open");
-        expect(built.experimentKey).toBeNull();
-        expect(built.safetyMessage).toBe(
-            "automation proposal has complete safety gates; run ax improve accept to emit a manual task brief",
-        );
-        expect(built.statements[1]).toMatch(/CREATE automation_proposal:/);
-        expect(built.statements[1]).toContain("trigger_signal");
-        expect(built.statements[1]).toContain("recovery_path");
-        expect(built.statements[1]).toContain("Unload the LaunchAgent");
-        expect(built.statements[1]).toContain("launchctl print gui/$UID/com.ax.weekly");
-        expect(built.statements[1]).toContain("launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist");
-        expect(built.statements[1]).toContain("fail_open");
-        expect(built.statements[1]).toContain("failure_mode");
-        expect(built.statements.length).toBe(2);
-    });
-
-    test("experiment row uses planPath when artifactPath is null", () => {
-        const built = buildRetroPlanStatements(baseArgs({ artifactPath: null }), 1);
-        const expStmt = built.statements[2];
-        expect(expStmt).toContain("/tmp/ax-plan.md");
-        expect(expStmt).toContain('status: "scaffolded"');
-    });
-
-    test("experiment row prefers artifactPath when provided", () => {
-        const built = buildRetroPlanStatements(
-            baseArgs({ artifactPath: "/tmp/skill.md" }),
-            1,
-        );
-        const expStmt = built.statements[2];
-        expect(expStmt).toContain("/tmp/skill.md");
-    });
-
+describe("buildRetroPlanKeys derivations", () => {
     test("proposal and experiment keys are stable content hashes", () => {
-        const first = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        const second = buildRetroPlanStatements(baseArgs(), 1_800_000_000_000);
+        const first = buildRetroPlanKeys(baseArgs(), 1_700_000_000_000);
+        const second = buildRetroPlanKeys(baseArgs(), 1_800_000_000_000);
         expect(first.proposalKey).toMatch(/^[0-9a-f]{32}$/);
         expect(first.experimentKey).toMatch(/^[0-9a-f]{32}$/);
         expect(second.proposalKey).toBe(first.proposalKey);
@@ -291,27 +176,19 @@ describe("buildRetroPlanStatements SQL shape", () => {
     });
 
     test("--leave-open: proposal status is 'open' (not 'accepted')", () => {
-        const built = buildRetroPlanStatements(
+        const built = buildRetroPlanKeys(
             baseArgs({ leaveOpen: true }),
             1_700_000_000_000,
         );
-        expect(built.statements[0]).toContain('status: "open"');
-        expect(built.statements[0]).not.toContain('status: "accepted"');
         expect(built.proposalStatus).toBe("open");
     });
 
-    test("--leave-open: NO experiment row emitted", () => {
-        const built = buildRetroPlanStatements(
+    test("--leave-open: no experiment key, so cmdRetroPlan writes no experiment row", () => {
+        const built = buildRetroPlanKeys(
             baseArgs({ leaveOpen: true }),
             1_700_000_000_000,
         );
         expect(built.experimentKey).toBeNull();
-        const sql = built.statements.join("\n");
-        expect(sql).not.toMatch(/UPSERT experiment:|CREATE experiment:/);
-        // Still emits proposal + per-form payload (so accept later has data).
-        expect(built.statements.length).toBe(2);
-        expect(sql).toMatch(/CREATE proposal:`[^`]+` CONTENT/);
-        expect(sql).toMatch(/CREATE skill_proposal:`[^`]+` CONTENT/);
     });
 
     test("parseRetroPlanArgs picks up --leave-open", () => {
@@ -327,5 +204,100 @@ describe("buildRetroPlanStatements SQL shape", () => {
             { checkPlanPath: false },
         );
         expect(parsed.leaveOpen).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// What `ax retro plan` actually WRITES.
+//
+// These tests replace an older block that asserted on SurrealQL statement text
+// returned by the builder. That text was never executed - `cmdRetroPlan` writes
+// through `judgment.transaction`, field by field - so the assertions proved
+// only that a dead string had the right shape. The behaviour they were
+// standing in for (which payload table each form writes, whether an experiment
+// row appears) is real, so it is asserted here against the live write path.
+// ---------------------------------------------------------------------------
+
+describe("cmdRetroPlan writes", () => {
+    const planPath = `${tmpdir()}/ax-retro-plan-test.md`;
+
+    /** Run the command against a recording Judgment; return the tables written, in order. */
+    const writesFor = async (argv: readonly string[]): Promise<Array<{ table: string; row: Record<string, unknown> }>> => {
+        await Bun.write(planPath, "# plan\n");
+        const writes: Array<{ table: string; row: Record<string, unknown> }> = [];
+        const log = console.log;
+        console.log = () => {};
+        try {
+            await Effect.runPromise(
+                cmdRetroPlan([...argv, `--plan-path=${planPath}`]).pipe(
+                    Effect.provide(judgmentTestLayer(() => [], () => 0, (table, row) => {
+                        writes.push({ table, row: row as Record<string, unknown> });
+                    })),
+                    Effect.provide(BunFileSystem.layer),
+                ),
+            );
+        } finally {
+            console.log = log;
+        }
+        return writes;
+    };
+
+    const argvFor = (form: string, extra: readonly string[] = []): readonly string[] => [
+        "--slug=test-slug",
+        `--form=${form}`,
+        "--title=Pre-Bash guard refinement",
+        "--hypothesis=Bash failures cluster around missing-dir errors.",
+        ...extra,
+    ];
+
+    test("skill form writes proposal + skill_proposal + experiment", async () => {
+        const writes = await writesFor(argvFor("skill"));
+        expect(writes.map((w) => w.table)).toEqual(["proposal", "skill_proposal", "experiment"]);
+        expect(writes[0]!.row.status).toBe("accepted");
+        expect(writes[0]!.row.form).toBe("skill");
+    });
+
+    test("guidance form writes a guidance_proposal payload targeting CLAUDE.md", async () => {
+        const writes = await writesFor(argvFor("guidance"));
+        expect(writes.map((w) => w.table)).toEqual(["proposal", "guidance_proposal", "experiment"]);
+        expect(writes[1]!.row.file_target).toBe("CLAUDE.md");
+    });
+
+    test("hook form writes a hook_proposal carrying its safety gates", async () => {
+        const writes = await writesFor(argvFor("hook", [
+            "--recovery-path=Remove the hook entry from settings.json",
+            "--smoke-test=bun test src/improve/lifecycle.test.ts",
+            "--disable-command=mv hook.sh hook.sh.disabled",
+            "--failure-mode=fail_open",
+        ]));
+        expect(writes.map((w) => w.table)).toEqual(["proposal", "hook_proposal"]);
+        expect(writes[1]!.row.event_name).toBe("PreToolUse");
+        expect(writes[1]!.row.recovery_path).toBe("Remove the hook entry from settings.json");
+        expect(writes[1]!.row.failure_mode).toBe("fail_open");
+        // A hook proposal stays open, so no experiment row is scaffolded.
+        expect(writes[0]!.row.status).toBe("open");
+    });
+
+    test("automation form writes an automation_proposal", async () => {
+        const writes = await writesFor(argvFor("automation"));
+        expect(writes.map((w) => w.table)).toContain("automation_proposal");
+    });
+
+    test("--leave-open writes no experiment row", async () => {
+        const writes = await writesFor(argvFor("skill", ["--leave-open"]));
+        expect(writes.map((w) => w.table)).toEqual(["proposal", "skill_proposal"]);
+        expect(writes[0]!.row.status).toBe("open");
+    });
+
+    test("the experiment row prefers artifactPath over planPath", async () => {
+        const writes = await writesFor(argvFor("skill", ["--artifact-path=/tmp/skill.md"]));
+        const experiment = writes.find((w) => w.table === "experiment");
+        expect(experiment?.row.artifact_path).toBe("/tmp/skill.md");
+    });
+
+    test("without --artifact-path the experiment row falls back to the plan path", async () => {
+        const writes = await writesFor(argvFor("skill"));
+        const experiment = writes.find((w) => w.table === "experiment");
+        expect(experiment?.row.artifact_path).toBe(planPath);
     });
 });

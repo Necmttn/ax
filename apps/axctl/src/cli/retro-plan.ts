@@ -28,12 +28,6 @@ import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { stableId } from "@ax/lib/stable-id";
-import {
-    recordRef,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
 import { fail as sharedFail, parseCsvFlag } from "./commands/shared.ts";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
@@ -166,19 +160,20 @@ export interface PlanBuildResult {
     readonly experimentStatus: RetroPlanRegistrationPlan["experimentStatus"];
     readonly safetyMessage: string | null;
     readonly sig: string;
-    readonly statements: readonly string[];
 }
 
 /**
- * Pure builder: turn validated args into the SurrealQL statements that
- * insert proposal + per-form payload + experiment. Kept pure so the
- * test file can assert on the SQL shape without a DB.
+ * Pure builder: derive the stable keys and lifecycle statuses a retro plan
+ * writes under - proposal key, experiment key, dedupe signature, and the
+ * registration's proposal/experiment status. Kept pure so the test file can
+ * assert on key derivation without a DB.
  *
- * cites_evidence edges to retro records are intentionally NOT emitted -
- * the schema's `cites_evidence TO` union does not yet include `retro`.
- * Provenance is captured inside `proposal.baseline` JSON.
+ * It used to also return the SurrealQL statement text, which `cmdRetroPlan`
+ * never executed: the actual writes go through `judgment.transaction` below,
+ * field by field. The statements were asserted on by tests and reported
+ * nowhere, so they were removed rather than ported.
  */
-export const buildRetroPlanStatements = (
+export const buildRetroPlanKeys = (
     args: RetroPlanArgs,
     _nowMs: number = Date.now(),
 ): PlanBuildResult => {
@@ -194,97 +189,6 @@ export const buildRetroPlanStatements = (
         ? stableId("experiment", [proposalKey])
         : null;
 
-    const proposalRef = recordRef("proposal", proposalKey);
-
-    // Embed frequency snapshot into baseline so the checkpoint verdict math
-    // (current_frequency vs baseline.frequency) has a fixed reference point
-    // even after derive-retro-proposals re-counts on later passes.
-    const baseline = JSON.stringify({
-        source: "retro_meta_plan",
-        slug: args.slug,
-        plan_path: args.planPath,
-        evidence_retros: args.evidenceRetros,
-        frequency: args.frequency,
-    });
-
-    const statements: string[] = [];
-
-    statements.push(
-        `CREATE ${proposalRef} CONTENT ${surrealObject([
-            ["form", surrealString(args.form)],
-            ["title", surrealString(args.title)],
-            ["hypothesis", surrealString(args.hypothesis)],
-            ["dedupe_sig", surrealString(sig)],
-            ["frequency", String(args.frequency)],
-            ["confidence", surrealString(args.confidence)],
-            ["status", surrealString(registration.proposalStatus)],
-            ["baseline", surrealOptionString(baseline)],
-            ["updated_at", "time::now()"],
-        ])};`,
-    );
-
-    const payloadKey = stableId(`${args.form}_proposal`, [proposalKey]);
-    const payloadRef = recordRef(`${args.form}_proposal`, payloadKey);
-    if (args.form === "skill") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_pattern", surrealString(`retro_meta·slug=${args.slug}`)],
-                ["suspected_gap", surrealString(args.hypothesis)],
-                ["proposed_behavior", surrealString(`see plan: ${args.planPath}`)],
-                ["expected_impact", surrealOptionString(null)],
-            ])};`,
-        );
-    } else if (args.form === "guidance") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString("CLAUDE.md")],
-                ["section", surrealOptionString(null)],
-                ["suggested_text", surrealString(`see plan: ${args.planPath}`)],
-            ])};`,
-        );
-    } else if (args.form === "hook") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["event_name", surrealString("PreToolUse")],
-                ["target_tool", surrealOptionString(null)],
-                ["hook_command", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
-                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
-                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
-                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
-            ])};`,
-        );
-    } else {
-        // automation
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_signal", surrealString(`retro_meta·slug=${args.slug}`)],
-                ["schedule", surrealOptionString(null)],
-                ["action", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
-                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
-                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
-                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
-            ])};`,
-        );
-    }
-
-    if (experimentKey !== null) {
-        const experimentRef = recordRef("experiment", experimentKey);
-        statements.push(
-            `CREATE ${experimentRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["artifact_path", surrealString(args.artifactPath ?? args.planPath)],
-                ["scaffolded_at", "time::now()"],
-                ["status", surrealString(registration.experimentStatus ?? "scaffolded")],
-            ])};`,
-        );
-    }
-
     return {
         proposalKey,
         experimentKey,
@@ -292,7 +196,6 @@ export const buildRetroPlanStatements = (
         experimentStatus: registration.experimentStatus,
         safetyMessage: registration.safetyMessage,
         sig,
-        statements,
     };
 };
 
@@ -308,7 +211,7 @@ export const cmdRetroPlan = (
         if (!planExists) {
             fail(`--plan-path file not found: ${parsed.planPath}`);
         }
-        const built = buildRetroPlanStatements(parsed);
+        const built = buildRetroPlanKeys(parsed);
 
         const judgment = yield* Judgment;
         const hit = yield* findStoredProposal(built.sig);

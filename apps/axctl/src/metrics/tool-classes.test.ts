@@ -6,8 +6,6 @@ import {
     READ_COMMANDS,
     READ_TOOL_NAMES,
     canonicalEditToolName,
-    editOrReadToolSqlFilter,
-    editToolSqlFilter,
     isApplyPatchCall,
     isEditTool,
     isReadTool,
@@ -81,21 +79,6 @@ describe("canonicalEditToolName", () => {
     test("passes unknown names through", () => {
         expect(canonicalEditToolName("apply_patch")).toBe("apply_patch");
         expect(canonicalEditToolName("edit_file")).toBe("edit_file");
-    });
-});
-
-describe("SQL filter fragments", () => {
-    test("edit filter covers names + commands and is deref-free", () => {
-        expect(editToolSqlFilter).toContain("string::lowercase(name)");
-        expect(editToolSqlFilter).toContain('"apply_patch"');
-        expect(editToolSqlFilter).toContain("command_norm IN");
-        expect(editToolSqlFilter).not.toMatch(/\bin\.|\bout\./);
-    });
-    test("edit-or-read filter additionally covers read names + commands", () => {
-        expect(editOrReadToolSqlFilter).toContain('"read"');
-        expect(editOrReadToolSqlFilter).toContain('"rg"');
-        expect(editOrReadToolSqlFilter).toContain('"git grep"');
-        expect(editOrReadToolSqlFilter).not.toMatch(/\bin\.|\bout\./);
     });
 });
 

@@ -1,5 +1,4 @@
 import type { DerivedSignal } from "./signals.ts";
-import { surrealJson, surrealString } from "@ax/lib/shared/surql";
 import { GUIDANCE_STATUS_PROPOSED } from "../improve/lifecycle.ts";
 
 export interface GuidanceDraft {
@@ -41,20 +40,4 @@ export function guidanceFromSignal(signal: DerivedSignal): GuidanceDraft {
         metrics: signal.metrics,
         createdAt: signal.ts,
     };
-}
-
-export function buildGuidanceWriteStatements(guidance: GuidanceDraft): string[] {
-    const artifactStatements = guidance.evidenceIds.map((evidenceId) =>
-        `UPSERT artifact:\`${hashKey(evidenceId)}\` MERGE { kind: "signal_evidence", uri: ${surrealString(evidenceId)}, title: ${surrealString(evidenceId)}, raw: ${surrealJson({ evidenceId })}, created_at: time::now() };`,
-    );
-    const derivedFromStatements = guidance.evidenceIds.map((evidenceId) => {
-        const edgeKey = hashKey(`${guidance.versionKey}|${evidenceId}`);
-        return `RELATE guidance_version:\`${guidance.versionKey}\`->derived_from:\`${edgeKey}\`->artifact:\`${hashKey(evidenceId)}\` SET kind = "signal_evidence", labels = ${surrealJson({ evidenceId })};`;
-    });
-    return [
-        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${surrealString(guidance.slug)}, title: ${surrealString(guidance.title)}, status: ${surrealString(GUIDANCE_STATUS_PROPOSED)}, updated_at: time::now() };`,
-        `UPSERT guidance_version:\`${guidance.versionKey}\` CONTENT { guidance: guidance:\`${guidance.key}\`, version: "v1", text: ${surrealString(guidance.text)}, status: ${surrealString(guidance.status)}, scope: ${surrealString(guidance.scope)}, risk: ${surrealString(guidance.risk)}, evidence: ${surrealJson(guidance.evidenceIds)}, metrics_before: ${surrealJson(guidance.metrics)}, metrics_after: NONE, raw: ${surrealJson(guidance)}, created_at: d${surrealString(guidance.createdAt)} };`,
-        ...artifactStatements,
-        ...derivedFromStatements,
-    ];
 }
