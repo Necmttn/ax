@@ -352,7 +352,7 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
         } else {
             // Larger backlog the sample couldn't time: stay honest - no fabricated
             // ETA. Point at the live view instead of guessing a duration.
-            lines.push(`${prefix}couldn't time a sample on this machine; run it and watch live in ax serve → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT}`);
+            lines.push(`${prefix}couldn't time a sample on this machine; run it and watch live in ax studio → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT}`);
         }
         lines.push("  run it: ax ingest");
         return lines.join("\n");
@@ -367,7 +367,7 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     // the full total; on a partially-populated one it's labelled accordingly.
     const label = result.populated ? "remaining" : "total";
     lines.push(`  ${label}: ${remaining.total.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
-    lines.push(`  run it: ax ingest   (watch live in ax serve → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT})`);
+    lines.push(`  run it: ax ingest   (watch live in ax studio → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT})`);
     return lines.join("\n");
 }
 

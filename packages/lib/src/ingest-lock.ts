@@ -64,7 +64,9 @@
  * - module-level, canonical-path keyed - answers that. It is deliberately NOT
  * per-layer-instance: ax builds a fresh layer per `run(provide(...))` call, so a
  * Ref closed over by one instance is invisible to a second acquirer going through
- * another, which is exactly the `ax serve`-forking-an-ingest shape. Acquires for
+ * another - the old `ax serve`-forking-an-ingest shape (retired in studio
+ * ephemeral, wave 3) was one example, but any two ManagedRuntime instances
+ * built in the same process hit the same gap. Acquires for
  * one canonical path are additionally serialized by a per-path semaphore, so no
  * fiber can observe the window between "the lock file exists" and "this process
  * is registered as its holder". The semaphore covers the ACQUIRE only, never the

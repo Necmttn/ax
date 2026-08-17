@@ -115,7 +115,7 @@ function serveRootLanding(port: string): Response {
 
 /**
  * CORS so the public studio at https://ax.necmttn.com/studio/ can read
- * a user's local `axctl serve` daemon. Local-only loopback, no cookies/
+ * a user's local `axctl studio` process. Local-only loopback, no cookies/
  * credentials needed, so we echo the requesting origin and allow the
  * standard methods + content-type.
  */

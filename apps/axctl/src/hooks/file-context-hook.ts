@@ -390,7 +390,7 @@ export function renderFileMemoryBlock(input: FileMemoryRenderInput): string {
             `Corrections targeting this file (${input.corrections.length}):`,
             ...input.corrections.slice(0, 5).map(describeCorrection),
         ]);
-        refsFooter.push("turn/session ids resolve via SurrealDB MCP or `surreal sql`");
+        refsFooter.push("turn/session ids resolve with `ax sessions show <id>`");
     }
 
     if (input.commits.length > 0) {

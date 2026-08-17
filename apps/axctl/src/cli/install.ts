@@ -43,8 +43,8 @@ const BIN_DIR = posixPath.join(HOME, ".local", "bin");
 // otlpd is the one LaunchAgent that survives daemon subtraction (shipped in
 // wave 0; `ax otlpd` -> otel/spool-server.ts). Everything else - ax-db,
 // ax-watch, ax-derive-daily, ax-quota-refresh, ax-serve - is gone: embedded
-// DuckDB needs no daemon to hold it open, and ephemeral `ax serve`/`ax
-// studio` (wave 3's c-daemon-studio) run only while a client is attached.
+// DuckDB needs no daemon to hold it open, and ephemeral `ax studio`
+// (wave 3's c-daemon-studio) runs only while a client is attached.
 const OTLPD_LABEL = "com.necmttn.ax-otlpd";
 const OTLPD_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${OTLPD_LABEL}.plist`);
 
@@ -127,7 +127,6 @@ export const resolveTelemetryConsent = (
 
 export type OtlpdPlistDecision =
     | { readonly action: "write-and-load" }
-    | { readonly action: "write-only"; readonly note: string }
     | { readonly action: "unload" }
     | { readonly action: "noop" };
 
@@ -138,25 +137,16 @@ export type OtlpdPlistDecision =
  *     regardless of whatever is already on disk (loaded-by-prior-consent, or
  *     never-consented). That's what "preserve existing state" means.
  *   - "revoke" always unloads.
- *   - "grant" writes the plist, but only bootstraps/loads it when no `ax
- *     serve` LaunchAgent is being installed/present - `ax serve` binds the
- *     same OTLP port and runs its own receiver until the spool-first
- *     receiver cutover, so loading otlpd alongside it would collide. The IDE
- *     desktop-app model has no serve LaunchAgent (`serveAgentManaged: false`
- *     there), so otlpd loads normally in that model.
+ *   - "grant" always writes the plist AND bootstraps/loads it - `ax otlpd`
+ *     is the only LaunchAgent ax installs, so nothing else contends for the
+ *     OTLP port.
  */
 export const resolveOtlpdPlistDecision = (
     consent: TelemetryConsent,
-    opts: { readonly serveAgentManaged: boolean },
 ): OtlpdPlistDecision => {
     if (consent === "revoke") return { action: "unload" };
     if (consent === "preserve") return { action: "noop" };
-    return opts.serveAgentManaged
-        ? {
-            action: "write-only",
-            note: "  otlpd: wrote the LaunchAgent but did not start it - ax serve currently owns the OTLP receiver on this port; otlpd activates at the spool cutover",
-        }
-        : { action: "write-and-load" };
+    return { action: "write-and-load" };
 };
 
 function which(cmd: string): string | null {
@@ -545,25 +535,19 @@ export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = 
         }
 
         // otlpd is the one LaunchAgent left. Nothing else can hold its port
-        // anymore - ephemeral `ax serve`/`ax studio` run only while a client
-        // is attached - so it always loads on fresh consent. Tri-state:
+        // anymore - ephemeral `ax studio` runs only while a client is
+        // attached - so it always loads on fresh consent. Tri-state:
         // "preserve" (no --telemetry/--no-telemetry flag - the common re-run
         // case) touches neither the plist file nor its loaded state, so a
         // bare `ax install` never silently revokes a prior `--telemetry`
         // consent.
         const consent: TelemetryConsent = options.telemetry ?? "preserve";
-        const otlpdDecision = resolveOtlpdPlistDecision(consent, { serveAgentManaged: false });
+        const otlpdDecision = resolveOtlpdPlistDecision(consent);
         switch (otlpdDecision.action) {
             case "write-and-load": {
                 yield* fs.writeFileString(OTLPD_PLIST, otlpdPlist(binSource));
                 console.log(`  wrote:  ${OTLPD_PLIST}`);
                 yield* Effect.promise(() => loadAgent(OTLPD_PLIST));
-                break;
-            }
-            case "write-only": {
-                yield* fs.writeFileString(OTLPD_PLIST, otlpdPlist(binSource));
-                console.log(`  wrote:  ${OTLPD_PLIST}`);
-                console.log(otlpdDecision.note);
                 break;
             }
             case "unload": {
@@ -623,7 +607,7 @@ export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = 
         console.log(BANNER);
         console.log("  installed. try:");
         console.log("    axctl ingest          # initial fill");
-        console.log("    axctl serve           # live web dashboard");
+        console.log("    axctl studio          # live web dashboard");
         console.log("    axctl tui             # interactive terminal dashboard");
         console.log();
         console.log("  set up agent guards (worktree safety + model-routing hooks):");
@@ -748,7 +732,7 @@ export function cmdSetup(
         // without an agent get the explicit next-step below.
         console.log("  ingest: not run yet (kept out of setup so it never blocks). populate the graph:");
         console.log("          ax ingest --dry-run   # see how long a full backfill will take");
-        console.log("          ax ingest             # full backfill (watch live in ax serve)");
+        console.log("          ax ingest             # full backfill (watch live in ax studio)");
         console.log("          ...or the daily 04:00 sync fills it overnight.");
 
         // 4. verify.

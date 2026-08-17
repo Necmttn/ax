@@ -216,8 +216,8 @@ export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
                 return jsonResponse(
                     {
                         error:
-                            `request exceeded the ${err.ms}ms server query deadline; the SurrealDB daemon may be wedged ` +
-                            `(check 'ax serve status' and restart the db)`,
+                            `request exceeded the ${err.ms}ms server query deadline reading the DuckDB snapshot; ` +
+                            `try a narrower --days window, or run 'ax ingest' to republish the snapshot`,
                     },
                     504,
                 );

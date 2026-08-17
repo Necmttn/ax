@@ -85,12 +85,12 @@ export function classifyCommitMessage(message: string | null | undefined): Commi
 }
 
 function candidateForPath(path: string): Omit<SkillCandidate, "key" | "evidenceCommits" | "metrics" | "confidence"> {
-    if (path.includes("schema/") || path.endsWith(".surql")) {
+    if (path.includes("schema/") || path.endsWith(".duckdb.sql") || path.endsWith(".sidecar.sql")) {
         return {
-            name: "SurrealDB schema change guardrail",
-            triggerPattern: "fix commits overlap SurrealDB schema files",
-            suspectedGap: "Schema changes need a tighter migration/apply/query verification loop.",
-            proposedBehavior: "Before schema edits, run schema import plus one read/write smoke query for every new table or relation.",
+            name: "Schema change guardrail",
+            triggerPattern: "fix commits overlap schema files",
+            suspectedGap: "Schema changes need a tighter declare/register/verify loop.",
+            proposedBehavior: "Before schema edits, confirm every new table is declared in the right DDL AND registered in its manifest (duckdb-tables.ts / sidecar-tables.ts / SCHEMA_TABLES), then run one read/write smoke query for it.",
             expectedImpact: "Fewer post-feature fixes after schema changes.",
         };
     }

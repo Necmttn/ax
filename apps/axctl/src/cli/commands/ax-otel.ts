@@ -26,7 +26,7 @@ export function renderOtelRollup(result: OtelRollupResult): string {
     const out: string[] = [];
 
     if (result.signals.length === 0) {
-        out.push("(no OTLP telemetry received - is `ax serve` running and the harness configured? `ax install` writes the config)");
+        out.push("(no OTLP telemetry received - is `ax otlpd` running and the harness configured? `ax install` writes the config)");
     } else {
         type Row = { sig: string; n: string; last: string };
         const rows: Row[] = result.signals.map((s) => ({

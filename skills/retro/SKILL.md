@@ -133,7 +133,7 @@ Order open proposals by `frequency` desc. For each, in turn:
 
    > **Schema change guardrail** (skill · freq=9 · confidence=high)
    > Hypothesis: schema edits often surface in fix-chains within ~14d.
-   > Trigger: fix commits overlap SurrealDB schema files.
+   > Trigger: fix commits overlap schema files.
    > Behavior: run schema lint + one read/write smoke before edit.
 
 3. Ask the user: **accept**, **reject**, or **skip**.

@@ -112,7 +112,7 @@ describe("formatDryRun", () => {
         expect(out).toContain("codex    60 sessions");
         expect(out).not.toContain("pi "); // zero-count sources omitted
         expect(out).toContain("ETA ~3m30s");
-        expect(out).toContain("ax serve");
+        expect(out).toContain("ax studio");
     });
 
     test("human output handles an empty source set", () => {
@@ -234,7 +234,7 @@ describe("formatDryRun", () => {
             false,
         );
         expect(out).toContain("couldn't time a sample");
-        expect(out).toContain("ax serve");
+        expect(out).toContain("ax studio");
         // No invented duration and no "couldn't measure a rate" dead end.
         expect(out).not.toMatch(/~\d+[mhs]\d* or less/);
         expect(out).not.toContain("couldn't measure a rate");

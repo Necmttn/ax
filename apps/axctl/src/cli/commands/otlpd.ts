@@ -21,7 +21,7 @@ import type { RuntimeManifest } from "./manifest.ts";
 export function formatOtlpdPortBusy(port: number): string {
     return [
         `[ax] otlpd: port ${port} is already in use.`,
-        "  ax studio may already own it - it runs its own OTLP receiver on this port until the otlpd cutover",
+        "  ax studio may already own it - it also mounts the OTLP routes while a client is attached",
         `  see who holds it  lsof -nP -iTCP:${port} -sTCP:LISTEN`,
     ].join("\n");
 }
@@ -29,7 +29,7 @@ export function formatOtlpdPortBusy(port: number): string {
 /**
  * Run the receiver until interrupted. A port collision (EADDRINUSE) is
  * reported as a clean one-line message + exit code 1 instead of an
- * `axctl error:` stack dump - the common cause is `ax serve` already
+ * `axctl error:` stack dump - the common cause is `ax studio` already
  * holding the port, not a genuine crash.
  */
 export const runOtlpd = (

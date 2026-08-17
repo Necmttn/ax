@@ -47,33 +47,21 @@ describe("resolveTelemetryConsent (tri-state, #findings-1)", () => {
 });
 
 describe("resolveOtlpdPlistDecision (cmdInstall's otlpd plist state machine)", () => {
+    // The old "ax serve owns the OTLP port" contention case is gone - ax
+    // otlpd is the only LaunchAgent ax installs, so there is no serve
+    // LaunchAgent left to contend with it. One case per consent value.
     it("default install (no flags) preserves prior consent - never touches the plist", () => {
         // Whether the plist was previously written+loaded (prior --telemetry
         // consent) or is absent, "preserve" always no-ops either way - the
         // decision does not even need to know which case it's in.
-        expect(resolveOtlpdPlistDecision("preserve", { serveAgentManaged: false }))
-            .toEqual({ action: "noop" });
-        expect(resolveOtlpdPlistDecision("preserve", { serveAgentManaged: true }))
-            .toEqual({ action: "noop" });
+        expect(resolveOtlpdPlistDecision("preserve")).toEqual({ action: "noop" });
     });
 
-    it("explicit --telemetry writes and loads when no serve LaunchAgent owns the port (IDE model)", () => {
-        expect(resolveOtlpdPlistDecision("grant", { serveAgentManaged: false }))
-            .toEqual({ action: "write-and-load" });
+    it("explicit --telemetry always writes and loads", () => {
+        expect(resolveOtlpdPlistDecision("grant")).toEqual({ action: "write-and-load" });
     });
 
-    it("explicit --telemetry writes but defers loading while ax serve owns the OTLP port", () => {
-        const decision = resolveOtlpdPlistDecision("grant", { serveAgentManaged: true });
-        expect(decision.action).toBe("write-only");
-        expect(decision).toMatchObject({
-            note: expect.stringContaining("ax serve currently owns the OTLP receiver"),
-        });
-    });
-
-    it("explicit --no-telemetry always unloads, regardless of serve ownership", () => {
-        expect(resolveOtlpdPlistDecision("revoke", { serveAgentManaged: false }))
-            .toEqual({ action: "unload" });
-        expect(resolveOtlpdPlistDecision("revoke", { serveAgentManaged: true }))
-            .toEqual({ action: "unload" });
+    it("explicit --no-telemetry always unloads", () => {
+        expect(resolveOtlpdPlistDecision("revoke")).toEqual({ action: "unload" });
     });
 });

@@ -262,7 +262,7 @@ const installCommand = Command.make(
             // install the single positional file.
             if (all) {
                 const workspaceDir = expandTilde(dir);
-                // --daemon installs the shim (POST to `ax serve`, fall back to the
+                // --daemon installs the shim (POST to `ax studio`, fall back to the
                 // bundle); default installs the dispatcher directly.
                 const commandPath = daemon
                     ? yield* resolveShimPath(workspaceDir)

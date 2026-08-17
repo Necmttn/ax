@@ -9,9 +9,8 @@
  * enforcement still works offline. The dynamic import keeps effect off the fast
  * path: the fat bundle is only loaded on the fallback.
  *
- * STUDIO IS EPHEMERAL (wave 3, `c-daemon-studio`): there is no more long-lived
- * `ax serve` daemon for this to warm-hit against - `ax studio` binds the same
- * port only while a client is connected, so on a typical machine nothing is
+ * STUDIO IS EPHEMERAL (wave 3, `c-daemon-studio`): `ax studio` binds a port
+ * only while a client is connected, so on a typical machine nothing is
  * listening and this fetch hits ECONNREFUSED. That failure is NEAR-INSTANT (a
  * closed loopback port RSTs immediately - no listener to time out against),
  * so the added cost on the common "studio not running" path is a few ms, not

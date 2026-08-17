@@ -49,7 +49,7 @@
  *     the blast radius of that rare failure is the transaction that caused it,
  *     not whatever else happened to be waiting.
  *
- * WAL, AND WHY THE SIDECAR CAN BE OPEN IN TWO PROCESSES AT ONCE. `ax serve`
+ * WAL, AND WHY THE SIDECAR CAN BE OPEN IN TWO PROCESSES AT ONCE. `ax studio`
  * holds the sidecar open for the dashboard while the user runs `ax improve
  * accept` in a terminal. Under SQLite's default rollback journal the writer
  * would block every reader for the duration of its transaction; under WAL,
@@ -509,8 +509,8 @@ const serviceOver = (db: Database, path: string, invalidate: () => void): Judgme
  * A `Judgment` over the sidecar at `options.sidecarPath`.
  *
  * NOTHING is opened at layer-build time, for the same reason `CacheReadLayer`
- * opens nothing: `ax serve` and `ax mcp` build their layers at startup, and a
- * daemon that failed to build a layer because `~/.ax` did not exist yet would be
+ * opens nothing: `ax studio` and `ax mcp` build their layers at startup, and a
+ * process that failed to build a layer because `~/.ax` did not exist yet would be
  * dead for the rest of its life. The first statement opens the database, creates
  * the directory if needed, applies the DDL and remembers the handle. A FAILURE is
  * deliberately not remembered.
