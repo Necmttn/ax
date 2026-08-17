@@ -84,7 +84,7 @@ const proofCards = [
   },
   {
     title: "Local-first",
-    detail: "SurrealDB on 127.0.0.1",
+    detail: "DuckDB, no daemon",
     accent: "green" as const,
     Icon: LocalIcon,
   },

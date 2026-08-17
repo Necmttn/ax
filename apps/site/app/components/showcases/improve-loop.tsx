@@ -27,7 +27,7 @@ const PROPOSALS = [
     kind: "skill",
     id: "skill__292666ce747117ee",
     rate: "3/wk",
-    title: "SurrealDB schema change guardrail",
+    title: "DuckDB schema change guardrail",
     evidence: "Schema changes need a tighter migration/apply/query verification loop.",
   },
 ];

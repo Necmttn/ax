@@ -83,7 +83,7 @@ export function ActWatch() {
                 LIVE
               </span>
               <span className="how-sink-title">typed local graph</span>
-              <span className="how-sink-host">surrealdb &middot; 127.0.0.1:8521</span>
+              <span className="how-sink-host">duckdb &middot; local file</span>
               <span className="how-sink-sub">
                 a background watcher ingests new runs the moment they land
               </span>

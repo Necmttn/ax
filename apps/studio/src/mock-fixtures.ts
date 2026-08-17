@@ -666,13 +666,5 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
         return { brief: "## Task: Deep-analysis pass (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
     }
 
-    // Lab SQL console
-    if (path === "/api/query" && method === "POST") {
-        return {
-            result: [[{ note: "mock mode - connect a local daemon to run real queries" }]],
-            durationMs: 0,
-        } as unknown as T;
-    }
-
     notFound();
 }

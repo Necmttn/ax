@@ -299,7 +299,7 @@ export function TokenEconomyShowcase() {
         </div>
         <div className="col">
           <div className="h">runs on your machine</div>
-          Local SurrealDB instance. Typed Effect pipeline. No outbound calls, no upload.
+          Local DuckDB cache, no daemon. Typed Effect pipeline. No outbound calls, no upload.
           Sibling diagnostics: <span className="pill">cache-health</span>
           <span className="pill">workflow-impact</span>
           <span className="pill">skill-impact</span>
