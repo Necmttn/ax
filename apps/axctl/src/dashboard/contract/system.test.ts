@@ -10,9 +10,7 @@ import { isContractRequest, makeContractWebHandler, type ContractWebHandler } fr
  *  queries) degrade to empty, same as a real dylib-less test run - that
  *  view only asserts response shape, not content. `raw` (/api/self-improve)
  *  echoes a canned row, or fails with a DuckDbQueryError for SQL containing
- *  "boom". No SurrealClient stub: nothing left in this contract group reads
- *  it (see system.ts's module doc - the default `InertSurrealLayer` in
- *  web-handler.ts is exercised as-is). */
+ *  "boom" (see system.ts's module doc). */
 const stubCacheReadService: CacheReadService = {
     rows: () => Effect.succeed([]),
     first: () => Effect.succeed(Option.none()),
@@ -47,7 +45,7 @@ describe("isContractRequest", () => {
     test("owns exactly the migrated (method, path) pairs", () => {
         // /api/version is in the contract (docs, generated client) but is
         // ROUTED to the DB-free legacy row so the daemon's identity probe
-        // keeps answering when SurrealDB is down - see web-handler.ts.
+        // keeps answering when the DB is down - see web-handler.ts.
         expect(isContractRequest("GET", "/api/version")).toBe(false);
         expect(isContractRequest("GET", "/api/worktrees")).toBe(true);
         expect(isContractRequest("GET", "/docs")).toBe(true);
@@ -68,15 +66,22 @@ describe("contract system group", () => {
         const { handler } = make();
         const res = await handler(req("GET", "/api/version"));
         expect(res.status).toBe(200);
-        const body = await res.json() as Record<string, unknown>;
+        const body = await res.json() as {
+            readonly version: string;
+            readonly api_version: number;
+            readonly capabilities: readonly string[];
+            readonly live_ingest: boolean;
+            readonly otlp_receiver: boolean;
+        };
         expect(body.version).toBe(AX_VERSION);
         expect(body.api_version).toBe(API_VERSION);
         expect(body.capabilities).toContain("sessions");
-        // Both retired in studio ephemeral (wave 3): the in-browser ingest
-        // trigger + sidecar are gone, and the OTLP receiver moved to its own
-        // daemon (ax otlpd) - this router registers zero /v1/* routes.
+        // live_ingest is retired (the in-browser trigger + sidecar are gone).
+        // otlp_receiver must AGREE with the capability list in the same body -
+        // it was hardcoded `false` while "otlp" was advertised and
+        // `POST /v1/logs` answered 200.
         expect(body.live_ingest).toBe(false);
-        expect(body.otlp_receiver).toBe(false);
+        expect(body.otlp_receiver).toBe(body.capabilities.includes("otlp"));
     });
 
     test("GET /api/worktrees returns activity + git", async () => {

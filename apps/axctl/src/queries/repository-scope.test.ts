@@ -1,11 +1,11 @@
 /**
  * The DuckDB repository lookup `--scope=here` runs on, against a REAL cache.
  *
- * This is the piece that let `ax recall` off the SurrealDB runtime: default
- * scope resolution used to end in `resolvePwdRepository`, whose last step is a
- * `SELECT ... FROM repository:<key>` through `SurrealClient` - so a command
- * routed without `AppLayer` died there, and a machine with no SurrealDB at all
- * could not run recall.
+ * This is the piece that lets `ax recall` run without the full `AppLayer`
+ * runtime: default scope resolution reads the repository row straight
+ * through the lightweight `CacheRead` seam, so a command routed without
+ * `AppLayer` still resolves and a machine with only a published DuckDB
+ * snapshot can run recall.
  */
 import { describe, expect, test } from "bun:test";
 import { Effect, Option } from "effect";

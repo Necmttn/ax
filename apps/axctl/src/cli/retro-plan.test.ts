@@ -210,7 +210,7 @@ describe("buildRetroPlanKeys derivations", () => {
 // ---------------------------------------------------------------------------
 // What `ax retro plan` actually WRITES.
 //
-// These tests replace an older block that asserted on SurrealQL statement text
+// These tests replace an older block that asserted on raw statement text
 // returned by the builder. That text was never executed - `cmdRetroPlan` writes
 // through `judgment.transaction`, field by field - so the assertions proved
 // only that a dead string had the right shape. The behaviour they were

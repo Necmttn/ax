@@ -365,8 +365,10 @@ const fetchChurnCandidateSessionIds = (
                 chunks.map((ids) => {
                     const sessions = sessionIdsClause("session", ids);
                     return read.rows(SessionOnlyRow,
-                        // De-dupe in JS instead of GROUP BY session; grouping
-                        // non-key fields is the slow path on large SurrealDB tables.
+                        // De-dupe in JS: candidates are merged across chunks
+                        // AND across the command_outcome + hook_command_invocation
+                        // queries below, so a per-query GROUP BY session
+                        // wouldn't dedupe the combined set anyway.
                         `SELECT session`
                         + ` FROM command_outcome`
                         + ` WHERE TRUE ${sessions.sql}`

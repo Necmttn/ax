@@ -6,12 +6,9 @@
  *
  * Pure queries feeding `ax dojo report`; presentation lives in the caller.
  *
- * Datetime comparison inlines a real SurrealQL datetime literal via
- * `surrealDate` (the repo's dominant pattern - see session-metrics-query.ts /
- * aggregates.ts / session-churn.ts), not a `$bind`, so the cutoff is compared
- * as a datetime rather than a quoted string. SurrealDB 3.0 requires any ORDER
- * BY field to appear in the projection, so the sort key is selected and
- * stripped in JS (mirrors verdict-pending.ts).
+ * Both queries run against the `Judgment` SQLite sidecar. The cutoff is a
+ * bound `?` parameter (a real `Date`, not a stringified literal), and the
+ * `ORDER BY` sort key does not need to appear in the `SELECT` projection.
  */
 
 import { Effect, Schema } from "effect";

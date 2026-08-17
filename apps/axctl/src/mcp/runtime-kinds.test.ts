@@ -1,13 +1,14 @@
 /**
- * MCP process coverage with SurrealDB deliberately unreachable.
+ * MCP process coverage that never provides the `full` runtime (`AppLayer` +
+ * both read seams, `mcp/runtime.ts`) - only the narrow kinds each tool
+ * actually declares.
  *
- * This starts the real stdio command and calls at least one tool per non-legacy
+ * This starts the real stdio command and calls at least one tool per narrow
  * runtime kind: `"cache"` (recall, plus session_metrics / sessions_churn /
- * cost_images, which the w2-live-reads merge moved off SurrealDB),
- * `"judgment"` (roles), and `"cache-judgment"` (skills_by_role - the runtime
- * behind skills_by_role / skills_roles, the one join surface that spans both
- * engines). Any call fails if server startup or tool dispatch resolves the
- * legacy `AppLayer` union.
+ * cost_images), `"judgment"` (roles), and `"cache-judgment"` (skills_by_role -
+ * the runtime behind skills_by_role / skills_roles, the one join surface that
+ * spans both engines). Any call fails if server startup or tool dispatch
+ * resolves `full` instead of the tool's declared kind.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
@@ -136,7 +137,7 @@ describe("MCP per-tool runtimes", () => {
             // The "cache-judgment" runtime (skills_by_role / skills_roles):
             // the tag lives in the sidecar (Judgment), the skill's name and
             // invocation count live in the cache (CacheRead) - neither half
-            // is `AppLayer`, so this must also succeed with SurrealDB dead.
+            // needs `full`.
             const skillsByRole = await client.callTool({
                 name: "skills_by_role",
                 arguments: { role: "verification" },
@@ -151,12 +152,11 @@ describe("MCP per-tool runtimes", () => {
                 expect.objectContaining({ skill_id: "skill:tdd", skill_name: "tdd", source: "user" }),
             ]);
 
-            // The three tools the w2-live-reads merge moved onto the cache:
-            // their queries stopped taking SurrealClient, so their declarations
-            // dropped from `legacy` to `cache`. On this runtime there is NO
-            // SurrealClient at all - not even the throwing proxy - so a residual
-            // reach would surface here as a tool error, which an in-process test
-            // over the query function alone could never show.
+            // The three tools below declare the narrow `cache` runtime, not
+            // `full` (mcp/runtime.ts). On this runtime there is no `AppLayer`
+            // at all, so a declaration that quietly widened to `full` would
+            // surface here as a tool error, which an in-process test over the
+            // query function alone could never show.
             const metrics = await client.callTool({ name: "session_metrics", arguments: {} });
             expect(metrics.isError).not.toBe(true);
             expect(Array.isArray(bodyOf(metrics))).toBe(true);
@@ -175,14 +175,14 @@ describe("MCP per-tool runtimes", () => {
                 totals: expect.any(Object),
             });
 
-            // `dispatches` was pinned to `legacy` only because its `candidates`
-            // branch reads ~/.ax/hooks/routing-table.json through
-            // `loadEffectiveRoutingTable()`, which needs `FileSystem`. The
-            // `cache` runtime now carries the Bun platform layers, so BOTH
-            // branches must answer with no SurrealDB at all. The candidates call
-            // is the one that proves the layer: without it the tool dispatch
-            // cannot even build its effect. (The file read fails open to the
-            // built-in defaults when no routing table exists.)
+            // `dispatches` declares the narrow `cache` runtime even though its
+            // `candidates` branch reads ~/.ax/hooks/routing-table.json through
+            // `loadEffectiveRoutingTable()`, which needs `FileSystem` - the
+            // `cache` runtime carries the Bun platform layers for exactly this
+            // (mcp/runtime.ts). The candidates call is the one that proves the
+            // layer: without it the tool dispatch cannot even build its
+            // effect. (The file read fails open to the built-in defaults when
+            // no routing table exists.)
             const dispatches = await client.callTool({ name: "dispatches", arguments: {} });
             expect(dispatches.isError).not.toBe(true);
             expect(bodyOf(dispatches)).toMatchObject({

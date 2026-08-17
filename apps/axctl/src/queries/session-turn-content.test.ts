@@ -2,25 +2,15 @@
  * Tests for src/queries/session-turn-content.ts against a REAL published
  * DuckDB snapshot.
  *
- * The SurrealDB version of this file carried a large "speculative record-id
- * fan-out" (deterministic content_block/content_atom id guessing, chunked to
- * a ref budget, capped and falling back to a per-document scan past a
- * ceiling) built specifically to route around a real SurrealDB weakness: a
- * `document IN [<all docs>]` membership scan was a multi-second full-table
- * scan on the 430k-block / 1.1M-atom production tables. None of that applies
- * to DuckDB - `content_block_document_seq` and `content_atom_document_kind`
- * are real indexes, so a chunked `document IN (...)` IS the fast indexed
- * lookup; there is no separate slow path to route around, and no
- * deterministic record ids to guess (DuckDB ids are opaque VARCHARs, not
- * SurrealDB's colon-delimited table:key literals). See session-turn-content.ts
- * for the full rationale.
+ * `content_block_document_seq` and `content_atom_document_kind` are real
+ * indexes, so a chunked `document IN (...)` IS the fast indexed lookup - see
+ * session-turn-content.ts for the full rationale.
  *
- * The old testing/surreal.ts-backed test asserted exact SurrealQL text
- * (record-list ref counts, direct-vs-per-document query shapes) that no
- * longer describes the implementation at all, so per the migration's rule
- * against fake-backed tests on a ported reader, it is replaced here with a
- * real-DuckDB fixture test: seed a real snapshot, read through the real
- * CacheRead seam, assert blocks + atoms land on the right turn.
+ * A ported reader gets a real-DuckDB fixture test rather than a stub that
+ * asserts exact SQL text: seed a real snapshot, read through the real
+ * CacheRead seam, assert blocks + atoms land on the right turn. That way the
+ * test tracks actual query behavior instead of a query-shape assumption that
+ * can silently stop matching the implementation.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";

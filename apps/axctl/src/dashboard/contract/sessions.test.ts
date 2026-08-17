@@ -95,10 +95,10 @@ describe("sessions handlers - sessionInspect not-found mapping", () => {
     test("a session with no transcript maps to 404 { error }", async () => {
         // The real not-found path is TranscriptNotFoundError from
         // locateTranscript: an unknown id finds no transcript on disk and no
-        // row in the snapshot. The earlier version of this test poisoned a
-        // SurrealClient the handler had already stopped resolving, so it
-        // asserted nothing about either path - and its own comment conceded as
-        // much by accepting 404 OR 500.
+        // row in the snapshot. An earlier version of this test poisoned a
+        // service the handler had already stopped resolving, so it asserted
+        // nothing about either path - and its own comment conceded as much by
+        // accepting 404 OR 500.
         const { handler } = make();
         const res = await handler(get("/api/sessions/abc/inspect"));
         expect(res.status).toBe(404);

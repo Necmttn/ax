@@ -46,10 +46,10 @@ export const buildServer = (runtimes: McpRuntimePool): McpServer => {
  * `args` is accepted to mirror `serveDashboard(args)`; unused for now.
  */
 export async function serveMcp(_args: ReadonlyArray<string>): Promise<void> {
-    // v2: `recall` reads the published DuckDB snapshot rather than SurrealDB.
-    // CacheReadLive opens nothing until a query arrives, so a server whose
-    // client never calls `recall` pays nothing for it - and one that starts
-    // before the first ingest picks the snapshot up when it appears.
+    // `recall` reads the published DuckDB snapshot. CacheReadLive opens
+    // nothing until a query arrives, so a server whose client never calls
+    // `recall` pays nothing for it - and one that starts before the first
+    // ingest picks the snapshot up when it appears.
     const runtimes = makeMcpRuntimePool();
 
     const server = buildServer(runtimes);

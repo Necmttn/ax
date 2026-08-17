@@ -3,8 +3,7 @@
  * cache fixture. The window semantics (repository scope, date bounds, project
  * filter) and the turn-count/first-user-message enrichment are all asserted
  * by seeding real `session`/`turn` rows and reading them back, not by
- * inspecting SQL text - the join/window approach the DuckDB port uses has no
- * SurrealQL analogue to compare strings against.
+ * inspecting SQL text.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";

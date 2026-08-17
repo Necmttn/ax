@@ -16,10 +16,8 @@ import {
 } from "../queries/insights.ts";
 import { fetchWorktreesOverview } from "./worktrees-overview.ts";
 
-// FULLY PORTED. The five `../queries/insights.ts` statements this file runs
-// moved onto `CacheRead` once chunk 2b (#819) ported that module to DuckDB
-// dialect, and the `SurrealClient` requirement dropped out with them - which
-// is exactly what the note here previously said would happen.
+// The five `../queries/insights.ts` statements this file runs read through
+// `CacheRead`.
 
 type Row = Record<string, unknown>;
 
@@ -101,9 +99,8 @@ const fetchCounts = (): Effect.Effect<DashboardCounts, never, CacheRead> =>
  * number. Without it `renderDashboardHtml`'s `JSON.stringify` throws on the
  * first aggregate column (see `LooseCellColumn`).
  *
- * `cacheRows` degrades a failed read to `[]` and logs `context`, matching what
- * the SurrealDB path did when a view's table was empty - one broken view must
- * not take the whole report down.
+ * `cacheRows` degrades a failed read to `[]` and logs `context` - one broken
+ * view must not take the whole report down.
  */
 const insightRows = (sql: string, context: string): Effect.Effect<readonly Row[], never, CacheRead> =>
     cacheRows(LooseRowSchema, { sql, params: [] }, context) as Effect.Effect<readonly Row[], never, CacheRead>;

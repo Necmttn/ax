@@ -41,7 +41,7 @@ const runCompileRouting = (outPath: string) =>
 type QueryResult = Array<Record<string, unknown>>;
 
 /**
- * Build a mock SurrealClient Layer from canned per-query results.
+ * Build a mock `CacheRead` Layer from canned per-query results.
  * The implementation returns results[0..n] in the order the SQL queries arrive
  * (multi-statement query returns multiple result arrays).
  */

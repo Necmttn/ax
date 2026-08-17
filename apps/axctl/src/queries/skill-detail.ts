@@ -6,13 +6,14 @@
  * `fetchSkillDetail` reads the DuckDB CacheRead seam as five straightforward
  * indexed lookups keyed off the resolved skill id.
  *
- * It used to sit beside two exported SurrealQL blobs
- * (`SKILL_DETAIL_BASIC_SQL` / `SKILL_DETAIL_SQL`) kept on the stated grounds
- * that "the TUI executes that raw text directly against a live SurrealClient -
- * a real, still-live consumer, not dead code". That was wrong when written:
- * `tui/hooks/useSkillDetail.ts` composes its OWN four statements and runs them
- * through `CacheReadService.raw`. The blobs' only readers were their own text
- * assertions and a re-export nothing imported, so they went with the client.
+ * This file has no exported SQL-text blobs: `tui/hooks/useSkillDetail.ts`
+ * composes its OWN four statements and runs them through
+ * `CacheReadService.raw` rather than importing anything from here. A prior
+ * pair of exported blobs (`SKILL_DETAIL_BASIC_SQL` / `SKILL_DETAIL_SQL`) was
+ * removed after their claimed live consumer turned out not to exist - their
+ * only readers were their own text assertions and an unused re-export. Don't
+ * reintroduce exported SQL-text constants here on the assumption the TUI
+ * reads them; verify the actual import first.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
@@ -129,8 +130,7 @@ const ProposalSchemaRow = Schema.Struct({
 
 /** `proposed` has no denormalised session, so `project` goes through the
  *  source turn. Some legacy `proposed` edges have `ts = epoch` (ingest used to
- *  skip the field) - fall back to the source turn's ts, same as the original
- *  SurrealQL `IF ts > d"1970-01-02" ...`. */
+ *  skip the field) - fall back to the source turn's ts in that case. */
 const PROPOSALS_SQL = `
 SELECT
     CASE WHEN p.ts > TIMESTAMP '1970-01-02' THEN p.ts ELSE t.ts END AS ts,

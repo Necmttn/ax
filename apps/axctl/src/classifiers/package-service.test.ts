@@ -37,10 +37,10 @@ const runWithService = <A>(
 /**
  * `applyExecutionSurrealWritePlanReport` writes through `withConfigWrite`
  * (config-core/reconcile.ts), which needs a REAL `AxConfig` (for
- * `paths.dataDir`) - a fake/no-op layer can't stand in the way it could for
- * `SurrealClient`, since the write seam actually opens a DuckDB file at that
- * path. `dataDir`/`AX_DUCKDB_SNAPSHOT` are pointed at the test's own temp dir
- * so nothing lands in a developer's real `~/.ax` cache.
+ * `paths.dataDir`) - a fake/no-op layer can't stand in for it, since the
+ * write seam actually opens a DuckDB file at that path. `dataDir`/
+ * `AX_DUCKDB_SNAPSHOT` are pointed at the test's own temp dir so nothing
+ * lands in a developer's real `~/.ax` cache.
  */
 const runWithServiceAndConfig = <A>(
     effect: Effect.Effect<A, unknown, ClassifierPackageService | AxConfig | FileSystem.FileSystem | Path.Path>,
@@ -53,13 +53,12 @@ const runWithServiceAndConfig = <A>(
     ) as Effect.Effect<A, unknown>);
 
 /**
- * `executionGraphHealth` (package-service.ts) reads through `CacheRead` now -
+ * `executionGraphHealth` (package-service.ts) reads through `CacheRead` -
  * three separate `.rows()` calls (node/edge/fact), possibly repeated several
  * times per report (lifecycle insight fans out into multiple graph-health
  * reads). `routes` (substring-matched, not consumed) is the right fixture
  * shape here: every call to any of the three queries gets the SAME canned
- * rows, exactly like the old SurrealQL fake's `fallback` array did for its
- * one multi-statement query.
+ * rows.
  */
 const runWithServiceAndCacheRead = <A>(
     effect: Effect.Effect<A, unknown, ClassifierPackageService | CacheRead | FileSystem.FileSystem | Path.Path>,
@@ -941,8 +940,8 @@ describe("ClassifierPackageService", () => {
             return yield* packages.boundaryReplaySummaryReport();
         }), tc.layer);
 
-        // executionGraphHealth now fires THREE separate CacheRead queries
-        // (node/edge/fact) instead of one multi-statement SurrealQL call.
+        // executionGraphHealth fires THREE separate CacheRead queries
+        // (node/edge/fact), one per table.
         expect(tc.captured).toHaveLength(3);
         expect(summary).toMatchObject({
             status: "reviewed_deterministic_facts_available",

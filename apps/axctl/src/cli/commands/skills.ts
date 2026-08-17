@@ -83,9 +83,9 @@ export const cmdSearch = (input: SearchInput) =>
             process.exit(1);
         }
         // DuckDB carries no FTS index over `skill` (only turn/commit text get
-        // one), so this is the case-insensitive substring match SurrealDB's
-        // BM25 path used to fall back to on a missing/cold FTS index - not a
-        // downgrade, the same behavior mode that already existed.
+        // one), so this is a case-insensitive substring match - not a
+        // downgrade: it mirrors the same fallback behavior a missing/cold FTS
+        // index already produced before this port.
         const lowerQuery = query.toLowerCase();
         const matched = yield* cacheRows(SearchMatchRow, {
             sql: `
@@ -236,8 +236,8 @@ export const cmdRecent = (input: RecentInput) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("recent", "limit", input.limit);
         // `invoked.session` is denormalized directly onto the edge (see
-        // schema.duckdb.sql), so this skips the turn hop the original
-        // SurrealQL's `in.session.project` deref implied.
+        // schema.duckdb.sql), so no extra hop through `turn` is needed to
+        // reach `session.project`.
         const rows = yield* cacheRows(RecentInvocationRow, {
             sql: `
 SELECT i.ts AS ts, sk.name AS skill, s.project AS project
@@ -421,9 +421,9 @@ const cmdSkillsByRole = (input: SkillsByRoleInput) =>
         const json = wantsJsonFlag(input.json);
         const limit = requirePositiveInt("skills by-role", "limit", input.limit);
 
-        // No `catchDbErrorAndExit`: this vertical is ported off SurrealDB, so
-        // its failures are `CacheReadError`/`JudgmentError`, not `DbError`. They
-        // bubble to the CLI edge exactly as `ax recall`'s do (the v2 template).
+        // No `catchDbErrorAndExit`: this vertical's failures are
+        // `CacheReadError`/`JudgmentError`, not `DbError`. They bubble to the
+        // CLI edge exactly as `ax recall`'s do (the v2 template).
         const result = yield* fetchSkillsByRole(normalizeSkillsByRoleParams({ role, limit }));
 
         if (json) {
@@ -554,8 +554,8 @@ export const cmdTaste = (input: TasteInput) =>
         //       of sessions that invoked this skill (a single JOIN + COUNT
         //       DISTINCT, rather than a per-skill correlated subquery)
         // A skill absent from (2)/(3)/(4) defaults to zero in the JS join,
-        // which is exactly the proposed-only/zero union the original three
-        // SurrealQL branches existed to reconstruct.
+        // which is exactly the proposed-only/zero union the original
+        // three-branch query existed to reconstruct.
         const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
         const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
         const [skillRows, invokedAgg, proposedAgg, commitsAgg] = yield* Effect.all(

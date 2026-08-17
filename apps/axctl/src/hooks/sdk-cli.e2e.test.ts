@@ -10,10 +10,10 @@ import { join } from "node:path";
  * full path (arg parse -> command body -> exit code -> stderr), which the
  * in-process installHookFile tests can't.
  *
- * The `hooks` command group provisions the SurrealDB layer eagerly at startup
- * (before the command body, even for --help), so every assertion here needs a
- * live DB. Gate on AX_E2E_DB=1 like the repo's other CLI e2e tests so CI
- * without a daemon doesn't fail.
+ * The `hooks` command group routes through the `CacheRead` layer eagerly at
+ * startup (before the command body, even for --help), so every assertion here
+ * needs a real published DuckDB snapshot. Gate on AX_E2E_DB=1 like the repo's
+ * other CLI e2e tests so CI without one doesn't fail.
  */
 
 // apps/axctl (cwd-independent: derive from this file's location)
@@ -47,9 +47,9 @@ describe("ax hooks install (issue #564 - file-not-found)", () => {
  * Compiled binary: SDK hooks WORK from embedded bundles (issue #573). Building a
  * --compile binary in CI is too heavy per-run, so these run only when a prebuilt
  * binary path is supplied via AX_E2E_COMPILED_BIN (`bun run build`, then point at
- * dist/axctl). They also need a live DB (the hooks group provisions it eagerly),
- * so gate on AX_E2E_DB=1 too. A throwaway HOME isolates the writes from the real
- * ~/.ax and ~/.claude.
+ * dist/axctl). They also need a real published DuckDB snapshot (the hooks group
+ * routes through `CacheRead` eagerly), so gate on AX_E2E_DB=1 too. A throwaway
+ * HOME isolates the writes from the real ~/.ax and ~/.claude.
  */
 describe("ax hooks init/install on a compiled binary (issue #573)", () => {
     const compiledBin = process.env.AX_E2E_COMPILED_BIN;

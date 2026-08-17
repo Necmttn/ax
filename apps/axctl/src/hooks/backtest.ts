@@ -248,7 +248,7 @@ export const fetchRows = (
                 row.project ??
                 process.cwd();
 
-            // ts: SurrealDB returns Date objects for datetime fields.
+            // ts: DuckDB decodes TIMESTAMP columns as Date objects.
             const rawTs = row.ts;
             const ts =
                 rawTs instanceof Date ? rawTs : new Date();

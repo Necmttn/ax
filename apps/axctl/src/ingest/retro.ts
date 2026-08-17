@@ -174,8 +174,8 @@ export const composeHeuristicRetro = (stat: SessionStatRow): RetroPayload => {
 
 /**
  * Accepts either a bare session key (UUID) or a full `session:`uuid``
- * record id. Builds the recordRef internally so the WHERE/FROM clause
- * uses SurrealDB record syntax, not a string comparison.
+ * record id. Strips the `session:` prefix internally so the bare key is
+ * bound as a plain string parameter against `session.id`.
  */
 export const retroFromSession = (
     read: CacheReadService,

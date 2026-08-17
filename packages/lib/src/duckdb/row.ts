@@ -1,12 +1,9 @@
 /**
  * The writer-side value contract: JS values in, `DuckDbParam`s out.
  *
- * This is the counterpart of the Surreal-era literal encoders (`surrealValue`
- * and friends in `shared/surreal.ts`), and it is much smaller for a good
- * reason: those existed because every writer built statement TEXT, so every
- * value had to be quoted, escaped and de-surrogated. Writers now hand
- * `put`/`putMany` a `Record<string, DuckDbParam>` and the values are BOUND, so
- * escaping is not a concern at all.
+ * This stays small on purpose: writers hand `put`/`putMany` a
+ * `Record<string, DuckDbParam>` and the values are BOUND, not spliced into
+ * statement TEXT, so quoting/escaping is not a concern here at all.
  *
  * What is left are the three conversions that are easy to get wrong and that
  * fail LATE - as a decode error in some reader, or as a silently wrong value -

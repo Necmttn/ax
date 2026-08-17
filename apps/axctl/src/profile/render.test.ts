@@ -3,13 +3,11 @@ import { Effect, Layer } from "effect";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
-// EVERY statement `buildProfile` issues now goes through CacheRead. The mock
-// SurrealClient below is still provided because `buildProfile`'s signature
-// carries the requirement transitively, but nothing reaches it - a query that
-// did would surface as an "out of results" mock failure rather than a silent
-// wrong answer. The two that used to: `fetchCostModels` (ported by
-// `c-read-analytics`) and `fetchWindowedInvocations` (ported here); both now
-// have entries in CACHE_ROUTES, keyed by a fragment of their own SQL.
+// EVERY statement `buildProfile` issues goes through CacheRead - it has no
+// other data requirement. `fetchCostModels` and `fetchWindowedInvocations`
+// both have entries in CACHE_ROUTES below, keyed by a fragment of their own
+// SQL; a statement missing a route surfaces as an "out of results" mock
+// failure rather than a silent wrong answer.
 
 // `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
 // CacheRead snapshot, matched below by its own "has_content" fragment (a
@@ -28,8 +26,8 @@ const contentTypeRows = [
 // real `Date` here, not a string - everything else here is read via
 // Number(...)/String(...) at the call site, so plain values are safe.
 const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
-    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL) - ported off
-    // SurrealQL here. Keyed on the join, which is unique to this statement.
+    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL). Keyed on the
+    // join, which is unique to this statement.
     // `ts` is a TIMESTAMP column now, so the fixture passes real Dates; the
     // reader renders them back to the ISO strings its callers compare.
     "JOIN skill s ON s.id = i.out_id": [
@@ -37,8 +35,7 @@ const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown
         { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:30:00.000Z") },
         { session: "session:2", skill: "tdd", ts: new Date("2026-06-12T11:01:00.000Z") },
     ],
-    // fetchCostModels (COST_MODELS_SQL) - ported off SurrealQL by
-    // `c-read-analytics`. Keyed on `GROUP BY model`, which no other statement
+    // fetchCostModels (COST_MODELS_SQL). Keyed on `GROUP BY model`, which no other statement
     // in this file uses; the `FROM session_token_usage` fragment alone would
     // collide with fetchTokenTotals below.
     "GROUP BY model": [

@@ -25,7 +25,7 @@ export const DbOperation = Schema.Literals([
 export type DbOperation = typeof DbOperation.Type;
 
 /**
- * SurrealDB query / upsert / relate failure. `sql` is a short excerpt for
+ * Stored-data query / upsert / relate failure. `sql` is a short excerpt for
  * debugging; `message` carries the original error string.
  */
 export class DbError extends Schema.TaggedErrorClass<DbError>("DbError")(

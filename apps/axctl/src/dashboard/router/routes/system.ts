@@ -26,11 +26,21 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
                 // fallback still engages correctly instead of erroring on a
                 // missing key.
                 live_ingest: false,
-                // Retired too: the OTLP receiver moved to its own long-lived
-                // daemon (`ax otlpd`) - this router registers zero /v1/*
-                // routes now, so answering `true` here was stale (issue: the
-                // daemon claimed a capability it no longer has).
-                otlp_receiver: false,
+                // Derived from the capability list, never hardcoded: the two
+                // live in the SAME response body, and for a while they
+                // disagreed - `capabilities` carried "otlp" while this said
+                // `false`, so a client that gated on the boolean concluded the
+                // receiver was absent while `POST /v1/logs` on that very port
+                // answered 200 `{"partialSuccess":{}}`. The comment that
+                // justified the `false` claimed this router registers zero
+                // /v1/* routes; `OtelGroupLive` is mounted in
+                // contract/web-handler.ts and appends to the spool.
+                //
+                // What IS true: `ax studio` is on-demand and exits when the
+                // last client disconnects, so it is not a durable exporter
+                // target - that is `ax otlpd`. This field answers "can this
+                // process accept OTLP right now", and it can.
+                otlp_receiver: dashboardApiCapabilities().includes("otlp"),
                 // POST /hooks/eval warm-evaluates SDK hooks (DB-free); the hook
                 // shim probes this to decide daemon-first vs spawn fallback.
                 hooks_eval: true,

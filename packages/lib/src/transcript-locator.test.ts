@@ -29,11 +29,12 @@ const onDisk = (sessionId: string, hint: string | null): Promise<FoundTranscript
 /**
  * A REAL published snapshot holding one session row with the given `raw_file`.
  *
- * The route-table `SurrealClient` fake this replaced answered `SELECT raw_file
- * FROM ...` with whatever the case handed it - so it passed identically whether
- * the reader worked or read a table nothing writes any more. The hint is the
- * ONLY way a synthetic subagent id resolves (no on-disk filename matches it),
- * so a silent `null` here is a subagent transcript that reports "not found".
+ * A stub that answered `SELECT raw_file FROM ...` with whatever the case
+ * handed it would pass identically whether the reader actually worked or
+ * read a stale table - so this publishes and re-reads a real snapshot instead.
+ * The hint is the ONLY way a synthetic subagent id resolves (no on-disk
+ * filename matches it), so a silent `null` here is a subagent transcript that
+ * reports "not found".
  */
 const cacheLayerWith = async (sessionId: string, rawFile: string | null) => {
     const fixture = await runWithPlatform(

@@ -1,6 +1,6 @@
 /**
  * Historical doctor marker for the old SurrealDB agent-event index repair.
- * DuckDB applies this index from schema.ddl.sql when the live cache opens.
+ * DuckDB applies this index from schema.duckdb.sql when the live cache opens.
  */
 import { Effect, FileSystem } from "effect";
 import { skipNotFound } from "@ax/lib/shared/fs-error";

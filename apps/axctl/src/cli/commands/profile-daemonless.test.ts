@@ -3,22 +3,14 @@
  *
  * Mirrors `apps/axctl/src/cli/recall-daemonless.test.ts`: spawns the ACTUAL
  * CLI entrypoint as a child, with `AX_DB_URL` pointing at a port nothing is
- * listening on, so any SurrealDB connect attempt can only fail or hang to its
- * timeout - a real crash mode, not something an in-process test with a stub
- * layer could observe.
+ * listening on (defensive - no current code path reads it) and no server of
+ * any kind running - a real crash mode, not something an in-process test
+ * with a stub layer could observe.
  *
- * STATE: the whole family is SurrealDB-free. `ax profile interview submit`
- * needs no data layer at all; `show`/`publish`/`widget`/bare `interview` read
- * the published snapshot through `CacheRead` and nothing else.
- *
- * This file used to end in a describe block pinning the opposite - that
- * `ax profile show` still FAILED without SurrealDB - because two statements on
- * `buildProfile`'s common path were unported: `fetchCostModels`
- * (queries/cost-analytics.ts, landed in #819) and `fetchWindowedInvocations`
- * (profile/queries.ts, landed with the runtime flip that also ported
- * `team/team-profile.ts`, the caller whose tests had blocked it). That block
- * is now the assertion below: the failure mode with no engine anywhere is a
- * `CacheUnavailableError` naming the missing snapshot, NOT a 5s SurrealDB
+ * `ax profile interview submit` needs no data layer at all; `show`/`publish`/
+ * `widget`/bare `interview` read the published snapshot through `CacheRead`
+ * and nothing else. The failure mode with no engine anywhere is a
+ * `CacheUnavailableError` naming the missing snapshot, not a dead-daemon
  * connect timeout.
  */
 import { describe, expect, test } from "bun:test";
@@ -26,7 +18,8 @@ import { describe, expect, test } from "bun:test";
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
 const CLI = new URL("../index.ts", import.meta.url).pathname;
 
-/** A port nothing listens on, so a SurrealDB connect can only FAIL. */
+/** A port nothing listens on - defensive, since no current code path reads
+ *  `AX_DB_URL`, but keeps the env var harmless if that changes. */
 const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 /** A path nothing publishes to, so a CacheRead open can only FAIL too. */
@@ -102,8 +95,9 @@ describe("ax profile show is SurrealDB-free", () => {
     test("with no engine reachable it names the MISSING SNAPSHOT, not a dead daemon", () => {
         const run = runCli(["profile", "show", "--json"]);
         // It still fails - `DEAD_SNAPSHOT` does not exist - but the failure is
-        // now about the cache. The distinction is the whole point: a `DbError`
-        // here would mean something on this path still dials SurrealDB.
+        // about the cache. The distinction is the whole point: a `DbError`
+        // here would mean something on this path still opens a live database
+        // connection.
         expect(run.exitCode).not.toBe(0);
         expect(run.stderr).toContain("CacheUnavailableError");
         expect(run.stderr).not.toContain("DbError");

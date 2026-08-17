@@ -1,12 +1,11 @@
 /**
  * `detectStaleness` against a REAL published DuckDB snapshot.
  *
- * This suite used to run against `testing/surreal.ts`'s route-table fake, which
- * answered whatever rows the case handed it. That is exactly the shape that let
- * the v2 cut-over ship green: the fake returned `raw_file` rows while the real,
- * write-frozen engine returned none, and `seenBasenames` being empty makes
- * EVERY transcript read as new - a wrong answer with no error anywhere. So the
- * fake is gone and the rows come from a snapshot the seam actually published.
+ * A route-table fake that answers whatever rows a test case hands it would
+ * pass here even when the real read path returns nothing: `seenBasenames`
+ * being empty makes EVERY transcript read as new - a wrong answer with no
+ * error anywhere. So the rows come from a snapshot the seam actually
+ * published, not a stub.
  */
 import { describe, expect } from "bun:test";
 import { Effect, FileSystem, Layer, Path } from "effect";

@@ -1,28 +1,23 @@
 /**
  * `ax sessions show`, END TO END, with no server of any kind running.
  *
- * This is the acceptance test for wave 3 chunk 2a (`c-read-seam`), and it has
- * to be out-of-process for the same reason `recall-daemonless.test.ts` does: an
- * in-process test is HANDED its layers, so it passes whether or not the real
- * CLI would have built `AppLayer` and tried to connect. The child gets
+ * This has to be out-of-process for the same reason `recall-daemonless.test.ts`
+ * does: an in-process test is HANDED its layers, so it passes whether or not
+ * the real CLI would have built `AppLayer` and tried to connect. The child
+ * gets `AX_DUCKDB_SNAPSHOT` pointing at a snapshot this suite published, and
+ * no server of any kind listening, so any read has to come from that snapshot.
  *
- *   - `AX_DUCKDB_SNAPSHOT` pointing at a snapshot this suite published, and
- *   - `AX_DB_URL` on a port nothing is listening on, so any SurrealDB connect
- *     fails rather than quietly finding the developer's own running daemon and
- *     making the test pass for the wrong reason.
- *
- * One invocation exercises the whole ported chain:
+ * One invocation exercises the whole chain:
  * `queries/session-detail-cache.ts` -> `dashboard/session-detail.ts` ->
  * `dashboard/session-view.ts` -> `queries/enriched-session.ts`, plus
  * `metrics/reverted-commits.ts` and the prefix fallback in
  * `dashboard/sessions-query.ts`.
  *
- * WHY THE ASSERTIONS ARE ON POPULATED FIELDS. Before this chunk the same
- * command exited 0 and printed a well-formed envelope full of empty lists,
- * because `queryMany`/`queryOptional` catch `DbError` and degrade - and a
- * successful query against a write-frozen engine never even trips that catch.
- * "Exit code 0" and "valid JSON" are therefore NOT evidence of anything here;
- * only the row CONTENT is.
+ * WHY THE ASSERTIONS ARE ON POPULATED FIELDS. `cacheRows`/`cacheFirst` catch
+ * `CacheReadError` and degrade to `[]`/`None`, so a broken read can still
+ * exit 0 and print a well-formed envelope full of empty lists. "Exit code 0"
+ * and "valid JSON" are therefore NOT evidence of anything here; only the row
+ * CONTENT is.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
@@ -37,7 +32,8 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax sessions show (n
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
 const CLI = new URL("./index.ts", import.meta.url).pathname;
 
-/** A port nothing listens on, so a SurrealDB connect can only FAIL. */
+/** A port nothing listens on - defensive, since no current code path reads
+ *  `AX_DB_URL`, but keeps the env var harmless if that changes. */
 const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 const PARENT = "019e0ad4-1111-2222-3333-444444444444";
@@ -227,8 +223,9 @@ describe("ax sessions show on the cache runtime", () => {
 
         const run = runCli(["sessions", "show", PARENT, "--turns", "--json"], fixture.snapshotPath);
 
-        // The throwing no-DB proxy names `SurrealClient.<prop>` when a ported
-        // path still reaches for the old engine.
+        // Regression guard: `SurrealClient` no longer exists in the codebase,
+        // so this string should never appear in stderr - a hit here would
+        // mean some code path still reaches for a deleted engine.
         expect(run.stderr).not.toContain("SurrealClient");
         if (run.exitCode !== 0) throw new Error(`exit ${run.exitCode}\n${run.stderr}`);
 
@@ -258,7 +255,7 @@ describe("ax sessions show on the cache runtime", () => {
 
     dtest("resolves a session-id PREFIX through the cache", async () => {
         // The fallback path: `overview === null` on the first probe sends the
-        // command through `findSessionIdsByPrefix`, which was SurrealQL.
+        // command through `findSessionIdsByPrefix`.
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-sessions-show-prefix-"), dylibPath, CORPUS),
         );

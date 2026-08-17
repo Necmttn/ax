@@ -108,10 +108,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // pattern that bit loadPriorFileSessions). Fetch the session-only
         // columns first, then batch-count subagent fan-out via one grouped
         // query against `spawned`. The count query reuses the same WHERE
-        // filter set so the answer is stable across pages. Run as a single
-        // multi-statement query: the shared SurrealDB websocket interleaves
-        // independent .query() calls badly, so issuing both in one round-trip
-        // keeps the response framing aligned.
+        // filter set so the answer is stable across pages.
         // Keep the cache row id during mapping for the batched edge and
         // aggregate queries. Only the bare id crosses the HTTP boundary.
         const [pageRows, countRows] = yield* Effect.all([

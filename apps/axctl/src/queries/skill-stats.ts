@@ -11,10 +11,10 @@
  * invocations aggregate, and recent_sessions, each an indexed lookup keyed off
  * the resolved skill id.
  *
- * The `SKILL_STATS_SQL` blob that used to sit here was held up only by its own
- * text assertions, on the stated grounds that skill-detail.ts's sibling
- * constant was live via the TUI. That was never true (see skill-detail.ts), so
- * both went with the SurrealDB client.
+ * This file has no exported SQL-text blob: a prior `SKILL_STATS_SQL` constant
+ * was removed after its only readers turned out to be its own text
+ * assertions - the claimed live consumer via skill-detail.ts's sibling
+ * constant was never true (see skill-detail.ts).
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";

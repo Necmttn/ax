@@ -14,12 +14,11 @@ import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
 /**
  * Runs against a REAL temp DuckDB, not a route-table fake.
  *
- * The predecessor of this suite handed `runPublishCards` a stub `SurrealClient`
- * that logged statement text and asserted on the strings. That kind of test
- * passes whichever engine the writer actually talks to, which is exactly how a
- * writer and its reader can end up on different databases with a green suite.
- * Here the writer WRITES and the reader READS BACK, so the two halves are
- * checked against each other.
+ * A stub that logs statement text and asserts on the strings passes whichever
+ * engine the writer actually talks to, which is exactly how a writer and its
+ * reader can end up on different databases with a green suite. Here the
+ * writer WRITES and the reader READS BACK, so the two halves are checked
+ * against each other.
  */
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("wrapped cards", { requireFts: true });
 

@@ -221,13 +221,14 @@ const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, Cache
 type CliProgram = Effect.Effect<void, unknown, never>;
 
 /**
- * Provide IngestRuntimeLayer (LegacySurrealAppLayer + StageRegistryDefault) for the
- * ingest command so the CLI handler can yield* StageRegistry.
+ * Provide IngestRuntimeLayer (`AppLayer` + `StageRegistryDefault` +
+ * `StageSourceLayers`) for the ingest command so the CLI handler can
+ * yield* StageRegistry.
  *
  * Transport selection for the ingest live-trace spans:
  *   - `--debug`            → ConsoleTransport (raw JSON events to stderr)
  *   - interactive terminal → PipelineTraceTransport (animated step pipeline)
- *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from LegacySurrealAppLayer), so
+ *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from `AppLayer`), so
  *     machine-readable stdout (e.g. `--progress=json`) stays clean.
  * All transports write to **stderr**, never stdout.
  */
@@ -282,7 +283,7 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
                         ? pipelineTraceTransportLayer("plain", resolveProgressStages(args))
                         : undefined;
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
-    // not merged on top of the already-built LegacySurrealAppLayer - otherwise the sink keeps
+    // not merged on top of the already-built IngestRuntimeLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
     // `JudgmentLive` rides along because judgment-domain ingest stages (skills'
     // frontmatter role tags, digest's open-proposal count) resolve `Judgment`.
@@ -355,8 +356,10 @@ const withCache = (args: ReadonlyArray<string>): CliProgram =>
 // the owning commands/<family>.ts manifest instead. db-conditional families
 // are excluded: dispatch resolves them per-invocation via resolveRuntime.
 //
-// The name is historical (it used to mean "opens a SurrealDB connection") and
-// is load-bearing in effect-cli.test.ts, which asserts membership per family.
+// The name doesn't match current semantics - it now marks commands routed
+// onto the write/ingest runtime, not literally "opens a database connection" -
+// but is load-bearing in effect-cli.test.ts, which asserts membership per
+// family.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
         .map(([name, entry]) => [name, entryRuntime(entry)] as const)
@@ -369,13 +372,12 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set(
 export { resolveIngestStages, detectRemovedIngestFlag, insightsOnlyConflicts } from "./commands/ingest.ts";
 
 /**
- * Route raw argv to a CLI program. Mirrors the routing that used to live in
- * an async `main()` that `Effect.runPromise`d each branch - now every branch
- * RETURNS its Effect so the whole invocation runs as ONE main fiber under
- * `BunRuntime.runMain`. That makes SIGINT/SIGTERM interrupt the fiber, which
- * lets finalizers actually run (SurrealDB close, TraceSink/OTLP flush, the
- * ingest_run finish row + ingest-lock release) instead of hard-killing
- * mid-run and stranding `ingest_run` rows in status "running".
+ * Route raw argv to a CLI program. Every branch RETURNS its Effect so the
+ * whole invocation runs as ONE main fiber under `BunRuntime.runMain`. That
+ * makes SIGINT/SIGTERM interrupt the fiber, which lets finalizers actually
+ * run (DuckDB close, TraceSink/OTLP flush, the ingest_run finish row +
+ * ingest-lock release) instead of hard-killing mid-run and stranding
+ * `ingest_run` rows in status "running".
  *
  * The one remaining non-Effect legacy path (`-V`/`--version` flag printing)
  * is wrapped in `Effect.promise`; a rejection becomes a defect and flows

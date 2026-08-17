@@ -4,11 +4,11 @@
  * raw DuckDB rows into clean typed rows so `derive.ts` can stay pure (no
  * DuckDB shapes, fully unit-testable with plain fixtures).
  *
- * Ported from SurrealQL (v1): record derefs (`in.seq`, `out.name`) became
- * JOINs against `turn`/`skill`/`"commit"`, since v2 foreign keys are bare
- * VARCHAR ids, not record links - `invoked`/`reaction_event` denormalise
- * `session` directly onto the edge, so those two stay a flat WHERE with no
- * join for the session filter. Every BIGINT-typed counter/seq column is
+ * Record references (`seq`, `name`) resolve as JOINs against
+ * `turn`/`skill`/`"commit"`, since foreign keys are bare VARCHAR ids, not
+ * record links - `invoked`/`reaction_event` denormalise `session` directly
+ * onto the edge, so those two stay a flat WHERE with no join for the session
+ * filter. Every BIGINT-typed counter/seq column is
  * CAST to INTEGER: DuckDB decodes BIGINT as JS `bigint`, but `numField`/
  * `seqField` below check `typeof v === "number"` (this file has no Effect
  * Schema layer by design, to keep `derive.ts` pure) - narrower widths decode

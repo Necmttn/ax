@@ -1,9 +1,9 @@
 /**
  * fetchSkillTriage tests, against a REAL published DuckDB cache fixture.
  *
- * `Judgment` (triage decisions) is a separate sqlite store untouched by the
- * SurrealDB->DuckDB migration, so it keeps the existing `judgmentTestLayer`
- * stub; the interesting behavior under test - the skill-summary aggregate,
+ * `Judgment` (triage decisions) is a separate sqlite store, so it keeps the
+ * existing `judgmentTestLayer` stub; the interesting behavior under test -
+ * the skill-summary aggregate,
  * the proposed-only union, commit/last-project enrichment, taste_score /
  * recommendation - all runs against a real DuckDB.
  */

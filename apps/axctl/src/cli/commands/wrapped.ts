@@ -92,5 +92,5 @@ export const wrappedCommand = Command.make("wrapped").pipe(
 
 // `"ingest"`: `wrapped publish` writes the deck through `withConfigWrite`
 // (the DuckDB seam, under the ingest lock) and `wrapped generate` only writes a
-// brief file. Neither resolves a `SurrealClient` any more.
+// brief file.
 export const wrappedRuntime: RuntimeManifest = { wrapped: "ingest" };

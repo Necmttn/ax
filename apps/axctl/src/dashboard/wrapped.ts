@@ -13,10 +13,11 @@ import type {
     WrappedUsageDay,
 } from "@ax/lib/shared/dashboard-types";
 
-// Local DuckDB translations of queries/wrapped.ts's SurrealQL constants -
-// that file is unported (2b's ownership); copy the shape, never import the
-// SurrealQL text. All ten queries share the same `${DAYS}d` lookback bound,
-// so every one takes the same single `[WRAPPED_DAYS_LOOKBACK]` param.
+// The `ax wrapped` DuckDB query set, consumed via `fetchWrapped` /
+// `sanitizeWrappedProfile` elsewhere in this module and by
+// `dashboard/contract/insights.ts`. All ten queries share the same `${DAYS}d`
+// lookback bound, so every one takes the same single
+// `[WRAPPED_DAYS_LOOKBACK]` param.
 
 const WRAPPED_DAYS_LOOKBACK = 365;
 

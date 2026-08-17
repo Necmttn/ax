@@ -262,7 +262,7 @@ describe("fetchAllRoles", () => {
     dtest("counts tagged skills per role, busiest first, WITHOUT touching the cache", async () => {
         // Both halves of this answer are judgment, so it needs no cache at all -
         // which is what lets `ax roles` run on a machine with no snapshot and no
-        // SurrealDB (see roles-daemonless.test.ts).
+        // DB at all (see roles-daemonless.test.ts).
         const dir = tempDir("ax-roles-all-");
         const result = await dylibEnv(() =>
             run(

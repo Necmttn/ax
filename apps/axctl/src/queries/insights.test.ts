@@ -166,9 +166,9 @@ describe("insights query builders", () => {
     test("fileEvidenceSql summarizes provider-neutral edit/read/search relations", () => {
         const sql = fileEvidenceSql(4);
 
-        // SurrealDB's RETURN [{relation, rows}] shape has no DuckDB equivalent
-        // in one statement - this is a flat UNION ALL rowset with `relation`
-        // as the discriminator column instead.
+        // A flat UNION ALL rowset with `relation` as the discriminator
+        // column, since a single statement can't nest a result set per
+        // relation.
         expect(sql).toContain("UNION ALL");
         expect(sql).toContain("'edited' AS relation");
         expect(sql).toContain("FROM edited e");
@@ -186,9 +186,7 @@ describe("insights query builders", () => {
     test("schemaCoverageSql returns scalar counts for active and staged tables", () => {
         const sql = schemaCoverageSql();
 
-        // SurrealDB's RETURN [{table, stage, note, count}] shape has no
-        // DuckDB equivalent in one statement - this UNIONs one flat row per
-        // registered table instead.
+        // UNIONs one flat row per registered table into the result.
         expect(sql).toContain("UNION ALL");
         expect(sql).toContain("'tool_call' AS table_name");
         expect(sql).toContain("'active' AS stage");
@@ -234,8 +232,8 @@ describe("insights query builders", () => {
     // SCHEMA_TABLES entry yet (the improve/proposal/experiment/retro/dogfood
     // subsystem, and the plays_role edge - owned by other in-flight chunks).
     // A live-catalog check against the real snapshot confirmed `FROM "role"`
-    // hard-errors the ENTIRE UNION ALL statement (a Catalog Error, unlike
-    // SurrealDB which returns 0 rows for an undefined table under SCHEMAFULL).
+    // hard-errors the ENTIRE UNION ALL statement (a Catalog Error) - so a
+    // single missing table would otherwise break every count in the view.
     // Those rows degrade to a literal 0 instead of a live subquery so the view
     // stays usable; re-check this list once those chunks land their tables.
     test("schemaCoverageSql degrades not-yet-migrated tables to a literal 0 count", () => {

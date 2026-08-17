@@ -44,11 +44,11 @@ export function deterministicId(parts: readonly string[]): string {
  * A stored `table:id` ref reduced to the BARE row id, or `null` when there is
  * nothing to reduce.
  *
- * `session` and `file` arrive as SurrealDB refs (`session:⟨uuid⟩`), and the
- * cache's own `session.id` IS that uuid (see `sessionRowId` - the one table
- * whose row id is the provider's identifier verbatim). So a ref carried across
- * unchanged would join to nothing at all - a silently empty enrichment rather
- * than an error. A value that is already bare passes through.
+ * `session` and `file` can arrive as `table:id` refs (`session:⟨uuid⟩`), and
+ * the cache's own `session.id` IS that bare uuid (see `sessionRowId` - the one
+ * table whose row id is the provider's identifier verbatim). So a ref carried
+ * across unchanged would join to nothing at all - a silently empty enrichment
+ * rather than an error. A value that is already bare passes through.
  */
 const bareRowId = (value: string | undefined): string | null => {
     if (!value) return null;

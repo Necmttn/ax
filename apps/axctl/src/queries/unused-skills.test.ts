@@ -43,7 +43,7 @@ describe("unused-skills SQL", () => {
 });
 
 describe("normalizeLastUsed", () => {
-    test("null / -Infinity (empty math::max group) → null", () => {
+    test("null / -Infinity (non-finite number) → null", () => {
         expect(normalizeLastUsed(null)).toBeNull();
         expect(normalizeLastUsed(undefined)).toBeNull();
         expect(normalizeLastUsed(Number.NEGATIVE_INFINITY)).toBeNull();
@@ -52,7 +52,7 @@ describe("normalizeLastUsed", () => {
         expect(normalizeLastUsed("2026-06-01T00:00:00.000Z")).toBe("2026-06-01T00:00:00.000Z");
         expect(normalizeLastUsed(new Date("2026-06-01T00:00:00.000Z"))).toBe("2026-06-01T00:00:00.000Z");
     });
-    test("toJSON objects (SurrealDB DateTime) → ISO", () => {
+    test("toJSON objects (DateTime-like) → ISO", () => {
         expect(normalizeLastUsed({ toJSON: () => "2026-06-01T00:00:00.000Z" })).toBe(
             "2026-06-01T00:00:00.000Z",
         );

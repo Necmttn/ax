@@ -1,31 +1,24 @@
 /**
  * Checkout-activity + git-correlation overview, rebuilt deref-free.
  *
- * The legacy SurrealQL (queries/insights.ts checkoutActivitySql/gitCorrelationSql)
- * ran correlated per-row subqueries with record derefs - e.g.
- * `(SELECT id FROM turn WHERE session.checkout = $parent.id)` is a full turn
- * scan WITH a session deref per turn, repeated once per checkout. On a
- * year-old graph that is 50+ seconds and the daemon's 60s idleTimeout kills
- * the response. This module computes single-pass GROUP BY aggregates
- * (~1s total) and joins them in JS, preserving the legacy row shapes.
+ * `queries/insights.ts`'s `checkoutActivitySql`/`gitCorrelationSql` run
+ * correlated per-row subqueries - e.g. counting turns per checkout joins
+ * `turn` to `session` and filters by `session.checkout = c.id`, repeated once
+ * per checkout row. On a year-old graph that is 50+ seconds and the daemon's
+ * 60s idleTimeout kills the response. This module computes single-pass
+ * GROUP BY aggregates (~1s total) and joins them in JS instead, preserving
+ * the same row shapes: `repository.name`/`repository.remote_url` come from a
+ * real `LEFT JOIN repository`; per-checkout counts (session/turn/tool_call/
+ * produced/touched) are correlated COUNT subqueries against plain `in_id`/
+ * `out_id` foreign-key columns.
  *
  * Same class of fix as the skills-weighted hang: keep aggregates deref-free,
  * join in JS (see memory: weighted-query-per-edge-deref-hang).
  *
- * PORTED TO DUCKDB (Surreal -> DuckDB):
- *  - `repository.name`/`repository.remote_url` derefs on `checkout` became a
- *    real `LEFT JOIN repository`.
- *  - `array::len(->has_checkout->checkout)` (an edge table DuckDB does not
- *    have - `checkout` carries a plain `repository` FK) became a correlated
- *    COUNT subquery.
- *  - `produced.in`/`produced.out` and `touched.in`/`touched.out` became
- *    `in_id`/`out_id` (DuckDB's plain-FK column names for what were Surreal
- *    edge endpoints).
- *  - Every `count()` decodes through `NumberFromBigIntColumn` - a DuckDB
- *    `count(*)` is a BIGINT and a `Schema.Number` on it is a decode FAILURE
- *    (silently empty rows under the defensive read policy), not an error.
- *  - 12 independent statements, run concurrently through `CacheRead`; the JS
- *    aggregation/join logic below is unchanged from the previous engine.
+ * Every `count()` decodes through `NumberFromBigIntColumn` - a DuckDB
+ * `count(*)` is a BIGINT and a `Schema.Number` on it is a decode FAILURE
+ * (silently empty rows under the defensive read policy), not an error. 12
+ * independent statements run concurrently through `CacheRead`.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";

@@ -561,8 +561,9 @@ export const lintFiles = (
         // Stale-task scan: always runs regardless of whether markers were found.
         // Warns about task_emitted experiments whose task file is >staleDays old
         // and whose short_id was NOT seen as a marker this run.
-        // The date predicate is pushed into SurrealQL so only rows older than
-        // staleDays round-trip to JS (avoiding a linear statSync-per-row scan).
+        // The date predicate filters `experimentRows` in JS before the loop
+        // below, so `fs.exists` (an I/O call) only runs for candidates already
+        // older than staleDays, not for every experiment row.
         const staleDays = opts.staleDays ?? 7;
         const staleCutoff = new Date(Date.now() - staleDays * 86_400_000);
         for (const row of experimentRows.filter((candidate) =>

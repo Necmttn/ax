@@ -9,10 +9,9 @@
  * per-row scan. Field names and shapes match what `insights.ts` emits, so
  * `formatInsightRows` is unchanged.
  *
- * Ported off SurrealQL onto the DuckDB `CacheRead` seam: `session` is now a
- * bare VARCHAR (no `session:` record-id wrapper) and every lookup binds its
- * session id / seq / ts as ordinary parameters instead of splicing record-id
- * literals into statement text.
+ * Runs over the DuckDB `CacheRead` seam: `session` is a bare VARCHAR (no
+ * record-id wrapper) and every lookup binds its session id / seq / ts as
+ * ordinary parameters instead of splicing literals into statement text.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";

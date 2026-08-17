@@ -14,13 +14,13 @@
  * Query shape follows dispatch-analytics: flat grouped aggregates (no record
  * derefs), JS-side join on stringified session ids.
  *
- * Ported onto the DuckDB CacheRead seam: the single 5-statement SurrealQL
- * batch becomes 5 parallel `cacheRows` calls. `SUM()` over a BIGINT column
+ * Runs as 5 parallel `cacheRows` calls over the DuckDB CacheRead seam.
+ * `SUM()` over a BIGINT column
  * (thinking_blocks/thinking_tokens/reasoning_output_tokens/completion_tokens)
  * widens to HUGEINT in DuckDB, so every sum is CAST back to BIGINT and
  * decoded via NumberFromBigIntColumn (see session-detail-cache.ts for the
- * same contract). `fetchSparSessionIds` already reads through a separate
- * SQLite-backed `Judgment` service, not SurrealDB/DuckDB - unaffected here.
+ * same contract). `fetchSparSessionIds` reads through a separate
+ * SQLite-backed `Judgment` service, not DuckDB.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";

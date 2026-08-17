@@ -4,11 +4,8 @@
  * spawns at runtime (`bun ... studio` / `bun ... ingest`, both on port/paths
  * derived from `DesktopEnvironment`).
  *
- * Wave 3 (`c-desktop-realign`): this used to also fetch `surreal` (spawned
- * alongside `ax serve`). ax moved off a required SurrealDB daemon onto
- * embedded DuckDB, and the desktop app now spawns a single `ax studio`
- * process instead of a surreal + ax-serve pair - there is nothing left for
- * this script to fetch a `surreal` binary for.
+ * The desktop app spawns a single `ax studio` process (embedded DuckDB, no
+ * separate daemon binary), so this script only needs to vendor `bun`.
  *
  * Downloads a pinned bun release for the requested macOS arch(es) into
  * `resources/bin/<arch>/bun` and `chmod +x`es it. The output dir is

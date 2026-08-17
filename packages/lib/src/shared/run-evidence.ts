@@ -95,9 +95,8 @@ export type RunEvidencePrivacyLevel = typeof RunEvidencePrivacyLevel.Type;
 // ============================================================================
 // 2. WRITE DTOs
 // ----------------------------------------------------------------------------
-// Plain interfaces consumed by the statement builders. Bare record KEYS (no
-// `table:` prefix) are passed for every link; the builder splices them through
-// `recordRef` / `surrealOptionRecord`.
+// Plain interfaces consumed by the write path. Bare record KEYS (no
+// `table:` prefix) are passed for every link and bound as plain parameters.
 // ============================================================================
 
 /** Optional hot-ref keys into the normalized graph (bare record keys). */

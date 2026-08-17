@@ -1,24 +1,19 @@
 /**
- * DuckDB replacement for the eleven SurrealQL fan-out queries `share/exporter.ts`
- * used to read from `apps/axctl/src/queries/session-detail.ts` +
- * `apps/axctl/src/queries/session-turn-content.ts`.
+ * `share/exporter.ts`'s own eleven DuckDB fan-out queries, standing apart from
+ * the equivalent row shapes `apps/axctl/src/queries/session-detail-cache.ts` +
+ * `apps/axctl/src/queries/session-turn-content.ts` provide for the dashboard.
  *
  * WHY THIS IS ITS OWN FILE RATHER THAN A PORT OF THOSE TWO. `queries/` belongs
- * to a sibling wave-3 chunk (band 2, chunk 2b) - see the partition doc's file
- * ownership table. This module does not import from either file; it re-derives
- * the same row shapes directly against the DuckDB cache through {@link
- * CacheRead}, so `ax share` stops depending on SurrealDB without editing a file
- * this chunk does not own. The dashboard's own session-detail route keeps
- * reading `queries/session-detail.ts` until 2b ports it - that is a separate,
- * still-Surreal-backed read path, not a regression introduced here.
+ * to a different ownership boundary - see the partition doc's file ownership
+ * table. This module does not import from either file; it re-derives the same
+ * row shapes directly against the DuckDB cache through {@link CacheRead}, so
+ * `ax share` never needs to reach across into a file this module does not own.
  *
- * SCOPE. Deliberately narrower than `session-detail.ts` + `session-turn-content.ts`
- * combined: only the rows `exportSessionShare` actually reads. The content
- * resolution below also skips the SurrealDB-specific "speculative direct record
- * fetch" optimisation those files needed to dodge Surreal's slow `document IN
- * [...]` membership scans (see session-turn-content.ts's module doc) - DuckDB
- * has a real `content_block(document, seq)` / `content_atom(document, kind)`
- * index, so a plain `document IN (...)` bulk fetch is already fast here.
+ * SCOPE. Deliberately narrower than `session-detail-cache.ts` +
+ * `session-turn-content.ts` combined: only the rows `exportSessionShare`
+ * actually reads. DuckDB has a real `content_block(document, seq)` /
+ * `content_atom(document, kind)` index, so the content resolution below is a
+ * plain `document IN (...)` bulk fetch.
  */
 import { Effect, Schema } from "effect";
 import type { CacheReadService } from "@ax/lib/duckdb/seam";

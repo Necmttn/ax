@@ -102,13 +102,12 @@ export function stableId(table: string, parts: readonly NaturalKeyPart[]): strin
  * `/sessions/<bare-session-id>`, and `ax otel` coverage matches uuid-to-uuid.
  * The earlier `stableId("session", [provider, id])` replaced the uuid with 32
  * hex chars that match no uuid, silently zeroing every one of those joins
- * (wave-0 finding P1-3). This mirrors the old SurrealDB `session:<id>` keying,
- * where the key was the raw provider session id.
+ * (wave-0 finding P1-3).
  *
  * `provider` stays in the signature for call-site symmetry with the other
  * row-id helpers, but is NOT folded into the id: provider-native session ids do
  * not collide across providers (uuids are globally unique; subagent ids embed
- * the provider name), exactly as the single-namespace Surreal scheme assumed.
+ * the provider name).
  *
  * Only tables whose natural key IS itself a provider-native stable id qualify
  * for verbatim ids. `turn`/`tool_call`/`agent_event` are keyed on a COMPOSITE
@@ -165,9 +164,10 @@ export function commitRowId(repo: string, sha: string): string {
  * path (a banned key part - see the module header), and the same skill
  * reinstalled under another root is the SAME catalogue entry, which is precisely
  * what a name-unique index says. The name is used verbatim as the hash input -
- * plugin-namespaced names keep their `:`, since nothing here has SurrealDB's
- * record-id character restrictions (the `:` -> `__` encoding in
- * `packages/lib/src/skill-id.ts` existed only for those).
+ * plugin-namespaced names keep their `:` unencoded. `legacySkillRecordKey`'s
+ * `:` -> `__` encoding (`packages/lib/src/ids.ts`) is a separate, legacy
+ * lookup key kept only for matching rows written under the older scheme - it
+ * is not this table's row id.
  */
 export function skillRowId(name: string): string {
     return stableId("skill", [name]);

@@ -3,14 +3,10 @@
  *
  * The claim the ported vertical rests on cannot be checked from inside the
  * process that defines the layers: an in-process test can always be handed a
- * `CacheRead` and a stub `SurrealClient` and will pass whether or not the real
- * CLI would have built `AppLayer` and tried to connect. So this spawns the ACTUAL
- * CLI entrypoint as a child, with:
- *
- *   - `AX_DUCKDB_SNAPSHOT` pointing at a snapshot this suite published, and
- *   - `AX_DB_URL` pointing at a port nothing is listening on, so ANY SurrealDB
- *     connect attempt fails rather than quietly finding the developer's own
- *     running daemon and making the test pass for the wrong reason.
+ * `CacheRead` and will pass whether or not the real CLI would have built
+ * `AppLayer` and tried to connect. So this spawns the ACTUAL CLI entrypoint
+ * as a child, with `AX_DUCKDB_SNAPSHOT` pointing at a snapshot this suite
+ * published and no server of any kind listening.
  *
  * If recall still routed through `AppLayer`, the connect would fail (or hang to
  * its timeout) and the assertions below would not see hits.
@@ -25,8 +21,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall (no surre
 
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
 const CLI = new URL("./index.ts", import.meta.url).pathname;
-
-/** A port nothing listens on, so a SurrealDB connect can only FAIL. */
 
 const T = (iso: string): Date => new Date(iso);
 
@@ -149,10 +143,10 @@ describe("ax recall on the cache runtime", () => {
     }, 60_000);
 
     dtest("scope=here resolves the repository through the cache, not through Surreal", async () => {
-        // `--scope=here` is the path that used to end in `resolvePwdRepository`'s
-        // `SurrealClient` lookup. Run it in a REAL git repo (this one) so git
-        // resolution succeeds; the cache has no matching repository row, so recall
-        // says so on stderr and still exits cleanly.
+        // `--scope=here` resolves the repository through the cache. Run it in
+        // a REAL git repo (this one) so git resolution succeeds; the cache has
+        // no matching repository row, so recall says so on stderr and still
+        // exits cleanly.
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-recall-nodb-here-"), dylibPath, CORPUS),
         );

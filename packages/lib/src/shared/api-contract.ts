@@ -33,9 +33,12 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
      *  on the wire: daemons older than the field omit it, and the hosted
      *  studio must keep decoding their responses. */
     live_ingest: Schema.optionalKey(Schema.Boolean),
-    /** Whether the OTLP receiver (/v1/traces, /v1/metrics, /v1/logs) is
-     *  available. Unlike live_ingest, this is always true: the receiver is
-     *  pure HTTP+JSON+SurrealDB with no native dependency. Optional on the
+    /** Whether this process can accept OTLP (/v1/traces, /v1/metrics,
+     *  /v1/logs) right now. DERIVED from the capability list, so it can never
+     *  contradict the `capabilities` array in the same body - it used to,
+     *  answering `false` while "otlp" was advertised and the routes returned
+     *  200. `ax studio` mounts them and appends to the spool; it is on-demand,
+     *  so the DURABLE exporter target is `ax otlpd`, not this. Optional on the
      *  wire for forward-compatibility with older daemons. */
     otlp_receiver: Schema.optionalKey(Schema.Boolean),
 }) {}

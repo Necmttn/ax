@@ -69,7 +69,7 @@ function SqlConsole() {
                 rows={4}
                 spellCheck={false}
                 style={{ width: "100%", fontFamily: "monospace", margin: "8px 0" }}
-                aria-label="SurrealQL query"
+                aria-label="SQL query"
             />
             <div className="actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button type="button" className="badge keep" onClick={() => void run()} disabled={busy}>

@@ -77,9 +77,7 @@ export function isHarnessInjected(text: string): boolean {
  * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
  * the lexicographically-smaller skill key always sits in the `in` slot. A
  * short hash of the joined keys keeps the id stable + length-bounded
- * regardless of skill-name length. (The bound outlived its original reason -
- * Surreal record-id segment escaping - but a stable, short primary key is
- * worth keeping on its own terms.)
+ * regardless of skill-name length.
  */
 export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     edgeId: string;

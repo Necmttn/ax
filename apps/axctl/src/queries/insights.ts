@@ -341,12 +341,10 @@ LIMIT ${safeLimit};`.trim();
 }
 
 /**
- * SurrealDB's original was one `RETURN [{relation, rows: (subquery)}, ...]`
- * statement - a nested array-of-objects-with-embedded-result-set shape DuckDB
- * has no equivalent for in a single statement. This UNIONs the three grouped
- * queries into one flat rowset instead, with `relation` as the discriminator
- * column (each caller filters/groups by it client-side). SHAPE CHANGE - flag
- * for whichever chunk ports the dashboard/CLI consumer of this view.
+ * A single statement can't return a nested array of result sets, so this
+ * UNIONs the three grouped queries into one flat rowset instead, with
+ * `relation` as the discriminator column (each caller filters/groups by it
+ * client-side).
  */
 export function fileEvidenceSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
@@ -666,9 +664,9 @@ LIMIT ${safeLimit};`.trim();
 // NOTE (classifier-facts / correction-contexts / classifier-outcomes): the
 // per-row context (previous assistant turn, recent failures, later activity)
 // is resolved AFTER this query by `enrichInsightRows` (insights-enrich.ts)
-// using literal session ids. The correlated `$parent.session` subqueries that
-// used to live here could not use index lookups (SurrealDB v3), so each row
-// cost ~1s of partial scans (~20-38s per view at LIMIT 20).
+// using literal session ids, rather than as a correlated per-row subquery
+// here - a correlated form cost ~1s of partial scans per row (~20-38s per
+// view at LIMIT 20).
 export function classifierFactsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -1016,9 +1014,9 @@ const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
  * (owned by not-yet-ported subsystems - improve/proposal/experiment/retro/
  * dogfood, the skill role-weighting edge). `schemaCoverageSql` degrades their
  * count to a literal 0 instead of a live subquery: DuckDB errors the WHOLE
- * UNION ALL statement on one nonexistent-table reference (unlike SurrealDB,
- * which returns 0 rows for an undefined table under SCHEMAFULL). Re-check
- * this list each time a chunk lands its own schema.duckdb.sql tables.
+ * UNION ALL statement on one nonexistent-table reference, so a single missing
+ * table would otherwise break every count in the view. Re-check this list
+ * each time a chunk lands its own schema.duckdb.sql tables.
  */
 const TABLES_PENDING_DUCKDB_SCHEMA = new Set<string>([
     "role",
@@ -1038,13 +1036,10 @@ const TABLES_PENDING_DUCKDB_SCHEMA = new Set<string>([
 ]);
 
 /**
- * SurrealDB's original was one `RETURN [{table, stage, note, count: (...)}]`
- * statement building ~140 inline correlated-subquery counts. DuckDB has no
- * equivalent literal-array-of-objects construction; this UNIONs one
- * `SELECT '<table>', ..., (SELECT COUNT(*) FROM <table>)` per registered
- * table instead - same information, flat rowset. Every table name is
- * double-quoted since `"commit"` is a reserved word DuckDB requires quoted
- * (harmless for the rest).
+ * UNIONs one `SELECT '<table>', ..., (SELECT COUNT(*) FROM <table>)` per
+ * registered table into a flat rowset (~140 inline correlated-subquery
+ * counts). Every table name is double-quoted since `"commit"` is a reserved
+ * word DuckDB requires quoted (harmless for the rest).
  */
 export function schemaCoverageSql(): string {
     const rows = SCHEMA_TABLES.map((spec) => {

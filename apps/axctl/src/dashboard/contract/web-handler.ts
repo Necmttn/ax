@@ -10,16 +10,18 @@
  *
  * GET /api/version is in the CONTRACT (docs, OpenAPI, generated client) but
  * NOT in the routing table: it is the daemon's identity probe and must keep
- * answering when SurrealDB is down, so the DB-free legacy rawRoute serves
- * it. The v4 web handler builds its layer stack on first request and
- * `toWebHandlerLayerWith` caches a FAILED build forever - the self-healing
- * wrapper below rebuilds the handler after a rejected request so contract
- * routes recover once the DB comes up (mirrors serve-runtime.ts).
+ * answering even when the DuckDB cache read is unavailable, so the DB-free
+ * legacy rawRoute serves it. The v4 web handler builds its layer stack on
+ * first request and `toWebHandlerLayerWith` caches a FAILED build forever -
+ * the self-healing wrapper below rebuilds the handler after a rejected
+ * request so contract routes recover once the DB comes up (mirrors
+ * serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
  * (serve-runtime.ts), so `AppLayer`'s services - AxConfig, the trace sink -
  * are built ONCE and reused by both the contract routes and the legacy
- * routes' runner. No SurrealDB connection: see {@link InertSurrealLayer}.
+ * routes' runner. The read seam (`CacheReadLive`) opens no connection until a
+ * query actually arrives - see its own comment below.
  */
 import { Layer } from "effect";
 import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
@@ -202,8 +204,8 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         });
 
     // Self-heal: a handler REJECTION (as opposed to an error response) means
-    // the lazy layer build failed - e.g. SurrealDB down at boot - and
-    // toWebHandlerLayerWith caches that failure forever. Swap in a fresh
+    // the lazy layer build failed - e.g. the DuckDB snapshot missing at boot -
+    // and toWebHandlerLayerWith caches that failure forever. Swap in a fresh
     // handler so the next request retries, and answer this one with a 500.
     let current = build();
     return {

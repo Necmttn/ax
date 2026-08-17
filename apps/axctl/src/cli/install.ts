@@ -20,9 +20,9 @@ import { CacheRead } from "@ax/lib/duckdb/seam";
 import { fetchLastSuccessfulIngestAt, staleIngestThresholdMs } from "../queries/ingest-staleness.ts";
 
 /**
- * Tagged failure for install steps (surreal resolution, symlinking). Extends
- * `Error`, so existing `Error`-typed failure channels and `.message` readers
- * keep working unchanged.
+ * Tagged failure for install steps (symlinking). Extends `Error`, so existing
+ * `Error`-typed failure channels and `.message` readers keep working
+ * unchanged.
  */
 export class InstallStepError extends Schema.TaggedErrorClass<InstallStepError>(
     "InstallStepError",
@@ -34,10 +34,8 @@ const HOME = homedir();
 const DATA_DIR = process.env.AX_DATA_DIR ?? posixPath.join(HOME, ".local", "share", "ax");
 const LOG_DIR = posixPath.join(DATA_DIR, "logs");
 // Blob storage for raw transcript/codex-artifact snapshots (packages/lib/src
-// blob-gc.ts). Plain directories on disk - NOT a SurrealDB `DEFINE BUCKET`;
-// that registration (and the `surreal import` that applied it) went away
-// with the daemon, but the directories themselves are still real storage
-// ingest writes into under the DuckDB engine.
+// blob-gc.ts). Plain directories on disk, not a database-managed bucket
+// abstraction - ingest writes into them directly under the DuckDB engine.
 const BUCKETS_DIR = posixPath.join(DATA_DIR, "buckets");
 const LAUNCH_AGENTS_DIR = posixPath.join(HOME, "Library", "LaunchAgents");
 const BIN_DIR = posixPath.join(HOME, ".local", "bin");
@@ -369,10 +367,9 @@ const StaleIngestRunRow = Schema.Struct({
 
 /**
  * "ingest-runs" doctor check, read straight off the published DuckDB
- * snapshot. Replaces the old raw-HTTP probe against a SurrealDB daemon that
- * no longer exists. ALWAYS returns a check (never omits it): a report that
- * silently drops a check on cache-unavailable is exactly the "stops
- * evaluating and prints nothing" failure mode doctor exists to avoid.
+ * snapshot. ALWAYS returns a check (never omits it): a report that silently
+ * drops a check on cache-unavailable is exactly the "stops evaluating and
+ * prints nothing" failure mode doctor exists to avoid.
  */
 function collectIngestRunsDoctorCheck(
     staleAfterMs: number,
@@ -533,12 +530,12 @@ export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = 
             console.log(`  alias symlink: ${aliasBinLink} → ${binSource}`);
         }
 
-        // Wave 3 (daemon subtraction): ax no longer runs a SurrealDB daemon -
-        // embedded DuckDB needs nothing held open, and reads go through a
-        // published snapshot ingest writes. A machine that installed an
-        // earlier version still has the old rocksdb store on disk; it is
-        // dead weight now, not a migration source (re-running 'ax ingest'
-        // rebuilds the graph straight from transcripts).
+        // ax no longer runs a SurrealDB daemon - embedded DuckDB needs
+        // nothing held open, and reads go through a published snapshot
+        // ingest writes. A machine that installed an earlier version still
+        // has the old rocksdb store on disk; it is dead weight now, not a
+        // migration source (re-running 'ax ingest' rebuilds the graph
+        // straight from transcripts).
         const oldDbDir = path.join(DATA_DIR, "db");
         if (yield* fs.exists(oldDbDir).pipe(orAbsent(false))) {
             console.log(

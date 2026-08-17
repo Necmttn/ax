@@ -11,9 +11,8 @@ import type {
     ProjectTopSkill,
 } from "@ax/lib/shared/dashboard-types";
 
-// Local DuckDB translations of queries/project.ts's SurrealQL constants -
-// that file is unported (2b's ownership); copy the shape, never import the
-// SurrealQL text or its query-seam wrappers.
+// The `GET /api/projects/:id` DuckDB query set, consumed via `fetchProject`
+// by `dashboard/contract/insights.ts`.
 
 const PROJECT_OVERVIEW_SQL = `
     SELECT

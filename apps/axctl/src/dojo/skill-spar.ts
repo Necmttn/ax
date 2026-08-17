@@ -561,9 +561,10 @@ export const scoreSkillSpar = (
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);
         const cwdB = posixPath.join(mainRepoRoot, brief.worktreeB);
         const sinceMs = Date.parse(brief.createdAt);
-        // Guard a malformed created_at: NaN would flow into surrealDate(new
-        // Date(NaN)) inside findVariantSession and throw a RangeError OUTSIDE
-        // the typed error channel. Fail in-channel instead.
+        // Guard a malformed created_at: NaN would flow into `new Date(NaN)`
+        // inside findVariantSession, whose `.toISOString()` bound-param
+        // encoding throws a RangeError OUTSIDE the typed error channel. Fail
+        // in-channel instead.
         if (Number.isNaN(sinceMs)) {
             return yield* Effect.fail(
                 new SparCaptureError(`malformed created_at in brief ${brief.id}`),

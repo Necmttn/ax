@@ -53,12 +53,13 @@ export type IngestStageKey = (typeof ALL_STAGES)[number]["meta"]["key"];
 /**
  * The stage error channel (F3).
  *
- * It is a UNION, not `DbError`, because a stage can now fail in four ways: the
- * un-ported half still talks to SurrealDB (`DbError`), the ported half writes
- * the lock-held cache (`CacheWriteError`) and reads live rows through the writer
- * (`CacheReadError`), and the judgment-domain stages write the SQLite sidecar
- * (`JudgmentError`). Widening it here rather than per stage is what lets the
- * registry hold all of them under one type.
+ * It is a UNION, not a single error type, because a stage can fail in four
+ * ways: a systemic stored-data failure a stage escalates itself (`DbError`,
+ * e.g. file-isolation.ts's consecutive-failure circuit breaker), writing the
+ * lock-held cache (`CacheWriteError`) and reading live rows through the writer
+ * (`CacheReadError`), and the judgment-domain stages writing the SQLite
+ * sidecar (`JudgmentError`). Widening it here rather than per stage is what
+ * lets the registry hold all of them under one type.
  */
 export type IngestStageError = DbError | CacheWriteError | CacheReadError | JudgmentError;
 

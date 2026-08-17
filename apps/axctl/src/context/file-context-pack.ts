@@ -56,12 +56,11 @@ export interface FileContextPack {
 /**
  * DuckDB SQL a human can paste into `ax duckdb sql` (or any DuckDB client
  * against the published snapshot) to dig deeper than the rendered context.
- * Was hand-rolled SurrealQL; SurrealDB is write-frozen (no ingest writes it
- * any more), so that text pointed at a store this evidence no longer flows
- * through - rewritten against the same tables/joins `context/file-evidence.ts`
- * itself queries. `commit.sessions` (the reverse `<-produced.in` traversal) has
- * no single-statement DuckDB equivalent; add a `JOIN produced p ON p.out_id =
- * c.id JOIN session s ON s.id = p.in_id` to the last query for that.
+ * Written against the same tables/joins `context/file-evidence.ts` itself
+ * queries. `commit.sessions` (the reverse session-produced-commit traversal)
+ * has no single-statement DuckDB equivalent; add a `JOIN produced p ON
+ * p.out_id = c.id JOIN session s ON s.id = p.in_id` to the last query for
+ * that.
  */
 function renderInspectionQuery(files: readonly FileRow[]): string {
     if (files.length === 0) return "-- No matched file records to inspect.";

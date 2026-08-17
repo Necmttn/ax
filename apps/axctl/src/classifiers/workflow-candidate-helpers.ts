@@ -125,11 +125,9 @@ import type {
 } from "./workflow-candidate-types.ts";
 import { workflowCandidateGuidancePendingReviewTaskSchema } from "./workflow-candidate-types.ts";
 /**
- * The two-statement `workflowCandidateSql` query this replaced returned BOTH
- * result sets from one SurrealQL call; DuckDB's `CacheRead.rows` answers one
- * query at a time, so it is split into a group query and an evidence query -
- * every call site now issues both and zips them the same way it already
- * zipped the old two-element result tuple.
+ * `CacheRead.rows` answers one query at a time, so a group query and an
+ * evidence query are kept separate here; every call site issues both and
+ * zips the two result sets into one pair.
  */
 export const workflowCandidateGroupSql =
     "SELECT graph_id, label, properties_json FROM classifier_graph_node WHERE source_kind = ? AND kind = 'classifier_candidate_group'";
@@ -2533,8 +2531,8 @@ export function renderWorkflowCandidateGuidancePendingReviewContextRepairText(
 /**
  * DuckDB `turn` lookup by bare id, keyed via `CacheRead.rows`. `turnKey` (the
  * `?` binding) is `recordKeyPart(turnId, "turn")` - the ax-wide record-key
- * parser, still used as-is: it just strips a `table:` prefix a caller may
- * still be carrying, it never builds SurrealQL syntax.
+ * parser: it just strips a `table:` prefix a caller may still be carrying,
+ * it never builds SQL syntax.
  */
 export const workflowCandidateTurnContextRowSql =
     "SELECT id, session AS session_id, seq, role, text, text_excerpt FROM turn WHERE id = ?";
@@ -3500,8 +3498,7 @@ export function buildWorkflowCandidateTopicHarnessGraphProjection(
  * Shared row-builder for both graph write plans below (harness-check and
  * candidate-review) - identical node/edge/fact shapes, differing only in the
  * `sourceKind` tag stamped onto every row. `id` and `graph_id` both carry the
- * projection's id (mirroring the SurrealQL this replaced, which used the same
- * value as both the record id and the `graph_id` field).
+ * projection's id, so the record id and the `graph_id` field always agree.
  */
 const buildWorkflowCandidateGraphWriteRows = (
     projection: {

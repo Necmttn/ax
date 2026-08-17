@@ -1297,8 +1297,8 @@ const upsertSessions = (write: CacheWriteService, sessions: Session[]) =>
         yield* Effect.forEach(
             sessions,
             (s) =>
-                // SurrealDB v3 rejects JS `null` for `option<T>` fields - the
-                // JS client must see `undefined` to encode NONE. See issue #37.
+                // `cacheRow` normalizes any `undefined` field to an explicit
+                // `null` - DuckDB's bind needs a real null for an absent value.
                 write.put("session", cacheRow({
                     id: s.id,
                     project: s.project ?? null,

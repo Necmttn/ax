@@ -11,15 +11,13 @@ import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
  * up on the next dashboard fetch (the daemon's in-memory TTL caches only
  * cover the expensive mechanical profile).
  *
- * BOTH HALVES ARE ON THE DUCKDB SEAM (wave 3, `c-ingest-cutover`). The publish
- * used to emit `DELETE wrapped_card;` + one `CREATE ... CONTENT` per card as
- * SurrealQL text; it now writes through `CacheWriteService`, which means it
- * only runs under the ingest lock (`withConfigWrite` at the CLI call site).
- * The reader moved WITH it in the same commit on purpose: a ported writer left
- * beside a SurrealQL reader is not a half-done port, it is a silently EMPTY
- * feature - `ax wrapped publish` would report "published 12 cards" while the
- * dashboard queried a write-frozen engine and rendered none, with no error on
- * either side.
+ * BOTH HALVES ARE ON THE DUCKDB SEAM. The publish writes through
+ * `CacheWriteService`, which means it only runs under the ingest lock
+ * (`withConfigWrite` at the CLI call site). Reader and writer must stay on the
+ * same engine on purpose: a writer on one engine and a reader on another is
+ * not a half-done port, it is a silently EMPTY feature - `ax wrapped publish`
+ * would report "published 12 cards" while the dashboard queried a different,
+ * write-frozen store and rendered none, with no error on either side.
  */
 
 const CardSchema = Schema.Struct({

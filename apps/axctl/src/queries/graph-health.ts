@@ -2,12 +2,10 @@
  * The `graph-health` insight view: six integrity scans over the published
  * snapshot, in ONE statement.
  *
- * SHAPE CHANGE from the SurrealDB original. That version was a
- * `RETURN { duplicate_file_identity: (...), ... }` object literal whose values
- * were nested result sets - a shape DuckDB has no single-statement equivalent
- * for, and `CacheRead.rows` returns flat rows regardless. So the six checks
- * UNION ALL into one flat table with a discriminator, the same resolution
- * `schemaCoverageSql` already uses for its own nested original:
+ * `CacheRead.rows` returns flat rows, with no way to nest a result set per
+ * check inside a single statement's output. So the six checks UNION ALL into
+ * one flat table with a discriminator, the same resolution `schemaCoverageSql`
+ * uses:
  *
  *   check       which scan produced the row (e.g. `duplicate_file_identity`)
  *   subject     what the scan groups by, rendered as text
@@ -51,11 +49,7 @@ ORDER BY row_count DESC
 LIMIT ${safeLimit};`.trim();
 }
 
-/**
- * Two or more `repository` rows sharing an identity key. The original's
- * `IS NOT NONE` is SurrealDB's absent-vs-null distinction; DuckDB has only
- * NULL, so both arms become `IS NOT NULL`.
- */
+/** Two or more `repository` rows sharing an identity key. */
 export function repositorySiblingSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -148,9 +142,8 @@ export function duplicateRelationEdgesSql(limit: number): string {
 }
 
 /**
- * Provider-native rows that lost their links. The original's third arm used
- * `count(<-agent_session.provider) = 0` - a SurrealDB reverse-edge traversal;
- * the DuckDB form is a `NOT EXISTS` against `agent_session.provider`.
+ * Provider-native rows that lost their links. The third arm is a
+ * `NOT EXISTS` against `agent_session.provider`.
  */
 export function providerEventIntegritySql(limit: number): string {
     const safeLimit = checkedLimit(limit);

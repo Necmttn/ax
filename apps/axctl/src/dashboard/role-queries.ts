@@ -11,12 +11,10 @@
  *   skill.name, invoked  -> the DuckDB cache (`CacheRead`). Both are derived from
  *                           what is on disk and in the transcripts.
  *
- * In v1 both halves were one SurrealQL statement - `WHERE out.name = $role` walked
- * the edge and dereferenced the skill in a single query. They are now two
- * databases, so the join happens HERE: read the tags, collect the skill ids they
- * name, and resolve names and counts in ONE cache query each. Never a query per
- * row - a tag list is small, but a per-row round trip is the shape that made the
- * v1 deref-avoidance rules necessary in the first place.
+ * The two halves live in two separate databases, so the join happens HERE:
+ * read the tags, collect the skill ids they name, and resolve names and
+ * counts in ONE cache query each. Never a query per row - a tag list is
+ * small, but a per-row round trip does not scale.
  *
  * A TAG WHOSE SKILL IS GONE IS SHOWN, NOT DROPPED. The cache is rebuildable and
  * the sidecar is not, so "a tag on a skill the cache no longer holds" is a real
@@ -348,8 +346,8 @@ const AllRolesRow = Schema.Struct({
  *
  * PURE JUDGMENT: both halves live in the sidecar, so this needs no cache and no
  * snapshot at all. That is what lets `ax roles` answer on a machine that has
- * never run an ingest - see roles-daemonless.test.ts, which runs it with
- * SurrealDB pointed at a dead port.
+ * never run an ingest - see roles-daemonless.test.ts, which runs it with no
+ * DB reachable at all.
  *
  * `LEFT JOIN`, so a role that exists but has been tagged on nothing reports 0
  * rather than vanishing - the v1 correlated subquery had that property and it is

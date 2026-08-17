@@ -241,11 +241,10 @@ const ObservedToolRow = Schema.Struct({
 /**
  * The 25 most-used tools of the last 30 days.
  *
- * `command_norm ?? name` moved from JS into `coalesce` in SQL, because it is
- * what the rows are GROUPED BY: grouping on the pair and collapsing afterwards
- * (what the Surreal version did) splits one tool's calls across two rows
- * whenever some of its invocations normalized and others did not, and then
- * ranks the halves separately.
+ * `command_norm ?? name` is computed in SQL via `coalesce`, because it is what
+ * the rows are GROUPED BY: grouping on the pair and collapsing afterwards
+ * splits one tool's calls across two rows whenever some of its invocations
+ * normalized and others did not, and then ranks the halves separately.
  *
  * `time::now() - 30d` becomes a bound cutoff computed here. DuckDB would spell
  * it `now() - INTERVAL 30 DAY`, but a bound parameter keeps the window testable
@@ -292,11 +291,10 @@ const MAIN_BRANCH_PLACEHOLDERS = MAIN_BRANCHES.map(() => "?").join(", ");
 /**
  * Did work happen directly on the trunk?
  *
- * `checkout.branch` was a Surreal record deref; `edited.checkout` and
- * `produced.checkout` are plain VARCHARs holding the checkout row id, so this is
- * an ordinary JOIN. Three statements rather than one `RETURN { … }` object,
- * which has no DuckDB equivalent - each is an indexed aggregate and the
- * combination happens here, where it is legible.
+ * `edited.checkout` and `produced.checkout` are plain VARCHARs holding the
+ * checkout row id, so reaching `checkout.branch` is an ordinary JOIN. Three
+ * statements rather than one combined query: each is an indexed aggregate,
+ * and the combination happens here, where it is legible.
  */
 const onMainCount = (table: "edited" | "produced"): Clause => ({
     sql: `SELECT count(*) AS count FROM ${table} e
@@ -332,20 +330,21 @@ export const fetchMainBranchGraphEvidence = (read: CacheReadService): Effect.Eff
 
 /**
  * Everything the harness report can say from the FILESYSTEM AND GIT ALONE - no
- * database of any kind, on either engine.
+ * database read of any kind.
  *
  * This exists because the two ingest stages that consume harness output do not
- * in fact need the graph half, and reading it there would make one operation
- * span two engines: an ingest stage writes SurrealDB, while `CacheRead` answers
- * from the last PUBLISHED SNAPSHOT - which by construction omits everything the
- * run currently in progress has written. `ingest/harness.ts` writes only the
+ * in fact need the graph half, and reading it there would mix two DuckDB
+ * views that must stay separate: an ingest stage writes through `CacheWrite`
+ * (the live database), while `CacheRead` only ever answers from the last
+ * PUBLISHED SNAPSHOT - which by construction omits everything the run
+ * currently in progress has written. `ingest/harness.ts` writes only the
  * three collections below, and `ingest/derive-proposals.ts` reads only
  * `learningCandidates`, which `mainBranchLearning` derives from git plus the
  * guidance sources.
  *
- * So the split is not a compromise for the migration - it is where the seam
- * always was. The graph half belongs to {@link buildProjectHarnessReport}, which
- * only the READ command calls.
+ * So the split is not a workaround - it is where the seam belongs. The graph
+ * half belongs to {@link buildProjectHarnessReport}, which only the READ
+ * command calls.
  */
 export interface HarnessGrounding {
     readonly git: GitState;

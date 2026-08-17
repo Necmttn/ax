@@ -1,11 +1,11 @@
 /**
  * The two graph reads inside the project harness report, against a REAL cache.
  *
- * They are exported for this file alone. Both changed shape in the port - one
- * moved a `??` out of JS and into the GROUP BY, the other turned a Surreal
- * record deref into a JOIN - and both are the kind of change that produces a
- * plausible WRONG NUMBER rather than an error, which is precisely what a
- * SQL-text assertion cannot catch.
+ * They are exported for this file alone: one computes `coalesce(...)` in the
+ * GROUP BY rather than in JS, the other reaches `checkout.branch` through a
+ * JOIN - both are the kind of query shape that produces a plausible WRONG
+ * NUMBER rather than an error, which is precisely what a SQL-text assertion
+ * cannot catch.
  */
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
@@ -139,10 +139,11 @@ describe("fetchMainBranchGraphEvidence", () => {
 describe("buildHarnessGrounding runs on NO database engine", () => {
     /**
      * The P1 regression this guards: the two ingest stages that consume harness
-     * output write SurrealDB, while `CacheRead` answers from the last PUBLISHED
-     * snapshot - which omits everything the run in progress has written. If the
-     * grounding ever grows a graph read, this case stops compiling (the
-     * requirement channel widens) and stops running (no layer provides it).
+     * output write through `CacheWrite` (the live database), while `CacheRead`
+     * answers from the last PUBLISHED snapshot - which omits everything the run
+     * in progress has written. If the grounding ever grows a graph read, this
+     * case stops compiling (the requirement channel widens) and stops running
+     * (no layer provides it).
      */
     test("resolves with only ProcessService, FileSystem and Path provided", async () => {
         const grounding = await Effect.runPromise(

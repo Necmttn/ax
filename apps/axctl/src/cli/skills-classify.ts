@@ -29,10 +29,10 @@ export interface ClassifyResult {
     readonly skipped: string[];
 }
 
-// Default mode ("unclassified skills with ≥3 invocations") no longer has its own
-// SurrealQL here. It delegates to fetchSkillHygiene - the single source of truth
-// shared with `ax skills weighted`. The old correlated predicate
-// (`NOT (SELECT ... )[0]`) was broken: that subquery yields NONE for an
+// Default mode ("unclassified skills with ≥3 invocations") has no query of
+// its own here. It delegates to fetchSkillHygiene - the single source of
+// truth shared with `ax skills weighted` - because a correlated predicate
+// (`NOT (SELECT ... )[0]`) here was broken: that subquery yields NONE for an
 // unclassified skill, and `NOT NONE` is NONE (not true), so the WHERE clause
 // silently excluded EVERY unclassified skill and classify always reported
 // "none found" while weighted reported a positive count.

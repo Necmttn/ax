@@ -8,7 +8,7 @@
 //  - timeline  (`apps/axctl/src/timeline/providers.ts`)         - unified
 //    event kinds for the session timeline.
 //  - metrics   (`apps/axctl/src/metrics/*`, #170)               - edit/read
-//    predicates + SurrealQL filter fragments for session_metrics.
+//    predicates + SQL filter fragments for session_metrics.
 //
 // Claude has dedicated Edit/Write/Read/Grep tools; Codex/Pi edit via
 // `apply_patch` (as a tool name OR as the base command of an `exec_command`)

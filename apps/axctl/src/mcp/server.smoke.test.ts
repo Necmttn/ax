@@ -1,8 +1,8 @@
 /**
  * Smoke test: the MCP server speaks MCP over an in-memory transport, exposes
  * the `recall` tool via tools/list, and the result-wrapping helpers + registry
- * are well-formed. No seeded DB required - tools/list never touches SurrealDB,
- * and we assert the registry/envelope shape directly.
+ * are well-formed. No seeded DB required - tools/list never touches the
+ * database, and we assert the registry/envelope shape directly.
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
@@ -315,10 +315,10 @@ describe("NavLink next[] wiring", () => {
 
     dtest("session_show returns full normalized turns when requested", async () => {
         // Runs against a REAL published snapshot: this tool goes through
-        // `fetchEnrichedSession` -> `fetchSessionView`, the chain wave 3's
-        // `c-read-seam` ported. The `testing/surreal.ts` fake it used before
-        // answered on a `sql.includes("FROM turn")` substring match, which
-        // cannot tell a working query from one that returns nothing.
+        // `fetchEnrichedSession` -> `fetchSessionView`. A fake that answers by
+        // matching SQL text (e.g. `sql.includes("FROM turn")`) cannot tell a
+        // working query from one that returns nothing, so this exercises the
+        // real DuckDB read path instead.
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-mcp-session-show-"), dylibPath, (w: CacheWriteService) =>
                 Effect.gen(function* () {

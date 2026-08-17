@@ -131,7 +131,7 @@ export function renderCostSessionsTable(result: CostSessionsResult): string {
     };
 
     const rendered: SessionRow[] = result.rows.map((r) => ({
-        // Strip "session:" prefix and optional SurrealDB backtick wrapping (`uuid`)
+        // Strip "session:" prefix and any backtick-wrapped id, if present
         session: r.session_id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1"),
         project: r.project ?? "",
         model: r.model ?? "?",
@@ -418,7 +418,7 @@ const cmdCostImages = (input: {
         };
 
         const rendered: ImgRow[] = result.rows.map((r) => ({
-            // Strip "session:" prefix and SurrealDB backtick wrapping
+            // Strip "session:" prefix and any backtick-wrapped id
             session: r.session.replace(/^session:/, "").replace(/^`(.*)`$/, "$1").slice(0, 14),
             origin: r.origin,
             calls: integer(r.calls),

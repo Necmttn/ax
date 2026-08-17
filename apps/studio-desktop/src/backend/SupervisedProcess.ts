@@ -6,12 +6,11 @@
  * restarts the child with exponential backoff if it exits while the supervisor
  * still wants it running.
  *
- * This module is intentionally free of any surreal / ax-serve specifics: the
- * caller supplies the executable, args, cwd, env, and a readiness URL. Task 2.3
- * originally instantiated this twice (surreal, ax-serve); wave 3
- * (`c-desktop-realign`) collapsed `AxBackendManager` down to a single
- * `ax studio` instance, but the generic single-process shape here is
- * unchanged - it never assumed two.
+ * This module is intentionally free of any backend-specific knowledge: the
+ * caller supplies the executable, args, cwd, env, and a readiness URL.
+ * `AxBackendManager` uses one instance of this supervisor for the single
+ * `ax studio` process; the generic single-process shape here never assumed
+ * more than one.
  *
  * The patterns (Scope / Fiber / Ref / Semaphore lifecycle, exponential backoff,
  * HTTP readiness via `HttpClient.filterStatusOk` + `Schedule.spaced`) mirror
@@ -63,9 +62,9 @@ export interface SupervisedProcessConfig {
     };
     /**
      * Optional liveness watchdog. The startup readiness probe only fires once;
-     * a child that comes up and later WEDGES (process alive, not answering -
-     * the recurring SurrealDB failure) never exits, so the exit->restart path
-     * never triggers and the daemon stays dead-but-running forever.
+     * a child that comes up and later WEDGES (process alive, not answering)
+     * never exits, so the exit->restart path never triggers and the daemon
+     * stays dead-but-running forever.
      *
      * When set, the supervisor runs `probe` every `interval` once the child is
      * ready, each capped at `timeout`. On `failureThreshold` CONSECUTIVE failed
@@ -74,8 +73,8 @@ export interface SupervisedProcessConfig {
      * backoff (LaunchAgent / SupervisedProcess respawn). One success resets the
      * counter. Keyed on probe timeouts, NOT CPU - a wedged daemon can sit at any
      * CPU level. The probe is supplied by the caller (so this module stays free
-     * of surreal/ax-serve specifics) and must be fully provided (no env): e.g.
-     * `HEAD /health` AND a tiny `RETURN 1` SQL round-trip, both with deadlines.
+     * of backend-specific knowledge) and must be fully provided (no env): e.g.
+     * a `HEAD /health` round-trip with its own deadline.
      */
     readonly liveness?: {
         readonly probe: Effect.Effect<void, unknown>;

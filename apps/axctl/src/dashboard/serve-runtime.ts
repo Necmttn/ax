@@ -5,16 +5,12 @@
  * published-snapshot connection (and the trace sink) is built once per
  * server lifetime instead of once per HTTP request.
  *
- * Studio ephemeral (wave 3, `c-daemon-studio`) dropped what this runtime used
- * to ALSO host: `IngestRuntimeLayer` merged with a live `SurrealClientLive`
- * connection, because this same runtime forked the detached ingest daemon
- * fiber the in-browser "trigger ingest" button started (`ingest-workflow.ts`,
- * now deleted). An on-demand process that exits when its client disconnects
- * cannot own that fiber's lifecycle, so the trigger was retired - studio now
- * only ever READS the published snapshot, and background freshness is a
- * separate concern (chunk 3a's freshness drive spawns `ax ingest`
- * independently of any studio invocation). No `SurrealClient` merge remains
- * anywhere in this runtime.
+ * Studio only ever READS the published snapshot; it does not host an ingest
+ * runtime. An on-demand server process that exits when its client
+ * disconnects cannot own a background fiber's lifecycle, so there is no
+ * in-browser "trigger ingest" path here - background freshness is a separate
+ * concern (a freshness drive spawns `ax ingest` independently of any studio
+ * invocation).
  *
  * Self-healing: v4 `ManagedRuntime` caches its layer-build fiber forever -
  * including a FAILED build (e.g. no snapshot published yet when the server
@@ -62,7 +58,7 @@ export interface ServeRuntimeHandle {
  * Production runtime factory. Pass a `memoMap` to share layer builds with
  * other consumers of the same layer objects - `serveDashboard` shares one
  * memoMap between this runtime and the contract web handler
- * (contract/web-handler.ts) so AppLayer's SurrealDB connection is built once.
+ * (contract/web-handler.ts) so `AppLayer`'s services are built once.
  */
 export const defaultRuntimeFactory = (
     options?: { readonly memoMap?: Layer.MemoMap },

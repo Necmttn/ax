@@ -6,8 +6,9 @@
  * snapshot rather than a stubbed client. `CacheReadLive` is merged inside
  * `makeContractWebHandler` and wins over anything passed as `services`, so the
  * fixture is pointed at through `AX_DUCKDB_SNAPSHOT` - the same override a user
- * has. A SurrealQL stub would prove nothing here: it cannot catch a predicate
- * DuckDB refuses to bind, which is exactly the defect this file caught.
+ * has. A text-matching stub would prove nothing here: it cannot catch a
+ * predicate DuckDB refuses to bind, which is exactly the defect this file
+ * caught.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";

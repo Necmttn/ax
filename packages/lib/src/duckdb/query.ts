@@ -1,44 +1,34 @@
 /**
- * The typed read helpers every ported reader goes through.
+ * The typed read helpers every reader goes through.
  *
- * This replaces BOTH Surreal-era modules - `shared/query.ts` (a query as a
- * value: SQL builder + row mapper) and `shared/graph-query.ts` (running one:
- * resolve the client, map the rows, apply the error policy). They were two
- * files because a Surreal read needed a hand-written row mapper AND a
- * hand-written defensive wrapper around every call. With {@link Clause} holding
- * the parameters and `Schema` holding the row contract, the structural half is
- * a record and the execution half is five functions, so they fit in one place.
+ * One module holds both halves of a read: the query as a value ({@link Clause}
+ * holding the parameters, `Schema` holding the row contract) and running one
+ * (resolve the cache, map the rows, apply the error policy below). Row ids are
+ * plain VARCHARs, so a record id is a bound parameter like every other value -
+ * there is no id-splicing seam here, and so no injection surface from one.
  *
- * WHAT DOES NOT COME ACROSS: `interpolateRid`. The Surreal reader had to splice
- * validated record ids into statement TEXT because the SDK's record-id bindings
- * returned empty results for this project's `session:` form. DuckDB row ids are
- * plain VARCHARs, so a record id is a bound parameter like every other value,
- * and that entire seam - along with its injection surface - is deleted rather
- * than ported.
- *
- * ## Error policy, carried over deliberately
+ * ## Error policy
  *
  * {@link cacheRows} / {@link cacheFirst} / {@link runCacheQuery} /
  * {@link runCacheSingleQuery} are DEFENSIVE: any read failure logs the caller's
  * context and degrades to `[]` / `null`, so their error channel is `never`.
- * That is the policy the ~95 dashboard, CLI and MCP read sites were written
+ * That is the policy the ~95 dashboard, CLI and MCP read sites are written
  * against - decorative, read-only metadata should degrade rather than fail a
- * whole page - and changing it during a mechanical port would push new error
- * handling into every one of them for no gain.
+ * whole page.
  *
- * {@link cachePaged} keeps its typed error channel, for the same reason it did
- * before: a paginated view that degrades silently renders "0 results", which a
- * user cannot tell apart from a genuinely empty result set.
+ * {@link cachePaged} keeps its typed error channel instead: a paginated view
+ * that degrades silently renders "0 results", which a user cannot tell apart
+ * from a genuinely empty result set.
  *
- * ONE ADDITION over the Surreal policy. A {@link CacheUnavailableError} - no
- * snapshot published yet - is the single most common cause of an empty read on
- * a fresh install, and the seam already composed the sentence that fixes it. So
- * that case is logged as its own line naming `ax ingest`, instead of being
- * flattened into the same "query failed" noise as a genuine bug.
+ * A {@link CacheUnavailableError} - no snapshot published yet - is the single
+ * most common cause of an empty read on a fresh install, and the seam already
+ * composed the sentence that fixes it. So that case is logged as its own line
+ * naming `ax ingest`, instead of being flattened into the same "query failed"
+ * noise as a genuine bug.
  *
- * Mapper exceptions are NOT caught, exactly as before: a mapper that throws has
- * a bad row shape, which is a programmer error that should surface in
- * development rather than degrade to an empty list in production.
+ * Mapper exceptions are NOT caught: a mapper that throws has a bad row shape,
+ * which is a programmer error that should surface in development rather than
+ * degrade to an empty list in production.
  */
 import { Effect, Schema } from "effect";
 import type { Clause } from "./clause.ts";

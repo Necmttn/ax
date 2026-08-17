@@ -228,13 +228,13 @@ export function buildShareArtifactFromParts(
 }
 
 /**
- * Validate + strip any Surreal-era record-ref decoration (`session:⟨...⟩` /
- * `session:...`) a caller might still pass, returning the BARE session id -
- * `session.id` in the DuckDB schema is the provider-native uuid verbatim, with
- * no record-ref wrapper (see schema.duckdb.sql's ROW IDS "CARVE-OUT" note).
- * `null` when the (unwrapped) id doesn't look like a session id at all - the
- * caller treats that as "session not found" rather than building a statement
- * with an unvalidated string.
+ * Validate + strip any `session:⟨...⟩` / `session:...` ref decoration a
+ * caller might still pass, returning the BARE session id - `session.id` in
+ * the DuckDB schema is the provider-native uuid verbatim, with no ref
+ * wrapper (see schema.duckdb.sql's ROW IDS "CARVE-OUT" note). `null` when the
+ * (unwrapped) id doesn't look like a session id at all - the caller treats
+ * that as "session not found" rather than building a statement with an
+ * unvalidated string.
  */
 export function normalizeSessionRecordRef(sessionId: string): string | null {
     const bare = sessionId.startsWith("session:⟨") && sessionId.endsWith("⟩")

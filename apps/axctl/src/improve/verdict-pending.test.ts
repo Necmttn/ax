@@ -10,8 +10,9 @@ const layerWith = (...fixtures: unknown[][]) => {
 
 describe("listPendingVerdicts", () => {
     test("returns experiments lacking locked_verdict with their proposal title", async () => {
-        // created_at is in the projection only to satisfy SurrealDB's
-        // ORDER BY rules; the query must strip it from returned rows.
+        // created_at is only used to order the real query (ORDER BY, not
+        // SELECT'd); it is included in the fixture rows below but the
+        // Schema decode drops it from what listPendingVerdicts returns.
         const layer = layerWith([
             { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded", created_at: new Date("2026-01-01T00:00:00Z") },
             { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted", created_at: new Date("2026-01-01T00:00:00Z") },

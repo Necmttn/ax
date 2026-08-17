@@ -265,10 +265,8 @@ const liveShareDeps: ShareCommandDeps = {
             exportSessionShare(sessionId, axVersion).pipe(
                 catchDbErrorAndExit("axctl share"),
                 // `ax share` is declared runtime "none" - it must never open a
-                // live SurrealDB connection. It used to self-provide
-                // `LegacySurrealAppLayer` here regardless of that declaration
-                // (wave-3 partition doc §2d finding); now that `exporter.ts`
-                // reads through the DuckDB cache, only CacheRead is needed.
+                // live database connection. `exporter.ts` reads through the
+                // DuckDB cache, so only CacheRead is needed here.
                 Effect.provide(CacheReadLive),
                 Effect.scoped,
             ),
@@ -277,8 +275,8 @@ const liveShareDeps: ShareCommandDeps = {
         Effect.runPromise(
             locateShareTranscript(sessionId).pipe(
                 // `locateShareTranscript` needs CacheRead (the `raw_file` hint
-                // off the published snapshot) + the filesystem, never
-                // SurrealDB - see recover.ts's own R-channel comment.
+                // off the published snapshot) + the filesystem, never a live
+                // database connection - see recover.ts's own R-channel comment.
                 Effect.provide(Layer.merge(CacheReadLive, SharePlatformLayer)),
                 Effect.scoped,
             ),

@@ -151,10 +151,7 @@ const positiveInt = (value: number, fallback: number): number => {
  * `fetchDispatches` for the parent->child->model resolution, so the advice view
  * inherits the same child_model logic the dispatch table uses.
  *
- * Both halves read the DuckDB cache through `CacheRead`. The advice half used to
- * read SurrealDB, which nothing has written since `advice` became a live DuckDB
- * table - and because an empty table is not an error, that read returned an
- * EMPTY ledger rather than failing.
+ * Both halves read the DuckDB cache through `CacheRead`.
  */
 export const fetchAdviceLedger = Effect.fn("queries.fetchAdviceLedger")(
   function* (opts: { readonly sinceDays: number; readonly limit: number }) {

@@ -48,9 +48,9 @@ export const mcpCommand = Command.make(
 
 // Unaffected by studio ephemeral: the interactive TERMINAL dashboard is a
 // separate feature from the web studio, manages its own CacheRead-backed
-// AppLayer scope (ported off SurrealDB by the earlier c-read-dashboard
-// chunk), and was never tied to `ax serve`'s daemon lifecycle - it opens,
-// runs, and closes within one invocation regardless of what this file does.
+// AppLayer scope, and was never tied to `ax serve`'s daemon lifecycle - it
+// opens, runs, and closes within one invocation regardless of what this
+// file does.
 export const tuiCommand = Command.make("tui", {}, () =>
     Effect.promise(async () => {
         // Dynamic import keeps React/opentui out of the load path for

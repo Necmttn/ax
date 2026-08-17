@@ -1,14 +1,11 @@
 /**
  * Phase 2 / Task 2.3 - single-process backend supervisor.
  *
- * Wave 3 (`c-desktop-realign`): ax retired the required SurrealDB daemon for
- * embedded DuckDB, and `ax serve` (a two-process pair - `surreal` then
- * `ax serve` against it) was replaced by `ax studio`, one ephemeral process
- * that reads a published DuckDB snapshot and self-exits when idle (see the
- * `c-daemon-studio` chunk, `apps/axctl/src/dashboard/server.ts`, landing as
- * PR #821). `AxBackendManager` now owns exactly ONE {@link SupervisedProcess}
- * instead of two. On `start` it runs the attach-vs-spawn arbitration
- * ({@link AxDaemonArbitration}) and then:
+ * `ax studio` is one ephemeral process that reads a published DuckDB
+ * snapshot and self-exits when idle (see
+ * `apps/axctl/src/dashboard/server.ts`). `AxBackendManager` owns exactly ONE
+ * {@link SupervisedProcess}. On `start` it runs the attach-vs-spawn
+ * arbitration ({@link AxDaemonArbitration}) and then:
  *
  * - `attach` -> a healthy `ax studio` is already answering on the port
  *               (another desktop instance, or a manual CLI run). Do NOT
@@ -17,7 +14,7 @@
  * - `spawn`  -> nothing is answering; spawn our own supervised `ax studio`,
  *               await its readiness, then mark ready and open the window.
  *
- * There is no more surreal to sequence in front of it, no schema to apply (a
+ * There is no other process to sequence in front of it, no schema to apply (a
  * published DuckDB snapshot already carries its schema - see
  * `packages/lib/src/duckdb/schema.duckdb.sql`), and no "spawn-ax-only" /
  * "conflict" split: a spawned process that never reports ready within its

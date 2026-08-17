@@ -8,7 +8,7 @@ import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 
 /** Max stages running their `run` Effect concurrently. Each stage has its own
- *  internal concurrency (claude=8, codex=4) hitting Surreal, so 2 stages
+ *  internal concurrency (claude=8, codex=4) hitting the database, so 2 stages
  *  × internal fan-out is already heavy. */
 export const PIPELINE_CONCURRENCY = 4;
 
@@ -21,11 +21,11 @@ export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number =
 
 /** Hard per-stage cap applied to `derive`-tagged stages ONLY. Derives reshape
  *  already-ingested rows and should finish fast; one that runs past this cap is
- *  stuck (e.g. a SurrealDB query that hangs on a given server version, #671) and
- *  is failed OPEN - a warning plus empty stats - so the rest of the pipeline
- *  still completes and exits. Heavy ingest/provider stages (claude, codex, git)
- *  are deliberately exempt: a full backfill legitimately runs for many minutes.
- *  Env override `AX_STAGE_TIMEOUT_SECONDS`; 0 disables. Exported for tests. */
+ *  stuck (a hung query, #671) and is failed OPEN - a warning plus empty stats -
+ *  so the rest of the pipeline still completes and exits. Heavy ingest/provider
+ *  stages (claude, codex, git) are deliberately exempt: a full backfill
+ *  legitimately runs for many minutes. Env override `AX_STAGE_TIMEOUT_SECONDS`;
+ *  0 disables. Exported for tests. */
 export const deriveStageTimeoutSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
     return nonNegativeNumberEnv(env.AX_STAGE_TIMEOUT_SECONDS, 300);
 };

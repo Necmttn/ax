@@ -551,7 +551,7 @@ function providerOfSource(source: string): RoutabilityProvider | null {
 }
 
 /**
- * Pull main-agent turns (Claude + Codex) from SurrealDB, group into class-run
+ * Pull main-agent turns (Claude + Codex) from the DuckDB cache, group into class-run
  * spans per (provider, session), classify + reprice each provider separately,
  * and return a combined RoutabilityResult with a per-provider breakdown.
  * Mirrors fetchCostSplit in cost-analytics.ts: flat queries + JS join/aggregate,

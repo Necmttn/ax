@@ -13,13 +13,11 @@ export interface SkillGraphParams {
     readonly limit?: number;
 }
 
-// Local DuckDB translation of queries/skill-graph.ts's SKILL_GRAPH_EDGES_SQL
-// (unported, 2b's ownership - copy the shape, never import the SurrealQL
-// text). `skill_paired.last_seen` is NOT NULL under DuckDB (the derive-signals
-// writer always stamps a real Date, falling back to "now" rather than an
-// epoch sentinel), so the old `d"1970-01-02"` NONE-guard from the SurrealQL
-// original has no DuckDB equivalent to translate - the column is selected
-// directly.
+// The `GET /api/skill-graph` DuckDB query, consumed via `fetchSkillGraph` by
+// `dashboard/contract/insights.ts`. `skill_paired.last_seen` is NOT NULL (the
+// derive-signals writer always stamps a real Date, falling back to "now"
+// rather than an epoch sentinel), so the column is selected directly with no
+// null guard needed.
 const SKILL_GRAPH_EDGES_SQL = `
     SELECT
         s_in.name AS source,

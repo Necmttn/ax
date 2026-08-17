@@ -57,10 +57,9 @@ export interface BlobGcOptions {
     readonly now?: () => number;
 }
 
-/** The one column GC reads. `WHERE raw_file IS NOT NULL` (the Surreal query said
- *  `IS NOT NONE`, a value DuckDB does not have) keeps the schema non-nullable,
- *  so a NULL slipping through is a decode failure rather than a `null` quietly
- *  entering the reference set and matching no file. */
+/** The one column GC reads. `WHERE raw_file IS NOT NULL` keeps the schema
+ *  non-nullable, so a NULL slipping through is a decode failure rather than a
+ *  `null` quietly entering the reference set and matching no file. */
 const RawFileRow = Schema.Struct({ raw_file: Schema.String });
 
 /**
@@ -69,14 +68,12 @@ const RawFileRow = Schema.Struct({ raw_file: Schema.String });
  * THE CALLER SUPPLIES THE SET, and that is not ceremony. GC DELETES FILES, and
  * its whole safety argument is that the reference set came from the engine the
  * triggering ingest actually wrote. Reading it here, unconditionally, from the
- * published DuckDB snapshot was wrong while ingest still writes SurrealDB: the
- * snapshot omits everything the run in progress produced, so an ingest that had
- * just written a session's blob would find that blob unreferenced. Passing the
- * set in makes the engine a decision of the CALL SITE - the one place that knows
- * which engine the run wrote - instead of a fact baked into a deletion pass.
- *
- * This is the v2 source. It becomes the only one at the ingest write cutover;
- * until then the Surreal-era caller reads its own.
+ * published DuckDB snapshot would be wrong if ingest wrote through a different
+ * engine: the snapshot omits everything the run in progress produced, so an
+ * ingest that had just written a session's blob would find that blob
+ * unreferenced. Passing the set in makes the engine a decision of the CALL
+ * SITE - the one place that knows which engine the run wrote - instead of a
+ * fact baked into a deletion pass.
  */
 export const cacheReferencedBlobs: Effect.Effect<ReadonlySet<string>, never, CacheRead> =
     Effect.map(

@@ -290,7 +290,7 @@ describe("effect cli", () => {
         const subNames = context!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["file"]));
         // Ported to the v2 cache runtime. `DB_COMMANDS` is what decides whether
-        // AppLayer (and its SurrealDB connect) is built, so a ported command
+        // AppLayer (and its database connect) is built, so a ported command
         // MUST be absent from it - same acceptance shape as `recall` below.
         expect(entryRuntime(RUNTIME_BY_COMMAND["context"]!)).toBe("cache");
         expect(DB_COMMANDS.has("context")).toBe(false);
@@ -303,11 +303,10 @@ describe("effect cli", () => {
         expect(hook).toBeDefined();
         const subNames = hook!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["file-context", "log"]));
-        // "hook" (harness plumbing) is db-conditional since `hook log` was
-        // ported to the v2 cache runtime while `hook file-context` still
-        // needs SurrealDB - see commands/hooks.ts's routing table. Full
-        // per-subcommand + anti-drift coverage: "hook/hooks db-conditional
-        // routing" below.
+        // "hook" (harness plumbing) is declared db-conditional, with every
+        // subcommand (file-context, log) currently resolving to the cache
+        // runtime - see commands/hooks.ts's routing table. Full per-subcommand
+        // + anti-drift coverage: "hook/hooks db-conditional routing" below.
         expect(DB_COMMANDS.has("hook")).toBe(false);
     });
 
@@ -318,9 +317,9 @@ describe("effect cli", () => {
         expect(hooks).toBeDefined();
         const subNames = hooks!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["summary", "invocations", "session", "backtest"]));
-        // "hooks" is db-conditional since `hooks backtest` was ported to the
-        // v2 cache runtime while its siblings (summary/config/install/...)
-        // still need SurrealDB - see commands/hooks.ts's routing table. Full
+        // "hooks" is declared db-conditional, with every subcommand
+        // (summary/config/install/backtest/...) currently resolving to the
+        // cache runtime - see commands/hooks.ts's routing table. Full
         // per-subcommand + anti-drift coverage: "hook/hooks db-conditional
         // routing" below.
         expect(DB_COMMANDS.has("hooks")).toBe(false);
@@ -340,9 +339,11 @@ describe("effect cli", () => {
     });
 
     test("recall is routed on the v2 cache runtime, and never opens SurrealDB", () => {
-        // The acceptance signal for the ported vertical (D6): `"cache"` gets
-        // CacheRead + the THROWING SurrealClient proxy, so any un-ported path
-        // inside recall fails loudly instead of answering from the old engine.
+        // The acceptance signal for the ported vertical: `"cache"` resolves to
+        // `withCache`, which provides a real `CacheReadLive` and never builds
+        // `AppLayer` (the layer that would open a database connection), so an
+        // un-ported path inside recall that still needed a live database would
+        // fail to typecheck rather than silently reaching for one.
         expect(entryRuntime(RUNTIME_BY_COMMAND["recall"]!)).toBe("cache");
         // DB_COMMANDS is what decides whether AppLayer (and its connect) is
         // built, so a ported command MUST be absent from it.
@@ -564,9 +565,9 @@ describe("sessions command", () => {
     };
 
     test("sessions is declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
-        // Was a static "db" entry. `show` is ported to the DuckDB cache
-        // (wave 3 c-read-seam) while here/around/near/compare are still
-        // SurrealQL, so routing is now per-subcommand.
+        // Declared db-conditional, with every subcommand (show/here/around/
+        // near/compare) currently resolving to the cache runtime - see the
+        // per-subcommand routing table in commands/sessions.ts.
         sessionsDeclaration();
         expect(DB_COMMANDS.has("sessions")).toBe(false);
     });
@@ -593,9 +594,9 @@ describe("sessions command", () => {
         expect(resolveRuntime(entry, ["sessions", "compare", "a", "b"])).toBe("cache");
         expect(resolveRuntime(entry, ["sessions"])).toBe("cache");
         // `here`/`near` are the two that changed BEHAVIOUR, not just runtime:
-        // they resolved $PWD through `resolvePwdRepository`, whose git-derived
-        // key matches no row in a v2 snapshot. They now resolve the cache's
-        // repository ROW id, so `--here` scoping selects rows instead of none.
+        // resolving $PWD used to match against a git-derived key that hit no
+        // row in a v2 snapshot. They now resolve the cache's repository ROW
+        // id, so `--here` scoping selects rows instead of none.
         expect(DB_COMMANDS.has("sessions")).toBe(false);
     });
 });

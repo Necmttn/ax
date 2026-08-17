@@ -5,14 +5,13 @@ import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib
 import { cacheReadResults } from "../testing/cache-read.ts";
 import { collectDoctorReport, formatDoctorReport } from "./install.ts";
 
-// Forced-dependency edit: `collectDoctorReport` is now an Effect requiring
-// FileSystem + Path + CacheRead (the DuckDB-seam rewrite dropped the raw
-// SurrealDB HTTP probes). Run it against the REAL Bun-backed platform layers,
-// exactly as the production CLI does via `withoutDb`/`withCache`, plus a
-// CacheRead test double (`../testing/cache-read.ts` - the "honest transform
-// stub" the wave-3 band rules call for: it decodes nothing, so it proves
-// nothing about database behavior, only about collectDoctorReport's own
-// branching - which is exactly what these tests are about).
+// `collectDoctorReport` is an Effect requiring FileSystem + Path + CacheRead.
+// Run it against the REAL Bun-backed platform layers, exactly as the
+// production CLI does via `withoutDb`/`withCache`, plus a CacheRead test
+// double (`../testing/cache-read.ts` - an "honest transform stub": it
+// decodes nothing, so it proves nothing about database behavior, only about
+// collectDoctorReport's own branching - which is exactly what these tests
+// are about).
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 // Doctor issues its two CacheRead queries in a fixed order: the "ingest-runs"

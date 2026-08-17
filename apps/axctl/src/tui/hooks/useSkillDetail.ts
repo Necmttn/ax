@@ -29,14 +29,12 @@ const readSkillBody = (filePath: string): Promise<string | null> =>
  */
 const DETAIL_DEBOUNCE_MS = 150;
 
-// Local DuckDB decomposition of queries/skill-detail.ts's
-// SKILL_DETAIL_BASIC_SQL (unported, 2b's ownership - copy the shape, never
-// import the SurrealQL text). The SurrealQL original is ONE composite
-// `RETURN { skill, invocations: {...}, recent: [...], daily: [...] }` query
-// built by skill-invocations-sql.ts's scaffold - DuckDB has no equivalent
-// nested-object RETURN, so it decomposes into 4 independent queries run in
-// parallel (all filtered by skill name, no dependency between them) and
-// reassembled client-side into the same SkillDetailRecord shape.
+// Local copy, kept separate from `queries/skill-detail.ts`'s
+// `fetchSkillDetail` (see that file's module doc: it composes its own
+// lookups and exports no shared SQL-text constants for the TUI to import).
+// The four queries below run independently in parallel (all filtered by
+// skill name, no dependency between them) and are reassembled client-side
+// into the SkillDetailRecord shape.
 
 const SKILL_ROW_SQL = `
     SELECT name, scope, description, dir_path, bytes
@@ -56,8 +54,8 @@ const SKILL_INVOCATION_COUNTS_SQL = `
     WHERE sk.name = ?
 `;
 
-// `in.session.project` deref (invoked -> turn -> session) simplifies to a
-// direct join on invoked.session, denormalized onto the edge row.
+// `session` is denormalized directly onto the `invoked` edge row, so this
+// project lookup is a plain join, not a multi-hop traversal.
 const SKILL_RECENT_SQL = `
     SELECT iv.ts AS ts, s.project AS project
     FROM invoked iv

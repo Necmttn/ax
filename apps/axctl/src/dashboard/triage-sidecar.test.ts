@@ -35,7 +35,7 @@ const runWithSidecar = <A, E>(directory: string, effect: Effect.Effect<A, E, Jud
     );
 
 describe("skill triage decisions in the judgment sidecar", () => {
-    test("sets, lists, replaces, and clears decisions without SurrealDB", async () => {
+    test("sets, lists, replaces, and clears decisions using only the sidecar", async () => {
         const directory = tempDirectory();
 
         await runWithSidecar(directory, setSkillDecision("tdd", "keep", "reliable"));

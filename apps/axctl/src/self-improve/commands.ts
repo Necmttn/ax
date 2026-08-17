@@ -102,10 +102,10 @@ const ToolCallEvidenceRow = Schema.Struct({
     has_error: Schema.Boolean,
     ts: TimestampColumn,
 });
-// plan_snapshot has no `status` column in the DuckDB schema (never made the
-// SurrealDB -> DuckDB migration; SignalInput.planSnapshots.status is optional
-// and unused by every current signal deriver - see signals.ts), so it is
-// mapped to `null` below rather than selected.
+// plan_snapshot has no `status` column in the DuckDB schema.
+// SignalInput.planSnapshots.status is optional and unused by every current
+// signal deriver (see signals.ts), so it is mapped to `null` below rather
+// than selected.
 const PlanSnapshotEvidenceRow = Schema.Struct({
     session: Schema.String,
     ts: TimestampColumn,
@@ -115,17 +115,14 @@ export interface DeriveWeeklyGuidanceResult {
     readonly guidanceCount: number;
     readonly guidance: readonly GuidanceDraft[];
     /**
-     * Reads are ported to CacheRead (the published DuckDB snapshot); the
-     * write side is NOT. `guidance`/`guidance_version` writes only happen
-     * inside ingest, under the ingest lock (`withCacheWrite` in
+     * Reads go through `CacheRead` (the published DuckDB snapshot); there is
+     * no write side. `guidance`/`guidance_version` writes only happen inside
+     * ingest, under the ingest lock (`withCacheWrite` in
      * @ax/lib/duckdb/seam) - this command is a standalone CLI invocation,
-     * never an ingest stage, so it holds no lock. Persisting SurrealDB
-     * instead would be a silent data-loss trap: SurrealDB is write-frozen
-     * from ingest's perspective, `guidanceNext` now reads the DuckDB
-     * snapshot, and nothing would ever read a Surreal-side write back. So
-     * this returns the derived drafts as DATA ONLY, un-persisted, until a
-     * follow-up (an ingest derive-stage, or a dedicated locked write path)
-     * gives this command a legal write target.
+     * never an ingest stage, so it holds no lock and has no legal write
+     * target. So this returns the derived drafts as DATA ONLY, un-persisted,
+     * until a follow-up (an ingest derive-stage, or a dedicated locked write
+     * path) gives this command one.
      */
     readonly persisted: false;
 }

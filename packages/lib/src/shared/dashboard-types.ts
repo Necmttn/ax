@@ -725,8 +725,8 @@ export interface SpawnedChild {
  *  inspector can show where ax contributed context vs stayed silent.
  *
  *  These rows are NOT in the JSONL transcript - they come from the
- *  `hook_fire` SurrealDB table and are spliced into the turn stream client-
- *  side, positioned by ts immediately BEFORE the tool call they gated. */
+ *  `hook_fire` table and are spliced into the turn stream client-side,
+ *  positioned by ts immediately BEFORE the tool call they gated. */
 export interface HookFireDto {
     /** Per-payload monotonic index, used for stable DOM ids on the SPA side. */
     readonly idx: number;

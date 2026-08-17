@@ -70,13 +70,11 @@ export interface PwdIdentity {
  * What `$PWD` resolves to against the DuckDB cache - what every `--here` /
  * `--scope=here` caller uses.
  *
- * There is one field, not the two the old SurrealDB shape carried, because in
- * v2 "which row" and "does it exist" are one question with one answer. Surreal
- * keyed the row by the git-derived key, so a caller could BUILD the id from git
- * alone and then ask separately whether it existed. DuckDB row ids are
- * content-hashed by their writer, so a reader constructing one would be
- * guessing at a recipe - the row is looked UP by the identity columns instead
- * (see `queries/repository-scope.ts`), and either it is there or it is not.
+ * There is one field, not two, because "which row" and "does it exist" are
+ * one question with one answer. Row ids are content-hashed by their writer,
+ * so a reader constructing one would be guessing at a recipe - the row is
+ * looked UP by the identity columns instead (see
+ * `queries/repository-scope.ts`), and either it is there or it is not.
  */
 export interface PwdCacheResolution extends PwdIdentity {
     /**
@@ -84,8 +82,8 @@ export interface PwdCacheResolution extends PwdIdentity {
      * this repository.
      *
      * This is the value `session.repository` and `commit.repository` actually
-     * hold - NOT `identity.repositoryKey`, which is the git-derived Surreal key
-     * and matches nothing in a v2 cache.
+     * hold - NOT `identity.repositoryKey`, which is the git-derived lookup key
+     * and matches nothing in the cache's own row ids.
      */
     readonly repositoryId: string | null;
 }

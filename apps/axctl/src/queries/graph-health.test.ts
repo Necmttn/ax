@@ -1,16 +1,15 @@
 /**
  * `graph-health` is a DEFECT LIST: a healthy graph returns zero rows. That
  * makes it the one view a text assertion cannot honestly cover - "the SQL
- * contains GROUP BY repository, path" was true of the SurrealQL version right
- * up until it stopped running at all, and an empty result reads identically
- * whether the scan found nothing or the statement never executed.
+ * contains GROUP BY repository, path" stays true right up until the statement
+ * stops running at all, and an empty result reads identically whether the
+ * scan found nothing or the statement never executed.
  *
  * So this seeds a fixture snapshot with ONE of each defect the six scans look
- * for and asserts each is found. The port from SurrealQL to DuckDB is what
- * these cover; the remaining text assertions pin only the two facts a query
- * result cannot show (the composed statement's shape, and the tables the
- * provider-integrity scan reads - which `ingest/provider-parity.ts` also
- * asserts against this file by name).
+ * for and asserts each is found. The remaining text assertions pin only the
+ * two facts a query result cannot show (the composed statement's shape, and
+ * the tables the provider-integrity scan reads - which
+ * `ingest/provider-parity.ts` also asserts against this file by name).
  */
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";

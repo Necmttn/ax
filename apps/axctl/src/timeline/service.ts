@@ -5,9 +5,8 @@
  * the logic lives in `derive.ts` (testable without a DB); this layer is just
  * I/O + composition.
  *
- * DuckDB port (wave 3, chunk 2d). `./queries.ts` (the SQL-builder + mapper
- * module this file used to call) belongs to a sibling chunk (band 2, 2b) and
- * still emits SurrealQL, so this file does NOT call into it for SQL or execution
+ * `./queries.ts` (the SQL-builder + mapper module) belongs to a sibling
+ * ownership boundary, so this file does NOT call into it for SQL or execution
  * - only its exported ROW TYPES are imported (type-only, erased at compile
  * time, zero runtime coupling) so `derive.ts`'s pure inputs stay unchanged. The
  * queries themselves are re-derived here directly against the DuckDB cache
@@ -49,8 +48,8 @@ export class SessionTimelineService extends Context.Service<
 
 // ---------------------------------------------------------------------------
 // Row schemas + DuckDB SQL, one per input `buildTimeline` needs. Re-derived
-// from the ROW SHAPES `./queries.ts` documents (its SurrealQL is not reused -
-// see the module doc).
+// from the ROW SHAPES `./queries.ts` documents (its SQL is not reused - see
+// the module doc).
 // ---------------------------------------------------------------------------
 
 const HealthDbRow = Schema.Struct({

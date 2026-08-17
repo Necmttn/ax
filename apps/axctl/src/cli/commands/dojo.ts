@@ -309,7 +309,7 @@ const outboxCommand = Command.make(
 
 /**
  * Resolve the MAIN repository root, even when invoked from inside a linked
- * worktree. `git rev-parse --show-toplevel` (what resolvePwdRepository uses)
+ * worktree. `git rev-parse --show-toplevel` (what resolvePwdIdentity uses)
  * returns the LINKED worktree's own toplevel, so a spar worktree path that is
  * relative to the main repo would double-nest. `--git-common-dir` always points
  * at the main repo's `.git`; its parent dir is the main repo root. Falls back to
@@ -321,8 +321,9 @@ const resolveMainRepoRoot = (repoRoot: string) =>
         const res = yield* proc.exec("git", ["rev-parse", "--git-common-dir"], {
             cwd: repoRoot,
         });
-        // Shared with `resolvePwdRepository` so both call sites agree on how a
-        // linked worktree maps back to its primary checkout.
+        // Shared with `resolvePwdIdentity` (via `mainRepoRootFromGitCommonDir`)
+        // so both call sites agree on how a linked worktree maps back to its
+        // primary checkout.
         return mainRepoRootFromGitCommonDir(repoRoot, res.code === 0 ? res.stdout.trim() : "");
     });
 
@@ -355,7 +356,7 @@ const resolveRepo = Effect.gen(function* () {
  * Returns an error message string when the supplied flags are mutually
  * exclusive or require another flag that is absent; returns null when valid.
  * Exported so tests can drive it without spawning the CLI (and without a
- * running SurrealDB).
+ * running database).
  *
  * Rules:
  * - `--skill` and a positional `<sha>` are mutually exclusive.
@@ -420,7 +421,7 @@ const sparPlanCommand = Command.make(
         // Pure flag validation BEFORE any Effect/DB work. fail() calls
         // process.exit(2) synchronously so the DB layer is never initialised
         // when these guards fire - CI tests can assert the error messages
-        // without a running SurrealDB instance.
+        // without a running database.
         const flagErr = validateSparPlanFlags({
             skill,
             session,

@@ -160,15 +160,13 @@ export const errorMessage = (err: unknown): string => {
 
 // ----------------------------------------------------------- request deadline
 //
-// Per-request DB deadline. `acquire` (db.ts) already caps the initial connect at
-// 5s, but once connected a daemon that wedges (alive but not answering - the
-// recurring SurrealDB failure on this box) makes `db.query()` hang FOREVER, so
-// JSON handlers pile up behind a dead websocket and the whole dashboard appears
-// frozen (this is what made /api/wrapped hang). A whole-request timeout bounds
-// each JSON handler's lifetime: the fiber is interrupted, the client gets a fast
-// 504, and handlers stop accumulating. (The orphaned WS promise can't be force-
-// cancelled, but the request no longer blocks - the daemon-side watchdog is what
-// reaps the wedged surreal.)
+// Per-request DB deadline. A DuckDB query that hangs (blocked native call, lock
+// contention) makes the read hang FOREVER, so JSON handlers pile up behind it
+// and the whole dashboard appears frozen (this is what made /api/wrapped
+// hang). A whole-request timeout bounds each JSON handler's lifetime: the
+// fiber is interrupted, the client gets a fast 504, and handlers stop
+// accumulating. (The underlying blocked native call can't be force-cancelled,
+// but the request no longer blocks on it.)
 //
 // Scope is deliberately JSON routes only: rawRoutes (SSE /api/events, the
 // ingest stream) own their own long-lived lifecycle and must NOT be clamped.

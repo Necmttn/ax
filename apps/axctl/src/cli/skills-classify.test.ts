@@ -14,8 +14,8 @@ import type { CacheRead } from "@ax/lib/duckdb/seam";
 
 // ---------------------------------------------------------------------------
 // Test fixtures - both cmdSkillsClassify backends (default = fetchSkillHygiene
-// on CacheRead + Judgment, explicit = a single CacheRead join) now live
-// entirely on the DuckDB cache + SQLite judgment sidecar. No SurrealDB fake.
+// on CacheRead + Judgment, explicit = a single CacheRead join) live entirely
+// on the DuckDB cache + SQLite judgment sidecar.
 // ---------------------------------------------------------------------------
 
 type MockRow = { name: string; invocations: number; sessions: number };

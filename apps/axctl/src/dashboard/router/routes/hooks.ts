@@ -7,7 +7,7 @@
  * already-running daemon via `dispatchEvent`, skipping the cold `bun` spawn +
  * effect-bundle parse the spawned path pays per fire. DB-free (the dispatcher
  * only needs GitEnvLive), so it works on both source and the compiled binary,
- * and answers even when SurrealDB is down.
+ * and answers even when the DB is down.
  *
  * Fail-open by construction: a body read error -> allow; `dispatchEvent` never
  * throws (per-guard defects already fail open). A daemon hiccup must never wedge

@@ -12,17 +12,10 @@ import { toBareSessionId } from "@ax/lib/shared/session-id";
 /**
  * `document IN (...)` chunk size, and per-chunk fetch concurrency.
  *
- * The SurrealDB version of this file went to considerable lengths (a
- * deterministic-record-id "speculative fan-out", chunked to
- * DIRECT_REF_BUDGET_PER_QUERY=200 refs/query, capped at
- * MAX_SPECULATIVE_REFS_PER_REQUEST=24k) to avoid a `document IN [<all docs>]`
- * membership scan, which was a real SurrealDB weakness (6s+22s on a 318-doc
- * session per the original comment here). None of that applies to DuckDB:
- * content_block_document_seq and content_atom_document_kind are real indexes,
- * so a chunked `document IN (...)` is itself the fast indexed lookup - there
- * is no separate "slow path" to avoid, and no deterministic record ids to
- * guess (DuckDB ids are opaque VARCHARs, not SurrealDB's colon-delimited
- * table:key literals). This file drops the whole speculative-fetch machinery.
+ * `content_block_document_seq` and `content_atom_document_kind` are real
+ * indexes, so a chunked `document IN (...)` is itself the fast indexed
+ * lookup - chunking exists only to keep each query's parameter list bounded,
+ * not to route around a slow membership scan.
  */
 const DOCUMENT_ID_CHUNK = 200;
 const DOCUMENT_ID_CONCURRENCY = 8;

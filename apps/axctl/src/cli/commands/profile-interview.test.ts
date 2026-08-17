@@ -28,8 +28,8 @@ describe("ax profile interview submit", () => {
     test("routes `interview submit` to the no-engine runtime; other paths read the cache", () => {
         const entry = axProfileRuntime.profile;
         // submit only writes a local file - it must not require ANY engine, and
-        // that distinction is what this pins. It outlived SurrealDB: `"none"`
-        // still means no data layer at all, while its siblings now get one.
+        // that distinction is what this pins. `"none"` means no data layer at
+        // all, distinct from its siblings below, which read the cache.
         expect(resolveRuntime(entry, ["profile", "interview", "submit"])).toBe("none");
         // brief generation reads the rig; show/publish read the graph.
         expect(resolveRuntime(entry, ["profile", "interview"])).toBe("cache");

@@ -2,12 +2,11 @@
  * P3.6 tests: fetchSkillsWeighted data layer, against a REAL published DuckDB
  * cache fixture.
  *
- * `Judgment` (spar-session ids + role weights) is a separate sqlite store
- * untouched by the SurrealDB->DuckDB migration, so it keeps the existing
- * `judgmentTestLayer` stub - the interesting behavior under test (invocation
- * aggregation, tombstone/synthetic exclusion, the `session NOT IN (...)` spar
- * filter, the `recovered_by JOIN turn` latency pass) all run against a real
- * DuckDB, not a SQL-text dispatcher.
+ * `Judgment` (spar-session ids + role weights) is a separate sqlite store, so
+ * it keeps the existing `judgmentTestLayer` stub - the interesting behavior
+ * under test (invocation aggregation, tombstone/synthetic exclusion, the
+ * `session NOT IN (...)` spar filter, the `recovered_by JOIN turn` latency
+ * pass) all run against a real DuckDB.
  */
 import { describe, expect } from "bun:test";
 import { Effect, Layer } from "effect";

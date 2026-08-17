@@ -600,9 +600,9 @@ describe("classifiers workflow-candidates", () => {
         expect(plan.summary.proposals[0].dedupe_sig).toStartWith("guidance__workflow_candidate__");
         expect(plan.summary.proposals[0].title).toBe("Require applied classifier results for surrealml");
         // `statements` are DESCRIPTIONS of the writes the persist step performs,
-        // not executable SQL. They used to be SurrealQL, and asserting on that
-        // text is how the missing `cites_evidence` write stayed hidden - the
-        // string always contained the edge, whether or not anything wrote it.
+        // not executable SQL - asserting on that text alone previously let the
+        // missing `cites_evidence` write stay hidden, since the string always
+        // contained the edge whether or not anything wrote it.
         const described = plan.statements.join("\n");
         expect(described).toContain("PUT proposal");
         expect(described).toContain("PUT guidance_proposal");

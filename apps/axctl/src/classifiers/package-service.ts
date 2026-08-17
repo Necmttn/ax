@@ -471,10 +471,9 @@ export class ClassifierPackageService extends Context.Service<ClassifierPackageS
 
 /**
  * DuckDB read for `executionGraphHealth`. `classifierGraphHealthSql()` in
- * `./package-operations.ts` (a different wave-3 chunk's file) stays SurrealQL
- * - it also backs `applyExecutionSurrealWritePlanReport`'s write statements,
- * which this chunk does not own - so the CacheRead port is a fresh, local
- * query set rather than a rewrite of that shared builder.
+ * `./package-operations.ts` is a leftover multi-statement SQL builder that
+ * nothing calls; the CacheRead port here is a fresh, separate query set
+ * (one query per table) rather than a use of that builder.
  */
 const CLASSIFIER_GRAPH_NODE_SQL =
     "SELECT graph_id, kind, label, properties_json, source_kind FROM classifier_graph_node ORDER BY graph_id";
@@ -781,8 +780,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             // `ax hooks lint` / `ax skills lint` / `ax ingest`'s own maintenance
             // writes go through. Each row is applied via `write.put`, which is
             // itself an Effect; run child effects with the SURROUNDING services
-            // (tracing etc.) rather than a detached `Effect.runPromise`, exactly
-            // as the SurrealQL version this replaced did with `db.query`.
+            // (tracing etc.) rather than a detached `Effect.runPromise`.
             return yield* withConfigWrite((write) =>
                 Effect.gen(function* () {
                     const services = yield* Effect.context();

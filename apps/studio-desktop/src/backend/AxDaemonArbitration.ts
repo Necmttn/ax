@@ -1,13 +1,11 @@
 /**
  * Phase 2 / Task 2.1 - `ax studio` attach-vs-spawn arbitration.
  *
- * Wave 3 (`c-desktop-realign`): ax moved off a required SurrealDB daemon onto
- * embedded DuckDB, and `ax serve` (two supervised processes - `surreal` +
- * `ax serve` itself) was retired in favor of `ax studio`, a single ephemeral
- * process that reads a published DuckDB snapshot and exits on its own once
- * idle (see the `c-daemon-studio` chunk, `apps/axctl/src/dashboard/server.ts`).
- * There is exactly one process and one port now, so arbitration collapses to
- * one question: is something already answering healthily on the studio port?
+ * `ax studio` is a single ephemeral process that reads a published DuckDB
+ * snapshot and exits on its own once idle (see
+ * `apps/axctl/src/dashboard/server.ts`). There is exactly one process and one
+ * port, so arbitration collapses to one question: is something already
+ * answering healthily on the studio port?
  *
  * - healthy   -> ATTACH. Something (another desktop instance, or a manually
  *   run `ax studio`/`ax serve` from the CLI) already owns the port; do not

@@ -140,10 +140,11 @@ export const INVESTIGATION_PROMPTS: readonly string[] = [
 ];
 
 /**
- * SurrealDB may return `duration::days(...)` as a plain int OR as a duration
- * object/string like `"32d"`/`{ secs: 2764800 }` depending on driver version.
- * Coerce to a non-negative integer day count; fall back to ISO diff against
- * created_at when nothing else parses.
+ * Coerce `raw` to a non-negative integer day count, accepting a plain int, a
+ * duration string like `"32d"`, or a duration object like `{ secs: N }`; falls
+ * back to an ISO diff against `created_at` when nothing else parses. Exported
+ * for its own unit coverage; the current write path (`days_since_accepted`
+ * below) computes the day count directly from `created_at` instead.
  */
 export const coerceDaysSinceAccepted = (
     raw: unknown,

@@ -249,8 +249,7 @@ export interface ClassifierPackageExecutionFactProjectionReport {
  * One row this write plan will `put` into a `classifier_graph_*` table via the
  * DuckDB write seam (`CacheWriteService.put`). `label` is a human-readable
  * description of the write (kept for the report's `statements` field and for
- * `first_failure.statement` on a failed apply) - it is NEVER executed as SQL,
- * unlike the SurrealQL text this replaced.
+ * `first_failure.statement` on a failed apply) - it is NEVER executed as SQL.
  */
 export interface ClassifierGraphWriteRow {
     readonly table: "classifier_graph_node" | "classifier_graph_edge" | "classifier_graph_fact";
@@ -262,8 +261,8 @@ export interface ClassifierPackageExecutionSurrealWritePlanReport {
     readonly schema: "ax.classifier_package_execution_surreal_write_plan.v1";
     readonly root: string;
     readonly source_projection_schema: ClassifierPackageExecutionFactProjectionReport["schema"];
-    /** Human-readable description of each write, in apply order (was raw
-     *  SurrealQL text before the DuckDB port; see {@link ClassifierGraphWriteRow}). */
+    /** Human-readable description of each write, in apply order; see
+     *  {@link ClassifierGraphWriteRow}. */
     readonly statements: readonly string[];
     /** The structured payload `applyExecutionSurrealWritePlanReport` actually
      *  writes - one entry per `statements[i]`, same order. */
@@ -2572,14 +2571,13 @@ export function buildExecutionFactProjectionReport(
 /**
  * Build the DuckDB write plan for `classifier_graph_{node,edge,fact}`.
  *
- * Was a SurrealQL statement builder (raw `UPSERT table:id CONTENT {...}` text).
- * The three tables now live in DuckDB (`packages/schema/src/schema.duckdb.sql`),
- * so this builds structured rows for `CacheWriteService.put` instead - see
+ * The three tables live in DuckDB (`packages/schema/src/schema.duckdb.sql`),
+ * so this builds structured rows for `CacheWriteService.put` - see
  * {@link ClassifierGraphWriteRow}. `id` and `graph_id` both carry the
- * projection's node/edge/fact id (mirroring the old SurrealQL, which used the
- * same value as both the record id and the `graph_id` field); `updated_at` is
- * stamped here with the writer's own clock rather than a `time::now()` literal,
- * since DuckDB binds parameters rather than interpolating SQL text.
+ * projection's node/edge/fact id, so the record id and the `graph_id` field
+ * always agree. `updated_at` is stamped here with the writer's own clock,
+ * since DuckDB write rows are bound as parameters rather than interpolated
+ * SQL text.
  */
 export function buildExecutionSurrealWritePlanReport(
     projection: ClassifierPackageExecutionFactProjectionReport,
@@ -2652,7 +2650,7 @@ export function buildExecutionSurrealWritePlanReport(
  * Apply a write plan built by {@link buildExecutionSurrealWritePlanReport}.
  * `put` is expected to be `CacheWriteService.put` (or an equivalent wrapper) -
  * one row per call, applied in order, so a mid-plan failure still reports
- * exactly how far it got (mirrors the old per-statement SurrealQL apply loop).
+ * exactly how far it got.
  */
 export async function applyExecutionSurrealWritePlanReport(
     writePlan: ClassifierPackageExecutionSurrealWritePlanReport,

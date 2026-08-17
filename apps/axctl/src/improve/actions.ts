@@ -1,7 +1,7 @@
 /**
  * Shared business logic for the `axctl improve` mutations. Phase C10
  * needed accept/reject/verdict callable from both the CLI handler and the
- * dashboard HTTP endpoint, so the SurrealQL + scaffold orchestration lives
+ * dashboard HTTP endpoint, so the query + scaffold orchestration lives
  * here in one place. Each function takes the proposal's `dedupe_sig`
  * (preferred) or full record id and returns a structured result the caller
  * (CLI or HTTP) can render however it likes.

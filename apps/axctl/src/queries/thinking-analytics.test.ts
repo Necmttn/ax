@@ -1,8 +1,8 @@
 /**
  * Tests for thinking-analytics.ts: pure rollup + fetchThinking over a real
- * published DuckDB snapshot (spar exclusion still routes through the
- * SQLite-backed `Judgment` test layer - fetchSparSessionIds was ported off
- * SurrealDB in an earlier chunk and is untouched here).
+ * published DuckDB snapshot (spar exclusion routes through the SQLite-backed
+ * `Judgment` test layer, since `fetchSparSessionIds` reads that sidecar, not
+ * DuckDB).
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
@@ -211,8 +211,8 @@ describe("fetchThinking", () => {
                 }),
             ),
         );
-        // fetchSparSessionIds reads `session_label` through the Judgment sidecar
-        // (already ported off SurrealDB); route it to flag SPAR_SESSION.
+        // fetchSparSessionIds reads `session_label` through the Judgment
+        // sidecar; route it to flag SPAR_SESSION.
         const sparLayer = judgmentTestLayer(() => [{ session_id: SPAR_SESSION }]);
         const layer = Layer.merge(readFixture(fixture.snapshotPath, dylibPath), sparLayer);
 

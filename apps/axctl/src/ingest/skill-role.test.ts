@@ -2,9 +2,9 @@
  * `relateSkillRoles` against a REAL SQLite judgment sidecar.
  *
  * Frontmatter role tags are durable judgment, so they land in the sidecar rather
- * than the rebuildable DuckDB cache. This file used to assert SurrealQL TEXT,
- * which could not tell a working write from one that merely looked right - and
- * the two interesting failure modes here are behavioural, not textual:
+ * than the rebuildable DuckDB cache. Asserting on SQL text could not tell a
+ * working write from one that merely looked right - the two interesting
+ * failure modes here are behavioural, not textual:
  *   - the sweep must remove ONLY this writer's `source = 'frontmatter'` rows, so
  *     a user's `ax skills tag` on the same skill-role pair survives re-ingest;
  *   - a re-ingest must NOT reset a role's user-tuned `weight`.

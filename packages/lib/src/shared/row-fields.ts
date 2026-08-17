@@ -1,29 +1,25 @@
 /**
- * row-fields: the ENGINE-NEUTRAL half of the old Graph Access Toolkit.
- *
- * Two things live here, and neither one talks to a database:
+ * row-fields: engine-neutral row and record-id helpers. Neither half talks
+ * to a database directly:
  *
  *   1. TYPED ROW FIELD ACCESS - pull a typed value out of a
- *      `Record<string, unknown>` result row. Written for SurrealDB's untyped
- *      rows, still used by every not-yet-ported reader, and by ported code that
- *      decodes a JSON payload rather than a DuckDB column.
+ *      `Record<string, unknown>` result row, whether that row came straight
+ *      off a query or out of a decoded JSON payload.
  *   2. RECORD-ID KEY DERIVATION - `safeKeyPart` / `recordKeyPart` /
- *      `isoTimestamp` / `nonEmptyString`. `safeKeyPart` in particular feeds row
- *      ids that the DuckDB writers still emit, so it OUTLIVES SurrealDB.
+ *      `isoTimestamp` / `nonEmptyString`. `safeKeyPart` in particular feeds
+ *      the row ids the DuckDB writers emit.
  *
- * These moved out of `shared/surreal.ts` in wave 3 (`c-read-seam`). That file
- * is now only SurrealQL TEXT emitters and dies whole in `c-surreal-delete`;
- * this one has no Surreal dependency and stays. It re-exports nothing and
- * imports nothing from the client, so it is safe to import from ported code.
+ * This module imports no database client, so it is safe to import from any
+ * reader or writer regardless of which store it talks to.
  */
 
 // ============================================================================
 // 1. TYPED ROW FIELD ACCESS
 // ----------------------------------------------------------------------------
-// SurrealDB hands back `Record<string, unknown>`; a missing column reads as
-// `undefined`, datetimes arrive as `Date` or ISO string depending on path, and
-// record ids as strings or `RecordId`-like objects. Every dashboard read used
-// to redefine these same guards. They live here once.
+// A query result hands back `Record<string, unknown>`; a missing column reads
+// as `undefined`, datetimes arrive as `Date` or ISO string depending on path,
+// and record ids as strings or ref-like objects. Every reader used to
+// redefine these same guards. They live here once.
 // ============================================================================
 
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -149,10 +145,10 @@ export const recordIdString = (v: unknown): string | null => {
 // ----------------------------------------------------------------------------
 // Canonical key/timestamp seam for ingest derive stages.
 //
-// All ingest derive stages that build SurrealDB record IDs must import from
-// here. `safeKeyPart` output feeds record IDs directly, so the 96-char slice
-// cap is load-bearing - SurrealDB record keys have a practical length limit
-// and a consistent cap prevents divergence across stages.
+// All ingest derive stages that build record IDs must import from here.
+// `safeKeyPart` output feeds record IDs directly, so the 96-char slice cap
+// is load-bearing - record keys have a practical length limit and a
+// consistent cap prevents divergence across stages.
 //
 // Previously each derive stage defined its own copies of these helpers; those
 // copies had started to diverge. This module is the single source of truth.
@@ -161,10 +157,10 @@ export const recordIdString = (v: unknown): string | null => {
 
 /**
  * The union of input types accepted by `isoTimestamp`.
- * - `Date`            - JS Date object
- * - `string`          - already-formatted ISO string, passed through as-is
- * - SurrealDB DateTime - any object exposing `toISOString()`; detected
- *                        structurally (see `isoTimestamp` for why not by name)
+ * - `Date`   - JS Date object
+ * - `string` - already-formatted ISO string, passed through as-is
+ * - any other object exposing `toISOString()`; detected structurally
+ *   (see `isoTimestamp` for why not by name)
  */
 export type TimestampInput =
     | Date
@@ -172,14 +168,14 @@ export type TimestampInput =
     | { toISOString(): string };
 
 /**
- * Sanitize an arbitrary string into a safe SurrealDB record-key segment.
+ * Sanitize an arbitrary string into a safe record-key segment.
  *
  * Rules applied in order:
  * 1. Replace `:` with `__` (plugin-namespaced skill names use `:`)
  * 2. Replace any remaining non-alphanumeric characters with `_`
  * 3. Collapse runs of 3+ underscores to `__`
  * 4. Trim leading and trailing underscores
- * 5. If the result is non-empty, slice to 96 chars (SurrealDB key hygiene)
+ * 5. If the result is non-empty, slice to 96 chars (key-length hygiene)
  * 6. If the result is empty, return the hex hash of the original value
  */
 export const safeKeyPart = (value: string): string => {
@@ -192,7 +188,7 @@ export const safeKeyPart = (value: string): string => {
 };
 
 /**
- * Extract the key portion from a SurrealDB record-ID value.
+ * Extract the key portion from a record-ref-shaped value.
  *
  * Handles:
  * - `"table:key"` strings - strips the table prefix (expected or first colon)
@@ -226,12 +222,11 @@ export const recordKeyPart = (value: unknown, expectedTable?: string): string | 
  * Branch order:
  * 1. `value instanceof Date`  → `value.toISOString()`
  * 2. Non-empty string         → pass through unchanged
- * 3. Any object exposing a `toISOString()` method (the SurrealDB DateTime) →
- *    `value.toISOString()`. We duck-type on the method rather than checking
- *    `constructor.name === "DateTime"`, because `bun build --compile` renames
- *    the bundled SDK class (observed as `DateTime3`), so an exact-name check
- *    silently falls through to epoch ONLY in the compiled binary - the #670
- *    "1970-01-01" friction-view timestamps that source builds never showed.
+ * 3. Any other object exposing a `toISOString()` method → `value.toISOString()`.
+ *    We duck-type on the method rather than checking a constructor name,
+ *    because `bun build --compile` renames bundled classes, so an exact-name
+ *    check can silently fall through to epoch ONLY in the compiled binary
+ *    (#670 - a class check passed in source and failed only once compiled).
  * 4. Anything else (null / undefined / unknown) → epoch `new Date(0).toISOString()`
  *    and emits a `console.warn` so silent epoch timestamps surface as data bugs
  *    (symptom: `ax insights friction` events timestamped `1970-01-01 00:00:00`)

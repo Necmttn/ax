@@ -457,10 +457,8 @@ describe("fetchWindowedInvocations", () => {
     });
 
     test("absent sessions and skill names are filtered in SQL, not JS", async () => {
-        // The SurrealDB original guarded three sentinel STRINGS in JS - "null",
-        // and "NONE" for pre-denormalization edges that stored an absent
-        // session. DuckDB has only NULL, so the guard is a WHERE clause and the
-        // rows never reach JS.
+        // The absent-session and absent-skill-name guard is a WHERE clause,
+        // so the rows never reach JS.
         const cache = cacheRead({ "FROM invoked i": [] });
         const r = await runCache(fetchWindowedInvocations({ windowDays: 30 }), cache.layer);
         expect(cache.captured[0]).toContain("i.session IS NOT NULL AND s.name IS NOT NULL");

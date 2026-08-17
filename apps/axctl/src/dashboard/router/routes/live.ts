@@ -108,11 +108,8 @@ export function formatSseComment(text: string): string {
 
 /**
  * `?`-parameterized: the caller binds the cutoff as a `Date` param, not a
- * string-interpolated literal - `ingest_event.ts` is now a DuckDB TIMESTAMP
- * column (this SSE tail used to read a SurrealQL `datetime` via
- * `SurrealClient`, which had gone silently dead: `ingest_event` writes moved
- * to DuckDB under `c-ingest-cutover`, so every poll answered `[]` forever -
- * exactly the "dead reader" trap this migration watches for).
+ * string-interpolated literal - `ingest_event.ts` is a DuckDB TIMESTAMP
+ * column.
  */
 export function recentIngestEventsSql(limit = 50): string {
     const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;

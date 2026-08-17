@@ -2,18 +2,17 @@
  * `runRoutingBacktest` against a REAL published DuckDB snapshot.
  *
  * This file exists because of a defect a mock cannot see. `runRoutingBacktest`
- * was HALF-ported: the dispatch half read the DuckDB cache through
- * `fetchDispatches` (`CacheRead`), while the pricing-catalog half still ran
- * SurrealQL against `agent_model` - which nothing has written since
- * `agent_model` became a live DuckDB table. A dead SurrealQL reader does not
- * error, it returns `[]`, so the pricing catalog was always empty and
- * `estSavingsUsd` was PROVABLY ZERO for every candidate, no matter how
- * expensive the matched dispatch actually was.
+ * was once HALF-ported: the dispatch half read the DuckDB cache through
+ * `fetchDispatches` (`CacheRead`), while the pricing-catalog half read a
+ * table nothing wrote to anymore. A dead reader does not error, it returns
+ * `[]`, so the pricing catalog was always empty and `estSavingsUsd` was
+ * PROVABLY ZERO for every candidate, no matter how expensive the matched
+ * dispatch actually was.
  *
  * This test seeds a real DuckDB snapshot with one inherit dispatch that ran on
  * an expensive model (`claude-fable-5`) and a cheap-tier `agent_model` pricing
  * row for the suggested model (`claude-sonnet-4-6`), then asserts
- * `estSavingsUsd` is POSITIVE - the number this whole port exists to fix.
+ * `estSavingsUsd` is POSITIVE, guarding against that regressing silently again.
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
@@ -59,7 +58,7 @@ describe("runRoutingBacktest over a published snapshot", () => {
                         estimated_cost_usd: 50,
                         ts: hoursAgo(2),
                     });
-                    // The real pricing catalog row the SurrealQL half never saw.
+                    // The real pricing catalog row the dead reader never saw.
                     yield* write.put("agent_model", {
                         id: "agent_model:claude-sonnet-4-6",
                         name: "claude-sonnet-4-6",
@@ -88,8 +87,8 @@ describe("runRoutingBacktest over a published snapshot", () => {
 
         expect(result.matched).toHaveLength(1);
         expect(result.matched[0]!.childModel).toBe("claude-fable-5");
-        // THE number: before the port this was 0 for every candidate because
-        // agent_model pricing came back empty from the dead SurrealQL reader.
+        // THE number: this was 0 for every candidate when agent_model pricing
+        // came back empty from a dead reader (see module doc above).
         expect(result.estSavingsUsd).toBeGreaterThan(0);
         // Sanity bound: sonnet's input rate at 1M prompt tokens is $3, so the
         // repriced cost is far below the $50 fable actually cost.

@@ -681,11 +681,11 @@ const writeReport = (
     });
 
 /**
- * `projectReviewed`'s apply-write path now writes through `withConfigWrite`
+ * `projectReviewed`'s apply-write path writes through `withConfigWrite`
  * (config-core/reconcile.ts): `projectReviewedLabelsToGraph`
  * (./label-mining.ts) builds structured `classifier_graph_*` /
  * `transcript_label_vector` rows (LabelMiningGraphWriteRow) rather than raw
- * SurrealQL, and `withConfigWrite` is the established "a CLI command, not
+ * SQL, and `withConfigWrite` is the established "a CLI command, not
  * ingest, needs a CacheWriteService" front door - it takes the shared ingest
  * lock itself, so `label-mining --project-reviewed --apply` (never run under
  * `ax ingest`) can still obtain write access. `withConfigWrite` opens a fresh

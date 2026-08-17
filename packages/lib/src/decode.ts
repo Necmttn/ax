@@ -84,8 +84,8 @@ export type PureSchema = Schema.Top & {
 };
 
 /**
- * Typed codec for a SurrealDB-v3 JSON-encoded nested field (nested objects
- * are stored as strings - see "Schema rules of thumb" in CLAUDE.md).
+ * Typed codec for a JSON-encoded nested field (nested objects are stored as
+ * strings - see "Schema rules of thumb" in CLAUDE.md).
  */
 export interface JsonField<S extends PureSchema> {
     /**
@@ -104,7 +104,7 @@ export interface JsonField<S extends PureSchema> {
 
 /**
  * Build a typed JSON-string field codec from a nested schema. This is the
- * standard bridge for SurrealDB JSON-encoded columns: replace ad-hoc
+ * standard bridge for JSON-encoded columns: replace ad-hoc
  * `try { JSON.parse(raw) as T } catch { ... }` sites with
  * `jsonField(TSchema).decode(raw)` so the parse and the shape check happen
  * in one schema-backed step.

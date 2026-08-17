@@ -22,10 +22,9 @@ import type {
 // subset orphaned every spawn parent/child that lacked a health row, dropping
 // their edges. `session_health` is now a per-row LEFT decoration for the size +
 // context-pressure signals only - same pattern as graph-explorer's FILE_ATTENTION_SQL.
-// SQL below is DuckDB (CacheRead), translated from the original SurrealQL -
-// see the per-query comments for the shape each still feeds into
-// `rowsToSessionCanvas`/`rowsToOrchestration` (both pure, engine-agnostic
-// `Record<string, unknown>` consumers, unchanged by this port).
+// SQL below runs through DuckDB (CacheRead) - see the per-query comments for
+// the shape each feeds into `rowsToSessionCanvas`/`rowsToOrchestration` (both
+// pure, engine-agnostic `Record<string, unknown>` consumers).
 export const SESSION_NODES_SQL = `
 SELECT id, project, COALESCE(source, 'claude') AS source, started_at, ended_at
 FROM session
@@ -378,11 +377,11 @@ export function rowsToOrchestration(
 
 /** Undecoded raw() reads throughout this module: row shapes vary per query
  *  and are already consumed by lenient, engine-agnostic `Record<string,
- *  unknown>` helpers (`str`/`num`/`dateStr` above) shared with the JSONL/
- *  Surreal-era pure functions - a typed Schema per query would just be
+ *  unknown>` helpers (`str`/`num`/`dateStr` above) shared with the JSONL
+ *  parser's pure functions - a typed Schema per query would just be
  *  re-derived busywork these helpers already do defensively. Defensive: a
  *  failed query degrades to `[]`, per-query (not batch-wide), matching the
- *  `cacheRows` contract used throughout the rest of this port. */
+ *  `cacheRows` contract used throughout the rest of this module. */
 const rawRows = (
     read: CacheReadService,
     sql: string,

@@ -103,12 +103,11 @@ export * from "../classifiers/workflow-candidate-helpers.ts";
 
 /**
  * DuckDB decode shapes for the `classifier_graph_{node,edge,fact}` /
- * `cites_evidence` / `turn` reads this dispatcher issues directly (every
- * `db.query` call this file used to make against SurrealDB). `updated_at` was
- * `type::string(updated_at)` under SurrealQL - already an ISO string; DuckDB
- * stores it as a real TIMESTAMP, so it decodes through `TimestampColumn` and
- * gets re-stringified with `.toISOString()` at the call site, keeping every
- * downstream row-shape contract (`updated_at?: string | null`) unchanged.
+ * `cites_evidence` / `turn` reads this dispatcher issues directly. DuckDB
+ * stores `updated_at` as a real TIMESTAMP, so it decodes through
+ * `TimestampColumn` and gets re-stringified with `.toISOString()` at the
+ * call site, keeping every downstream row-shape contract (`updated_at?:
+ * string | null`) unchanged.
  */
 const GroupRowSchema = Schema.Struct({
     graph_id: Schema.String,
@@ -201,10 +200,10 @@ const toEmbeddingHelperEdgeRow = (row: typeof EdgeRowSchema.Type): WorkflowCandi
 });
 
 /** Every read this dispatcher issues propagates a `CacheReadError` straight to
- *  a hard process exit, matching `catchDbErrorAndExit`'s exit-on-failure policy
- *  for the SurrealDB reads it replaces - a report command should never print a
- *  silently-empty result because a read degraded, so this deliberately does
- *  NOT use the defensive `cacheRows` helper (which degrades to `[]`). */
+ *  a hard process exit, matching `catchDbErrorAndExit`'s exit-on-failure
+ *  policy - a report command should never print a silently-empty result
+ *  because a read degraded, so this deliberately does NOT use the defensive
+ *  `cacheRows` helper (which degrades to `[]`). */
 const readRows = <S extends Schema.Top>(
     schema: S,
     sql: string,
@@ -219,8 +218,7 @@ const readRows = <S extends Schema.Top>(
 
 /** `(kind = ? AND source_kind = ?)` OR-combined over `kinds`, optionally
  *  narrowed by a case-insensitive `properties_json` substring match - the
- *  DuckDB equivalent of the SurrealQL `string::lowercase(properties_json)
- *  CONTAINS ...` filter every topic-scoped fact read used. */
+ *  filter every topic-scoped fact read uses. */
 const workflowFactsByKindsSql = (kindCount: number, withTopic: boolean): string => {
     const kindFrag = Array.from({ length: kindCount }, () => "(kind = ? AND source_kind = ?)").join(" OR ");
     const where = kindCount > 1 ? `(${kindFrag})` : kindFrag;
@@ -297,7 +295,7 @@ const readWorkflowCandidateEvidenceByIds = (candidateIds: readonly string[]) => 
 /** `cites_evidence` rows citing `kind = 'workflow_candidate'` FROM one of
  *  `proposalKeys` (bare `proposal` ids) - reconstructs the `proposal:<id>` /
  *  bare-graph-id shape `attachWorkflowCandidateProposalEvidence` expects, since
- *  DuckDB's `in_id`/`out_id` are bare (no SurrealDB `table:id` ref). */
+ *  DuckDB's `in_id`/`out_id` are stored bare (no table-prefixed ref). */
 const readWorkflowCandidateProposalEvidenceEdges = (
     proposalKeys: readonly string[],
 ): Effect.Effect<readonly WorkflowCandidateProposalEvidenceEdgeRow[], never, CacheRead> =>
@@ -380,9 +378,11 @@ const citesEvidenceRow = (
  * SQLite sidecar, so the two halves of a promotion land in different stores and
  * cannot share one transaction.
  *
- * These edges were LOST in the DuckDB port: they were only ever emitted as
- * SurrealQL text in the plan builder, which nothing executed. The report kept
- * counting them, so the loss was invisible.
+ * This write is explicit and REQUIRED: the plan builder only emits a
+ * human-readable description of these edges (see `statements`), never
+ * anything that persists them, and the report's counts come from that
+ * description regardless of whether this call actually runs - so a dropped
+ * call here silently loses the edges while the report keeps counting them.
  */
 const writeCitesEvidence = (rows: readonly Readonly<Record<string, DuckDbParam>>[]) =>
     rows.length === 0

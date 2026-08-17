@@ -1,9 +1,9 @@
 /**
  * `ax cost models / sessions / split`: model/cost analytics over
  * `session_token_usage`. GROUP BY stays on scalar fields of the scanned table
- * only - record derefs inside aggregates over large tables hang SurrealDB 3.x -
- * so any grouping that needs a derived dimension (origin) happens in JS after
- * a single scan.
+ * only (source, model); any grouping that needs a derived dimension (origin)
+ * happens in JS after a single scan, so origin classification lives in one
+ * place (`originOfSource`) instead of duplicated SQL CASE logic.
  *
  * Tables used (read-only):
  *   session_token_usage: source, model, prompt_tokens, completion_tokens,
@@ -58,8 +58,8 @@ export const COST_DEFAULT_WINDOW_DAYS = 14;
  * SQL-interpolation boundary guard for day-window values.
  *
  * Distinct from transport-level defaults: this guard lives at the SQL
- * interpolation site to prevent negative/fractional/NaN values reaching
- * SurrealDB. It is intentionally SEPARATE from clampInt / Flag.withDefault so
+ * interpolation site to prevent negative/fractional/NaN values reaching the
+ * query. It is intentionally SEPARATE from clampInt / Flag.withDefault so
  * that neither the CLI default nor the MCP default bypass the injection guard.
  */
 const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));

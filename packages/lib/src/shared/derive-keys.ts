@@ -3,8 +3,7 @@
  *
  * A re-export of the implementations in `./row-fields.ts`, kept because the
  * ingest tree imports this path in ~15 places and the name says what the
- * callers want. Nothing here is engine-specific - DuckDB row ids are derived
- * the same way SurrealDB record ids were.
+ * callers want. Nothing here is engine-specific.
  */
 export {
     safeKeyPart,

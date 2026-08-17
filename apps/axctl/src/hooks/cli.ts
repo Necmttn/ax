@@ -37,8 +37,8 @@ import { fetchHookLatencyRegression, renderHookLatency } from "../queries/hook-l
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
  * opencode). Spliced into the existing `hooksCommand` group in cli/index.ts.
  * Every handler provides `HookProviderRegistryDefault`; CacheRead + FileSystem
- * + Path come from AppLayer (readAllHooks reads the DuckDB snapshot, not
- * SurrealDB - see hooks/config.ts).
+ * + Path come from the `cache` runtime (`withCache` in cli/index.ts -
+ * `readAllHooks` reads the published DuckDB snapshot, see hooks/config.ts).
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));

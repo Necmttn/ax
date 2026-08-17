@@ -1,15 +1,11 @@
 /**
  * `ax roles`, END TO END, with no server running and no DuckDB snapshot on disk.
  *
- * The sibling of recall-daemonless.test.ts, and the acceptance signal for the
- * judgment half of the v2 split. An in-process test cannot check this: it is
- * handed whatever layers it asks for and passes either way. So this spawns the
- * ACTUAL CLI entrypoint as a child with
+ * The sibling of recall-daemonless.test.ts. An in-process test cannot check
+ * this: it is handed whatever layers it asks for and passes either way. So
+ * this spawns the ACTUAL CLI entrypoint as a child with
  *
- *   - `AX_SIDECAR_PATH` pointing at a sidecar this suite wrote,
- *   - `AX_DB_URL` pointing at a port nothing listens on, so any SurrealDB connect
- *     FAILS rather than quietly finding the developer's own running daemon and
- *     passing for the wrong reason, and
+ *   - `AX_SIDECAR_PATH` pointing at a sidecar this suite wrote, and
  *   - `AX_DUCKDB_SNAPSHOT` pointing at a file that does not exist.
  *
  * The missing snapshot is deliberate and is the extra claim this suite makes over
@@ -30,8 +26,6 @@ import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 
 /** The CLI entrypoint, run the way `bin/axctl` runs it. */
 const CLI = Bun.fileURLToPath(new URL("./index.ts", import.meta.url));
-
-/** A port nothing listens on, so a SurrealDB connect can only FAIL. */
 
 interface CliRun {
     readonly exitCode: number | null;

@@ -319,7 +319,7 @@ describe("buildShareArtifactFromParts", () => {
 });
 
 describe("normalizeSessionRecordRef", () => {
-    it("strips any Surreal-era decoration and returns the bare session id", () => {
+    it("strips any record-ref decoration and returns the bare session id", () => {
         expect(normalizeSessionRecordRef("abc123")).toBe("abc123");
         expect(normalizeSessionRecordRef("session:abc123")).toBe("abc123");
         expect(normalizeSessionRecordRef("session:⟨abc123⟩")).toBe("abc123");

@@ -4,13 +4,10 @@ import { flushSync } from "@opentui/react";
 import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import type { CacheReadService } from "@ax/lib/duckdb/seam";
 
-// Local DuckDB translations of queries/skill-summary.ts's SurrealQL
-// constants (unported, 2b's ownership - copy the shape, never import the
-// SurrealQL text). Mirrors the identical translation already landed in
-// dashboard/triage.ts's fetchSkillTriage - the TUI hot path and the web
-// dashboard's triage view compute the same skill-summary shape, but each
-// chunk-owned surface carries its own local copy rather than cross-importing
-// between dashboard/ and tui/.
+// Local copy of dashboard/triage.ts's fetchSkillTriage SKILL_SUMMARY_SQL -
+// the TUI hot path and the web dashboard's triage view compute the same
+// skill-summary shape, but each surface carries its own local copy rather
+// than cross-importing between dashboard/ and tui/.
 
 const SKILL_SUMMARY_SQL = `
 SELECT

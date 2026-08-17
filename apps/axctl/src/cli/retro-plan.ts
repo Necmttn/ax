@@ -168,10 +168,10 @@ export interface PlanBuildResult {
  * registration's proposal/experiment status. Kept pure so the test file can
  * assert on key derivation without a DB.
  *
- * It used to also return the SurrealQL statement text, which `cmdRetroPlan`
- * never executed: the actual writes go through `judgment.transaction` below,
- * field by field. The statements were asserted on by tests and reported
- * nowhere, so they were removed rather than ported.
+ * Deliberately does NOT return statement text: `cmdRetroPlan` never executes
+ * any such text - the actual writes go through `judgment.transaction` below,
+ * field by field - and statement text asserted on by tests but reported
+ * nowhere earns nothing but false confidence.
  */
 export const buildRetroPlanKeys = (
     args: RetroPlanArgs,

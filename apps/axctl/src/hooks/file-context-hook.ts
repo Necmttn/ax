@@ -207,8 +207,8 @@ export function generateLookupCandidates(filePath: string, cwd: string | null): 
     return Array.from(candidates);
 }
 
-/** Claude Code's `session_id` is a bare UUID. Telemetry + dedup need a
- *  SurrealQL record literal, so prefix `session:` when no table is present. */
+/** Claude Code's `session_id` is a bare UUID. Telemetry + dedup need the
+ *  `session:`-prefixed id convention, so prefix it when no table is present. */
 export function normalizeSessionId(raw: string | null): string | null {
     if (!raw) return null;
     return raw.includes(":") ? raw : `session:${raw}`;

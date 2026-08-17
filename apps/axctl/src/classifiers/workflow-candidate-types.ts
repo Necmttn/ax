@@ -7,7 +7,7 @@ import type { DuckDbParam } from "@ax/lib/duckdb/types";
  * `label` is a human-readable description, kept for `statements` and
  * `first_failure` reporting - never executed as SQL. Mirrors the identical
  * convention in package-operations.ts / label-mining.ts (each write-plan
- * builder owns its own copy - three independent SurrealDB write paths that
+ * builder owns its own copy - three independent DuckDB write paths that
  * happened to share a target-table shape, not one shared module).
  */
 export interface WorkflowCandidateGraphWriteRow {
@@ -1372,8 +1372,8 @@ export interface WorkflowCandidateProposalPlan {
     readonly summary: WorkflowCandidateProposalPromotionSummary;
     /** Human-readable description of each write this plan performs, in order.
      *  These are descriptions, NOT executable SQL - the same convention the
-     *  graph write plans and label-mining use. They used to be SurrealQL, which
-     *  nothing executed; see the persist functions for the real writes. */
+     *  graph write plans and label-mining use; see the persist functions for
+     *  the real writes. */
     readonly statements: readonly string[];
 }
 

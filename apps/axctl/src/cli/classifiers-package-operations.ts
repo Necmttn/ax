@@ -1148,9 +1148,9 @@ const serviceErrorText = (error: unknown): string => {
 
 export const runClassifiersPackageOperations = (
     input: ClassifierPackageOperationsCommandInput,
-// `applyExecutionSurrealWritePlanReport` now writes through `withConfigWrite`
+// `applyExecutionSurrealWritePlanReport` writes through `withConfigWrite`
 // (the DuckDB seam's CLI-invoked write front door), which needs `AxConfig` +
-// `Path.Path` rather than `SurrealClient` - see package-service.ts.
+// `Path.Path` - see package-service.ts.
 ): Effect.Effect<void, never, ClassifierPackageService | AxConfig | CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
@@ -1440,8 +1440,9 @@ export const runClassifiersLifecycle = (
         readonly out?: string;
         readonly json: boolean;
     },
-// Fully ported: this report path reads through the DuckDB seam only, so
-// `SurrealClient` is gone rather than joined (contrast the operation above).
+// This report path only reads through the DuckDB seam (CacheRead), unlike
+// the write path above, which additionally needs `AxConfig` + `Path.Path`
+// for `withConfigWrite`.
 ): Effect.Effect<void, PlatformError.PlatformError, ClassifierPackageService | CacheRead | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;

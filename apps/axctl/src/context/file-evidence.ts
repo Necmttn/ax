@@ -221,11 +221,11 @@ const ProducedSessionRow = Schema.Struct({
 
 /**
  * `touched` is a `(commit) -in-> edge -out-> (file)` edge; `commit.sessions`
- * (the sessions that produced the commit) was a reverse graph traversal
- * (`<-produced.in`) in SurrealQL. DuckDB has no record-graph traversal, so
- * this is a second batched query over `produced` (session -in-> commit -out->)
- * for the commit ids the first query returned, grouped back onto each commit
- * in JS - same batching shape as `prevTurnQuery` in label-mining-service.ts.
+ * (the sessions that produced the commit) needs a reverse traversal over
+ * `produced`. DuckDB has no record-graph traversal, so this is a second
+ * batched query over `produced` (session -in-> commit -out->) for the commit
+ * ids the first query returned, grouped back onto each commit in JS - same
+ * batching shape as `prevTurnQuery` in label-mining-service.ts.
  */
 export const loadTouches = (fileIds: readonly string[]) =>
     Effect.gen(function* () {
@@ -466,11 +466,9 @@ export const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
  *
  * Two-stage aggregation: run the cheap inner aggregation first (one indexed
  * query), then issue batched `session IN (...)` reads through CacheRead,
- * aggregating client-side. Ported off the SurrealDB-specific "N per-session
- * queries beat one IN-list scan" tuning (Surreal's `session = <lit>` hit a
- * point index the `IN [...]` form didn't); DuckDB's turn_session_seq index
- * serves an IN-list scan directly, so this is one batched query per shape
- * instead of a fanned-out per-session loop.
+ * aggregating client-side. DuckDB's turn_session_seq index serves an IN-list
+ * scan directly, so this is one batched query per shape instead of a
+ * fanned-out per-session loop.
  */
 export const loadPriorFileSessions = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {

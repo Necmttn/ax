@@ -954,8 +954,7 @@ export function projectReviewedLabelsToGraph(input: {
     // Build the DuckDB write rows in a fixed, deterministic order. NOTE:
     // `transcript_label_review` is deliberately absent here - it lives in the
     // judgment sidecar (see the doc comment on LabelMiningGraphWriteRow) and
-    // was always excluded before the row is applied even when this emitted
-    // SurrealQL text for it.
+    // is excluded before the row is applied.
     const rows: LabelMiningGraphWriteRow[] = [];
     for (const node of [...nodes].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
         rows.push({

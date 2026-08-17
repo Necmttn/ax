@@ -36,15 +36,13 @@ const NODE_KINDS = new Set<GraphNodeKind>([
 // counts) plus interruptions are precomputed once per session during the
 // `session-health` ingest stage and stored on `session_health`. This query
 // LEFT JOINs `session_health`/`delivery_outcome`/`pull_request` (each UNIQUE
-// on session, so the join adds at most one row) instead of the ~5 correlated
-// scans over the 400k-row `turn` table that hung the endpoint (GitHub issue
-// #77) - the DuckDB translation goes a step further than the original
-// SurrealQL's per-row scalar subqueries against session_health/delivery_outcome,
-// collapsing those into 2 real JOINs (only phase_span's SUM and produced's
-// COUNT stay as scalar subqueries, since neither is unique-per-session). The
-// `task_label` derivation - the two-tier organic-task fallback with
-// boilerplate filtering - lives in `src/lib/shared/task-label.ts` (consumed
-// by the ingest derivation, unaffected by this port).
+// on session, so the join adds at most one row) instead of running any of
+// those lookups as correlated scans over the 400k-row `turn` table, which is
+// what hung the endpoint (GitHub issue #77). Only phase_span's SUM and
+// produced's COUNT stay as scalar subqueries, since neither is
+// unique-per-session. The `task_label` derivation - the two-tier organic-task
+// fallback with boilerplate filtering - lives in `src/lib/shared/task-label.ts`
+// (consumed by the ingest derivation).
 export const FILE_ATTENTION_SQL = `
 SELECT
     agg.session AS source_id,

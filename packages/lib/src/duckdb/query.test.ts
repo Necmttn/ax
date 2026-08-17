@@ -307,8 +307,8 @@ describe("defineCacheQuery", () => {
 
 describe("the layer requirement", () => {
     test("a helper needs CacheRead and nothing else", () => {
-        // Typed proof that these compose into a command without dragging a
-        // SurrealClient (or anything else) into the requirement channel.
+        // Typed proof that these compose into a command without dragging
+        // anything else into the requirement channel.
         const program: Effect.Effect<ReadonlyArray<string>, never, CacheRead> = cacheRows(
             Schema.Struct({ id: Schema.String }),
             { sql: "SELECT id FROM session", params: [] },

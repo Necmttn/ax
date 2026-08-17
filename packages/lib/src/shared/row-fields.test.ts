@@ -194,8 +194,7 @@ describe("stringOrNull", () => {
 });
 
 // ============================================================================
-// 2. RECORD-ID KEY DERIVATION (exercised through the
-//    surreal.ts re-export so both spellings stay covered)
+// 2. RECORD-ID KEY DERIVATION
 // ============================================================================
 
 describe("safeKeyPart", () => {
@@ -294,7 +293,7 @@ describe("isoTimestamp", () => {
         expect(isoTimestamp("2024-03-01T00:00:00.000Z")).toBe("2024-03-01T00:00:00.000Z");
     });
 
-    it("handles a SurrealDB DateTime via its toISOString() method", () => {
+    it("handles a DateTime-like object via its toISOString() method", () => {
         class DateTime {
             toISOString() { return "2024-06-01T12:00:00.000Z"; }
         }
@@ -360,7 +359,7 @@ describe("isoTimestamp - warn on epoch fallback", () => {
         });
     });
 
-    it("does NOT warn for a SurrealDB DateTime-like object", () => {
+    it("does NOT warn for a DateTime-like object", () => {
         withWarnSpy((calls) => {
             const fakeDateTime = {
                 toISOString() { return "2024-06-01T12:00:00.000Z"; },

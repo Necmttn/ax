@@ -160,9 +160,9 @@ export function toolFileRelationRecordKey(input: ToolFileRelationKeyInput): stri
 }
 
 /**
- * Validate that a record key is safe to embed as a backtick-quoted SurrealDB
- * record literal (`table:\`key\``). Throws when the key contains characters
- * that would break or escape the literal: backtick, newline, or null byte.
+ * Validate that a record key is safe to embed as a backtick-quoted
+ * `table:\`key\`` literal. Throws when the key contains characters that
+ * would break or escape the literal: backtick, newline, or null byte.
  *
  * Call this early (on user-supplied input) to get a clear error before the
  * broken key reaches a SQL string.
@@ -185,11 +185,7 @@ export function safeRecordKey(key: string): string {
 }
 
 /**
- * Build a backtick-quoted SurrealDB record literal: `table:\`key\``.
- *
- * This is the canonical way to embed a known record id into a SurrealQL
- * string. The SDK's RecordId binding silently produces empty results in some
- * query contexts (see src/lib/shared/graph-query.ts:132).
+ * Build a backtick-quoted record literal: `table:\`key\``.
  *
  * @throws {Error} when `key` contains a backtick, newline, or null byte.
  */

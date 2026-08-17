@@ -2,12 +2,12 @@
  * `fetchAdviceLedger` against a REAL published DuckDB snapshot.
  *
  * This file exists because of a defect a stub or a SQL-text assertion cannot
- * see. `fetchAdviceLedger` was HALF-ported: the dispatch half read the DuckDB
- * cache through `CacheRead`, while the advice half still ran SurrealQL against
- * SurrealDB - which nothing has written since `advice` became a live DuckDB
- * table. An empty table is not an error, so `ax dispatches --advice` and the
- * `dispatches_advice` MCP tool returned an EMPTY ledger with a clean exit: a
- * wrong answer, not a failure.
+ * see. `fetchAdviceLedger` was once HALF-ported: the dispatch half read the
+ * DuckDB cache through `CacheRead` while the advice half read a table nothing
+ * wrote to anymore. An empty table is not an error, so `ax dispatches
+ * --advice` and the `dispatches_advice` MCP tool returned an EMPTY ledger
+ * with a clean exit: a wrong answer, not a failure. Both halves now read
+ * `CacheRead`, and this test guards against that regressing silently again.
  *
  * Two more traps are pinned here, both invisible to a mocked seam:
  *

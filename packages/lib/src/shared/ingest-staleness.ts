@@ -29,13 +29,13 @@ export const REAP_GRACE_SECONDS = 60;
 /**
  * The heartbeat as milliseconds, or `null` when there is nothing usable.
  *
- * Two callers hand this two different types and always have: doctor's raw HTTP
- * probe sees a JSON string, while a graph read sees whatever its client decoded.
- * Under SurrealDB that was also a string; the DuckDB seam decodes a TIMESTAMP to
- * a `Date`, and the old `Date.parse(String(value))` round-tripped one through
- * `"Wed Aug 15 2026 12:00:00 GMT+0000"` - which parses, but only to whole
- * seconds, so a `Date` silently lost its milliseconds on the way to a
- * millisecond comparison. A `Date` is now read directly.
+ * Two callers hand this two different types: doctor's raw HTTP probe sees a
+ * JSON string, while a graph read sees whatever its client decoded - the
+ * DuckDB seam decodes a TIMESTAMP to a `Date`. A `Date.parse(String(value))`
+ * round-trip would stringify one through `"Wed Aug 15 2026 12:00:00 GMT+0000"`
+ * - which parses, but only to whole seconds, so a `Date` would silently lose
+ * its milliseconds on the way to a millisecond comparison. A `Date` is read
+ * directly instead.
  */
 const heartbeatMs = (value: unknown): number | null => {
     if (value instanceof Date) {

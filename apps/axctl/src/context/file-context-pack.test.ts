@@ -8,12 +8,12 @@ import { buildFileContextPack } from "./file-context-pack.ts";
 /**
  * `buildFileContextPack` composes seven joins across file-evidence.ts (files,
  * read_file/searched_file, touched, mentioned_file, edited+session-aggregate,
- * produced+delivery_outcome+session_health, touched-neighbor). The old
- * testing/surreal.ts fake answered each by matching SQL TEXT, which is not
- * evidence any of those joins are correct - only that the row-shaping code
- * downstream works on canned data. This is a REAL published DuckDB snapshot,
- * so a wrong JOIN (wrong column, wrong direction, missing subagent filter)
- * fails here the same way it would against production.
+ * produced+delivery_outcome+session_health, touched-neighbor). This test runs
+ * them against a REAL published DuckDB snapshot rather than a fake that
+ * answers by matching SQL text - a text-matching fake only proves the
+ * row-shaping code works on canned data, not that the joins themselves are
+ * correct - so a wrong JOIN (wrong column, wrong direction, missing subagent
+ * filter) fails here the same way it would against production.
  */
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("file-context-pack (duckdb)", { requireFts: true });
 

@@ -980,7 +980,7 @@ const SYMBOL_REF_STYLE = { fontWeight: 700, color: "var(--green)" } as const;
 
 /**
  * Render a block's raw slice with symbol-reference atom values bolded inline,
- * so named entities (e.g. `SurrealDB`) stand out in the transcript itself
+ * so named entities (e.g. `DuckDB`) stand out in the transcript itself
  * rather than only in the inspector's atom list. Atoms carry no offsets, so we
  * match by value (longest-first; word boundaries so "data" doesn't bold inside
  * "metadata").

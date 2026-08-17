@@ -33,10 +33,10 @@ const stringField = (row: Record<string, unknown>, key: string): string | null =
 };
 
 /**
- * SurrealDB hands datetime aggregates back as `DateTime` instances (its own
- * class, *not* JS `Date`). They serialize via `toJSON()`. `stringField`
- * silently dropped them, which is how `last_used` was coming back null for
- * every skill (dogfood ISSUE-001).
+ * Datetime aggregates can arrive as a `Date` instance or, from some paths, a
+ * DateTime-like object with a `toJSON()` method rather than a plain JS
+ * `Date`. `stringField` silently drops both, which is how `last_used` was
+ * coming back null for every skill (dogfood ISSUE-001).
  */
 const dateField = (row: Record<string, unknown>, key: string): string | null => {
     const value = row[key];

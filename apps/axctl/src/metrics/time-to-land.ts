@@ -21,9 +21,9 @@ const PullRequestRow = Schema.Struct({ merge_sha: Schema.String, merged_at: Time
  * is monotonic (a commit precedes its merge), so the metric is now a real
  * latency; residual negatives (clock skew across machines) are dropped.
  *
- * Two flat queries joined in JS rather than a correlated subquery - SurrealDB
- * rejects the `FROM pull_request AS pr` table alias used by the inline form, and
- * two set-based reads keep us off the per-edge-deref hang path.
+ * Two flat queries joined in JS rather than a single correlated subquery: the
+ * merged-PR set is read once into a sha->merged_at map, then matched against
+ * each produced commit in memory.
  */
 export const computeTimeToLand = (
     read: CacheReadService,

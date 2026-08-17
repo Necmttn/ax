@@ -72,11 +72,11 @@ export interface UnusedSkillRow {
 }
 
 /**
- * SurrealDB's math::max returns -Infinity for empty groups; normalise that
- * (and null/undefined) to `null`. Datetimes arrive as string, Date, or a
- * DateTime-like `{toJSON}` object depending on path - delegated to the shared
- * `dateField` extractor (string passthrough, Date/`{toJSON}` → ISO, anything
- * else → null).
+ * Normalise a raw `last_used` value to an ISO string or `null`. Datetimes
+ * arrive as string, Date, or a DateTime-like `{toJSON}` object depending on
+ * path - delegated to the shared `dateField` extractor (string passthrough,
+ * Date/`{toJSON}` → ISO, anything else - including non-finite numbers,
+ * missing, or junk - → null).
  */
 export const normalizeLastUsed = (v: unknown): string | null => dateField({ v }, "v");
 

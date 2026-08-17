@@ -503,10 +503,7 @@ const cmdIngestHere = (args: string[]) => {
     return Effect.gen(function* () {
         const registry = yield* StageRegistry;
         // `cwd` and `repoRoot` are all this uses, and both are git-derived -
-        // so it needs the identity and no database. It was the LAST caller of
-        // `resolvePwdRepository`, whose final step is a SurrealQL
-        // `SELECT ... FROM repository:<key>`; that function is now unreachable
-        // outside its own test and dies with the client in the deletion chunk.
+        // so it needs the identity and no database.
         const pwd = yield* resolvePwdIdentity().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl ingest here: not in a git repository (cwd=${err.cwd})\n`, 2),
@@ -863,13 +860,11 @@ export const ingestRuntime: RuntimeManifest = {
     // Hidden maintenance verbs. `derive-signals`/`derive-intents` MUST stay
     // callable - the installed LaunchAgent plists invoke them by name.
     //
-    // `"ingest"`, not `"db"` (wave 3, `c-ingest-cutover`). All three handlers
-    // write through `withConfigWrite` -> the DuckDB seam and resolve no
-    // `SurrealClient`; routing them through `withDb` only bought them an
-    // AppLayer SurrealDB connect (and, with nothing listening, its full
-    // `CONNECT_TIMEOUT_MS`) before they could touch the cache. `withIngest`
-    // gives them the same `AxConfig`/platform/trace stack, the panicking
-    // no-DB client, and the trace transport the progress reporter needs.
+    // Runtime `"ingest"`, not `"db"`: all three handlers write through
+    // `withConfigWrite` -> the DuckDB seam, and never resolve a database
+    // connection through `withDb`. `withIngest` gives them the same
+    // `AxConfig`/platform/trace stack, the panicking no-DB client, and the
+    // trace transport the progress reporter needs.
     derive: { runtime: "ingest", hidden: true },
     "derive-signals": { runtime: "ingest", hidden: true },
     "derive-intents": { runtime: "ingest", hidden: true },

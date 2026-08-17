@@ -335,17 +335,14 @@ const parseSnapshotPayload = (rows: ReadonlyArray<Record<string, unknown>>): Wor
 /**
  * Weeks lookback for the three weekly-bucket queries below - kept bounded so a
  * cold scan on a large `invoked`/`tool_call`/`session` table stays cheap.
- * Ported from `queries/workflow.ts` (SurrealDB `time::now() - 12w`); DuckDB has
- * no week-interval literal, so the bound param is expressed in DAYS.
+ * DuckDB has no week-interval literal, so the bound param is expressed in
+ * DAYS.
  */
 const WEEKS_LOOKBACK = 12;
 const LOOKBACK_DAYS = WEEKS_LOOKBACK * 7;
 
-// Local DuckDB translations of `queries/workflow.ts`'s SurrealQL constants -
-// that file is unported (2b's ownership); copy the shape, never import the
-// SurrealQL text. `strftime(ts, '%G-W%V')` is DuckDB's equivalent of
-// SurrealDB's `time::format(ts, "%G-W%V")` (verified: both produce ISO
-// year-week, e.g. 2025-12-29 -> "2026-W01").
+// `strftime(ts, '%G-W%V')` produces an ISO year-week (verified, e.g.
+// 2025-12-29 -> "2026-W01").
 
 const WORKFLOW_WEEKLY_SKILLS_SQL = `
     SELECT strftime(iv.ts, '%G-W%V') AS week, sk.name AS skill, count(*) AS count
@@ -372,10 +369,10 @@ const WORKFLOW_SESSION_SHAPE_SQL = `
     ORDER BY week ASC
 `;
 
-// SurrealDB's `GROUP BY parent, project, started_at` collects the
-// non-aggregate columns (SurrealQL semantics differ from standard SQL); the
-// DuckDB equivalent groups on the real key (`sp.in_id`) and joins `session`
-// for the two descriptive columns, which are single-valued per parent.
+// Groups on the real key (`sp.in_id`) and joins `session` for the two
+// descriptive columns; standard SQL requires every non-aggregate selected
+// column to appear in GROUP BY, and project/started_at are single-valued per
+// parent so this doesn't split rows that should collapse into one.
 const WORKFLOW_EPISODES_SQL = `
     SELECT
         sp.in_id AS parent,
@@ -485,10 +482,8 @@ export const computeWorkflow = (
             .map((raw): WorkflowEpisode | null => {
                 const parent = stringFieldOrId(raw, "parent");
                 if (!parent) return null;
-                // Plain single-valued columns under DuckDB (real GROUP BY
-                // keys/joins, not SurrealQL's array-collecting semantics) -
-                // the array-unwrap branches from the old SurrealQL port are
-                // gone; stringField/dateField read the scalar directly.
+                // Plain single-valued columns from the GROUP BY/join above;
+                // stringField/dateField read the scalar directly.
                 const project = stringField(raw, "project");
                 const started = dateField(raw, "started_at");
                 return {

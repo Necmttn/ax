@@ -4,18 +4,12 @@
  * Pure data layer: no IO formatting, no CLI concerns. Each function returns
  * typed rows from the `session` table with a lightweight turn summary.
  *
- * PORTED TO DUCKDB. The Surreal version fetched the session projection, then
- * fanned out ONE indexed query per session (`enrichSessions`) to compute
- * `turn_count` + `first_user_message` - because SurrealDB evaluated
- * `session IN [<all ids>]` as a per-row membership test rather than using the
- * `turn_session_seq` index, so a single batched query was slower than N
- * literal-id lookups at concurrency. DuckDB has no such limitation: a real
- * `GROUP BY` aggregate plus a `row_number() OVER (PARTITION BY session ...)`
- * window for the first user turn both use the `turn_session_seq` index
- * directly, so the whole session list - projection AND enrichment - is now
- * ONE statement with two `LEFT JOIN`s, not 1+N round trips. `AxConfig`'s
- * `sessionsEnrichConcurrency` knob (the old fan-out width) has no DuckDB
- * analogue and is dropped from every signature here.
+ * A real `GROUP BY` aggregate plus a `row_number() OVER (PARTITION BY
+ * session ...)` window compute `turn_count` + `first_user_message` using the
+ * `turn_session_seq` index directly, so the whole session list - projection
+ * AND enrichment - is ONE statement with two `LEFT JOIN`s, not a fan-out of
+ * one indexed query per session. There is accordingly no per-session
+ * concurrency knob in any signature here.
  */
 import { Effect, Schema } from "effect";
 import { andAll, eqClause, withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";

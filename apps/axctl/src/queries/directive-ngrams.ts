@@ -158,10 +158,8 @@ const sqlDays = (n: number): number => Math.max(1, Math.trunc(n));
  * Statement 1: User turns in the last `sinceDays` days, excluding subagent
  * sessions. Mirrors the v1 directive turn-fetch shape from derive-proposals.ts.
  *
- * Note: `session.source` is a record-deref in the WHERE clause. This is NOT
- * inside an aggregate and the turn table is indexed on ts. SurrealDB resolves
- * this per-row at read time; performance is acceptable on 90d windows (tested
- * in derive-proposals with identical shape).
+ * `session.source` is filtered via a JOIN, not a subquery per row; the turn
+ * table is indexed on ts, so this stays cheap on 90d windows.
  */
 const UserTurnRow = Schema.Struct({
   id: Schema.String,
@@ -174,10 +172,9 @@ const OutcomeRow = Schema.Struct({ sid: Schema.String, ts: TimestampColumn });
 
 /**
  * Statement 2: Outcome markers from edited edges where the path targets a
- * memory or hooks directory. Projects `in.session` - a SELECT-projection
- * deref (NOT inside an aggregate). The matching rows are small in practice
- * (only writes to /memory/ and /.ax/hooks/ paths), so this does not trigger
- * the per-edge deref hang seen in the 87k-row aggregate case.
+ * memory or hooks directory, joined to the owning turn for its session id.
+ * The matching rows are small in practice (only writes to /memory/ and
+ * /.ax/hooks/ paths).
  *
  * Proposals with status='accepted' are omitted in v1: the proposal table
  * carries no session field and cites_evidence → skill_candidate also lacks

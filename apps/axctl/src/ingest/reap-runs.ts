@@ -18,10 +18,10 @@ import {
     type IngestRunHeartbeatRow,
 } from "@ax/lib/shared/ingest-staleness";
 
-/** `ingest_run:⟨id⟩` or `ingest_run:\`id\`` (SurrealDB escapes ids with special
- *  chars - e.g. a uuid's dashes - in angle brackets or backticks) -> the bare id
- *  that `buildIngestRunFinishStatement` re-wraps in backticks (an equivalent
- *  escape, so a uuid id still matches). */
+/** Strips a legacy `ingest_run:⟨id⟩` or `ingest_run:\`id\`` prefix/escaping
+ *  down to the bare id, in case an older row's `id` column still carries it.
+ *  `buildReapIngestRunStatement` below matches on this bare id via a plain
+ *  bound `id = ?` predicate. */
 const bareRunId = (id: unknown): string =>
     String(id)
         .replace(/^ingest_run:/, "")

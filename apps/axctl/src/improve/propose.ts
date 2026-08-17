@@ -23,7 +23,7 @@ const common = {
     evidence: Schema.optional(Schema.String),
     /** hypothesis with {{placeholders}} hydrated at serve time - numbers stay live */
     hypothesis_template: Schema.optional(Schema.String),
-    /** read-only SurrealQL (SELECT/RETURN) whose first row fills the template */
+    /** read-only DuckDB SELECT whose first row fills the template */
     evidence_query: Schema.optional(Schema.String),
 };
 

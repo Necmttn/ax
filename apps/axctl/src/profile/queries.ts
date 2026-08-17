@@ -1,9 +1,9 @@
 /**
  * Windowed stat queries for the profile renderer. These are parameterized
- * variants of queries/wrapped.ts (which hardcodes 365d). No stacked
- * in/out deref combos inside grouped aggregates (SurrealDB 3.x hang rule);
- * fetchSkillInvocations carries the single out.name deref that
- * WRAPPED_SKILLS_SQL already established. Joins happen in JS.
+ * variants of dashboard/wrapped.ts (which hardcodes 365d). Grouped
+ * aggregates stay to a single JOIN per statement - fetchSkillInvocations
+ * mirrors the `invoked JOIN skill` shape dashboard/wrapped.ts's
+ * WRAPPED_SKILLS_SQL already established.
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
  */
@@ -17,13 +17,12 @@ import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 
 /**
- * Unwrap `CacheReadService.raw`'s `{ columns, rows }` to just the rows - the
- * DuckDB-side equivalent of the old `db.query(...).pipe(Effect.map(r => r?.[0]
- * ?? []))` SurrealDB multi-statement-result unwrap. Schema-free on purpose:
- * every function here already coerces each field with `Number(...)`/
- * `String(...)` at the call site (its pre-existing style), and `Number(...)`
- * on a native BIGINT is a safe widening (unlike `JSON.stringify`, which is
- * never called on these raw rows before that coercion happens).
+ * Unwrap `CacheReadService.raw`'s `{ columns, rows }` to just the rows.
+ * Schema-free on purpose: every function here already coerces each field
+ * with `Number(...)`/`String(...)` at the call site (its pre-existing
+ * style), and `Number(...)` on a native BIGINT is a safe widening (unlike
+ * `JSON.stringify`, which is never called on these raw rows before that
+ * coercion happens).
  */
 const rawRows = (
     read: CacheReadService,
@@ -256,8 +255,8 @@ export const fetchDailyActivityFull = Effect.fn("profile.fetchDailyActivityFull"
                 withinTs.params,
             ),
         );
-        // Join tokens onto session rows in JS (two grouped queries; mirrors
-        // the deref-free-aggregate discipline the SurrealDB era established).
+        // Join tokens onto session rows in JS: two separate grouped queries
+        // rather than one stacked aggregate.
         const tokenMap = new Map(
             tokenRows
                 .map((r) => [String(r.date), Number(r.tokens ?? 0)] as const)
@@ -321,14 +320,14 @@ export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
  * LOC floor beyond >0 - a surgical fix that ships clean is a deep outcome; size
  * lives on the SCALE axis, not here.
  */
-// DuckDB is bare-ref (no `session:`/`commit:` record prefixes and no `in`/`out`
-// graph deref), so the old SurrealQL `in.started_at`/`in.source`/`out.reverted`
-// path through the `produced` edge becomes explicit JOINs against `session` and
-// `commit`, and `touched.in`/`commit` become `touched.in_id`/`"commit".id`.
-// `out.reverted != true` needs `IS DISTINCT FROM TRUE` (not `!= TRUE`) because
-// `reverted` is a nullable BOOLEAN (schema.duckdb.sql: NONE means "not known
-// reverted") and plain `!=` against NULL evaluates to NULL, which WHERE treats
-// as false and would wrongly drop every commit that has never been checked.
+// Reaching `session.started_at`/`session.source`/`commit.reverted` through the
+// `produced` edge is an explicit JOIN against `session` and `commit`, keyed on
+// `produced.in_id`/`out_id`; `touched`'s edge fields are `in_id`/`"commit".id`.
+// `commit.reverted != true` needs `IS DISTINCT FROM TRUE` (not `!= TRUE`)
+// because `reverted` is a nullable BOOLEAN (schema.duckdb.sql: NULL means "not
+// known reverted") and plain `!=` against NULL evaluates to NULL, which WHERE
+// treats as false and would wrongly drop every commit that has never been
+// checked.
 const DEEP_PRODUCED_SQL = `
 SELECT p.in_id AS session, p.out_id AS commit
 FROM produced p
@@ -506,8 +505,6 @@ export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
                 // bare `tool` in GROUP BY to the underlying column, not the
                 // SELECT alias, and then rejects the statement:
                 // `column "command_norm" must appear in the GROUP BY clause`.
-                // SurrealDB accepted the alias, so this only surfaced when the
-                // command was actually routed at the cache.
                 + "GROUP BY COALESCE(command_norm, name) ORDER BY count DESC LIMIT 10",
             within.params,
         );
@@ -524,8 +521,8 @@ export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
 // One combined SQL returns all per-tool rows (mirroring WRAPPED_TOOLS_SQL) so
 // we can compute verification/context pattern matches in JS just as
 // dashboard/wrapped.ts does (contextToolPattern / verificationToolPattern).
-// Separate SQL for turn count, distinct skills, and repo count (distinct
-// grouped aggregates; deref-free per the SurrealDB 3.x hang rule).
+// Separate SQL for turn count, distinct skills, and repo count: three
+// independent statements rather than one combined aggregate.
 
 export interface WrappedCounts {
     readonly turns: number;
@@ -575,8 +572,7 @@ SELECT count(*) AS count
 FROM turn
 WHERE TRUE`;
 
-// Distinct invoked skill names in window. DuckDB is bare-ref, so the old
-// `out.name` deref through `invoked` becomes an explicit JOIN against `skill`.
+// Distinct invoked skill names in window: an explicit JOIN against `skill`.
 const DISTINCT_SKILLS_SQL = `
 SELECT count(*) AS count
 FROM (
@@ -770,10 +766,9 @@ export interface WindowedInvocationRow {
 // place (~3-4x faster on the maintainer's 64k-invocation graph). The skill NAME
 // still needs the one join, since the edge carries only `out_id`.
 //
-// The SurrealDB original guarded three sentinel STRINGS in JS - "null", and
-// "NONE" for pre-denormalization edges that stored an absent session. DuckDB
-// has only NULL, so both guards become `IS NOT NULL` in the WHERE clause and
-// the rows arrive already filtered.
+// Both the absent-session and absent-skill-name cases collapse to a plain
+// `IS NOT NULL` in the WHERE clause below, so the rows arrive already
+// filtered - callers never see a row with a null session or skill name.
 const WINDOWED_INVOCATIONS_SQL = `
 SELECT i.session AS session, s.name AS skill, i.ts AS ts
 FROM invoked i
@@ -796,7 +791,7 @@ export const fetchWindowedInvocations = Effect.fn("profile.fetchWindowedInvocati
             within.params,
         );
         // Callers compare `ts` as a string against session start/end strings,
-        // so keep the ISO form the SurrealDB `type::string(ts)` produced.
+        // so it must be rendered as ISO here.
         return rows.map((r) => ({
             session: r.session,
             skill: r.skill,
