@@ -58,6 +58,7 @@
     "check:no-node-fs": "bun scripts/check-no-node-fs.ts",
     "check:record-select": "bun scripts/check-record-select.ts",
     "check:timestamp-cast": "bun scripts/check-timestamp-cast.ts",
+    "check:raw-numeric-cast": "bun scripts/check-raw-numeric-cast.ts",
     "check:no-applayer-provide": "bun scripts/check-no-applayer-provide.ts",
     "check:harness-docs": "bun scripts/check-harness-docs-drift.ts",
     "check:table-coverage": "bun scripts/check-table-coverage.ts",

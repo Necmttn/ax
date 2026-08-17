@@ -581,16 +581,26 @@ const loadGitWatermarks = (
     write: CacheWriteService,
 ): Effect.Effect<Map<string, GitWatermark>, CacheWriteError> =>
     Effect.gen(function* () {
-        const result = yield* write.raw("SELECT path, sha, since_days FROM ingest_file_state WHERE source_kind = ?", [GIT_WATERMARK_SOURCE]);
-        const rows = result.rows as Array<{ path?: string; sha?: string; since_days?: number | bigint }>;
+        // `since_days` is cast in the PROJECTION, not guarded in JS afterwards.
+        // It is a BIGINT and `write.raw` applies no column decoder, so the
+        // cell arrived as a JS bigint and the guard below had to name that type
+        // explicitly. That works only for as long as someone remembers - the
+        // same shape written the obvious way (`typeof x === "number"`) reads
+        // false and drops every watermark silently, which is a full git
+        // re-scan on every ingest with nothing in the logs to say why.
+        const result = yield* write.raw(
+            "SELECT path, sha, CAST(since_days AS DOUBLE) AS since_days FROM ingest_file_state WHERE source_kind = ?",
+            [GIT_WATERMARK_SOURCE],
+        );
+        const rows = result.rows as Array<{ path?: string; sha?: string; since_days?: number }>;
         const out = new Map<string, GitWatermark>();
         for (const row of rows) {
             if (
                 typeof row.path === "string" &&
                 typeof row.sha === "string" &&
-                (typeof row.since_days === "number" || typeof row.since_days === "bigint")
+                typeof row.since_days === "number"
             ) {
-                out.set(row.path, { sha: row.sha, sinceDays: Number(row.since_days) });
+                out.set(row.path, { sha: row.sha, sinceDays: row.since_days });
             }
         }
         return out;

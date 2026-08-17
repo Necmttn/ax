@@ -405,8 +405,20 @@ WHERE kind = 'claude_insights'`),
                 notes: "Sessions at or after first observed Superpowers skill invocation." }),
         ]);
         for (const row of usages) {
+            // Numeric columns are projected DOUBLE at the READ boundary, not
+            // cast in JS afterwards. `write.raw` applies no column decoder, so
+            // a BIGINT cell arrives as a JS bigint; every consumer then needs
+            // its own guard, and a `typeof x === "number"` guard reads FALSE on
+            // one and silently stores null. Doing it in the projection is the
+            // one place that cannot be forgotten per-consumer.
             const existing = yield* write.raw(
-                "SELECT prompt_tokens, completion_tokens, cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens, labels, metrics, model FROM session_token_usage WHERE id = ?",
+                `SELECT CAST(prompt_tokens AS DOUBLE) AS prompt_tokens,
+                        CAST(completion_tokens AS DOUBLE) AS completion_tokens,
+                        CAST(cache_creation_input_tokens AS DOUBLE) AS cache_creation_input_tokens,
+                        CAST(cache_read_input_tokens AS DOUBLE) AS cache_read_input_tokens,
+                        CAST(estimated_tokens AS DOUBLE) AS estimated_tokens,
+                        labels, metrics, model
+                 FROM session_token_usage WHERE id = ?`,
                 [row.sessionKey],
             );
             const values = existing.rows[0] as Record<string, unknown> | undefined;
@@ -415,11 +427,11 @@ WHERE kind = 'claude_insights'`),
             yield* write.put("session_token_usage", cacheRow({
                 id: row.sessionKey, session: row.sessionKey, source: row.source,
                 workflow_epoch: row.workflowEpoch, model: row.model ?? (values?.model as string | null | undefined) ?? null,
-                prompt_tokens: hasActual ? values?.prompt_tokens as bigint | number : row.promptTokens,
-                completion_tokens: hasActual ? values?.completion_tokens as bigint | number : row.completionTokens,
-                cache_creation_input_tokens: hasActual ? values?.cache_creation_input_tokens as bigint | number : row.cacheCreationInputTokens,
-                cache_read_input_tokens: hasActual ? values?.cache_read_input_tokens as bigint | number : row.cacheReadInputTokens,
-                estimated_tokens: hasActual ? (values?.estimated_tokens as bigint | number | undefined) ?? row.estimatedTokens : row.estimatedTokens,
+                prompt_tokens: hasActual ? values?.prompt_tokens as number : row.promptTokens,
+                completion_tokens: hasActual ? values?.completion_tokens as number : row.completionTokens,
+                cache_creation_input_tokens: hasActual ? values?.cache_creation_input_tokens as number : row.cacheCreationInputTokens,
+                cache_read_input_tokens: hasActual ? values?.cache_read_input_tokens as number : row.cacheReadInputTokens,
+                estimated_tokens: hasActual ? (values?.estimated_tokens as number | undefined) ?? row.estimatedTokens : row.estimatedTokens,
                 transcript_bytes: row.transcriptBytes, context_window: row.contextWindow,
                 labels: hasActual ? (values?.labels as string | null | undefined) ?? jsonParam(row.labels) : jsonParam(row.labels),
                 metrics: hasActual ? (values?.metrics as string | null | undefined) ?? jsonParam(row.metrics) : jsonParam(row.metrics),
