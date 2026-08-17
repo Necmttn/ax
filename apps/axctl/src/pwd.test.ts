@@ -1,7 +1,7 @@
 /**
  * Tests for src/pwd.ts
- * Uses real git fixtures (mkdtemp + git init) for process calls,
- * and a mock SurrealClient for DB checks.
+ * Uses real git fixtures (mkdtemp + git init) for the git half, and a real
+ * published DuckDB cache for the lookup half.
  */
 import { describe, expect, test, afterAll } from "bun:test";
 import { mkdtemp, rm, mkdir, writeFile, realpath } from "node:fs/promises";
@@ -9,12 +9,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import { RecordId } from "surrealdb";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
-import { resolvePwdCacheRepository, resolvePwdRepository, type PwdCacheResolution } from "./pwd.ts";
+import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdCacheResolution } from "./pwd.ts";
 
 const { dylibPath, dtest } = await duckdbTestSetup("pwd cache resolver", { requireFts: true });
 
@@ -74,37 +72,24 @@ async function initRepoWithCommit(dir: string): Promise<string> {
     return new TextDecoder().decode(result.stdout).trim();
 }
 
-/** Build a mock SurrealClient layer. */
-function makeMockDb(existsResponse: boolean) {
-    // Return a row (exists) or empty (not exists)
-    return makeTestSurrealClient({
-        denyWrites: true,
-        fallback: [existsResponse ? [{ id: "repository:somekey" }] : []],
-    }).layer;
-}
-
-/** Run resolvePwdRepository with real ProcessService and mock DB. */
-async function resolve(cwd: string, dbExists: boolean) {
+/** Run resolvePwdIdentity with real ProcessService. Touches no engine. */
+async function resolve(cwd: string) {
     return Effect.runPromise(
-        resolvePwdRepository(cwd).pipe(
-            Effect.provide(
-                Layer.mergeAll(ProcessServiceLive, makeMockDb(dbExists), BunFileSystem.layer),
-            ),
+        resolvePwdIdentity(cwd).pipe(
+            Effect.provide(Layer.mergeAll(ProcessServiceLive, BunFileSystem.layer)),
         ),
     );
 }
 
-/** Run resolvePwdRepository expecting failure, return the error. */
+/** Run resolvePwdIdentity expecting failure, return the error. */
 async function resolveErr(cwd: string) {
     return Effect.runPromise(
-        resolvePwdRepository(cwd).pipe(
+        resolvePwdIdentity(cwd).pipe(
             Effect.match({
                 onSuccess: (v) => ({ ok: true, v }) as const,
                 onFailure: (e) => ({ ok: false, e }) as const,
             }),
-            Effect.provide(
-                Layer.mergeAll(ProcessServiceLive, makeMockDb(false), BunFileSystem.layer),
-            ),
+            Effect.provide(Layer.mergeAll(ProcessServiceLive, BunFileSystem.layer)),
         ),
     );
 }
@@ -113,13 +98,13 @@ async function resolveErr(cwd: string) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("resolvePwdRepository", () => {
+describe("resolvePwdIdentity", () => {
     test("repo with remote: identity.kind === 'remote'", async () => {
         const dir = await makeTempDir();
         await initRepoWithCommit(dir);
         git(["remote", "add", "origin", "git@github.com:foo/bar.git"], dir);
 
-        const res = await resolve(dir, false);
+        const res = await resolve(dir);
 
         expect(res.cwd).toBe(dir);
         expect(res.repoRoot).toBe(dir);
@@ -131,32 +116,19 @@ describe("resolvePwdRepository", () => {
         expect(res.remoteUrl).toBe("git@github.com:foo/bar.git");
         expect(res.identity.kind).toBe("remote");
         expect(res.identity.repositoryKey).toContain("remote__");
-        expect(res.repositoryRecordId).toBeInstanceOf(RecordId);
-        expect(String(res.repositoryRecordId)).toContain("repository");
-        expect(res.existsInDb).toBe(false);
-    });
-
-    test("repo with remote: existsInDb true when DB returns a row", async () => {
-        const dir = await makeTempDir();
-        await initRepoWithCommit(dir);
-        git(["remote", "add", "origin", "git@github.com:foo/bar.git"], dir);
-
-        const res = await resolve(dir, true);
-        expect(res.existsInDb).toBe(true);
     });
 
     test("repo with initial commit only (no remote): identity.kind === 'initial_commit'", async () => {
         const dir = await makeTempDir();
         const sha = await initRepoWithCommit(dir);
 
-        const res = await resolve(dir, false);
+        const res = await resolve(dir);
 
         expect(res.identity.kind).toBe("initial_commit");
         expect(res.initialCommit).toBe(sha);
         expect(res.remoteUrlNormalized).toBeNull();
         expect(res.remoteUrl).toBeNull();
         expect(res.identity.repositoryKey).toContain("initial__");
-        expect(res.existsInDb).toBe(false);
     });
 
     test("non-git directory: NotAGitRepoError", async () => {
@@ -177,7 +149,7 @@ describe("resolvePwdRepository", () => {
         const subdir = join(dir, "src");
         await mkdir(subdir, { recursive: true });
 
-        const res = await resolve(subdir, false);
+        const res = await resolve(subdir);
 
         expect(res.cwd).toBe(subdir);
         expect(res.repoRoot).toBe(dir);
@@ -191,25 +163,23 @@ describe("resolvePwdRepository", () => {
 
         git(["worktree", "add", "-b", "feature", worktree], dir);
 
-        const res = await resolve(worktree, false);
+        const res = await resolve(worktree);
 
         expect(res.repoRoot).toBe(worktree);
         expect(res.mainRepoRoot).toBe(dir);
     });
 
     test("cwd defaults to process.cwd() when not provided", async () => {
-        // This test calls resolvePwdRepository() with no args; it will succeed
+        // This test calls resolvePwdIdentity() with no args; it will succeed
         // if we happen to be inside a git repo, or fail with NotAGitRepoError.
         // Either outcome is acceptable - just verify the function runs.
         const out = await Effect.runPromise(
-            resolvePwdRepository().pipe(
+            resolvePwdIdentity().pipe(
                 Effect.match({
                     onSuccess: (v) => ({ ok: true, cwd: v.cwd }) as const,
                     onFailure: (e) => ({ ok: false, tag: (e as { _tag: string })._tag }) as const,
                 }),
-                Effect.provide(
-                    Layer.mergeAll(ProcessServiceLive, makeMockDb(false), BunFileSystem.layer),
-                ),
+                Effect.provide(Layer.mergeAll(ProcessServiceLive, BunFileSystem.layer)),
             ),
         );
         // Either resolution or NotAGitRepoError are valid
@@ -224,8 +194,8 @@ describe("resolvePwdRepository", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * `resolvePwdCacheRepository` is what the five CLI callers of the Surreal
- * resolver above port to. It resolves against a REAL published cache, because
+ * `resolvePwdCacheRepository` is what every `--here` caller uses. It resolves
+ * against a REAL published cache, because
  * the whole point is the LOOKUP - a constructed id would be guessing at a
  * content-hash recipe, and a mock would just confirm the guess.
  */

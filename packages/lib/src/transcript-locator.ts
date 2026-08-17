@@ -158,7 +158,7 @@ const resolveRawFileFromCache = (
     ));
 
 /** Disk-only resolution: try the hint, then claude search, then codex search.
- *  No DB dep so it can be exercised without a SurrealClient layer. */
+ *  No stored-data dep, so it can be exercised without any read seam. */
 const findOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
@@ -202,7 +202,7 @@ export const locateTranscript = (
     });
 
 /** Disk-only variant exposed for tests that don't want to spin up a fake
- *  SurrealClient just to exercise the hint + search logic. */
+ *  read seam just to exercise the hint + search logic. */
 export const locateTranscriptOnDisk = (
     sessionId: string,
     rawFileHint: string | null,

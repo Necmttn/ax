@@ -2,13 +2,12 @@
  * The ingest PROGRESS LEDGER: `ingest_run` / `ingest_stage` / `ingest_event`.
  *
  * Every write here goes through `CacheWriteService` (DuckDB, under the ingest
- * lock). It used to emit SurrealQL text - `UPSERT ingest_run:⟨id⟩ MERGE {…}`
- * built out of `surrealString`/`surrealJson` - which is why no wave-2 chunk ever
- * claimed it: the module imports no `SurrealClient`, so `git grep SurrealClient`
- * could not see it. Wave 3's `c-ingest-cutover` ported the emitters and moved
- * the module out of `dashboard/`, where it never belonged - it is written by
- * `ingest/run.ts` and `cli/commands/ingest.ts`, and the dashboard only ever READ
- * it.
+ * lock). It used to emit raw SQL TEXT built out of string helpers, which is why
+ * no port chunk ever claimed it: the module imported no client, so grepping for
+ * one could not see it. A writer is found by what it emits, not by what it
+ * imports. The module also moved out of `dashboard/`, where it never belonged -
+ * it is written by `ingest/run.ts` and `cli/commands/ingest.ts`, and the
+ * dashboard only ever READ it.
  *
  * WHY THE WRITERS LIVE HERE AND NOT AT THE TWO CALL SITES. The seam port landed
  * as inline `write.put(...)` / `write.exec(...)` blocks duplicated between

@@ -7,40 +7,20 @@
  * include the session id so we can de-dup in TS, and capture cwd so we can
  * render a human-friendly project label rather than the raw Claude slug.
  *
- * `fetchSkillStats` is ported onto the DuckDB CacheRead seam below (skill row
- * + invocations aggregate + recent_sessions, each an indexed lookup keyed off
- * the resolved skill id). `SKILL_STATS_SQL` (built from
- * skill-invocations-sql.ts) has no other live caller in this worktree - it is
- * kept exported only because skill-invocations-sql.test.ts and this module's
- * own SQL-text tests still assert on it; see skill-detail.ts for the sibling
- * case where the equivalent constant IS still live (consumed directly by the
- * TUI over SurrealClient).
+ * `fetchSkillStats` reads the DuckDB CacheRead seam below - skill row,
+ * invocations aggregate, and recent_sessions, each an indexed lookup keyed off
+ * the resolved skill id.
  *
- * Bindings: $name (skill name).
+ * The `SKILL_STATS_SQL` blob that used to sit here was held up only by its own
+ * text assertions, on the stated grounds that skill-detail.ts's sibling
+ * constant was live via the TUI. That was never true (see skill-detail.ts), so
+ * both went with the SurrealDB client.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
 import { dateField } from "@ax/lib/shared/row-fields";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
-import { skillWithInvocationsSql } from "./skill-invocations-sql.ts";
-
-export const SKILL_STATS_SQL = skillWithInvocationsSql({
-    windows: [7, 30, 90],
-    blocks: [
-        `    recent_sessions: (
-        SELECT
-            in.session AS session_id,
-            in.session.project AS project_slug,
-            in.session.cwd AS cwd,
-            ts
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 50
-    )`,
-    ],
-});
 
 export interface SkillStatsInvocations {
     readonly total: number;

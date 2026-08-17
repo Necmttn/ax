@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { makeMockDb } from "@ax/lib/testing/surreal";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { Effect, Layer } from "effect";
 import { GitHubEnvTest } from "../profile/github-env.ts";
@@ -18,7 +17,6 @@ afterEach(async () => {
 describe("pushCurrentTeamProfile", () => {
     test("refuses an unbound repository without sending anything to GitHub", async () => {
         const github = GitHubEnvTest({ responses: {}, login: "alice" });
-        const db = makeMockDb(new Map());
 
         const outcome = await Effect.runPromise(
             pushCurrentTeamProfile({
@@ -33,7 +31,7 @@ describe("pushCurrentTeamProfile", () => {
                     onSuccess: (value) => ({ ok: true as const, value }),
                     onFailure: (error) => ({ ok: false as const, error }),
                 }),
-                Effect.provide(Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer)),
+                Effect.provide(Layer.mergeAll(github.layer, makeTestCacheRead().layer)),
             ),
         );
 
@@ -43,7 +41,6 @@ describe("pushCurrentTeamProfile", () => {
             expect(outcome.error.message).toMatch(/unbound|not bound|refus/i);
         }
         expect(github.calls).toEqual([]);
-        expect(db.captured).toEqual([]);
     });
 
     test("creates without a sha, then updates with the current contents sha", async () => {
@@ -54,7 +51,6 @@ describe("pushCurrentTeamProfile", () => {
             joined_at: "2026-07-16T00:00:00Z",
         });
         const path = "/repos/acme/ax-team/contents/.ax-team/alice.json";
-        const db = makeMockDb(new Map());
         const first = GitHubEnvTest({
             responses: {
                 [`PUT ${path}`]: { content: { sha: "created-sha" } },
@@ -70,7 +66,7 @@ describe("pushCurrentTeamProfile", () => {
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.mergeAll(first.layer, db.layer, makeTestCacheRead().layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(first.layer, makeTestCacheRead().layer))),
         );
 
         expect(firstResult.file).toBe(".ax-team/alice.json");
@@ -101,7 +97,7 @@ describe("pushCurrentTeamProfile", () => {
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.mergeAll(second.layer, db.layer, makeTestCacheRead().layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(second.layer, makeTestCacheRead().layer))),
         );
 
         expect(second.calls.map(({ method, path: callPath }) => `${method} ${callPath}`)).toEqual([
@@ -134,7 +130,6 @@ describe("pushCurrentTeamProfile", () => {
             },
             login: "Alice",
         });
-        const db = makeMockDb(new Map());
 
         const result = await Effect.runPromise(
             pushCurrentTeamProfile({
@@ -144,7 +139,7 @@ describe("pushCurrentTeamProfile", () => {
                 publishStatePath,
                 windowDays: 30,
                 generatedAt: "2026-07-16T00:00:00Z",
-            }).pipe(Effect.provide(Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer))),
+            }).pipe(Effect.provide(Layer.mergeAll(github.layer, makeTestCacheRead().layer))),
         );
 
         expect(result.anonymous).toBe(true);
@@ -184,8 +179,7 @@ describe("pushCurrentTeamProfile", () => {
             },
             login: "alice",
         });
-        const db = makeMockDb(new Map());
-        const layer = Layer.mergeAll(github.layer, db.layer, makeTestCacheRead().layer);
+        const layer = Layer.mergeAll(github.layer, makeTestCacheRead().layer);
 
         await Effect.runPromise(
             pushCurrentTeamProfile({

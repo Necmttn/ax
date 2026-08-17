@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { createImpactEstimateCache } from "../improve/impact.ts";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
@@ -22,7 +21,6 @@ const env = (proposals: ReadonlyArray<Record<string, unknown>>, evidence: Readon
     Layer.mergeAll(
         judgmentTestLayer((sql) => sql.includes("FROM proposal") ? proposals : []),
         cacheReadTestLayer(() => evidence),
-        Layer.succeed(SurrealClient, { query: () => Effect.succeed([[], [], [], [], [], [], [], []]) } as never),
     );
 
 const deps = () => ({

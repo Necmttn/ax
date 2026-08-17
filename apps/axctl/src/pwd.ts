@@ -6,10 +6,7 @@
  * record does it correspond to?" resolver.
  */
 import { Effect, FileSystem, Option, Schema } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
-import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
@@ -38,11 +35,10 @@ export class NotAGitRepoError extends Schema.TaggedErrorClass<NotAGitRepoError>(
 /**
  * What `$PWD` resolves to using GIT ALONE - no database of any kind.
  *
- * Split out of {@link PwdResolution} because the git half is the part every
- * engine needs and the only part the v2 DuckDB readers can use: `existsInDb`
- * below is a SurrealDB lookup, and a command routed without `AppLayer` (see the
- * `"cache"` command runtime) has no `SurrealClient` to make it with. The
- * DuckDB-side equivalent lives in `queries/repository-scope.ts`, over `CacheRead`.
+ * This is what a caller wants when it needs the repo roots but not the stored
+ * `repository` row: `sessions metrics --here` scopes by path, so it never
+ * touches an engine. Callers that DO need the row want
+ * {@link PwdCacheResolution}, resolved against the DuckDB cache.
  */
 export interface PwdIdentity {
     /** Absolute path after symlink resolve. */
@@ -70,25 +66,17 @@ export interface PwdIdentity {
     readonly identity: RepositoryIdentity;
 }
 
-export interface PwdResolution extends PwdIdentity {
-    /** RecordId("repository", repositoryKey). */
-    readonly repositoryRecordId: RecordId;
-    /** true iff a row at that id already exists in the DB. */
-    readonly existsInDb: boolean;
-}
-
 /**
- * What `$PWD` resolves to against the DuckDB cache - the v2 counterpart of
- * {@link PwdResolution}, and what every `--here` / `--scope=here` caller ports
- * to.
+ * What `$PWD` resolves to against the DuckDB cache - what every `--here` /
+ * `--scope=here` caller uses.
  *
- * There is no `repositoryRecordId` and no `existsInDb`, because in v2 those are
- * one question with one answer. Surreal keyed the row by the git-derived key, so
- * a caller could BUILD the id from git alone and then ask separately whether it
- * existed. DuckDB row ids are content-hashed by their writer, so a reader
- * constructing one would be guessing at a recipe - the row is looked UP by the
- * identity columns instead (see `queries/repository-scope.ts`), and either it is
- * there or it is not.
+ * There is one field, not the two the old SurrealDB shape carried, because in
+ * v2 "which row" and "does it exist" are one question with one answer. Surreal
+ * keyed the row by the git-derived key, so a caller could BUILD the id from git
+ * alone and then ask separately whether it existed. DuckDB row ids are
+ * content-hashed by their writer, so a reader constructing one would be
+ * guessing at a recipe - the row is looked UP by the identity columns instead
+ * (see `queries/repository-scope.ts`), and either it is there or it is not.
  */
 export interface PwdCacheResolution extends PwdIdentity {
     /**
@@ -226,39 +214,4 @@ export const resolvePwdCacheRepository = (
             ...resolved,
             repositoryId: Option.getOrNull(found),
         } satisfies PwdCacheResolution;
-    });
-
-/**
- * Resolve the current working directory (or the provided `cwd`) to a
- * `repository` record identity and check whether the record exists in DB.
- *
- * SURREAL-ERA, and doomed: it dies with the client in wave 3. A v2 caller wants
- * {@link resolvePwdCacheRepository}; a caller that needs only the git-derived
- * identity wants {@link resolvePwdIdentity}, which is this function minus any
- * database at all.
- *
- * Requires: SurrealClient + ProcessService in the Effect environment.
- */
-export const resolvePwdRepository = (
-    cwd?: string,
-): Effect.Effect<
-    PwdResolution,
-    NotAGitRepoError | DbError | ProcessError,
-    SurrealClient | ProcessService | FileSystem.FileSystem
-> =>
-    Effect.gen(function* () {
-        const resolved = yield* resolvePwdIdentity(cwd);
-        const repositoryRecordId = new RecordId("repository", resolved.identity.repositoryKey);
-
-        const db = yield* SurrealClient;
-        const queryResult = yield* db.query<[[{ id: unknown }[]]]>(
-            `SELECT id FROM repository:\`${resolved.identity.repositoryKey}\` LIMIT 1`,
-        );
-        const rows = queryResult[0] ?? [];
-
-        return {
-            ...resolved,
-            repositoryRecordId,
-            existsInDb: rows.length > 0,
-        } satisfies PwdResolution;
     });

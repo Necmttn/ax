@@ -1,41 +1,43 @@
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Layer, ManagedRuntime } from "effect";
-import { LegacySurrealAppLayer } from "@ax/lib/layers";
+import { AppLayer } from "@ax/lib/layers";
 import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { JudgmentLive } from "../judgment.ts";
 
 /**
  * Runtime needs are part of each MCP tool's contract.
  *
- * `legacy` is temporary for tools whose read query still uses SurrealDB. The
- * other three values exclude `LegacySurrealAppLayer`, so those requests never construct a
- * SurrealDB client. This keeps the cutover incremental without hiding a live
- * reader behind a process-wide union layer.
+ * The three narrow kinds carry only what their name says. `full` is the
+ * superset - `AppLayer` (AxConfig, ProcessService, tracing, FileSystem, Path)
+ * plus both read seams - for tools that need config or git on top of a read.
+ * Declaring the narrowest kind that works is what keeps one tool's needs from
+ * becoming every tool's, which is how a process-wide union layer hides a live
+ * reader.
  */
-export type McpRuntimeKind = "cache" | "judgment" | "cache-judgment" | "legacy";
+export type McpRuntimeKind = "cache" | "judgment" | "cache-judgment" | "full";
 
 /**
  * Bun-backed `FileSystem` + `Path`, merged into the cache runtime.
  *
- * A ported reader can still need the filesystem for a config file that never
- * lived in the database - `dispatches` reads `~/.ax/hooks/routing-table.json`
- * through `loadEffectiveRoutingTable()`. Without these the tool had to stay on
- * `legacy`, which opened a SurrealDB connection nothing used. The CLI's own
- * cache runtime (`withCache`, cli/index.ts) already merges exactly these two.
- * Carrying no database client, this stays a no-DB runtime.
+ * A reader can still need the filesystem for a config file that never lived in
+ * the database - `dispatches` reads `~/.ax/hooks/routing-table.json` through
+ * `loadEffectiveRoutingTable()`. Without these the tool would have to declare
+ * `full` and drag in AxConfig, ProcessService and tracing for two file reads.
+ * The CLI's own cache runtime (`withCache`, cli/index.ts) merges exactly these
+ * two.
  */
 const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 const CacheLayer = Layer.merge(CacheReadLive, PlatformLayer);
 const JudgmentLayer = JudgmentLive;
 const CacheJudgmentLayer = Layer.merge(CacheReadLive, JudgmentLive);
-const LegacyLayer = Layer.mergeAll(LegacySurrealAppLayer, CacheReadLive, JudgmentLive);
+const FullLayer = Layer.mergeAll(AppLayer, CacheReadLive, JudgmentLive);
 
 const RUNTIME_LAYERS = {
     cache: CacheLayer,
     judgment: JudgmentLayer,
     "cache-judgment": CacheJudgmentLayer,
-    legacy: LegacyLayer,
+    full: FullLayer,
 } as const;
 
 type RuntimeLayer<K extends McpRuntimeKind> = (typeof RUNTIME_LAYERS)[K];
@@ -46,7 +48,7 @@ export type McpRuntimeFor<K extends McpRuntimeKind> = ManagedRuntime.ManagedRunt
 >;
 
 /** The full runtime remains the type-erased direct-test injection seam. */
-export type AxRuntime = McpRuntimeFor<"legacy">;
+export type AxRuntime = McpRuntimeFor<"full">;
 
 export interface McpRuntimePool {
     readonly get: <K extends McpRuntimeKind>(kind: K) => McpRuntimeFor<K>;
@@ -56,15 +58,15 @@ export interface McpRuntimePool {
 /**
  * Build runtimes on first tool call, one per exact need set.
  *
- * Registering or listing tools opens no database. A cache-only or
- * judgment-only request cannot resolve `LegacySurrealAppLayer`, even when legacy tools are
- * present in the same MCP process.
+ * Registering or listing tools opens no snapshot. A judgment-only request
+ * cannot resolve `CacheRead`, even when cache tools are present in the same
+ * MCP process.
  */
 export const makeMcpRuntimePool = (): McpRuntimePool => {
     let cacheRuntime: McpRuntimeFor<"cache"> | undefined;
     let judgmentRuntime: McpRuntimeFor<"judgment"> | undefined;
     let cacheJudgmentRuntime: McpRuntimeFor<"cache-judgment"> | undefined;
-    let legacyRuntime: McpRuntimeFor<"legacy"> | undefined;
+    let fullRuntime: McpRuntimeFor<"full"> | undefined;
 
     const get = <K extends McpRuntimeKind>(kind: K): McpRuntimeFor<K> => {
         switch (kind) {
@@ -77,9 +79,9 @@ export const makeMcpRuntimePool = (): McpRuntimePool => {
             case "cache-judgment":
                 cacheJudgmentRuntime ??= ManagedRuntime.make(CacheJudgmentLayer);
                 return cacheJudgmentRuntime as unknown as McpRuntimeFor<K>;
-            case "legacy":
-                legacyRuntime ??= ManagedRuntime.make(LegacyLayer);
-                return legacyRuntime as unknown as McpRuntimeFor<K>;
+            case "full":
+                fullRuntime ??= ManagedRuntime.make(FullLayer);
+                return fullRuntime as unknown as McpRuntimeFor<K>;
         }
     };
 
@@ -88,12 +90,12 @@ export const makeMcpRuntimePool = (): McpRuntimePool => {
             cacheRuntime?.dispose(),
             judgmentRuntime?.dispose(),
             cacheJudgmentRuntime?.dispose(),
-            legacyRuntime?.dispose(),
+            fullRuntime?.dispose(),
         ].map((result) => result?.catch(() => undefined)));
         cacheRuntime = undefined;
         judgmentRuntime = undefined;
         cacheJudgmentRuntime = undefined;
-        legacyRuntime = undefined;
+        fullRuntime = undefined;
     };
 
     return { get, dispose };

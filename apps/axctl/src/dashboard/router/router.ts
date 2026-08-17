@@ -25,12 +25,9 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * Everything the studio server runtime provides; the upper bound for
  * jsonRoute handler envs.
  *
- * NO `SurrealClient` (studio ephemeral, wave 3): `c-read-dashboard` (wave 3's
- * earlier `c-read-completion` chunk) finished porting every dashboard route
- * handler off SurrealQL onto `CacheRead`, so the union that used to name it
- * "the honest remaining bill" is gone - a route handler written to require
- * `SurrealClient` again would now fail to typecheck against this env, same
- * enforcement the `IngestRuntimeLayer` DUAL-module rule relies on elsewhere.
+ * Every dashboard route handler reads `CacheRead` or `Judgment`, and this env
+ * is the enforcement: a handler that required anything else would fail to
+ * typecheck against it, the same rule `IngestRuntimeLayer` relies on elsewhere.
  */
 export type DashboardEnv = Layer.Success<typeof AppLayer> | CacheRead | Judgment;
 

@@ -18,7 +18,6 @@
     "./testing/duckdb-dylib": "./src/testing/duckdb-dylib.ts",
     "./testing/cache": "./src/testing/cache.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
-    "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"

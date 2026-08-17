@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import type {
     NextActionCard,
@@ -636,11 +635,6 @@ describe("fetchNextActions", () => {
     });
 
     test("a failing source degrades to a note, never a defect", async () => {
-        const stub: SurrealClientShape = {
-            query: (_sql: string) => Effect.fail(new Error("db down") as never),
-            // biome-ignore lint: other methods not needed
-        } as unknown as SurrealClientShape;
-        const layer = Layer.succeed(SurrealClient, stub);
         const failure = Effect.fail(new Error("db down") as never);
         const cache: CacheReadService = {
             rows: () => failure as never,
@@ -651,7 +645,7 @@ describe("fetchNextActions", () => {
 
         const payload = await Effect.runPromise(
             fetchNextActions().pipe(
-                Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(Layer.succeed(CacheRead, cache)),
                 Effect.provide(EmptyJudgmentTestLayer),
             ),
         );
@@ -675,11 +669,7 @@ describe("fetchNextActions", () => {
         // prevent fiber interruption from timeoutOrElse. The timeout fires, the
         // orElse failure propagates to our guarded catch, and ALL 6 sources add a
         // note - including tool_failure which normally swallows DB errors internally.
-        const stub: SurrealClientShape = {
-            query: (_sql: string) => Effect.never,
-            // biome-ignore lint: other methods not needed
-        } as unknown as SurrealClientShape;
-        const layer = Layer.succeed(SurrealClient, stub);
+
         const cache: CacheReadService = {
             rows: () => Effect.never,
             first: () => Effect.never,
@@ -689,7 +679,7 @@ describe("fetchNextActions", () => {
 
         const payload = await Effect.runPromise(
             fetchNextActions({ sourceTimeoutMs: 50 }).pipe(
-                Effect.provide(Layer.merge(layer, Layer.succeed(CacheRead, cache))),
+                Effect.provide(Layer.succeed(CacheRead, cache)),
                 Effect.provide(EmptyJudgmentTestLayer),
             ),
         );

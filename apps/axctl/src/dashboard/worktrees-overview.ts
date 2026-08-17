@@ -24,9 +24,8 @@
  *  - Every `count()` decodes through `NumberFromBigIntColumn` - a DuckDB
  *    `count(*)` is a BIGINT and a `Schema.Number` on it is a decode FAILURE
  *    (silently empty rows under the defensive read policy), not an error.
- *  - 12 independent statements, run concurrently through `CacheRead` exactly
- *    as they ran concurrently through `SurrealClient` before; the JS
- *    aggregation/join logic below is UNCHANGED from the Surreal version.
+ *  - 12 independent statements, run concurrently through `CacheRead`; the JS
+ *    aggregation/join logic below is unchanged from the previous engine.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";

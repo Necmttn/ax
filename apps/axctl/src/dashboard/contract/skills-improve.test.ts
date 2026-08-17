@@ -1,17 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
-
-const emptyDb = Layer.mock(SurrealClient, {
-    query: <T extends unknown[] = unknown[]>(_sql: string, _bindings?: Record<string, unknown> | undefined) =>
-        Effect.succeed(Array.from({ length: 8 }, () => []) as unknown as T),
-    raw: null as never,
-});
 
 const handlers: ContractWebHandler[] = [];
 function make(): ContractWebHandler {
-    const h = makeContractWebHandler({ ingestStream: null, services: emptyDb });
+    const h = makeContractWebHandler({ ingestStream: null });
     handlers.push(h);
     return h;
 }

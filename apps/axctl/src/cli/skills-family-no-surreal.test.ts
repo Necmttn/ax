@@ -1,37 +1,20 @@
 /**
- * `ax skills` command family, invoking every subcommand this chunk ported
- * plus its already-cache-routed siblings, with no SurrealDB reachable.
+ * `ax skills` command family, invoking each read subcommand against a real
+ * published DuckDB fixture.
  *
- * TWO shapes, for the same reason retro-family-no-surreal.test.ts uses two:
- *
- * (A) `search` / `recent` / `taste` / `pairs` / `recovery` - ported by THIS
- *     commit, but `skillsRuntime`'s manifest still routes them through
- *     `"db"` (the RUNTIME_BY_COMMAND flip is a separate, deferred chunk,
- *     Ruling R34). `withDb` provides `LegacySurrealAppLayer`, whose
- *     `SurrealClientLive` is `Layer.effect` and awaits a real
- *     `db.connect()` with a 5s timeout AT LAYER CONSTRUCTION - so a spawned
- *     CLI against a dead port would time out on ROUTING before the ported
- *     code ever ran, proving nothing about this chunk's change. These call
- *     the exported command functions directly, with a real CacheRead
- *     (published DuckDB fixture) and the exact throwing `SurrealClient`
- *     sentinel `cli/index.ts`'s `withCache`/`withoutDb` provide in
- *     production - any access still fails loudly, by name.
- *
- * (B) `tag` / `by-role` / `roles` (skill-scoped) - already routed `"cache"`
- *     in the manifest before this chunk, so the spawned-CLI dead-port shape
- *     (recall-no-surreal.test.ts) genuinely discriminates for them: it
- *     spawns the real entrypoint with `AX_DB_URL` on a port nothing
- *     listens on.
+ * The suite calls the exported command functions directly rather than spawning
+ * the CLI: a spawned run answers "did routing work", which effect-cli.test.ts
+ * already asserts from the manifest. What is worth exercising here is the data
+ * path against a snapshot with known rows, where a wrong answer is silent.
  *
  * `stats` / `unused` / `bloat` / `loaded` / `weighted` / `classify` are not
  * exercised here: their data layer lives in `dashboard/skills-weighted.ts`,
- * `queries/skill-bloat.ts`, `queries/skill-loaded.ts`, `queries/skill-stats.ts`,
- * `queries/unused-skills.ts` - other chunks' scope, not touched by this one.
+ * `queries/skill-bloat.ts`, `queries/skill-loaded.ts`, `queries/skill-stats.ts`
+ * and `queries/unused-skills.ts`, each covered by its own suite.
  */
 import { describe, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { CacheReadLayer, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
@@ -43,15 +26,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax skills family (n
 
 const T = (iso: string): Date => new Date(iso);
 
-/** The exact sentinel `withCache`/`withoutDb` provide in cli/index.ts: any
- *  property access throws immediately and by name. */
-const throwingSurrealClient = (): SurrealClientShape =>
-    new Proxy({} as SurrealClientShape, {
-        get(_target, prop) {
-            throw new Error(`SurrealClient.${String(prop)} accessed on the no-DB test layer`);
-        },
-    });
-
 const buildLayer = async (
     corpus: (write: CacheWriteService) => Effect.Effect<unknown, unknown, never>,
     label: string,
@@ -59,7 +33,6 @@ const buildLayer = async (
     const fixture = await runWithPlatform(publishCacheFixture(tempDir(`${label}-`), dylibPath, corpus));
     const layer = Layer.mergeAll(
         CacheReadLayer({ snapshotPath: fixture.snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) }),
-        Layer.succeed(SurrealClient, throwingSurrealClient()),
         Layer.merge(BunFileSystem.layer, BunPath.layer),
     );
     return layer;
@@ -93,7 +66,7 @@ const CORPUS = (w: CacheWriteService) =>
         yield* w.put("recovered_by", { id: "rec-1", in_id: "turn-1", out_id: "skill-composto", ts: T("2026-08-15T10:00:00.000Z") });
     });
 
-describe("ax skills family - ported subcommands, direct-call against the cache with SurrealClient never reachable", () => {
+describe("ax skills family - direct-call against a published cache", () => {
     dtest("search matches by name substring, not Surreal", async () => {
         const layer = await buildLayer(CORPUS, "ax-skills-search");
         const logged = await capture(() => run(cmdSearch({ query: "compos", limit: 10 }), layer));
@@ -169,36 +142,33 @@ const runCli = (args: ReadonlyArray<string>, snapshotPath: string, sidecarPath: 
     };
 };
 
-describe("ax skills family - already-cache-routed subcommands, spawned CLI against a dead SurrealDB port", () => {
-    dtest("tag writes a plays_role edge to the sidecar, not Surreal", async () => {
+describe("ax skills family - spawned CLI end to end against a published cache + sidecar", () => {
+    dtest("tag writes a plays_role edge to the sidecar", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skills-tag-"), dylibPath, CORPUS));
         const sidecarPath = `${tempDir("ax-skills-tag-sidecar-")}/judgment.sqlite`;
         const run = runCli(["skills", "tag", "composto", "verification"], fixture.snapshotPath, sidecarPath);
-        expect(run.stderr).not.toContain("SurrealClient");
         expect(run.exitCode, `${run.stderr}\n${run.stdout}`).toBe(0);
         expect(run.stdout).toContain("verification");
     }, 60_000);
 
-    dtest("by-role reads plays_role from the sidecar joined to cache usage, not Surreal", async () => {
+    dtest("by-role reads plays_role from the sidecar joined to cache usage", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skills-byrole-"), dylibPath, CORPUS));
         const sidecarPath = `${tempDir("ax-skills-byrole-sidecar-")}/judgment.sqlite`;
         const tagRun = runCli(["skills", "tag", "composto", "verification"], fixture.snapshotPath, sidecarPath);
         expect(tagRun.exitCode, `${tagRun.stderr}\n${tagRun.stdout}`).toBe(0);
 
         const run = runCli(["skills", "by-role", "verification", "--json"], fixture.snapshotPath, sidecarPath);
-        expect(run.stderr).not.toContain("SurrealClient");
         expect(run.exitCode, `${run.stderr}\n${run.stdout}`).toBe(0);
         expect(run.stdout).toContain("composto");
     }, 60_000);
 
-    dtest("roles (skill-scoped) reads plays_role from the sidecar, not Surreal", async () => {
+    dtest("roles (skill-scoped) reads plays_role from the sidecar", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skills-roles-"), dylibPath, CORPUS));
         const sidecarPath = `${tempDir("ax-skills-roles-sidecar-")}/judgment.sqlite`;
         const tagRun = runCli(["skills", "tag", "composto", "verification"], fixture.snapshotPath, sidecarPath);
         expect(tagRun.exitCode, `${tagRun.stderr}\n${tagRun.stdout}`).toBe(0);
 
         const run = runCli(["skills", "roles", "composto", "--json"], fixture.snapshotPath, sidecarPath);
-        expect(run.stderr).not.toContain("SurrealClient");
         expect(run.exitCode, `${run.stderr}\n${run.stdout}`).toBe(0);
         expect(run.stdout).toContain("verification");
     }, 60_000);

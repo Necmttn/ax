@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
@@ -9,15 +8,6 @@ import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-inspect", { requireFts: true });
-
-// resolveTurnContentForSourceRefs (queries/session-turn-content.ts, chunk 2b's)
-// is not yet ported off SurrealClient - see the module-doc note in
-// session-inspect.ts. An empty deny-writes fake is the honest interim stand-in
-// (mirrors report.test.ts's makeEmptyDb): every other resolver this test
-// exercises reads a real published DuckDB fixture below.
-function makeEmptySurrealLayer() {
-    return makeTestSurrealClient({ denyWrites: true }).layer;
-}
 
 describe("graph tool_calls mapping (shareTurnToolCallToDto)", () => {
     test("maps a recorded Bash tool_call row to a ToolCallDto, parsing input_json + carrying output", () => {
@@ -196,7 +186,7 @@ describe("fetchSessionInspect graph-backed paging", () => {
         const payload = await Effect.runPromise(
             fetchSessionInspect("session-a", { turnOffset: 0, turnLimit: 100 }).pipe(
                 Effect.provide(
-                    Layer.mergeAll(makeEmptySurrealLayer(), readFixture(fixture.snapshotPath, dylibPath), BunFsLayer),
+                    Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), BunFsLayer),
                 ),
             ),
         );

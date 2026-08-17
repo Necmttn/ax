@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { makeMockDb, type TestSurrealResponder } from "@ax/lib/testing/surreal";
+import { Effect } from "effect";
 import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { buildTeamProfile } from "./team-profile.ts";
 
@@ -16,8 +15,6 @@ const REPO_A_ID = "repo-a-duckdb-row-id";
 // `toBareSessionId` normalization it used to need went away with the Surreal
 // reader. It still answers rows for BOTH repos' sessions, because the leak this
 // test guards against is exactly a b1 row surviving that filter.
-const surrealRoutes = new Map<string, TestSurrealResponder>();
-
 const capturedCacheParams: unknown[][] = [];
 
 const cacheRoutes = {
@@ -55,7 +52,6 @@ const run = (opts: {
     share: "public" | "anon";
     includeCost: boolean;
 }) => {
-    const surreal = makeMockDb(surrealRoutes);
     const cache = makeTestCacheRead({ routes: cacheRoutes });
     const profile = Effect.runSync(
         buildTeamProfile({
@@ -66,9 +62,9 @@ const run = (opts: {
             share: opts.share,
             includeCost: opts.includeCost,
             env: { login: "necmttn", generatedAt: "2026-07-16T00:00:00Z" },
-        }).pipe(Effect.provide(Layer.merge(surreal.layer, cache.layer))),
+        }).pipe(Effect.provide(cache.layer)),
     );
-    return { profile, captured: surreal.captured, cacheCaptured: cache.captured };
+    return { profile, cacheCaptured: cache.captured };
 };
 
 describe("buildTeamProfile", () => {
@@ -152,14 +148,13 @@ describe("buildTeamProfile", () => {
     });
 
     test("empty repo window yields a valid zero snapshot", () => {
-        const surreal = makeMockDb(new Map());
         const cache = makeTestCacheRead();
         const profile = Effect.runSync(
             buildTeamProfile({
                 org: "acme", repoKey: REPO_A_ID, repositoryId: REPO_A_ID, windowDays: 30,
                 share: "public", includeCost: true,
                 env: { login: "necmttn", generatedAt: "2026-07-16T00:00:00Z" },
-            }).pipe(Effect.provide(Layer.merge(surreal.layer, cache.layer))),
+            }).pipe(Effect.provide(cache.layer)),
         );
         expect(profile.stats.sessions).toBe(0);
         expect(profile.activity.daily).toEqual([]);
@@ -168,14 +163,13 @@ describe("buildTeamProfile", () => {
     });
 
     test("repositoryId=null (repo never ingested) yields a valid zero snapshot", () => {
-        const surreal = makeMockDb(new Map());
         const cache = makeTestCacheRead();
         const profile = Effect.runSync(
             buildTeamProfile({
                 org: "acme", repoKey: REPO_A_ID, repositoryId: null, windowDays: 30,
                 share: "public", includeCost: true,
                 env: { login: "necmttn", generatedAt: "2026-07-16T00:00:00Z" },
-            }).pipe(Effect.provide(Layer.merge(surreal.layer, cache.layer))),
+            }).pipe(Effect.provide(cache.layer)),
         );
         expect(profile.stats.sessions).toBe(0);
     });

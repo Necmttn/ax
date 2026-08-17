@@ -3,19 +3,9 @@ import { Effect, Layer } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { Judgment, JudgmentLayer } from "@ax/lib/sqlite";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { clearSkillDecision, listSkillDecisions, setSkillDecision, setSkillDecisionsBulk } from "./triage.ts";
-
-const deadSurreal = Layer.succeed(
-    SurrealClient,
-    new Proxy({} as SurrealClientShape, {
-        get(_target, property) {
-            throw new Error(`SurrealClient.${String(property)} must not be used by triage decisions`);
-        },
-    }),
-);
 
 const directories: string[] = [];
 
@@ -29,12 +19,11 @@ const tempDirectory = (): string => {
     return directory;
 };
 
-const runWithSidecar = <A, E>(directory: string, effect: Effect.Effect<A, E, Judgment | SurrealClient>) =>
+const runWithSidecar = <A, E>(directory: string, effect: Effect.Effect<A, E, Judgment>) =>
     Effect.runPromise(
         effect.pipe(
             Effect.provide(
                 Layer.mergeAll(
-                    deadSurreal,
                     JudgmentLayer({
                         sidecarPath: join(directory, "judgment.sqlite"),
                         schemaSql: SIDECAR_SCHEMA_SQL,

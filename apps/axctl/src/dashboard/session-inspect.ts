@@ -11,7 +11,6 @@ import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, isCodexTurnUsageAggregated, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
 import { turnRecordKey } from "@ax/lib/ids";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn, JsonArrayColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows, cacheFirst, runCacheSingleQuery } from "@ax/lib/duckdb/query";
@@ -1036,15 +1035,14 @@ export function assembleInspectPayload(args: {
     };
 }
 
-// R channel still carries SurrealClient: resolveTurnContentForSourceRefs
-// (queries/session-turn-content.ts, chunk 2b's) has not been ported to
-// CacheRead yet - see the module-doc note near the top of this file. Every
-// other resolver in this function is CacheRead-only.
+// Every resolver in this function reads the published snapshot through
+// CacheRead, resolveTurnContentForSourceRefs
+// (queries/session-turn-content.ts) included.
 const fetchGraphSessionInspect = (
     bareSessionId: string,
     turnOffset: number,
     turnLimit: number,
-): Effect.Effect<SessionInspectPayload | null, never, SurrealClient | CacheRead> =>
+): Effect.Effect<SessionInspectPayload | null, never, CacheRead> =>
     Effect.gen(function* () {
         const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
         const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent, toolCallsByDbSeq] = yield* Effect.all([
@@ -1142,7 +1140,7 @@ export const fetchSessionInspect = (
 ): Effect.Effect<
     SessionInspectPayload,
     SessionInspectReadError | TranscriptNotFoundError,
-    SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path
+    CacheRead | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         // Normalise inbound id at the seam so the rest of the function operates

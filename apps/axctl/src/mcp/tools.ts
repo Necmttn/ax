@@ -252,7 +252,7 @@ const recallTool: AxMcpTool = defineMcpTool({
 
 const sessionsAroundTool: AxMcpTool = defineMcpTool({
     name: "sessions_around",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `List agent sessions in a time window centred on a date (default +/-3 days). Returns an envelope { sessions, next } - session rows with turn counts and the first user message. Use to find what work happened around a given day. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -295,7 +295,7 @@ const sessionsAroundTool: AxMcpTool = defineMcpTool({
 
 const sessionShowTool: AxMcpTool = defineMcpTool({
     name: "session_show",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Show one session in detail: base facts, optional normalized cross-harness turns, expanded subagent children, and skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -346,7 +346,7 @@ const sessionShowTool: AxMcpTool = defineMcpTool({
 
 const skillsWeightedTool: AxMcpTool = defineMcpTool({
     name: "skills_weighted",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Rank skills by usage x role-weight (score = invocations x role-weight). Returns ranked rows plus a doctor summary of unclassified skills. Use to see which skills actually carry weight in recent work. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -622,7 +622,7 @@ const sessionsChurnTool: AxMcpTool = defineMcpTool({
 
 const signalShowTool: AxMcpTool = defineMcpTool({
     name: "signal_show",
-    runtime: "legacy",
+    runtime: "full",
     description:
         "Signal catalog access. With no `id`: list all signal descriptors (id, kind, label, description). With an `id` (e.g. fragility_cascade): run that relation signal and return its edges sorted by weight (descending). Unknown ids error with the list of valid ids.",
     inputSchema: {
@@ -667,7 +667,7 @@ const signalShowTool: AxMcpTool = defineMcpTool({
 
 const costModelsTool: AxMcpTool = defineMcpTool({
     name: "cost_models",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Per-model cost rollup over session_token_usage: sessions count, prompt/completion/cache tokens, estimated cost USD, sorted by cost desc. Includes an "(unattributed)" row for sessions with no model recorded. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -687,7 +687,7 @@ const costModelsTool: AxMcpTool = defineMcpTool({
 
 const costSplitTool: AxMcpTool = defineMcpTool({
     name: "cost_split",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Cost matrix split by origin (main = non-subagent, subagent = claude-subagent) x model. Returns rows with cost, token sums, and share-of-total percent, plus a totals row. Use to understand how much subagent dispatch costs relative to top-level sessions. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -736,7 +736,7 @@ const costImagesTool: AxMcpTool = defineMcpTool({
 
 const otelTool: AxMcpTool = defineMcpTool({
     name: "otel",
-    runtime: "legacy",
+    runtime: "full",
     description:
         "OTLP receiver health: per (harness, signal) all-time row count + freshness reduced to a health verdict (flowing <6h / stale <48h / cold / none); session correlation coverage (share of windowed sessions carrying a telemetry_of edge - 0% means telemetry arrives but is not linked to sessions); and OTLP claude cost metric vs transcript cost over the window. Use to check whether harness telemetry is flowing and being correlated.",
     inputSchema: {
@@ -755,7 +755,7 @@ const otelTool: AxMcpTool = defineMcpTool({
 
 const runsEvidenceTool: AxMcpTool = defineMcpTool({
     name: "runs_evidence",
-    runtime: "legacy",
+    runtime: "full",
     description:
         "Run evidence ledger for one session (#578): event counts by kind (tool_observation/verification/boundary/task_state) and by `backing` - the model-claim-vs-tool-backed lens - plus a latest-N timeline. Use to see, for a run, how much of the evidence is tool/verifier-backed vs an unverified claim. Takes a bare or session:-prefixed id.",
     inputSchema: {
@@ -768,7 +768,7 @@ const runsEvidenceTool: AxMcpTool = defineMcpTool({
 
 const costRoutabilityTool: AxMcpTool = defineMcpTool({
     name: "cost_routability",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Main-thread routability lens: of main-agent (non-subagent) spend, how much sat in routable class-runs (gather, mechanical-impl / niche-research) vs genuine judgment, with estimated savings repriced one tier down. Covers Claude (-> haiku/sonnet) AND Codex (-> gpt-5-nano/gpt-5-mini), classified + repriced separately; the result has a per-provider breakdown in 'providers' plus combined totals. Deterministic (tool composition + JUDGMENT_GUARD_RE text guard); turn-level by default. Use to see how much main-thread work could have been a cheaper subagent. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -845,7 +845,7 @@ const dispatchesTool: AxMcpTool = defineMcpTool({
 
 const dispatchesAdviceTool: AxMcpTool = defineMcpTool({
     name: "dispatches_advice",
-    runtime: "legacy",
+    runtime: "full",
     description:
         `Route advice -> dispatch outcome. Joins the hook advice ledger (~/.ax/hooks/advise-log.jsonl, written by advise-tap.ts) to the spawned dispatches it advised on (same parent session + description), and judges whether the child ran the suggested cheaper model. Returns rows (ts, description, suggested_model, child_model, followed) + summary (advised, matched, followed, notFollowed, unmatched, followThroughPct). Closes the advice->outcome attribution gap. Empty until the tap accumulates advise rows. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
@@ -861,7 +861,7 @@ const dispatchesAdviceTool: AxMcpTool = defineMcpTool({
 
 const dojoAgendaTool: AxMcpTool = defineMcpTool({
     name: "dojo_agenda",
-    runtime: "legacy",
+    runtime: "full",
     description:
         "Dojo training agenda for surplus-quota self-improvement: budget envelope (window remaining minus reserve, deadline = window reset) + prioritized work items (pending verdicts, unfilled briefs, routing backtests, proposal minting, churn experiments, optional sparring). Mirrors `ax dojo agenda`. Read-only.",
     inputSchema: {

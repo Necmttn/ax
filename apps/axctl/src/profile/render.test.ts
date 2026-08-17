@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { makeMockDb, type MockDbResponses, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
@@ -11,7 +10,6 @@ import { buildProfile } from "./render.ts";
 // wrong answer. The two that used to: `fetchCostModels` (ported by
 // `c-read-analytics`) and `fetchWindowedInvocations` (ported here); both now
 // have entries in CACHE_ROUTES, keyed by a fragment of their own SQL.
-const surrealResults = [] satisfies MockDbResponses;
 
 // `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
 // CacheRead snapshot, matched below by its own "has_content" fragment (a
@@ -168,13 +166,11 @@ const verdictRows = [
 ];
 
 const runProfile = <A, E>(
-    db: TestSurrealClient,
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
     contentTypes: ReadonlyArray<Record<string, unknown>> = contentTypeRows,
     cacheOverrides: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
-    db.layer,
     // Dispatched by SQL text: content-type breakdown (`has_content`, a
     // different wave-3 chunk's convention) first, then per-test overrides,
     // then the default CACHE_ROUTES table built above. The pricing-catalog
@@ -222,8 +218,7 @@ const env = {
 
 describe("buildProfile", () => {
     test("assembles a valid ProfileV1", async () => {
-        const db = makeMockDb(surrealResults);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }));
 
         expect(p.v).toBe(1);
         expect(p.github).toBe("necmttn");
@@ -305,31 +300,26 @@ describe("buildProfile", () => {
     });
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {
-        const db = makeMockDb(surrealResults);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: false, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: false, env }));
         expect(p.stats.cost_usd).toBeUndefined();
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
     test("no proposals -> taste has only the mix pattern from content types", async () => {
-        const db = makeMockDb(surrealResults);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), []);
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), []);
         expect(p.taste?.patterns).toHaveLength(1);
         expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
     });
 
     test("no proposals + no content types -> taste omitted", async () => {
-        const db = makeMockDb(surrealResults);
-        const p = await runProfile(db, buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
         expect(p.taste).toBeUndefined();
     });
 
     test("empty daily + durations -> activity and insights omitted", async () => {
         // Blank out dailyFull(sessions+tokens) and sessionDurations via a
         // CACHE_ROUTES override - all three are now CacheRead statements.
-        const db = makeMockDb(surrealResults);
         const p = await runProfile(
-            db,
             buildProfile({ windowDays: 30, includeCost: true, env }),
             proposalRows,
             contentTypeRows,
@@ -344,8 +334,7 @@ describe("buildProfile", () => {
     });
 
     test("buildProfile attaches highlights from env", async () => {
-        const db = makeMockDb(surrealResults);
-        const profile = await runProfile(db, buildProfile({
+        const profile = await runProfile(buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {
@@ -358,8 +347,7 @@ describe("buildProfile", () => {
     });
 
     test("buildProfile omits highlights when env.highlights is null", async () => {
-        const db = makeMockDb(surrealResults);
-        const profile = await runProfile(db, buildProfile({
+        const profile = await runProfile(buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {
