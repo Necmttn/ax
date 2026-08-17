@@ -207,7 +207,12 @@ export const SkillGraphEdge = Schema.Struct({
 export type SkillGraphEdge = typeof SkillGraphEdge.Type;
 
 export const SkillGraphPayload = Schema.Struct({
-    min_count: Schema.Number,
+    // Echoes the `minCount` query param verbatim - kept in the SAME casing
+    // as the request field (matching RecallResponse.window echoing
+    // offset/limit), not the snake_case used by this struct's other,
+    // non-echoed aggregate fields. A caller that copies the response field
+    // name back onto the query string must get the same spelling (#832).
+    minCount: Schema.Number,
     limit: Schema.Number,
     node_count: Schema.Number,
     edge_count: Schema.Number,

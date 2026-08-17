@@ -44,4 +44,13 @@ describe("fetchSkillGraph (real DuckDB fixture)", () => {
         expect(payload.edge_count).toBe(2);
         expect(payload.node_count).toBe(3);
     });
+
+    dtest("no minCount param defaults to no floor (#832) - surfaces both pairs", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skill-graph-default-"), dylibPath, FIXTURE));
+        const payload = await readThroughFixture(fixture, dylibPath, fetchSkillGraph({}));
+
+        expect(payload.minCount).toBe(1);
+        expect(payload.edge_count).toBe(2);
+        expect(payload.node_count).toBe(3);
+    });
 });

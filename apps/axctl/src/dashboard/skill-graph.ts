@@ -45,7 +45,15 @@ export const fetchSkillGraph = (
     params: SkillGraphParams = {},
 ): Effect.Effect<SkillGraphPayload, never, CacheRead> =>
     Effect.gen(function* () {
-        const minCount = Math.max(1, Math.floor(params.minCount ?? 50));
+        // No hardcoded noise floor: default to 1 (no filtering) and let
+        // `ORDER BY count DESC` + `limit` do the real work of surfacing the
+        // strongest edges first. A fixed floor like the former 50 has no
+        // relationship to the actual count distribution and can hide nearly
+        // all of it - measured on this graph, 50 kept 4/34 edges while every
+        // edge is already ordered strongest-first and capped by `limit`.
+        // `minCount` stays as an opt-in refinement for a caller who wants to
+        // prune the long tail themselves (#832).
+        const minCount = Math.max(1, Math.floor(params.minCount ?? 1));
         const limit = Math.max(10, Math.min(2000, Math.floor(params.limit ?? 400)));
 
         const rows = yield* cacheRows(
@@ -89,7 +97,7 @@ export const fetchSkillGraph = (
             }));
 
         return {
-            min_count: minCount,
+            minCount,
             limit,
             node_count: nodes.length,
             edge_count: edges.length,
