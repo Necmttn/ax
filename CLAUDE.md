@@ -64,22 +64,35 @@ apps/
 ├── axctl/                 # the CLI (npm package "axctl")
 │   ├── bin/axctl          # shell shim → src/cli/index.ts
 │   └── src/
-│       ├── lib/  (NOTE: moved to @ax/lib) cli/ ingest/ dashboard/ hooks/
+│       ├── cli/ ingest/ dashboard/ hooks/ otel/ mcp/
 │       ├── improve/ classifiers/ queries/ context/ project/ tui/ ...
-│       └── ...            # the whole former /src tree
-└── site/                  # landing site (@ax/site, TanStack Start SPA → CF Pages)
+│       └── ...            # (the former src/lib/ moved to @ax/lib)
+├── studio/                # @ax/studio - the web studio SPA (served by `ax studio`)
+├── studio-desktop/        # the Electron wrapper (owns its own long-lived backend)
+├── site/                  # landing site (@ax/site, TanStack Start SPA → CF Pages)
+└── community-worker/      # CF Worker that compiles the community leaderboard
 packages/
-├── lib/                   # @ax/lib - db client, paths, errors, layers, shared/, live-traces/
-├── schema/                # @ax/schema - schema.surql (DDL) + derived types
+├── lib/                   # @ax/lib - duckdb/ sqlite/ paths, errors, layers, shared/, live-traces/
+├── schema/                # @ax/schema - the DDL + derived types (see below)
+├── hooks-sdk/             # @ax/hooks-sdk - author agent hooks once, run on Claude + Codex
+├── recap-deck/ foresight/ onboarding-prompt/ community-compile/
 └── ax-classifier-*/       # @ax-classifier/* + python classifier experiments
-scripts/                   # repo-wide orchestration (db lifecycle, checks, prototypes)
+scripts/                   # repo-wide orchestration (build, check:* gates, duckdb, prototypes)
 skill/                     # SKILL.md for the installable Claude Code skill
 .references/               # gitignored - clone of Effect source for AI lookup
 turbo.json  tsconfig.base.json  package.json (root = workspace orchestrator)
 ```
 
-Internal imports resolve by package name: `@ax/lib/db`, `@ax/lib/shared/surql`,
-`@ax/schema/schema.surql` (with `{ type: "text" }`), `@ax-classifier/...`.
+Internal imports resolve by package name: `@ax/lib/duckdb`, `@ax/lib/sqlite`,
+`@ax/schema/duckdb-tables`, `@ax/schema/schema.duckdb.sql` (with
+`{ type: "text" }`), `@ax-classifier/...`.
+
+`@ax/schema` carries THREE DDL files, and only two are live:
+`schema.duckdb.sql` (the cache) and `schema.sidecar.sql` (the judgment
+sidecar). `schema.surql` is the retired SurrealDB DDL, kept on purpose as
+migration-fidelity proof - the v2 port is checked against it
+(`duckdb-parity.test.ts`). Nothing applies it. Do not add to it, and do not
+delete it.
 
 **Build/test:** `bun run build` → `dist/axctl`; `bunx turbo run build` does CLI
 + site. CI gates: `bun test` (repo-wide) + `bun run typecheck`. Site's own
@@ -231,28 +244,28 @@ land as typed columns. Bodies decode via Effect `Schema` (curated OTLP/JSON
 subset, `apps/axctl/src/otel/`), normalize per-harness (`service.name` ->
 harness label), and land in `otel_metric_point` / `otel_span` / `otel_log_event`.
 A correlation pass at ingest finish draws `session -> telemetry_of -> otel_*`
-edges by matching `session.id` (OTLP arrives before the transcript, so the
+edges by matching session ids (OTLP arrives before the transcript, so the
 ingest run owns linking; idempotent, best-effort via `Effect.ignore`).
-**Session-grain + incremental** (`correlate.ts`): one edge per top-level session
-that has telemetry (the edge means "this session has telemetry"; no data query
-reads it - enrichment joins `session_id` directly). Only telemetry observed in the
-last 2 days is scanned, via the `observed_at` index (a range scan over recent
-rows, ~30ms - NOT a full GROUP BY over the whole ~1.5M-row `otel_log_event`, which
-cost ~8s every ingest), then filtered to existing+unlinked sessions in JS. otel
-`session_id` is a bare uuid, `session.id` is `session:⟨uuid⟩`, so matching is
-uuid-to-uuid in JS (the older `type::record("session:"+id)` form mis-parsed
-hyphenated uuids as arithmetic -> zero edges, #610). All otel index builds are
-`CONCURRENTLY` (a plain `DEFINE INDEX` locks the table while building, wedging the
-daemon when `ax install` re-applies the schema onto an already-large otel table).
-OTLP cost
-is stored separately from file-parsed cost (no double-count). The receiver is
-fail-open (always 2xx so exporters never retry-storm) and JSON-only (ax owns the
-harness config, so it forces `http/json` - no protobuf decode, works in the
-compiled binary). `ax install` writes the harness telemetry config
+**Session-grain + incremental** (`apps/axctl/src/otel/correlate.ts`): one edge
+per top-level session that has telemetry (the edge means "this session has
+telemetry"; no data query reads it - enrichment joins `session_id` directly).
+Only telemetry observed in the last 2 days is scanned, windowed on `observed_at`
+(a range scan over recent rows - NOT a full GROUP BY over the whole ~1.5M-row
+`otel_log_event`, which cost ~8s every ingest), then filtered to
+existing+unlinked sessions in JS. Both sides are bare uuids now, normalized
+through `bareUuid` (#610 was the SurrealDB-era `type::record("session:"+id)`
+form mis-parsing hyphenated uuids as arithmetic -> zero edges; the trap is gone
+with the engine, but keep the normalization - a harness can still hand you a
+prefixed or wrapped id). Note the window predicate spells the clock
+`CAST(CURRENT_TIMESTAMP AS TIMESTAMP)`: uncast, it does not bind at all in an
+ICU-less build. OTLP cost is stored separately from file-parsed cost (no
+double-count). Both receivers are fail-open (always 2xx so exporters never
+retry-storm) and JSON-only (ax owns the harness config, so it forces
+`http/json` - no protobuf decode, works in the compiled binary). `ax install`
+writes the harness telemetry config
 (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1738`,
-`http/json`; Codex `[otel]` block), idempotent + ax-marked. `/api/version`
-advertises `otlp_receiver: true`. Provider name: `otel`. Spec:
-docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
+`http/json`; Codex `[otel]` block), idempotent + ax-marked. Provider name:
+`otel`. Spec: docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 
 `ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
 (previously write-only - data landed in `otel_*` and only enriched insights, with
@@ -275,8 +288,9 @@ from transcript parsing, so capturing bodies would only duplicate + re-leak them
 A metadata-only overlay on the normalized graph that answers, for a run:
 objective, durable task state, tool-backed observations, verifier results, and
 what was lost at compaction/resume boundaries - and distinguishes a model CLAIM
-from tool-BACKED evidence. Two SCHEMAFULL tables (`run_evidence_event`,
-`run_evidence_ref`); the shared contract + deterministic builders live in
+from tool-BACKED evidence. Two DuckDB cache tables (`run_evidence_event`,
+`run_evidence_ref`) - cache, not sidecar, because every row is REBUILDABLE from
+transcripts; the shared contract + deterministic builders live in
 `@ax/lib/shared/run-evidence` (closed-set enums `kind`/`backing`/`ref_kind`/
 `privacy_level`; rows REBUILDABLE - key = session+source_table+source_id, so
 re-derive overwrites). Refs default to `ref_only` (no raw payloads); `backing`
@@ -341,7 +355,7 @@ That second row is the one usage views can see: `ax skills weighted` excludes
 skills with `dir_path = "(synthetic)"`, which is why an OpenCode-only user read
 "(no skill invocations found)" despite steady skill use. Catalog rows are
 written create-if-missing (`skillUpsert: "if_missing"` ->
-`INSERT ... ON DUPLICATE KEY UPDATE name = name`); a plain MERGE would stamp a
+`INSERT ... ON CONFLICT DO NOTHING`); a plain `write.put` (INSERT OR REPLACE) would stamp a
 real skill with `dir_path = "(opencode)"` and hide it from those same views.
 
 ### Role registry
@@ -496,8 +510,9 @@ A retro's prose is NOT triageable - only rows in `proposal` reach
 2. **A reviewer files them explicitly**: `ax retro emit --from-file` accepts
    `proposals: [<ax improve propose payload>]` (same `ProposeInputSchema`,
    decoded strictly - a malformed entry fails the emit rather than dropping a
-   finding), writes each through `runPropose`, and RELATEs
-   `proposal->cites_evidence->retro` so triage can trace it back to the review.
+   finding), writes each through `runPropose`, and writes a
+   `cites_evidence` edge row (`proposal -> retro`) so triage can trace it back
+   to the review.
    Emit then runs the derivation inline for that session, and when `failed`/
    `next` carry findings with nothing filed it says the loop is open.
 
@@ -518,10 +533,19 @@ task file, then run `axctl improve lint` to reconcile.
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
-native deps, so the compiled binary should work too - untested in v0). Mutating
+`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context.
+Works from source AND from the compiled binary - DuckDB is a native dep, but
+`libduckdb` is embedded at build time, so a `tools/list` handshake against
+`dist/axctl mcp` returns all 23. Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.
+
+Each tool declares which stores it opens, via
+`McpRuntimeKind = "cache" | "judgment" | "cache-judgment" | "full"`
+(`apps/axctl/src/mcp/runtime.ts`) - the MCP-side sibling of a command's
+`RuntimeManifest`. Declare the narrowest kind that works: the pool builds only
+what the roster asks for, so an over-broad `"full"` opens the sidecar for a
+reader that never touches a decision.
 Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
 
 ## Hooks SDK
@@ -592,8 +616,9 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   whose command is `bun <dir>/<guard>.{ts,js}`; user-authored hooks are never
   touched). Pure planning (`planDispatcherInstall` / `planLegacyRemoval` in
   `dispatch-install.ts`) is unit-tested; `installDispatcher` has an in-process
-  integration test (real temp config, stub DB - `readAllHooks(withEvidence:false)`
-  never touches SurrealClient). `ax install`'s tail nudges `ax hooks init &&
+  integration test (real temp config, no store at all -
+  `readAllHooks(withEvidence:false)` opens neither the cache nor the sidecar).
+  `ax install`'s tail nudges `ax hooks init &&
   ax hooks install --all`. Release binary needs NO repo checkout (#573).
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
