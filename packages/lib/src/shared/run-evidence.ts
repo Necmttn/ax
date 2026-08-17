@@ -24,7 +24,7 @@
 
 import { Schema } from "effect";
 import { stableDigest } from "../ids.ts";
-import { safeKeyPart } from "./surreal.ts";
+import { safeKeyPart } from "./row-fields.ts";
 
 // ============================================================================
 // 1. ENUMS / CLOSED SETS

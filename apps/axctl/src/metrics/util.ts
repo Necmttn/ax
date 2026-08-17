@@ -15,14 +15,14 @@ export const chunked = <T>(items: readonly T[], size: number): T[][] => {
 
 // ---------------------------------------------------------------------------
 // Row-field coercion (shared by the metrics fetchers)
-// Deprecated re-export shim: canonical implementations live in
-// @ax/lib/shared/surreal. New callers should import directly from there.
+// Re-export shim: canonical implementations live in @ax/lib/shared/row-fields.
+// New callers should import directly from there.
 // ---------------------------------------------------------------------------
 export {
     numberOrNull as numOrNull,
     numberOrZero as numOrZero,
     stringOrNull as strOrNull,
-} from "@ax/lib/shared/surreal";
+} from "@ax/lib/shared/row-fields";
 
 /** Set absent ids to a default (mutates + returns the map). */
 export const fillDefaults = <V>(map: Map<string, V>, ids: readonly string[], def: V): Map<string, V> => {

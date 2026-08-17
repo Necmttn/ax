@@ -3,12 +3,17 @@
  * Guard: ban bare record-list FROM sources (`FROM [table:..., ...]`) in
  * runtime SurrealQL.
  *
- * SurrealDB 3.0.x throws "Specify a database to use" on bare record-list
+ * SurrealDB 3.0.x threw "Specify a database to use" on bare record-list
  * selection even with the session database set (issue #251 - it aborted every
- * Claude/Codex ingest on fresh installs). The version-portable shape
- * materializes the records first; @ax/lib/shared/record-select is the only
- * place allowed to emit it. Any other `FROM [` in a query string is a
- * regression waiting for a 3.0.x daemon.
+ * Claude/Codex ingest on fresh installs).
+ *
+ * RETIRED IN PRACTICE, STILL WIRED. The v2 DuckDB migration removed the
+ * SurrealDB client, and with it `@ax/lib/shared/record-select` - the only
+ * module that was allowed to emit the materialized shape. Nothing produces
+ * `FROM [` any more, so this guard now watches an empty set. It is kept only
+ * because `.github/workflows/ci.yml` runs it and that file cannot be edited
+ * from the migration branch (the push token lacks the `workflow` scope).
+ * Delete both together.
  *
  * Scope: .ts/.tsx under apps/axctl/src and packages/-star-/src, excluding
  * test files and record-select.ts itself. Comment lines are skipped so the
@@ -26,8 +31,8 @@ const SCAN_GLOBS = [
 
 /** Files allowed to contain `FROM [`. Each entry must carry a reason. */
 const EXCLUDED_FILES: readonly string[] = [
-    // The materialized-shape helpers + the invariant documentation live here.
-    "packages/lib/src/shared/record-select.ts",
+    // Empty: the one module that was allowed to emit `FROM [` went with the
+    // SurrealDB client. Any hit is now unambiguously a mistake.
 ];
 
 const COMMENT_LINE_RE = /^\s*(?:\/\/|\*|\/\*|--)/;

@@ -1,11 +1,15 @@
-/** @deprecated import from ./surreal.ts (the Graph Access Toolkit). This file
- *  is a re-export shim kept so existing `@ax/lib/shared/derive-keys` imports
- *  keep working; the implementations moved into surreal.ts (record-id key
- *  derivation section) verbatim. */
+/**
+ * Record-id key derivation: turn arbitrary text into a safe key part.
+ *
+ * A re-export of the implementations in `./row-fields.ts`, kept because the
+ * ingest tree imports this path in ~15 places and the name says what the
+ * callers want. Nothing here is engine-specific - DuckDB row ids are derived
+ * the same way SurrealDB record ids were.
+ */
 export {
     safeKeyPart,
     recordKeyPart,
     isoTimestamp,
     nonEmptyString,
     type TimestampInput,
-} from "./surreal.ts";
+} from "./row-fields.ts";
