@@ -59,7 +59,7 @@ export const digestCommand = Command.make(
 
 export const digestRuntime: RuntimeManifest = {
     digest: {
-        runtime: "db",
+        runtime: "cache",
         hidden: false,
     },
 };

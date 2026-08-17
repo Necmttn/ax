@@ -28,5 +28,5 @@ export const projectCommand = Command.make("project").pipe(
 );
 
 export const projectRuntime: RuntimeManifest = {
-    project: { runtime: "db", hidden: true },
+    project: { runtime: "cache", hidden: true },
 };

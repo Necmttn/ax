@@ -124,7 +124,7 @@ export const thinkingCommand = Command.make(
 
 export const axThinkingRuntime: RuntimeManifest = {
     thinking: {
-        runtime: "db",
+        runtime: "cache",
         hidden: false,
     },
 };
