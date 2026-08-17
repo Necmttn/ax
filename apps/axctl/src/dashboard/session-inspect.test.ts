@@ -4,7 +4,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
-import type { ShareTurnToolCall } from "../queries/session-detail.ts";
+import type { ShareTurnToolCall } from "../share/session-share-queries.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-inspect", { requireFts: true });

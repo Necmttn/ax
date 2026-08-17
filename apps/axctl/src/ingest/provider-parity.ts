@@ -81,7 +81,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         sharedRecords: ["agent_provider", "agent_session", "session"],
         readEvidence: [
             { path: "apps/axctl/src/queries/graph-health.ts", contains: "FROM agent_session" },
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM $sessionId" },
+            { path: "apps/axctl/src/dashboard/session-inspect.ts", contains: "raw_file" },
         ],
         providers: {
             claude: supported("Claude JSONL path is stored on normalized session and agent_session rows.", [
@@ -127,7 +127,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         sharedRecords: ["turn"],
         readEvidence: [
             { path: "apps/axctl/src/queries/recall.ts", contains: "FROM turn" },
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "SESSION_OVERVIEW_SQL" },
+            { path: "apps/axctl/src/dashboard/session-inspect.ts", contains: "FROM turn" },
         ],
         providers: {
             claude: supported("Claude messages are normalized into turn rows.", normalizedProviderWriters("claude", "apps/axctl/src/ingest/transcripts.ts")),
@@ -142,8 +142,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         label: "Tool calls",
         sharedRecords: ["tool", "tool_call"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/tool-failures.ts", contains: "FROM tool_call" },
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM tool_call" },
+            { path: "apps/axctl/src/dashboard/tool-failures.ts", contains: "FROM tool_call" },
+            { path: "apps/axctl/src/dashboard/session-inspect.ts", contains: "FROM tool_call" },
         ],
         providers: {
             claude: supported("Claude tool use/result blocks write shared tool_call rows.", [
@@ -171,7 +171,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         sharedRecords: ["skill", "invoked"],
         relatedRecords: ["concerns"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM invoked" },
+            { path: "apps/axctl/src/dashboard/session-insights.ts", contains: "FROM invoked" },
             { path: "apps/axctl/src/dashboard/skills-weighted.ts", contains: "FROM invoked" },
         ],
         providers: {
@@ -256,8 +256,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         label: "File read/search evidence",
         sharedRecords: ["file", "read_file", "searched_file"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM read_file" },
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM searched_file" },
+            { path: "apps/axctl/src/context/file-context-pack.ts", contains: "FROM read_file" },
+            { path: "apps/axctl/src/context/file-context-pack.ts", contains: "FROM searched_file" },
         ],
         providers: {
             claude: supported("Claude Read/Grep/Glob tool arguments write read_file and searched_file edges.", [
@@ -284,7 +284,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         label: "Token/cost usage",
         sharedRecords: ["session_token_usage"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/wrapped.ts", contains: "FROM session_token_usage" },
+            { path: "apps/axctl/src/dashboard/wrapped.ts", contains: "FROM session_token_usage" },
             { path: "apps/axctl/src/queries/insights.ts", contains: "FROM session_token_usage" },
         ],
         providers: {
@@ -331,8 +331,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         sharedRecords: ["spawned"],
         relatedRecords: ["session", "tool_call"],
         readEvidence: [
-            { path: "apps/axctl/src/queries/episode-timeline.ts", contains: "FROM spawned" },
-            { path: "apps/axctl/src/queries/session-detail.ts", contains: "FROM spawned" },
+            { path: "apps/axctl/src/dashboard/episode-timeline.ts", contains: "FROM spawned" },
+            { path: "apps/axctl/src/dashboard/session-inspect.ts", contains: "FROM spawned" },
         ],
         providers: {
             claude: supported("Claude Task/Agent evidence writes spawned child-session links.", [
