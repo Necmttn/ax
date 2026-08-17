@@ -408,5 +408,13 @@ describe("publishSnapshot options.from (RULING R14)", () => {
                 yield* rw.close;
             }),
         ),
+        // bun's default 5000ms is a LOCAL number. This case does real DuckDB
+        // work three times over - a 3000-row build, a publish forced to fail
+        // under a memory cap, then a second full publish - and on a loaded CI
+        // runner (that whole suite run took 372s against 96s locally) it timed
+        // out at 5070ms. The timeout was measuring the runner, not the code:
+        // the same case passes locally every time. 30s is generous enough that
+        // a failure here means the connection really did stay wedged.
+        30_000,
     );
 });
