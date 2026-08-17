@@ -432,27 +432,30 @@ describe("classifiers db-conditional routing (#241)", () => {
         }
     });
 
-    test("resolveRuntime preserves the pre-#241 dispatch behavior byte-for-byte", () => {
+    test("resolveRuntime keeps the #241 split, with the graph side now on cache", () => {
         const declared = classifiersDeclaration();
-        // DB subcommands.
-        expect(resolveRuntime(declared, ["classifiers", "graph"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "lifecycle"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "explain"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "workflow-candidates"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "label-mining"])).toBe("db");
+        // Graph-reading subcommands - `"db"` until the v2 flip, `"cache"` now.
+        // The SPLIT is what #241 introduced and what this pins; which engine
+        // the reading side resolves to is the migration's business.
+        expect(resolveRuntime(declared, ["classifiers", "graph"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "lifecycle"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "explain"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "workflow-candidates"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "label-mining"])).toBe("cache");
         // No-DB subcommands.
         expect(resolveRuntime(declared, ["classifiers", "eval"])).toBe("none");
         expect(resolveRuntime(declared, ["classifiers", "list"])).toBe("none");
-        // package-operations: DB only with the write-plan/health/replay flags.
+        // package-operations: reaches an engine ONLY with the
+        // write-plan/health/replay flags. That per-flag split is the point and
+        // it survives - only the engine side moved from `"db"` to `"cache"`.
         expect(resolveRuntime(declared, ["classifiers", "package-operations"])).toBe("none");
         expect(resolveRuntime(declared, ["classifiers", "package-operations", "--quality-status"])).toBe("none");
-        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--apply-write-plan"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--graph-health"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--boundary-replay-summary"])).toBe("db");
-        // Bare family / --help / unknown subcommand fall back to db (old
-        // behavior: fell through to DB_COMMANDS which contained "classifiers").
-        expect(resolveRuntime(declared, ["classifiers"])).toBe("db");
-        expect(resolveRuntime(declared, ["classifiers", "--help"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--apply-write-plan"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--graph-health"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--boundary-replay-summary"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers"])).toBe("cache");
+        expect(resolveRuntime(declared, ["classifiers", "--help"])).toBe("cache");
+        expect(DB_COMMANDS.has("classifiers")).toBe(false);
     });
 
     test("static manifest declarations resolve to themselves", () => {
@@ -517,21 +520,22 @@ describe("hook/hooks db-conditional routing", () => {
         });
     }
 
-    test("resolveRuntime routes the ported subcommands to cache and their siblings to db", () => {
+    test("the whole hook/hooks family resolves on the cache runtime", () => {
         const hook = declarationOf("hook");
-        expect(resolveRuntime(hook, ["hook", "file-context"])).toBe("db");
+        expect(resolveRuntime(hook, ["hook", "file-context"])).toBe("cache");
         expect(resolveRuntime(hook, ["hook", "log"])).toBe("cache");
-        // Bare family / unknown subcommand fall back to db (harness plumbing
-        // invokes `hook` directly with no dispatch help/typo path).
-        expect(resolveRuntime(hook, ["hook"])).toBe("db");
+        // The family stays db-CONDITIONAL rather than collapsing to a static
+        // declaration: the shape is what lets a future subcommand differ, and
+        // the bare-family fallback is load-bearing (harness plumbing invokes
+        // `hook` directly, with no dispatch help/typo path).
+        expect(resolveRuntime(hook, ["hook"])).toBe("cache");
 
         const hooks = declarationOf("hooks");
         expect(resolveRuntime(hooks, ["hooks", "backtest"])).toBe("cache");
-        expect(resolveRuntime(hooks, ["hooks", "summary"])).toBe("db");
-        expect(resolveRuntime(hooks, ["hooks", "install"])).toBe("db");
-        // Bare family / unknown subcommand falls back to db (old behavior:
-        // fell through to DB_COMMANDS which contained "hooks").
-        expect(resolveRuntime(hooks, ["hooks"])).toBe("db");
+        expect(resolveRuntime(hooks, ["hooks", "summary"])).toBe("cache");
+        expect(resolveRuntime(hooks, ["hooks", "install"])).toBe("cache");
+        expect(resolveRuntime(hooks, ["hooks"])).toBe("cache");
+        expect(DB_COMMANDS.has("hooks")).toBe(false);
     });
 });
 
@@ -580,15 +584,19 @@ describe("sessions command", () => {
         }
     });
 
-    test("`sessions show` routes to the cache runtime; the unported siblings stay on db", () => {
+    test("every sessions subcommand routes to the cache runtime", () => {
         const entry = RUNTIME_BY_COMMAND["sessions"]!;
         expect(resolveRuntime(entry, ["sessions", "show", "abc"])).toBe("cache");
-        expect(resolveRuntime(entry, ["sessions", "here"])).toBe("db");
-        expect(resolveRuntime(entry, ["sessions", "around", "2026-01-01"])).toBe("db");
-        expect(resolveRuntime(entry, ["sessions", "near", "HEAD"])).toBe("db");
-        expect(resolveRuntime(entry, ["sessions", "compare", "a", "b"])).toBe("db");
-        // Bare family / --help / unknown subcommand keeps the old behaviour.
-        expect(resolveRuntime(entry, ["sessions"])).toBe("db");
+        expect(resolveRuntime(entry, ["sessions", "here"])).toBe("cache");
+        expect(resolveRuntime(entry, ["sessions", "around", "2026-01-01"])).toBe("cache");
+        expect(resolveRuntime(entry, ["sessions", "near", "HEAD"])).toBe("cache");
+        expect(resolveRuntime(entry, ["sessions", "compare", "a", "b"])).toBe("cache");
+        expect(resolveRuntime(entry, ["sessions"])).toBe("cache");
+        // `here`/`near` are the two that changed BEHAVIOUR, not just runtime:
+        // they resolved $PWD through `resolvePwdRepository`, whose git-derived
+        // key matches no row in a v2 snapshot. They now resolve the cache's
+        // repository ROW id, so `--here` scoping selects rows instead of none.
+        expect(DB_COMMANDS.has("sessions")).toBe(false);
     });
 });
 

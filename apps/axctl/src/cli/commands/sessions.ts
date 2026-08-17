@@ -43,7 +43,7 @@ import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
 import { resolveStudioTarget } from "../banner.ts";
-import { resolvePwdRepository, type PwdResolution } from "../../pwd.ts";
+import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdResolution } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
@@ -213,15 +213,29 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
             ? null
             : requirePositiveInt("sessions here", "limit", input.limit);
 
-        const pwdResolution = yield* resolvePwdRepository().pipe(
+        // The cache's repository ROW id, not the git-derived key. They are
+        // different strings: the DuckDB writer content-hashes row ids, and
+        // `session.repository` holds that hash - so the old
+        // `repositoryRecordId.id` matched nothing here and this command would
+        // have answered "no sessions" rather than failing.
+        const pwdResolution = yield* resolvePwdCacheRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl sessions here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
-        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
         yield* maybeAutoIngestStale("sessions here", pwdResolution.repoRoot, input.staleCheck);
-        const allRows = yield* listSessionsHere({ repositoryKey, days });
+        if (pwdResolution.repositoryId === null) {
+            // Nothing ingested for this repo yet. Say so instead of printing an
+            // empty table that reads like "you did no work here".
+            process.stderr.write(
+                `axctl sessions here: nothing ingested for ${pwdResolution.mainRepoRoot} yet - ` +
+                "run `ax ingest here`\n",
+            );
+        }
+        const allRows = pwdResolution.repositoryId === null
+            ? []
+            : yield* listSessionsHere({ repositoryId: pwdResolution.repositoryId, days });
 
         // claude-subagent sessions are orchestrated children and routinely
         // outnumber real sessions by 10x+; hide them by default (mirrors
@@ -320,14 +334,17 @@ const cmdSessionsNear = (input: {
         const json = wantsJsonFlag(input.json);
 
         // Resolve repository via pwd (near is always pwd-scoped)
-        const pwdResolution = yield* resolvePwdRepository().pipe(
+        const pwdResolution = yield* resolvePwdCacheRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl sessions near: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
         const repoRoot = pwdResolution.repoRoot;
-        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        // null when the cache has never seen this repo; `listSessionsNear`
+        // already treats a null repository as "unscoped", which is the honest
+        // answer for a window nothing was ingested for.
+        const repositoryId = pwdResolution.repositoryId;
 
         yield* maybeAutoIngestStale("sessions near", repoRoot, input.staleCheck);
 
@@ -356,7 +373,7 @@ const cmdSessionsNear = (input: {
             to = window.to;
         }
 
-        const rows = yield* listSessionsNear({ from, to, repositoryKey });
+        const rows = yield* listSessionsNear({ from, to, repositoryId });
         const studio = yield* Effect.promise(() => resolveStudioTarget());
         const { sessions, next } = buildSessionsNext(rows, { studio });
 
@@ -684,7 +701,9 @@ const cmdSessionsMetrics = (input: {
         }
         let project = input.project;
         if (input.here) {
-            const pwd = yield* resolvePwdRepository().pipe(
+            // `projectRootForHere` reads only `repoRoot`/`mainRepoRoot`, so
+            // this needs the git identity and no database at all.
+            const pwd = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
@@ -795,7 +814,8 @@ export const cmdSessionsChurn = (input: {
     Effect.gen(function* () {
         let project = input.project;
         if (input.here) {
-            const pwd = yield* resolvePwdRepository().pipe(
+            // Same as metrics: roots only, no engine.
+            const pwd = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl sessions churn: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
@@ -873,24 +893,25 @@ export const sessionsCommand = Command.make("sessions").pipe(
  * still reaches for SurrealDB now fails loudly instead of quietly answering
  * `[]` from a write-frozen engine.
  *
- * Everything else stays `"db"` until its own chunk lands: `here`/`around`/`near`
- * are SurrealQL in `dashboard/sessions-query.ts`, `compare` is SurrealQL in
- * `dashboard/session-compare.ts`, and `metrics`/`churn` are on `CacheRead`
- * already but share the family's `maybeAutoIngestStale` preflight, whose
- * remaining Surreal legs (`runIngest`) belong to chunk 1.
+ * The whole family is now on `"cache"`. The readers named below as blockers
+ * landed with the wave-3 read chunks - `here`/`around`/`near` with
+ * `dashboard/sessions-query.ts` (#816), `compare` with
+ * `dashboard/session-compare.ts` (#816) - and the family's
+ * `maybeAutoIngestStale` preflight no longer carries a Surreal leg. Each
+ * subcommand was RUN under the proxy before this flip; see the chunk's PR.
  */
 export const sessionsRuntime: RuntimeManifest = {
     sessions: {
         kind: "db-conditional",
-        fallback: "db",
+        fallback: "cache",
         subcommands: {
-            here: "db",
-            around: "db",
-            near: "db",
+            here: "cache",
+            around: "cache",
+            near: "cache",
             show: "cache",
-            compare: "db",
-            metrics: "db",
-            churn: "db",
+            compare: "cache",
+            metrics: "cache",
+            churn: "cache",
         },
     },
 };

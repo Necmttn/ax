@@ -89,5 +89,5 @@ export const otelCommand = Command.make(
 );
 
 export const axOtelRuntime: RuntimeManifest = {
-    otel: "db",
+    otel: "cache",
 };

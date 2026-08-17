@@ -485,5 +485,5 @@ export const costCommand = Command.make("cost").pipe(
 );
 
 export const axCostRuntime: RuntimeManifest = {
-    cost: "db",
+    cost: "cache",
 };

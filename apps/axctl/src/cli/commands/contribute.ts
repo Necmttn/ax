@@ -250,7 +250,7 @@ export const contributeRuntime: RuntimeManifest = {
         kind: "db-conditional",
         fallback: "none",
         subcommands: {
-            pattern: (args) => args.includes("--fresh") ? "none" : "db",
+            pattern: (args) => args.includes("--fresh") ? "none" : "cache",
         },
     },
 };

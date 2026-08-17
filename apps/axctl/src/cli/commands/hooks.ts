@@ -271,18 +271,18 @@ export const hooksRuntime: RuntimeManifest = {
     hook: {
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
-            subcommands: { "file-context": "db", log: "cache" },
+            fallback: "cache",
+            subcommands: { "file-context": "cache", log: "cache" },
         },
         hidden: true,
     },
     hooks: {
         kind: "db-conditional",
-        fallback: "db",
+        fallback: "cache",
         subcommands: {
-            config: "db", add: "db", remove: "db", edit: "db", disable: "db", enable: "db",
-            init: "db", install: "db", backtest: "cache", bench: "db", latency: "db",
-            summary: "db", invocations: "db", session: "db", cases: "db",
+            config: "cache", add: "cache", remove: "cache", edit: "cache", disable: "cache", enable: "cache",
+            init: "cache", install: "cache", backtest: "cache", bench: "cache", latency: "cache",
+            summary: "cache", invocations: "cache", session: "cache", cases: "cache",
         },
     },
 };

@@ -52,7 +52,7 @@ import {
     resolveSkillSparTask,
     scoreSkillSpar,
 } from "../../dojo/skill-spar.ts";
-import { mainRepoRootFromGitCommonDir, resolvePwdRepository } from "../../pwd.ts";
+import { mainRepoRootFromGitCommonDir, resolvePwdCacheRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
 import { QuotaEnvLive } from "../../quota/quota-env.ts";
 import { getQuota } from "../../quota/quota.ts";
@@ -332,7 +332,7 @@ const resolveMainRepoRoot = (repoRoot: string) =>
  * spar worktree path the agent creates.
  */
 const resolveRepo = Effect.gen(function* () {
-    const pwd = yield* resolvePwdRepository().pipe(
+    const pwd = yield* resolvePwdCacheRepository().pipe(
         Effect.catchTag("NotAGitRepoError", (err) => {
             console.error(`ax dojo: not in a git repository (cwd=${err.cwd})`);
             return exitEffect(1);
@@ -342,7 +342,10 @@ const resolveRepo = Effect.gen(function* () {
     return {
         repoRoot: pwd.repoRoot,
         mainRepoRoot,
-        repositoryKey: pwd.repositoryRecordId.id as string,
+        // The cache's repository ROW id, null when nothing is ingested for this
+        // repo yet. Both spar callers already accept `string | null` and treat
+        // null as "do not scope by repository".
+        repositoryKey: pwd.repositoryId,
     };
 });
 
@@ -680,12 +683,12 @@ export const dojoRuntime: RuntimeManifest = {
             kind: "db-conditional",
             fallback: "none",
             subcommands: {
-                agenda: "db",
-                report: "db",
+                agenda: "cache",
+                report: "cache",
                 draft: "none",
                 outbox: "none",
-                "spar-plan": "db",
-                "spar-score": "db",
+                "spar-plan": "cache",
+                "spar-score": "cache",
             },
         },
         hidden: false,

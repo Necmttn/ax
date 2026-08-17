@@ -686,19 +686,19 @@ export const retroCommand = Command.make("retro").pipe(
 export const retroRuntime: RuntimeManifest = {
     retro: {
         kind: "db-conditional",
-        fallback: "db",
+        fallback: "cache",
         subcommands: {
             emit: (args) => {
                 const hasFile = args.some((arg) => arg === "--from-file" || arg.startsWith("--from-file="));
                 const hasSession = args.some((arg) => arg === "--session" || arg.startsWith("--session="))
                     || Boolean(process.env.AX_SESSION_ID);
-                return hasFile && hasSession ? "cache" : "db";
+                return hasFile && hasSession ? "cache" : "cache";
             },
             list: "cache",
-            pending: "db",
-            brief: "db",
+            pending: "cache",
+            brief: "cache",
             reflect: "cache",
-            meta: "db",
+            meta: "cache",
             plan: "cache",
         },
     },

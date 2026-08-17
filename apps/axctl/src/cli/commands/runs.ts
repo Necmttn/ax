@@ -54,5 +54,5 @@ export const runsCommand = Command.make("runs").pipe(
 );
 
 export const axRunsRuntime: RuntimeManifest = {
-    runs: "db",
+    runs: "cache",
 };

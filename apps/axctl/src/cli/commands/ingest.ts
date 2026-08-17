@@ -19,7 +19,7 @@ import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../../ingest/stage/types.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolvePwdIdentity } from "../../pwd.ts";
 import { estimateIngest, formatDryRun } from "../../ingest/dry-run.ts";
 import { withConfigWrite } from "../../config-core/reconcile.ts";
 import {
@@ -502,7 +502,12 @@ const cmdIngestHere = (args: string[]) => {
     const hasStagesArg = args.some((a) => a.startsWith("--stages="));
     return Effect.gen(function* () {
         const registry = yield* StageRegistry;
-        const pwd = yield* resolvePwdRepository().pipe(
+        // `cwd` and `repoRoot` are all this uses, and both are git-derived -
+        // so it needs the identity and no database. It was the LAST caller of
+        // `resolvePwdRepository`, whose final step is a SurrealQL
+        // `SELECT ... FROM repository:<key>`; that function is now unreachable
+        // outside its own test and dies with the client in the deletion chunk.
+        const pwd = yield* resolvePwdIdentity().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl ingest here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
