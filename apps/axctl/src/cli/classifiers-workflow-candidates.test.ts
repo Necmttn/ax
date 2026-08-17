@@ -9,6 +9,7 @@ import {
     attachWorkflowCandidateProposalEvidence,
     buildWorkflowCandidateReport,
     buildWorkflowCandidateGuidanceProposalPlan,
+    workflowCandidateStoredProposalId,
     buildWorkflowCandidateProposalListReport,
     buildWorkflowCandidateHarnessProposalPlan,
     buildWorkflowCandidateTopicClassifierFixtureRows,
@@ -598,10 +599,19 @@ describe("classifiers workflow-candidates", () => {
         expect(plan.summary.statement_count).toBe(plan.statements.length);
         expect(plan.summary.proposals[0].dedupe_sig).toStartWith("guidance__workflow_candidate__");
         expect(plan.summary.proposals[0].title).toBe("Require applied classifier results for surrealml");
-        expect(plan.statements.join("\n")).toContain("CREATE proposal:");
-        expect(plan.statements.join("\n")).toContain("UPSERT guidance_proposal:");
-        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
-        expect(plan.statements.join("\n")).toContain("classifier_graph_node:");
+        // `statements` are DESCRIPTIONS of the writes the persist step performs,
+        // not executable SQL. They used to be SurrealQL, and asserting on that
+        // text is how the missing `cites_evidence` write stayed hidden - the
+        // string always contained the edge, whether or not anything wrote it.
+        const described = plan.statements.join("\n");
+        expect(described).toContain("PUT proposal");
+        expect(described).toContain("PUT guidance_proposal");
+        expect(described).toContain("PUT cites_evidence");
+        // The reported id must be the id the row is STORED under, so the
+        // proposal_id in a report resolves against the proposal table.
+        expect(plan.summary.proposals[0].proposal_id).toBe(
+            `proposal:${workflowCandidateStoredProposalId(plan.summary.proposals[0].dedupe_sig, new Set())}`,
+        );
     });
 
     test("guidance proposal dry-run includes planned statements without changing ids", () => {
@@ -3228,7 +3238,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(plan.summary.proposals[0].dedupe_sig).toStartWith("harness_check__workflow_candidate__");
         expect(plan.statements.join("\n")).toContain("harness_check");
-        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
+        expect(plan.statements.join("\n")).toContain("PUT cites_evidence");
         expect(plan.summary.statements).toEqual(plan.statements);
     });
 

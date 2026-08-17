@@ -6,8 +6,9 @@ import { withConfigWrite } from "../config-core/reconcile.ts";
 import { Judgment } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
-import { stableId } from "@ax/lib/stable-id";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { edgeRowId, stableId } from "@ax/lib/stable-id";
+import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { cacheRow } from "@ax/lib/duckdb/row";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { ClassifierReviewPipelineService, ClassifierReviewPipelineServiceLive, type ClassifierReviewPipelineInputValues, nodeFileOutputVerifier } from "../classifiers/review-pipeline-service.ts";
 import { catchDbErrorAndExit, catchCacheReadErrorAndExit } from "./output.ts";
@@ -350,6 +351,46 @@ const loadWorkflowProposalRows = (input: {
         updated_at: (proposal.updated_at ?? proposal.created_at).toISOString(),
     }))));
 
+/**
+ * A `cites_evidence` edge from a promoted proposal to the classifier graph node
+ * it was mined from.
+ *
+ * `inId` MUST be the id the proposal row is stored under, which is why these
+ * edges are built here and not in the plan builder: the builder cannot see the
+ * stored id of a proposal being REFRESHED, and an edge keyed on a re-derived id
+ * dangles silently.
+ */
+const citesEvidenceRow = (
+    inId: string,
+    candidateId: string,
+    count: number,
+): Readonly<Record<string, DuckDbParam>> => cacheRow({
+    id: edgeRowId("cites_evidence", inId, safeKeyPart(candidateId), "workflow_candidate"),
+    in_id: inId,
+    out_id: candidateId,
+    in_table: "proposal",
+    out_table: "classifier_graph_node",
+    count,
+    kind: "workflow_candidate",
+    ts: new Date(),
+});
+
+/**
+ * Write the evidence edges into the CACHE - the proposal itself lives in the
+ * SQLite sidecar, so the two halves of a promotion land in different stores and
+ * cannot share one transaction.
+ *
+ * These edges were LOST in the DuckDB port: they were only ever emitted as
+ * SurrealQL text in the plan builder, which nothing executed. The report kept
+ * counting them, so the loss was invisible.
+ */
+const writeCitesEvidence = (rows: readonly Readonly<Record<string, DuckDbParam>>[]) =>
+    rows.length === 0
+        ? Effect.void
+        : withConfigWrite((write) =>
+            Effect.forEach(rows, (row) => write.put("cites_evidence", row), { discard: true }),
+        ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+
 const persistGuidanceProposalPlan = (
     report: import("../classifiers/workflow-candidate-types.ts").WorkflowCandidateReport,
     plan: ReturnType<typeof buildWorkflowCandidateGuidanceProposalPlan>,
@@ -358,6 +399,7 @@ const persistGuidanceProposalPlan = (
     const stored = yield* listStoredProposals(1_000);
     const bySig = new Map(stored.map((proposal) => [proposal.dedupe_sig, proposal] as const));
     const now = new Date();
+    const edges: Array<Readonly<Record<string, DuckDbParam>>> = [];
     yield* judgment.transaction((tx) => Effect.gen(function* () {
         for (const promoted of plan.summary.proposals) {
             if (promoted.status !== "created_or_refreshed") continue;
@@ -390,8 +432,12 @@ const persistGuidanceProposalPlan = (
                 section: promoted.section,
                 suggested_text: workflowCandidateSuggestedGuidance(task, report),
             });
+            for (const candidateId of candidateIds) {
+                edges.push(citesEvidenceRow(id, candidateId, 1));
+            }
         }
     }));
+    yield* writeCitesEvidence(edges);
 });
 
 const persistHarnessProposalPlan = (
@@ -402,6 +448,7 @@ const persistHarnessProposalPlan = (
     const stored = yield* listStoredProposals(1_000);
     const bySig = new Map(stored.map((proposal) => [proposal.dedupe_sig, proposal] as const));
     const now = new Date();
+    const edges: Array<Readonly<Record<string, DuckDbParam>>> = [];
     yield* judgment.transaction((tx) => Effect.gen(function* () {
         for (const promoted of plan.summary.proposals) {
             if (promoted.status !== "created_or_refreshed") continue;
@@ -426,8 +473,10 @@ const persistHarnessProposalPlan = (
                 created_at: existing?.created_at ?? now,
                 updated_at: now,
             });
+            edges.push(citesEvidenceRow(id, candidate.group_id, Math.max(1, candidate.support_count)));
         }
     }));
+    yield* writeCitesEvidence(edges);
 });
 const loadWorkflowCandidatePendingReviewTurnContexts = (
     turnIds: readonly string[],
@@ -1414,7 +1463,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 };
             }
             if (input.promoteHarnessProposals) {
-                const existingSigs = new Set((yield* listStoredProposals(1_000)).map((proposal) => proposal.dedupe_sig));
+                // sig -> STORED row id, so a refreshed proposal reports (and cites evidence
+                // under) the id it actually keeps, not a freshly derived one.
+                const existingSigs = new Map(
+                    (yield* listStoredProposals(1_000)).map((proposal) => [proposal.dedupe_sig, proposal.id] as const),
+                );
                 const plan = buildWorkflowCandidateHarnessProposalPlan(topicReport, existingSigs, {
                     dryRun: Boolean(input.proposalDryRun),
                     includeStatements: Boolean(input.proposalDryRun),
@@ -1567,7 +1620,11 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             }
         }
         if (input.promoteProposals) {
-            const existingSigs = new Set((yield* listStoredProposals(1_000)).map((proposal) => proposal.dedupe_sig));
+            // sig -> STORED row id, so a refreshed proposal reports (and cites evidence
+                // under) the id it actually keeps, not a freshly derived one.
+                const existingSigs = new Map(
+                    (yield* listStoredProposals(1_000)).map((proposal) => [proposal.dedupe_sig, proposal.id] as const),
+                );
             const plan = buildWorkflowCandidateGuidanceProposalPlan(report, existingSigs, {
                 ...(input.proposalTarget === undefined ? {} : { fileTarget: input.proposalTarget }),
                 ...(input.proposalSection === undefined ? {} : { section: input.proposalSection }),

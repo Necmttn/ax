@@ -1,9 +1,7 @@
 import { posixPath } from "@ax/lib/shared/path";
-import { prettyPrint } from "@ax/lib/json";
 import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
-import { recordRef, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import type {
     WorkflowCandidatePromotionMode,
@@ -442,6 +440,37 @@ export const workflowCandidateProposalTitle = (
     return `Workflow guardrail for ${task.label}`;
 };
 
+/**
+ * What the caller already knows about stored proposals: either just their
+ * dedupe sigs, or a sig -> stored-row-id map.
+ *
+ * The map form is what you want. A proposal that already exists keeps its
+ * ORIGINAL row id on refresh, and only the caller (which read the proposal
+ * table) can know it - so with a bare Set, a refreshed proposal's reported id
+ * and evidence edges would point at a freshly derived id instead of the row
+ * that actually gets updated.
+ */
+export type WorkflowCandidateExistingProposals =
+    | ReadonlySet<string>
+    | ReadonlyMap<string, string>;
+
+const existingSigSet = (existing: WorkflowCandidateExistingProposals): ReadonlySet<string> =>
+    existing instanceof Map ? new Set(existing.keys()) : existing as ReadonlySet<string>;
+
+/**
+ * The row id a promoted proposal is stored under.
+ *
+ * MUST stay identical to the derivation in `persistGuidanceProposalPlan` /
+ * `persistHarnessProposalPlan` (cli/classifiers-workflow-candidates.ts): the
+ * report's `proposal_id` and the `cites_evidence` edges are both keyed on it,
+ * and an id that disagrees with the persisted row produces a report naming a
+ * record that does not exist and edges that dangle. Neither fails loudly.
+ */
+export const workflowCandidateStoredProposalId = (
+    sig: string,
+    existing: WorkflowCandidateExistingProposals,
+): string => (existing instanceof Map ? existing.get(sig) : undefined) ?? stableId("proposal", [sig]);
+
 export const workflowCandidateProposalKey = (title: string, sig: string): string =>
     stableId("proposal", ["workflow_guidance", title, sig]);
 
@@ -473,7 +502,7 @@ export const workflowCandidateProposalHypothesis = (
 
 export const buildWorkflowCandidateGuidanceProposalPlan = (
     report: WorkflowCandidateReport,
-    existingSigs: ReadonlySet<string>,
+    existing: WorkflowCandidateExistingProposals,
     opts: {
         readonly fileTarget?: string;
         readonly section?: string;
@@ -522,62 +551,27 @@ export const buildWorkflowCandidateGuidanceProposalPlan = (
 
         const title = workflowCandidateProposalTitle(task, report);
         const sig = workflowCandidateProposalSig(task);
-        const proposalKey = workflowCandidateProposalKey(title, sig);
-        const proposalRef = recordRef("proposal", proposalKey);
+        const proposalKey = workflowCandidateStoredProposalId(sig, existing);
         const payloadKey = stableId("guidance_proposal", [proposalKey]);
-        const payloadRef = recordRef("guidance_proposal", payloadKey);
         const fileTarget = opts.fileTarget ?? "AGENTS.md";
         const section = opts.section ?? "Workflow Candidate Guardrails";
         const candidateIds = task.candidate_ids ?? [task.candidate_id];
-        const baseline = prettyPrint({
-            source: "workflow_candidates",
-            frequency: Math.max(1, candidateIds.length),
-            candidate_ids: candidateIds,
-            recommendation: task.recommended_artifact,
-        });
-        const existing = existingSigs.has(sig);
-
-        if (existing) {
-            statements.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
-                    ["frequency", String(Math.max(1, candidateIds.length))],
-                    ["confidence", surrealString(task.recommended_artifact.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        } else {
-            statements.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("guidance")],
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
-                    ["dedupe_sig", surrealString(sig)],
-                    ["frequency", String(Math.max(1, candidateIds.length))],
-                    ["confidence", surrealString(task.recommended_artifact.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        }
+        const isExisting = existingSigSet(existing).has(sig);
 
         statements.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString(fileTarget)],
-                ["section", surrealOptionString(section)],
-                ["suggested_text", surrealString(workflowCandidateSuggestedGuidance(task, report))],
-            ])};`,
+            isExisting
+                ? `UPDATE proposal ${proposalKey} (guidance, sig=${sig})`
+                : `PUT proposal ${proposalKey} (guidance, sig=${sig})`,
         );
+        statements.push(`PUT guidance_proposal ${payloadKey} -> ${fileTarget}`);
         for (const candidateId of candidateIds) {
             const candidateKey = safeKeyPart(candidateId);
-            const edgeKey = `${proposalKey}__${candidateKey}`;
-            statements.push(
-                `DELETE ${recordRef("cites_evidence", edgeKey)};`,
-                `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidateId)} SET count = 1, kind = "workflow_candidate", ts = time::now();`,
-            );
+            // The edge itself is written by `persistGuidanceProposalPlan`, which
+            // is the only place that knows the proposal's REAL row id: this
+            // builder's `proposalKey` hashes ["workflow_guidance", title, sig]
+            // while the persisted row is keyed on the dedupe sig alone. Building
+            // the edge here would point it at an id no row has.
+            statements.push(`PUT cites_evidence -> ${candidateId} (${candidateKey})`);
         }
 
         proposals.push({
@@ -5943,7 +5937,7 @@ export const workflowCandidateHarnessProposalTitle = (candidate: WorkflowCandida
 
 export function buildWorkflowCandidateHarnessProposalPlan(
     report: WorkflowCandidateTopicReport,
-    existingSigs: ReadonlySet<string>,
+    existing: WorkflowCandidateExistingProposals,
     opts: {
         readonly dryRun?: boolean;
         readonly includeStatements?: boolean;
@@ -5962,54 +5956,17 @@ export function buildWorkflowCandidateHarnessProposalPlan(
     for (const { candidate, recommendation } of harnessCandidates) {
         const sig = workflowCandidateHarnessProposalSig(candidate, report.topic);
         const title = workflowCandidateHarnessProposalTitle(candidate, report.topic);
-        const proposalKey = stableId("proposal", ["workflow_harness", title, sig]);
-        const proposalRef = recordRef("proposal", proposalKey);
-        const existing = existingSigs.has(sig);
-        const baseline = prettyPrint({
-            source: "workflow_topic_report",
-            topic: report.topic,
-            candidate_id: candidate.group_id,
-            recommendation,
-            examples: candidate.examples,
-        });
-        const hypothesis = [
-            recommendation.rationale,
-            `Evidence-backed workflow candidate: ${candidate.label}.`,
-            "The check should fail when the agent stops before producing applied classifier result evidence.",
-        ].join(" ");
+        const proposalKey = workflowCandidateStoredProposalId(sig, existing);
+        const isExisting = existingSigSet(existing).has(sig);
 
-        if (existing) {
-            statements.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(hypothesis)],
-                    ["frequency", String(Math.max(1, candidate.support_count))],
-                    ["confidence", surrealString(recommendation.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        } else {
-            statements.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("harness_check")],
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(hypothesis)],
-                    ["dedupe_sig", surrealString(sig)],
-                    ["frequency", String(Math.max(1, candidate.support_count))],
-                    ["confidence", surrealString(recommendation.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        }
-
-        const candidateKey = safeKeyPart(candidate.group_id);
-        const edgeKey = `${proposalKey}__${candidateKey}`;
         statements.push(
-            `DELETE ${recordRef("cites_evidence", edgeKey)};`,
-            `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidate.group_id)} SET count = ${Math.max(1, candidate.support_count)}, kind = "workflow_candidate", ts = time::now();`,
+            isExisting
+                ? `UPDATE proposal ${proposalKey} (harness_check, sig=${sig})`
+                : `PUT proposal ${proposalKey} (harness_check, sig=${sig})`,
         );
+        // The edge row is written by `persistHarnessProposalPlan`, which holds
+        // the write seam; this only records that the write is planned.
+        statements.push(`PUT cites_evidence -> ${candidate.group_id} (${safeKeyPart(candidate.group_id)})`);
         proposals.push({
             candidate_id: candidate.group_id,
             proposal_id: `proposal:${proposalKey}`,

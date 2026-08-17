@@ -1370,6 +1370,10 @@ export interface WorkflowCandidateTaskDraft {
 
 export interface WorkflowCandidateProposalPlan {
     readonly summary: WorkflowCandidateProposalPromotionSummary;
+    /** Human-readable description of each write this plan performs, in order.
+     *  These are descriptions, NOT executable SQL - the same convention the
+     *  graph write plans and label-mining use. They used to be SurrealQL, which
+     *  nothing executed; see the persist functions for the real writes. */
     readonly statements: readonly string[];
 }
 
