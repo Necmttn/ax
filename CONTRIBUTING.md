@@ -57,14 +57,18 @@ The 🟢 line's `host` tells you which device owns it; the `age` flags a stale c
 
 ## Local setup
 
+`ax` embeds DuckDB + a SQLite sidecar - no daemon to start. See
+[`docs/development.md`](docs/development.md#setup) for the full setup
+(building `libduckdb` and exporting `AX_DUCKDB_DYLIB`).
+
 ```bash
 bun install
-bun scripts/db-start.sh
-bun scripts/apply-schema.sh
+bash scripts/build-duckdb.sh
+export AX_DUCKDB_DYLIB="$PWD/dist/duckdb/libduckdb.dylib"   # libduckdb.so on Linux
 bun apps/axctl/src/cli/index.ts ingest --since=7   # or: bun run ingest --since=7
 ```
 
-Requirements: Bun ≥ 1.3, SurrealDB ≥ 3.0.
+Requirements: Bun ≥ 1.3.
 
 ## Repo layout
 

@@ -4,9 +4,12 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** apps/axctl, derived from this file's location so the suite is cwd-independent. */
+const AXCTL_DIR = join(import.meta.dir, "..", "..");
+
 describe("axctl improve lint", () => {
     test("--help mentions --json and --stale-days", () => {
-        const source = readFileSync("apps/axctl/src/cli/commands/improve.ts", "utf8");
+        const source = readFileSync(join(AXCTL_DIR, "src", "cli", "commands", "improve.ts"), "utf8");
         const commandBlock = source.slice(
             source.indexOf("const improveLintCommand"),
             source.indexOf("const improveListCommand"),
@@ -16,15 +19,19 @@ describe("axctl improve lint", () => {
         expect(commandBlock).toContain("--stale-days");
     });
 
-    // DB is required for the stale-task scan that runs unconditionally in lintFiles.
-    // Gate behind AX_E2E_DB=1 so CI without a live SurrealDB doesn't fail.
+    // Spawns the real CLI, so it costs a process per run. `AX_E2E_DB=1` is the
+    // repo's opt-in for that class of test; it no longer implies a running
+    // server, because none exists to run.
     const e2eEnabled = process.env.AX_E2E_DB === "1";
     test.skipIf(!e2eEnabled)("clean run on an empty dir exits 0", () => {
         const root = mkdtempSync(join(tmpdir(), "ax-cli-lint-"));
         writeFileSync(join(root, "CLAUDE.md"), "no markers");
+        // cwd-independent: `src/cli/index.ts` resolves only from apps/axctl, and
+        // `bun test` is run from the repo root, so a bare relative entry exits 1
+        // on a missing file and the assertion below reads as a CLI failure.
         const cli = spawnSync("bun", [
-            "src/cli/index.ts", "improve", "lint", "--root", root, "--json",
-        ], { encoding: "utf-8" });
+            join(AXCTL_DIR, "src", "cli", "index.ts"), "improve", "lint", "--root", root, "--json",
+        ], { encoding: "utf-8", cwd: AXCTL_DIR });
         expect(cli.status).toBe(0);
         const out = JSON.parse(cli.stdout);
         expect(out.errors).toEqual([]);

@@ -26,8 +26,8 @@ Do NOT auto-trigger on generic "look at recent work".
 
 ## Prerequisites
 
-- `ax` (axctl) is on PATH and the local SurrealDB is reachable. If
-  `ax doctor` fails, stop and tell the user `scripts/db-start.sh`.
+- `ax` (axctl) is on PATH. If `ax doctor` fails, stop and point the user at
+  `docs/development.md#setup` (DuckDB dylib setup - no daemon required).
 - At least 3 retros in the last 30 days. Below that, evidence is too
   thin for a meta pass - recommend `ax:retro` first.
 
