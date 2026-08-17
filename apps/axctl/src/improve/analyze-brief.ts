@@ -62,12 +62,21 @@ hypothesis prose (they expire), also pass:
 {
   "hypothesis": "fallback prose with today's numbers",
   "hypothesis_template": "{{n}} failed Bash calls in the last 30d keep recurring",
-  "evidence_query": "SELECT count() AS n FROM tool_call WHERE name = 'Bash' AND status = 'error' AND ts > time::now() - 30d GROUP ALL;"
+  "evidence_query": "SELECT count(*) AS n FROM tool_call WHERE name = 'Bash' AND status = 'error' AND ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '30 days'"
 }
 \`\`\`
 
 The dashboard re-runs the query at view time and fills the {{placeholders}} -
-your numbers never go stale. evidence_query must be read-only (SELECT/RETURN).
+your numbers never go stale. evidence_query must be a read-only DuckDB SELECT.
+
+Two details the query will fail on silently if you miss them - a query that
+errors is caught and the stale prose hypothesis is shown instead, with nothing
+logged:
+- The clock is a TIMESTAMPTZ and the shipped DuckDB build carries no ICU, so
+  date arithmetic MUST cast it down first: CAST(CURRENT_TIMESTAMP AS TIMESTAMP)
+  is the only form that binds.
+- Use count(*), not count(), and plain SQL - no time::now(), no SELECT VALUE,
+  no GROUP ALL.
 
 **Rules:**
 - Every proposal MUST carry evidence refs (session ids / dedupe sigs / failure counts / $).

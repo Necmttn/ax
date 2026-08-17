@@ -24,16 +24,7 @@
 
 import { Schema } from "effect";
 import { stableDigest } from "../ids.ts";
-import {
-    recordRef,
-    safeKeyPart,
-    surrealDate,
-    surrealObject,
-    surrealOptionDate,
-    surrealOptionRecord,
-    surrealOptionString,
-    surrealString,
-} from "./surreal.ts";
+import { safeKeyPart } from "./surreal.ts";
 
 // ============================================================================
 // 1. ENUMS / CLOSED SETS
@@ -209,99 +200,3 @@ export const runEvidenceRefRecordKey = (input: {
         ].join("|"),
     );
 
-// ============================================================================
-// 4. STATEMENT BUILDERS
-// ----------------------------------------------------------------------------
-// Deterministic SurrealQL strings. UPSERT ... MERGE so a re-derive overwrites
-// the row in place. `attrs` is JSON-encoded; every ref/hash field is an
-// `option` literal (NONE when absent).
-// ============================================================================
-
-const optHotRef = (
-    fields: (readonly [string, string])[],
-    name: string,
-    table: string,
-    key: string | null | undefined,
-): void => {
-    // Always emit the field (NONE when absent) so a MERGE re-derive CLEARS a hot
-    // ref that disappeared between runs, instead of leaving a stale link. (CONTENT
-    // would also clear, but would re-fire the observed_at DEFAULT every run; MERGE
-    // + explicit NONE keeps observed_at default-once.)
-    fields.push([name, surrealOptionRecord(table, key)]);
-};
-
-/** Build the `UPSERT run_evidence_event:... MERGE {...}` statement. */
-export const buildRunEvidenceEventStatement = (input: RunEvidenceEventWrite): string => {
-    const key = runEvidenceEventRecordKey(input);
-    const fields: (readonly [string, string])[] = [
-        ["session", recordRef("session", input.sessionId)],
-        ["root_session", surrealOptionRecord("session", input.rootSessionId)],
-        ["parent_session", surrealOptionRecord("session", input.parentSessionId)],
-        ["ts", surrealDate(input.ts)],
-        ["provider", surrealString(input.provider)],
-        ["kind", surrealString(input.kind)],
-        ["backing", surrealString(input.backing)],
-    ];
-    optHotRef(fields, "turn", "turn", input.turnKey);
-    optHotRef(fields, "tool_call", "tool_call", input.toolCallKey);
-    optHotRef(fields, "agent_event", "agent_event", input.agentEventKey);
-    optHotRef(fields, "compaction", "compaction", input.compactionKey);
-    optHotRef(fields, "plan_snapshot", "plan_snapshot", input.planSnapshotKey);
-    optHotRef(fields, "command_outcome", "command_outcome", input.commandOutcomeKey);
-    optHotRef(fields, "hook_invocation", "hook_command_invocation", input.hookInvocationKey);
-    optHotRef(fields, "artifact", "artifact", input.artifactKey);
-    optHotRef(fields, "file", "file", input.fileKey);
-    optHotRef(fields, "checkout", "checkout", input.checkoutKey);
-    optHotRef(fields, "commit", "commit", input.commitKey);
-    fields.push(
-        ["source_table", surrealString(input.sourceTable)],
-        ["source_id", surrealString(input.sourceId)],
-        ["summary", surrealOptionString(input.summary)],
-        ["content_hash", surrealOptionString(input.contentHash)],
-        ["input_hash", surrealOptionString(input.inputHash)],
-        ["output_hash", surrealOptionString(input.outputHash)],
-        ["attrs", surrealOptionString(encodeAttrs(input.attrs))],
-    );
-    // Omit observed_at unless explicitly provided so the column defaults once at
-    // create time and a later rebuild does not re-stamp it (idempotent).
-    if (input.observedAt !== undefined && input.observedAt !== null) {
-        fields.push(["observed_at", surrealOptionDate(input.observedAt)]);
-    }
-    return `UPSERT ${recordRef("run_evidence_event", key)} MERGE ${surrealObject(fields)};`;
-};
-
-/** Build the `UPSERT run_evidence_ref:... MERGE {...}` statement. */
-export const buildRunEvidenceRefStatement = (input: RunEvidenceRefWrite): string => {
-    const key = runEvidenceRefRecordKey(input);
-    const fields: (readonly [string, string])[] = [
-        ["event", recordRef("run_evidence_event", input.eventKey)],
-        ["session", recordRef("session", input.sessionId)],
-        ["ts", surrealDate(input.ts)],
-        ["ref_kind", surrealString(input.refKind)],
-        ["target_table", surrealOptionString(input.targetTable)],
-        ["target_id", surrealOptionString(input.targetId)],
-        ["path_hash", surrealOptionString(input.pathHash)],
-        ["uri_hash", surrealOptionString(input.uriHash)],
-        ["content_hash", surrealOptionString(input.contentHash)],
-        ["privacy_level", surrealString(input.privacyLevel ?? "ref_only")],
-        ["attrs", surrealOptionString(encodeAttrs(input.attrs))],
-    ];
-    return `UPSERT ${recordRef("run_evidence_ref", key)} MERGE ${surrealObject(fields)};`;
-};
-
-/** Build all statements for a batch (events first, then refs). */
-export const buildRunEvidenceStatements = (batch: {
-    readonly events: readonly RunEvidenceEventWrite[];
-    readonly refs: readonly RunEvidenceRefWrite[];
-}): string[] => [
-    ...batch.events.map(buildRunEvidenceEventStatement),
-    ...batch.refs.map(buildRunEvidenceRefStatement),
-];
-
-/** JSON-encode attrs to a string column value (null when absent/empty). */
-const encodeAttrs = (attrs: unknown): string | null => {
-    if (attrs === null || attrs === undefined) return null;
-    if (typeof attrs === "string") return attrs;
-    const json = JSON.stringify(attrs);
-    return json === undefined || json === "{}" ? null : json;
-};
