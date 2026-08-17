@@ -190,6 +190,9 @@
 .v-mc-rail-g { display: grid; place-items: center; }
 .v-mc-rail-label { display: none; }
 .v-mc-rail-toggle { margin-top: auto; }
+/* separates the rail's overview/explore/manage clusters (#829) */
+.v-mc-rail-divider { width: 22px; height: 1px; background: var(--border); margin: 4px 0; flex: none; }
+.v-mc.nav-expanded .v-mc-rail-divider { width: 100%; }
 /* expanded rail: widen the grid track + lay each item out as glyph + page name */
 .v-mc.nav-expanded { grid-template-columns: 208px 1fr; }
 .v-mc.nav-expanded .v-mc-rail { align-items: stretch; padding-left: 12px; padding-right: 12px; }
