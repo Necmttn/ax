@@ -11,11 +11,9 @@
  * synthetic-tool set all move onto `CacheRead`. The spar-session exclusion
  * (`session NOT IN $sparSessions`) no longer needs the Surreal
  * record-vs-string binding workaround `fetchSparSessionIds` was built for -
- * DuckDB `session` is a plain VARCHAR, so the `RecordId[]` values it still
- * returns (unchanged; `queries/spar-sessions.ts` is chunk 2b's) are unwrapped
- * to their bare `.id` string here and bound as an ordinary `NOT IN (?, ...)`
- * list. The recovery-latency pass's `in.session` turn deref became a real
- * `JOIN turn`.
+ * DuckDB `session` is a plain VARCHAR, so the bare ids it returns bind
+ * directly as an ordinary `NOT IN (?, ...)` list. The recovery-latency pass's
+ * `in.session` turn deref became a real `JOIN turn`.
  */
 import { Effect, Schema } from "effect";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
@@ -155,12 +153,9 @@ export const fetchSkillsWeighted = (
             params.doctorThreshold ?? SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD;
         const includeTools = params.includeTools ?? false;
 
-        // Fetch spar variant session ids first (Judgment sqlite - untouched by
-        // this migration). `fetchSparSessionIds` still returns SurrealDB
-        // `RecordId` values (chunk 2b owns that file); only `.id` (the bare
-        // session key) is used here.
-        const sparSessions = yield* fetchSparSessionIds();
-        const sparSessionIds = sparSessions.map((rid) => String(rid.id));
+        // Fetch spar variant session ids first (Judgment sqlite). They come back
+        // as bare session keys, which is exactly what `invoked.session` holds.
+        const sparSessionIds = yield* fetchSparSessionIds();
 
         const where = buildInvocationClause(params.windowDays, sparSessionIds);
 

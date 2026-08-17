@@ -30,8 +30,7 @@
   "dependencies": {
     "@ax/onboarding-prompt": "workspace:*",
     "@effect/platform-bun": "catalog:",
-    "effect": "catalog:",
-    "surrealdb": "^2.0.0"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

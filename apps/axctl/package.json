@@ -42,7 +42,6 @@
     "node-pty": "1.1.0",
     "react": "^19.2.0",
     "smol-toml": "1.6.1",
-    "surrealdb": "^2.0.0",
     "yaml": "^2.8.4",
     "zod": "catalog:"
   },

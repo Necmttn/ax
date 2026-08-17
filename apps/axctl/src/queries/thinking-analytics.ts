@@ -190,12 +190,11 @@ export interface SessionThinkingRow {
     readonly thinking_turns: number;
 }
 
-// Strip the `session:` prefix + record-id delimiters. Handles both the
-// backtick form (`type::string(session)` / `type::string(id)` casts ->
-// session:`uuid`) AND the angle-bracket form (a raw RecordId's String() ->
-// session:⟨uuid⟩, as returned by fetchSparSessionIds' SELECT VALUE id). The
-// spar-session ids and the turn-scan session_id columns must normalize to the
-// same bare uuid or the spar exclusion below silently misses.
+// Strip the `session:` prefix + record-id delimiters, in both the backtick
+// (session:`uuid`) and angle-bracket (session:⟨uuid⟩) forms SurrealDB used to
+// emit. DuckDB stores bare uuids, so on current data this is a no-op; it stays
+// because BOTH sides of the spar exclusion below must normalize the same way,
+// and a mismatch there does not fail - it silently excludes nothing.
 const cleanSessionId = (id: string): string =>
     id
         .replace(/^session:/, "")
@@ -267,12 +266,11 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
         const sinceDays = days(opts.sinceDays);
 
         // Fetch spar variant session ids before the main queries so we can
-        // exclude them from behavioral totals at the JS join. fetchSparSessionIds
-        // returns RecordId[] (record-vs-record exclusion for the weighted path);
-        // here we normalize each via String() -> cleanSessionId to the bare uuid
-        // so the Set keys match the session ids below (bare VARCHARs in DuckDB).
+        // exclude them from behavioral totals at the JS join. Both sides run
+        // through cleanSessionId so the Set keys and the scanned session_id
+        // columns cannot disagree on shape.
         const sparSessionIds = yield* fetchSparSessionIds();
-        const sparSet = new Set(sparSessionIds.map((id) => cleanSessionId(String(id))));
+        const sparSet = new Set(sparSessionIds.map(cleanSessionId));
 
         const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* Effect.all([
             cacheRows(SessionThinkingSchemaRow, { sql: SESSION_THINKING_SQL, params: [sinceDays] }, "thinking per-session"),

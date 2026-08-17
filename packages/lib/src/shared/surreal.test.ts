@@ -1,5 +1,4 @@
 import { describe, expect, test, it } from "bun:test";
-import { RecordId } from "surrealdb";
 import {
     // literals / escaping
     surrealJson,
@@ -236,12 +235,17 @@ describe("surrealValue (universal encoder)", () => {
     test("plain object → surrealJson literal", () => {
         expect(surrealValue({ a: 1 })).toBe('"{\\"a\\":1}"');
     });
+    // `surrealValue` detects a RecordId by DUCK TYPE (`.table.name` + `.id`),
+    // never by `instanceof`, so these literals exercise the same branch the
+    // real class did. That is now the only way to test it: the `surrealdb`
+    // package is no longer a dependency of this repo.
+    const recordIdLike = (table: string, id: string) => ({ table: { name: table }, id });
+
     test("RecordId → native record reference literal", () => {
-        const rid = new RecordId("session", "s1");
-        expect(surrealValue(rid)).toBe("session:`s1`");
+        expect(surrealValue(recordIdLike("session", "s1"))).toBe("session:`s1`");
     });
     test("array of RecordId → bracketed record refs", () => {
-        const rids = [new RecordId("session", "s1"), new RecordId("session", "s2")];
+        const rids = [recordIdLike("session", "s1"), recordIdLike("session", "s2")];
         expect(surrealValue(rids)).toBe("[session:`s1`, session:`s2`]");
     });
     test("RecordId with a non-string id falls through to JSON, not a mangled ref", () => {
