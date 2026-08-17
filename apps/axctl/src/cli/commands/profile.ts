@@ -696,13 +696,13 @@ export const profileCommand = Command.make("profile").pipe(
 export const axProfileRuntime: RuntimeManifest = {
     profile: {
         kind: "db-conditional",
-        fallback: "db",
+        fallback: "cache",
         subcommands: {
-            show: "db",
-            publish: "db",
-            widget: "db",
-            unpublish: "db",
-            interview: (args) => (args[2] === "submit" ? "none" : "db"),
+            show: "cache",
+            publish: "cache",
+            widget: "cache",
+            unpublish: "cache",
+            interview: (args) => (args[2] === "submit" ? "none" : "cache"),
         },
     },
 };

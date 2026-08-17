@@ -264,15 +264,15 @@ export const axRoutingRuntime: RuntimeManifest = {
     routing: {
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
+            fallback: "cache",
             subcommands: {
-                tune: "db",
+                tune: "cache",
                 compile: "none",
                 show: "none",
                 // begin/end only need quota (they provide QuotaEnvLive themselves);
                 // report queries the graph. Keyed on argv[1]="impact", so the whole
-                // group shares one runtime - "db", consistent with ax analytics.
-                impact: "db",
+                // group shares one runtime, consistent with ax analytics.
+                impact: "cache",
             },
         },
         hidden: false,

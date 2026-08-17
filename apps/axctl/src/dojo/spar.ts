@@ -423,7 +423,7 @@ export const captureBaseline = (
                 ? parentRes.stdout.trim()
                 : sha;
 
-        const sessions = yield* listSessionsNear({ from, to, repositoryKey });
+        const sessions = yield* listSessionsNear({ from, to, repositoryId: repositoryKey });
         if (sessions.length === 0) {
             return yield* Effect.fail(
                 new SparCaptureError(`no sessions found in the commit window for ${sha}`),

@@ -692,7 +692,7 @@ export const improveRuntime: RuntimeManifest = {
             lint: "cache",
             list: "cache",
             show: "cache",
-            accept: (args) => args.includes("--with-agent") ? "db" : "cache",
+            accept: (args) => args.includes("--with-agent") ? "cache" : "cache",
             reject: "cache",
             verdict: "cache",
             reset: "cache",

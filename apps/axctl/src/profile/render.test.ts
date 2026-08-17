@@ -1,32 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { makeMockDb, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb, type MockDbResponses, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
-// buildProfile's own queries.ts fetch* calls are now served by CacheRead (see
-// the wave-3 queries.ts port history). Only 2 statements still resolve
-// SurrealClient: fetchCostModels' main query (queries/cost-analytics.ts - a
-// different wave-3 chunk's file, only its OPTIONAL pricing-catalog lookup
-// reads CacheRead, skipped here since no fixture row needs repricing) and
-// fetchWindowedInvocations (deliberately left unported - porting it breaks
-// apps/axctl/src/team/team-profile.ts, out of this chunk's ownership).
-// `surrealResults` replays ONLY those two, in call order (see buildProfile's
-// own ordering comment).
-const surrealResults = [
-    // fetchCostModels MOVED to CACHE_ROUTES below: `c-read-analytics` ported
-    // queries/cost-analytics.ts onto the CacheRead seam, so this function no
-    // longer reaches the Surreal mock at all. Leaving its fixture here would
-    // not fail loudly - `surrealResults` replays IN CALL ORDER, so a stale
-    // leading entry silently feeds fetchCostModels' rows to the next Surreal
-    // caller instead. Removed rather than commented out for that reason.
-    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL)
-    [[
-        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
-        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
-        { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
-    ]],
-];
+// EVERY statement `buildProfile` issues now goes through CacheRead. The mock
+// SurrealClient below is still provided because `buildProfile`'s signature
+// carries the requirement transitively, but nothing reaches it - a query that
+// did would surface as an "out of results" mock failure rather than a silent
+// wrong answer. The two that used to: `fetchCostModels` (ported by
+// `c-read-analytics`) and `fetchWindowedInvocations` (ported here); both now
+// have entries in CACHE_ROUTES, keyed by a fragment of their own SQL.
+const surrealResults = [] satisfies MockDbResponses;
 
 // `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
 // CacheRead snapshot, matched below by its own "has_content" fragment (a
@@ -45,6 +30,15 @@ const contentTypeRows = [
 // real `Date` here, not a string - everything else here is read via
 // Number(...)/String(...) at the call site, so plain values are safe.
 const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
+    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL) - ported off
+    // SurrealQL here. Keyed on the join, which is unique to this statement.
+    // `ts` is a TIMESTAMP column now, so the fixture passes real Dates; the
+    // reader renders them back to the ISO strings its callers compare.
+    "JOIN skill s ON s.id = i.out_id": [
+        { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:01:00.000Z") },
+        { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:30:00.000Z") },
+        { session: "session:2", skill: "tdd", ts: new Date("2026-06-12T11:01:00.000Z") },
+    ],
     // fetchCostModels (COST_MODELS_SQL) - ported off SurrealQL by
     // `c-read-analytics`. Keyed on `GROUP BY model`, which no other statement
     // in this file uses; the `FROM session_token_usage` fragment alone would

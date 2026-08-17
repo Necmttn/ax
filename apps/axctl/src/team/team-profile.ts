@@ -10,7 +10,6 @@
 import { Effect } from "effect";
 import { fetchWindowedInvocations } from "../profile/queries.ts";
 import { isVerificationTool } from "../profile/tool-taxonomy.ts";
-import { toBareSessionId } from "@ax/lib/shared/session-id";
 import {
     fetchSessionUsageRows,
     fetchTeamRepoSessions,
@@ -49,11 +48,12 @@ export const buildTeamProfile = Effect.fn("team.buildTeamProfile")(
         const usageAll = yield* fetchSessionUsageRows({ windowDays });
         const usage = usageAll.filter((u) => sessionIds.has(u.session));
         const invocationsAll = yield* fetchWindowedInvocations({ windowDays });
-        // fetchWindowedInvocations is still Surreal-backed (unported -
-        // profile/queries.ts) and returns Surreal-decorated session ids
-        // (`session:⟨uuid⟩`); `sessionIds` above comes off the ported,
-        // DuckDB-bare `fetchTeamRepoSessions`. Normalize before comparing.
-        const invocations = invocationsAll.filter((i) => sessionIds.has(toBareSessionId(i.session)));
+        // Both sides are now DuckDB-bare session ids off the same column
+        // family, so they compare directly. This used to route the left side
+        // through `toBareSessionId`, because `fetchWindowedInvocations` was
+        // still Surreal-backed and returned decorated `session:⟨uuid⟩` ids
+        // while `fetchTeamRepoSessions` was already ported.
+        const invocations = invocationsAll.filter((i) => sessionIds.has(i.session));
 
         // 3. Per-session indexed tool_call fan-out (repo-scoped by construction).
         // Sorted for deterministic query order (Set iteration order is

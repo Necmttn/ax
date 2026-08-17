@@ -11,21 +11,12 @@ const REPO_A_ID = "repo-a-duckdb-row-id";
 // (repository is a bound parameter, asserted below via capturedParams) - so
 // any b1 data reaching the output would mean the repo filter is broken.
 //
-// `invoked` (skill invocations) is still Surreal-backed
-// (`profile/queries.ts`'s `fetchWindowedInvocations` is unported) and answers
-// rows for BOTH repos' sessions using Surreal-decorated session ids
-// (`session:⟨a1⟩`), matching what that reader still returns; the JS repo
-// filter in team-profile.ts normalizes those before comparing against the
-// (bare) DuckDB session-id set.
-const surrealRoutes = new Map<string, TestSurrealResponder>([
-    ["FROM invoked", [[
-        { session: "session:⟨a1⟩", skill: "tdd", ts: "2026-07-14T10:01:00Z" },
-        { session: "session:⟨a1⟩", skill: "tdd", ts: "2026-07-14T10:30:00Z" },
-        { session: "session:⟨a2⟩", skill: "tdd", ts: "2026-07-15T09:10:00Z" },
-        { session: "session:⟨a2⟩", skill: "review", ts: "2026-07-15T09:20:00Z" },
-        { session: "session:⟨b1⟩", skill: "leaky-skill", ts: "2026-07-15T09:30:00Z" },
-    ]]],
-]);
+// `invoked` (skill invocations) is on the cache seam now, so its rows carry
+// BARE DuckDB session ids and the JS repo filter compares them directly - the
+// `toBareSessionId` normalization it used to need went away with the Surreal
+// reader. It still answers rows for BOTH repos' sessions, because the leak this
+// test guards against is exactly a b1 row surviving that filter.
+const surrealRoutes = new Map<string, TestSurrealResponder>();
 
 const capturedCacheParams: unknown[][] = [];
 
@@ -47,6 +38,13 @@ const cacheRoutes = {
     ],
     // ONE bulk `session IN (...)` query now (not per-session fan-out); only
     // session a1 carries tool-call activity in this fixture.
+    "JOIN skill s ON s.id = i.out_id": [
+        { session: "a1", skill: "tdd", ts: new Date("2026-07-14T10:01:00.000Z") },
+        { session: "a1", skill: "tdd", ts: new Date("2026-07-14T10:30:00.000Z") },
+        { session: "a2", skill: "tdd", ts: new Date("2026-07-15T09:10:00.000Z") },
+        { session: "a2", skill: "review", ts: new Date("2026-07-15T09:20:00.000Z") },
+        { session: "b1", skill: "leaky-skill", ts: new Date("2026-07-15T09:30:00.000Z") },
+    ],
     "FROM tool_call": [
         { cmd: "bun test", count: 10, failures: 1 },
         { cmd: "Read", count: 20, failures: 0 },

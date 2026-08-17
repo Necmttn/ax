@@ -5,7 +5,7 @@ import { prettyPrint } from "@ax/lib/json";
 import { fetchCostSummary, type CostSummary } from "../../dashboard/cost-query.ts";
 import { fetchCostSummaryRollup, fetchPricingRows } from "../../dashboard/cost-summary-query.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../../dashboard/loc-query.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolvePwdCacheRepository } from "../../pwd.ts";
 import { stderrExit } from "../output.ts";
 import { integer, usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -112,12 +112,16 @@ const cmdCostsFor = (input: {
     Effect.gen(function* () {
         let repositoryKey: string | null = null;
         if (input.commit || input.branch || input.here) {
-            const pwdResolution = yield* resolvePwdRepository().pipe(
+            // The CACHE's repository row id. The git-derived key this used
+            // to pass matches nothing in a v2 snapshot (the writer
+            // content-hashes row ids), so the filter silently selected zero
+            // rows instead of failing.
+            const pwdResolution = yield* resolvePwdCacheRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
-            repositoryKey = pwdResolution.repositoryRecordId.id as string;
+            repositoryKey = pwdResolution.repositoryId;
         }
         const since = input.sinceDays === null
             ? null
@@ -218,12 +222,16 @@ const cmdLoc = (input: {
     Effect.gen(function* () {
         let repositoryKey: string | null = null;
         if (input.here) {
-            const pwdResolution = yield* resolvePwdRepository().pipe(
+            // The CACHE's repository row id. The git-derived key this used
+            // to pass matches nothing in a v2 snapshot (the writer
+            // content-hashes row ids), so the filter silently selected zero
+            // rows instead of failing.
+            const pwdResolution = yield* resolvePwdCacheRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
-            repositoryKey = pwdResolution.repositoryRecordId.id as string;
+            repositoryKey = pwdResolution.repositoryId;
         }
         const since = input.sinceDays === null
             ? null

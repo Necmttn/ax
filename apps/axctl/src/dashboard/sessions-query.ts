@@ -132,7 +132,7 @@ export interface SessionsHereOpts {
      * bound as a plain parameter - DuckDB row ids are VARCHARs, not a typed
      * record reference, so there is no record-literal seam to go through.
      */
-    readonly repositoryKey: string;
+    readonly repositoryId: string;
     /** how many days back from now (default 14) */
     readonly days?: number;
 }
@@ -143,7 +143,7 @@ export const listSessionsHere = (
 ): Effect.Effect<SessionRow[], never, CacheRead> =>
     fetchSessions(
         andAll([
-            eqClause("s.repository", opts.repositoryKey),
+            eqClause("s.repository", opts.repositoryId),
             withinDaysClause("s.started_at", opts.days ?? 14),
         ]),
     );
@@ -226,7 +226,7 @@ export interface SessionsNearOpts {
      * Bare repository row id. Omit or pass null/undefined to skip the repo
      * filter.
      */
-    readonly repositoryKey?: string | null;
+    readonly repositoryId?: string | null;
 }
 
 /**
@@ -241,6 +241,6 @@ export const listSessionsNear = (
     fetchSessions(
         andAll([
             { sql: "AND s.started_at >= ? AND s.started_at <= ?", params: [opts.from, opts.to] },
-            eqClause("s.repository", opts.repositoryKey),
+            eqClause("s.repository", opts.repositoryId),
         ]),
     );

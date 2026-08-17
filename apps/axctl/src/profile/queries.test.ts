@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, type Layer } from "effect";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
 import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache";
 import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
@@ -441,26 +440,36 @@ describe("fetchDailyCommits", () => {
 });
 
 describe("fetchWindowedInvocations", () => {
-    test("uses denormalized session field (not in.session deref) and filters NONE rows", async () => {
-        const db = makeMockDb([[[
-            { session: "session:1", skill: "tdd", ts: "2026-06-12T10:00:00Z" },
-            // pre-denormalization edge: session = NONE (stringified to "NONE")
-            { session: "NONE", skill: "tdd", ts: "2026-06-12T11:00:00Z" },
-            // null session (js null)
-            { session: null, skill: "ship", ts: "2026-06-12T12:00:00Z" },
-        ]]]);
-        const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 30 }));
-        // Fix 2: SQL must read the denormalized `session` field, not `in.session`
-        expect(db.captured[0]).toContain("type::string(session) AS session");
-        expect(db.captured[0]).not.toContain("in.session");
-        // Fix 2: NONE and null rows are filtered out in JS
-        expect(r).toHaveLength(1);
-        expect(r[0]).toEqual({ session: "session:1", skill: "tdd", ts: "2026-06-12T10:00:00Z" });
+    test("reads the denormalized session column and joins skill for the name", async () => {
+        const cache = cacheRead({
+            "FROM invoked i": [
+                { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:00:00.000Z") },
+            ],
+        });
+        const r = await runCache(fetchWindowedInvocations({ windowDays: 30 }), cache.layer);
+        // The denormalized column exists so this never dereferences the source
+        // turn; the skill NAME still needs the one join, since the edge carries
+        // only `out_id`.
+        expect(cache.captured[0]).toContain("i.session AS session");
+        expect(cache.captured[0]).toContain("JOIN skill s ON s.id = i.out_id");
+        expect(cache.captured[0]).not.toContain("in.session");
+        expect(r).toEqual([{ session: "session:1", skill: "tdd", ts: "2026-06-12T10:00:00.000Z" }]);
+    });
+
+    test("absent sessions and skill names are filtered in SQL, not JS", async () => {
+        // The SurrealDB original guarded three sentinel STRINGS in JS - "null",
+        // and "NONE" for pre-denormalization edges that stored an absent
+        // session. DuckDB has only NULL, so the guard is a WHERE clause and the
+        // rows never reach JS.
+        const cache = cacheRead({ "FROM invoked i": [] });
+        const r = await runCache(fetchWindowedInvocations({ windowDays: 30 }), cache.layer);
+        expect(cache.captured[0]).toContain("i.session IS NOT NULL AND s.name IS NOT NULL");
+        expect(r).toHaveLength(0);
     });
 
     test("empty invocations -> empty array", async () => {
-        const db = makeMockDb([[[]]]);
-        const r = await runWithMock(db, fetchWindowedInvocations({ windowDays: 7 }));
+        const cache = cacheRead({});
+        const r = await runCache(fetchWindowedInvocations({ windowDays: 7 }), cache.layer);
         expect(r).toHaveLength(0);
     });
 });

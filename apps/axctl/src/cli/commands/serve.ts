@@ -66,5 +66,5 @@ export const serveRuntime: RuntimeManifest = {
     // NOT flipped to "cache" here even though the TUI now reads via
     // CacheRead - Ruling R34 defers the whole-branch RUNTIME_BY_COMMAND
     // review to its own chunk; this file only renames the studio verb.
-    tui: "db",
+    tui: "cache",
 };

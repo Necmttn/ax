@@ -8,7 +8,6 @@
  * proposal.
  */
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { inClause, withinDaysClause } from "@ax/lib/duckdb/clause";
@@ -16,8 +15,6 @@ import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 import type { GuardrailHookEvidenceRow, GuardrailVerdictRow } from "./guardrails.ts";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
-
-const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
 /**
  * Unwrap `CacheReadService.raw`'s `{ columns, rows }` to just the rows - the
@@ -505,7 +502,13 @@ export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
         const rows = yield* read.rows(
             TopToolDbRow,
             `${TOP_TOOLS_SQL} ${within.sql} AND COALESCE(command_norm, name) IS NOT NULL `
-                + "GROUP BY tool ORDER BY count DESC LIMIT 10",
+                // GROUP BY the EXPRESSION, not the alias. DuckDB resolves a
+                // bare `tool` in GROUP BY to the underlying column, not the
+                // SELECT alias, and then rejects the statement:
+                // `column "command_norm" must appear in the GROUP BY clause`.
+                // SurrealDB accepted the alias, so this only surfaced when the
+                // command was actually routed at the cache.
+                + "GROUP BY COALESCE(command_norm, name) ORDER BY count DESC LIMIT 10",
             within.params,
         );
         return rows.map((r) => ({
@@ -602,7 +605,8 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
         const toolRows = yield* read.rows(
             ToolAggRow,
             `${TOOL_AGG_SQL} ${toolWithin.sql} AND COALESCE(command_norm, name) IS NOT NULL `
-                + "GROUP BY tool ORDER BY count DESC LIMIT 200",
+                // Same alias-vs-expression rule as `fetchTopTools` above.
+                + "GROUP BY COALESCE(command_norm, name) ORDER BY count DESC LIMIT 200",
             toolWithin.params,
         );
         const turnRows = yield* read.rows(
@@ -761,37 +765,43 @@ export interface WindowedInvocationRow {
     readonly ts: string;
 }
 
-// Reads the denormalized `session` field on the invoked edge rather than the
-// deref `in.session` - avoids a per-row SurrealDB record lookup (~3–4× faster
-// on the maintainer's 64k-invocation graph). Pre-denormalization edges stored
-// session = NONE; the JS filter below excludes them ("NONE" guard).
-const WINDOWED_INVOCATIONS_SQL = (d: number) => `
-SELECT
-    type::string(session) AS session,
-    out.name AS skill,
-    type::string(ts) AS ts
-FROM invoked
-WHERE ts > time::now() - ${win(d)};`;
+// Reads the denormalized `session` column on the invoked edge rather than
+// dereferencing the source turn - the reason it was denormalized in the first
+// place (~3-4x faster on the maintainer's 64k-invocation graph). The skill NAME
+// still needs the one join, since the edge carries only `out_id`.
+//
+// The SurrealDB original guarded three sentinel STRINGS in JS - "null", and
+// "NONE" for pre-denormalization edges that stored an absent session. DuckDB
+// has only NULL, so both guards become `IS NOT NULL` in the WHERE clause and
+// the rows arrive already filtered.
+const WINDOWED_INVOCATIONS_SQL = `
+SELECT i.session AS session, s.name AS skill, i.ts AS ts
+FROM invoked i
+JOIN skill s ON s.id = i.out_id
+WHERE i.session IS NOT NULL AND s.name IS NOT NULL`;
+
+const WindowedInvocationDbRow = Schema.Struct({
+    session: Schema.String,
+    skill: Schema.String,
+    ts: TimestampColumn,
+});
 
 export const fetchWindowedInvocations = Effect.fn("profile.fetchWindowedInvocations")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* timedQuery(
-            "windowedInvocations",
-            db.query<[Array<Record<string, unknown>>]>(WINDOWED_INVOCATIONS_SQL(opts.windowDays))
-                .pipe(Effect.map((r) => r?.[0] ?? [])),
+        const read = yield* CacheRead;
+        const within = withinDaysClause("i.ts", opts.windowDays);
+        const rows = yield* read.rows(
+            WindowedInvocationDbRow,
+            `${WINDOWED_INVOCATIONS_SQL} ${within.sql}`,
+            within.params,
         );
-        return rows
-            .filter((r) =>
-                r.session != null && r.skill != null
-                && r.session !== "null" && r.skill !== "null"
-                && r.session !== "NONE" // pre-denormalization edges stored session = NONE
-            )
-            .map((r) => ({
-                session: String(r.session),
-                skill: String(r.skill),
-                ts: String(r.ts),
-            })) satisfies WindowedInvocationRow[];
+        // Callers compare `ts` as a string against session start/end strings,
+        // so keep the ISO form the SurrealDB `type::string(ts)` produced.
+        return rows.map((r) => ({
+            session: r.session,
+            skill: r.skill,
+            ts: r.ts.toISOString(),
+        })) satisfies WindowedInvocationRow[];
     },
 );
 

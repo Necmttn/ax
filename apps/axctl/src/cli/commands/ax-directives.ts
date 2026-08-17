@@ -311,12 +311,12 @@ export const axDirectivesRuntime: RuntimeManifest = {
     directives: {
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
+            fallback: "cache",
             subcommands: {
-                mine: "db",
-                list: "db",
-                ngrams: "db",
-                workflows: "db",
+                mine: "cache",
+                list: "cache",
+                ngrams: "cache",
+                workflows: "cache",
             },
         },
         hidden: false,

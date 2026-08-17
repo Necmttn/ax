@@ -58,7 +58,7 @@ describe("listSessionsHere", () => {
     dtest("scopes by repository and the default 14-day window, enriching turn_count + first_user_message", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-"), dylibPath, FIXTURE));
 
-        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryKey: "r1" }));
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryId: "r1" }));
 
         // s3 is repository r1 but 20 days old - outside the default 14d window.
         expect(rows.map((r) => r.id)).toEqual(["s1"]);
@@ -68,7 +68,7 @@ describe("listSessionsHere", () => {
     dtest("respects a custom --days window", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-days-"), dylibPath, FIXTURE));
 
-        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryKey: "r1", days: 30 }));
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryId: "r1", days: 30 }));
 
         expect(rows.map((r) => r.id).sort()).toEqual(["s1", "s3"]);
     });
@@ -103,7 +103,7 @@ describe("listSessionsNear", () => {
         const rows = await readThroughFixture(
             fixture,
             dylibPath,
-            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryKey: "r1" }),
+            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryId: "r1" }),
         );
 
         expect(rows.map((r) => r.id)).toEqual(["s1"]);
@@ -115,7 +115,7 @@ describe("listSessionsNear", () => {
         const rows = await readThroughFixture(
             fixture,
             dylibPath,
-            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryKey: null }),
+            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryId: null }),
         );
 
         expect(rows.map((r) => r.id).sort()).toEqual(["s1", "s2"]);

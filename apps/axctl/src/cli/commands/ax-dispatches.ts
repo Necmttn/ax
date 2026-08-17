@@ -394,7 +394,7 @@ export const axDispatchesRuntime: RuntimeManifest = {
     dispatches: {
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
+            fallback: "cache",
             subcommands: {
                 "compile-routing": "none",
             },

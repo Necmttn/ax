@@ -7,34 +7,19 @@
  * timeout - a real crash mode, not something an in-process test with a stub
  * layer could observe.
  *
- * HONEST STATE (2026-08-17, wave-3 profile/queries.ts port): only
- * `ax profile interview submit` is actually SurrealDB-free today, and this
- * file proves exactly that - it does NOT claim `show`/`publish`/`widget`/bare
- * `interview` are ported, because they are not:
+ * STATE: the whole family is SurrealDB-free. `ax profile interview submit`
+ * needs no data layer at all; `show`/`publish`/`widget`/bare `interview` read
+ * the published snapshot through `CacheRead` and nothing else.
  *
- *   - `fetchWindowedInvocations` (profile/queries.ts) is the one remaining
- *     unported statement in this file's ownership. Porting it was tried and
- *     reverted this session (see queries.ts's port history) because
- *     `apps/axctl/src/team/team-profile.ts` imports it directly and that
- *     file's own tests only provide a SurrealClient mock, not CacheRead -
- *     porting it makes 9 unrelated tests fail with "Service not found:
- *     ax/CacheRead". Needs a coordinated port of team-profile.ts by its
- *     owner, out of scope here.
- *   - `fetchCostModels` (queries/cost-analytics.ts, a DIFFERENT wave-3
- *     chunk's file, not touched by this session) still resolves
- *     SurrealClient for its main query; only its optional pricing-catalog
- *     lookup reads CacheRead.
- *
- * Both are reached unconditionally on every `buildProfile` call (`ax profile
- * show`'s and therefore `publish`/`widget`/bare `interview`'s common path),
- * so those four commands genuinely still need a live SurrealDB today.
- * Live-verified: `AX_DB_URL="ws://127.0.0.1:1/rpc" ax profile show --json`
- * exits 1 after a 5s connect timeout with a `DbError`
- * ("daemon not reachable..."), not a clean CacheRead-only run. `ax
- * profile.ts`'s own runtime manifest (`resolveRuntime`/`axProfileRuntime`,
- * see profile-interview.test.ts) already tracks this split: `interview
- * submit` resolves to runtime "none"; `show`/`publish`/`interview` (bare)
- * resolve to "db".
+ * This file used to end in a describe block pinning the opposite - that
+ * `ax profile show` still FAILED without SurrealDB - because two statements on
+ * `buildProfile`'s common path were unported: `fetchCostModels`
+ * (queries/cost-analytics.ts, landed in #819) and `fetchWindowedInvocations`
+ * (profile/queries.ts, landed with the runtime flip that also ported
+ * `team/team-profile.ts`, the caller whose tests had blocked it). That block
+ * is now the assertion below: the failure mode with no engine anywhere is a
+ * `CacheUnavailableError` naming the missing snapshot, NOT a 5s SurrealDB
+ * connect timeout.
  */
 import { describe, expect, test } from "bun:test";
 
@@ -113,16 +98,16 @@ describe("ax profile interview submit on the cache runtime", () => {
     }, 60_000);
 });
 
-describe("ax profile show/publish/widget/interview are NOT yet SurrealDB-free", () => {
-    // These pin the CURRENT, honest state (see file header) rather than
-    // asserting a success this session did not earn. Once
-    // fetchWindowedInvocations (this file's queries.ts) and fetchCostModels
-    // (queries/cost-analytics.ts) are both ported, this whole describe block
-    // should be deleted and `show`/`publish`/`widget`/`interview` folded into
-    // real no-surreal coverage above.
-    test("`ax profile show` still fails when SurrealDB is unreachable", () => {
+describe("ax profile show is SurrealDB-free", () => {
+    test("with no engine reachable it names the MISSING SNAPSHOT, not a dead daemon", () => {
         const run = runCli(["profile", "show", "--json"]);
+        // It still fails - `DEAD_SNAPSHOT` does not exist - but the failure is
+        // now about the cache. The distinction is the whole point: a `DbError`
+        // here would mean something on this path still dials SurrealDB.
         expect(run.exitCode).not.toBe(0);
-        expect(run.stderr).toContain("DbError");
+        expect(run.stderr).toContain("CacheUnavailableError");
+        expect(run.stderr).not.toContain("DbError");
+        expect(run.stderr).not.toContain("daemon not reachable");
+        expect(run.stderr).not.toContain("SurrealClient");
     }, 60_000);
 });
