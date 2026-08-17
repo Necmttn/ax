@@ -111,7 +111,13 @@ export const FULL_CONTEXT_RULES: UserTextRules = {
     // `control` is a user CONTROL ACTION recorded as a user turn - they invoked
     // a slash command, or they interrupted the run. It is not injected context,
     // and it is not something they asked for in words.
-    control: ["<command-name>", "[Request interrupted"],
+    // `<command-message>` is the PAIRED half of `<command-name>` - Claude Code
+    // writes both for one slash-command invocation, and which one comes first
+    // varies, so classifying only `<command-name>` catches the shape only when
+    // it happens to lead. Found by diffing this classifier against an
+    // independent implementation of the same filter: 3 rows, and the only real
+    // disagreement between them.
+    control: ["<command-name>", "<command-message>", "[Request interrupted"],
     contextStartsWith: [
         "# AGENTS.md instructions",
         "# CLAUDE.md",

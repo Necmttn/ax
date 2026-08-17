@@ -147,6 +147,54 @@ PR branch or a commit SHA for now.
   tokens (from `token_count.total_token_usage`), with its USD cost
   (`reasoning_cost_usd`) at the model's output rate.
 
+## Prompt reverse search
+
+`ax prompts [-q TEXT] [--days=N] [--limit=N] [--here|--project=PATH] [--json] [--tsv]`
+searches the prompts **you typed**, across every harness ax ingests. Browse with
+no query; search with one. Rows are deduped by text (with a repeat count) and
+ordered newest first.
+
+```
+$ ax prompts -q duckdb --days=30 --limit=3
+when              harness      ×  prompt
+2026-08-17 06:48  claude          are we using https://duckdb.org/docs/lts/guides/sql_featur…
+2026-08-17 06:34  claude          currently we are building v2 of the ax with duckdb backend…
+
+(3 of 25 distinct prompts, last 30 days - raise --limit)
+```
+
+This is not `ax recall`. `recall` is full-text search over everything *said* in a
+session - assistant turns, subagent turns, commits, skills - and answers "where
+was this discussed". This answers "what did I ask for", which is the
+reverse-history-search question a shell answers with Ctrl+R.
+
+**There is no built-in picker, on purpose.** `fzf` and `atuin` are already
+installed, already have the muscle memory, and already do fuzzy/exact/negation
+better than anything bundled here would. So `--tsv` emits a line-oriented stream
+and the picker stays your choice:
+
+```bash
+ax prompts --tsv --days=365 \
+  | fzf --delimiter='\t' --with-nth=1,2,4 \
+        --preview="printf '%s' {4} | sed 's/\\\\n/\\n/g'" \
+  | cut -f4- | sed 's/\\n/\n/g' | pbcopy
+```
+
+`--tsv` escapes newlines to a literal `\n` so every prompt is exactly one line -
+multi-line prompt handling is the specific thing Claude Code's own Ctrl+R gets
+wrong, and a line-oriented consumer cannot fix it after the fact. `--json`
+carries the real text unescaped.
+
+**What "you typed" means, and where to fix it.** The command keys off
+`turn.message_kind = 'task'`, and making that kind honest is the
+classifier's job (`apps/axctl/src/ingest/normalized/message-kind.ts`).
+Two filters live in the query instead, because neither is a message-kind
+question: subagent sources are excluded (a dispatch brief is a genuine task, but
+an agent wrote it), and identical prompts are collapsed. If machine text appears
+in the output, add a rule to the classifier - the query's legacy guard is
+GENERATED from those same rule tables, so one edit covers both new ingests and
+rows written before the rule existed.
+
 ## OTLP receiver health
 
 `ax otel [--days=N] [--json]` is the read surface for the OTLP receiver (the

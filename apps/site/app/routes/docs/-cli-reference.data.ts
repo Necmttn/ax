@@ -300,6 +300,30 @@ claude-sonnet-4             54          120   18.7%        201,330`,
         ],
       },
       {
+        name: "prompts",
+        job: "Reverse search the prompts you typed, across every harness - the Ctrl+R your agent never had.",
+        signature: "ax prompts [-q TEXT] [--days=N] [--limit=N] [--here|--project=PATH] [--json] [--tsv]",
+        flags: [
+          { flag: "-q, --query=TEXT", desc: "case-insensitive substring; omit to browse" },
+          { flag: "--days=N", desc: "window (default 90)" },
+          { flag: "--limit=N", desc: "rows (default 40)" },
+          { flag: "--here | --project=PATH", desc: "scope to a directory subtree" },
+          { flag: "--tsv", desc: "line-oriented stream for fzf/atuin (newlines escaped)" },
+          { flag: "--json", desc: "machine output, text unescaped" },
+        ],
+        receipt: `$ ax prompts -q duckdb --days=30 --limit=3
+when              harness      ×  prompt
+2026-08-17 06:48  claude          are we using https://duckdb.org/docs/lts/guides/sq…
+2026-08-17 06:34  claude          currently we are building v2 of the ax with duckdb…
+
+(3 of 25 distinct prompts, last 30 days - raise --limit)`,
+        detail: [
+          "Not the same question as recall: recall is full-text search over everything SAID in a session (assistant turns, subagents, commits, skills), while this answers \"what did I ask for\". Rows are deduped by text with a repeat count, newest first.",
+          "Ships no picker on purpose - fzf and atuin already do fuzzy/exact/negation better than a bundled TUI would, so --tsv emits a stream you pipe into whichever you use. Newlines become a literal \\n so every prompt is one line; multi-line handling is exactly what a line-oriented consumer cannot fix after the fact.",
+          "\"You typed\" is decided by the ingest classifier, not by this command: subagent sources are excluded (a dispatch brief is a real task, but an agent wrote it) and harness-injected blocks are classified as context at ingest.",
+        ],
+      },
+      {
         name: "digest",
         job: "Your ranked digest board - the ax signal a session-start hook pushes into the agent's context so value arrives without being asked for.",
         signature: "ax digest [--json] [--refresh]",
