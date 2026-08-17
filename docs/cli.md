@@ -150,7 +150,7 @@ PR branch or a commit SHA for now.
 ## OTLP receiver health
 
 `ax otel [--days=N] [--json]` is the read surface for the OTLP receiver (the
-`/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax serve` exposes). It
+`/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax otlpd` exposes). It
 answers "is harness telemetry flowing, and is it reaching my sessions?":
 
 - **Signal health**: per `(harness, signal)` an all-time row count plus how long
@@ -337,10 +337,9 @@ The 17 tools, each mirroring the matching CLI command:
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
 > reviews - so v0 exposes no mutating tools.
 >
-> **Run it from source** (the `bin/axctl` shim does this). Unlike live ingest,
-> the MCP server pulls in no native deps (just the JS MCP SDK + the SurrealDB
-> client), so the compiled standalone binary should serve it too - that path is
-> just untested in v0.
+> **Works from source AND from the compiled binary.** DuckDB *is* a native dep,
+> but `libduckdb` is embedded at build time, so `dist/axctl mcp` answers a real
+> `tools/list` handshake with the full roster - verified, not assumed.
 >
 > `sessions_here` / `sessions_near` are intentionally deferred - they need a
 > git/cwd-resolved repository key, a documented follow-up.

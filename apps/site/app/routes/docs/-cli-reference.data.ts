@@ -767,10 +767,8 @@ verified install - hand the onboarding brief to your agent`,
         signature: "ax doctor [--json]",
         flags: [{ flag: "--json", desc: "machine output" }],
         receipt: `$ ax doctor
-axctl doctor
   ok   platform: darwin - no daemon required; otlpd (macOS launchd) is available
-  ok   binary: /Users/you/.local/bin/axctl
-  ok   data-dir: /Users/you/.local/share/ax
+  ok   data-dir: ~/.local/share/ax
   ok   cache: last successful ingest: 2026-08-17T06:06:49.861Z
   ok   otlpd: not installed (telemetry consent not granted; 'ax install --telemetry' opts in)`,
       },

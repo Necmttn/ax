@@ -45,12 +45,15 @@ which ones to actually use:
 
 <!-- MANUAL MIRROR of AGENT_ONBOARDING_WITH_INSTALL in packages/onboarding-prompt/src/index.ts
      (README can't import TS). If you change the prompt, regenerate this block:
-     bun -e "import('@ax/onboarding-prompt').then(m=>process.stdout.write(m.AGENT_ONBOARDING_WITH_INSTALL))" -->
+     bun -e "import('./packages/onboarding-prompt/src/index.ts').then(m=>process.stdout.write(m.AGENT_ONBOARDING_WITH_INSTALL))"
+     Use the relative path, not the `@ax/onboarding-prompt` specifier - the
+     latter does not resolve from a git worktree. Drift is now a test failure:
+     packages/onboarding-prompt/src/readme-mirror.test.ts -->
 
 ```text
 Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
 
-PRIVACY (read first, so you can answer if I ask whether this is safe to run): ax is fully local. Ingest reads my transcripts, git history, and tool calls into a SurrealDB on 127.0.0.1 - nothing is uploaded, there is no account, no cloud, and no outbound call at ingest. The only commands that can leave my machine are explicit opt-in, consent-gated surfaces: `ax profile publish` shares an aggregates-only JSON (counts, day streaks, model split, skill/hook names, taste-pattern summaries) to a public gist I control - NEVER transcript content, code, project names, or file paths; `ax profile widget` commits a marker-delimited block to my public GitHub profile README; `ax contribute pattern` opens a GitHub PR containing one reviewed taste-pattern JSON file. `--no-cost` strips the publish dollar figures too, and `ax profile unpublish` deletes the gist. Do NOT run `ax profile publish` or `ax profile widget` or `ax contribute pattern` as part of this setup. If I ask about privacy or data handling, answer from these facts; it's AGPL-3.0, so you can also read the source to confirm.
+PRIVACY (read first, so you can answer if I ask whether this is safe to run): ax is fully local - no daemon, no server to install or connect to. Ingest reads my transcripts, git history, and tool calls into a local DuckDB cache file on my machine - nothing is uploaded, there is no account, no cloud, and no outbound call at ingest. The only commands that can leave my machine are explicit opt-in, consent-gated surfaces: `ax profile publish` shares an aggregates-only JSON (counts, day streaks, model split, skill/hook names, taste-pattern summaries) to a public gist I control - NEVER transcript content, code, project names, or file paths; `ax profile widget` commits a marker-delimited block to my public GitHub profile README; `ax contribute pattern` opens a GitHub PR containing one reviewed taste-pattern JSON file. `--no-cost` strips the publish dollar figures too, and `ax profile unpublish` deletes the gist. Do NOT run `ax profile publish` or `ax profile widget` or `ax contribute pattern` as part of this setup. If I ask about privacy or data handling, answer from these facts; it's AGPL-3.0, so you can also read the source to confirm.
 
 A note from Neco (ax's founder): ax is early and I'm hungry for feedback - every bug, wrong number, or rough edge you send back makes it sharper for everyone. Please don't hold back; if something's off, help me fix it.
 
@@ -58,7 +61,7 @@ CONTRIBUTE-BACK (do this whenever a trigger below fires; never publish anything 
 
 1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
 
-2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. If it fails or lands zero data after finishing, that's a CONTRIBUTE-BACK trigger. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use.
+2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax studio` and open http://127.0.0.1:1738. If it fails or lands zero data after finishing, that's a CONTRIBUTE-BACK trigger. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use.
 
 3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is. If the cause is a bug in ax itself (not my environment), that's a CONTRIBUTE-BACK trigger.
 
@@ -66,9 +69,9 @@ CONTRIBUTE-BACK (do this whenever a trigger below fires; never publish anything 
 
 5. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (`primary_role:` is required; `secondary`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine. Then show `ax skills weighted` and `ax skills config`; tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
 
-6. BUILD MY PROFILE + AGENT WRAPPED - first run `ax profile show` for a quick text fingerprint (sessions, active days + streak, model split, top skills, installed hooks, workflow arcs, taste patterns) and read it back to me in a few sentences. THEN build my Agent Wrapped deck, because the dashboard's Wrapped tab stays BLANK until you do - ingest does not fill it. Run `ax wrapped generate`; it writes a brief to `.ax/tasks/wrapped-generate-<date>.md`. Follow that brief: mine my graph for the answers and assemble the recap cards as `{ "cards": [{question, headline, body, sensitivity?}] }` JSON, then publish them with `ax wrapped publish --file=<your-cards.json>` (or pipe the JSON on stdin). Now my Wrapped deck is populated - tell me to run `ax serve` and open http://127.0.0.1:1738 to see it. All of this stays LOCAL: `ax profile show` and `ax wrapped publish` write only to my own machine and upload nothing. Do NOT run `ax profile publish` or `ax profile widget` or `ax contribute pattern` as part of this setup.
+6. BUILD MY PROFILE + AGENT WRAPPED - first run `ax profile show` for a quick text fingerprint (sessions, active days + streak, model split, top skills, installed hooks, workflow arcs, taste patterns) and read it back to me in a few sentences. THEN build my Agent Wrapped deck, because the dashboard's Wrapped tab stays BLANK until you do - ingest does not fill it. Run `ax wrapped generate`; it writes a brief to `.ax/tasks/wrapped-generate-<date>.md`. Follow that brief: mine my graph for the answers and assemble the recap cards as `{ "cards": [{question, headline, body, sensitivity?}] }` JSON, then publish them with `ax wrapped publish --file=<your-cards.json>` (or pipe the JSON on stdin). Now my Wrapped deck is populated - tell me to run `ax studio` and open http://127.0.0.1:1738 to see it. All of this stays LOCAL: `ax profile show` and `ax wrapped publish` write only to my own machine and upload nothing. Do NOT run `ax profile publish` or `ax profile widget` or `ax contribute pattern` as part of this setup.
 
-7. GATHER MY INSIGHTS IN PARALLEL - the three areas below are independent and only READ the local graph, so fan them out instead of running them one by one: dispatch one subagent per area, all at once (cap ~3 concurrent - they share one local SurrealDB). Give each subagent your MOST CAPABLE / strongest-reasoning model - do NOT route these down to a cheap model. This is a one-time setup and the commands can error or return surprising output, so I want an agent that can actually diagnose, retry, and interpret what it sees, not just paste noise back. Brief each one clearly: its area, the exact commands to run, and what to return - the raw output plus a tight read of what stands out (the biggest number, anomalies, anything that looks broken). The areas: (a) SPEND - `ax cost sessions`, `ax cost routability`, `ax dispatches --candidates`; (b) FRICTION - `ax improve recommend`, `ax insights friction`, `ax insights tools`; (c) HISTORY (run inside one of my git repos) - `ax sessions here --days=30`, `ax recall "<a topic worth searching>"`. When all three return, synthesize across them for me: my single biggest cost driver and the largest concrete saving, the top 1-2 fixes worth accepting and why (if I say yes, run `ax improve accept <id>` then `ax improve lint`), and one genuinely useful thing from my history.
+7. GATHER MY INSIGHTS IN PARALLEL - the three areas below are independent and only READ the local graph, so fan them out instead of running them one by one: dispatch one subagent per area, all at once (cap ~3 concurrent - they read the same local cache). Give each subagent your MOST CAPABLE / strongest-reasoning model - do NOT route these down to a cheap model. This is a one-time setup and the commands can error or return surprising output, so I want an agent that can actually diagnose, retry, and interpret what it sees, not just paste noise back. Brief each one clearly: its area, the exact commands to run, and what to return - the raw output plus a tight read of what stands out (the biggest number, anomalies, anything that looks broken). The areas: (a) SPEND - `ax cost sessions`, `ax cost routability`, `ax dispatches --candidates`; (b) FRICTION - `ax improve recommend`, `ax insights friction`, `ax insights tools`; (c) HISTORY (run inside one of my git repos) - `ax sessions here --days=30`, `ax recall "<a topic worth searching>"`. When all three return, synthesize across them for me: my single biggest cost driver and the largest concrete saving, the top 1-2 fixes worth accepting and why (if I say yes, run `ax improve accept <id>` then `ax improve lint`), and one genuinely useful thing from my history.
 
 8. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.
 ```
@@ -83,22 +86,27 @@ ax skills taste               # which skills earned their keep
 ax costs for --branch main    # what a branch cost in tokens
 ax sessions metrics           # graph-derived session health
 ax share <session-id>         # publish a session anyone can read
-ax serve                      # live dashboard at http://127.0.0.1:1738
+ax studio                     # live dashboard at http://127.0.0.1:1738
 ```
 
-Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
-and CLI (no launchd reactivity). Dev install, schema, queries, benchmarks:
+Requires Bun ≥ 1.3. **No database server** - the graph is an embedded DuckDB
+file plus a small SQLite sidecar for the decisions you make, so there is
+nothing to install, start, or connect to. macOS-first; Linux works for ingest
+and CLI (the one optional launchd agent is the telemetry receiver). Dev
+install, schema, queries, benchmarks:
 [`docs/development.md`](docs/development.md).
 
 ## Every harness, one graph
 
 Five harnesses - Claude Code, Codex, Pi, OpenCode, Cursor - plus installed
 skills, local git history, and GitHub PRs with their reviews and checks, all
-ingested into one local SurrealDB graph: sessions, turns, tool calls, plans,
-skills, commits, files, friction, compaction, derived signals. Ingest is a
-staged Effect pipeline; unchanged sources are skipped, so re-ingest takes
-seconds. A launchd watcher keeps it current as you work. Everything runs on
-`127.0.0.1` - no network round-trip, no third party.
+ingested into one local graph: sessions, turns, tool calls, plans, skills,
+commits, files, friction, compaction, derived signals. Ingest is a staged
+Effect pipeline; unchanged sources are skipped, so re-ingest takes seconds.
+Reading keeps it current - a query against a stale graph quietly forks a
+catch-up ingest in the background, so nothing has to be running while you are
+not using ax. Everything is a file on your own disk - no network round-trip,
+no third party, no server.
 
 Signals are normalized across harnesses: "context ran out and got summarized"
 is one queryable compaction event whether it came from Claude Code or Codex.
@@ -231,11 +239,10 @@ under your account; the viewer just renders it.
 
 ## Watch your agents work
 
-`ax serve` runs the dashboard + studio over the same graph. The daemon knows
-itself: re-running `ax serve` while one is already up prints the dashboard URL
-instead of a port error, and `ax serve status` / `ax serve stop` find and
-manage the running instance (pidfile + port probe, even for daemons started by
-older versions):
+`ax studio` opens the dashboard over your published snapshot. It is ephemeral
+by design: it binds a port only while a browser is attached and exits on its
+own afterward, so there is no daemon to start, find, or stop - and nothing left
+running when you close the tab:
 
 - **Transcript view** - tool call and result as one card, skill and image
   turns folded, subagent spawns with their metrics.
