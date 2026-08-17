@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "license": "AGPL-3.0-only",
-  "description": "ax studio desktop app - Electron shell that supervises surreal + ax serve and renders the studio SPA.",
+  "description": "ax studio desktop app - Electron shell that supervises ax studio and renders the studio SPA.",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@ax/lib": "workspace:*",
-    "@ax/schema": "workspace:*",
     "@effect/platform-node": "catalog:",
     "effect": "catalog:"
   },
