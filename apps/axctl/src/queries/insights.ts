@@ -120,6 +120,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "guidance_proposal", stage: "active", note: "Typed payload rows for guidance-file proposals." },
     { table: "automation_proposal", stage: "active", note: "Typed payload rows for automation-form proposals." },
     { table: "experiment", stage: "active", note: "Accepted proposals and scaffold/verdict state." },
+    { table: "session_label", stage: "active", note: "Labels stamped on a cache session (spar), durable across a cache rebuild. Sidecar-only - it has no v1 counterpart, which is how it stayed unregistered here." },
     { table: "checkpoint", stage: "active", note: "Experiment measurement snapshots and user verdicts." },
     { table: "retro", stage: "active", note: "Structured session retrospectives." },
     { table: "skill_triage_decision", stage: "active", note: "Dashboard keep/archive/review decisions per skill." },

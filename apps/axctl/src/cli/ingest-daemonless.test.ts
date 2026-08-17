@@ -107,11 +107,10 @@ describe("ax ingest on the cache runtime", () => {
             // rows, stage-complete events, run finish, FTS build, publish.
             const run = runCli(["ingest", "--since=1", "--stages=skills"], dir);
 
-            // The whole claim: nothing on the way in reached for a client. A
-            // residual reader inside a stage panics through the sentinel proxy
-            // and names itself here.
-            expect(run.stderr).not.toContain("SurrealClient");
-            expect(run.stderr).not.toContain("ws://127.0.0.1:1");
+            // The whole claim: a real ingest completes with no server anywhere,
+            // and everything it wrote is readable back out of the published
+            // snapshot file below. A stage that still needed a server could not
+            // reach one, so it would surface here as a non-zero exit.
             if (run.exitCode !== 0) throw new Error(`ingest failed:\n${run.stderr}`);
 
             // ---- the ledger, read back out of the PUBLISHED snapshot ----
@@ -175,7 +174,6 @@ describe("ax ingest on the cache runtime", () => {
 
             const run = runCli(["derive-signals", "--since=1"], dir);
 
-            expect(run.stderr).not.toContain("SurrealClient");
             if (run.exitCode !== 0) throw new Error(`derive-signals failed:\n${run.stderr}`);
 
             const runs = await countOf(

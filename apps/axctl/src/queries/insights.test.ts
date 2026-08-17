@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+import { DUCKDB_TABLE_NAMES } from "@ax/schema/parse-duckdb-schema";
+import { parseSqliteTables } from "@ax/schema/sidecar-ddl";
 import {
     SCHEMA_TABLES,
     checkoutActivitySql,
@@ -44,10 +45,11 @@ const STALE_FIELDS = [
     "last_seen_at",
 ] as const;
 
+/** Every table the live engines define: the rebuildable DuckDB cache plus the
+ *  SQLite judgment sidecar. `SCHEMA_TABLES` spans both - it predates the split -
+ *  so the mirror it must hold against is the union. */
 function liveSchemaTables(): string[] {
-    const defined = [...schemaSurql.matchAll(/^DEFINE TABLE(?: IF NOT EXISTS)? ([A-Za-z_][A-Za-z0-9_]*)/gm)]
-        .map((match) => match[1]!);
-    return [...new Set(defined)].sort();
+    return [...new Set([...DUCKDB_TABLE_NAMES, ...parseSqliteTables()])].sort();
 }
 
 function expectNoStaleFields(sql: string) {
