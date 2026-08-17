@@ -140,12 +140,30 @@ export const topoLayers = <S extends BaseStageStats, R, E>(
  *  are budgeted against it so the pass ends cleanly instead of being killed by
  *  the outer ingest timeout (#697); omit it and derives keep only their static
  *  `AX_STAGE_TIMEOUT_SECONDS` cap. `opts.reserveMs` overrides the finalization
- *  reserve (env default) - tests pass 0. */
+ *  reserve (env default) - tests pass 0.
+ *
+ *  `opts.recordStageOutcome` lets the caller record the two outcomes only the
+ *  RUNNER knows about, which the stage's own `Exit` cannot express: a watchdog
+ *  `timeout` (the stage body is interrupted, so it can only report
+ *  "interrupted" - the cap that fired is known here) and a budget `skipped`
+ *  (the stage never runs at all, so it produces no `Exit` and, without this,
+ *  no row either). Optional and fire-and-forget by contract: this is
+ *  bookkeeping, and it must never change whether the pass succeeds. See #840. */
 export const runPipeline = <S extends BaseStageStats, R, E>(
     stages: ReadonlyArray<StageDef<S, R, E>>,
     ctx: IngestContext,
     write: CacheWriteService,
-    opts: { readonly deadlineMs?: number; readonly reserveMs?: number } = {},
+    opts: {
+        readonly deadlineMs?: number;
+        readonly reserveMs?: number;
+        readonly recordStageOutcome?: (
+            stageKey: string,
+            outcome: {
+                readonly status: "timeout" | "skipped";
+                readonly errorText: string;
+            },
+        ) => Effect.Effect<void>;
+    } = {},
 ): Effect.Effect<ReadonlyArray<S>, E, R> =>
     Effect.gen(function* () {
         topoLayers(stages); // cycle check
@@ -202,24 +220,51 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                         });
                         if (budget._tag === "uncapped") return body;
                         if (budget._tag === "skip") {
+                            const reason = `skipped - ${budget.reason}`;
                             return Effect.logWarning(
                                 `ingest: skipping derive stage '${s.meta.key}' - ${budget.reason}.`,
                             ).pipe(
+                                // Record the skip BEFORE succeeding: a stage
+                                // dropped for want of budget has no Exit and no
+                                // row, so without this it is indistinguishable
+                                // from a stage that was never configured.
+                                Effect.andThen(
+                                    opts.recordStageOutcome?.(s.meta.key, {
+                                        status: "skipped",
+                                        errorText: reason,
+                                    }) ?? Effect.void,
+                                ),
                                 Effect.as({
                                     durationMs: 0,
                                     summary: "skipped (out of budget)",
                                 } as unknown as S),
                             );
                         }
+                        const capSeconds = Math.round(budget.capMs / 1000);
                         return body.pipe(
                             Effect.timeoutOrElse({
                                 duration: budget.capMs,
                                 orElse: () =>
                                     Effect.logWarning(
-                                        `ingest: derive stage '${s.meta.key}' exceeded ${Math.round(budget.capMs / 1000)}s - ` +
+                                        `ingest: derive stage '${s.meta.key}' exceeded ${capSeconds}s - ` +
                                             `skipping it (failed open) so the run can finish. ` +
                                             `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
                                     ).pipe(
+                                        // Overwrite the `interrupted` row the
+                                        // stage's own finalizer just wrote with
+                                        // the precise cap that fired. Safe to
+                                        // order this way: timeoutOrElse
+                                        // completes the body's interruption,
+                                        // finalizers included, before orElse.
+                                        Effect.andThen(
+                                            opts.recordStageOutcome?.(s.meta.key, {
+                                                status: "timeout",
+                                                errorText:
+                                                    `timed out - exceeded the ${capSeconds}s derive watchdog cap ` +
+                                                    `(raise or disable with AX_STAGE_TIMEOUT_SECONDS); ` +
+                                                    `the run continued without this stage`,
+                                            }) ?? Effect.void,
+                                        ),
                                         Effect.as({
                                             durationMs: budget.capMs,
                                             summary: "timed out (watchdog)",

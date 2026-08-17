@@ -10,6 +10,7 @@ import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { ProcessService } from "@ax/lib/process";
 import {
+    reconcileStrandedIngestStages,
     writeIngestEvent,
     writeIngestRunFinish,
     writeIngestRunStart,
@@ -160,6 +161,75 @@ const resolveStages = (
     return registry.all();
 };
 
+/**
+ * Settle one stage row from the stage's `Exit`, on EVERY exit path.
+ *
+ * This mirrors {@link withIngestRunFinish} deliberately: the run-level finalizer
+ * already had all four arms (success / typed failure / interruption / defect),
+ * and the stage-level wrapper had only the first two. That asymmetry is #840 -
+ * `Effect.tap` runs only on success and `Effect.catch` only on a typed failure,
+ * so an INTERRUPTED stage reached neither and its row stayed `running` forever,
+ * with no `ended_at` and no reason. Both the derive watchdog
+ * (`stage/runner.ts`, `Effect.timeoutOrElse`) and the outer run deadline
+ * interrupt stages, which is why 38 rows accumulated - 3 of them inside a run
+ * that reported `ok`, since the watchdog fails OPEN with a success sentinel.
+ *
+ * The interruption and defect arms `ignore` their write errors, exactly as the
+ * run-level finalizer does: a run that is already being torn down must not have
+ * its cause replaced by a bookkeeping failure. Success and typed failure let a
+ * write error propagate, because there the write IS the work.
+ *
+ * Exported for tests: the four arms are the contract, and crafting an `Exit`
+ * directly covers the interruption case that no end-to-end ingest test can
+ * trigger reliably.
+ */
+export const settleStage = (
+    write: CacheWriteService,
+    ledgerKey: { readonly runId: string; readonly source: string; readonly stage: string },
+    eventName: { readonly source: string; readonly stage: string },
+    exit: Exit.Exit<BaseStageStats, IngestStageError>,
+): Effect.Effect<void, CacheWriteError> => {
+    if (Exit.isSuccess(exit)) {
+        const counts = numericCounts(exit.value);
+        return Effect.gen(function* () {
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts });
+            yield* writeIngestEvent(write, {
+                ...ledgerKey,
+                level: "info",
+                message: `${eventName.source} ${eventName.stage} complete`,
+                counts,
+            });
+        });
+    }
+    // Read the cause before the `hasInterrupts` guard: its negative branch
+    // would otherwise narrow `exit` to `never`.
+    const cause = exit.cause;
+    const settle = (status: "error" | "interrupted", message: string) =>
+        Effect.gen(function* () {
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status, errorText: message });
+            yield* writeIngestEvent(write, {
+                ...ledgerKey,
+                level: "error",
+                message,
+            });
+        });
+    if (Exit.hasInterrupts(exit)) {
+        // The watchdog overwrites this row with `timeout` immediately after,
+        // via `recordStageOutcome` - it knows the cap, and this arm does not.
+        return settle(
+            "interrupted",
+            "interrupted - the run ended before this stage finished (deadline, watchdog cap, or SIGINT)",
+        ).pipe(Effect.ignore);
+    }
+    const failure = Cause.findErrorOption(cause);
+    if (Option.isSome(failure)) {
+        return settle("error", errorText(failure.value));
+    }
+    // Defect: still settle the row (never leave "running"), best effort; the
+    // defect itself propagates past this finalizer.
+    return settle("error", errorText(Cause.squash(cause))).pipe(Effect.ignore);
+};
+
 const wrapStage = (
     runId: string,
     stageDef: StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>,
@@ -171,40 +241,47 @@ const wrapStage = (
         run: (ctx: IngestContext, write: CacheWriteService) =>
             Effect.gen(function* () {
                 yield* writeIngestStageStart(write, ledgerKey);
-
-                return yield* stageDef.run(ctx, write).pipe(
-                    Effect.tap((value) => {
-                        const counts = numericCounts(value);
-                        return Effect.gen(function* () {
-                            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts });
-                            yield* writeIngestEvent(write, {
-                                ...ledgerKey,
-                                level: "info",
-                                message: `${eventName.source} ${eventName.stage} complete`,
-                                counts,
-                            });
-                        });
-                    }),
-                    Effect.catch((error) =>
-                        Effect.gen(function* () {
-                            const message = errorText(error);
-                            yield* writeIngestStageFinish(write, {
-                                ...ledgerKey,
-                                status: "error",
-                                errorText: message,
-                            });
-                            yield* writeIngestEvent(write, {
-                                ...ledgerKey,
-                                level: "error",
-                                message,
-                            });
-                            return yield* error;
-                        }),
-                    ),
+                return yield* Effect.onExit(stageDef.run(ctx, write), (exit) =>
+                    settleStage(write, ledgerKey, eventName, exit),
                 );
             }),
     };
 };
+
+/**
+ * Settle a stage the RUNNER decided about without ever entering (or while
+ * cutting short) the stage body - the two cases the stage's own `Exit` cannot
+ * describe honestly.
+ *
+ * `timeout`: the derive watchdog capped a running stage. The stage body was
+ * interrupted, so {@link settleStage} has already written `interrupted`; this
+ * overwrites it with the precise status and the cap that fired. Ordering is
+ * guaranteed - `Effect.timeoutOrElse` completes the body's interruption
+ * (finalizers included) before it runs `orElse`.
+ *
+ * `skipped`: the stage never started, so it has NO row at all. Writing one is
+ * the point: a stage silently dropped for want of budget is indistinguishable
+ * from a stage that was never configured, and that ambiguity is what made a
+ * blank skill graph look like a broken feature rather than a starved derive.
+ */
+const recordRunnerStageOutcome = (
+    runId: string,
+    write: CacheWriteService,
+) =>
+(
+    stageKey: string,
+    outcome: { readonly status: "timeout" | "skipped"; readonly errorText: string },
+): Effect.Effect<void> =>
+    Effect.gen(function* () {
+        const eventName = stageEventName(stageKey);
+        const ledgerKey = { runId, source: eventName.source, stage: eventName.stage } as const;
+        if (outcome.status === "skipped") yield* writeIngestStageStart(write, ledgerKey);
+        yield* writeIngestStageFinish(write, {
+            ...ledgerKey,
+            status: outcome.status,
+            errorText: outcome.errorText,
+        });
+    }).pipe(Effect.ignore);
 
 export interface RunIngestOptions {
     readonly command: string;
@@ -309,6 +386,23 @@ export const runIngest = (
             sinceDays: sinceDays ?? null,
         });
 
+        // Clean up after runs that could not clean up after themselves. A
+        // finalizer cannot run on SIGKILL or power loss, so settling every stage
+        // on every exit path is necessary but never sufficient - the next run
+        // has to reconcile the residue (#840). Deliberately AFTER
+        // `reapStaleIngestRuns` above, which is what marks a stranded RUN
+        // terminal; this only touches stages whose parent run already is, so a
+        // concurrent run's live stages are untouched. Best effort: bookkeeping
+        // must not be able to fail an ingest.
+        const reconciled = yield* reconcileStrandedIngestStages(write, runId).pipe(
+            Effect.catchCause(() => Effect.succeed(0)),
+        );
+        if (reconciled > 0) {
+            yield* Effect.logInfo(
+                `ingest: reconciled ${reconciled} stage row(s) stranded at 'running' by an earlier run`,
+            );
+        }
+
         if (opts.args.includes("--reset")) {
             for (const table of ["invoked", "loaded", "proposed", "concerns", "recovered_by", "skill_paired", "skill"]) {
                 yield* write.exec(`DELETE FROM "${table}"`);
@@ -332,7 +426,10 @@ export const runIngest = (
             wrappedStages,
             ctx,
             write,
-            deadlineMs === undefined ? {} : { deadlineMs },
+            {
+                ...(deadlineMs === undefined ? {} : { deadlineMs }),
+                recordStageOutcome: recordRunnerStageOutcome(runId, write),
+            },
         ).pipe(
             LiveTrace.withTrace({
                 traceId: `ingest:${runId}`,
