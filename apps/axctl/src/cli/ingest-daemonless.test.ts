@@ -1,8 +1,8 @@
 /**
- * `ax ingest`, END TO END, with NO SurrealDB reachable - the acceptance test for
+ * `ax ingest`, END TO END, with no server of any kind running - the acceptance test for
  * wave 3's `c-ingest-cutover`.
  *
- * Sibling of `recall-no-surreal.test.ts`, and out-of-process for the same
+ * Sibling of `recall-daemonless.test.ts`, and out-of-process for the same
  * reason: the claim under test is about which LAYER the CLI builds, and an
  * in-process test is handed its layers either way. So this spawns the ACTUAL
  * CLI entrypoint as a child with `AX_DB_URL` pointing at a port nothing is
@@ -33,7 +33,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax ingest (no surre
 const CLI = new URL("./index.ts", import.meta.url).pathname;
 
 /** A port nothing listens on, so a SurrealDB connect can only FAIL. */
-const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 interface CliRun {
     readonly exitCode: number | null;
@@ -55,7 +54,6 @@ const runCli = (args: ReadonlyArray<string>, dir: string): CliRun => {
             ...process.env,
             AX_DATA_DIR: dir,
             AX_DUCKDB_SNAPSHOT: `${dir}/snapshot.duckdb`,
-            AX_DB_URL: DEAD_DB_URL,
             ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
             AX_PROGRESS: "off",
             NO_COLOR: "1",

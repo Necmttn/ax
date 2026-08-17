@@ -194,7 +194,7 @@ Shared rules for all six:
   `"db"` -> `"cache"` in its `RuntimeManifest` (`cli/commands/manifest.ts`): `withCache` provides
   `CacheRead` + AxConfig + platform + ProcessService and a `SurrealClient` proxy that THROWS, so an
   un-ported path fails loudly instead of answering from the old engine. An in-process test cannot
-  check this (it is handed the layers either way) - copy `cli/recall-no-surreal.test.ts`, which spawns
+  check this (it is handed the layers either way) - copy `cli/recall-daemonless.test.ts`, which spawns
   the real CLI with `AX_DB_URL` on a dead port. Anything a ported reader still needs from Surreal (the
   repository lookup was the one in w1) has to be ported WITH it, not left behind - see
   `queries/repository-scope.ts` for the shape: look the row up by the DDL's identity columns rather

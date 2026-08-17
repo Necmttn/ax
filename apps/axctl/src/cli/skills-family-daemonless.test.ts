@@ -107,7 +107,6 @@ describe("ax skills family - direct-call against a published cache", () => {
 // ---------------------------------------------------------------------------
 
 const CLI = new URL("./index.ts", import.meta.url).pathname;
-const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 interface CliRun {
     readonly exitCode: number | null;
@@ -124,11 +123,10 @@ const runCli = (args: ReadonlyArray<string>, snapshotPath: string, sidecarPath: 
             // Spreading `process.env` alone therefore passes locally (the dev
             // shell exports AX_DUCKDB_DYLIB) and fails in CI with
             // `CacheUnavailableError: no libduckdb available`. Forward it
-            // explicitly, exactly as recall/sessions-show/ingest-no-surreal do.
+            // explicitly, exactly as recall/sessions-show/ingest-daemonless do.
             ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
             AX_DUCKDB_SNAPSHOT: snapshotPath,
             AX_SIDECAR_PATH: sidecarPath,
-            AX_DB_URL: DEAD_DB_URL,
             AX_PROGRESS: "off",
             NO_COLOR: "1",
         },

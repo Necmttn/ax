@@ -25,7 +25,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax mcp (no surreal)
 });
 
 const CLI = new URL("../cli/index.ts", import.meta.url).pathname;
-const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 const CORPUS = (write: CacheWriteService) =>
     Effect.gen(function* () {
@@ -110,7 +109,6 @@ describe("MCP per-tool runtimes", () => {
             cwd: process.cwd(),
             env: {
                 ...process.env,
-                AX_DB_URL: DEAD_DB_URL,
                 AX_DUCKDB_SNAPSHOT: fixture.snapshotPath,
                 AX_SIDECAR_PATH: sidecarPath,
                 ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
@@ -118,7 +116,7 @@ describe("MCP per-tool runtimes", () => {
             },
             stderr: "pipe",
         });
-        const client = new Client({ name: "dead-surreal-test", version: "0.0.0" });
+        const client = new Client({ name: "runtime-kinds-test", version: "0.0.0" });
 
         try {
             await client.connect(transport);

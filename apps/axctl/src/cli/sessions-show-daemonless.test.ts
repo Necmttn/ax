@@ -1,8 +1,8 @@
 /**
- * `ax sessions show`, END TO END, with NO SurrealDB reachable.
+ * `ax sessions show`, END TO END, with no server of any kind running.
  *
  * This is the acceptance test for wave 3 chunk 2a (`c-read-seam`), and it has
- * to be out-of-process for the same reason `recall-no-surreal.test.ts` does: an
+ * to be out-of-process for the same reason `recall-daemonless.test.ts` does: an
  * in-process test is HANDED its layers, so it passes whether or not the real
  * CLI would have built `AppLayer` and tried to connect. The child gets
  *

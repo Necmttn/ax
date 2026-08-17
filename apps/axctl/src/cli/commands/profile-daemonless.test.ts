@@ -1,7 +1,7 @@
 /**
- * `ax profile`, END TO END, with NO SurrealDB reachable.
+ * `ax profile`, END TO END, with no server of any kind running.
  *
- * Mirrors `apps/axctl/src/cli/recall-no-surreal.test.ts`: spawns the ACTUAL
+ * Mirrors `apps/axctl/src/cli/recall-daemonless.test.ts`: spawns the ACTUAL
  * CLI entrypoint as a child, with `AX_DB_URL` pointing at a port nothing is
  * listening on, so any SurrealDB connect attempt can only fail or hang to its
  * timeout - a real crash mode, not something an in-process test with a stub

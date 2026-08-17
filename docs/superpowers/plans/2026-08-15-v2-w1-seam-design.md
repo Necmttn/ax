@@ -115,7 +115,7 @@ the vertical really is ported, and it is the template wave 2 follows.
 > content-hashed by a writer wave 2 has not written yet - and returns the ROW id, which is what
 > `session.repository` actually holds (the git-derived Surreal key does not). A repository the cache has
 > never seen falls back to `--scope=all` (with a stderr note under an explicit `--scope=here`). Proof is
-> `cli/recall-no-surreal.test.ts`: it spawns the real CLI with `AX_DB_URL` pointed at a dead port, and
+> `cli/recall-daemonless.test.ts`: it spawns the real CLI with `AX_DB_URL` pointed at a dead port, and
 > fails (5.5s connect timeouts) the moment the manifest says `"db"`.
 
 **D7 - skills recall is plain SQL, not FTS.** Locked upstream by #758 and by the DDL header: only

@@ -1,5 +1,5 @@
 /**
- * `ax recall`, END TO END, with NO SurrealDB reachable.
+ * `ax recall`, END TO END, with no server of any kind running.
  *
  * The claim the ported vertical rests on cannot be checked from inside the
  * process that defines the layers: an in-process test can always be handed a
@@ -27,7 +27,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax recall (no surre
 const CLI = new URL("./index.ts", import.meta.url).pathname;
 
 /** A port nothing listens on, so a SurrealDB connect can only FAIL. */
-const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 const T = (iso: string): Date => new Date(iso);
 
@@ -103,7 +102,6 @@ const runCli = (args: ReadonlyArray<string>, snapshotPath: string): CliRun => {
         env: {
             ...process.env,
             AX_DUCKDB_SNAPSHOT: snapshotPath,
-            AX_DB_URL: DEAD_DB_URL,
             ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
             // Keep the child's output machine-readable and animation-free.
             AX_PROGRESS: "off",

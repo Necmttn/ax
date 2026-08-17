@@ -650,20 +650,15 @@ describe("finalizeInjection", () => {
     });
 });
 
-describe("buildFileContextHookResponse (DuckDB, no SurrealDB reachable)", () => {
-    // Before this port, a file-context hook fire built `AppLayer` and opened a
-    // live SurrealDB WebSocket, waiting up to the 5s `CONNECT_TIMEOUT_MS` if
-    // nothing was listening. `buildFileContextHookResponse`'s type signature is
-    // now `Effect<FileContextHookResponse, CacheReadError, CacheRead>` - no
-    // `SurrealClient` in the R channel, so it is a COMPILE-TIME impossibility
-    // for this Effect to construct a SurrealDB connection; Effect.provide below
-    // only has a `CacheRead` layer to give it, and the code still typechecks.
-    // `AX_DB_URL` pointed at a dead port is set anyway, to demonstrate at
-    // runtime that nothing in this path so much as reads that variable.
-    dtest("resolves fast with AX_DB_URL pointed at a port nothing listens on", async () => {
-        const priorDbUrl = process.env.AX_DB_URL;
-        process.env.AX_DB_URL = "ws://127.0.0.1:1/rpc";
-        try {
+describe("buildFileContextHookResponse resolves from the snapshot alone", () => {
+    // A hook fire used to open a live database connection and wait up to a 5s
+    // connect timeout when nothing was listening - on a machine with no daemon
+    // running, every edit paid that. `buildFileContextHookResponse` is now
+    // `Effect<FileContextHookResponse, CacheReadError, CacheRead>`, so the only
+    // thing it can read is the published snapshot, and this pins the result:
+    // milliseconds, from a file, with no server anywhere.
+    dtest("answers in milliseconds, with no server running", async () => {
+        {
             const fixture = await runWithPlatform(
                 publishCacheFixture(
                     tempDir("ax-file-context-hook-nodb-"),
@@ -685,14 +680,11 @@ describe("buildFileContextHookResponse (DuckDB, no SurrealDB reachable)", () => 
             );
             const elapsedMs = performance.now() - startMs;
 
-            // Well under the 5s CONNECT_TIMEOUT_MS a stalled SurrealDB dial
-            // would have cost - this is milliseconds, not seconds.
+            // Well under the 5s connect timeout a stalled dial used to cost -
+            // this is milliseconds, not seconds.
             expect(elapsedMs).toBeLessThan(2000);
             expect(response.inject).toBe(false); // no prior sessions in this tiny fixture
             expect(response.reason).toBe("no_prior_sessions");
-        } finally {
-            if (priorDbUrl === undefined) delete process.env.AX_DB_URL;
-            else process.env.AX_DB_URL = priorDbUrl;
         }
     }, 60_000);
 });

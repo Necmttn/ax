@@ -348,7 +348,7 @@ const AllRolesRow = Schema.Struct({
  *
  * PURE JUDGMENT: both halves live in the sidecar, so this needs no cache and no
  * snapshot at all. That is what lets `ax roles` answer on a machine that has
- * never run an ingest - see roles-no-surreal.test.ts, which runs it with
+ * never run an ingest - see roles-daemonless.test.ts, which runs it with
  * SurrealDB pointed at a dead port.
  *
  * `LEFT JOIN`, so a role that exists but has been tagged on nothing reports 0

@@ -1,7 +1,7 @@
 /**
- * `ax roles`, END TO END, with NO SurrealDB reachable and NO DuckDB snapshot.
+ * `ax roles`, END TO END, with no server running and no DuckDB snapshot on disk.
  *
- * The sibling of recall-no-surreal.test.ts, and the acceptance signal for the
+ * The sibling of recall-daemonless.test.ts, and the acceptance signal for the
  * judgment half of the v2 split. An in-process test cannot check this: it is
  * handed whatever layers it asks for and passes either way. So this spawns the
  * ACTUAL CLI entrypoint as a child with
@@ -32,7 +32,6 @@ import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 const CLI = Bun.fileURLToPath(new URL("./index.ts", import.meta.url));
 
 /** A port nothing listens on, so a SurrealDB connect can only FAIL. */
-const DEAD_DB_URL = "ws://127.0.0.1:1/rpc";
 
 interface CliRun {
     readonly exitCode: number | null;
@@ -47,7 +46,6 @@ const runCli = (args: ReadonlyArray<string>, sidecarPath: string, dir: string): 
             AX_SIDECAR_PATH: sidecarPath,
             // A snapshot that does not exist: any cache read would fail loudly.
             AX_DUCKDB_SNAPSHOT: join(dir, "there-is-no-snapshot.duckdb"),
-            AX_DB_URL: DEAD_DB_URL,
             AX_PROGRESS: "off",
             NO_COLOR: "1",
         },

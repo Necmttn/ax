@@ -1035,7 +1035,7 @@ export const skillsRuntime: RuntimeManifest = {
     // `ax roles` is PURE JUDGMENT - the role vocabulary and the tag counts both
     // live in the SQLite sidecar - so it needs no published snapshot at all, and
     // answers on a machine that has never run an ingest.
-    // roles-no-surreal.test.ts spawns the real CLI with a snapshot path that
+    // roles-daemonless.test.ts spawns the real CLI with a snapshot path that
     // does not exist, which an in-process test cannot check.
     roles: "cache",
 };

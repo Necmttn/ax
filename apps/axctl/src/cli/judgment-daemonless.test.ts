@@ -9,7 +9,7 @@ import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 const runCli = async (sidecarPath: string, args: string[]) => {
     const child = Bun.spawn(["bun", "apps/axctl/src/cli/index.ts", ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, AX_DEV: "1", AX_SIDECAR_PATH: sidecarPath, AX_DB_URL: "ws://127.0.0.1:1/rpc" },
+        env: { ...process.env, AX_DEV: "1", AX_SIDECAR_PATH: sidecarPath },
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -23,7 +23,7 @@ const runCli = async (sidecarPath: string, args: string[]) => {
 
 describe("judgment commands without SurrealDB", () => {
     test("improve, retro, and dogfood reads use only SQLite", async () => {
-        const root = mkdtempSync(join(tmpdir(), "ax-no-surreal-"));
+        const root = mkdtempSync(join(tmpdir(), "ax-daemonless-"));
         const sidecarPath = join(root, "judgment.sqlite");
         await Effect.runPromise(Effect.gen(function* () {
             const judgment = yield* Judgment;
@@ -64,7 +64,7 @@ describe("judgment commands without SurrealDB", () => {
     });
 
     test("manual retro emit uses SQLite when the session and file are explicit", async () => {
-        const root = mkdtempSync(join(tmpdir(), "ax-retro-emit-no-surreal-"));
+        const root = mkdtempSync(join(tmpdir(), "ax-retro-emit-daemonless-"));
         const sidecarPath = join(root, "judgment.sqlite");
         const payloadPath = join(root, "retro.json");
         writeFileSync(payloadPath, JSON.stringify({ tried: "port judgments", worked: "SQLite" }));

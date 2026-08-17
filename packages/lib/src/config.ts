@@ -9,17 +9,8 @@ import {
     Redacted,
 } from "effect";
 import { posixPath } from "@ax/lib/shared/path";
-import { dbUrlFromState, readRuntimeState, runtimeStatePath } from "./runtime-state.ts";
 
 export interface AxConfigShape {
-    readonly db: {
-        readonly url: string;
-        readonly ns: string;
-        readonly db: string;
-        readonly user: string;
-        /** Redacted so the password never leaks via logs/inspect. Unwrap with `Redacted.value`. */
-        readonly pass: Redacted.Redacted<string>;
-    };
     readonly paths: {
         readonly home: string;
         readonly transcriptsDir: string;
@@ -103,9 +94,9 @@ const stringOr = (name: string, fallback: string): Config.Config<string> =>
 
 /**
  * The full config recipe, read through the ambient `ConfigProvider`. Requires
- * `FileSystem` because the persisted DB endpoint comes from `runtime.json` via
- * `readRuntimeState`. `Effect.orDie` is safe: every leaf has a fallback, so the
- * only theoretical failure is a provider source error (impossible for env).
+ * `FileSystem` so path leaves can be resolved. `Effect.orDie` is safe: every
+ * leaf has a fallback, so the only theoretical failure is a provider source
+ * error (impossible for env).
  */
 const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> =
     Effect.gen(function* () {
@@ -114,21 +105,7 @@ const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem>
             "AX_DATA_DIR",
             posixPath.join(home, ".local", "share", "ax"),
         );
-        const runtime = yield* readRuntimeState(runtimeStatePath(dataDir));
         return {
-            db: {
-                // Precedence: explicit env override -> persisted runtime endpoint -> default.
-                // install writes runtime.json after a successful port pick, so a one-time
-                // port fallback keeps every later CLI invocation pointed at the right
-                // listener without the user needing to set env vars.
-                url: yield* stringOr("AX_DB_URL", dbUrlFromState(runtime)),
-                ns: yield* stringOr("AX_DB_NS", "ax"),
-                db: yield* stringOr("AX_DB_DB", "main"),
-                user: yield* stringOr("AX_DB_USER", "root"),
-                pass: yield* Config.redacted("AX_DB_PASS").pipe(
-                    Config.withDefault(Redacted.make("root")),
-                ),
-            },
             paths: {
                 home,
                 transcriptsDir: yield* stringOr(
@@ -221,10 +198,10 @@ const compactEnv = (
 /**
  * Read a fresh snapshot of the config. With no argument, reads `process.env`
  * at *run* time (same semantics as the previous hand-rolled reader); pass an
- * explicit env record for hermetic tests. Requires `FileSystem` because the
- * persisted DB endpoint is read from `runtime.json` via `readRuntimeState`.
- * Pure path math is done through the shared `posixPath` instance, so no `Path`
- * dependency is incurred. Effect callers should prefer the `AxConfig` service.
+ * explicit env record for hermetic tests. Requires `FileSystem` so path leaves
+ * can be resolved. Pure path math is done through the shared `posixPath`
+ * instance, so no `Path` dependency is incurred. Effect callers should prefer
+ * the `AxConfig` service.
  */
 export const envSnapshot = Effect.fn("config.envSnapshot")(function* (
     env?: Record<string, string | undefined>,
@@ -256,7 +233,7 @@ export const AxConfigLive: Layer.Layer<AxConfig, never, FileSystem.FileSystem> =
 /**
  * Test factory: deep-merge overrides into a default snapshot. Requires
  * `FileSystem` because it builds on `envSnapshot`. Use as
- * `Layer.succeed(AxConfig, yield* makeTestConfig({ db: { url: ... } }))` or via
+ * `Layer.succeed(AxConfig, yield* makeTestConfig({ paths: { ... } }))` or via
  * the `AxConfigTest` layer.
  */
 export const makeTestConfig = Effect.fn("config.makeTestConfig")(function* (
@@ -264,7 +241,6 @@ export const makeTestConfig = Effect.fn("config.makeTestConfig")(function* (
 ) {
     const base = yield* envSnapshot({});
     return {
-        db: { ...base.db, ...(overrides.db ?? {}) },
         paths: { ...base.paths, ...(overrides.paths ?? {}) },
         knobs: { ...base.knobs, ...(overrides.knobs ?? {}) },
     } satisfies AxConfigShape;

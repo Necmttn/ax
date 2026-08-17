@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Layer, Redacted } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { AxConfig, AxConfigTest, envSnapshot, makeTestConfig } from "./config.ts";
 
@@ -9,14 +9,10 @@ const run = <A, E>(eff: Effect.Effect<A, E, FileSystem.FileSystem>) =>
 describe("AxConfig", () => {
     test("envSnapshot honors env overrides", async () => {
         const snap = await run(envSnapshot({
-            AX_DB_URL: "ws://example:9999",
-            AX_DB_NS: "ns-x",
             AX_CODEX_CONCURRENCY: "4",
             AX_CLAUDE_CONCURRENCY: "8",
             HOME: "/tmp/home",
         }));
-        expect(snap.db.url).toBe("ws://example:9999");
-        expect(snap.db.ns).toBe("ns-x");
         expect(snap.knobs.codexConcurrency).toBe(4);
         expect(snap.knobs.claudeConcurrency).toBe(8);
         expect(snap.paths.transcriptsDir).toBe("/tmp/home/.claude/projects");
@@ -42,8 +38,6 @@ describe("AxConfig", () => {
 
     test("envSnapshot falls back to defaults", async () => {
         const snap = await run(envSnapshot({ HOME: "/tmp/home" }));
-        expect(snap.db.url).toBe("ws://127.0.0.1:8521");
-        expect(snap.db.ns).toBe("ax");
         expect(snap.knobs.claudeConcurrency).toBe(4);
         expect(snap.knobs.codexConcurrency).toBe(1);
         expect(snap.paths.piDir).toBe("/tmp/home/.pi/agent/sessions");
@@ -109,39 +103,30 @@ describe("AxConfig", () => {
         expect(snap.paths.commandDirs).toEqual([]);
     });
 
-    test("db.pass is redacted: never leaks via toString, unwraps via Redacted.value", async () => {
-        const snap = await run(envSnapshot({ HOME: "/tmp/home", AX_DB_PASS: "s3cret" }));
-        expect(String(snap.db.pass)).not.toContain("s3cret");
-        expect(`${snap.db.pass}`).not.toContain("s3cret");
-        expect(Redacted.value(snap.db.pass)).toBe("s3cret");
-
-        const dflt = await run(envSnapshot({ HOME: "/tmp/home" }));
-        expect(Redacted.value(dflt.db.pass)).toBe("root");
-    });
-
     test("AxConfigTest layer provides overridden values", async () => {
         const program = Effect.gen(function* () {
             const cfg = yield* AxConfig;
-            return cfg.db.url;
+            return cfg.paths.transcriptsDir;
         });
-        const url = await Effect.runPromise(
+        const dir = await Effect.runPromise(
             program.pipe(
-                // AxConfigTest now needs FileSystem to build its base snapshot;
+                // AxConfigTest needs FileSystem to build its base snapshot;
                 // provide both in one merged Layer (single `Effect.provide`).
                 Effect.provide(
-                    AxConfigTest({ db: { url: "ws://test:1234" } as never }).pipe(
+                    AxConfigTest({ paths: { transcriptsDir: "/tmp/override" } as never }).pipe(
                         Layer.provide(BunFileSystem.layer),
                     ),
                 ),
             ),
         );
-        expect(url).toBe("ws://test:1234");
+        expect(dir).toBe("/tmp/override");
     });
 
     test("makeTestConfig deep-merges overrides", async () => {
         const cfg = await run(makeTestConfig({ knobs: { claudeConcurrency: 16 } as never }));
         expect(cfg.knobs.claudeConcurrency).toBe(16);
         expect(cfg.knobs.codexConcurrency).toBe(1);
-        expect(cfg.db.url).toBe("ws://127.0.0.1:8521");
+        // A sibling branch the override did not touch survives the deep merge.
+        expect(cfg.paths.transcriptsDir).toEndWith("/.claude/projects");
     });
 });
