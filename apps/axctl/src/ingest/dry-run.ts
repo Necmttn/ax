@@ -22,6 +22,11 @@ import { AxConfig } from "@ax/lib/config";
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import type { DbError } from "@ax/lib/errors";
+import {
+    estimateUncoveredSeconds,
+    type PriorRunObservation,
+    type UncoveredCostEstimate,
+} from "./derive-cost.ts";
 import { ingestTranscripts } from "./transcripts.ts";
 import { ingestCodex } from "./codex.ts";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
@@ -89,6 +94,13 @@ export interface DryRunResult {
     /** projected seconds for the REMAINING backfill, or null when no rate could
      *  be measured (or nothing remains). */
     readonly etaSeconds: number | null;
+    /** The sampled parse component of `etaSeconds` - remaining / measured rate.
+     *  This alone was the WHOLE estimate before #831, and it is the part that
+     *  shrinks as the backlog shrinks. */
+    readonly parseSeconds: number | null;
+    /** Everything the sample could not observe: ~35 other stages. Null when no
+     *  estimate was possible at all. See `./derive-cost.ts`. */
+    readonly uncovered: UncoveredCostEstimate | null;
     /** true when the sample was small (time-boxed early), so the ETA is noisy. */
     readonly rough: boolean;
     /** true when the graph already has sessions. Kept for backward compat; no
@@ -165,6 +177,59 @@ const countJsonl = (
     });
 
 const EMPTY_TALLY: SessionTally = { claude: 0, codex: 0, pi: 0, total: 0 };
+
+/**
+ * What this machine's last SUCCESSFUL run cost, split into the part a fresh
+ * sample can observe and the part it cannot (#831).
+ *
+ * Returns WALL time alongside stage-seconds because the two differ by the run's
+ * concurrency (measured: 8,371 stage-seconds over 5,136s wall), and the caller
+ * needs wall time. Restricted to `status = 'ok'` runs on purpose - a partial or
+ * timed-out run had stages cut short, so its durations would under-predict in
+ * exactly the case that matters. Unsettled stages (`ended_at IS NULL`) are
+ * excluded for the same reason.
+ */
+const dbPriorUncovered = (
+    write: CacheWriteService,
+    sampledSource: string,
+): Effect.Effect<PriorRunObservation | undefined, never> =>
+    write
+        .rows(
+            Schema.Struct({
+                wall_secs: Schema.Number,
+                total_secs: Schema.Number,
+                uncovered_secs: Schema.Number,
+            }),
+            `WITH last_ok AS (
+                 SELECT id, started_at, ended_at FROM ingest_run
+                 WHERE status = 'ok' AND ended_at IS NOT NULL
+                 ORDER BY started_at DESC LIMIT 1
+             )
+             SELECT
+                 date_diff('millisecond', r.started_at, r.ended_at) / 1000.0 AS wall_secs,
+                 coalesce(sum(date_diff('millisecond', s.started_at, s.ended_at)), 0) / 1000.0 AS total_secs,
+                 coalesce(sum(CASE WHEN s.source <> ?
+                     THEN date_diff('millisecond', s.started_at, s.ended_at) ELSE 0 END), 0) / 1000.0 AS uncovered_secs
+             FROM last_ok r
+             LEFT JOIN ingest_stage s
+               ON s.run = r.id AND s.status = 'ok' AND s.ended_at IS NOT NULL
+             GROUP BY r.started_at, r.ended_at`,
+            [sampledSource],
+        )
+        .pipe(
+            Effect.map((rows): PriorRunObservation | undefined => {
+                const row = rows[0];
+                if (row === undefined) return undefined;
+                return {
+                    wallSeconds: row.wall_secs,
+                    totalStageSeconds: row.total_secs,
+                    uncoveredStageSeconds: row.uncovered_secs,
+                };
+            }),
+            // A malformed or absent prior is not an error - the pure estimator
+            // validates every field and falls back to the shipped factor.
+            Effect.orElseSucceed(() => undefined),
+        );
 
 /** Per-source session counts already in the graph. One cheap aggregate (no
  *  derefs), so it stays fast even on a large graph. Compared against the
@@ -265,6 +330,8 @@ export const estimateIngest = (
                 sampled: { items: 0, seconds: 0 },
                 ratePerSec: null,
                 etaSeconds: null,
+                parseSeconds: null,
+                uncovered: null,
                 rough: false,
                 populated,
                 upToDate: true,
@@ -284,9 +351,39 @@ export const estimateIngest = (
             : (yield* ingestTranscripts(write, { sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions;
         const seconds = (now() - t0) / 1000;
 
-        const { ratePerSec, etaSeconds } = computeEstimate(remaining.total, items, seconds);
-        const rough = ratePerSec !== null && items < ROUGH_SAMPLE_THRESHOLD;
-        return { sources, inGraph, remaining, sampled: { items, seconds }, ratePerSec, etaSeconds, rough, populated, upToDate: false };
+        const { ratePerSec, etaSeconds: parseSeconds } = computeEstimate(remaining.total, items, seconds);
+
+        // The sample timed ONE harness's transcript parsing. The run also does
+        // sidecar discovery, git history, config/skill scanning and the derive
+        // chain - and assuming those cost zero is what made this estimate ~3x
+        // low (#831). Prefer this machine's own last successful run over any
+        // shipped constant.
+        const prior = yield* dbPriorUncovered(write, useCodex ? "codex" : "claude");
+        const uncovered = parseSeconds === null
+            ? null
+            : estimateUncoveredSeconds({ parseSeconds, prior });
+        const etaSeconds = parseSeconds === null || uncovered === null
+            ? null
+            : parseSeconds + uncovered.seconds;
+
+        // "rough" now also covers an estimate whose uncovered half is a shipped
+        // factor rather than a local measurement - the first-run case, where the
+        // number is an order of magnitude rather than a prediction.
+        const rough = ratePerSec !== null &&
+            (items < ROUGH_SAMPLE_THRESHOLD || uncovered?.basis === "fallback-factor");
+        return {
+            sources,
+            inGraph,
+            remaining,
+            sampled: { items, seconds },
+            ratePerSec,
+            etaSeconds,
+            parseSeconds,
+            uncovered,
+            rough,
+            populated,
+            upToDate: false,
+        };
     });
 
 /** Render the dry-run result for humans (Paxel-style) or as JSON for the agent. */
@@ -300,6 +397,8 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
                 sampled: result.sampled,
                 ratePerSec: result.ratePerSec,
                 etaSeconds: result.etaSeconds,
+                parseSeconds: result.parseSeconds,
+                uncovered: result.uncovered,
                 rough: result.rough,
                 populated: result.populated,
                 upToDate: result.upToDate,
@@ -367,6 +466,20 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     // the full total; on a partially-populated one it's labelled accordingly.
     const label = result.populated ? "remaining" : "total";
     lines.push(`  ${label}: ${remaining.total.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
+    // Show the split. The parse half is what the sample measured; the other half
+    // is ~35 stages it never touched, and hiding it is what made this estimate
+    // ~3x low (#831). Naming the basis keeps the number from reading as a
+    // precision it does not have.
+    if (result.parseSeconds !== null && result.uncovered !== null) {
+        const basis = result.uncovered.basis === "prior-run"
+            ? "measured on your last successful run"
+            : "estimated - no prior run to measure";
+        lines.push(
+            `    ${formatDuration(result.parseSeconds)} reading transcripts` +
+            ` + ${formatDuration(result.uncovered.seconds)} for the other stages` +
+            ` (git, sidecars, skills, derives; ${basis})`,
+        );
+    }
     lines.push(`  run it: ax ingest   (watch live in ax studio → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT})`);
     return lines.join("\n");
 }

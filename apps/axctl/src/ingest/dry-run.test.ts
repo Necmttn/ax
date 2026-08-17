@@ -59,6 +59,8 @@ const baseResult = (over: Partial<DryRunResult> = {}): DryRunResult => ({
     sampled: { items: 30, seconds: 2.1 },
     ratePerSec: 14.3,
     etaSeconds: 210,
+    parseSeconds: 84,
+    uncovered: { seconds: 126, basis: "prior-run" },
     rough: false,
     populated: false,
     upToDate: false,
