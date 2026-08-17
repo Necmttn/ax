@@ -125,4 +125,4 @@ export const agentsCommand = Command.make("agents").pipe(
 );
 
 /** Routing declaration consumed by cli/index.ts (Phase 2 command-family split). */
-export const agentsRuntime: RuntimeManifest = { agents: { runtime: "db", hidden: true } };
+export const agentsRuntime: RuntimeManifest = { agents: { runtime: "cache", hidden: true } };

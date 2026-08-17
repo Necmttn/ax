@@ -4,14 +4,13 @@
  * Pure cores (scoreSpar, renderSparBrief/parseSparBrief, renderSparReport) are
  * fully unit-tested. `fetchSessionMetrics` and `findVariantSession` read
  * entirely off the DuckDB `CacheRead` snapshot and are tested with a real-
- * decode fake (`@ax/lib/testing/cache`); `captureBaseline` still resolves
- * `SurrealClient` transitively (`listSessionsNear`, owned by another wave-3
- * chunk) and is covered only by the live spar-plan smoke.
+ * decode fake (`@ax/lib/testing/cache`); `captureBaseline` reads the snapshot
+ * transitively through `listSessionsNear` and is covered only by the live
+ * spar-plan smoke.
  *
  * Spec: docs/superpowers/specs/2026-06-13-dojo-spar-design.md
  */
 import { Effect, Option, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
@@ -393,7 +392,7 @@ export const captureBaseline = (
 ): Effect.Effect<
     SparBrief,
     DbError | CacheReadError | ProcessError | SparCaptureError,
-    SurrealClient | CacheRead | AxConfig | ProcessService
+    CacheRead | AxConfig | ProcessService
 > =>
     Effect.gen(function* () {
         const proc = yield* ProcessService;

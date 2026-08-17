@@ -459,7 +459,7 @@ describe("classifiers db-conditional routing (#241)", () => {
     });
 
     test("static manifest declarations resolve to themselves", () => {
-        expect(resolveRuntime("db", ["sessions"])).toBe("db");
+        expect(resolveRuntime("cache", ["sessions"])).toBe("cache");
         expect(resolveRuntime("ingest", ["ingest"])).toBe("ingest");
         expect(resolveRuntime("none", ["version"])).toBe("none");
     });

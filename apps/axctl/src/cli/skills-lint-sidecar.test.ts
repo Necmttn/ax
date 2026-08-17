@@ -3,7 +3,6 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { CacheReadLayer } from "@ax/lib/duckdb/seam";
 import { Judgment, JudgmentLayer, TextColumn } from "@ax/lib/sqlite";
 import { skillRowId } from "@ax/lib/stable-id";
@@ -14,17 +13,8 @@ import { cmdSkillsLint } from "./skills-lint.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills lint sidecar", { requireFts: true });
 
-const deadSurreal = Layer.succeed(
-    SurrealClient,
-    new Proxy({} as SurrealClientShape, {
-        get(_target, property) {
-            throw new Error(`SurrealClient.${String(property)} must not be used by skills lint`);
-        },
-    }),
-);
-
 describe("cmdSkillsLint SQLite judgment port", () => {
-    dtest("writes brief role decisions atomically without SurrealDB", async () => {
+    dtest("writes brief role decisions atomically to the judgment sidecar", async () => {
         const directory = tempDir("ax-skills-lint-sidecar-");
         const taskDir = join(directory, "tasks");
         const briefPath = join(taskDir, "classify-tdd.md");
@@ -47,7 +37,6 @@ describe("cmdSkillsLint SQLite judgment port", () => {
             schemaSql: SIDECAR_SCHEMA_SQL,
         });
         const layer = Layer.mergeAll(
-            deadSurreal,
             BunFileSystem.layer,
             BunPath.layer,
             judgmentLayer,

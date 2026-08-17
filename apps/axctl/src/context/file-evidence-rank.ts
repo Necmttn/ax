@@ -3,7 +3,7 @@ import type { MentionSignals, SessionTurn, ToolEvidenceRow, TouchRow } from "./f
 // ============================================================================
 // File Evidence - pure (DB-free) signal extraction, ranking, and compaction.
 //
-// No SurrealClient, no Effect: every function here is a synchronous transform
+// No read seam, no Effect: every function here is a synchronous transform
 // over already-fetched rows or a raw query string. This is the unit-test
 // surface for the logic that actually carries bugs; the retrieval primitives
 // (file-evidence.ts) and the renderers (adapters) compose these.

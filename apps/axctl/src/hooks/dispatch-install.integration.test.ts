@@ -4,20 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
 import { installDispatcher } from "./dispatch-install.ts";
 import { HookProviderRegistryDefault } from "./providers/registry.ts";
 
-// readAllHooks(withEvidence:false) returns before it ever touches SurrealClient,
-// so the dispatcher install path needs no DB - a never-invoked stub satisfies
-// the requirement type.
-const stubDb = Layer.succeed(SurrealClient, {} as never);
-
+// readAllHooks(withEvidence:false) returns before it reads any stored data, so
+// the dispatcher install path needs no engine at all.
 const layers = Layer.mergeAll(
     HookProviderRegistryDefault,
     BunFileSystem.layer,
     BunPath.layer,
-    stubDb,
 );
 
 const run = <A, E>(eff: Effect.Effect<A, E, any>): Promise<A> =>

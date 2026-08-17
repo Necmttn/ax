@@ -1,7 +1,6 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect, FileSystem, Option, Path } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
@@ -43,7 +42,7 @@ import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
 import { resolveStudioTarget } from "../banner.ts";
-import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdResolution } from "../../pwd.ts";
+import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
@@ -64,7 +63,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export const projectRootForHere = (
-    pwd: Pick<PwdResolution, "repoRoot" | "mainRepoRoot">,
+    pwd: Pick<PwdIdentity, "repoRoot" | "mainRepoRoot">,
 ): string => {
     const { repoRoot, mainRepoRoot } = pwd;
     if (!mainRepoRoot || mainRepoRoot === repoRoot) return repoRoot;
@@ -144,7 +143,7 @@ const maybeAutoIngestStale = (
 ): Effect.Effect<
     void,
     DbError | CacheReadError | CacheWriteError,
-    SurrealClient | CacheRead | AxConfig | FileSystem.FileSystem | Path.Path
+    CacheRead | AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         if (opts.noStaleCheck) return;
@@ -885,13 +884,9 @@ export const sessionsCommand = Command.make("sessions").pipe(
  * `sessions` splits across runtimes, so the family declares its routing per
  * subcommand rather than as one static entry.
  *
- * `show` is PORTED (wave 3 `c-read-seam`): its whole chain -
- * `fetchEnrichedSession` -> `fetchSessionView` -> `fetchSessionDetail` plus
- * `fetchSessionDurabilityDetail` and the prefix fallback - reads the published
- * snapshot, so it routes through `withCache` and gets the throwing no-DB
- * SurrealClient proxy. That proxy is the ACCEPTANCE SIGNAL: any sub-path that
- * still reaches for SurrealDB now fails loudly instead of quietly answering
- * `[]` from a write-frozen engine.
+ * `show`'s whole chain - `fetchEnrichedSession` -> `fetchSessionView` ->
+ * `fetchSessionDetail` plus `fetchSessionDurabilityDetail` and the prefix
+ * fallback - reads the published snapshot, so it routes through `withCache`.
  *
  * The whole family is now on `"cache"`. The readers named below as blockers
  * landed with the wave-3 read chunks - `here`/`around`/`near` with

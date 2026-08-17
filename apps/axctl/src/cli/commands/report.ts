@@ -107,13 +107,14 @@ export const timelineCommand = Command.make(
 ));
 
 /**
- * All three are on the v2 cache runtime. c8 left `report` and `insights` on
- * `"db"` and recorded them as blocked on "~1100 lines of SurrealQL across 31
- * views" - **that reading was wrong**. `queries/insights.ts` was already DuckDB
- * dialect (chunk 2b, #819); what still reached SurrealDB was the two HANDLERS,
- * `cmdInsights` above and the five statements in `dashboard/report.ts`. The
- * throwing proxy reports only that SOME path touched `SurrealClient` - it does
- * not name the layer, and the SQL was not opened before the size was asserted.
+ * All three are on the v2 cache runtime. An earlier chunk left `report` and
+ * `insights` on the old runtime and recorded them as blocked on "~1100 lines of
+ * SurrealQL across 31 views" - **that reading was wrong**. `queries/insights.ts`
+ * was already DuckDB dialect (#819); what still reached the old engine was the
+ * two HANDLERS, `cmdInsights` above and the five statements in
+ * `dashboard/report.ts`. The throwing proxy that reported the block named a
+ * FAILURE, not a layer, and the SQL was never opened before the size was
+ * asserted.
  */
 export const reportRuntime: RuntimeManifest = {
     report: { runtime: "cache", hidden: true },

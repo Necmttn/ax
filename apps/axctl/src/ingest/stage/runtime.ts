@@ -14,16 +14,9 @@ const StageSourceLayers = AgentSourceRegistryLive;
  * `StageRegistryDefault`. CLI ingest entry points consume this; library code
  * that does not need the stage registry consumes `AppLayer` directly.
  *
- * NO `SurrealClient`, and that is the point of this file (wave 3,
- * `c-ingest-cutover`). Every writer under `apps/axctl/src/ingest/` and
- * `apps/axctl/src/otel/` goes through `CacheWriteService` - not one `.upsert`,
- * `.relate` or SurrealQL statement remains - yet this layer merged `AppLayer`,
- * which was built from `SurrealClientLive`, so every `ax ingest` still opened a
- * SurrealDB websocket (and waited out `CONNECT_TIMEOUT_MS` when nothing was
- * listening) before writing a single DuckDB row. `packages/lib/src/layers.ts`
- * dropped that client from `AppLayer`, so ingest is now Surreal-free by
- * CONSTRUCTION: a residual reader inside a stage is a compile error here rather
- * than a silent empty answer from a write-frozen engine.
+ * Every writer under `apps/axctl/src/ingest/` and `apps/axctl/src/otel/` goes
+ * through `CacheWriteService`, and `AppLayer` carries no database client, so
+ * ingest acquires exactly one engine handle: the live DuckDB it writes.
  *
  * NO `CacheRead` either - see {@link withoutCacheRead} for why (F1/F2).
  */
@@ -43,8 +36,8 @@ export const ingestRuntimeLayerWith = (transport: Layer.Layer<TraceTransportTag>
  *
  * This is the F1/F2 guard, and it has to be a runtime panic rather than a
  * missing service because the two runtimes reach it differently. The CLI's
- * `runCli` is typed `SurrealClient | CacheRead` (the union across ALL commands),
- * so `CacheRead` must be satisfiable there; the daemon's `ManagedRuntime` builds
+ * `runCli` is typed `CacheRead` (the union across ALL commands), so `CacheRead`
+ * must be satisfiable there; the daemon's `ManagedRuntime` builds
  * ONE layer for both HTTP handlers - which legitimately read the published
  * snapshot through `CacheRead` - and the ingest fibers `startIngestWorkflow`
  * forks onto it. Neither can simply omit the service.

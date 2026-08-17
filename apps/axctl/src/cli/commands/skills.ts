@@ -1032,15 +1032,10 @@ export const skillsRuntime: RuntimeManifest = {
             rm: "none",
         },
     },
-    // PORTED (c-sidecar-sqlite). `ax roles` is PURE JUDGMENT - the role
-    // vocabulary and the tag counts both live in the SQLite sidecar - so it needs
-    // neither SurrealDB nor a published snapshot, and answers on a machine that
-    // has never run an ingest. The `"cache"` runtime's throwing SurrealClient
-    // proxy is the acceptance signal; roles-no-surreal.test.ts spawns the real
-    // CLI with `AX_DB_URL` on a dead port AND a snapshot path that does not exist,
-    // which an in-process test cannot check.
-    //
-    // Ported subcommands route through the cache runtime above. The remaining
-    // query subcommands stay on SurrealDB until their own wave-2 ports land.
+    // `ax roles` is PURE JUDGMENT - the role vocabulary and the tag counts both
+    // live in the SQLite sidecar - so it needs no published snapshot at all, and
+    // answers on a machine that has never run an ingest.
+    // roles-no-surreal.test.ts spawns the real CLI with a snapshot path that
+    // does not exist, which an in-process test cannot check.
     roles: "cache",
 };

@@ -14,7 +14,7 @@
  */
 
 /** The `ingest_run` columns the stranded check reads. Shape is shared by
- *  doctor's raw HTTP probe and the reaper's SurrealClient query. */
+ *  doctor's probe and the reaper's query. */
 export interface IngestRunHeartbeatRow {
     readonly id?: unknown;
     readonly started_at?: unknown;

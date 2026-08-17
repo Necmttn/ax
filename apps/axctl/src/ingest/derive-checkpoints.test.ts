@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
 import { join } from "node:path";
-import { SurrealClient } from "@ax/lib/db";
 import { CacheReadLayer, withCacheWrite } from "@ax/lib/duckdb/seam";
 import { withIngestLock } from "@ax/lib/ingest-lock";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
@@ -133,13 +132,9 @@ dtest("deriveCheckpoints uses DuckDB facts and SQLite judgments", async () => {
     })));
     await Effect.runPromise(publish.pipe(Effect.provide(Platform)));
 
-    const deadSurreal = Layer.succeed(SurrealClient, new Proxy({} as never, {
-        get() { throw new Error("SurrealDB must stay unused"); },
-    }));
     const layer = Layer.mergeAll(
         CacheReadLayer({ snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) }),
         JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
-        deadSurreal,
     );
     const result = await Effect.runPromise(Effect.gen(function* () {
         const judgment = yield* Judgment;

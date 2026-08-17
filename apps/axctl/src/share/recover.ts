@@ -76,10 +76,9 @@ export const ingestShareTranscript = (
 ): Effect.Effect<
     ShareIngestOutcome,
     never,
-    // No `SurrealClient` (wave 3, `c-ingest-cutover`): `runIngest` writes DuckDB
-    // through the seam, so the client was vestigial in this Requires union -
-    // declared, never yielded, and enough on its own to force `ax share
-    // --recover` to open a SurrealDB connection it never used.
+    // `runIngest` writes DuckDB through the seam. A database client was once
+    // declared in this Requires union and never yielded, which was enough on
+    // its own to make `ax share --recover` open a connection it never used.
     AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {

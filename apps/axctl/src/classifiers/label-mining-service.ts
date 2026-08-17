@@ -682,7 +682,7 @@ const writeReport = (
 
 /**
  * `projectReviewed`'s apply-write path now writes through `withConfigWrite`
- * (config-core/reconcile.ts) instead of SurrealClient: `projectReviewedLabelsToGraph`
+ * (config-core/reconcile.ts): `projectReviewedLabelsToGraph`
  * (./label-mining.ts) builds structured `classifier_graph_*` /
  * `transcript_label_vector` rows (LabelMiningGraphWriteRow) rather than raw
  * SurrealQL, and `withConfigWrite` is the established "a CLI command, not

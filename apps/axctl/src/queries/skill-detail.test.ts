@@ -3,66 +3,11 @@ import { Effect } from "effect";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
-    SKILL_DETAIL_BASIC_SQL,
-    SKILL_DETAIL_SQL,
     fetchSkillDetail,
     mapSkillPairRow,
     mapSkillProposalRow,
     mapSkillRecentRow,
 } from "./skill-detail.ts";
-import { SKILL_DETAIL_SQL as TUI_SKILL_DETAIL_SQL } from "../tui/queries.ts";
-
-// SKILL_DETAIL_BASIC_SQL/SKILL_DETAIL_SQL are kept UNCHANGED (still real
-// SurrealQL text) purely because tui/hooks/useSkillDetail.ts (out of scope
-// for this port) still executes them directly against a live SurrealClient -
-// see the file-header comment in skill-detail.ts. fetchSkillDetail itself no
-// longer uses these constants; it runs its own DuckDB SQL below.
-
-describe("SKILL_DETAIL_SQL", () => {
-    test("binds the skill by $name", () => {
-        expect(SKILL_DETAIL_SQL).toContain("WHERE name = $name");
-    });
-
-    test("includes the TUI daily buckets (last 30 days, ascending)", () => {
-        expect(SKILL_DETAIL_SQL).toContain("daily:");
-        expect(SKILL_DETAIL_SQL).toMatch(
-            /daily:\s*\(\s*SELECT ts FROM invoked\s*WHERE out = \$s\.id AND ts > time::now\(\) - 30d\s*ORDER BY ts ASC\s*\)/,
-        );
-    });
-
-    test("includes the dashboard evidence blocks", () => {
-        expect(SKILL_DETAIL_SQL).toContain("corrections:");
-        expect(SKILL_DETAIL_SQL).toContain("proposals:");
-        expect(SKILL_DETAIL_SQL).toContain("paired:");
-        expect(SKILL_DETAIL_SQL).toContain("turn_has_error");
-    });
-
-    test("TUI re-exports the canonical basic SQL (no fork)", () => {
-        expect(TUI_SKILL_DETAIL_SQL).toBe(SKILL_DETAIL_BASIC_SQL);
-    });
-});
-
-describe("SKILL_DETAIL_BASIC_SQL", () => {
-    test("binds the skill by $name", () => {
-        expect(SKILL_DETAIL_BASIC_SQL).toContain("WHERE name = $name");
-    });
-
-    test("includes the TUI daily buckets (last 30 days, ascending)", () => {
-        expect(SKILL_DETAIL_BASIC_SQL).toContain("daily:");
-        expect(SKILL_DETAIL_BASIC_SQL).toMatch(
-            /daily:\s*\(\s*SELECT ts FROM invoked\s*WHERE out = \$s\.id AND ts > time::now\(\) - 30d\s*ORDER BY ts ASC\s*\)/,
-        );
-    });
-
-    test("excludes the dashboard evidence blocks (TUI hot-path regression)", () => {
-        // The TUI DetailPane queries per row selection; the dashboard-only
-        // evidence blocks must never leak back into the basic variant.
-        expect(SKILL_DETAIL_BASIC_SQL).not.toContain("corrections:");
-        expect(SKILL_DETAIL_BASIC_SQL).not.toContain("proposals:");
-        expect(SKILL_DETAIL_BASIC_SQL).not.toContain("paired:");
-        expect(SKILL_DETAIL_BASIC_SQL).not.toContain("skill_paired");
-    });
-});
 
 describe("skill-detail row mappers", () => {
     test("mapSkillRecentRow keeps ts/project and optional turn_has_error", () => {

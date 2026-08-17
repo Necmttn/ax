@@ -45,7 +45,6 @@
     "db:start:nix": "nix run .#ax-surreal",
     "db:stop": "scripts/db-stop.sh",
     "db:schema": "scripts/apply-schema.sh",
-    "classifiers:smoke": "bun scripts/classifier-smoke.ts",
     "refs:setup": "scripts/setup-references.sh",
     "community:deploy": "bun alchemy deploy",
     "community:destroy": "bun alchemy destroy",
@@ -66,11 +65,6 @@
     "dashboard:build": "vite build --config apps/axctl/src/dashboard/web/vite.config.ts",
     "serve": "bun apps/axctl/src/cli/index.ts serve",
     "release:announcement": "bun scripts/create-release-announcement.ts",
-    "prototype:memory-context": "bun scripts/prototypes/ax-memory-context.ts",
-    "prototype:file-context": "bun scripts/prototypes/ax-file-context.ts",
-    "prototype:turn-references": "bun scripts/prototypes/ax-ingest-turn-references.ts",
-    "prototype:turn-blocks": "bun scripts/prototypes/turn-content-blocks-dashboard.ts",
-    "classifiers:export-windows": "bun scripts/classifier-window-export.ts",
     "classifiers:package-operations": "bun scripts/classifier-package-operations.ts",
     "classifiers:embedding-baseline": "uv run scripts/classifier-embedding-baseline.py",
     "classifiers:setfit-eval": "uv run packages/ax-classifier-session-sections/eval.py",
@@ -151,7 +145,6 @@
     "node-pty": "1.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "surrealdb": "^2.0.0",
     "yaml": "^2.8.4"
   },
   "devDependencies": {

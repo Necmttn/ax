@@ -1,33 +1,18 @@
 /**
- * `ax retro` command family, exercised END TO END against a real DuckDB
- * cache fixture + a real SQLite judgment sidecar, with the SAME throwing
- * `SurrealClient` sentinel production's no-DB runtimes (`withCache` /
- * `withoutDb` in `cli/index.ts`) provide - any access still fails LOUDLY.
+ * `ax retro` command family, exercised END TO END against a real DuckDB cache
+ * fixture and a real SQLite judgment sidecar - not fakes for either.
  *
- * WHY NOT A SPAWNED-CLI DEAD-PORT TEST (the `recall-no-surreal.test.ts`
- * shape). That shape only discriminates for a command whose MANIFEST entry
- * already says `"cache"` - `recall` and `sessions show` are. `retroRuntime`
- * (commands/retro.ts) still routes `pending`, `brief`, and `meta` through
- * `"db"`: the RUNTIME_BY_COMMAND flip is a SEPARATE, deferred chunk (band
- * ruling R34), not this chunk's to make. `withDb` provides
- * `LegacySurrealAppLayer`, and `SurrealClientLive` is `Layer.effect` whose
- * body `await`s `db.connect()` with a 5s timeout - so building that layer
- * against a dead port fails BEFORE the command body ever runs, regardless of
- * whether the ported code touches `SurrealClient`. A spawned dead-port test
- * for `pending`/`brief`/`meta` would therefore just time out on ROUTING,
- * proving nothing about the code this chunk changed.
+ * The suite calls the exported command functions directly rather than spawning
+ * the CLI. That is deliberate: a spawned run answers "did routing work", and
+ * routing is already covered by effect-cli.test.ts, which asserts each family's
+ * declared runtime. What is worth exercising here is the data path - the
+ * queries these commands run against a snapshot with known rows in it, where a
+ * wrong answer is silent rather than an error.
  *
- * So instead: call the exported command functions directly, providing a real
- * `CacheRead` (published DuckDB fixture), a real `Judgment` (SQLite sidecar,
- * not a fake), and the exact throwing `SurrealClient` sentinel `withCache`
- * provides in production. Any `SurrealClient` access still throws
- * immediately and by name - this is MORE precise than a dead-port timeout,
- * and it is not confounded by manifest routing that is out of this chunk's
- * scope. `cmdRetroReflect`/`cmdRetroPlan` need no runtime check here at all:
- * their Effect signatures require only `Judgment` (see retro-reflect.ts /
- * retro-plan.ts) - the ABSENCE of `SurrealClient` from the type is itself
- * compile-time proof, and this suite would fail to typecheck if that ever
- * regressed.
+ * `cmdRetroReflect` / `cmdRetroPlan` are absent on purpose: their Effect
+ * signatures require only `Judgment` (see retro-reflect.ts / retro-plan.ts), so
+ * the type is itself the proof they read no snapshot, and this suite would fail
+ * to typecheck if that regressed.
  */
 import { describe, expect } from "bun:test";
 import { Effect, Layer } from "effect";
@@ -36,7 +21,6 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { CacheReadLayer, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { JudgmentLayer } from "@ax/lib/sqlite";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
@@ -51,15 +35,6 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax retro family (no
 
 const T = (iso: string): Date => new Date(iso);
 
-/** The exact sentinel `withCache`/`withoutDb` provide in cli/index.ts: any
- *  property access throws immediately and by name. */
-const throwingSurrealClient = (): SurrealClientShape =>
-    new Proxy({} as SurrealClientShape, {
-        get(_target, prop) {
-            throw new Error(`SurrealClient.${String(prop)} accessed on the no-DB test layer`);
-        },
-    });
-
 /** One CacheRead + one fresh Judgment sidecar + the throwing sentinel. */
 const buildLayer = async (
     corpus: (write: CacheWriteService) => Effect.Effect<unknown, unknown, never>,
@@ -71,7 +46,6 @@ const buildLayer = async (
     const layer = Layer.mergeAll(
         CacheReadLayer({ snapshotPath: fixture.snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) }),
         JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL }),
-        Layer.succeed(SurrealClient, throwingSurrealClient()),
         Layer.merge(BunFileSystem.layer, BunPath.layer),
     );
     return { layer, sidecarPath };
@@ -80,7 +54,7 @@ const buildLayer = async (
 const run = <A, E, R>(eff: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Promise<A> =>
     Effect.runPromise(eff.pipe(Effect.provide(layer), Effect.scoped));
 
-describe("ax retro family on the cache + sidecar, SurrealClient never reachable", () => {
+describe("ax retro family on the cache + sidecar", () => {
     dtest("emit's latest-session fallback resolves through the cache, not Surreal", async () => {
         const { layer } = await buildLayer((w) =>
             w.put("session", {

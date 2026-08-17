@@ -15,9 +15,10 @@
  * domain records - it never touches `Record<string, unknown>` or restates
  * field-extraction guards.
  *
- * This is the structural half of the read seam; `graph-query.ts` is the
- * execution half (`runQuery` / `runSingleQuery` resolve `SurrealClient`, apply
- * the mapper, and own the defensive error policy).
+ * This is the structural half only. Its execution half was `graph-query.ts`,
+ * which died with the SurrealDB client; a `Query` value is now a description
+ * with no runner in tree. Callers read through `CacheRead` (`cacheRows` /
+ * `cacheFirst`, @ax/lib/duckdb/seam) instead.
  */
 
 /** A multi-row query: params → SQL, plus a per-row mapper to a domain type. */

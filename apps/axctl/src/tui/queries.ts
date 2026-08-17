@@ -1,8 +1,8 @@
 /**
- * SurrealQL query strings used by the TUI dashboard.
+ * Query strings used by the TUI dashboard.
  *
- * All SQL now lives in `src/queries/` so every surface shares one variant.
- * Re-exported here for backward compatibility with the TUI hooks.
+ * All SQL lives in `src/queries/` so every surface shares one variant;
+ * re-exported here for the TUI hooks.
  */
 
 export {
@@ -11,8 +11,3 @@ export {
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
     SKILL_SUMMARY_SQL,
 } from "../queries/skill-summary.ts";
-
-// The TUI DetailPane re-queries per (debounced) row selection, so it gets the
-// lightweight variant - the full SKILL_DETAIL_SQL adds dashboard evidence
-// blocks (corrections/proposals/paired) the TUI never renders.
-export { SKILL_DETAIL_BASIC_SQL as SKILL_DETAIL_SQL } from "../queries/skill-detail.ts";

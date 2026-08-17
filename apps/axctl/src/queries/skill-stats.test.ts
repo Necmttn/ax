@@ -3,26 +3,9 @@ import { Effect } from "effect";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
-    SKILL_STATS_SQL,
     dedupeRecentSessions,
     fetchSkillStats,
 } from "./skill-stats.ts";
-
-describe("SKILL_STATS_SQL", () => {
-    test("binds by $name and covers 7/30/90d windows", () => {
-        expect(SKILL_STATS_SQL).toContain("WHERE name = $name");
-        expect(SKILL_STATS_SQL).toContain("time::now() - 7d");
-        expect(SKILL_STATS_SQL).toContain("time::now() - 30d");
-        expect(SKILL_STATS_SQL).toContain("time::now() - 90d");
-    });
-
-    test("recent sessions are ordered server-side and bounded", () => {
-        expect(SKILL_STATS_SQL).toContain("ORDER BY ts DESC");
-        expect(SKILL_STATS_SQL).toContain("LIMIT 50");
-        expect(SKILL_STATS_SQL).toContain("in.session AS session_id");
-        expect(SKILL_STATS_SQL).toContain("in.session.cwd AS cwd");
-    });
-});
 
 describe("dedupeRecentSessions", () => {
     test("dedupes by session id and caps at 5", () => {

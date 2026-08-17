@@ -80,10 +80,9 @@ interface RecallCliOpts {
  *  - `--scope=here` → resolve cwd's repository in the CACHE; error if not a git repo
  *  - omitted        → auto-detect: try `here`; fall back to `all` silently
  *
- * PORTED OFF SURREALDB. This used to end in `resolvePwdRepository`, whose last
- * step is a `SELECT ... FROM repository:<key>` through `SurrealClient` - so a
- * command routed on the cache runtime died there. It now resolves the git
- * identity (DB-free) and looks the repository ROW up in the snapshot, which is
+ * This used to end in `resolvePwdRepository`, whose last step selected a
+ * `repository` row BY the git-derived key. It now resolves the git identity
+ * (engine-free) and looks the repository ROW up in the snapshot, which is
  * also more correct: DuckDB row ids are content-hashed by the writer, so the
  * git-derived key is NOT the row id `session.repository` holds.
  *
@@ -396,10 +395,9 @@ export const recallCommand = Command.make(
 );
 
 /**
- * The FIRST v2-ported vertical, and the template wave 2 follows: `recall` runs
- * on the `"cache"` runtime, so it gets `CacheRead` over the published snapshot
- * and a SurrealClient proxy that THROWS. Any un-ported path inside the vertical
- * fails loudly instead of silently reading the old engine (D6).
+ * `recall` was the first v2-ported vertical and the template the rest followed:
+ * it runs on the `"cache"` runtime, reading the published snapshot through
+ * `CacheRead`.
  */
 export const recallRuntime: RuntimeManifest = {
     recall: "cache",

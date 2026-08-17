@@ -6,11 +6,9 @@
  * hook files, rules text) is injected so the Effect needs no ambient env
  * reads.
  *
- * NOT SurrealClient-free yet: `./queries.ts` (this package) still resolves
- * SurrealClient for every fetch* it exports, and `../queries/cost-analytics.ts`
- * (owned by a different wave-3 chunk) resolves BOTH SurrealClient and
- * CacheRead per query - so buildProfile keeps SurrealClient in its R channel
- * even once queries.ts is ported.
+ * Every fetch* this composes - `./queries.ts` and
+ * `../queries/cost-analytics.ts` - reads the published snapshot through
+ * `CacheRead`, so that is the whole of `buildProfile`'s data requirement.
  */
 import { Effect } from "effect";
 import { fetchContentTypeBreakdown } from "../queries/content-types.ts";

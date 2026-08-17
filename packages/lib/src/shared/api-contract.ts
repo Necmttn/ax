@@ -1003,7 +1003,7 @@ export const UsageGroup = HttpApiGroup.make("usage")
  * independently of any studio invocation); `GET /api/events` (the raw SSE
  * ingest-progress TAIL, unaffected by who triggered the run) stays a legacy
  * route in `router/routes/live.ts`, now reading `ingest_event` off
- * `CacheRead` instead of a write-frozen `SurrealClient`.
+ * `CacheRead` instead of the write-frozen engine it used to poll.
  */
 
 /** Routing class write endpoints (upsert + delete by id). */

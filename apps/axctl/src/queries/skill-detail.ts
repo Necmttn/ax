@@ -1,16 +1,18 @@
 /**
  * Per-skill detail payload powering the TUI DetailPane (incl. the 30-day
  * `daily` sparkline buckets), the web dashboard's "click recommendation
- * reason → see evidence" expand panel, and `GET /api/skills/:name/detail`.
+ * reason -> see evidence" expand panel, and `GET /api/skills/:name/detail`.
  *
- * `fetchSkillDetail` (the dashboard-facing entry point) is ported onto the
- * DuckDB CacheRead seam below as five straightforward indexed lookups keyed
- * off the resolved skill id, rather than one SurrealQL `LET/RETURN` blob.
- * `SKILL_DETAIL_BASIC_SQL`/`SKILL_DETAIL_SQL` (built from
- * `skill-invocations-sql.ts`) are kept UNCHANGED and still exported: the TUI
- * (`tui/hooks/useSkillDetail.ts`, out of scope for this port) executes that
- * raw SurrealQL text directly against a live `SurrealClient` - it is a real,
- * still-live consumer, not dead code, so the string builder stays as-is.
+ * `fetchSkillDetail` reads the DuckDB CacheRead seam as five straightforward
+ * indexed lookups keyed off the resolved skill id.
+ *
+ * It used to sit beside two exported SurrealQL blobs
+ * (`SKILL_DETAIL_BASIC_SQL` / `SKILL_DETAIL_SQL`) kept on the stated grounds
+ * that "the TUI executes that raw text directly against a live SurrealClient -
+ * a real, still-live consumer, not dead code". That was wrong when written:
+ * `tui/hooks/useSkillDetail.ts` composes its OWN four statements and runs them
+ * through `CacheReadService.raw`. The blobs' only readers were their own text
+ * assertions and a re-export nothing imported, so they went with the client.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
@@ -22,90 +24,6 @@ import type {
     SkillProposalEvidence,
     SkillRecentInvocation,
 } from "@ax/lib/shared/dashboard-types";
-import { skillWithInvocationsSql } from "./skill-invocations-sql.ts";
-
-/**
- * `daily` sparkline buckets - shared verbatim by both variants below.
- */
-const DAILY_BLOCK = `    daily: (
-        SELECT ts FROM invoked
-        WHERE out = $s.id AND ts > time::now() - 30d
-        ORDER BY ts ASC
-    )`;
-
-/**
- * 10 most recent invocations. The full variant additionally projects
- * `turn_has_error` for the dashboard's error badges; the TUI doesn't render
- * it, so the basic variant keeps the projection minimal.
- */
-const recentBlock = (extraColumns: string) => `    recent: (
-        SELECT ts, in.session.project AS project${extraColumns}
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 10
-    )`;
-
-/**
- * Two variants share this module (both compose the canonical
- * skill+invocations scaffold from `skill-invocations-sql.ts`):
- *
- * - `SKILL_DETAIL_BASIC_SQL` - the TUI hot path. The DetailPane re-queries on
- *   every (debounced) j/k selection change, so it only carries the lightweight
- *   blocks it renders: skill row, invocation counts, recent list, daily
- *   sparkline buckets. All filtered by the indexed `invoked.out`.
- * - `SKILL_DETAIL_SQL` - the full dashboard payload. Adds the evidence blocks
- *   (`corrections`, `proposals`, `paired`); `paired` looks up `skill_paired`
- *   by both endpoints (indexed: `skill_paired_in`/`skill_paired_out`). Still
- *   dashboard-only - the TUI's per-row selection keeps the lighter variant.
- */
-export const SKILL_DETAIL_BASIC_SQL = skillWithInvocationsSql({
-    windows: [7, 30],
-    blocks: [recentBlock(""), DAILY_BLOCK],
-});
-
-export const SKILL_DETAIL_SQL = skillWithInvocationsSql({
-    windows: [7, 30],
-    blocks: [
-        recentBlock(", turn_has_error"),
-        DAILY_BLOCK,
-        `    corrections: (
-        SELECT ts, in.session.project AS project
-        FROM invoked
-        WHERE out = $s.id AND was_corrected = true
-        ORDER BY ts DESC
-        LIMIT 5
-    )`,
-        `    proposals: (
-        -- Some legacy proposed edges have ts = epoch (ingest path used to skip
-        -- the field). Fall back to the source turn's ts so the timeline reads
-        -- correctly.
-        SELECT
-            (IF ts > d"1970-01-02" THEN ts ELSE in.ts END) AS ts,
-            in.session.project AS project,
-            context_excerpt
-        FROM proposed
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 5
-    )`,
-        `    paired: (
-        -- Skills that co-occurred in the same session within a turn window
-        -- (denormalised by derive-signals). The pair is undirected, so we
-        -- check both directions and surface the partner's name.
-        -- Some legacy edges have last_seen = epoch; null those out so the
-        -- UI can show "-" instead of 1970.
-        SELECT
-            (IF in = $s.id THEN out.name ELSE in.name END) AS partner,
-            count,
-            (IF last_seen > d"1970-01-02" THEN last_seen ELSE NONE END) AS last_seen
-        FROM skill_paired
-        WHERE in = $s.id OR out = $s.id
-        ORDER BY count DESC
-        LIMIT 5
-    )`,
-    ],
-});
 
 export const mapSkillRecentRow = (raw: unknown): SkillRecentInvocation | null => {
     if (!raw || typeof raw !== "object") return null;
