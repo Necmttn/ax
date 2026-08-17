@@ -31,6 +31,7 @@ import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispat
 import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
 import { directivesRootCommand, axDirectivesRuntime } from "./commands/ax-directives.ts";
 import { thinkingCommand, axThinkingRuntime } from "./commands/ax-thinking.ts";
+import { promptsCommand, axPromptsRuntime } from "./commands/ax-prompts.ts";
 import { digestCommand, digestRuntime } from "./commands/digest.ts";
 import { teamCommand, teamRuntime } from "./commands/team.ts";
 import { usageCommand, usageRuntime } from "./commands/usage.ts";
@@ -106,6 +107,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...axRoutingRuntime,
     ...axDirectivesRuntime,
     ...axThinkingRuntime,
+    ...axPromptsRuntime,
     ...digestRuntime,
     ...teamRuntime,
     ...usageRuntime,
@@ -158,6 +160,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     routingRootCommand,
     directivesRootCommand,
     thinkingCommand,
+    promptsCommand,
     digestCommand,
     teamCommand,
     usageCommand,

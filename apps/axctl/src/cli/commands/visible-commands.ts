@@ -34,6 +34,7 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "routing",
     "directives",
     "thinking",
+    "prompts",
     "digest",
     "team",
     "usage",
