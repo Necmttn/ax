@@ -2,9 +2,8 @@ import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { LooseRowSchema, NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
 import { CacheRead } from "@ax/lib/duckdb/seam";
 import { posixPath } from "@ax/lib/shared/path";
@@ -17,15 +16,10 @@ import {
 } from "../queries/insights.ts";
 import { fetchWorktreesOverview } from "./worktrees-overview.ts";
 
-// PARTIALLY PORTED, blocked on chunk 2b: `repositoryOverviewSql`,
-// `recentFrictionSql`, `toolFailuresSql`, `sessionEvidenceSql` and
-// `schemaCoverageSql` (all from `../queries/insights.ts`, owned by chunk 2b)
-// still build SurrealQL and run through `SurrealClient` below - a surviving
-// reader that answers `[]` against write-frozen SurrealDB, not an error (see
-// wave3-band2-common.md). `COUNT_SQL` and `fetchWorktreesOverview` are this
-// file's own SQL and are fully on `CacheRead`. Once 2b ports `insights.ts`,
-// the five `queryRows(client, ...Sql(...))` calls below should move to
-// `CacheRead` too and the `SurrealClient` requirement drops out entirely.
+// FULLY PORTED. The five `../queries/insights.ts` statements this file runs
+// moved onto `CacheRead` once chunk 2b (#819) ported that module to DuckDB
+// dialect, and the `SurrealClient` requirement dropped out with them - which
+// is exactly what the note here previously said would happen.
 
 type Row = Record<string, unknown>;
 
@@ -99,32 +93,37 @@ const fetchCounts = (): Effect.Effect<DashboardCounts, never, CacheRead> =>
         return out;
     });
 
-const queryRows = (
-    client: SurrealClientShape,
-    sql: string,
-): Effect.Effect<readonly Row[], DbError> =>
-    Effect.gen(function* () {
-        const result = yield* client.query<[Row[]]>(sql);
-        return result?.[0] ?? [];
-    });
+/**
+ * One insight view, read through `CacheRead`.
+ *
+ * The column set differs per view and is not known here, so rows decode as
+ * `LooseRowSchema` - which is also what turns a `COUNT(*)` BIGINT cell into a
+ * number. Without it `renderDashboardHtml`'s `JSON.stringify` throws on the
+ * first aggregate column (see `LooseCellColumn`).
+ *
+ * `cacheRows` degrades a failed read to `[]` and logs `context`, matching what
+ * the SurrealDB path did when a view's table was empty - one broken view must
+ * not take the whole report down.
+ */
+const insightRows = (sql: string, context: string): Effect.Effect<readonly Row[], never, CacheRead> =>
+    cacheRows(LooseRowSchema, { sql, params: [] }, context) as Effect.Effect<readonly Row[], never, CacheRead>;
 
 export const fetchDashboardData = (
     limit: number,
-): Effect.Effect<DashboardData, DbError, SurrealClient | CacheRead> =>
+): Effect.Effect<DashboardData, DbError, CacheRead> =>
     Effect.gen(function* () {
-        const client = yield* SurrealClient;
         const [counts, tableCounts, worktrees, repositories, friction, tools, sessions] =
             yield* Effect.all(
                 [
                     fetchCounts(),
-                    queryRows(client, schemaCoverageSql()),
+                    insightRows(schemaCoverageSql(), "report.schema_coverage"),
                     // Deref-free aggregates + JS join; the legacy correlated
                     // SQL full-scanned turn/tool_call once per checkout.
                     fetchWorktreesOverview(limit),
-                    queryRows(client, repositoryOverviewSql(limit)),
-                    queryRows(client, recentFrictionSql(limit)),
-                    queryRows(client, toolFailuresSql(limit)),
-                    queryRows(client, sessionEvidenceSql(limit)),
+                    insightRows(repositoryOverviewSql(limit), "report.repository_overview"),
+                    insightRows(recentFrictionSql(limit), "report.recent_friction"),
+                    insightRows(toolFailuresSql(limit), "report.tool_failures"),
+                    insightRows(sessionEvidenceSql(limit), "report.session_evidence"),
                 ],
                 { concurrency: 6 },
             );
@@ -146,7 +145,7 @@ export const fetchDashboardData = (
 
 export const writeDashboard = (
     opts: DashboardOpts,
-): Effect.Effect<DashboardWriteResult, DbError, SurrealClient | CacheRead | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<DashboardWriteResult, DbError, CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
