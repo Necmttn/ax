@@ -59,7 +59,6 @@ const asIngestRun = <A>(
 const snapshotSessions = (dir: string): Promise<number> =>
     runWithPlatform(
         Effect.gen(function* () {
-            const path = yield* Path.Path;
             const read = yield* CacheRead;
             const result = yield* read.raw("SELECT CAST(count(*) AS DOUBLE) AS n FROM session");
             return Number(result.rows[0]?.n ?? 0);
