@@ -36,10 +36,10 @@
  *
  * WHY READS ARE LAZY AND MEMOIZED ON SUCCESS ONLY. `CacheReadLayer` must be safe
  * to sit in a long-lived layer on a machine that has no dylib and no snapshot
- * yet - `ax serve` and `ax mcp` build their layers at startup, long before anyone
+ * yet - `ax studio` and `ax mcp` build their layers at startup, long before anyone
  * runs a query - so NOTHING is opened at layer-build time. The first query opens
  * the dylib and the snapshot and remembers them. A FAILURE is deliberately not
- * remembered: the common shape is a daemon that started before the first ingest,
+ * remembered: the common shape is a process that started before the first ingest,
  * and it must pick the snapshot up once it appears rather than reporting "no
  * cache" for the rest of its life. The same argument applies AFTER the first
  * success - a memoized connection goes stale on the next publish - which is why
@@ -348,7 +348,8 @@ const readerOver = (withConnection: WithConnection, path: string): CacheReadServ
 };
 
 export interface CacheReadOptions extends DuckDbLiveOptions {
-    /** Defaults to `AX_DUCKDB_SNAPSHOT` or `~/.ax/cache/ax-snapshot.duckdb`. */
+    /** Defaults to `defaultSnapshotPath()`: `AX_DUCKDB_SNAPSHOT`, else
+     *  `AX_DATA_DIR`-rooted, else `~/.ax/cache/ax-snapshot.duckdb`. */
     readonly snapshotPath?: string;
 }
 
@@ -393,9 +394,9 @@ const snapshotIdentity = (
  *
  * AND REOPENS WHEN THE SNAPSHOT IS REPUBLISHED. A publish renames a new file
  * over the snapshot path, so a connection held across it keeps reading the OLD
- * inode - and `ax serve` / `ax mcp` hold ONE `CacheRead` for the whole process
+ * inode - and `ax studio` / `ax mcp` hold ONE `CacheRead` for the whole process
  * lifetime, so every request after the first ingest answered stale data until
- * the daemon restarted. Each statement therefore checks the file identity first
+ * the process restarted. Each statement therefore checks the file identity first
  * (one `stat`, ~tens of microseconds against a >100ms query budget) and reopens
  * when it changed.
  *

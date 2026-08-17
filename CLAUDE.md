@@ -160,8 +160,25 @@ or write. Getting it wrong does not error; it returns a wrong answer.
   no daemon to hold it open, and the studio runs only while a client is
   attached. If you are about to add a background agent, the burden of proof is
   on you - the whole point of v2 is that a fresh install starts nothing.
-- Ingest is therefore ON DEMAND: `ax ingest --since=1`. Do NOT add a Stop hook
-  to drive it - Stop fires per turn and blocks the agent until ingest returns.
+- Ingest is on demand (`ax ingest --since=1`) **plus a read-driven freshness
+  drive** - and "nothing is always-on" is NOT the same claim as "nothing ingests
+  in the background". `cli/index.ts` wraps EVERY command in
+  `withIngestStalenessPreflight`, and `maybeSpawnBackgroundIngest`
+  (`queries/ingest-staleness.ts`) forks a DETACHED, output-silenced
+  `ax ingest --since=1 --progress=off` when the graph is past
+  `AX_STALE_INGEST_HOURS` and the debounce in
+  `~/.local/share/ax/freshness-drive-state.json` has elapsed. Reading is what
+  keeps the cache fresh now that the watcher LaunchAgent is gone. It is
+  fail-open and never awaited; `AX_NO_AUTO_INGEST=1` / `AX_AUTO_INGEST=off`
+  disables it.
+  - **Consequence for anything you measure or test**: a plain read can start a
+    writer. A publish landing mid-session will change what the next read returns,
+    and two ingests racing is a real state, not a hypothetical - so pin
+    `AX_DUCKDB_SNAPSHOT` (and `AX_NO_AUTO_INGEST=1`) in any test or benchmark
+    that must see a stable store, and do not conclude "the data vanished" from
+    two reads taken minutes apart.
+- Do NOT add a Stop hook to drive ingest - Stop fires per turn and blocks the
+  agent until ingest returns. The freshness drive exists so you do not need one.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 

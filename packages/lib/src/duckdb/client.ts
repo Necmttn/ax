@@ -113,16 +113,41 @@ export interface DuckDbService {
     ) => Effect.Effect<void, SnapshotPublishError | DuckDbOpenError>;
     /** Open a published snapshot read-only. Defaults to {@link snapshotPath}. */
     readonly openSnapshot: (snapshotPath?: string) => Effect.Effect<DuckDbConnection, DuckDbOpenError>;
-    /** `AX_DUCKDB_SNAPSHOT`, or `~/.ax/cache/ax-snapshot.duckdb`. Pure - same
-     *  value as the module-level {@link snapshotPath} export. */
+    /** `AX_DUCKDB_SNAPSHOT`, else `AX_DATA_DIR`-rooted, else
+     *  `~/.ax/cache/ax-snapshot.duckdb`. Pure - same value as the module-level
+     *  {@link snapshotPath} export. */
     readonly snapshotPath: () => string;
 }
 
-/** `AX_DUCKDB_SNAPSHOT`, or `~/.ax/cache/ax-snapshot.duckdb` - mirrors the
- *  `AX_DATA_DIR`-less default used by `dylib.ts`/`lock.ts`. */
+/**
+ * `AX_DUCKDB_SNAPSHOT`, else `<AX_DATA_DIR>/ax-snapshot.duckdb`, else
+ * `~/.ax/cache/ax-snapshot.duckdb` - honours `AX_DATA_DIR` exactly like
+ * {@link dylibCacheDir} and the ingest lock.
+ *
+ * HONOURING `AX_DATA_DIR` IS LOAD-BEARING, and this function used to skip it.
+ * Its own doc comment claimed to mirror an "`AX_DATA_DIR`-less default used by
+ * `dylib.ts`/`lock.ts`" - but `dylibCacheDir` honours `AX_DATA_DIR`, so the
+ * comment was false and this resolver was the lone outlier. The live DB IS
+ * data-dir-rooted (`<dataDir>/ax-live.duckdb`, see `ingest/run.ts`), so the pair
+ * came apart: point `AX_DATA_DIR` at an empty directory, run
+ * `ax ingest --since=1`, and ingest built its live DB in the isolated dir and
+ * then PUBLISHED it over the real `~/.ax/cache/ax-snapshot.duckdb`. Exit 0, no
+ * warning, and every read surface afterwards answered "no data" instead of
+ * failing - the dominant defect class of this migration, on the main write path.
+ * Measured: a 636 MB isolated store replaced the real snapshot, and `ax recall`
+ * went from 1014 hits to zero.
+ *
+ * So: whatever roots the live DB must also root the snapshot. An isolated data
+ * dir now gets an isolated snapshot, which is what asking for isolation meant.
+ * `AX_DUCKDB_SNAPSHOT` keeps top precedence for pinning one explicitly.
+ */
 export const snapshotPath = (): string => {
     const override = process.env.AX_DUCKDB_SNAPSHOT?.trim();
-    return override ? override : posixPath.join(homedir(), ".ax", "cache", "ax-snapshot.duckdb");
+    if (override) return override;
+    const dataDir = process.env.AX_DATA_DIR?.trim();
+    return dataDir
+        ? posixPath.join(dataDir, "ax-snapshot.duckdb")
+        : posixPath.join(homedir(), ".ax", "cache", "ax-snapshot.duckdb");
 };
 
 /** First 200 chars of a statement, mirroring `packages/lib/src/db.ts`'s
@@ -885,7 +910,7 @@ const openedFrom = (lib: LibDuckDb, fs: FileSystem.FileSystem): OpenedDuckDb => 
  *
  * Every other constructor here is a `Layer`, which is right for a program that
  * knows at startup that it needs a database. The read seam does not: it must be
- * safe to put in a long-lived layer (`ax serve`, `ax mcp`) on a machine with no
+ * safe to put in a long-lived layer (`ax studio`, `ax mcp`) on a machine with no
  * dylib and no cache yet, and only pay for - and only fail on - the first query
  * that actually arrives. A layer cannot express that, because `Layer.effect`
  * runs eagerly at provide time. So the seam holds THIS, calls it lazily, and
