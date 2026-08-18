@@ -1515,7 +1515,8 @@ CREATE INDEX IF NOT EXISTS skill_candidate_status ON skill_candidate(status, cre
 -- this DuckDB build (replay fails, live db unopenable), so the apply path
 -- CHECKPOINTs immediately and this row keeps every later open comment-free.
 CREATE TABLE IF NOT EXISTS schema_comment_state (
-    id VARCHAR PRIMARY KEY,  -- always 'comments'
+    -- always 'comments'
+    id VARCHAR PRIMARY KEY,
     comments_hash VARCHAR NOT NULL,  -- stableDigest of the emitted COMMENT ON script
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
