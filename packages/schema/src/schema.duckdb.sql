@@ -1393,8 +1393,18 @@ CREATE TABLE IF NOT EXISTS ingest_stage (
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at TIMESTAMP,
     counts VARCHAR,  -- JSON
-    error_text VARCHAR
+    error_text VARCHAR,
+    self_ms BIGINT  -- this stage's OWN DuckDB time; see the ALTER below
 );
+-- `ended_at - started_at` is WALL CLOCK, and with 4 stages running at once that
+-- is mostly other stages' work: every DuckDB call is a synchronous bun:ffi call
+-- that blocks the single JS thread. Measured on a real store, `claude-config`
+-- read 0.4s serialized against 380.2s concurrent (#841, #865). `self_ms` is the
+-- summed duration of the stage's own calls, so it is comparable across runs.
+-- The ALTER is what reaches an EXISTING database: `CREATE TABLE IF NOT EXISTS`
+-- never adds a column to a table that is already there, and this file is
+-- replayed on every write as the self-heal. Both are idempotent.
+ALTER TABLE ingest_stage ADD COLUMN IF NOT EXISTS self_ms BIGINT;
 CREATE INDEX IF NOT EXISTS ingest_stage_run ON ingest_stage(run, started_at);
 
 CREATE TABLE IF NOT EXISTS ingest_event (

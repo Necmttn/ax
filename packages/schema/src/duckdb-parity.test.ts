@@ -188,6 +188,21 @@ const engineFor = (table: string): OwningEngine =>
 // polymorphic in real writers (see the POLYMORPHIC EDGES note in
 // schema.duckdb.sql's header). These columns have no Surreal DEFINE FIELD
 // counterpart, so the strict field<->column equality below must allow them.
+/**
+ * Columns that exist in v2 and have no Surreal `DEFINE FIELD` to map onto,
+ * because they were added AFTER the engine cutover.
+ *
+ * This parity suite compares the DuckDB schema against the retired Surreal DDL,
+ * which is a useful bridge while the two are meant to agree - and a false alarm
+ * for anything v2 grew on its own. Each entry has to name why the column has no
+ * Surreal counterpart, so this list stays a record rather than a silencer.
+ */
+const V2_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+    // Stage self-time: the Surreal-era ledger only had wall clock, and wall
+    // clock is what #865 showed to be unusable at PIPELINE_CONCURRENCY > 1.
+    ingest_stage: ["self_ms"],
+};
+
 const POLYMORPHIC_EDGE_EXTRA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     concerns: ["in_table", "out_table"],
     resulted_in: ["in_table", "out_table"],
@@ -219,6 +234,7 @@ describe("column-set parity (Surreal field set == owning engine's column set)", 
                 expected.add("out_id");
             }
             for (const extra of POLYMORPHIC_EDGE_EXTRA_COLUMNS[table] ?? []) expected.add(extra);
+            for (const extra of V2_ONLY_COLUMNS[table] ?? []) expected.add(extra);
             for (const f of fields) expected.add(renamedColumn(f));
 
             for (const c of expected) {

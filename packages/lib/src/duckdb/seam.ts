@@ -50,6 +50,7 @@
  */
 import { BunFileSystem } from "@effect/platform-bun";
 import { Context, Effect, FileSystem, Layer, Option, Schema, Semaphore } from "effect";
+import { chargeStageSelfTime } from "./self-time.ts";
 import { ingestLockHeldHere } from "../ingest-lock.ts";
 import {
     openDuckDbService,
@@ -329,11 +330,13 @@ type WithConnection = <A, E, R>(
 
 /** The read half of the service, over a connection-borrowing combinator. */
 const readerOver = (withConnection: WithConnection, path: string): CacheReadService => {
+    // Every statement is charged to the stage that issued it, if any - see
+    // ./self-time.ts for why per-stage wall clock cannot be read as cost.
     const raw: CacheReadService["raw"] = (sql, params) =>
-        withConnection((conn) => conn.query(sql, params));
+        chargeStageSelfTime(withConnection((conn) => conn.query(sql, params)));
 
     const rows: CacheReadService["rows"] = (schema, sql, params) =>
-        withConnection((conn) => conn.queryAs(schema, sql, params));
+        chargeStageSelfTime(withConnection((conn) => conn.queryAs(schema, sql, params)));
 
     const first = <S extends Schema.Top>(
         schema: S,
@@ -799,7 +802,8 @@ const writerOver = (
         return conn.exec(sql, stripped.params);
     };
 
-    const exec: CacheWriteService["exec"] = (sql, params) => execScrubbed(sql, params);
+    const exec: CacheWriteService["exec"] = (sql, params) =>
+        chargeStageSelfTime(execScrubbed(sql, params));
 
     /**
      * One upsert covering `rows`, all of which must share `columns`.
@@ -899,7 +903,7 @@ const writerOver = (
                 const batch = rows.slice(start, start + PUT_BATCH_ROWS);
                 const sql = yield* insertStatement(table, columns, stamped, batch.length);
                 const params = batch.flatMap((row) => columns.map((column) => row[column]));
-                yield* execScrubbed(sql, params);
+                yield* chargeStageSelfTime(execScrubbed(sql, params));
             }
         });
 

@@ -190,22 +190,35 @@ export type IngestStageOutcome =
         readonly counts?: Record<string, number>;
     };
 
-/** Settle a stage row and bump the run heartbeat. */
+/**
+ * Settle a stage row and bump the run heartbeat.
+ *
+ * `self_ms` is the stage's OWN database time, and it is not a nicety: with the
+ * pipeline running 4 stages at once, `ended_at - started_at` is mostly other
+ * stages' work, because every DuckDB call is a synchronous `bun:ffi` call that
+ * blocks the one JS thread. Measured on a real store, `claude-config` read
+ * 0.4s serially against 380.2s concurrently (#841, #865). `null` means the
+ * caller had no accumulator - a runner-side settle for a stage that never ran.
+ */
 export const writeIngestStageFinish = (
     write: CacheWriteService,
     input: {
         readonly runId: string;
         readonly source: string;
         readonly stage: string;
+        readonly selfMs?: number | null | undefined;
     } & IngestStageOutcome,
 ): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         yield* write.exec(
-            "UPDATE ingest_stage SET status = ?, ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ? WHERE id = ?",
+            "UPDATE ingest_stage SET status = ?, ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ?, self_ms = ? WHERE id = ?",
             [
                 input.status,
                 jsonParam(input.counts ?? {}),
                 input.status === "ok" ? null : input.errorText,
+                input.selfMs === undefined || input.selfMs === null
+                    ? null
+                    : Math.round(input.selfMs),
                 ingestStageId(input.runId, input.source, input.stage),
             ],
         );
