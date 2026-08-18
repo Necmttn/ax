@@ -22,7 +22,7 @@ describe("estimateTokens", () => {
 
 describe("fetchSkillBloat", () => {
     it("flags only skills over the token budget, with overBy + estTokens", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 2000, limit: 10 }),
             makeMockDb([
                 // statement 1: skill rows (bytes)
@@ -40,7 +40,7 @@ describe("fetchSkillBloat", () => {
     });
 
     it("skips synthetic shims and null-bytes skills", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 100, limit: 10 }),
             makeMockDb([
                 [
@@ -56,8 +56,27 @@ describe("fetchSkillBloat", () => {
         ]);
     });
 
+    // `--limit` is a page size, not a filter. Reporting the page as the total
+    // told a user with 40 bloated skills that they had 4 (#dogfood).
+    it("reports the pre-limit total alongside the limited page", async () => {
+        const { rows, total } = await run(
+            fetchSkillBloat({ budgetTokens: 100, limit: 2 }),
+            makeMockDb([
+                [
+                    { id: "skill:a", name: "a", bytes: 4000, dir_path: "/s/a" },
+                    { id: "skill:b", name: "b", bytes: 3000, dir_path: "/s/b" },
+                    { id: "skill:c", name: "c", bytes: 2000, dir_path: "/s/c" },
+                    { id: "skill:d", name: "d", bytes: 1000, dir_path: "/s/d" },
+                ],
+                [],
+            ]),
+        );
+        expect(rows).toHaveLength(2);
+        expect(total).toBe(4);
+    });
+
     it("sorts by estTokens desc and respects limit", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 0, limit: 2 }),
             makeMockDb([
                 [
@@ -72,7 +91,7 @@ describe("fetchSkillBloat", () => {
     });
 
     it("collapses plugin-namespace twins (same content_hash), keeps bare name, sums invocations", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 100, limit: 10 }),
             makeMockDb([
                 [
@@ -91,7 +110,7 @@ describe("fetchSkillBloat", () => {
     });
 
     it("does NOT collapse distinct skills that lack a content_hash", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 100, limit: 10 }),
             makeMockDb([
                 [
@@ -105,7 +124,7 @@ describe("fetchSkillBloat", () => {
     });
 
     it("returns empty when every skill is within budget", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 2000, limit: 10 }),
             makeMockDb([
                 [{ id: "skill:lean", name: "lean", bytes: 4000, dir_path: "/s/lean" }],
@@ -116,7 +135,7 @@ describe("fetchSkillBloat", () => {
     });
 
     it("returns empty when no data", async () => {
-        const rows = await run(
+        const { rows } = await run(
             fetchSkillBloat({ budgetTokens: 2000, limit: 10 }),
             makeMockDb([[], []]),
         );
