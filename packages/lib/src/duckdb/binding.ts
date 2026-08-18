@@ -44,6 +44,7 @@ import { Effect, FileSystem, type PlatformError } from "effect";
 import { createRequire } from "node:module";
 import { posixPath } from "../shared/path.ts";
 import { stageAndRename } from "../staged-rename.ts";
+import { canonicalPath } from "./canonical-path.ts";
 import { dylibCacheDir } from "./dylib.ts";
 import { DuckDbDylibError } from "./errors.ts";
 import type * as NodeApi from "@duckdb/node-api";
@@ -254,7 +255,15 @@ export const loadNodeApiOver = (
     options: LoadNodeApiOptions,
 ): Effect.Effect<DuckDbNodeApi, DuckDbDylibError> =>
     Effect.gen(function* () {
-        const dylibPath = options.dylibPath;
+        // CANONICALIZE FIRST (#884): the engine path feeds the stage-dir
+        // digest, the memo compare, and - critically - the staged SYMLINK's
+        // target. A relative spelling (CI smokes pass `dist/duckdb/
+        // libduckdb.so`) stored verbatim becomes a symlink target relative to
+        // the STAGE DIR, i.e. dangling - the addon's `$ORIGIN`/`@loader_path`
+        // lookup then fails with "cannot open shared object file". Canonical
+        // also means a relative and an absolute spelling of the SAME engine
+        // share one memo entry instead of tripping the one-engine refusal.
+        const dylibPath = yield* canonicalPath(fs, options.dylibPath);
         const nodeBindingPath =
             options.nodeBindingPath ??
             (yield* Effect.try({
