@@ -458,6 +458,25 @@ interface MutableCodexExtract {
     tokenUsage: CodexTokenUsage | null;
 }
 
+/**
+ * The thread this session was spawned from, across the three shapes codex has
+ * written it in. The top-level `parent_thread_id` covers most files; a subagent
+ * meta also nests it under `source.subagent.thread_spawn`, and `forked_from_id`
+ * carries the same value. Measured over the 529 files affected by #796 on one
+ * machine: top-level 519, nested 529, `forked_from_id` 529, and the nested and
+ * forked values agreed in all 529 - so the fallbacks recover the 10 that the
+ * top-level read alone dropped.
+ */
+function codexParentThreadId(payload: Record<string, unknown>): string | null {
+    const top = stringField(payload, "parent_thread_id");
+    if (top !== null) return top;
+    const source = isRecord(payload.source) ? payload.source : null;
+    const subagent = source && isRecord(source.subagent) ? source.subagent : null;
+    const spawn = subagent && isRecord(subagent.thread_spawn) ? subagent.thread_spawn : null;
+    const nested = spawn ? stringField(spawn, "parent_thread_id") : null;
+    return nested ?? stringField(payload, "forked_from_id");
+}
+
 function createCodexExtractor(
     filePath: string,
     payloadMaxBytes = DEFAULT_CODEX_PAYLOAD_MAX_BYTES,
@@ -809,6 +828,21 @@ function createCodexExtractor(
             }
 
             if (type === "session_meta" && payload) {
+                // A rollout file for a FORKED or SUBAGENT thread carries TWO
+                // adjacent `session_meta` records: its own first, then the
+                // FORK SOURCE's as a header. Reassigning on the second one
+                // gave the file the ancestor's identity, so the file's real
+                // session was never written and every record in it - the
+                // child's own turns, all 596 of them in the file this was
+                // found on - landed on the ancestor's id, colliding with that
+                // ancestor's own file on `turnRecordKey(session, seq)`.
+                //
+                // The file's own meta is always first: measured across 529
+                // affected files on one machine, the first meta's `id` equals
+                // the filename's uuid in 529 of 529, and 300 sampled
+                // correctly-ingested files carry exactly one meta - so this
+                // guard cannot disturb the working population. (#796)
+                if (session) return;
                 const rawPayloadTimestamp = stringField(payload, "timestamp");
                 const payloadTimestamp = validIsoTimestamp(rawPayloadTimestamp);
                 if (rawPayloadTimestamp !== null && !payloadTimestamp) {
@@ -824,7 +858,7 @@ function createCodexExtractor(
                     model: stringField(payload, "model"),
                     reasoning_effort: null,
                     thread_source: stringField(payload, "thread_source"),
-                    parent_thread_id: stringField(payload, "parent_thread_id"),
+                    parent_thread_id: codexParentThreadId(payload),
                     started_at: startedAt,
                     ended_at: endedAt,
                 };
