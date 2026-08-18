@@ -8,7 +8,7 @@ import {
 } from "@ax/lib/live-traces/Sink";
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { LiveTrace } from "@ax/lib/live-traces/index";
-import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, runPipeline as runPipelineWithWrite, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
+import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, pipelineConcurrency, runPipeline as runPipelineWithWrite, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 
@@ -111,6 +111,22 @@ describe("runPipeline", () => {
     // runner must dispatch claude as soon as its deps complete, regardless of
     // any sibling dep-free stage still running. See ADR-0007 / commit bded64b
     // for the legacy `pipeline.ts` path this replaced.
+    it("AX_PIPELINE_CONCURRENCY overrides the default, and only when it is >= 1", () => {
+        // Serializing the pipeline is how a stage's wall time becomes its OWN
+        // cost: every DuckDB call is a synchronous bun:ffi call that blocks the
+        // event loop, so with stages interleaved a stage's measured seconds
+        // include time spent inside OTHER stages' calls. Measured: claude-config
+        // reported 637s in a concurrent warm pass and 0.5s running alone (#841).
+        expect(pipelineConcurrency({} as NodeJS.ProcessEnv)).toBe(PIPELINE_CONCURRENCY);
+        expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "1" } as NodeJS.ProcessEnv)).toBe(1);
+        expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "8" } as NodeJS.ProcessEnv)).toBe(8);
+        // A floor of 1: 0 would deadlock the semaphore, and a fraction or a
+        // typo must not silently halve the pipeline.
+        expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "0" } as NodeJS.ProcessEnv)).toBe(PIPELINE_CONCURRENCY);
+        expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "banana" } as NodeJS.ProcessEnv)).toBe(PIPELINE_CONCURRENCY);
+        expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "2.7" } as NodeJS.ProcessEnv)).toBe(2);
+    });
+
     it("does not let a dep-free long stage block downstream stages whose deps are met", async () => {
         // Implicit dependency: if the semaphore had only 1 permit, git would
         // hold it forever (parked on `released`) and claude could never run.

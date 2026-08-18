@@ -12,6 +12,22 @@ import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
  *  × internal fan-out is already heavy. */
 export const PIPELINE_CONCURRENCY = 4;
 
+/**
+ * Effective stage concurrency, with an `AX_PIPELINE_CONCURRENCY` override.
+ *
+ * Every DuckDB call is a SYNCHRONOUS `bun:ffi` call, so it blocks the whole
+ * event loop while it runs - no other fiber makes progress. With several stages
+ * interleaved, a stage's measured wall time therefore includes time the thread
+ * spent inside OTHER stages' calls, and per-stage seconds stop being a cost
+ * measure. Setting this to 1 serializes the pipeline so each stage's wall time
+ * IS its own cost, which is how the #841 warm-vs-cold table can be read
+ * honestly. 0 or an unparseable value keeps the default.
+ */
+export const pipelineConcurrency = (env: NodeJS.ProcessEnv = process.env): number => {
+    const raw = nonNegativeNumberEnv(env.AX_PIPELINE_CONCURRENCY, 0);
+    return raw >= 1 ? Math.floor(raw) : PIPELINE_CONCURRENCY;
+};
+
 /** How often the pipeline logs which stages are still running, so a hung or
  *  slow stage is attributable instead of looking like a silent stall (#671).
  *  Env override `AX_INGEST_HEARTBEAT_SECONDS`; 0 disables. Exported for tests. */
@@ -172,7 +188,7 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
         for (const s of stages) {
             deferreds.set(s.meta.key, yield* Deferred.make<S, E>());
         }
-        const sem = yield* Semaphore.make(PIPELINE_CONCURRENCY);
+        const sem = yield* Semaphore.make(pipelineConcurrency());
 
         // Stages currently executing (permit acquired, run not yet resolved). The
         // heartbeat reads this so a hang is attributable to a specific stage (#671).
