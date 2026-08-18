@@ -383,6 +383,18 @@ export function CanvasRoute() {
                 <span>click a pill → detail (toggle in-place / focus / both)</span>
             </div>
 
+            {/* Orchestration drill-in: the subagent fan-out/parallel/sequential
+                timeline for the focused session, when it dispatched any -
+                the "click a pill to drill into its orchestration timeline"
+                promised at the top of this file (#834 - the panel existed
+                but nothing ever rendered it). */}
+            {(() => {
+                const sel = focusId ? sessions.find((s) => s.id === focusId) : undefined;
+                return sel && sel.subagent_count > 0
+                    ? <OrchestrationPanel sessionId={sel.id} onClose={() => setSelected(null)} />
+                    : null;
+            })()}
+
             {focusId && (detailMode === "focus" || detailMode === "both")
                 ? <FocusDetail sessionId={focusId} onClose={() => setSelected(null)} />
                 : null}

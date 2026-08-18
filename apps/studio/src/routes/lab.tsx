@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { api } from "../api.ts";
 
 /**
  * Lab - hidden power-user area (footer link, no nav tab).
@@ -7,8 +9,26 @@ import { Link } from "@tanstack/react-router";
  * POST /api/query; studio is ephemeral now - it opens a published snapshot
  * and exits when the last client disconnects, so there is no daemon left to
  * hold an ad-hoc query console open against. Retired rather than reworked.)
+ *
+ * Graph explorer is gated server-side behind AX_ENABLE_GRAPH_EXPLORER=1
+ * (`/api/graph-explorer` answers 404 `graph_explorer_disabled` otherwise -
+ * see dashboard/router/routes/insights.ts). The link used to render
+ * unconditionally regardless of that flag, so most visitors clicked into a
+ * dead end (#834) - the daemon's `/api/version` capability list is the
+ * single source of truth for whether the flag is on, so gate on it here too.
  */
 export function LabRoute() {
+    // Same query key IngestSplash already uses for its own /api/version probe
+    // (mounted on every route via InstrumentChrome) - shares that cache entry
+    // instead of firing a second identical request.
+    const version = useQuery({
+        queryKey: ["daemon-version"],
+        queryFn: () => api.version(),
+        staleTime: 60_000,
+        retry: false,
+    });
+    const graphExplorerEnabled = version.data?.capabilities.includes("graph-explorer") ?? false;
+
     return (
         <section className="panel">
             <header>
@@ -20,9 +40,19 @@ export function LabRoute() {
                 <Link to="/canvas" className="badge review" style={{ textDecoration: "none" }}>
                     Session canvas →
                 </Link>
-                <Link to="/graph" className="badge review" style={{ textDecoration: "none" }}>
-                    Graph explorer →
-                </Link>
+                {graphExplorerEnabled ? (
+                    <Link to="/graph" className="badge review" style={{ textDecoration: "none" }}>
+                        Graph explorer →
+                    </Link>
+                ) : (
+                    <span
+                        className="badge review"
+                        style={{ opacity: 0.5, cursor: "not-allowed" }}
+                        title="Disabled - set AX_ENABLE_GRAPH_EXPLORER=1 on the daemon to enable this experimental endpoint."
+                    >
+                        Graph explorer (disabled) →
+                    </span>
+                )}
                 <Link to="/lab/sigils" className="badge review" style={{ textDecoration: "none" }}>
                     Archetype sigils →
                 </Link>
