@@ -116,4 +116,24 @@ describe("claude normalized-batch parity", () => {
         expect(batch.compactions.length).toBeGreaterThan(0);
         expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
     });
+
+    it("carries session.raw_file as a top-level rawFile, not only inside `raw`", () => {
+        // The normalized session write resolves `raw_file` as
+        // `rawFile ?? sourcePath ?? null` and runs AFTER the claude stage's own
+        // session upsert. When this field is missing, that later write silently
+        // replaces the blob POINTER with the SOURCE PATH, and every snapshot on
+        // disk becomes unreferenced - the reference-set shape blob GC deletes
+        // (#854). A copy nested under `raw` is not enough; the writer never
+        // reads it.
+        const extracted = __testExtractClaudeJsonlLines(
+            fixtureLines(), "-Users-necmttn-Projects-ax", "claude-parity-session",
+        );
+        expect(extracted).not.toBeNull();
+        extracted!.session.raw_file = "transcripts:/claude-parity-session.jsonl";
+
+        const batch = toClaudeNormalizedBatch(
+            extracted!, extracted!.skillRelations, extracted!.invocations,
+        );
+        expect(batch.sessions[0]?.rawFile).toBe("transcripts:/claude-parity-session.jsonl");
+    });
 });

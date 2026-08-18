@@ -4,6 +4,7 @@ import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
+import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -1400,6 +1401,7 @@ export interface CodexStats {
 export const ingestCodex = Effect.fn("codex.ingest")(
     function* (write: CacheWriteService, opts: Partial<CodexIngestOpts> = {}) {
         const cfg = yield* AxConfig;
+        const path = yield* Path.Path;
         // Shared across all files this stage run: the agent_event ghost-index
         // rebuild fires at most once, memoized so file concurrency awaits one
         // in-flight rebuild + a failed rebuild is observable (#680).
@@ -1445,6 +1447,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
+        const bucketsDir = path.join(cfg.paths.dataDir, "buckets");
         const progressEvery = cfg.knobs.codexProgressEvery;
         const flushEvery = cfg.knobs.codexFlushEvery;
         const concurrency = cfg.knobs.codexConcurrency;
@@ -1651,8 +1654,21 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 // best-effort cold storage for modest files. Large Codex sessions
                 // are parsed line-by-line above; reading them again just to copy the
                 // raw transcript can dominate benchmark runs.
+                //
+                // Falls back to the SOURCE PATH when the snapshot is skipped or
+                // fails, so `raw_file` still locates the transcript while the
+                // harness keeps it - see blob-gc.ts for why that fallback shape
+                // has to stay distinguishable from a real pointer.
                 if (snapshotRaw) yield* emitProgress(3);
-                const rawPointer = filePath;
+                const rawPointer = snapshotRaw
+                    ? (yield* putBlobFromFile(
+                        bucketsDir,
+                        "codex_artifacts",
+                        blobName(completedSession.id, ".jsonl"),
+                        filePath,
+                        { maxBytes: rawMaxBytes, sizeBytes },
+                    )) ?? filePath
+                    : filePath;
 
                 // Final session upsert carries the latest ended_at and raw artifact
                 // pointer after the streaming writes have completed.
