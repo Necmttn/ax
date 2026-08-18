@@ -13,7 +13,7 @@
  * by "SQL-text assertions do not count as coverage".
  *
  * So this helper decodes through `Schema.decodeUnknownEffect` with the same
- * error mapping the real bun:ffi client uses (`queryAs` in ../duckdb/client.ts),
+ * error mapping the real DuckDB client uses (`queryAs` in ../duckdb/client.ts),
  * and a row shape that does not satisfy the caller's contract fails the test
  * with a `DuckDbDecodeError` rather than sailing through as `never`.
  *

@@ -1,22 +1,32 @@
 /**
  * The `DuckDb` service: open a database, run queries/exec through it, and
  * close it. Everything downstream in the v2 architecture reads and writes
- * through this module, so its two jobs are non-negotiable: never leak a
- * native allocation, and never turn a missing/corrupt database into a silent
- * empty result.
+ * through this module, so its two jobs are non-negotiable: never let a native
+ * failure escape untyped, and never turn a missing/corrupt database into a
+ * silent empty result.
  *
- * Layered on top of ffi.ts's raw symbol table (see that module's docstring
- * for the handle-convention gotchas) and row-decode.ts's pure accessor/coerce
- * rules. This module owns:
- *   - the open/connect/close lifecycle, including the config dance needed to
- *     force read-only mode and the guard that refuses to silently create a
- *     database when a read-only caller expected one to already exist,
- *   - translating every C-level failure into one of this package's tagged
+ * v3 Phase 1 (#880): the engine underneath is `@duckdb/node-api` - the
+ * THREADED napi client, loaded over ax's own static libduckdb by
+ * `binding.ts` - replacing the synchronous `bun:ffi` symbol table that
+ * blocked the JS thread for every call (ffi.ts, deleted). What this module
+ * still owns is unchanged:
+ *   - the open/connect/close lifecycle, including read-only opens and the
+ *     guard that refuses to silently create a database when a read-only
+ *     caller expected one to already exist,
+ *   - translating every native failure into one of this package's tagged
  *     errors (`DuckDbOpenError` / `DuckDbQueryError` / `DuckDbUnsupportedTypeError`),
- *   - the parameter-binding dispatch for prepared statements,
- *   - freeing every `duckdb_value_varchar` pointer and every `duckdb_result` /
- *     `duckdb_prepared_statement` handle, on every path (success, SQL error,
- *     decode error) via `try/finally`.
+ *   - the parameter-binding dispatch, with the SAME width/NUL guards the FFI
+ *     client enforced (see `encodeParams`),
+ *   - the decoded-row contract (`QueryResult`): the same JS value for the
+ *     same column type as the FFI client produced, pinned by client.test.ts.
+ *
+ * CONCURRENCY: calls on ONE connection are serialized through a promise
+ * chain, preserving the FFI client's implicit one-call-in-flight semantics
+ * (and staying inside DuckDB's one-thread-per-connection comfort zone).
+ * Unlike the FFI client, a running statement no longer blocks the JS thread -
+ * other fibers, timers and other connections keep running - and an
+ * interrupted fiber CANCELS its in-flight statement via
+ * `connection.interrupt()`, which the synchronous client could never do.
  *
  * RULING R6: this is a runtime module under `packages/lib/src/`, so
  * `node:fs` / `node:path` are banned (`check:no-node-fs`). The read-only
@@ -24,15 +34,14 @@
  * layer and closed over by every service/connection method - so every method
  * below keeps `R = never`, exactly as the interfaces declare. `node:os`
  * `homedir()` is not banned, and `snapshotPath()`'s default
- * (`~/.ax/cache/ax-snapshot.duckdb`) uses it. `bun:ffi` is fine - this module
- * is Bun-only regardless.
+ * (`~/.ax/cache/ax-snapshot.duckdb`) uses it.
  */
-import { ptr } from "bun:ffi";
 import { BunFileSystem } from "@effect/platform-bun";
 import { Context, Effect, FileSystem, Layer, Schema, type Scope } from "effect";
 import { homedir } from "node:os";
 import { posixPath } from "../shared/path.ts";
 import { stageAndRename } from "../staged-rename.ts";
+import { loadNodeApiOver, type DuckDbNodeApi } from "./binding.ts";
 import { canonicalPath } from "./canonical-path.ts";
 import { resolveDylibPath } from "./dylib.ts";
 import {
@@ -43,17 +52,15 @@ import {
     DuckDbUnsupportedTypeError,
     SnapshotPublishError,
 } from "./errors.ts";
-import {
-    cstr,
-    DUCKDB_RESULT_SIZE,
-    DUCKDB_SUCCESS,
-    handleBuffer,
-    openLibDuckDb,
-    readCString,
-    type LibDuckDb,
-} from "./ffi.ts";
-import { accessorFor, coerceValue, unsupportedColumns } from "./row-decode.ts";
-import type { DuckDbColumn, DuckDbParam, DuckDbRow, DuckDbValue, QueryResult } from "./types.ts";
+import { coerceValue, unsupportedColumns } from "./row-decode.ts";
+import { DuckDbTypeId, type DuckDbColumn, type DuckDbParam, type DuckDbRow, type DuckDbValue, type QueryResult } from "./types.ts";
+import type {
+    DuckDBConnection as NapiConnection,
+    DuckDBInstance as NapiInstance,
+    DuckDBResultReader as NapiResultReader,
+    DuckDBType as NapiType,
+    DuckDBValue as NapiValue,
+} from "@duckdb/node-api";
 
 export interface DuckDbConnection {
     readonly path: string;
@@ -159,103 +166,22 @@ const sqlExcerpt = (sql: string): string =>
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** True for a null/zero pointer - both the `Pointer` shape from a
- *  `PTR`-typed return and the `bigint` shape read out of a `BigUint64Array`
- *  out-param show up here. */
-const isNullPointer = (p: number | bigint | null | undefined): boolean =>
-    p === null || p === undefined || p === 0 || p === 0n;
-
-/** Free a `char *` this client owns, tolerating a null pointer. */
-const duckdbFree = (lib: LibDuckDb, p: number | bigint | null | undefined): void => {
-    if (isNullPointer(p)) return;
-    lib.symbols.duckdb_free(Number(p) as never);
-};
-
-/**
- * Open the database file and connect. Always builds a `duckdb_config` (even
- * for a read-write open) so the read-only branch is just one extra
- * `duckdb_set_config` call; the config is always destroyed before returning,
- * on every path. Throws `DuckDbOpenError` - the caller (`makeService.open`)
- * wraps this in `Effect.try`.
- *
- * The "does the file already exist" check for a read-only open happens
- * BEFORE this is called (in the effectful `open`, via `FileSystem`) rather
- * than here, so this function can stay a plain sync throw-on-failure helper
- * with no `R` channel to thread through.
- */
-// Exported (not part of the DuckDbService product surface) so the P3-1
-// config-destruction guarantee can be unit-tested against a fake LibDuckDb -
-// a failing `duckdb_create_config` cannot be provoked through a real dylib.
-export const openDatabase = (
-    lib: LibDuckDb,
-    path: string,
-    readOnly: boolean,
-): { readonly dbBuf: BigUint64Array; readonly connBuf: BigUint64Array } => {
-    const cfgBuf = handleBuffer();
-    const createState = lib.symbols.duckdb_create_config(ptr(cfgBuf));
-    if (createState !== DUCKDB_SUCCESS) {
-        // Cross-review P3-1: duckdb.h (v1.5.5, lines 1018-1023) documents
-        // that `duckdb_destroy_config` must run even when creation FAILS -
-        // the out-param can already hold a partially-initialised config. The
-        // throw used to skip it, leaking that allocation on every failure.
-        lib.symbols.duckdb_destroy_config(ptr(cfgBuf));
-        throw new DuckDbOpenError({ path, readOnly, message: "duckdb_create_config failed" });
-    }
-
-    if (readOnly) {
-        const setState = lib.symbols.duckdb_set_config(
-            cfgBuf[0]!,
-            cstr("access_mode"),
-            cstr("READ_ONLY"),
-        );
-        if (setState !== DUCKDB_SUCCESS) {
-            lib.symbols.duckdb_destroy_config(ptr(cfgBuf));
-            throw new DuckDbOpenError({
-                path,
-                readOnly,
-                message: "duckdb_set_config(access_mode, READ_ONLY) failed",
-            });
-        }
-    }
-
-    const dbBuf = handleBuffer();
-    const errBuf = handleBuffer();
-    const openState = lib.symbols.duckdb_open_ext(cstr(path), ptr(dbBuf), cfgBuf[0]!, ptr(errBuf));
-    // Always destroyed, on both the success and failure path.
-    lib.symbols.duckdb_destroy_config(ptr(cfgBuf));
-
-    if (openState !== DUCKDB_SUCCESS) {
-        const message = readCString(errBuf[0]) ?? "duckdb_open_ext failed with no message";
-        duckdbFree(lib, errBuf[0]);
-        throw new DuckDbOpenError({ path, readOnly, message });
-    }
-
-    const connBuf = handleBuffer();
-    const connectState = lib.symbols.duckdb_connect(dbBuf[0]!, ptr(connBuf));
-    if (connectState !== DUCKDB_SUCCESS) {
-        lib.symbols.duckdb_close(ptr(dbBuf));
-        throw new DuckDbOpenError({ path, readOnly, message: "duckdb_connect failed" });
-    }
-
-    return { dbBuf, connBuf };
-};
-
 /**
  * The inclusive bounds of DuckDB's `BIGINT` / C `int64_t`, which is the only
- * integer width `duckdb_bind_int64` (the sole integer bind this client binds)
- * can carry.
+ * integer width this client binds a `bigint` as.
  */
 const I64_MIN = -(2n ** 63n);
 const I64_MAX = 2n ** 63n - 1n;
 
 /**
- * Cross-review P1-2: every `bigint` parameter went straight to
- * `duckdb_bind_int64`, and `bun:ffi`'s `i64` marshalling WRAPS silently -
- * `2n**63n` was reproduced arriving as `-2n**63n`, and `2n**100n` as `0n`.
- * Corrupt data with no signal is the worst failure mode a store can have, so
- * an out-of-range value is refused BEFORE it reaches the FFI boundary. The
- * caller keeps the exact value in the message, plus the limit it broke, so
- * the fix (store it as VARCHAR/HUGEINT text) is obvious from the error alone.
+ * Cross-review P1-2 (kept from the FFI client, still load-bearing): an
+ * out-of-int64 `bigint` parameter is refused BEFORE it reaches the native
+ * layer. The napi path (`create_int64(BigInt(v))`) throws its own error on
+ * overflow rather than wrapping, but "corrupt data with no signal" and "a
+ * generic native message with no fix in it" are both worse than this guard:
+ * the caller keeps the exact value in the message, plus the limit it broke,
+ * so the fix (store it as VARCHAR/HUGEINT text) is obvious from the error
+ * alone.
  */
 export const bindableBigInt = (value: bigint): boolean => value >= I64_MIN && value <= I64_MAX;
 
@@ -263,171 +189,148 @@ const bigintRangeMessage = (idx: number, value: bigint): string =>
     `parameter ${idx} (${value}) is outside the range this client can bind: DuckDB binds integers as a signed 64-bit int64 (${I64_MIN} to ${I64_MAX}), and a wider value would silently wrap. Pass it as text (and store the column as VARCHAR or HUGEINT) instead.`;
 
 const nulByteMessage = (idx: number): string =>
-    `parameter ${idx} contains a NUL byte (U+0000): this client binds VARCHAR through a NUL-terminated C string, so the value would be SILENTLY TRUNCATED at the first NUL on the way in - and the length-less read accessor cannot detect the truncation on the way back out (see readResult's fix-round-2 note). Strip or escape NUL bytes upstream before binding. #790: the ax write seam (@ax/lib/duckdb/seam, writerOver) already does this for every write it issues, so reaching this message means a write path bypassed the seam - or a READ parameter carried a NUL, which the seam deliberately does not scrub.`;
+    `parameter ${idx} contains a NUL byte (U+0000): DuckDB VARCHARs cannot round-trip an embedded NUL through this client (the FFI client truncated at it; the contract is pinned so the swap to napi cannot silently widen what callers may write). Strip or escape NUL bytes upstream before binding. #790: the ax write seam (@ax/lib/duckdb/seam, writerOver) already does this for every write it issues, so reaching this message means a write path bypassed the seam - or a READ parameter carried a NUL, which the seam deliberately does not scrub.`;
 
-/** Bind one prepared-statement parameter (1-based `idx`). Returns the
- *  `duckdb_state` from the underlying bind call so the caller can check it. */
-const bindParam = (lib: LibDuckDb, stmtHandle: bigint, idx: bigint, param: DuckDbParam): number => {
-    if (param === null || param === undefined) return lib.symbols.duckdb_bind_null(stmtHandle, idx);
-    if (typeof param === "boolean") return lib.symbols.duckdb_bind_boolean(stmtHandle, idx, param);
-    if (typeof param === "bigint") return lib.symbols.duckdb_bind_int64(stmtHandle, idx, param);
-    if (typeof param === "number") {
-        return Number.isSafeInteger(param)
-            ? lib.symbols.duckdb_bind_int64(stmtHandle, idx, BigInt(param))
-            : lib.symbols.duckdb_bind_double(stmtHandle, idx, param);
-    }
-    if (param instanceof Date) {
-        return lib.symbols.duckdb_bind_varchar(stmtHandle, idx, cstr(param.toISOString()));
-    }
-    return lib.symbols.duckdb_bind_varchar(stmtHandle, idx, cstr(param));
-};
-
-/** Read the borrowed (result-owned) error message off a just-failed result,
- *  destroy the result, and build the typed failure. */
-const queryError = (
-    lib: LibDuckDb,
-    sql: string,
-    resultPtr: ReturnType<typeof ptr>,
-): DuckDbQueryError => {
-    const message = readCString(lib.symbols.duckdb_result_error(resultPtr)) ?? "query failed with no message";
-    lib.symbols.duckdb_destroy_result(resultPtr);
-    return new DuckDbQueryError({ sql: sqlExcerpt(sql), message });
-};
+/** The napi values + explicit types for one parameter list. A plain data
+ *  plan, exported for direct unit-testing without a database. */
+export interface BindPlan {
+    readonly values: NapiValue[];
+    readonly types: NapiType[];
+}
 
 /**
- * Run one statement (query or prepared+bound+execute) and hand back the raw
- * result buffer. Throws `DuckDbQueryError`. The prepared statement, when one
- * is created, is always destroyed in a `finally` - on the bind-failure,
- * execute-failure, and success paths alike.
+ * Encode `params` into napi bind values with EXPLICIT types, preserving the
+ * FFI client's binding semantics exactly:
+ *   - null/undefined  -> SQL NULL
+ *   - boolean         -> BOOLEAN
+ *   - bigint          -> BIGINT (int64; range-guarded above)
+ *   - safe-int number -> BIGINT (int64) - NOT the napi default (which infers
+ *                        INTEGER/DOUBLE), because the FFI client always bound
+ *                        integers via `duckdb_bind_int64`
+ *   - other number    -> DOUBLE
+ *   - Date            -> VARCHAR of `toISOString()`
+ *   - string          -> VARCHAR (NUL-guarded above)
+ *
+ * Explicit types matter: napi's own inference maps a JS `bigint` to HUGEINT,
+ * which would silently change every integer comparison's type from the FFI
+ * behavior callers were written against.
+ *
+ * Throws `DuckDbQueryError` - callers run it inside the same try that wraps
+ * the statement itself.
  */
-const runStatement = (
-    lib: LibDuckDb,
-    connHandle: bigint,
+export const encodeParams = (
+    api: DuckDbNodeApi,
     sql: string,
     params: ReadonlyArray<DuckDbParam>,
-): { readonly resultPtr: ReturnType<typeof ptr>; readonly resultBuf: Uint8Array } => {
-    const resultBuf = new Uint8Array(DUCKDB_RESULT_SIZE);
-    const resultPtr = ptr(resultBuf);
-
-    if (params.length === 0) {
-        const state = lib.symbols.duckdb_query(connHandle, cstr(sql), resultPtr);
-        if (state !== DUCKDB_SUCCESS) throw queryError(lib, sql, resultPtr);
-        return { resultPtr, resultBuf };
-    }
-
-    const stmtBuf = handleBuffer();
-    const prepareState = lib.symbols.duckdb_prepare(connHandle, cstr(sql), ptr(stmtBuf));
-    if (prepareState !== DUCKDB_SUCCESS) {
-        const message =
-            readCString(lib.symbols.duckdb_prepare_error(stmtBuf[0]!)) ??
-            "duckdb_prepare failed with no message";
-        lib.symbols.duckdb_destroy_prepare(ptr(stmtBuf));
-        throw new DuckDbQueryError({ sql: sqlExcerpt(sql), message });
-    }
-
-    try {
-        const stmtHandle = stmtBuf[0]!;
-        for (let i = 0; i < params.length; i += 1) {
-            const param = params[i];
-            if (typeof param === "bigint" && !bindableBigInt(param)) {
+): BindPlan => {
+    const values: NapiValue[] = [];
+    const types: NapiType[] = [];
+    for (let i = 0; i < params.length; i += 1) {
+        const param = params[i];
+        if (param === null || param === undefined) {
+            values.push(null);
+            types.push(api.SQLNULL); // create_null_value
+        } else if (typeof param === "boolean") {
+            values.push(param);
+            types.push(api.BOOLEAN);
+        } else if (typeof param === "bigint") {
+            if (!bindableBigInt(param)) {
                 throw new DuckDbQueryError({
                     sql: sqlExcerpt(sql),
                     message: bigintRangeMessage(i + 1, param),
                 });
             }
-            // A VARCHAR bind through a NUL-terminated C string would silently
-            // truncate at an embedded NUL. The read side documents "callers must
-            // escape NUL bytes" but nothing enforced it - make the silent
-            // truncation a loud, typed failure at the write boundary instead.
-            if (typeof param === "string" && param.includes("\0")) {
+            values.push(param);
+            types.push(api.BIGINT);
+        } else if (typeof param === "number") {
+            if (Number.isSafeInteger(param)) {
+                values.push(BigInt(param));
+                types.push(api.BIGINT);
+            } else {
+                values.push(param);
+                types.push(api.DOUBLE);
+            }
+        } else if (param instanceof Date) {
+            values.push(param.toISOString());
+            types.push(api.VARCHAR);
+        } else {
+            if (param.includes("\0")) {
                 throw new DuckDbQueryError({
                     sql: sqlExcerpt(sql),
                     message: nulByteMessage(i + 1),
                 });
             }
-            const bindState = bindParam(lib, stmtHandle, BigInt(i + 1), params[i]);
-            if (bindState !== DUCKDB_SUCCESS) {
-                throw new DuckDbQueryError({
-                    sql: sqlExcerpt(sql),
-                    message: `failed to bind parameter ${i + 1}`,
-                });
-            }
+            values.push(param);
+            types.push(api.VARCHAR);
         }
-
-        const execState = lib.symbols.duckdb_execute_prepared(stmtHandle, resultPtr);
-        if (execState !== DUCKDB_SUCCESS) throw queryError(lib, sql, resultPtr);
-    } finally {
-        lib.symbols.duckdb_destroy_prepare(ptr(stmtBuf));
     }
-
-    return { resultPtr, resultBuf };
+    return { values, types };
 };
 
 /**
- * Decode a successful result into `QueryResult`. Throws
- * `DuckDbUnsupportedTypeError` for the FIRST undecodable column BEFORE
- * reading any cell - a BLOB (or other unsupported) column must never let a
- * garbage value through. Every `duckdb_value_varchar` pointer is freed in a
- * `try/finally` immediately wrapping `readCString`, on every row - freeing
- * happens whether or not decoding the string itself throws, by construction
- * rather than by the two calls merely sitting next to each other.
+ * One decoded cell: the napi value for a SUPPORTED column type (see
+ * `unsupportedColumns` / row-decode.ts for the closed set) becomes the same
+ * JS value the FFI client produced for that type:
+ *   - BOOLEAN -> boolean; narrow ints/floats -> number (napi hands them over
+ *     as numbers already)
+ *   - BIGINT/UBIGINT/HUGEINT/UHUGEINT -> bigint (64-bit stays bigint so a
+ *     row's TS type never depends on a value's magnitude; int128 is
+ *     arbitrary-precision in a JS bigint)
+ *   - VARCHAR -> string
+ *   - TIMESTAMP -> `Date`, MILLISECOND-truncated (P2-2 contract): the napi
+ *     value renders to DuckDB's own text form and goes through the SAME
+ *     `coerceValue` text path the FFI client used, so `.999999` still reads
+ *     back `.999` and an unparseable rendering (e.g. `infinity`) still falls
+ *     back to its text
+ *   - DATE/TIME/INTERVAL/DECIMAL -> their DuckDB text rendering (string),
+ *     exactly as `duckdb_value_varchar` produced
  *
- * Fix round 1 (ruling R10, Part B): a column can pass the structural
- * `unsupportedColumns` check above (it has an accessor kind) and STILL fail
- * per-cell - `duckdb_value_varchar` returns a NULL `char *` for a handful of
- * types (`TIME_TZ`/`TIMESTAMP_TZ` confirmed, plus `TIMESTAMP_S`/`_MS`/`_NS`,
- * `UUID`, `ENUM`, `BIT` in this dylib build - see the comment on
- * `VARCHAR_TYPES` in row-decode.ts) even though `duckdb_value_is_null`
- * reports the cell is NOT SQL NULL. That combination - not-null cell, NULL
- * varchar pointer - is an ACCESSOR FAILURE, not an empty string and not a
- * real NULL, so it raises `DuckDbUnsupportedTypeError` naming the column
- * instead of silently decoding to `""`. This is the general guard: it is
- * what would have caught `TIMESTAMP_TZ` before it shipped, and it is what
- * catches every other type in the list above today plus whatever DuckDB
- * adds next. It keys on duckdb.h's own documented contract for
- * `duckdb_value_varchar` (duckdb.h:1579-1581): "returns the char* value...
- * NULL if the value cannot be converted" - the NULL return IS the failure
- * signal, not an implementation quirk being worked around.
- *
- * Fix round 2 (ruling R11) - KNOWN, UNFIXED LIMITATION: `duckdb_value_varchar`
- * returns a plain NUL-terminated `char *` with no accompanying length, and
- * `readCString` (ffi.ts) decodes it with `new CString(ptr)`, which stops at
- * the first NUL byte. A VARCHAR value containing an embedded NUL byte (e.g.
- * `SELECT 'a' || chr(0) || 'b'`) is silently TRUNCATED to `"a"` - no error,
- * no signal, on the load-bearing read path every v2 caller uses. This is NOT
- * fixable within this design: the length-carrying accessor
- * (`duckdb_value_string`, returning `duckdb_string { char *data; idx_t size;
- * }`) returns that struct BY VALUE, which `bun:ffi` cannot express (no
- * struct-typed `FFIType` exists at all - the same constraint already
- * documented in ffi.ts for `duckdb_fetch_chunk`/`duckdb_result`). Callers
- * storing arbitrary text (e.g. JSON transcripts, which can carry `\0`)
- * through this client must reject or escape NUL bytes before writing, since
- * this client cannot detect the truncation on the way back out.
+ * Exported for direct unit-testing without a database.
  */
-// Exported (not part of the DuckDbService/DuckDbConnection product surface)
-// so fix round 1's Part B guard can be unit-tested directly against a fake
-// LibDuckDb: Part A now excludes every currently-known trigger of the guard
-// from VARCHAR_TYPES structurally, so no real SQL type reaches it any more -
-// see client.test.ts.
-export const readResult = (
-    lib: LibDuckDb,
-    resultPtr: ReturnType<typeof ptr>,
-    sql = "",
-): QueryResult => {
-    const columnCount = Number(lib.symbols.duckdb_column_count(resultPtr));
-    const columns: DuckDbColumn[] = [];
-    for (let c = 0; c < columnCount; c += 1) {
-        const idx = BigInt(c);
-        const name = readCString(lib.symbols.duckdb_column_name(resultPtr, idx)) ?? `column_${c}`;
-        const typeId = lib.symbols.duckdb_column_type(resultPtr, idx);
-        columns.push({ name, typeId });
+export const decodeCell = (typeId: number, value: NapiValue): DuckDbValue => {
+    if (value === null) return null;
+    switch (typeof value) {
+        case "boolean":
+            return value;
+        case "number":
+            return value;
+        case "string":
+            return coerceValue(typeId, value);
+        case "bigint":
+            // 64-bit and 128-bit integer columns keep bigint; anything else
+            // napi chose to hand over as bigint is width-safe to narrow.
+            return typeId === DuckDbTypeId.BIGINT ||
+                    typeId === DuckDbTypeId.UBIGINT ||
+                    typeId === DuckDbTypeId.HUGEINT ||
+                    typeId === DuckDbTypeId.UHUGEINT
+                ? value
+                : Number(value);
+        default:
+            // A value object (timestamp/date/time/interval/decimal): its
+            // toString() is DuckDB's own text rendering - the same text the
+            // row-major varchar accessor produced - so the coerce rules apply
+            // unchanged.
+            return coerceValue(typeId, String(value));
     }
+};
 
-    // Cross-review P2-1, half one: a row is keyed BY COLUMN NAME, so two
-    // columns sharing a name (`SELECT a.v, b.v FROM a, b` - DuckDB permits
-    // it) used to overwrite each other and hand the caller one value where it
-    // asked for two. That is silent data loss on a read path, so it is a
-    // typed refusal naming the fix.
+/**
+ * Decode a finished reader into `QueryResult`. Refuses (typed) BEFORE reading
+ * any cell:
+ *   - duplicate column names (cross-review P2-1, half one: rows are keyed by
+ *     name, so two columns sharing one would silently overwrite each other),
+ *   - any column outside the supported closed set (`DuckDbUnsupportedTypeError`
+ *     via `unsupportedColumns` - a BLOB/TIMESTAMP_TZ/UUID/... column must
+ *     never let a differently-shaped value through just because the napi
+ *     driver CAN render it; every caller was written against the closed set).
+ */
+const decodeReader = (reader: NapiResultReader, sql: string): QueryResult => {
+    const names = reader.columnNames();
+    const columns: DuckDbColumn[] = names.map((name, i) => ({
+        name,
+        typeId: reader.columnTypeId(i) as number,
+    }));
+
     const duplicate = columns.find((c, i) => columns.findIndex((o) => o.name === c.name) !== i);
     if (duplicate !== undefined) {
         throw new DuckDbQueryError({
@@ -442,14 +345,9 @@ export const readResult = (
         throw new DuckDbUnsupportedTypeError({ column: first.name, typeId: first.typeId });
     }
 
-    // Hoisted out of the row loop: every column's accessor kind is invariant
-    // across rows, and `unsupportedColumns` above already proved none is null.
-    const columnKinds = columns.map((c) => accessorFor(c.typeId));
-
-    const rowCount = Number(lib.symbols.duckdb_row_count(resultPtr));
+    const rawRows = reader.getRows();
     const rows: DuckDbRow[] = [];
-    for (let r = 0; r < rowCount; r += 1) {
-        const rowIdx = BigInt(r);
+    for (const rawRow of rawRows) {
         // Cross-review P2-1, half two: on a normal `{}` the assignment
         // `row["__proto__"] = v` hits Object.prototype's `__proto__` SETTER,
         // which ignores a non-object value - so a `__proto__` column silently
@@ -457,126 +355,101 @@ export const readResult = (
         // accessors at all, so every column name (`__proto__`, `constructor`,
         // `toString`) round-trips as plain data.
         const row: Record<string, DuckDbValue> = Object.create(null) as Record<string, DuckDbValue>;
-        for (let c = 0; c < columnCount; c += 1) {
-            const colIdx = BigInt(c);
-            const column = columns[c]!;
-
-            if (lib.symbols.duckdb_value_is_null(resultPtr, colIdx, rowIdx)) {
-                row[column.name] = null;
-                continue;
-            }
-
-            const kind = columnKinds[c];
-            let raw: boolean | bigint | number | string;
-            switch (kind) {
-                case "boolean":
-                    raw = lib.symbols.duckdb_value_boolean(resultPtr, colIdx, rowIdx);
-                    break;
-                case "int64":
-                    raw = lib.symbols.duckdb_value_int64(resultPtr, colIdx, rowIdx);
-                    break;
-                case "uint64":
-                    raw = lib.symbols.duckdb_value_uint64(resultPtr, colIdx, rowIdx);
-                    break;
-                case "double":
-                    raw = lib.symbols.duckdb_value_double(resultPtr, colIdx, rowIdx);
-                    break;
-                case "varchar": {
-                    const strPtr = lib.symbols.duckdb_value_varchar(resultPtr, colIdx, rowIdx);
-                    if (isNullPointer(strPtr)) {
-                        // duckdb_value_is_null already said this cell is NOT
-                        // SQL NULL, so a NULL char* here means the row-major
-                        // accessor cannot render this type at all - see the
-                        // fix-round-1 note on this function.
-                        throw new DuckDbUnsupportedTypeError({
-                            column: column.name,
-                            typeId: column.typeId,
-                        });
-                    }
-                    try {
-                        raw = readCString(strPtr) ?? "";
-                    } finally {
-                        duckdbFree(lib, strPtr);
-                    }
-                    break;
-                }
-                default:
-                    // unreachable: unsupportedColumns() above already excluded
-                    // every column whose accessorFor() is null.
-                    throw new DuckDbUnsupportedTypeError({ column: column.name, typeId: column.typeId });
-            }
-            row[column.name] = coerceValue(column.typeId, raw);
+        for (let c = 0; c < columns.length; c += 1) {
+            row[columns[c]!.name] = decodeCell(columns[c]!.typeId, rawRow[c] ?? null);
         }
         rows.push(row);
     }
 
-    const rowsChanged = Number(lib.symbols.duckdb_rows_changed(resultPtr));
-    return { columns, rows, rowsChanged };
+    return { columns, rows, rowsChanged: reader.rowsChanged };
 };
 
-// Exported (not part of the DuckDbService/DuckDbConnection product surface,
-// same rationale as readResult above) so fix round 2's close/idempotency
-// tests can drive a connection against a fake LibDuckDb and count
-// duckdb_disconnect/duckdb_close calls directly, instead of relying on an
-// indirect, unreliable proxy (a read-only reopen of the same path does NOT
-// prove the write handle was released - opening a path read-only while a
-// write handle is still open on it succeeds against this dylib).
 /** Build the `DuckDbConnection` for one open database handle. */
-export const makeConnection = (
-    lib: LibDuckDb,
+const makeConnection = (
+    api: DuckDbNodeApi,
     path: string,
     readOnly: boolean,
-    dbBuf: BigUint64Array,
-    connBuf: BigUint64Array,
+    instance: NapiInstance,
+    connection: NapiConnection,
 ): DuckDbConnection => {
-    const connHandle = connBuf[0]!;
     let closed = false;
 
-    /** Run `sql`, always destroying the native result exactly once, whether
-     *  decoding succeeds, fails with `DuckDbUnsupportedTypeError`, or a lower
-     *  layer throws something unexpected. */
-    const runQuery = (sql: string, params: ReadonlyArray<DuckDbParam>): QueryResult => {
-        // `resultBuf` is bound (not discarded) so it stays a live local
-        // reference for the duration of this call - `resultPtr` is a raw
-        // address into its backing store, so the buffer must outlive every
-        // use of that address. Never read directly; it exists to be held.
-        const { resultPtr, resultBuf } = runStatement(lib, connHandle, sql, params);
-        try {
-            return readResult(lib, resultPtr, sql);
-        } finally {
-            lib.symbols.duckdb_destroy_result(resultPtr);
-            void resultBuf;
-        }
-    };
+    /**
+     * The per-connection serialization chain: exactly one statement in flight
+     * per connection, in submission order - the FFI client's semantics, kept
+     * on purpose (callers interleave DDL/DML on one writer connection and
+     * were never written against concurrent execution). The chain never
+     * rejects (each link's outcome is absorbed), so one failed statement
+     * cannot poison the queue.
+     */
+    let tail: Promise<unknown> = Promise.resolve();
 
     /**
-     * Cross-review P1-1: `connHandle` is captured ONCE, above, and `close`
-     * frees the database and connection behind it - so every operation issued
-     * after `close` handed a DANGLING pointer to libduckdb. That is not a
-     * catchable error: it was reproduced as a Bun SEGMENTATION FAULT, the
-     * process gone with no stack, no Effect failure, and nothing written to
-     * the caller's log. Use-after-close is a caller bug either way, but this
-     * client's job is to make it a typed failure the caller can see, so every
-     * operation re-checks the flag first and NO native symbol is reached.
-     *
-     * `Effect.suspend` matters: the check has to run when the effect RUNS,
-     * not when it is built - a `query(...)` value constructed before `close`
-     * and run after it must still refuse.
+     * Cross-review P1-1, napi edition: `close` tears down the native
+     * connection/instance, so a statement issued after it must never reach
+     * them. The FFI version re-checked a flag before touching a raw pointer;
+     * here the check runs BOTH at effect-run time (`Effect.suspend`) and
+     * again when the statement's turn in the chain arrives - a query built
+     * before `close` and already queued when `close` lands is refused, not
+     * run against a disconnecting handle.
      */
-    const refuseIfClosed = (sql: string): Effect.Effect<never, DuckDbQueryError> =>
-        Effect.fail(
-            new DuckDbQueryError({
-                sql: sqlExcerpt(sql),
-                message: `the connection to ${path} is closed; open a new one (a statement on a closed connection would dereference a freed native handle)`,
-            }),
+    const closedError = (sql: string): DuckDbQueryError =>
+        new DuckDbQueryError({
+            sql: sqlExcerpt(sql),
+            message: `the connection to ${path} is closed; open a new one (a statement on a closed connection would touch a torn-down native handle)`,
+        });
+
+    const closedInterrupt = (sql: string): DuckDbQueryError =>
+        new DuckDbQueryError({
+            sql: sqlExcerpt(sql),
+            message: "statement was interrupted before it started",
+        });
+
+    const runQuery = (
+        sql: string,
+        params: ReadonlyArray<DuckDbParam>,
+        signal: AbortSignal,
+    ): Promise<QueryResult> => {
+        const run = async (): Promise<QueryResult> => {
+            if (closed) throw closedError(sql);
+            if (signal.aborted) throw closedInterrupt(sql);
+            // Interruption: while THIS statement is the one running, an abort
+            // cancels it natively. Registered only after the chain reaches us,
+            // so aborting a still-queued statement can never interrupt a
+            // DIFFERENT caller's in-flight work.
+            const onAbort = (): void => {
+                try {
+                    connection.interrupt();
+                } catch {
+                    /* best-effort: an uninterruptible statement finishes on its own */
+                }
+            };
+            signal.addEventListener("abort", onAbort, { once: true });
+            try {
+                const plan = encodeParams(api, sql, params);
+                const reader =
+                    plan.values.length === 0
+                        ? await connection.runAndReadAll(sql)
+                        : await connection.runAndReadAll(sql, plan.values, plan.types);
+                return decodeReader(reader, sql);
+            } finally {
+                signal.removeEventListener("abort", onAbort);
+            }
+        };
+        const turn = tail.then(run, run);
+        tail = turn.then(
+            () => undefined,
+            () => undefined,
         );
+        return turn;
+    };
 
     const query: DuckDbConnection["query"] = (sql, params = []) =>
         Effect.suspend(() =>
             closed
-                ? refuseIfClosed(sql)
-                : Effect.try({
-                      try: () => runQuery(sql, params),
+                ? Effect.fail(closedError(sql))
+                : Effect.tryPromise({
+                      try: (signal) => runQuery(sql, params, signal),
                       catch: (err) =>
                           err instanceof DuckDbQueryError || err instanceof DuckDbUnsupportedTypeError
                               ? err
@@ -601,19 +474,48 @@ export const makeConnection = (
             ),
         );
 
-    const close: Effect.Effect<void> = Effect.sync(() => {
-        if (closed) return;
-        closed = true;
-        lib.symbols.duckdb_disconnect(ptr(connBuf));
-        lib.symbols.duckdb_close(ptr(dbBuf));
+    /**
+     * Close AFTER the chain drains: `closed` flips first (new statements are
+     * refused immediately, queued ones refuse at their turn), then the
+     * disconnect runs once nothing native is in flight - `disconnectSync`
+     * during a running statement is the napi equivalent of the dangling-
+     * pointer segfault the FFI client's flag existed to prevent. Idempotent:
+     * the teardown chains once; later calls await the same drained chain.
+     */
+    const close: Effect.Effect<void> = Effect.suspend(() => {
+        if (!closed) {
+            closed = true;
+            tail = tail.then(
+                () => teardown(),
+                () => teardown(),
+            );
+        }
+        const settled = tail.then(
+            () => undefined,
+            () => undefined,
+        );
+        return Effect.promise(() => settled);
     });
+
+    const teardown = (): void => {
+        try {
+            connection.disconnectSync();
+        } catch {
+            /* already torn down */
+        }
+        try {
+            instance.closeSync();
+        } catch {
+            /* already torn down */
+        }
+    };
 
     return { path, readOnly, query, queryAs, exec, close };
 };
 
-/** Build the `DuckDbService` over an already-opened `LibDuckDb`. `fs` is
+/** Build the `DuckDbService` over a loaded `@duckdb/node-api`. `fs` is
  *  closed over from the layer so `open`/`scoped` stay `R = never`. */
-const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService => {
+const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbService => {
     const open: DuckDbService["open"] = (path, options) => {
         const readOnly = options?.readOnly ?? false;
         return Effect.gen(function* () {
@@ -641,15 +543,31 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
                 }
             }
 
-            const { dbBuf, connBuf } = yield* Effect.try({
-                try: () => openDatabase(lib, path, readOnly),
+            const opened = yield* Effect.tryPromise({
+                try: async () => {
+                    // Same config key the FFI client set through duckdb_config:
+                    // access_mode READ_ONLY refuses writes at the engine.
+                    const instance = await api.DuckDBInstance.create(
+                        path,
+                        readOnly ? { access_mode: "READ_ONLY" } : {},
+                    );
+                    try {
+                        const connection = await instance.connect();
+                        return { instance, connection };
+                    } catch (err) {
+                        try {
+                            instance.closeSync();
+                        } catch {
+                            /* connect failed; instance close is best-effort */
+                        }
+                        throw err;
+                    }
+                },
                 catch: (err) =>
-                    err instanceof DuckDbOpenError
-                        ? err
-                        : new DuckDbOpenError({ path, readOnly, message: errorMessage(err) }),
+                    new DuckDbOpenError({ path, readOnly, message: errorMessage(err) }),
             });
 
-            return makeConnection(lib, path, readOnly, dbBuf, connBuf);
+            return makeConnection(api, path, readOnly, opened.instance, opened.connection);
         });
     };
 
@@ -678,7 +596,7 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
      *
      * RULING R14 - READ THIS BEFORE CALLING WITHOUT `options.from`:
      * without `options.from`, this function opens its OWN, SEPARATE
-     * `duckdb_open_ext` handle on `livePath`. If another handle on that same
+     * database handle on `livePath`. If another handle on that same
      * path is ALREADY OPEN IN THIS PROCESS - e.g. an ingest writer, which is
      * exactly the epic's intended call site ("writes happen inside ingest
      * against the live database... publish is the hand-off at the end of
@@ -870,43 +788,54 @@ const makeService = (lib: LibDuckDb, fs: FileSystem.FileSystem): DuckDbService =
 
 export class DuckDb extends Context.Service<DuckDb, DuckDbService>()("ax/DuckDb") {}
 
-/** `dlopen` throws synchronously - on a missing file AND on a missing symbol
- *  (ruling R2) - never let that surface as an unhandled defect. Shared by
- *  both layer constructors below so a bad dylib path is a typed
- *  `DuckDbDylibError` through either one. */
-const openLibOrFail = (dylibPath: string): Effect.Effect<LibDuckDb, DuckDbDylibError> =>
-    Effect.try({
-        try: () => openLibDuckDb(dylibPath),
-        catch: (err) =>
-            new DuckDbDylibError({
-                message: `failed to open libduckdb at ${dylibPath}: ${errorMessage(err)}`,
-            }),
-    });
-
 /**
- * An open `DuckDbService` plus the function that releases the dylib behind it.
- * Scope-free ON PURPOSE - see {@link openDuckDbService}.
+ * The service plus the release hook the FFI client's `dlopen` handle needed.
+ * A napi addon CANNOT be unloaded (the native module registers process-wide),
+ * so `close` is now a documented no-op - kept so every existing teardown path
+ * (the seam's layer finalizer, tests) stays shaped exactly as before.
  */
 export interface OpenedDuckDb {
     readonly db: DuckDbService;
-    /** Release the `dlopen` handle. Idempotent-ish and never throws: an
-     *  unloadable dylib must not fail a teardown. */
+    /** No-op under the napi driver (a native addon outlives every scope);
+     *  never throws, exactly as teardown paths require. */
     readonly close: () => void;
 }
 
-const openedFrom = (lib: LibDuckDb, fs: FileSystem.FileSystem): OpenedDuckDb => ({
-    db: makeService(lib, fs),
-    close: () => {
-        try {
-            lib.close();
-        } catch {
-            /* an unloadable dylib must not fail teardown */
-        }
-    },
-});
+/** Options for the layer constructors and {@link openDuckDbService}. */
+export interface DuckDbLiveOptions {
+    /** The bundled libduckdb asset path (an apps-side `{ type: "file" }` embed
+     *  import). `packages/lib` cannot import from `apps/*`, so the embed lives
+     *  on the consumer's side and is threaded in here rather than imported
+     *  directly - see `apps/axctl/src/duckdb-embed.gen.ts`'s header (#791,
+     *  wave 3 c-binary-embed). `null` and `undefined` both mean "no bundled
+     *  asset". */
+    readonly assetPath?: string | null;
+    /** The bundled `duckdb.node` addon asset path, same threading story as
+     *  `assetPath` (#880: the napi driver needs the addon bytes too in a
+     *  compiled binary). Unset in source mode - the addon resolves from
+     *  node_modules. */
+    readonly nodeBindingAssetPath?: string | null;
+}
+
+/** Resolve the dylib, load the napi driver over it, build the service. */
+const serviceOver = (
+    fs: FileSystem.FileSystem,
+    options?: DuckDbLiveOptions,
+): Effect.Effect<DuckDbService, DuckDbDylibError> =>
+    Effect.gen(function* () {
+        const assetPath = options?.assetPath ?? undefined;
+        const dylibPath = yield* resolveDylibPath(assetPath === undefined ? {} : { assetPath }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+        );
+        const api = yield* loadNodeApiOver(fs, {
+            dylibPath,
+            nodeBindingPath: options?.nodeBindingAssetPath ?? undefined,
+        });
+        return makeService(api, fs);
+    });
 
 /**
- * Open libduckdb and build the service over it, WITHOUT a `Scope`.
+ * Open the driver and build the service over it, WITHOUT a `Scope`.
  *
  * Every other constructor here is a `Layer`, which is right for a program that
  * knows at startup that it needs a database. The read seam does not: it must be
@@ -923,96 +852,46 @@ export const openDuckDbService = (
     fs: FileSystem.FileSystem,
     options?: DuckDbLiveOptions,
 ): Effect.Effect<OpenedDuckDb, DuckDbDylibError> =>
-    Effect.gen(function* () {
-        const assetPath = options?.assetPath ?? undefined;
-        const dylibPath = yield* resolveDylibPath(assetPath === undefined ? {} : { assetPath }).pipe(
-            Effect.provideService(FileSystem.FileSystem, fs),
-        );
-        return yield* openDuckDbServiceAt(fs, dylibPath);
-    });
+    Effect.map(serviceOver(fs, options), (db) => ({ db, close: () => {} }));
 
 /** {@link openDuckDbService} with the dylib path already decided. */
 export const openDuckDbServiceAt = (
     fs: FileSystem.FileSystem,
     dylibPath: string,
 ): Effect.Effect<OpenedDuckDb, DuckDbDylibError> =>
-    Effect.map(openLibOrFail(dylibPath), (lib) => openedFrom(lib, fs));
+    Effect.map(
+        Effect.flatMap(loadNodeApiOver(fs, { dylibPath }), (api) =>
+            Effect.succeed(makeService(api, fs)),
+        ),
+        (db) => ({ db, close: () => {} }),
+    );
 
-/**
- * The one place a `DuckDb` layer is built, over whatever effect produces the
- * `LibDuckDb`.
- *
- * Cross-review P3-2: `Layer.effect` runs its effect IN THE LAYER'S SCOPE, so
- * an `Effect.addFinalizer` here is released when the layer is - and `dlopen`
- * handles are a per-process resource this repo hands out repeatedly (a fresh
- * `AppLayer` per `run(provide(...))` call is the established shape), so
- * never calling `lib.close()` retained one dylib handle per layer for the
- * life of the process. Bun documents `close()` as the release operation.
- *
- * Closing is best-effort by design: the finalizer must not fail, and a dylib
- * that refuses to unload is not a reason to fail a program that has already
- * finished its work.
- *
- * Exported (not on the barrel) so the release is unit-testable against a fake
- * `LibDuckDb` - a real `dlopen` handle has no observable "was I closed".
- */
-export const layerFromLib = (
-    openLib: Effect.Effect<LibDuckDb, DuckDbDylibError, FileSystem.FileSystem>,
+const layerOver = (
+    options?: DuckDbLiveOptions,
 ): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
     Layer.effect(DuckDb)(
         Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
-            const lib = yield* openLib;
-            yield* Effect.addFinalizer(() =>
-                Effect.sync(() => {
-                    try {
-                        lib.close();
-                    } catch {
-                        /* an unloadable dylib must not fail teardown */
-                    }
-                }),
-            );
-            return makeService(lib, fs);
+            return yield* serviceOver(fs, options);
         }),
     );
-
-const baseLayer = (
-    dylibPath: string,
-): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
-    layerFromLib(openLibOrFail(dylibPath));
 
 /** Layer over an explicit dylib path - the injection point for tests and for
  *  the custom static dylib from chunk w0-dylib-ci. */
 export const DuckDbLayer = (dylibPath: string): Layer.Layer<DuckDb, DuckDbDylibError> =>
-    baseLayer(dylibPath).pipe(Layer.provide(BunFileSystem.layer));
-
-/** Options for {@link DuckDbLiveWith}. */
-export interface DuckDbLiveOptions {
-    /** The bundled asset path (an apps-side `{ type: "file" }` embed import).
-     *  `packages/lib` cannot import from `apps/*`, so the embed lives on the
-     *  consumer's side and is threaded in here rather than imported directly -
-     *  see `apps/axctl/src/duckdb-embed.gen.ts`'s header for the consumer this
-     *  unblocks (#791, wave 3 c-binary-embed). `null` and `undefined` both mean
-     *  "no bundled asset". */
-    readonly assetPath?: string | null;
-}
-
-const baseLiveWith = (
-    options?: DuckDbLiveOptions,
-): Layer.Layer<DuckDb, DuckDbDylibError, FileSystem.FileSystem> =>
-    layerFromLib(
+    Layer.effect(DuckDb)(
         Effect.gen(function* () {
-            const assetPath = options?.assetPath ?? undefined;
-            const dylibPath = yield* resolveDylibPath(assetPath === undefined ? {} : { assetPath });
-            return yield* openLibOrFail(dylibPath);
+            const fs = yield* FileSystem.FileSystem;
+            const api = yield* loadNodeApiOver(fs, { dylibPath });
+            return makeService(api, fs);
         }),
-    );
+    ).pipe(Layer.provide(BunFileSystem.layer));
 
 /** Layer that resolves the dylib itself (env override / bundled asset).
  *  `options.assetPath` threads through to {@link resolveDylibPath} as its
  *  fallback source once `AX_DUCKDB_DYLIB` is unset - see {@link DuckDbLiveOptions}. */
 export const DuckDbLiveWith = (options?: DuckDbLiveOptions): Layer.Layer<DuckDb, DuckDbDylibError> =>
-    baseLiveWith(options).pipe(Layer.provide(BunFileSystem.layer));
+    layerOver(options).pipe(Layer.provide(BunFileSystem.layer));
 
 /** `DuckDbLiveWith()` with no bundled asset - env override only. */
 export const DuckDbLive: Layer.Layer<DuckDb, DuckDbDylibError> = DuckDbLiveWith();

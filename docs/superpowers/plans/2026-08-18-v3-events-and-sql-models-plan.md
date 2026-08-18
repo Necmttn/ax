@@ -54,6 +54,20 @@ replay tests.
   swap, or neo-on-source + FFI-on-binary (accepted complexity), or stop.
 - Gates: full suite green; self attribution still ~1.0x; a timeout can now
   actually preempt a query (retire #837's cooperative workaround later).
+- **DONE (#880).** Full swap shipped: `packages/lib/src/duckdb/binding.ts`
+  stages `duckdb.node` next to ax's dylib (content-addressed dir, dylib
+  symlinked) and loads `@duckdb/node-api` over it - require.cache seeding in
+  source mode, a bundler shim reading `AX_NAPI_BINDING_GLOBAL` in the
+  compiled binary (plugin in `scripts/build-axctl.ts`; `duckdb-embed.gen.ts`
+  now also embeds the addon). `client.ts` rewritten on the napi promises
+  behind the UNCHANGED exported surface; `ffi.ts` deleted. Gates measured:
+  full suite green (only the pre-existing studio-desktop electron
+  exemptions), CLI read wall 0.49-0.52s -> 0.52-0.57s (residual = node-api JS
+  import + addon hash), and a 250ms `Effect.timeout` preempts a multi-second
+  statement natively (pinned in client.test.ts). One engine per process: the
+  addon is process-global, so a second dylib path is a typed refusal.
+  self_ms semantics: per-call wall time now (upper bound under concurrent
+  stages; exact when serialized) - self-time.ts documents it.
 
 ### Phase 2 — batch writers
 

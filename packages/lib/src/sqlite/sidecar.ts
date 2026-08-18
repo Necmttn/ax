@@ -60,7 +60,7 @@
  *
  * RULING R6: runtime module under `packages/lib/src/` - `node:fs` / `node:path`
  * are banned; filesystem access goes through `FileSystem.FileSystem`. `bun:sqlite`
- * is fine (this package is Bun-only regardless, as `bun:ffi` already is), and
+ * is fine (this package is Bun-only regardless), and
  * `node:os` `homedir()` is not banned - {@link sidecarPath}'s default uses it.
  */
 import { BunFileSystem } from "@effect/platform-bun";

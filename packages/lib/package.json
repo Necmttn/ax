@@ -31,6 +31,8 @@
   },
   "dependencies": {
     "@ax/onboarding-prompt": "workspace:*",
+    "@duckdb/node-api": "catalog:",
+    "@duckdb/node-bindings": "catalog:",
     "@effect/platform-bun": "catalog:",
     "effect": "catalog:"
   },

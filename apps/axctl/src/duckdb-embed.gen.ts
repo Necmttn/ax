@@ -12,4 +12,10 @@
 // `withCacheWrite`/`withConfigWrite` call sites in
 // `apps/axctl/src/ingest/run.ts`, `apps/axctl/src/cli/commands/ingest.ts`, and
 // `apps/axctl/src/config-core/reconcile.ts`).
+//
+// DUCKDB_NODE_BINDING (#880): the napi driver's `duckdb.node` addon, embedded
+// the same way so a compiled binary can stage it next to the dylib
+// (`@ax/lib/duckdb`'s binding.ts). Threads through as
+// `nodeBindingAssetPath`.
 export const DUCKDB_DYLIB: string | undefined = undefined;
+export const DUCKDB_NODE_BINDING: string | undefined = undefined;

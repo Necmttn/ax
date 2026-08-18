@@ -15,10 +15,10 @@
  *
  * WHY JSON-IN-VARCHAR AT ALL. The DDL stores every array and every nested object
  * as JSON text in a VARCHAR (see schema.duckdb.sql's ARRAYS and FFI CLIENT
- * COMPATIBILITY sections): the bun:ffi client cannot pass structs by value, so it
- * reads results through the row-major `duckdb_value_*` accessors, which cannot
- * decode a native `LIST`. Native list columns are banned in the DDL for that
- * reason. Parsing is therefore a READ-SIDE job, done here, per field, ON DEMAND -
+ * COMPATIBILITY sections): the DuckDB client answers for a closed set of column
+ * types that has never included native `LIST` (originally an FFI accessor
+ * limitation, kept as a compatibility contract across the napi swap, #880).
+ * Native list columns are banned in the DDL for that reason. Parsing is therefore a READ-SIDE job, done here, per field, ON DEMAND -
  * a query that does not select the column pays nothing, and a malformed value is
  * a typed decode failure naming what it found rather than a `JSON.parse` throw
  * escaping as a defect.

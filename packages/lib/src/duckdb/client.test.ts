@@ -1,49 +1,16 @@
-import { ptr } from "bun:ffi";
 import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Fiber, FileSystem, Schema } from "effect";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
-import {
-    DuckDb,
-    DuckDbLayer,
-    DuckDbLiveWith,
-    layerFromLib,
-    makeConnection,
-    openDatabase,
-    readResult,
-} from "./client.ts";
-import type { LibDuckDb } from "./ffi.ts";
+import { loadNodeApiOver } from "./binding.ts";
+import { DuckDb, DuckDbLayer, DuckDbLiveWith, decodeCell } from "./client.ts";
 import { NumberFromBigIntColumn } from "./bigint-column.ts";
 import { DuckDbTypeId } from "./types.ts";
 
 const { dtest, tempDir, withDuckDb } = await duckdbTestSetup("duckdb client");
 const tempDb = () => join(tempDir("ax-duckdb-client-"), "test.db");
-
-/**
- * F2: a minimal fake `LibDuckDb` for a unit test that only needs a handful
- * of symbols stubbed - replaces five hand-rolled
- * `{ symbols: {...} } as unknown as LibDuckDb` literals below. `bun:ffi`
- * brands every real symbol function with a `__ffi_function_callable` unique
- * symbol only `dlopen` can produce, so a plain stub function can never
- * structurally satisfy `LibDuckDb["symbols"]` - `overrides.symbols` stays a
- * loose callable-value record and the cast to `unknown` still happens here,
- * same as every literal it replaces; this only removes the boilerplate
- * around it. `close` defaults to a no-op - every fake below except the
- * `layerFromLib` one never calls it (`conn.close` reaches
- * `duckdb_disconnect`/`duckdb_close` in `symbols`, not `lib.close`).
- */
-const makeFakeLib = (
-    overrides: {
-        readonly symbols?: Record<string, (...args: never[]) => unknown>;
-        readonly close?: () => void;
-    } = {},
-): LibDuckDb =>
-    ({
-        symbols: overrides.symbols ?? {},
-        close: overrides.close ?? ((): void => {}),
-    }) as unknown as LibDuckDb;
 
 describe("DuckDb", () => {
     dtest(
@@ -268,13 +235,13 @@ describe("DuckDb", () => {
 
     // Fix round 2 (ruling R11): this test previously "proved" close ran by
     // reopening the path read-only afterward. The reviewer disproved that as
-    // evidence - opening the same dylib read-only WHILE a write handle is
+    // evidence - opening the same engine read-only WHILE a write handle is
     // still open on the same path SUCCEEDS, so the reopen would pass whether
-    // or not close ever ran. This is now a light integration smoke test only
-    // (scoped composes correctly and the scope exits without throwing); the
-    // actual guarantee - close disconnects/closes exactly once, and a second
-    // close is a no-op - is unit-tested directly below against a fake
-    // LibDuckDb, where the FFI calls can be counted.
+    // or not close ever ran. This is a light integration smoke test only
+    // (scoped composes correctly and the scope exits without throwing);
+    // close idempotency and the after-close refusal are pinned by "a query
+    // after close fails with a typed error" below, and close-under-load by
+    // "close while a statement is in flight drains cleanly".
     dtest(
         "scoped opens a usable connection and the scope exits cleanly",
         withDuckDb((db) =>
@@ -513,76 +480,163 @@ describe("DuckDb", () => {
     );
 });
 
-// Fix round 1 (ruling R10), Part B: direct unit test of readResult's general
-// accessor-failure guard (duckdb_value_is_null false + a NULL varchar
-// pointer -> DuckDbUnsupportedTypeError). Part A now excludes every
-// currently-known trigger of this guard from VARCHAR_TYPES structurally, so
-// no real SQL type reaches it any more via the client.open()/query() path
-// above - this is the "unit-test the read helper directly" fallback,
-// exercising readResult with a hand-built fake LibDuckDb instead of a
-// vacuous SQL assertion that could never fail. DATE is used as the column's
-// reported type (still a real "varchar"-accessor type) purely so the
-// structural unsupportedColumns() pre-check does not reject the column
-// before the per-cell guard even runs - the fake's duckdb_value_varchar is
-// what actually returns NULL, standing in for the accessor failure.
-describe("readResult (Part B unit test)", () => {
-    test("a not-null cell with a NULL duckdb_value_varchar pointer raises DuckDbUnsupportedTypeError, not an empty string", () => {
-        const resultPtr = ptr(new Uint8Array(8));
-        const fakeLib = makeFakeLib({
-            symbols: {
-                duckdb_column_count: () => 1n,
-                duckdb_column_name: () => null, // -> readResult falls back to "column_0"
-                duckdb_column_type: () => DuckDbTypeId.DATE,
-                duckdb_row_count: () => 1n,
-                duckdb_rows_changed: () => 0n,
-                duckdb_value_is_null: () => false, // the cell is NOT SQL NULL
-                duckdb_value_varchar: () => null, // ...yet the accessor returns NULL anyway
-                duckdb_value_boolean: () => {
-                    throw new Error("not expected to be called for a DATE column");
-                },
-                duckdb_value_int64: () => {
-                    throw new Error("not expected to be called for a DATE column");
-                },
-                duckdb_value_uint64: () => {
-                    throw new Error("not expected to be called for a DATE column");
-                },
-                duckdb_value_double: () => {
-                    throw new Error("not expected to be called for a DATE column");
-                },
-                duckdb_free: () => {
-                    throw new Error("must not be called - there is no pointer to free");
-                },
-            },
-        });
+// ---------------------------------------------------------------------------
+// napi driver contracts (#880) - what the swap must NOT have changed
+// ---------------------------------------------------------------------------
 
-        expect(() => readResult(fakeLib, resultPtr)).toThrow();
-        try {
-            readResult(fakeLib, resultPtr);
-            throw new Error("expected readResult to throw");
-        } catch (err) {
-            expect((err as { _tag?: string })._tag).toBe("DuckDbUnsupportedTypeError");
-            expect((err as { message: string }).message).toContain("column_0");
-        }
+describe("napi binding semantics", () => {
+    // The FFI client bound every integer through duckdb_bind_int64 and every
+    // non-integer number through duckdb_bind_double; napi's OWN inference
+    // would bind a JS bigint as HUGEINT and a safe integer as INTEGER. The
+    // explicit types in encodeParams pin the FFI behavior - proven end-to-end
+    // here by asking the engine what type each parameter arrived as.
+    dtest(
+        "parameters arrive with the same SQL types the FFI client bound",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                const typeOf = (param: unknown) =>
+                    Effect.map(
+                        conn.query("SELECT typeof(?) AS t", [param as never]),
+                        (r) => r.rows[0]!.t,
+                    );
+                expect(yield* typeOf(5)).toBe("BIGINT");
+                expect(yield* typeOf(12n)).toBe("BIGINT");
+                expect(yield* typeOf(5.5)).toBe("DOUBLE");
+                expect(yield* typeOf("x")).toBe("VARCHAR");
+                expect(yield* typeOf(true)).toBe("BOOLEAN");
+                expect(yield* typeOf(new Date("2026-08-14T10:11:12Z"))).toBe("VARCHAR");
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // `sum(BIGINT)` is HUGEINT by TYPE (not by magnitude), and the FFI client
+    // decoded it to a JS bigint via the varchar accessor + parseHugeint. The
+    // napi driver hands HUGEINT over as a bigint directly - same caller-visible
+    // value, pinned so `ax cost models`-style aggregates keep decoding.
+    dtest(
+        "sum over a BIGINT column decodes to bigint (HUGEINT promotion)",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("CREATE TABLE t (n BIGINT)");
+                yield* conn.exec("INSERT INTO t VALUES (40), (2)");
+                const result = yield* conn.query("SELECT sum(n) AS s FROM t");
+                expect(result.rows[0]!.s).toBe(42n);
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // The FFI client serialized calls by construction (a synchronous FFI call
+    // blocks the thread). The napi driver serializes per connection through
+    // its promise chain - concurrent fibers on one connection must all
+    // complete, in order, without corrupting each other.
+    dtest(
+        "concurrent queries on one connection all complete",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("CREATE TABLE t (id INTEGER)");
+                const inserts = Array.from({ length: 8 }, (_, i) =>
+                    conn.exec("INSERT INTO t VALUES (?)", [i]),
+                );
+                yield* Effect.all(inserts, { concurrency: "unbounded" });
+                const count = yield* conn.query("SELECT count(*) AS n, sum(id) AS s FROM t");
+                expect(count.rows[0]!.n).toBe(8n);
+                expect(count.rows[0]!.s).toBe(28n);
+                yield* conn.close;
+            }),
+        ),
+    );
+
+    // THE reason for the swap (#880): a running statement no longer blocks
+    // the JS thread, and an interrupted fiber cancels it natively via
+    // connection.interrupt(). Under the FFI client this test was impossible -
+    // the timeout could not even fire until the statement returned.
+    dtest(
+        "a timed-out statement is preempted natively, and the connection stays usable",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                // ~20M md5 calls: several seconds of engine work if left alone.
+                const slow = conn.query(
+                    "SELECT max(md5(i::VARCHAR)) AS m FROM range(20000000) t(i)",
+                );
+                const startedAt = performance.now();
+                const raced = yield* Effect.result(slow.pipe(Effect.timeout("250 millis")));
+                const elapsed = performance.now() - startedAt;
+                expect(raced._tag).toBe("Failure");
+                // Preemption must be REAL: the fiber came back long before the
+                // statement's natural run time (generous 5s bound vs ~250ms
+                // expected, so a slow CI box cannot flake this).
+                expect(elapsed).toBeLessThan(5000);
+                // ... and the interrupt poisoned nothing: the connection
+                // serves the next statement normally.
+                const after = yield* conn.query("SELECT 1 AS ok");
+                expect(after.rows[0]!.ok).toBe(1);
+                yield* conn.close;
+            }),
+        ),
+        15000,
+    );
+
+    // Close drains: `close` waits for in-flight/queued statements to settle
+    // before tearing down the native handles, so a racing statement can never
+    // observe a torn-down connection mid-run.
+    dtest(
+        "close while a statement is in flight drains cleanly",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const conn = yield* db.open(tempDb());
+                const fiber = yield* Effect.forkChild(
+                    Effect.result(conn.query("SELECT max(md5(i::VARCHAR)) AS m FROM range(200000) t(i)")),
+                );
+                yield* conn.close;
+                // Whatever the in-flight statement's outcome (finished before
+                // the teardown, or refused at its turn), the process survives
+                // and the fiber settles.
+                yield* Fiber.await(fiber);
+                const again = yield* Effect.result(conn.query("SELECT 1"));
+                expect(again._tag).toBe("Failure");
+                yield* conn.close; // idempotent
+            }),
+        ),
+        15000,
+    );
+});
+
+// decodeCell is the pure napi-value -> DuckDbValue rule; the primitive
+// branches are testable without a database.
+describe("decodeCell", () => {
+    test("keeps bigint for 64/128-bit integer columns, narrows the rest", () => {
+        expect(decodeCell(DuckDbTypeId.BIGINT, 42n)).toBe(42n);
+        expect(decodeCell(DuckDbTypeId.UBIGINT, 42n)).toBe(42n);
+        expect(decodeCell(DuckDbTypeId.HUGEINT, 2n ** 100n)).toBe(2n ** 100n);
+        expect(decodeCell(DuckDbTypeId.UHUGEINT, 7n)).toBe(7n);
+        expect(decodeCell(DuckDbTypeId.INTEGER, 7)).toBe(7);
+    });
+
+    test("routes a TIMESTAMP text rendering through the Date coercion", () => {
+        const decoded = decodeCell(DuckDbTypeId.TIMESTAMP, "2026-08-14 10:11:12.999999");
+        expect(decoded).toBeInstanceOf(Date);
+        expect((decoded as Date).toISOString()).toBe("2026-08-14T10:11:12.999Z");
+    });
+
+    test("null, boolean, number and varchar pass through", () => {
+        expect(decodeCell(DuckDbTypeId.VARCHAR, null)).toBe(null);
+        expect(decodeCell(DuckDbTypeId.BOOLEAN, true)).toBe(true);
+        expect(decodeCell(DuckDbTypeId.DOUBLE, 1.5)).toBe(1.5);
+        expect(decodeCell(DuckDbTypeId.VARCHAR, "x")).toBe("x");
     });
 });
 
-// Fix round 2 (ruling R11), IMPORTANT 1 + 2: direct unit test of
-// makeConnection's `close`. The previous "scoped" test's evidence for
-// "close actually releases the file" was a read-only reopen of the same
-// path - disproved as evidence (opening read-only while a write handle is
-// still open on the same path SUCCEEDS against this dylib, so that
-// assertion was true whether or not close ever ran). This counts the
-// duckdb_disconnect/duckdb_close calls directly against a fake LibDuckDb,
-// which is the only reliable way to prove (a) close actually calls them and
-// (b) a second close does not call them again - the `closed` flag guard is
-// the only thing standing between an idempotent close and a double-free of
-// the same handle buffers.
-// Final fix round, finding 1: `baseLayer` used to call `openLibDuckDb`
-// bare inside `Effect.gen`, so a bad dylib path threw a raw, unhandled
-// defect straight through `DuckDbLayer` - which is declared
-// `Layer.Layer<DuckDb, DuckDbDylibError>` and is the seam the w0-dylib-ci
-// chunk consumes directly. This never touches a real dylib (the path does
-// not exist), so it runs unconditionally - no `withDuckDb`/skip needed.
+// Final fix round, finding 1 (kept across the driver swap): a bad dylib path
+// must surface as a typed DuckDbDylibError through the layer, never a raw
+// defect. Under the napi driver the failure comes from the binding loader's
+// read of the dylib bytes. This never touches a real dylib (the path does not
+// exist), so it runs unconditionally - no withDuckDb/skip needed.
 describe("DuckDbLayer (finding 1)", () => {
     test("a bad dylib path surfaces DuckDbDylibError through Effect.result, not a rejected promise", async () => {
         const layer = DuckDbLayer("/definitely/not/a/dylib.so");
@@ -648,125 +702,30 @@ describe("DuckDbLiveWith (A8)", () => {
     });
 });
 
-describe("makeConnection.close (Part B-style unit test)", () => {
-    test("close disconnects and closes exactly once; a second close is a no-op", () => {
-        let disconnectCalls = 0;
-        let closeCalls = 0;
-        const fakeLib = makeFakeLib({
-            symbols: {
-                duckdb_disconnect: () => {
-                    disconnectCalls += 1;
-                },
-                duckdb_close: () => {
-                    closeCalls += 1;
-                },
-            },
-        });
+// ONE ENGINE PER PROCESS (binding.ts): the napi addon and its dylib are
+// process-global once loaded; asking for a DIFFERENT dylib afterwards must be
+// a typed refusal, never a silent answer from the previously-loaded engine.
+describe("binding one-engine-per-process", () => {
+    dtest(
+        "a second load with a different dylib path is refused, not silently served",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                // Ensure the engine is genuinely loaded in this process.
+                const conn = yield* db.open(tempDb());
+                yield* conn.exec("SELECT 1");
+                yield* conn.close;
 
-        const conn = makeConnection(
-            fakeLib,
-            "/fake/path.db",
-            false,
-            new BigUint64Array(1),
-            new BigUint64Array(1),
-        );
-
-        Effect.runSync(conn.close);
-        expect(disconnectCalls).toBe(1);
-        expect(closeCalls).toBe(1);
-
-        // Idempotency: the second close must not re-invoke either FFI call.
-        Effect.runSync(conn.close);
-        Effect.runSync(conn.close);
-        expect(disconnectCalls).toBe(1);
-        expect(closeCalls).toBe(1);
-    });
-
-    // Cross-review P1-1, unit half: prove NO native symbol is reached after
-    // close. The e2e half (above) proves the process survives; this proves
-    // WHY - the guard short-circuits before any pointer is dereferenced.
-    test("no operation touches a native symbol after close", () => {
-        const boom = () => {
-            throw new Error("native call after close");
-        };
-        const fakeLib = makeFakeLib({
-            symbols: {
-                duckdb_disconnect: () => {},
-                duckdb_close: () => {},
-                duckdb_query: boom,
-                duckdb_prepare: boom,
-                duckdb_column_count: boom,
-                duckdb_row_count: boom,
-            },
-        });
-
-        const conn = makeConnection(
-            fakeLib,
-            "/fake/path.db",
-            false,
-            new BigUint64Array(1),
-            new BigUint64Array(1),
-        );
-        Effect.runSync(conn.close);
-
-        const ops: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
-            conn.query("SELECT 1"),
-            conn.exec("SELECT 1"),
-            conn.queryAs(Schema.Struct({ n: Schema.Number }), "SELECT 1 AS n"),
-        ];
-        for (const op of ops) {
-            const result = Effect.runSync(Effect.result(op));
-            expect(result._tag).toBe("Failure");
-            if (result._tag === "Failure") {
-                expect((result.failure as { _tag: string })._tag).toBe("DuckDbQueryError");
-                expect((result.failure as { message: string }).message.toLowerCase()).toContain(
-                    "closed",
+                const fs = yield* FileSystem.FileSystem;
+                const result = yield* Effect.result(
+                    loadNodeApiOver(fs, { dylibPath: "/some/other/libduckdb.dylib" }),
                 );
-            }
-        }
-    });
-});
-
-// Cross-review P3-1: duckdb.h requires `duckdb_destroy_config` even when
-// `duckdb_create_config` FAILS (duckdb.h:1018-1023) - the failure path threw
-// without it, leaking whatever the call had already allocated.
-describe("openDatabase (P3-1)", () => {
-    test("destroys the config even when duckdb_create_config fails", () => {
-        let destroyCalls = 0;
-        const fakeLib = makeFakeLib({
-            symbols: {
-                duckdb_create_config: () => 1, // != DUCKDB_SUCCESS
-                duckdb_destroy_config: () => {
-                    destroyCalls += 1;
-                },
-            },
-        });
-
-        expect(() => openDatabase(fakeLib, "/fake/path.db", false)).toThrow();
-        expect(destroyCalls).toBe(1);
-    });
-});
-
-// Cross-review P3-2: the layers held the `dlopen` handle for the life of the
-// process - repeated layer construction (a fresh AppLayer per run, the shape
-// this repo already builds) retained one dylib handle each. The layer is now
-// scoped: releasing it calls `lib.close()`.
-describe("layerFromLib (P3-2)", () => {
-    test("closing the layer scope releases the dynamic library handle", async () => {
-        let closeCalls = 0;
-        const fakeLib = makeFakeLib({
-            close: () => {
-                closeCalls += 1;
-            },
-        });
-
-        await Effect.runPromise(
-            Effect.asVoid(DuckDb).pipe(
-                Effect.provide(
-                    layerFromLib(Effect.succeed(fakeLib)).pipe(Layer.provide(BunFileSystem.layer)),
-                ),
-            ) as Effect.Effect<void>,
-        );
-        expect(closeCalls).toBe(1);
-    });
+                expect(result._tag).toBe("Failure");
+                if (result._tag === "Failure") {
+                    const failure = result.failure as { _tag?: string; message?: string };
+                    expect(failure._tag).toBe("DuckDbDylibError");
+                    expect(failure.message).toContain("already loaded");
+                }
+            }).pipe(Effect.provide(BunFileSystem.layer)),
+        ),
+    );
 });

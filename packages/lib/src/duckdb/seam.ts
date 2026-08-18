@@ -419,8 +419,12 @@ export const CacheReadLayer = (options?: CacheReadOptions): Layer.Layer<CacheRea
         Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
             const path = options?.snapshotPath ?? defaultSnapshotPath();
-            const liveOptions: DuckDbLiveOptions =
-                options?.assetPath === undefined ? {} : { assetPath: options.assetPath };
+            const liveOptions: DuckDbLiveOptions = {
+                ...(options?.assetPath === undefined ? {} : { assetPath: options.assetPath }),
+                ...(options?.nodeBindingAssetPath === undefined
+                    ? {}
+                    : { nodeBindingAssetPath: options.nodeBindingAssetPath }),
+            };
 
             // Plain mutable cells rather than a Ref: every read/write of them
             // below happens inside one synchronous statement (never straddling a
@@ -584,8 +588,12 @@ export const withCacheWrite = <A, E, R>(
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const target = options.snapshotPath ?? defaultSnapshotPath();
-        const liveOptions: DuckDbLiveOptions =
-            options.assetPath === undefined ? {} : { assetPath: options.assetPath };
+        const liveOptions: DuckDbLiveOptions = {
+            ...(options.assetPath === undefined ? {} : { assetPath: options.assetPath }),
+            ...(options.nodeBindingAssetPath === undefined
+                ? {}
+                : { nodeBindingAssetPath: options.nodeBindingAssetPath }),
+        };
 
         const held = yield* ingestLockHeldHere(options.lockPath);
         if (!held) {

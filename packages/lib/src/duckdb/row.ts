@@ -10,9 +10,10 @@
  * rather than at the write:
  *
  *  1. ARRAYS AND NESTED OBJECTS ARE JSON TEXT. The DDL stores them in a VARCHAR
- *     because the bun:ffi client reads results through the row-major
- *     `duckdb_value_*` accessors, which cannot decode a native `LIST` (native
- *     list columns are banned in the DDL for that reason). So a writer must
+ *     because the DuckDB client's supported-type set has never included native
+ *     `LIST` (native list columns are banned in the DDL for that reason; the
+ *     set is a compatibility contract, kept across the napi swap - see
+ *     row-decode.ts). So a writer must
  *     stringify on the way in, and the reader parses through `JsonArrayColumn` /
  *     `JsonObjectColumn`. {@link jsonParam} is the write half of that pair.
  *  2. `undefined` IS NOT A VALUE. `putMany` refuses a ragged batch - rows with

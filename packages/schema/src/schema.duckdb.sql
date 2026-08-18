@@ -76,20 +76,17 @@
 -- for now, readable with DuckDB's json functions.
 --
 -- FFI CLIENT COMPATIBILITY. Every reader of this cache goes through the
--- bun:ffi DuckDB client, which cannot pass structs by value and therefore
--- decodes results with the deprecated row-major `duckdb_value_*` accessors
--- instead of the columnar/vector API. Those accessors do not support every
--- DuckDB logical type. A probe against the real client + dylib confirmed
--- `TIMESTAMP_TZ` and `LIST` both raise `DuckDbUnsupportedTypeError`, while
--- plain `TIMESTAMP` decodes fine - so this DDL bends to the client instead of
--- the other way round, until a pointer-based (vector API) read path lands
--- (tracked separately). BANNED TYPES - none of these may appear as a column
--- type in this file:
+-- `@ax/lib/duckdb` client, which answers for a CLOSED SET of column types
+-- (row-decode.ts). The set was forced by the original bun:ffi client's
+-- row-major `duckdb_value_*` accessors; the napi driver that replaced it
+-- (#880) keeps the set closed as a compatibility contract - every query and
+-- this DDL were written against exactly these types, and widening the set
+-- silently would change what existing readers decode to. BANNED TYPES - none
+-- of these may appear as a column type in this file:
 --   UUID, ENUM, BIT, TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP_NS, TIMESTAMP_TZ,
 --   TIME_TZ, LIST
--- `duckdb_value_varchar` on an unsupported type either returns NULL with no
--- failure signal, or the client raises a typed error - neither is a column
--- type any writer should be allowed to introduce silently, so
+-- The client raises `DuckDbUnsupportedTypeError` for all of them - not a
+-- column type any writer should be allowed to introduce silently, so
 -- duckdb-parity.test.ts scans every column type token in this file against
 -- this exact list.
 --
@@ -1566,8 +1563,8 @@ CREATE TABLE IF NOT EXISTS ingest_stage (
     self_ms BIGINT  -- ms spent inside this stage's OWN DuckDB calls (#865); wall clock minus other stages' turns. Budget-enforced for derives (#837)
 );
 -- `ended_at - started_at` is WALL CLOCK, and with 4 stages running at once that
--- is mostly other stages' work: every DuckDB call is a synchronous bun:ffi call
--- that blocks the single JS thread. Measured on a real store, `claude-config`
+-- is mostly other stages' work: DuckDB calls on the shared write connection
+-- are serialized. Measured on a real store, `claude-config`
 -- read 0.4s serialized against 380.2s concurrent (#841, #865). `self_ms` is the
 -- summed duration of the stage's own calls, so it is comparable across runs.
 -- The ALTER is what reaches an EXISTING database: `CREATE TABLE IF NOT EXISTS`
