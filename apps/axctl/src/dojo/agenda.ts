@@ -8,7 +8,8 @@
  * never kill the whole agenda.
  */
 import { Effect, type FileSystem } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import type { Judgment } from "@ax/lib/sqlite";
 import { listDirectiveProposals, listProposals } from "../improve/list.ts";
 import { listPendingVerdicts } from "../improve/verdict-pending.ts";
 import { fetchSessionChurnSummary, type SessionChurnRow } from "../metrics/session-churn.ts";
@@ -106,13 +107,14 @@ export interface CollectAgendaItemsResult {
  */
 export const collectAgendaItems = (
     opts: CollectOptions,
-): Effect.Effect<CollectAgendaItemsResult, never, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<CollectAgendaItemsResult, never, CacheRead | Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const read = yield* CacheRead;
         const verdicts = yield* soft("verdicts", listPendingVerdicts(), []);
         const briefs = yield* soft("briefs", scanTaskDir(opts.taskDir ?? defaultTaskDir()), []);
         const churnRows = yield* soft(
             "churn",
-            fetchSessionChurnSummary({
+            fetchSessionChurnSummary(read, {
                 since: new Date(opts.nowMs - opts.days * DAY_MS),
                 limit: CHURN_SESSION_LIMIT,
             }).pipe(Effect.map((summary): readonly SessionChurnRow[] => summary.hotSessions)),
@@ -128,7 +130,7 @@ export const collectAgendaItems = (
             "routing",
             Effect.gen(function* () {
                 const table = yield* loadEffectiveRoutingTable(opts.routingTablePath);
-                return yield* fetchTuneProposals({ sinceDays: opts.days, table });
+                return yield* fetchTuneProposals(read, { sinceDays: opts.days, table });
             }),
             [] as TuneProposal[],
         );

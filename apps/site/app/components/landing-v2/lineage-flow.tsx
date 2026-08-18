@@ -686,7 +686,7 @@ export function LineageFlow() {
             <div className="sink-col">
               <div className="sink-box" id="sink" ref={sinkRef}>
                 <div className="sink-title">typed local graph</div>
-                <div className="sink-host">surrealdb · 127.0.0.1</div>
+                <div className="sink-host">duckdb · local file</div>
                 <div className="sink-counter">
                   <span id="ctr-sessions" ref={ctrSessionsRef}>
                     4,773
@@ -742,8 +742,8 @@ export function LineageFlow() {
         </div>
 
         <p className="lineage-foot">
-          every event &rarr; typed graph &rarr; ranked interventions. local
-          SurrealDB at <code>127.0.0.1</code>.{" "}
+          every event &rarr; typed graph &rarr; ranked interventions. a local
+          DuckDB file, no daemon.{" "}
           <Link to="/features">see /features for the schema &rarr;</Link>
           <span className="forms">
             six forms: <b>skill</b> &middot; <b>guidance</b> &middot;{" "}

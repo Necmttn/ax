@@ -8,8 +8,8 @@
  * handler: it fetches dispatch rows + agent_model pricing, then delegates to the
  * pure `backtestPattern` function above.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { reprice, MODEL_ALIASES, type RepriceUsage } from "./reprice.ts";
 import type { ModelPricing } from "../ingest/model-pricing.ts";
 import { fetchDispatches } from "./dispatch-analytics.ts";
@@ -130,6 +130,14 @@ export function backtestPattern(
 // delegates to the pure backtestPattern above.
 // ---------------------------------------------------------------------------
 
+const AgentModelSchema = Schema.Struct({
+    name: Schema.String,
+    input_per_million_usd: Schema.NullOr(Schema.Number),
+    output_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_read_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_creation_per_million_usd: Schema.NullOr(Schema.Number),
+});
+
 const AGENT_MODELS_SQL = `
 SELECT name, input_per_million_usd, output_per_million_usd,
        cache_read_per_million_usd, cache_creation_per_million_usd
@@ -138,28 +146,26 @@ FROM agent_model;
 
 export const runRoutingBacktest = Effect.fn("queries.runRoutingBacktest")(
     function* (payload: BacktestPattern & { readonly days?: number }) {
-        const db = yield* SurrealClient;
         const sinceDays = Math.max(1, Math.trunc(payload.days ?? 14));
 
         // Fetch dispatch rows (includes per-dispatch token usage).
-        const result = yield* fetchDispatches({ sinceDays, limit: 2000 });
+        const read = yield* CacheRead;
+        const result = yield* fetchDispatches(read, { sinceDays, limit: 2000 });
 
         // Build pricingCatalog from agent_model - same pattern as
         // fetchDispatchCandidates in dispatch-analytics.ts.
-        const agentModelRows = yield* db
-            .query<[Array<Record<string, unknown>>]>(AGENT_MODELS_SQL)
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const agentModelRows = yield* read.rows(AgentModelSchema, AGENT_MODELS_SQL);
 
         const pricingCatalog = new Map<string, ModelPricing>();
         for (const am of agentModelRows) {
-            const name = String(am.name ?? "");
+            const name = am.name;
             if (!name) continue;
             pricingCatalog.set(name, {
                 provider: "anthropic",
-                inputPerMillionUsd: am.input_per_million_usd == null ? null : Number(am.input_per_million_usd),
-                outputPerMillionUsd: am.output_per_million_usd == null ? null : Number(am.output_per_million_usd),
-                cacheCreationPerMillionUsd: am.cache_creation_per_million_usd == null ? null : Number(am.cache_creation_per_million_usd),
-                cacheReadPerMillionUsd: am.cache_read_per_million_usd == null ? null : Number(am.cache_read_per_million_usd),
+                inputPerMillionUsd: am.input_per_million_usd,
+                outputPerMillionUsd: am.output_per_million_usd,
+                cacheCreationPerMillionUsd: am.cache_creation_per_million_usd,
+                cacheReadPerMillionUsd: am.cache_read_per_million_usd,
                 fastMultiplier: 1,
                 pricingSource: "agent_model",
             });

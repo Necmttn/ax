@@ -1,15 +1,17 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
-import { recordRef } from "@ax/lib/shared/surql";
-import { retroFromSession, retroRecordKey, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
-import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
-import { proposalKey, runPropose } from "../../improve/propose.ts";
+import { retroFromSession, upsertRetro, type RetroSource } from "../../ingest/retro.ts";
 import { deriveRetroProposals } from "../../ingest/derive-retro-proposals.ts";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { TimestampColumn, NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows, cacheFirst } from "@ax/lib/duckdb/query";
+import { decodeRetroEmitPayload, hasUnfiledFindings } from "../../ingest/retro-emit-payload.ts";
+import { runPropose } from "../../improve/propose.ts";
+import { listStoredRetros } from "../../queries/judgment-retros.ts";
 import { cmdRetroReflect } from "../retro-reflect.ts";
 import { cmdRetroMeta } from "../retro-meta.ts";
 import { cmdRetroPlan } from "../retro-plan.ts";
@@ -32,23 +34,44 @@ import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt
  * Run the `retro-proposals` derivation for the retro just written (#742).
  *
  * That stage is the ONLY path from a retro's clustered failures to a proposal,
- * and it runs during `ax ingest` - NOT during `ax derive-signals`, which is
- * where a reporter reasonably looked and found nothing. Emitting a retro and
- * then seeing an unchanged proposal queue reads as a broken loop, so emit runs
- * the derivation itself.
+ * and it otherwise runs during `ax ingest` - NOT during `ax derive-signals`,
+ * which is where a reporter reasonably looked and found nothing. Emitting a
+ * retro and then seeing an unchanged proposal queue reads as a broken loop, so
+ * emit runs the derivation itself.
  *
- * Best-effort: the retro is already committed, and a derivation failure must
- * not turn a successful emit into a non-zero exit. It returns the number of
- * proposals derived so the caller can report it.
+ * It reads the installed-skill catalog from the PUBLISHED SNAPSHOT and reads +
+ * writes proposals in the sidecar - so it takes NO ingest lock. It used to take
+ * one (`withConfigWrite`), and that was wrong twice over: the lock's `onBusy` is
+ * an `Effect.die`, which `orElseSucceed` cannot recover, so a background watcher
+ * ingest holding the lock crashed `ax retro emit` AFTER the retro was already
+ * committed; and the write scope rebuilt every FTS index and republished the
+ * snapshot for what is, on this path, a single `SELECT name FROM skill`.
+ *
+ * Best-effort by intent, but never SILENT: the retro is already committed and a
+ * derivation failure must not turn a successful emit into a non-zero exit, so
+ * the failure is printed and the count returns 0.
  */
-const runInlineRetroDerive = deriveRetroProposals().pipe(
-    Effect.map((stats) =>
-        stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals
-    ),
-    Effect.orElseSucceed(() => 0),
-);
+const runInlineRetroDerive = () =>
+    Effect.gen(function* () {
+        const cache = yield* CacheRead;
+        const stats = yield* deriveRetroProposals(cache);
+        return stats.toolFailureProposals + stats.correctionProposals + stats.frictionProposals;
+    }).pipe(
+        Effect.catchCause((cause) =>
+            Effect.sync(() => {
+                console.error(
+                    "ax retro emit: the retro was saved, but deriving proposals from it failed - "
+                    + "the next 'ax ingest' will retry.\n  "
+                    + String(cause),
+                );
+                return 0;
+            })
+        ),
+    );
 
-const cmdRetroEmit = (input: {
+const LatestSessionRow = Schema.Struct({ id: Schema.String });
+
+export const cmdRetroEmit = (input: {
     readonly session: string | undefined;
     readonly fromFile: string | undefined;
     readonly source: string | undefined;
@@ -59,19 +82,17 @@ const cmdRetroEmit = (input: {
         const sessionFlag = input.session ?? process.env.AX_SESSION_ID;
         const sourceFlag = (input.source ?? (fromFile ? "claude_stop_hook" : "heuristic")) as RetroSource;
         const json = input.json;
-        const db = yield* SurrealClient;
 
         let sessionRecordId = sessionFlag;
         if (!sessionRecordId) {
-            const latest = yield* db.query<[Array<{ id: string | { tb: string; id: string } }>]>(
-                "SELECT id, started_at FROM session ORDER BY started_at DESC LIMIT 1;",
-            );
-            const row = (latest?.[0] ?? [])[0];
+            const row = yield* cacheFirst(LatestSessionRow, {
+                sql: "SELECT id FROM session ORDER BY started_at DESC LIMIT 1",
+                params: [],
+            }, "retro emit latest session");
             if (!row) {
                 fail("ax retro emit: no session to retro on (no --session and no rows in DB)");
             }
-            const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
-            sessionRecordId = idStr;
+            sessionRecordId = row.id;
         }
         if (!sessionRecordId.includes(":")) sessionRecordId = `session:${sessionRecordId}`;
 
@@ -116,15 +137,10 @@ const cmdRetroEmit = (input: {
             const filed: Array<{ status: string; title: string; sig: string }> = [];
             for (const proposal of parsed.proposals ?? []) {
                 const result = yield* runPropose(proposal);
-                yield* db.query(
-                    `RELATE ${recordRef("proposal", proposalKey(result.sig))}->cites_evidence->${
-                        recordRef("retro", retroRecordKey(sessionKey))
-                    } SET kind = "retro";`,
-                );
                 filed.push({ status: result.status, title: result.title, sig: result.sig });
             }
 
-            const derived = yield* runInlineRetroDerive;
+            const derived = yield* runInlineRetroDerive();
 
             if (json) {
                 console.log(prettyPrint({
@@ -156,12 +172,13 @@ const cmdRetroEmit = (input: {
             return;
         }
 
-        const retroInput = yield* retroFromSession(sessionRecordId);
+        const read = yield* CacheRead;
+        const retroInput = yield* retroFromSession(read, sessionRecordId);
         if (!retroInput) {
             fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
         yield* upsertRetro(retroInput);
-        const derived = yield* runInlineRetroDerive;
+        const derived = yield* runInlineRetroDerive();
         if (json) {
             console.log(prettyPrint({
                 session: sessionRecordId,
@@ -182,7 +199,7 @@ const cmdRetroEmit = (input: {
         }
     });
 
-const cmdRetroList = (input: {
+export const cmdRetroList = (input: {
     readonly limit: number;
     readonly since: string | undefined;
     readonly json: boolean;
@@ -191,18 +208,13 @@ const cmdRetroList = (input: {
         const json = input.json;
         const limit = requirePositiveInt("retro list", "limit", input.limit);
         const since = input.since;
-        const db = yield* SurrealClient;
-        const where = since ? `WHERE created_at > time::now() - ${parseInt(since, 10) || 7}d` : "";
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, session, source, tried, failed, next, type::string(created_at) AS created_at
-             FROM retro ${where} ORDER BY created_at DESC LIMIT ${limit};`,
-        );
-        const list = rows?.[0] ?? [];
+        const cutoff = since ? new Date(Date.now() - (parseInt(since, 10) || 7) * 86_400_000) : null;
+        const list = yield* listStoredRetros({ ...(cutoff ? { since: cutoff } : {}), limit });
         if (json) { console.log(prettyPrint(list)); return; }
         if (list.length === 0) { console.log("(no retros yet - try `ax retro emit`)"); return; }
         for (const row of list) {
             const tried = String(row.tried ?? "").slice(0, 60);
-            console.log(`${String(row.created_at ?? "?")}  [${String(row.source ?? "?")}]  ${String(row.session ?? "?")}`);
+            console.log(`${row.created_at.toISOString()}  [${row.source}]  session:${row.session}`);
             console.log(`  ${tried}${tried.length >= 60 ? "…" : ""}`);
             if (row.failed) console.log(`  ! ${String(row.failed).slice(0, 60)}`);
             if (row.next) console.log(`  → ${String(row.next).slice(0, 60)}`);
@@ -210,10 +222,10 @@ const cmdRetroList = (input: {
     });
 
 /**
- * `ax retro pending` - sessions that lack a `reviewed` edge to any retro.
+ * `ax retro pending` - sessions that have no sidecar retro judgment.
  *
  * A session is "pending retro" when:
- *   - it has no outbound `reviewed` edge, AND
+ *   - its cache id is absent from the sidecar retro rows, AND
  *   - it looks finished: either `ended_at` is set, or the last turn was
  *     more than --idle-min minutes ago (user closed the tab, no explicit
  *     end marker).
@@ -221,17 +233,6 @@ const cmdRetroList = (input: {
  * Drives the quota-arbitrage flow: idle Opus budget chews through the
  * backlog via the retro-reviewer subagent.
  */
-interface PendingSessionRow {
-    readonly id: string | { tb: string; id: string };
-    readonly project: string | null;
-    readonly source: string | null;
-    readonly model: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly last_turn_at: string | null;
-    readonly turns: number;
-}
-
 export interface PendingSession {
     readonly sessionId: string;     // `session:<key>` record id
     readonly key: string;           // bare key (UUID, no prefix)
@@ -264,86 +265,99 @@ interface PendingQueryOpts {
     readonly limit: number;
 }
 
+const PendingEndedRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: TimestampColumn,
+});
+const PendingIdleRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: TimestampColumn,
+});
+
 const queryPendingSessions = (opts: PendingQueryOpts) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const retros = yield* listStoredRetros({ limit: 100_000 });
+        const reviewedSessions = new Set(retros.map((retro) => retro.session.replace(/^session:/, "")));
+        const scanLimit = Math.min(100_000, opts.limit + reviewedSessions.size);
         // claude-subagent sessions are orchestrated children; their retros
         // belong to the parent session's review. Exclude unless asked.
-        const subagentFilter = opts.includeSubagents ? "" : "AND source != 'claude-subagent'";
-        const endedRows = yield* db.query<[Array<{
-            id: PendingSessionRow["id"]; project: string | null; source: string | null;
-            model: string | null; started_at: string | null; ended_at: string | null;
-        }>]>(`
-            SELECT id, project, source, model,
-                type::string(started_at) AS started_at,
-                type::string(ended_at) AS ended_at
-            FROM session
-            WHERE count(->reviewed) = 0
-              AND ended_at != NONE
-              AND ended_at > time::now() - ${opts.sinceDays}d
-              ${subagentFilter}
-            ORDER BY ended_at DESC
-            LIMIT ${opts.limit};
-        `);
-        const idleRows = yield* db.query<[Array<{
-            id: PendingSessionRow["id"]; project: string | null; source: string | null;
-            model: string | null; started_at: string | null;
-        }>]>(`
-            SELECT id, project, source, model,
-                type::string(started_at) AS started_at
-            FROM session
-            WHERE count(->reviewed) = 0
-              AND ended_at = NONE
-              AND started_at != NONE
-              AND started_at > time::now() - ${opts.sinceDays}d
-              AND started_at < time::now() - ${opts.idleMinutes}m
-              ${subagentFilter}
-            ORDER BY started_at DESC
-            LIMIT ${opts.limit};
-        `);
+        const subagentFilter = opts.includeSubagents ? "" : "AND source <> 'claude-subagent'";
+        // Cutoffs computed in JS and bound as params - no CURRENT_TIMESTAMP
+        // arithmetic in SQL (the ICU rule; see clause.ts).
+        const sinceCutoff = new Date(Date.now() - opts.sinceDays * 86_400_000);
+        const idleCutoff = new Date(Date.now() - opts.idleMinutes * 60_000);
 
-        const recordIdOf = (id: PendingSessionRow["id"]): string =>
-            typeof id === "string" ? id : `session:${id.id}`;
+        const endedRows = yield* cacheRows(PendingEndedRow, {
+            sql: `SELECT id, project, source, model, started_at, ended_at
+                  FROM session
+                  WHERE ended_at IS NOT NULL AND ended_at > ?
+                  ${subagentFilter}
+                  ORDER BY ended_at DESC
+                  LIMIT ?`,
+            params: [sinceCutoff, scanLimit],
+        }, "retro pending ended sessions");
+        const idleRows = yield* cacheRows(PendingIdleRow, {
+            sql: `SELECT id, project, source, model, started_at
+                  FROM session
+                  WHERE ended_at IS NULL AND started_at IS NOT NULL
+                    AND started_at > ? AND started_at < ?
+                    ${subagentFilter}
+                  ORDER BY started_at DESC
+                  LIMIT ?`,
+            params: [sinceCutoff, idleCutoff, scanLimit],
+        }, "retro pending idle sessions");
+
+        const recordIdOf = (id: string): string =>
+            id.startsWith("session:") ? id : `session:${id}`;
         const keyOf = (recordId: string): string =>
             recordId.startsWith("session:")
                 ? recordId.slice("session:".length).replace(/`/g, "")
                 : recordId;
 
         const out: PendingSession[] = [];
-        for (const row of (endedRows?.[0] ?? [])) {
+        for (const row of endedRows) {
             const sessionRecordId = recordIdOf(row.id);
+            if (reviewedSessions.has(keyOf(sessionRecordId))) continue;
             out.push({
                 sessionId: sessionRecordId,
                 key: keyOf(sessionRecordId),
                 project: row.project,
                 source: row.source,
                 model: row.model,
-                startedAt: row.started_at,
-                endedAt: row.ended_at,
+                startedAt: row.started_at ? row.started_at.toISOString() : null,
+                endedAt: row.ended_at.toISOString(),
                 lastTurnAt: null,
                 turns: 0,
                 reason: "ended_at",
             });
         }
-        for (const row of (idleRows?.[0] ?? [])) {
+        for (const row of idleRows) {
             const sessionRecordId = recordIdOf(row.id);
+            if (reviewedSessions.has(keyOf(sessionRecordId))) continue;
             out.push({
                 sessionId: sessionRecordId,
                 key: keyOf(sessionRecordId),
                 project: row.project,
                 source: row.source,
                 model: row.model,
-                startedAt: row.started_at,
+                startedAt: row.started_at.toISOString(),
                 endedAt: null,
                 lastTurnAt: null,
                 turns: 0,
                 reason: "idle",
             });
         }
-        return out;
+        return out.slice(0, opts.limit);
     });
 
-const cmdRetroPending = (input: {
+export const cmdRetroPending = (input: {
     readonly since: number;
     readonly idleMin: number;
     readonly limit: number;
@@ -470,7 +484,19 @@ const suggestModelFor = (s: PendingSession): string => {
     return "sonnet";
 };
 
-const cmdRetroBrief = (input: {
+const RetroBriefSessionRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    raw_file: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+    last_turn_at: Schema.NullOr(TimestampColumn),
+    turns: NumberFromBigIntColumn,
+});
+
+export const cmdRetroBrief = (input: {
     readonly session: string;
     readonly outDir: string | undefined;
     readonly json: boolean;
@@ -483,44 +509,29 @@ const cmdRetroBrief = (input: {
         const rawSession = sessionFlag.startsWith("session:")
             ? sessionFlag.slice("session:".length).replace(/`/g, "")
             : sessionFlag;
-        const sessionRef = recordRef("session", rawSession);
         const sessionRecordId = `session:${rawSession}`;
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<{
-            id: string | { tb: string; id: string };
-            project: string | null;
-            source: string | null;
-            model: string | null;
-            started_at: string | null;
-            ended_at: string | null;
-            raw_file: string | null;
-            last_turn_at: string | null;
-            turns: number;
-        }>]>(`
-            SELECT
-                id, project, source, model, raw_file,
-                type::string(started_at) AS started_at,
-                type::string(ended_at) AS ended_at,
-                type::string((SELECT VALUE math::max(ts) FROM turn WHERE session = $parent.id GROUP ALL)[0]) AS last_turn_at,
-                (SELECT count() FROM turn WHERE session = $parent.id GROUP ALL)[0].count ?? 0 AS turns
-            FROM ${sessionRef} LIMIT 1;
-        `);
-        const row = (rows?.[0] ?? [])[0];
+        const row = yield* cacheFirst(RetroBriefSessionRow, {
+            sql: `SELECT id, project, source, model, raw_file, started_at, ended_at,
+                         (SELECT max(ts) FROM turn WHERE session = s.id) AS last_turn_at,
+                         (SELECT count(*) FROM turn WHERE session = s.id) AS turns
+                  FROM session s WHERE s.id = ? LIMIT 1`,
+            params: [rawSession],
+        }, "retro brief session");
         if (!row) {
             fail(`ax retro brief: session ${sessionRecordId} not found`);
         }
-        const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
-        const key = idStr.startsWith("session:") ? idStr.slice("session:".length).replace(/`/g, "") : idStr;
+        const idStr = `session:${row.id}`;
+        const key = row.id;
         const session: PendingSession = {
             sessionId: idStr,
             key,
             project: row.project,
             source: row.source,
             model: row.model,
-            startedAt: row.started_at,
-            endedAt: row.ended_at,
-            lastTurnAt: row.last_turn_at,
-            turns: row.turns ?? 0,
+            startedAt: row.started_at ? row.started_at.toISOString() : null,
+            endedAt: row.ended_at ? row.ended_at.toISOString() : null,
+            lastTurnAt: row.last_turn_at ? row.last_turn_at.toISOString() : null,
+            turns: row.turns,
             reason: row.ended_at ? "ended_at" : "idle",
         };
         const suggested = suggestModelFor(session);
@@ -673,5 +684,22 @@ export const retroCommand = Command.make("retro").pipe(
 );
 
 export const retroRuntime: RuntimeManifest = {
-    retro: "db",
+    retro: {
+        kind: "db-conditional",
+        fallback: "cache",
+        subcommands: {
+            emit: (args) => {
+                const hasFile = args.some((arg) => arg === "--from-file" || arg.startsWith("--from-file="));
+                const hasSession = args.some((arg) => arg === "--session" || arg.startsWith("--session="))
+                    || Boolean(process.env.AX_SESSION_ID);
+                return hasFile && hasSession ? "cache" : "cache";
+            },
+            list: "cache",
+            pending: "cache",
+            brief: "cache",
+            reflect: "cache",
+            meta: "cache",
+            plan: "cache",
+        },
+    },
 };

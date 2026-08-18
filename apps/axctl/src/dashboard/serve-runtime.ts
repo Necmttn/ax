@@ -1,24 +1,31 @@
 /**
- * Server-scoped Effect runtime for the dashboard server (Insights Surface).
+ * Server-scoped Effect runtime for the studio server (Insights Surface).
  *
- * One `ManagedRuntime` over `IngestRuntimeLayer` (a superset of `AppLayer`)
- * serves BOTH route handlers and the detached ingest daemon fibers that
- * `startIngestWorkflow` forks - so the SurrealDB connection, trace sink, and
- * stage registry are built once per server lifetime instead of once per
- * HTTP request (the old `appLayerRunner` paid a fresh WebSocket handshake +
- * signin on every request).
+ * One `ManagedRuntime` serves every route handler, so `CacheRead`'s
+ * published-snapshot connection (and the trace sink) is built once per
+ * server lifetime instead of once per HTTP request.
+ *
+ * Studio only ever READS the published snapshot; it does not host an ingest
+ * runtime. An on-demand server process that exits when its client
+ * disconnects cannot own a background fiber's lifecycle, so there is no
+ * in-browser "trigger ingest" path here - background freshness is a separate
+ * concern (a freshness drive spawns `ax ingest` independently of any studio
+ * invocation).
  *
  * Self-healing: v4 `ManagedRuntime` caches its layer-build fiber forever -
- * including a FAILED build (e.g. SurrealDB down when the server boots). A
- * naive shared runtime would stay bricked until restart, where the old
- * per-request runner healed as soon as the DB came up. `makeServeRuntime`
- * restores that behavior: when a run rejects while `cachedContext` is still
- * undefined (the build never succeeded), the failed runtime is disposed and a
- * fresh one is swapped in for the next request. A rejection AFTER a
- * successful build is a handler error and never triggers a swap.
+ * including a FAILED build (e.g. no snapshot published yet when the server
+ * boots). A naive shared runtime would stay bricked until restart, where the
+ * old per-request runner healed as soon as a snapshot appeared.
+ * `makeServeRuntime` restores that behavior: when a run rejects while
+ * `cachedContext` is still undefined (the build never succeeded), the failed
+ * runtime is disposed and a fresh one is swapped in for the next request. A
+ * rejection AFTER a successful build is a handler error and never triggers a
+ * swap.
  */
-import { Effect, ManagedRuntime, type Layer } from "effect";
-import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
+import { JudgmentLive } from "../judgment.ts";
 import type { DashboardEnv, EffectRunner } from "./router/router.ts";
 
 /**
@@ -51,12 +58,19 @@ export interface ServeRuntimeHandle {
  * Production runtime factory. Pass a `memoMap` to share layer builds with
  * other consumers of the same layer objects - `serveDashboard` shares one
  * memoMap between this runtime and the contract web handler
- * (contract/web-handler.ts) so AppLayer's SurrealDB connection is built once.
+ * (contract/web-handler.ts) so `AppLayer`'s services are built once.
  */
 export const defaultRuntimeFactory = (
     options?: { readonly memoMap?: Layer.MemoMap },
 ): (() => RuntimeLike) =>
-() => ManagedRuntime.make(IngestRuntimeLayer, options?.memoMap ? { memoMap: options.memoMap } : undefined);
+() => ManagedRuntime.make(
+    Layer.mergeAll(
+        CacheReadLive,
+        JudgmentLive,
+        AppLayer,
+    ),
+    options?.memoMap ? { memoMap: options.memoMap } : undefined,
+);
 
 export function makeServeRuntime(make: () => RuntimeLike = defaultRuntimeFactory()): ServeRuntimeHandle {
     let runtime = make();

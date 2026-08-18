@@ -136,5 +136,5 @@ export const memoryCommand = Command.make("memory").pipe(
 );
 
 export const axMemoryRuntime: RuntimeManifest = {
-    memory: "db",
+    memory: "cache",
 };

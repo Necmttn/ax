@@ -1,11 +1,9 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
+import { isoTimestamp, recordKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
 import { checkFamilyFromCommand } from "./check-family.ts";
 
 export type CommandOutcomeKind =
@@ -21,15 +19,15 @@ export type CommandOutcomeKind =
 interface ToolCallOutcomeRow {
     readonly id?: unknown;
     readonly session?: unknown;
-    readonly turn?: unknown;
+    readonly turn?: unknown | null;
     readonly name?: string;
-    readonly command_norm?: string;
-    readonly command_text?: string;
-    readonly output_excerpt?: string;
-    readonly error_text?: string;
-    readonly exit_code?: number;
+    readonly command_norm?: string | null;
+    readonly command_text?: string | null;
+    readonly output_excerpt?: string | null;
+    readonly error_text?: string | null;
+    readonly exit_code?: number | null;
     readonly has_error?: boolean;
-    readonly status?: string;
+    readonly status?: string | null;
     readonly ts?: TimestampInput;
 }
 
@@ -37,7 +35,7 @@ interface UserTurnRow {
     readonly id?: unknown;
     readonly session?: unknown;
     readonly seq?: number;
-    readonly text_excerpt?: string;
+    readonly text_excerpt?: string | null;
     readonly ts?: TimestampInput;
     readonly has_error?: boolean;
 }
@@ -97,16 +95,16 @@ export function classifyCommandOutcome(row: ToolCallOutcomeRow): CommandOutcomeK
 }
 
 function commandOutcomeKey(row: ToolCallOutcomeRow, index: number): string {
-    const toolCallKey = recordKeyPart(row.id, "tool_call");
-    if (toolCallKey) return `tool_call__${safeKeyPart(toolCallKey)}__${Bun.hash(toolCallKey).toString(16).slice(0, 12)}`;
-    const seed = `${recordKeyPart(row.session, "session") ?? "session"}:${row.command_norm ?? row.name ?? "command"}:${index}`;
-    return `derived__${safeKeyPart(seed)}__${Bun.hash(seed).toString(16).slice(0, 12)}`;
+    const toolCallKey = recordKeyPart(row.id, "tool_call") ?? (typeof row.id === "string" ? row.id : null);
+    if (toolCallKey) return stableId("command_outcome", [toolCallKey]);
+    const seed = `${typeof row.session === "string" ? row.session : "session"}:${row.command_norm ?? row.name ?? "command"}:${index}`;
+    return stableId("command_outcome", [seed]);
 }
 
 export function deriveCommandOutcomes(rows: readonly ToolCallOutcomeRow[]): CommandOutcome[] {
     return rows.map((row, index) => {
-        const toolCallKey = recordKeyPart(row.id, "tool_call");
-        const sessionKey = recordKeyPart(row.session, "session");
+        const toolCallKey = recordKeyPart(row.id, "tool_call") ?? (typeof row.id === "string" ? row.id : null);
+        const sessionKey = recordKeyPart(row.session, "session") ?? (typeof row.session === "string" ? row.session : null);
         const kind = classifyCommandOutcome(row);
         return {
             key: commandOutcomeKey(row, index),
@@ -149,7 +147,7 @@ export function deriveUserMessageNgrams(rows: readonly UserTurnRow[], sizes: rea
     for (const row of rows) {
         const text = row.text_excerpt?.trim();
         if (!text) continue;
-        const sessionKey = recordKeyPart(row.session, "session") ?? "unknown";
+        const sessionKey = recordKeyPart(row.session, "session") ?? (typeof row.session === "string" ? row.session : "unknown");
         const ts = isoTimestamp(row.ts);
         const words = tokens(text);
         const nearCorrection = /\b(no|wrong|instead|wait|stop|not that|actually)\b/i.test(text);
@@ -191,103 +189,71 @@ export function deriveUserMessageNgrams(rows: readonly UserTurnRow[], sizes: rea
         .slice(0, 1000);
 }
 
-function commandOutcomeStatement(outcome: CommandOutcome): string {
-    return `UPSERT ${recordRef("command_outcome", outcome.key)} MERGE ${surrealObject([
-        ["tool_call", outcome.toolCallKey ? recordRef("tool_call", outcome.toolCallKey) : "NONE"],
-        ["session", outcome.sessionKey ? recordRef("session", outcome.sessionKey) : "NONE"],
-        ["command_norm", surrealOptionString(outcome.commandNorm)],
-        ["command_tool", surrealOptionString(outcome.commandTool)],
-        ["kind", surrealString(outcome.kind)],
-        ["status", surrealString(outcome.status)],
-        ["text", surrealOptionString(outcome.text)],
-        ["labels", surrealJsonOption(outcome.labels)],
-        ["metrics", surrealJsonOption(outcome.metrics)],
-        ["ts", surrealDate(outcome.ts)],
-    ])};`;
-}
+const commandOutcomeRow = (outcome: CommandOutcome) => cacheRow({
+    id: outcome.key, tool_call: outcome.toolCallKey, session: outcome.sessionKey,
+    command_norm: outcome.commandNorm, command_tool: outcome.commandTool, kind: outcome.kind,
+    status: outcome.status, text: outcome.text, labels: jsonParam(outcome.labels),
+    metrics: jsonParam(outcome.metrics), ts: tsParam(outcome.ts),
+});
+const ngramRow = (item: NgramAggregate) => cacheRow({
+    id: stableId("user_message_ngram", [item.n, item.ngram]), ngram: item.ngram, n: item.n,
+    count: item.count, sessions: jsonParam([...item.sessions].slice(0, 100)),
+    near_correction_count: item.nearCorrectionCount, near_failed_tool_count: item.nearFailedToolCount,
+    near_edit_count: item.nearEditCount, near_verification_count: item.nearVerificationCount,
+    first_seen: tsParam(item.firstSeen), last_seen: tsParam(item.lastSeen),
+});
 
-function ngramStatement(item: NgramAggregate): string {
-    const key = `${item.n}__${safeKeyPart(item.ngram)}__${Bun.hash(item.ngram).toString(16).slice(0, 12)}`;
-    return `UPSERT ${recordRef("user_message_ngram", key)} MERGE ${surrealObject([
-        ["ngram", surrealString(item.ngram)],
-        ["n", item.n.toString(10)],
-        ["count", item.count.toString(10)],
-        ["sessions", surrealJsonOption([...item.sessions].slice(0, 100))],
-        ["near_correction_count", item.nearCorrectionCount.toString(10)],
-        ["near_failed_tool_count", item.nearFailedToolCount.toString(10)],
-        ["near_edit_count", item.nearEditCount.toString(10)],
-        ["near_verification_count", item.nearVerificationCount.toString(10)],
-        ["first_seen", surrealOptionDate(item.firstSeen)],
-        ["last_seen", surrealOptionDate(item.lastSeen)],
-    ])};`;
-}
-
-const fetchToolCalls = (sinceDays: number | undefined): Effect.Effect<ToolCallOutcomeRow[], DbError, SurrealClient> =>
+const fetchToolCalls = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly ToolCallOutcomeRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceWhereClause(sinceDays);
-        const result = yield* db.query<[ToolCallOutcomeRow[]]>(`
-SELECT id, session, turn, name, command_norm, command_text, output_excerpt, error_text, exit_code, has_error, status, type::string(ts) AS ts
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, turn: Schema.NullOr(Schema.String), name: Schema.String,
+            command_norm: Schema.NullOr(Schema.String), command_text: Schema.NullOr(Schema.String),
+            output_excerpt: Schema.NullOr(Schema.String), error_text: Schema.NullOr(Schema.String),
+            exit_code: Schema.NullOr(Schema.Number), has_error: Schema.Boolean,
+            status: Schema.NullOr(Schema.String), ts: TimestampColumn,
+        }), `SELECT id, session, turn, name, command_norm, command_text, output_excerpt, error_text,
+                    CAST(exit_code AS DOUBLE) AS exit_code, has_error, status, ts
 FROM tool_call
-${since}
-ORDER BY ts DESC;`);
-        return result?.[0] ?? [];
+${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
+ORDER BY ts DESC`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
-const fetchUserTurns = (sinceDays: number | undefined): Effect.Effect<UserTurnRow[], DbError, SurrealClient> =>
+const fetchUserTurns = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly UserTurnRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceAndClause(sinceDays);
-        const result = yield* db.query<[UserTurnRow[]]>(`
-SELECT id, session, seq, text_excerpt, type::string(ts) AS ts, has_error
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, seq: Schema.Number,
+            text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn, has_error: Schema.Boolean,
+        }), `SELECT id, session, CAST(seq AS DOUBLE) AS seq, text_excerpt, ts, has_error
 FROM turn
-WHERE role = "user" ${since}
-ORDER BY ts DESC;`);
-        return result?.[0] ?? [];
+WHERE role = 'user' ${sinceDays === undefined ? "" : "AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
+ORDER BY ts DESC`, sinceDays === undefined ? [] : [sinceDays]);
     });
 
-export const deriveOutcomes = (opts: { sinceDays: number | undefined } = { sinceDays: undefined }): Effect.Effect<OutcomeStats, DbError, SurrealClient> =>
+export const deriveOutcomes = (write: CacheWriteService, opts: { sinceDays: number | undefined } = { sinceDays: undefined }): Effect.Effect<OutcomeStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const [toolCalls, userTurns] = yield* Effect.all(
             [
-                fetchToolCalls(opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-tool-calls")),
-                fetchUserTurns(opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-user-turns")),
+                fetchToolCalls(write, opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-tool-calls")),
+                fetchUserTurns(write, opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-user-turns")),
             ],
             { concurrency: 2 },
         );
         const outcomes = deriveCommandOutcomes(toolCalls);
         const ngrams = deriveUserMessageNgrams(userTurns);
-        const statements = [
-            ...outcomes.map(commandOutcomeStatement),
-            ...ngrams.map(ngramStatement),
-        ];
-        yield* db.query("DELETE user_message_ngram;").pipe(
-            Effect.withSpan("outcomes.delete-ngrams"),
-        );
-        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "outcomes" });
+        yield* write.exec("DELETE FROM user_message_ngram");
+        yield* write.putMany("command_outcome", outcomes.map(commandOutcomeRow));
+        yield* write.putMany("user_message_ngram", ngrams.map(ngramRow));
         return {
             commandOutcomes: outcomes.length,
             userMessageNgrams: ngrams.length,
         };
     });
 
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        deriveOutcomes({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<OutcomeStats>,
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const OutcomesKey = Schema.Literal("outcomes");
@@ -303,13 +269,13 @@ export class OutcomesStageStats extends BaseStageStats.extend<OutcomesStageStats
     userMessageNgrams: Schema.Number,
 }) {}
 
-export const outcomesStage: StageDef<OutcomesStageStats, SurrealClient> = {
+export const outcomesStage: StageDef<OutcomesStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "outcomes", deps: ["signals"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveOutcomes({ sinceDays });
+            const result = yield* deriveOutcomes(write, { sinceDays });
             return OutcomesStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `derived ${result.commandOutcomes} command outcomes, ${result.userMessageNgrams} ngrams`,

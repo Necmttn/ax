@@ -4,14 +4,18 @@
  * top-level names it registers; index.ts spreads them into RUNTIME_BY_COMMAND
  * and derives DB_COMMANDS. effect-cli.test.ts enforces exhaustiveness against
  * rootCommand, so an undeclared new command fails CI instead of dying at
- * runtime on the no-DB Proxy.
+ * runtime for want of a layer.
  */
 export type CommandRuntime =
-    /** handlers reach SurrealDB - route through withDb (AppLayer) */
-    | "db"
+    /**
+     * Reads the published DuckDB snapshot through `CacheRead` - route through
+     * withCache (AxConfig + platform + ProcessService + CacheReadLive). This is
+     * the runtime of every query command.
+     */
+    | "cache"
     /** ingest pipeline - route through withIngest (IngestRuntimeLayer + trace transports) */
     | "ingest"
-    /** must never touch the DB - route through withoutDb (Proxy SurrealClient that throws) */
+    /** reads no stored data at all - route through withoutDb (platform layers only) */
     | "none";
 
 /**

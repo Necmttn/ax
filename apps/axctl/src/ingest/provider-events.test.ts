@@ -1,294 +1,85 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
+import { Effect, Schema } from "effect";
 import {
     agentEventRecordKey,
     agentProviderRecordKey,
     agentSessionRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
+    writeAgentEvents,
+    writeAgentProviders,
 } from "./provider-events.ts";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 
-describe("provider event writer statement builders", () => {
-    test("record keys are stable and provider-scoped", () => {
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("provider event writers", { requireFts: true });
+
+describe("provider event keys", () => {
+    dtest("record keys are stable and provider scoped", () => {
         expect(agentProviderRecordKey("claude")).toBe("claude");
+        expect(agentSessionRecordKey("codex", "session-1/unsafe"))
+            .toMatch(/^codex__session_1_unsafe__[0-9a-f]{16}$/);
+        expect(agentEventRecordKey({
+            provider: "codex", providerSessionId: "session-1/unsafe",
+            providerEventId: "evt-1/unsafe", seq: 7,
+        })).toMatch(/__evt_1_unsafe__[0-9a-f]{16}$/);
+        expect(agentEventRecordKey({
+            provider: "codex", providerSessionId: "session-1/unsafe", seq: 7,
+        })).toMatch(/__seq_000007$/);
+    });
+});
 
-        const sessionKey = agentSessionRecordKey("codex", "session-1/unsafe");
-        expect(sessionKey).toBe(agentSessionRecordKey("codex", "session-1/unsafe"));
-        expect(sessionKey).toMatch(/^codex__session_1_unsafe__[0-9a-f]{16}$/);
-
-        const eventKey = agentEventRecordKey({
-            provider: "codex",
-            providerSessionId: "session-1/unsafe",
-            providerEventId: "evt-1/unsafe",
-            seq: 7,
-        });
-        expect(eventKey).toBe(
-            agentEventRecordKey({
-                provider: "codex",
-                providerSessionId: "session-1/unsafe",
-                providerEventId: "evt-1/unsafe",
-                seq: 7,
+describe("provider event writers on real DuckDB", () => {
+    dtest("writes typed provider, session, event, and parent edge rows", async () => {
+        let counts: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-provider-events-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* writeAgentProviders(write, [{
+                    name: "codex", displayName: "Codex CLI", version: "0.1.0",
+                    capabilities: { transcripts: true, tools: ["exec_command"] },
+                }]);
+                yield* writeAgentEvents(write, {
+                    sessions: [{
+                        provider: "codex", providerSessionId: "session-1", axSessionId: "session-1",
+                        raw: { source: "fixture" }, startedAt: "2026-05-29T01:00:00.000Z",
+                    }],
+                    events: [
+                        { provider: "codex", providerSessionId: "session-1", providerEventId: "parent",
+                            seq: 1, ts: "2026-05-29T01:00:01.000Z", type: "message" },
+                        { provider: "codex", providerSessionId: "session-1", providerEventId: "child",
+                            parentProviderEventId: "parent", parentProviderEventIds: ["parent"],
+                            seq: 2, ts: "2026-05-29T01:00:02.000Z", type: "message" },
+                    ],
+                });
+                counts = (yield* write.rows(Schema.Struct({
+                    providers: Schema.BigInt, sessions: Schema.BigInt,
+                    events: Schema.BigInt, edges: Schema.BigInt,
+                }), `SELECT
+                    (SELECT count(*) FROM agent_provider) AS providers,
+                    (SELECT count(*) FROM agent_session) AS sessions,
+                    (SELECT count(*) FROM agent_event) AS events,
+                    (SELECT count(*) FROM agent_event_child) AS edges`))[0];
             }),
-        );
-        expect(eventKey).toMatch(/__evt_1_unsafe__[0-9a-f]{16}$/);
+        ));
+        expect(counts).toEqual({ providers: 1n, sessions: 1n, events: 2n, edges: 1n });
+    });
 
-        expect(
-            agentEventRecordKey({
-                provider: "codex",
-                providerSessionId: "session-1/unsafe",
-                seq: 7,
+    dtest("re-ingest replaces events, while a streaming batch appends", async () => {
+        let ids: string[] = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-provider-replace-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const session = { provider: "codex" as const, providerSessionId: "session-1", axSessionId: "session-1" };
+                const event = (id: string, seq: number) => ({
+                    provider: "codex" as const, providerSessionId: "session-1", providerEventId: id,
+                    seq, ts: new Date(1_700_000_000_000 + seq), type: "message",
+                });
+                yield* writeAgentEvents(write, { sessions: [session], events: [event("old", 1)] });
+                yield* writeAgentEvents(write, { sessions: [session], events: [event("new", 1)] });
+                yield* writeAgentEvents(write, { sessions: [session], events: [event("later", 2)] }, { clearExisting: false });
+                ids = (yield* write.rows(
+                    Schema.Struct({ provider_event_id: Schema.String }),
+                    "SELECT provider_event_id FROM agent_event ORDER BY seq",
+                )).map((row) => row.provider_event_id);
             }),
-        ).toMatch(/__seq_000007$/);
-    });
-
-    test("provider statements upsert provider rows with optional JSON text", () => {
-        const sql = buildAgentProviderStatements([
-            {
-                name: "codex",
-                displayName: "Codex CLI",
-                version: "0.1.0",
-                capabilities: { transcripts: true, tools: ["exec_command"] },
-            },
-        ]).join("\n");
-
-        expect(sql).toContain("UPSERT agent_provider:`codex` MERGE");
-        expect(sql).toContain("name: \"codex\"");
-        expect(sql).toContain("display_name: \"Codex CLI\"");
-        expect(sql).toContain("version: \"0.1.0\"");
-        expect(sql).toContain(
-            "capabilities: \"{\\\"transcripts\\\":true,\\\"tools\\\":[\\\"exec_command\\\"]}\"",
-        );
-        expect(sql).toContain("updated_at: time::now()");
-    });
-
-    test("event batch clears existing session events before re-inserting (idempotent re-ingest)", () => {
-        const sessionKey = agentSessionRecordKey("codex", "session-1");
-        const statements = buildAgentEventStatements({
-            sessions: [
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1",
-                    axSessionId: "session-1",
-                },
-            ],
-            events: [
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1",
-                    providerEventId: "evt-1",
-                    seq: 1,
-                    ts: "2026-05-29T01:00:01.000Z",
-                    type: "message",
-                },
-            ],
-        });
-
-        // The clears must come FIRST so the fresh batch inserts cleanly even if
-        // the existing rows hold the same (agent_session, seq) under a different
-        // record id (seq drift across ingests).
-        //
-        // They MUST delete the subquery RESULT by primary id
-        // (`DELETE (SELECT VALUE id ...)`), NOT a bare `WHERE agent_session =
-        // ...` and NOT `WHERE id IN (SELECT ...)`. The bare WHERE is planned
-        // through the `agent_event_session_seq` secondary index, which can hold
-        // stale/ghost entries in a long-lived DB - an index-driven DELETE then
-        // silently skips drifted rows while their entries still block the fresh
-        // INSERT, crashing the next ingest. The id-IN-subquery form re-evaluates
-        // the inner full-table scan per candidate row - quadratic in table size,
-        // it wedged every ingest once agent_event_child grew to ~460k rows.
-        const clearEventStmt = `DELETE (SELECT VALUE id FROM agent_event WHERE agent_session = agent_session:\`${sessionKey}\`);`;
-        const clearEdgeStmt = `DELETE (SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:\`${sessionKey}\`);`;
-
-        const clearEventIdx = statements.indexOf(clearEventStmt);
-        const clearEdgeIdx = statements.indexOf(clearEdgeStmt);
-        const firstUpsertIdx = statements.findIndex((s) => s.startsWith("UPSERT agent_event:"));
-
-        expect(clearEventIdx).toBeGreaterThanOrEqual(0);
-        expect(clearEdgeIdx).toBeGreaterThanOrEqual(0);
-        expect(firstUpsertIdx).toBeGreaterThanOrEqual(0);
-        expect(clearEdgeIdx).toBeLessThan(firstUpsertIdx);
-        expect(clearEventIdx).toBeLessThan(firstUpsertIdx);
-
-        // Guard against regressing to the index-driven bare-WHERE delete.
-        expect(
-            statements.some((s) => /^DELETE agent_event WHERE agent_session =/.test(s)),
-        ).toBe(false);
-        // Guard against regressing to the quadratic id-IN-subquery delete.
-        expect(
-            statements.some((s) => s.includes("WHERE id IN (SELECT")),
-        ).toBe(false);
-    });
-
-    test("clearExisting:false suppresses the per-session clear (streaming follow-up batches)", () => {
-        const statements = buildAgentEventStatements(
-            {
-                sessions: [
-                    {
-                        provider: "codex",
-                        providerSessionId: "session-1",
-                        axSessionId: "session-1",
-                    },
-                ],
-                events: [
-                    {
-                        provider: "codex",
-                        providerSessionId: "session-1",
-                        providerEventId: "evt-2",
-                        seq: 2,
-                        ts: "2026-05-29T01:00:02.000Z",
-                        type: "message",
-                    },
-                ],
-            },
-            { clearExisting: false },
-        );
-
-        expect(statements.some((s) => s.startsWith("DELETE agent_event"))).toBe(false);
-        expect(statements.some((s) => s.startsWith("DELETE agent_event_child"))).toBe(false);
-    });
-
-    test("event batch statements write sessions, events, and parent edges", () => {
-        const statements = buildAgentEventStatements({
-            sessions: [
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1/unsafe",
-                    axSessionId: "ax-session-1",
-                    cwd: "/tmp/ax",
-                    project: "ax",
-                    title: "Task 1",
-                    model: "gpt-5-codex",
-                    sourcePath: "/tmp/transcript.jsonl",
-                    raw: { source: "fixture" },
-                    labels: { imported: true },
-                    metrics: { turns: 2 },
-                    startedAt: "2026-05-29T01:00:00.000Z",
-                    endedAt: "2026-05-29T01:02:00.000Z",
-                },
-            ],
-            events: [
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1/unsafe",
-                    providerEventId: "evt-1/unsafe",
-                    seq: 1,
-                    ts: "2026-05-29T01:00:01.000Z",
-                    type: "message",
-                    role: "user",
-                    text: "Implement Task 1",
-                    textExcerpt: "Implement Task 1",
-                    raw: { id: "evt-1/unsafe" },
-                    labels: { source: "codex" },
-                    metrics: { tokens: 4 },
-                },
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1/unsafe",
-                    providerEventId: "evt-2/unsafe",
-                    parentProviderEventIds: ["evt-1/unsafe", "missing-parent"],
-                    parentKind: "reply",
-                    seq: 2,
-                    ts: "2026-05-29T01:00:02.000Z",
-                    type: "message",
-                    role: "assistant",
-                    textExcerpt: "Done",
-                },
-            ],
-        });
-
-        const sql = statements.join("\n");
-        const parentEventStatement = statements.find((statement) =>
-            statement.startsWith("UPSERT agent_event:") && statement.includes("evt-1/unsafe"),
-        );
-        const childEventStatement = statements.find((statement) =>
-            statement.startsWith("UPSERT agent_event:") && statement.includes("evt-2/unsafe"),
-        );
-        const sessionKey = agentSessionRecordKey("codex", "session-1/unsafe");
-        const parentKey = agentEventRecordKey({
-            provider: "codex",
-            providerSessionId: "session-1/unsafe",
-            providerEventId: "evt-1/unsafe",
-            seq: 1,
-        });
-        const childKey = agentEventRecordKey({
-            provider: "codex",
-            providerSessionId: "session-1/unsafe",
-            providerEventId: "evt-2/unsafe",
-            seq: 2,
-        });
-
-        expect(sql).toContain(`UPSERT agent_session:\`${sessionKey}\` MERGE`);
-        expect(sql).toContain("provider: agent_provider:`codex`");
-        expect(sql).toContain("provider_session_id: \"session-1/unsafe\"");
-        expect(sql).toContain("ax_session: session:`ax-session-1`");
-        expect(sql).toContain("raw: \"{\\\"source\\\":\\\"fixture\\\"}\"");
-        expect(sql).toContain("started_at: d\"2026-05-29T01:00:00.000Z\"");
-
-        expect(sql).toContain(`UPSERT agent_event:\`${parentKey}\` CONTENT`);
-        expect(sql).toContain(`agent_session: agent_session:\`${sessionKey}\``);
-        expect(sql).toContain("provider_event_id: \"evt-1/unsafe\"");
-        expect(parentEventStatement).toContain("parent_provider_event_id: NONE");
-        expect(parentEventStatement).not.toContain("provider_session_id:");
-        expect(childEventStatement).toContain("parent_provider_event_id: \"evt-1/unsafe\"");
-        expect(childEventStatement).not.toContain("provider_session_id:");
-        expect(sql).toContain("seq: 1");
-        expect(sql).toContain("ts: d\"2026-05-29T01:00:01.000Z\"");
-        expect(sql).toContain("text_excerpt: \"Implement Task 1\"");
-        expect(sql).toContain("metrics: \"{\\\"tokens\\\":4}\"");
-
-        expect(sql).toContain(
-            `RELATE agent_event:\`${parentKey}\`->agent_event_child:\``,
-        );
-        expect(sql).toContain(`->agent_event:\`${childKey}\` SET`);
-        expect(sql).toContain(`agent_session = agent_session:\`${sessionKey}\``);
-        expect(sql).toContain("provider = agent_provider:`codex`");
-        expect(sql).toContain("kind = \"reply\"");
-        expect(sql).toContain("ts = d\"2026-05-29T01:00:02.000Z\"");
-        expect(sql).not.toContain("missing-parent");
-    });
-
-    test("scalar parent event ids create de-duped parent edges", () => {
-        const statements = buildAgentEventStatements({
-            sessions: [],
-            events: [
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1",
-                    providerEventId: "evt-parent",
-                    seq: 1,
-                    ts: "2026-05-29T01:00:01.000Z",
-                    type: "message",
-                },
-                {
-                    provider: "codex",
-                    providerSessionId: "session-1",
-                    providerEventId: "evt-child",
-                    parentProviderEventId: "evt-parent",
-                    parentProviderEventIds: ["evt-parent"],
-                    seq: 2,
-                    ts: "2026-05-29T01:00:02.000Z",
-                    type: "message",
-                },
-            ],
-        });
-
-        const parentKey = agentEventRecordKey({
-            provider: "codex",
-            providerSessionId: "session-1",
-            providerEventId: "evt-parent",
-            seq: 1,
-        });
-        const childKey = agentEventRecordKey({
-            provider: "codex",
-            providerSessionId: "session-1",
-            providerEventId: "evt-child",
-            seq: 2,
-        });
-        const edgeStatements = statements.filter((statement) =>
-            statement.startsWith("RELATE agent_event:"),
-        );
-
-        expect(edgeStatements).toHaveLength(1);
-        expect(edgeStatements[0]).toContain(`RELATE agent_event:\`${parentKey}\``);
-        expect(edgeStatements[0]).toContain(`->agent_event:\`${childKey}\``);
+        ));
+        expect(ids).toEqual(["new", "later"]);
     });
 });

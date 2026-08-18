@@ -6,25 +6,30 @@
  *   - jsonRoute: pure param decoder -> Effect handler -> JSON encode, with
  *     optional respond/errorStatus overrides.
  *   - rawRoute: full Request -> Response escape hatch (SSE /api/events,
- *     binary /api/image, POST /api/ingest - the IngestStreamBus seam - plus
- *     the pure responses that must never build AppLayer: /api/version and
- *     empty-q /api/recall, whose eager SurrealClient build would stall ~5s
- *     without a DB).
+ *     binary /api/image, plus the pure responses that must never build
+ *     AppLayer: /api/version and empty-q /api/recall).
  *
  * The Effect runner is injectable: production passes the server-scoped
  * runtime's runner (serve-runtime.ts), so layers are built once per server
- * lifetime; router/route unit tests pass a stub so they never build AppLayer
- * (and therefore never touch SurrealDB).
+ * lifetime; router/route unit tests pass a stub so they never build AppLayer.
  */
 import { Effect } from "effect";
 import type { Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
+import type { Judgment } from "@ax/lib/sqlite";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-/** Everything AppLayer provides; the upper bound for jsonRoute handler envs. */
-export type DashboardEnv = Layer.Success<typeof AppLayer>;
+/**
+ * Everything the studio server runtime provides; the upper bound for
+ * jsonRoute handler envs.
+ *
+ * Every dashboard route handler reads `CacheRead` or `Judgment`, and this env
+ * is the enforcement: a handler that required anything else would fail to
+ * typecheck against it, the same rule `IngestRuntimeLayer` relies on elsewhere.
+ */
+export type DashboardEnv = Layer.Success<typeof AppLayer> | CacheRead | Judgment;
 
 /** Runs a handler effect to a Promise. Production = ServeRuntimeHandle.runner. */
 export type EffectRunner = {
@@ -33,14 +38,13 @@ export type EffectRunner = {
 
 /**
  * Server-boot context threaded into raw routes. `null` means the request is
- * being handled WITHOUT a booted server (unit tests, direct invocation);
- * `ingestStream` is null when the Durable Streams sidecar could not start
- * (the compiled binary, which can't load native lmdb). /api/version reports
- * the second case as `live_ingest: false` and POST /api/ingest 503s on both.
+ * being handled WITHOUT a booted server (unit tests, direct invocation).
+ * Empty now that the live-ingest trigger (its Durable Streams sidecar handle
+ * used to live here) was retired in studio ephemeral (wave 3) - kept as a
+ * distinct type rather than deleted outright so a future boot-time fact has
+ * somewhere to land without re-threading every raw route's signature.
  */
-export interface ServeContext {
-    readonly ingestStream: DurableIngestStream | null;
-}
+export type ServeContext = Record<string, never>;
 
 export function jsonResponse(value: unknown, status = 200): Response {
     return new Response(JSON.stringify(value), {
@@ -156,15 +160,13 @@ export const errorMessage = (err: unknown): string => {
 
 // ----------------------------------------------------------- request deadline
 //
-// Per-request DB deadline. `acquire` (db.ts) already caps the initial connect at
-// 5s, but once connected a daemon that wedges (alive but not answering - the
-// recurring SurrealDB failure on this box) makes `db.query()` hang FOREVER, so
-// JSON handlers pile up behind a dead websocket and the whole dashboard appears
-// frozen (this is what made /api/wrapped hang). A whole-request timeout bounds
-// each JSON handler's lifetime: the fiber is interrupted, the client gets a fast
-// 504, and handlers stop accumulating. (The orphaned WS promise can't be force-
-// cancelled, but the request no longer blocks - the daemon-side watchdog is what
-// reaps the wedged surreal.)
+// Per-request DB deadline. A DuckDB query that hangs (blocked native call, lock
+// contention) makes the read hang FOREVER, so JSON handlers pile up behind it
+// and the whole dashboard appears frozen (this is what made /api/wrapped
+// hang). A whole-request timeout bounds each JSON handler's lifetime: the
+// fiber is interrupted, the client gets a fast 504, and handlers stop
+// accumulating. (The underlying blocked native call can't be force-cancelled,
+// but the request no longer blocks on it.)
 //
 // Scope is deliberately JSON routes only: rawRoutes (SSE /api/events, the
 // ingest stream) own their own long-lived lifecycle and must NOT be clamped.
@@ -214,8 +216,8 @@ export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
                 return jsonResponse(
                     {
                         error:
-                            `request exceeded the ${err.ms}ms server query deadline; the SurrealDB daemon may be wedged ` +
-                            `(check 'ax serve status' and restart the db)`,
+                            `request exceeded the ${err.ms}ms server query deadline reading the DuckDB snapshot; ` +
+                            `try a narrower --days window, or run 'ax ingest' to republish the snapshot`,
                     },
                     504,
                 );

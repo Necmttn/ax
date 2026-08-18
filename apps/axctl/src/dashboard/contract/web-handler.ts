@@ -10,47 +10,45 @@
  *
  * GET /api/version is in the CONTRACT (docs, OpenAPI, generated client) but
  * NOT in the routing table: it is the daemon's identity probe and must keep
- * answering when SurrealDB is down, so the DB-free legacy rawRoute serves
- * it. The v4 web handler builds its layer stack on first request and
- * `toWebHandlerLayerWith` caches a FAILED build forever - the self-healing
- * wrapper below rebuilds the handler after a rejected request so contract
- * routes recover once the DB comes up (mirrors serve-runtime.ts).
+ * answering even when the DuckDB cache read is unavailable, so the DB-free
+ * legacy rawRoute serves it. The v4 web handler builds its layer stack on
+ * first request and `toWebHandlerLayerWith` caches a FAILED build forever -
+ * the self-healing wrapper below rebuilds the handler after a rejected
+ * request so contract routes recover once the DB comes up (mirrors
+ * serve-runtime.ts).
  *
  * The `memoMap` option is shared with the server's ManagedRuntime
- * (serve-runtime.ts), so AppLayer's services - the SurrealDB connection,
- * trace sink - are built ONCE and reused by both the contract routes and
- * the legacy routes' runner.
+ * (serve-runtime.ts), so `AppLayer`'s services - AxConfig, the trace sink -
+ * are built ONCE and reused by both the contract routes and the legacy
+ * routes' runner. The read seam (`CacheReadLive`) opens no connection until a
+ * query actually arrives - see its own comment below.
  */
 import { Layer } from "effect";
 import { BunFileSystem, BunHttpPlatform, BunPath } from "@effect/platform-bun";
 import { Etag, HttpRouter } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
-import type { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { AxApi } from "@ax/lib/shared/api-contract";
+import { CacheReadLive } from "../../duckdb-embed-wiring.ts";
 import { GitHubEnv, GitHubEnvLive } from "../../profile/github-env.ts";
-import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
 import { errorText } from "./common.ts";
 import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
-import { LiveGroupLive } from "./live.ts";
 import { OtelGroupLive } from "./otel.ts";
 import { RoutingGroupLive } from "./routing.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
-import { ContractServeInfo, SystemGroupLive } from "./system.ts";
+import { SystemGroupLive } from "./system.ts";
 import { TeamGroupLive } from "./team.ts";
 import { UsageGroupLive } from "./usage.ts";
-
-/** Everything the contract handlers reach for; widens as families join. */
-export type ContractServices = SurrealClient;
+import { JudgmentLive } from "../../judgment.ts";
 
 /** Migrated exact (method, path) pairs the contract router owns. */
 const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
-    // system (GET /api/version deliberately absent - see module doc)
-    "POST /api/query",
-    "GET /api/graph-health",
+    // system (GET /api/version deliberately absent - see module doc; POST
+    // /api/query and GET /api/graph-health retired - see system.ts)
     "GET /api/worktrees",
     "GET /api/self-improve",
     // insights
@@ -88,8 +86,9 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/usage",
     // team
     "GET /api/team",
-    // live (SSE /api/events + binary /api/image stay raw legacy routes)
-    "POST /api/ingest",
+    // live: SSE /api/events + binary /api/image stay raw legacy routes; the
+    // trigger POST /api/ingest was retired in studio ephemeral, wave 3 - see
+    // api-contract.ts's module doc.
     // otel receiver
     "POST /v1/metrics",
     "POST /v1/traces",
@@ -130,19 +129,37 @@ export interface ContractWebHandler {
 }
 
 export interface MakeContractWebHandlerOptions {
-    /** Durable Streams sidecar handle, or null when it could not start
-     *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
-    readonly ingestStream: DurableIngestStream | null;
-    /** Share with the server runtime so AppLayer builds once (see above). */
+    /**
+     * Retired with the live-ingest trigger (studio ephemeral, wave 3) - the
+     * Durable Streams sidecar this used to identify no longer exists. Kept
+     * accepting `null` only so existing call sites (every group's test file
+     * passes `ingestStream: null`) compile unchanged; the value is not read.
+     */
+    readonly ingestStream?: null;
+    /** Share with the server runtime so `AppLayer` builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
-    /** Test seam: services the handlers need (default: production AppLayer). */
-    readonly services?: Layer.Layer<ContractServices, unknown>;
+    /**
+     * Test seam for the published-snapshot reader (default: `CacheReadLive`,
+     * which resolves a real libduckdb).
+     *
+     * v2 moved DuckDB-backed routes (`/api/recall`, `/api/sessions`, ...) onto
+     * `CacheRead`, and `CacheReadLive` fails with "the DuckDB library could not
+     * be loaded" wherever no dylib is resolvable - which is every plain
+     * `bun test` run and CI. Without this seam a route-plumbing test (does
+     * `GET /api/sessions` answer 200 with empty data?) reports 500 for a reason
+     * that has nothing to do with the route, and the only way to make it green
+     * would be to stop asserting the status. `@ax/lib/testing/cache`
+     * `makeTestCacheRead` fills it with canned rows that still decode through
+     * the caller's `Schema`. Query CORRECTNESS is a different question and
+     * belongs on a real temp DuckDB (`duckdbTestSetup` + `publishCacheFixture`).
+     */
+    readonly cacheRead?: Layer.Layer<CacheRead, unknown>;
     /** Test seam for server-side GitHub calls (default: daemon `gh` auth). */
     readonly github?: Layer.Layer<GitHubEnv, unknown>;
 }
 
 export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): ContractWebHandler {
-    // Handler services (SurrealClient, ContractServeInfo, FileSystem/Path
+    // Handler services (ContractServeInfo, FileSystem/Path
     // for the transcript-reading session handlers) must be part of the app
     // layer's OUTPUT: route handlers declare them through the router's
     // `Requires` channel, which `toWebHandler` satisfies from the built
@@ -151,8 +168,15 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
     const routesLayer = Layer.mergeAll(
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
-        Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
-        opts.services ?? AppLayer,
+        // The read seam: handlers read the published DuckDB snapshot. The
+        // layer opens nothing until a query actually arrives (see
+        // @ax/lib/duckdb/seam), so a daemon that never serves a read request
+        // pays nothing for it.
+        opts.cacheRead ?? CacheReadLive,
+        JudgmentLive,
+        // AxConfig/ProcessService/live-trace sink. Some handler call chains
+        // (worktrees overview, self-improve) reach for these transitively.
+        AppLayer,
     ).pipe(
         Layer.provide([
             SystemGroupLive,
@@ -161,7 +185,6 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             SkillsGroupLive,
             ImproveGroupLive,
             UsageGroupLive,
-            LiveGroupLive,
             OtelGroupLive,
             RoutingGroupLive,
             TeamGroupLive,
@@ -181,15 +204,15 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         });
 
     // Self-heal: a handler REJECTION (as opposed to an error response) means
-    // the lazy layer build failed - e.g. SurrealDB down at boot - and
-    // toWebHandlerLayerWith caches that failure forever. Swap in a fresh
+    // the lazy layer build failed - e.g. the DuckDB snapshot missing at boot -
+    // and toWebHandlerLayerWith caches that failure forever. Swap in a fresh
     // handler so the next request retries, and answer this one with a 500.
     let current = build();
     return {
         handler: async (request) => {
             const active = current;
             try {
-                return await active.handler(request);
+                return await withBodyOnValidationFailure(await active.handler(request), request);
             } catch (err) {
                 if (current === active) {
                     current = build();
@@ -201,3 +224,38 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         dispose: () => current.dispose(),
     };
 }
+
+/**
+ * Give a request-validation failure a body.
+ *
+ * `HttpApiSchemaError` - what a params/headers/query/payload decode failure is
+ * wrapped in - documents itself as responding "as an empty `400 Bad Request`".
+ * Zero bytes is indistinguishable from a broken server, and the primary
+ * consumer of this API is an agent that has to self-correct from the response
+ * alone. One reader lost most of a day to it, reporting a healthy route as dead
+ * because their own probe omitted a required parameter (#855).
+ *
+ * The error's `kind` and `cause` are not reachable from out here, so this does
+ * not name the offending field; it names the request and points at the two
+ * surfaces this same daemon serves that DO describe the contract. A 400 that
+ * already carries a body is passed through untouched, so a handler that
+ * explains itself keeps its own words.
+ */
+const withBodyOnValidationFailure = async (
+    response: Response,
+    request: Request,
+): Promise<Response> => {
+    if (response.status !== 400) return response;
+    // The empty respondable carries NO headers at all - not even
+    // `content-length: 0` - so emptiness has to be read off the body itself.
+    // Cloning a 400 is cheap, and a 400 that already carries a body returns
+    // here untouched.
+    if ((await response.clone().text()) !== "") return response;
+    const url = new URL(request.url);
+    return jsonResponse({
+        error: "bad_request",
+        message: `${request.method} ${url.pathname} failed request validation - a parameter, header, or body did not match the endpoint's schema.`,
+        docs: `${url.origin}/docs`,
+        openapi: `${url.origin}/openapi.json`,
+    }, 400);
+};

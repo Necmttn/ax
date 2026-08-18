@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
-import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import {
     COST_TOL,
     fetchSessionMetrics,
@@ -16,6 +14,7 @@ import {
     stampSparSession,
 } from "./spar.ts";
 import type { SparBrief, SparMetrics } from "./spar.ts";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const baseMetrics = (o: Partial<SparMetrics> = {}): SparMetrics => ({
     costUsd: 1.20,
@@ -126,21 +125,15 @@ describe("renderSparReport", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Effect glue (fake SurrealClient)
+// Effect glue (real-decode CacheRead fake - @ax/lib/testing/cache)
 // ---------------------------------------------------------------------------
 
-// enrichSessions/churn read fan-out width from AxConfig.knobs.
-const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
+const cacheRead = (routes: TestCacheOptions["routes"]) =>
+    makeTestCacheRead(routes !== undefined ? { routes } : {});
 
-const runDb = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
-    layer: Layer.Layer<SurrealClient>,
-): Promise<A> =>
-    Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer))));
-
-const runDbOnly = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
+const runCache = <A>(
+    eff: Effect.Effect<A, CacheReadError, CacheRead>,
+    layer: Layer.Layer<CacheRead>,
 ): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 describe("fetchSessionMetrics", () => {
@@ -148,42 +141,39 @@ describe("fetchSessionMetrics", () => {
         const since = new Date("2026-06-11T00:00:00.000Z");
         // routes: cost usage, churn base scan, churn fan-out, and the focused
         // turn/wall lookup. Unmatched -> [[]] (pricing falls back to built-in).
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM session_token_usage": [[
-                    { session: "session:`s1`", model: "claude", estimated_cost_usd: 1.5 },
-                ]],
-                // churn base session scan (selects id AS session, source)
-                "AS session, source\nFROM session": [[
-                    { session: "session:`s1`", source: "codex" },
-                ]],
-                "FROM produced": [[{ session: "session:`s1`", commit: "commit:`c1`" }]],
-                "FROM touched": [[
-                    { commit: "commit:`c1`", file: "file:`f1`", path: "src/a.ts", additions: 13, deletions: 3 },
-                ]],
-                // churn edit events: an initial edit (enables episode opening),
-                // then the repair edit between the failure and its pass.
-                "FROM tool_call": [[
-                    { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
-                    { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb\nc" }) },
-                ]],
-                // failure opens an episode; the later pass closes it so the
-                // edit between them is classified as repair.
-                "FROM command_outcome": [[
-                    { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
-                    { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", status: "ok", command_norm: "tsc" },
-                ]],
-                // focused turn/wall lookup: `FROM ONLY` returns the bare object,
-                // so the statement result is `[ {turn_count, s, e} ]` (NOT
-                // doubly-nested - that mismatch hid the rows[0][0] indexing bug).
-                "AS turn_count": [
-                    { turn_count: 21, s: "2026-06-11T00:00:00.000Z", e: "2026-06-11T00:10:00.000Z" },
-                ],
-            },
+        const { layer } = cacheRead({
+            "FROM session_token_usage": [[
+                { session: "session:`s1`", model: "claude", estimated_tokens: 1_000, estimated_cost_usd: 1.5 },
+            ]],
+            // churn base session scan (selects id AS session, source)
+            "AS session, source\nFROM session": [[
+                { session: "session:`s1`", source: "codex" },
+            ]],
+            "FROM produced": [[{ session: "session:`s1`", commit: "commit:`c1`" }]],
+            "FROM touched": [[
+                { commit: "commit:`c1`", file: "file:`f1`", path: "src/a.ts", additions: 13, deletions: 3 },
+            ]],
+            // churn edit events: an initial edit (enables episode opening),
+            // then the repair edit between the failure and its pass.
+            "FROM tool_call": [[
+                { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb\nc" }) },
+            ]],
+            // failure opens an episode; the later pass closes it so the
+            // edit between them is classified as repair.
+            "FROM command_outcome": [[
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "check", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "check", status: "ok", command_norm: "tsc" },
+            ]],
+            // focused turn/wall lookup (real DuckDB SELECT against `session`,
+            // count(*) subquery against `turn`): row carries turn_count +
+            // started_at/ended_at (Date, decoded via TimestampColumn).
+            "AS turn_count": [
+                { turn_count: 21, started_at: "2026-06-11T00:00:00.000Z", ended_at: "2026-06-11T00:10:00.000Z" },
+            ],
         });
 
-        const m = await runDb(fetchSessionMetrics("session:`s1`", since), tc.layer);
+        const m = await runCache(fetchSessionMetrics("session:`s1`", since), layer);
         expect(m.costUsd).toBe(1.5);
         expect(m.turns).toBe(21);
         expect(m.wallMs).toBe(600_000);
@@ -197,29 +187,26 @@ describe("fetchSessionMetrics", () => {
         // zero verification failures) is FILTERED OUT of churn.hotSessions by
         // hasVerificationSignal. landed must come from the produced edge, not
         // hotSessions - otherwise the best outcome scores as a regression.
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM session_token_usage": [[
-                    { session: "session:`clean`", model: "claude", estimated_cost_usd: 0.7 },
-                ]],
-                // churn base scan: clean session has NO verification signal, so
-                // it never appears here (and thus never in hotSessions).
-                "AS session, source\nFROM session": [[]],
-                // produced edge + touched LOC DO carry the clean session.
-                "FROM produced": [[{ session: "session:`clean`", commit: "commit:`cc`" }]],
-                "FROM touched": [[
-                    { commit: "commit:`cc`", file: "file:`f1`", path: "src/a.ts", additions: 9, deletions: 1 },
-                ]],
-                "AS turn_count": [
-                    { turn_count: 12, s: "2026-06-11T00:00:00.000Z", e: "2026-06-11T00:05:00.000Z" },
-                ],
-            },
+        const { layer } = cacheRead({
+            "FROM session_token_usage": [[
+                { session: "session:`clean`", model: "claude", estimated_tokens: 500, estimated_cost_usd: 0.7 },
+            ]],
+            // churn base scan: clean session has NO verification signal, so
+            // it never appears here (and thus never in hotSessions).
+            "AS session, source\nFROM session": [[]],
+            // produced edge + touched LOC DO carry the clean session.
+            "FROM produced": [[{ session: "session:`clean`", commit: "commit:`cc`" }]],
+            "FROM touched": [[
+                { commit: "commit:`cc`", file: "file:`f1`", path: "src/a.ts", additions: 9, deletions: 1 },
+            ]],
+            "AS turn_count": [
+                { turn_count: 12, started_at: "2026-06-11T00:00:00.000Z", ended_at: "2026-06-11T00:05:00.000Z" },
+            ],
         });
 
-        const m = await runDb(
+        const m = await runCache(
             fetchSessionMetrics("session:`clean`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.landed).toBe(true);
         expect(m.repairLines).toBe(0);
@@ -229,10 +216,10 @@ describe("fetchSessionMetrics", () => {
     });
 
     test("null cost + null turn/wall when nothing matches", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
-        const m = await runDb(
+        const { layer } = cacheRead({});
+        const m = await runCache(
             fetchSessionMetrics("session:`ghost`", new Date("2026-06-11T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
         expect(m.costUsd).toBeNull();
         expect(m.turns).toBeNull();
@@ -244,27 +231,43 @@ describe("fetchSessionMetrics", () => {
 });
 
 describe("findVariantSession", () => {
-    test("returns the most recent bare id; embeds cwd + since literals", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: { "FROM session": [[{ id: "session:variant" }]] },
+    test("returns the most recent bare id; binds cwd + since as parameters", async () => {
+        const { layer, captured } = cacheRead({
+            "FROM session": [{ id: "variant" }],
         });
-        const id = await runDbOnly(
+        const id = await runCache(
             findVariantSession("/abs/cwd", Date.parse("2026-06-13T10:00:00.000Z")),
-            tc.layer,
+            layer,
         );
-        expect(id).toBe("session:variant");
-        const sql = tc.captured[0]!;
-        expect(sql).toContain(`cwd = "/abs/cwd"`);
-        expect(sql).toContain("started_at >=");
+        expect(id).toBe("variant");
+        const sql = captured[0]!;
+        // DuckDB binds are positional `?` placeholders, not interpolated
+        // literals - the cwd/since values are proven by the fixture's
+        // param-inspecting variants below, not by string content here.
+        expect(sql).toContain("cwd = ?");
+        expect(sql).toContain("started_at >= ?");
         expect(sql).toContain("ORDER BY started_at DESC LIMIT 1");
     });
 
+    test("binds the given cwd and since as positional parameters", async () => {
+        let seenParams: readonly unknown[] | undefined;
+        const { layer } = cacheRead({
+            "FROM session": (_sql, params) => {
+                seenParams = params;
+                return [{ id: "variant" }];
+            },
+        });
+        const sinceMs = Date.parse("2026-06-13T10:00:00.000Z");
+        await runCache(findVariantSession("/abs/cwd", sinceMs), layer);
+        expect(seenParams?.[0]).toBe("/abs/cwd");
+        expect((seenParams?.[1] as Date).getTime()).toBe(sinceMs);
+    });
+
     test("returns null when no variant session exists", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
-        const id = await runDbOnly(
+        const { layer } = cacheRead({});
+        const id = await runCache(
             findVariantSession("/abs/cwd", Date.now()),
-            tc.layer,
+            layer,
         );
         expect(id).toBeNull();
     });
@@ -275,51 +278,14 @@ describe("findVariantSession", () => {
 // ---------------------------------------------------------------------------
 
 describe("stampSparSession", () => {
-    test("issues UPDATE with labels = [\"spar\"] when session has no existing labels", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: false,
-            routes: {
-                // SELECT labels read: no existing labels (NONE row)
-                "SELECT labels FROM": [[{ labels: null }]],
-                // UPDATE: captured in tc.captured
-                "UPDATE ": [[]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
-        // The UPDATE should set labels to the JSON-encoded ["spar"]
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeDefined();
-        // The SQL wraps the JSON-encoded string in a SurrealQL string literal;
-        // the escaped form is: \"[\\\"spar\\\"]\". Check the label key is present.
-        expect(updateSql).toContain("spar");
-    });
-
-    test("merges into existing labels without clobbering them", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: false,
-            routes: {
-                "SELECT labels FROM": [[{ labels: JSON.stringify(["existing"]) }]],
-                "UPDATE ": [[]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeDefined();
-        // Must include both labels
-        expect(updateSql).toContain("existing");
-        expect(updateSql).toContain("spar");
-    });
-
-    test("is idempotent: does not issue an UPDATE when already tagged", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: false,
-            routes: {
-                "SELECT labels FROM": [[{ labels: JSON.stringify(["spar"]) }]],
-            },
-        });
-        await runDbOnly(stampSparSession("session:abc"), tc.layer);
-        // Only the SELECT query should be captured; no UPDATE
-        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
-        expect(updateSql).toBeUndefined();
+    test("writes one spar label row to the judgment sidecar", async () => {
+        const writes: Array<{ table: string; row: Record<string, unknown> }> = [];
+        await Effect.runPromise(stampSparSession("session:abc").pipe(
+            Effect.provide(judgmentTestLayer(() => [], () => 0, (table, row) => {
+                writes.push({ table, row: { ...row } });
+            })),
+        ));
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toMatchObject({ table: "session_label", row: { session_id: "abc", label: "spar", source: "spar-score" } });
     });
 });

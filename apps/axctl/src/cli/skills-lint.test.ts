@@ -1,502 +1,194 @@
-/**
- * Tests for `cmdSkillsLint` (P3.5).
- *
- * All tests run through Effect.runPromise with a mock SurrealClientShape so
- * no real DB connection is needed.
- */
-import { describe, it, expect } from "bun:test";
-import { Effect, Layer } from "effect";
+import { afterEach, describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { mkdir, writeFile, access } from "node:fs/promises";
-import { join } from "node:path";
+import { Effect, Layer, Option, Schema } from "effect";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import {
-    makeTestSurrealClient,
-    type TestSurrealQueryCall,
-    type TestSurrealUpsertCall,
-} from "@ax/lib/testing/surreal";
-import { cmdSkillsLint, type LintReport } from "./skills-lint.ts";
-
-// ---------------------------------------------------------------------------
-// Test fixtures
-// Briefs have YAML frontmatter at the very top (--- block), matching the
-// classify brief spec. The rendering template scaffolds the frontmatter at
-// the top of the file, so filled briefs keep it there.
-// ---------------------------------------------------------------------------
+import { join } from "node:path";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { Judgment, JudgmentLayer, TextColumn } from "@ax/lib/sqlite";
+import { skillRowId } from "@ax/lib/stable-id";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
+import { cmdSkillsLint, parseBrief, type LintReport } from "./skills-lint.ts";
 
 const FILLED_BRIEF = `---
 ax_classify: worktree-read-strategy
 primary_role: framing
 secondary: [execution, repair]
 confidence: 0.8
-rationale: |
-  This skill frames the approach before reading.
+rationale: This skill frames the approach before reading.
 ---
-
-# ax classify: worktree-read-strategy
 `;
 
-const PENDING_BRIEF = `---
-ax_classify: some-skill
-primary_role:
-secondary: []
-confidence: 1.0
----
+const directories: string[] = [];
 
-# ax classify: some-skill
-`;
+afterEach(async () => {
+    await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
-const MALFORMED_BRIEF_NO_AX_CLASSIFY = `---
-primary_role: framing
-secondary: []
----
+const tempDirectory = async (): Promise<string> => {
+    const directory = await mkdtemp(join(tmpdir(), "ax-skills-lint-"));
+    directories.push(directory);
+    return directory;
+};
 
-# ax classify: missing-field
-`;
-
-const UNKNOWN_SKILL_BRIEF = `---
-ax_classify: ghost-skill-xyz
-primary_role: execution
-secondary: []
----
-
-# ax classify: ghost-skill-xyz
-`;
-
-// A brief with both primary and secondary containing duplicate after normalise
-const DEDUP_BRIEF = `---
-ax_classify: worktree-read-strategy
-primary_role: Framing
-secondary: [FRAMING, execution]
----
-
-# ax classify: worktree-read-strategy
-`;
-
-// A brief with no frontmatter at all
-const NO_FRONTMATTER_BRIEF = `# ax classify: no-yaml
-
-Just markdown, no frontmatter here.
-`;
-
-// ---------------------------------------------------------------------------
-// Mock SurrealClient factory
-// ---------------------------------------------------------------------------
-
-interface MockDbState {
-    readonly queries: TestSurrealQueryCall[];
-    readonly upserts: TestSurrealUpsertCall[];
-}
-
-function makeMockDb(knownSkills: Map<string, string>): {
-    db: SurrealClientShape;
-    state: MockDbState;
-} {
-    const tc = makeTestSurrealClient({
-        routes: [{
-            // Skill lookup: SELECT id FROM skill WHERE name = $name LIMIT 1;
-            match: "SELECT id FROM skill WHERE name",
-            rows: (_sql, bindings) => {
-                const name = String(bindings?.["name"]);
-                const key = knownSkills.get(name);
-                if (key === undefined) return [[]];
-                return [[{ id: `skill:${key}` }]];
-            },
-        }],
-        // All other queries (DELETE, RELATE) succeed silently
-        fallback: [],
-    });
-
-    return { db: tc.client, state: { queries: tc.calls, upserts: tc.upserts } };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function createTaskDir(prefix: string): Promise<string> {
-    const dir = join(tmpdir(), `ax-skills-lint-test-${prefix}-${Date.now()}`);
-    await mkdir(dir, { recursive: true });
-    return dir;
-}
-
-async function fileExists(path: string): Promise<boolean> {
+const fileExists = async (path: string): Promise<boolean> => {
     try {
         await access(path);
         return true;
     } catch {
         return false;
     }
-}
+};
 
-// Forced-dependency edit: cmdSkillsLint now requires FileSystem + Path
-// (the @effect/platform migration); run against the REAL Bun-backed layers.
-const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+const cacheLayer = (knownSkills: ReadonlySet<string>) =>
+    Layer.succeed(CacheRead, {
+        snapshotPath: "/test/snapshot.duckdb",
+        rows: () => Effect.succeed([]),
+        raw: () => Effect.succeed({ columns: [], rows: [], rowsChanged: 0 }),
+        first: (_schema, _sql, params) => {
+            const name = String(params?.[0] ?? "");
+            return Effect.succeed(
+                knownSkills.has(name)
+                    ? Option.some({ id: skillRowId(name) })
+                    : Option.none(),
+            );
+        },
+    } as CacheReadService);
 
-function runLint(
-    db: SurrealClientShape,
-    opts: { taskDir: string; dryRun?: boolean; json?: boolean },
-): Promise<void> {
-    return Effect.runPromise(
-        cmdSkillsLint({
-            taskDir: opts.taskDir,
-            dryRun: opts.dryRun ?? false,
-            json: opts.json ?? false,
-        }).pipe(Effect.provideService(SurrealClient, db), Effect.provide(BunFsLayer)),
-    );
-}
-
-/** Capture console.log output during the effect run, returning the report for JSON mode. */
-async function runLintJson(
-    db: SurrealClientShape,
-    opts: { taskDir: string; dryRun?: boolean },
-): Promise<LintReport> {
+const runLintJson = async (
+    directory: string,
+    knownSkills: ReadonlySet<string>,
+    options: { readonly dryRun?: boolean } = {},
+): Promise<LintReport> => {
     const lines: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: unknown[]) => {
-        lines.push(args.map(String).join(" "));
-    };
+    const original = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
     try {
-        await runLint(db, { ...opts, json: true });
+        await Effect.runPromise(
+            cmdSkillsLint({
+                taskDir: join(directory, "tasks"),
+                dryRun: options.dryRun ?? false,
+                json: true,
+            }).pipe(
+                Effect.provide(
+                    Layer.mergeAll(
+                        BunFileSystem.layer,
+                        BunPath.layer,
+                        cacheLayer(knownSkills),
+                        JudgmentLayer({
+                            sidecarPath: join(directory, "judgment.sqlite"),
+                            schemaSql: SIDECAR_SCHEMA_SQL,
+                        }),
+                    ),
+                ),
+                Effect.scoped,
+            ),
+        );
     } finally {
-        console.log = origLog;
+        console.log = original;
     }
     return JSON.parse(lines.join("\n")) as LintReport;
-}
+};
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const roleNames = (directory: string) =>
+    Effect.runPromise(
+        Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            return yield* judgment.rows(
+                Schema.Struct({ name: TextColumn }),
+                `SELECT r.name
+                 FROM plays_role p JOIN role r ON r.id = p.out_id
+                 WHERE p.source = 'brief'
+                 ORDER BY r.name`,
+            );
+        }).pipe(
+            Effect.provide(
+                JudgmentLayer({
+                    sidecarPath: join(directory, "judgment.sqlite"),
+                    schemaSql: SIDECAR_SCHEMA_SQL,
+                }),
+            ),
+            Effect.scoped,
+        ),
+    );
+
+describe("parseBrief", () => {
+    test("normalizes and deduplicates valid roles", () => {
+        const parsed = parseBrief(`---
+ax_classify: tdd
+primary_role: Framing
+secondary: [FRAMING, execution, "bad\`role"]
+confidence: 0.7
+---
+`, "brief.md");
+        expect(parsed).toEqual({
+            ax_classify: "tdd",
+            primary_role: "framing",
+            secondary: ["framing", "execution"],
+            confidence: 0.7,
+            rationale: undefined,
+        });
+    });
+
+    test("keeps an empty primary role pending", () => {
+        expect(parseBrief(`---\nax_classify: tdd\nprimary_role:\nsecondary: []\n---\n`, "brief.md")).toBeNull();
+    });
+
+    test("rejects malformed and unsafe fields", () => {
+        expect(parseBrief("# no frontmatter", "brief.md")).toEqual({ error: "no YAML frontmatter found in brief.md" });
+        expect(parseBrief(`---\nprimary_role: framing\n---\n`, "brief.md")).toEqual({
+            error: "missing or empty ax_classify in brief.md",
+        });
+        expect(parseBrief(`---\nax_classify: bad;skill\nprimary_role: framing\n---\n`, "brief.md")).toEqual({
+            error: "invalid skill name \"bad;skill\" in ax_classify of brief.md (must be alphanumeric, _ or -, optionally plugin:namespaced)",
+        });
+    });
+});
 
 describe("cmdSkillsLint", () => {
-    // 1. Filled brief → 2+ edges written, file removed
-    it("applies filled brief: writes primary+secondary edges and removes file", async () => {
-        const taskDir = await createTaskDir("filled");
-        const filePath = join(taskDir, "classify-worktree-read-strategy.md");
-        await writeFile(filePath, FILLED_BRIEF, "utf8");
+    test("replaces brief roles in SQLite and removes the applied file", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        const file = join(taskDir, "classify-worktree-read-strategy.md");
+        await mkdir(taskDir, { recursive: true });
+        await writeFile(file, FILLED_BRIEF);
 
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db, state } = makeMockDb(knownSkills);
+        const report = await runLintJson(directory, new Set(["worktree-read-strategy"]));
 
-        const report = await runLintJson(db, { taskDir });
-
-        // Edges: primary=framing + secondary=[execution, repair] = 3
-        expect(report.applied).toBe(1);
-        expect(report.pending).toBe(0);
-        expect(report.errors).toBe(0);
-
-        const briefResult = report.briefs[0]!;
-        expect(briefResult.action).toBe("applied");
-        expect(briefResult.skill).toBe("worktree-read-strategy");
-        expect(briefResult.edgesWritten).toBe(3);
-
-        // File must be removed after successful apply
-        expect(await fileExists(filePath)).toBe(false);
-
-        // State: 1 DELETE sweep, 3 upserts (role nodes), 3 RELATE queries
-        const relateQueries = state.queries.filter((q) => q.sql.includes("RELATE"));
-        expect(relateQueries.length).toBe(3);
-
-        // All RELATE queries use literal record ids, not bindings
-        for (const q of relateQueries) {
-            expect(q.sql).toMatch(/skill:`[^`]+`->plays_role->role:`[^`]+`/);
-            expect(q.sql).toContain('source = "brief"');
-            // Bindings should not carry the record ids
-            expect(q.bindings).toBeUndefined();
-        }
-
-        // Upserted role nodes: framing, execution, repair
-        const roleNames = state.upserts.map((u) => u.content["name"]);
-        expect(roleNames).toContain("framing");
-        expect(roleNames).toContain("execution");
-        expect(roleNames).toContain("repair");
+        expect(report).toMatchObject({ applied: 1, pending: 0, errors: 0, dryRun: false });
+        expect(report.briefs[0]).toMatchObject({ action: "applied", edgesWritten: 3 });
+        expect((await roleNames(directory)).map((row) => row.name)).toEqual(["execution", "framing", "repair"]);
+        expect(await fileExists(file)).toBe(false);
     });
 
-    // 2. Pending brief (no primary_role) → no DB writes, file remains
-    it("skips pending brief (empty primary_role): no writes, file stays", async () => {
-        const taskDir = await createTaskDir("pending");
-        const filePath = join(taskDir, "classify-some-skill.md");
-        await writeFile(filePath, PENDING_BRIEF, "utf8");
+    test("keeps pending, malformed, and unknown-skill briefs", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        await mkdir(taskDir, { recursive: true });
+        await writeFile(join(taskDir, "classify-pending.md"), `---\nax_classify: pending\nprimary_role:\n---\n`);
+        await writeFile(join(taskDir, "classify-malformed.md"), "# no frontmatter");
+        await writeFile(join(taskDir, "classify-unknown.md"), `---\nax_classify: unknown\nprimary_role: framing\n---\n`);
 
-        const knownSkills = new Map([["some-skill", "some-skill"]]);
-        const { db, state } = makeMockDb(knownSkills);
+        const report = await runLintJson(directory, new Set());
 
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.pending).toBe(1);
-        expect(report.applied).toBe(0);
-        expect(report.errors).toBe(0);
-
-        // File must remain
-        expect(await fileExists(filePath)).toBe(true);
-
-        // No DB operations at all
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-        expect(state.upserts.length).toBe(0);
+        expect(report).toMatchObject({ applied: 0, pending: 1, errors: 2 });
+        expect(await roleNames(directory)).toEqual([]);
+        expect(await fileExists(join(taskDir, "classify-pending.md"))).toBe(true);
+        expect(await fileExists(join(taskDir, "classify-malformed.md"))).toBe(true);
+        expect(await fileExists(join(taskDir, "classify-unknown.md"))).toBe(true);
     });
 
-    // 3. Malformed brief (no ax_classify) → error reported, file remains
-    it("reports error for brief missing ax_classify, file stays", async () => {
-        const taskDir = await createTaskDir("malformed");
-        const filePath = join(taskDir, "classify-missing-field.md");
-        await writeFile(filePath, MALFORMED_BRIEF_NO_AX_CLASSIFY, "utf8");
+    test("dry-run checks identity but does not write or remove", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        const file = join(taskDir, "classify-worktree-read-strategy.md");
+        await mkdir(taskDir, { recursive: true });
+        await writeFile(file, FILLED_BRIEF);
 
-        const { db, state } = makeMockDb(new Map());
+        const report = await runLintJson(directory, new Set(["worktree-read-strategy"]), { dryRun: true });
 
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.errors).toBe(1);
-        expect(report.applied).toBe(0);
-        const r = report.briefs[0]!;
-        expect(r.action).toBe("error");
-        expect(r.error).toMatch(/ax_classify/);
-
-        expect(await fileExists(filePath)).toBe(true);
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-    });
-
-    // 3b. No frontmatter at all
-    it("reports error for brief with no YAML frontmatter, file stays", async () => {
-        const taskDir = await createTaskDir("nofm");
-        const filePath = join(taskDir, "classify-no-yaml.md");
-        await writeFile(filePath, NO_FRONTMATTER_BRIEF, "utf8");
-
-        const { db } = makeMockDb(new Map());
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.errors).toBe(1);
-        expect(await fileExists(filePath)).toBe(true);
-    });
-
-    // 4. Unknown skill → error reported, file remains, NO partial role writes
-    it("reports error for unknown skill, no partial role writes, file stays", async () => {
-        const taskDir = await createTaskDir("unknown-skill");
-        const filePath = join(taskDir, "classify-ghost-skill-xyz.md");
-        await writeFile(filePath, UNKNOWN_SKILL_BRIEF, "utf8");
-
-        // Empty map = no known skills
-        const { db, state } = makeMockDb(new Map());
-
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.errors).toBe(1);
-        expect(report.applied).toBe(0);
-        const r = report.briefs[0]!;
-        expect(r.action).toBe("error");
-        expect(r.error).toMatch(/ghost-skill-xyz/);
-
-        expect(await fileExists(filePath)).toBe(true);
-
-        // No RELATE or upsert calls - no partial writes
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-        expect(state.upserts.length).toBe(0);
-    });
-
-    // 5. --dry-run → no DB writes, no file removal
-    it("dry-run: reports applied but makes no DB writes and no file removal", async () => {
-        const taskDir = await createTaskDir("dryrun");
-        const filePath = join(taskDir, "classify-worktree-read-strategy.md");
-        await writeFile(filePath, FILLED_BRIEF, "utf8");
-
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db, state } = makeMockDb(knownSkills);
-
-        const report = await runLintJson(db, { taskDir, dryRun: true });
-
-        expect(report.dryRun).toBe(true);
-        expect(report.applied).toBe(1);
-        // File must remain (dry-run)
-        expect(await fileExists(filePath)).toBe(true);
-
-        // No RELATE, no upsert calls
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-        expect(state.queries.filter((q) => q.sql.includes("DELETE")).length).toBe(0);
-        expect(state.upserts.length).toBe(0);
-    });
-
-    // 6. Idempotent: running lint twice = same end state
-    it("idempotent: running lint twice leaves the same end state (files already removed after first run)", async () => {
-        const taskDir = await createTaskDir("idempotent");
-        const filePath = join(taskDir, "classify-worktree-read-strategy.md");
-        await writeFile(filePath, FILLED_BRIEF, "utf8");
-
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db: db1 } = makeMockDb(knownSkills);
-        const { db: db2, state: state2 } = makeMockDb(knownSkills);
-
-        // First run: applies and removes the file
-        const report1 = await runLintJson(db1, { taskDir });
-        expect(report1.applied).toBe(1);
-        expect(await fileExists(filePath)).toBe(false);
-
-        // Second run: no files to process
-        const report2 = await runLintJson(db2, { taskDir });
-        expect(report2.applied).toBe(0);
-        expect(report2.pending).toBe(0);
-        expect(report2.errors).toBe(0);
-        expect(state2.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-    });
-
-    // 7. Edges use literal record id interpolation (not RecordId bindings)
-    it("RELATE statements use literal record id strings, not variable bindings", async () => {
-        const taskDir = await createTaskDir("literal-ids");
-        const filePath = join(taskDir, "classify-worktree-read-strategy.md");
-        await writeFile(filePath, FILLED_BRIEF, "utf8");
-
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db, state } = makeMockDb(knownSkills);
-
-        await runLint(db, { taskDir });
-
-        // RELATE SQL must embed the record ids as literals in the query string
-        for (const q of state.queries.filter((q) => q.sql.includes("RELATE"))) {
-            // Pattern: skill:`<key>`->plays_role->role:`<role>`
-            expect(q.sql).toMatch(/RELATE skill:`[^`]+`->plays_role->role:`[^`]+`/);
-            // Must NOT pass bindings for the skill/role ids
-            expect(q.bindings).toBeUndefined();
-        }
-    });
-
-    // 8. Deduplication: same role in primary and secondary only written once
-    it("deduplicates roles across primary and secondary", async () => {
-        const taskDir = await createTaskDir("dedup");
-        const filePath = join(taskDir, "classify-worktree-read-strategy.md");
-        await writeFile(filePath, DEDUP_BRIEF, "utf8");
-
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db, state } = makeMockDb(knownSkills);
-
-        const report = await runLintJson(db, { taskDir });
-
-        // DEDUP_BRIEF: primary=Framing, secondary=[FRAMING, execution]
-        // After normalise: framing, execution → 2 edges
-        expect(report.briefs[0]!.edgesWritten).toBe(2);
-        const relateQueries = state.queries.filter((q) => q.sql.includes("RELATE"));
-        expect(relateQueries.length).toBe(2);
-    });
-
-    // 9. Mixed briefs: filled + pending + error processed together
-    it("processes multiple briefs correctly in one run", async () => {
-        const taskDir = await createTaskDir("mixed");
-        await writeFile(join(taskDir, "classify-worktree-read-strategy.md"), FILLED_BRIEF, "utf8");
-        await writeFile(join(taskDir, "classify-some-skill.md"), PENDING_BRIEF, "utf8");
-        await writeFile(join(taskDir, "classify-missing-field.md"), MALFORMED_BRIEF_NO_AX_CLASSIFY, "utf8");
-
-        const knownSkills = new Map([["worktree-read-strategy", "worktree-read-strategy"]]);
-        const { db } = makeMockDb(knownSkills);
-
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.applied).toBe(1);
-        expect(report.pending).toBe(1);
-        expect(report.errors).toBe(1);
-
-        // Only the filled brief file should be gone
-        expect(await fileExists(join(taskDir, "classify-worktree-read-strategy.md"))).toBe(false);
-        expect(await fileExists(join(taskDir, "classify-some-skill.md"))).toBe(true);
-        expect(await fileExists(join(taskDir, "classify-missing-field.md"))).toBe(true);
-    });
-
-    // 10. Non-existent task dir: returns clean report with zero briefs
-    it("returns clean report when task dir does not exist", async () => {
-        const { db } = makeMockDb(new Map());
-        const report = await runLintJson(db, { taskDir: "/tmp/ax-nonexistent-dir-xyz-abc" });
-
-        expect(report.applied).toBe(0);
-        expect(report.pending).toBe(0);
-        expect(report.errors).toBe(0);
-        expect(report.briefs).toHaveLength(0);
-    });
-
-    // 11. Invalid primary_role (backtick injection) → error reported, file stays, no edges
-    it("reports error for brief with invalid primary_role (backtick), file stays, no edges", async () => {
-        const taskDir = await createTaskDir("invalid-role");
-        const filePath = join(taskDir, "classify-my-skill.md");
-        const brief = `---
-ax_classify: my-skill
-primary_role: "bad\`role"
-secondary: []
----
-`;
-        await writeFile(filePath, brief, "utf8");
-
-        const knownSkills = new Map([["my-skill", "my-skill"]]);
-        const { db, state } = makeMockDb(knownSkills);
-
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.errors).toBe(1);
-        expect(report.applied).toBe(0);
-        const r = report.briefs[0]!;
-        expect(r.action).toBe("error");
-        expect(r.error).toMatch(/invalid role name/);
-
-        // File must remain (error case)
-        expect(await fileExists(filePath)).toBe(true);
-
-        // No edges written
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-        expect(state.upserts.length).toBe(0);
-    });
-
-    // 12. Invalid ax_classify (semicolon injection) → error reported, file stays, no edges
-    it("reports error for brief with invalid ax_classify (semicolon), file stays, no edges", async () => {
-        const taskDir = await createTaskDir("invalid-skill");
-        const filePath = join(taskDir, "classify-bad-skill.md");
-        const brief = `---
-ax_classify: "bad;skill name"
-primary_role: framing
-secondary: []
----
-`;
-        await writeFile(filePath, brief, "utf8");
-
-        const { db, state } = makeMockDb(new Map());
-
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.errors).toBe(1);
-        expect(report.applied).toBe(0);
-        const r = report.briefs[0]!;
-        expect(r.action).toBe("error");
-        expect(r.error).toMatch(/invalid skill name/);
-
-        expect(await fileExists(filePath)).toBe(true);
-        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
-        expect(state.upserts.length).toBe(0);
-    });
-
-    // 13. Invalid secondary role entries are skipped (brief still applied with valid roles only)
-    it("applies brief with mixed valid/invalid secondary roles, skipping invalid ones", async () => {
-        const taskDir = await createTaskDir("invalid-secondary");
-        const filePath = join(taskDir, "classify-my-skill.md");
-        // primary=framing valid, secondary=[execution, "bad`role"] → execution kept, bad one skipped
-        const brief = `---
-ax_classify: my-skill
-primary_role: framing
-secondary:
-  - execution
-  - "bad\`role"
----
-`;
-        await writeFile(filePath, brief, "utf8");
-
-        const knownSkills = new Map([["my-skill", "my-skill"]]);
-        const { db, state } = makeMockDb(knownSkills);
-
-        const report = await runLintJson(db, { taskDir });
-
-        expect(report.applied).toBe(1);
-        expect(report.errors).toBe(0);
-        // primary=framing + secondary=execution = 2 edges (bad role skipped)
-        expect(report.briefs[0]!.edgesWritten).toBe(2);
-
-        const relateQueries = state.queries.filter((q) => q.sql.includes("RELATE"));
-        expect(relateQueries.length).toBe(2);
-        // Verify no backtick made it into any SQL
-        for (const q of relateQueries) {
-            expect(q.sql).not.toContain("`role`with");
-        }
+        expect(report).toMatchObject({ applied: 1, errors: 0, dryRun: true });
+        expect(await roleNames(directory)).toEqual([]);
+        expect(await fileExists(file)).toBe(true);
     });
 });

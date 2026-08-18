@@ -24,12 +24,6 @@ const shared = {
     // process. tsdown warns about that and, under CI=true, escalates the warning
     // to a fatal error - silence it; the bundling is intended.
     inlineOnly: false,
-    // `@ax/schema/schema.surql` is imported as text (DesktopSchema applies it on
-    // boot). Teach rolldown to load `.surql` files as string modules instead of
-    // trying to parse them as JS.
-    inputOptions: {
-        moduleTypes: { ".surql": "text" },
-    },
 } satisfies Partial<import("tsdown").UserConfig>;
 
 export default defineConfig([

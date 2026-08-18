@@ -1,7 +1,7 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
+import { BooleanColumn, Judgment, NumberColumn, TextColumn, TimestampColumn } from "@ax/lib/sqlite";
 import { prettyPrint } from "@ax/lib/json";
 import { cmdDogfoodTerminal } from "../../dogfood/wterm.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -37,17 +37,31 @@ const dogfoodTerminalCommand = Command.make(
 const cmdDogfoodRuns = (input: { readonly limit: number; readonly json: boolean }) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("dogfood runs", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+        const judgment = yield* Judgment;
+        const DogfoodRunRow = Schema.Struct({
+            id: TextColumn,
+            run_id: TextColumn,
+            scenario: TextColumn,
+            driver: TextColumn,
+            status: TextColumn,
+            agent: Schema.NullOr(TextColumn),
+            command: Schema.NullOr(TextColumn),
+            transport: Schema.NullOr(TextColumn),
+            marker_found: BooleanColumn,
+            timed_out: BooleanColumn,
+            timeout_seconds: Schema.NullOr(NumberColumn),
+            started_at: TimestampColumn,
+            ended_at: TimestampColumn,
+        });
+        const list = yield* judgment.rows(
+            DogfoodRunRow,
             `SELECT id, run_id, scenario, driver, status, agent, command, transport,
                 marker_found, timed_out, timeout_seconds,
-                type::string(started_at) AS started_at,
-                type::string(ended_at) AS ended_at
+                started_at, ended_at
             FROM dogfood_run
             ORDER BY ended_at DESC
-            LIMIT ${limit};`,
+            LIMIT ?`, [limit],
         );
-        const list = rows?.[0] ?? [];
         if (input.json) { console.log(prettyPrint(list)); return; }
         if (list.length === 0) {
             console.log("(no dogfood runs persisted yet)");
@@ -55,7 +69,7 @@ const cmdDogfoodRuns = (input: { readonly limit: number; readonly json: boolean 
         }
         for (const row of list) {
             console.log(
-                `${String(row.ended_at ?? "?")}  [${String(row.status ?? "?")}]  ` +
+                `${row.ended_at.toISOString()}  [${row.status}]  ` +
                 `${String(row.scenario ?? "?")}  ${String(row.driver ?? "?")}  ` +
                 `run_id=${String(row.run_id ?? "?")}`,
             );
@@ -77,5 +91,12 @@ export const dogfoodCommand = Command.make("dogfood").pipe(
 );
 
 export const dogfoodRuntime: RuntimeManifest = {
-    dogfood: "db",
+    dogfood: {
+        kind: "db-conditional",
+        fallback: "none",
+        subcommands: {
+            terminal: "none",
+            runs: "cache",
+        },
+    },
 };

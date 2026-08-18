@@ -193,7 +193,6 @@ DEFINE FIELD type               ON agent_event TYPE string;
 DEFINE FIELD role               ON agent_event TYPE option<string>;
 DEFINE FIELD text               ON agent_event TYPE option<string>;
 DEFINE FIELD text_excerpt       ON agent_event TYPE option<string>;
-DEFINE FIELD raw                ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD labels             ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics            ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE INDEX IF NOT EXISTS agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;
@@ -208,7 +207,7 @@ DEFINE INDEX IF NOT EXISTS agent_event_session_ts ON agent_event FIELDS agent_se
 -- verbatim on another machine: every apply path must rewrite the paths to
 -- the local $AX_DATA_DIR/buckets first (issue #251) - axctl install uses
 -- renderBucketBackends (packages/schema/src/render.ts); shell paths go
--- through apply-schema.sh's sed (dev-db.sh delegates to it).
+-- through apply-schema.sh's sed.
 
 DEFINE BUCKET IF NOT EXISTS transcripts
     BACKEND "file:/Users/necmttn/.local/share/ax/buckets/transcripts";

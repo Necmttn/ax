@@ -25,13 +25,15 @@ describe("ax profile interview submit", () => {
         expect(await Bun.file(path).exists()).toBe(false);
     });
 
-    test("routes `interview submit` to the no-DB runtime; other paths stay db", () => {
+    test("routes `interview submit` to the no-engine runtime; other paths read the cache", () => {
         const entry = axProfileRuntime.profile;
-        // submit only writes a local file - must not require a live SurrealDB.
+        // submit only writes a local file - it must not require ANY engine, and
+        // that distinction is what this pins. `"none"` means no data layer at
+        // all, distinct from its siblings below, which read the cache.
         expect(resolveRuntime(entry, ["profile", "interview", "submit"])).toBe("none");
         // brief generation reads the rig; show/publish read the graph.
-        expect(resolveRuntime(entry, ["profile", "interview"])).toBe("db");
-        expect(resolveRuntime(entry, ["profile", "show"])).toBe("db");
-        expect(resolveRuntime(entry, ["profile", "publish"])).toBe("db");
+        expect(resolveRuntime(entry, ["profile", "interview"])).toBe("cache");
+        expect(resolveRuntime(entry, ["profile", "show"])).toBe("cache");
+        expect(resolveRuntime(entry, ["profile", "publish"])).toBe("cache");
     });
 });

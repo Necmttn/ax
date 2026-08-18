@@ -1,15 +1,15 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
-import { RecordId, SurrealClient } from "@ax/lib/db";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
-import { surrealJsonTextOption } from "@ax/lib/shared/surql";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { DbError } from "@ax/lib/errors";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { extractPiCompaction, type CompactionWrite } from "./compaction.ts";
-import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite, type AgentProviderName } from "./provider-events.ts";
@@ -34,7 +34,6 @@ import {
     makeToolCallWrite,
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
-import { buildSessionTokenUsageStatement } from "./token-usage-writers.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
@@ -364,7 +363,6 @@ function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER)
             role: "assistant",
             text: toolName,
             textExcerpt: toolName,
-            raw: block,
             labels: {
                 source: desc.jsonlLabel,
                 toolName,
@@ -540,7 +538,6 @@ function createPiExtractor(filePath: string, desc: PiLikeProvider = PI_PROVIDER)
                 role,
                 text,
                 textExcerpt,
-                raw: entry,
                 labels: {
                     source: desc.jsonlLabel,
                     messageKind,
@@ -625,40 +622,52 @@ export function __testExtractPiJsonlLines(
     return extractor.finish();
 }
 
-const buildPiTokenUsageStatements = (extract: PiExtract, desc: PiLikeProvider): string[] => {
-    if (!Object.values(extract.usage).some((value) => value > 0)) return [];
+const writePiTokenUsage = (
+    write: CacheWriteService,
+    extract: PiExtract,
+    desc: PiLikeProvider,
+) => {
+    if (!Object.values(extract.usage).some((value) => value > 0)) return Effect.void;
     const estimatedTokens = extract.usage.totalTokens > 0
         ? extract.usage.totalTokens
         : extract.usage.input + extract.usage.output;
-    return [
-        buildSessionTokenUsageStatement({
-            sessionId: extract.session.id,
-            source: desc.provider,
+    return write.put("session_token_usage", cacheRow({
+        id: extract.session.id,
+        session: extract.session.id,
+        source: desc.provider,
+        workflow_epoch: null,
+        model: extract.session.model,
+        prompt_tokens: extract.usage.input || null,
+        completion_tokens: extract.usage.output || null,
+        cache_creation_input_tokens: extract.usage.cacheWrite || null,
+        cache_read_input_tokens: extract.usage.cacheRead || null,
+        reasoning_output_tokens: null,
+        estimated_tokens: estimatedTokens,
+        transcript_bytes: 0,
+        context_window: null,
+        model_ref: null,
+        estimated_input_cost_usd: null,
+        estimated_output_cost_usd: null,
+        estimated_cache_creation_cost_usd: null,
+        estimated_cache_read_cost_usd: null,
+        estimated_cost_usd: null,
+        pricing_source: null,
+        labels: jsonParam(tokenQualityLabels({
+            source: desc.jsonlLabel,
+            tokenSourceQuality: "explicit",
+            tokenSourceDetail: desc.tokenSourceDetail,
             model: extract.session.model,
-            promptTokens: extract.usage.input || null,
-            completionTokens: extract.usage.output || null,
-            cacheCreationInputTokens: extract.usage.cacheWrite || null,
-            cacheReadInputTokens: extract.usage.cacheRead || null,
-            estimatedTokens,
-            contextWindow: null,
-            labels: surrealJsonTextOption({
-                ...tokenQualityLabels({
-                    source: desc.jsonlLabel,
-                    tokenSourceQuality: "explicit",
-                    tokenSourceDetail: desc.tokenSourceDetail,
-                    model: extract.session.model,
-                    modelSourceDetail: extract.session.model
-                        ? `${desc.provider}_session.model`
-                        : `missing_${desc.provider}_session_model`,
-                }),
-            }),
-            metrics: surrealJsonTextOption({ usage: extract.usage }),
-            ts: extract.session.ended_at,
-        }),
-    ];
+            modelSourceDetail: extract.session.model
+                ? `${desc.provider}_session.model`
+                : `missing_${desc.provider}_session_model`,
+        })),
+        metrics: jsonParam({ usage: extract.usage }),
+        burn_buckets: null,
+        ts: tsParam(extract.session.ended_at),
+    }));
 };
 
-const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider): NormalizedTranscriptBatch => ({
+export const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider = PI_PROVIDER): NormalizedTranscriptBatch => ({
     providers: [{
         name: desc.provider,
         displayName: desc.displayName,
@@ -731,13 +740,6 @@ const toPiNormalizedBatch = (extract: PiExtract, desc: PiLikeProvider): Normaliz
     compactions: extract.compactions,
 });
 
-const buildPiBatchStatements = (extract: PiExtract, desc: PiLikeProvider = PI_PROVIDER): string[] => [
-    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract, desc)),
-    ...buildPiTokenUsageStatements(extract, desc),
-];
-
-export const __testBuildPiBatchStatements = buildPiBatchStatements;
-
 interface PiIngestOpts {
     sinceDays: number | undefined;
     runId: string | undefined;
@@ -749,9 +751,8 @@ interface PiIngestOpts {
  * force-rederive env. See {@link ingestPi} / {@link ingestOmp}.
  */
 const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.ingest`)(
-    function* (opts: Partial<PiIngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<PiIngestOpts> = {}) {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* walkJsonlFilesLenient(cfg.paths[desc.dirKey], cutoff);
@@ -768,7 +769,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
         // per-file parse/write below. A file whose (mtime,size) matches a prior
         // run is skipped without re-reading. `fileCount` (pi's own) counts
         // completed files, like claude/codex.
-        const result = yield* runJsonlProviderFiles({
+        const result = yield* runJsonlProviderFiles(write, {
             candidates: files,
             sourceKind: desc.sourceKind,
             forceEnv: desc.forceEnv,
@@ -796,16 +797,8 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
 
                 skipped += extracted.skipped;
                 warningCount += extracted.warnings.length;
-                yield* db.upsert(new RecordId("session", extracted.session.id), {
-                    project: extracted.session.cwd ?? undefined,
-                    cwd: extracted.session.cwd ?? undefined,
-                    model: extracted.session.model ?? undefined,
-                    source: desc.provider,
-                    started_at: new Date(extracted.session.started_at),
-                    ended_at: new Date(extracted.session.ended_at),
-                    raw_file: extracted.sourcePath ?? undefined,
-                });
-                yield* executeStatements(buildPiBatchStatements(extracted, desc), { chunkSize: 500, label: desc.provider });
+                yield* writeNormalizedTranscriptBatch(write, toPiNormalizedBatch(extracted, desc));
+                yield* writePiTokenUsage(write, extracted, desc);
                 fileCount += 1;
                 sessionCount += 1;
                 eventCount += extracted.providerEvents.length;
@@ -851,11 +844,11 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
 const makePiLikeStage = (
     desc: PiLikeProvider,
     ingest: ReturnType<typeof makePiLikeIngest>,
-): StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> => ({
+): StageDef<PiStageStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> => ({
     meta: StageMeta.make({ key: desc.provider, deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
         // The directory walk recovers every PlatformError internally, and a
@@ -863,7 +856,7 @@ const makePiLikeStage = (
         // per-file isolation seam (#261, see file-isolation.ts), so no
         // PlatformError escapes the ingest. Only connection loss and failure
         // storms abort the stage, as a DbError.
-        const result = yield* ingest({ sinceDays, runId: ctx.runId });
+        const result = yield* ingest(write, { sinceDays, runId: ctx.runId });
         return PiStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +

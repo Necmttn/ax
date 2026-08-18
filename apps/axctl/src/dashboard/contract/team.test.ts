@@ -1,6 +1,4 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import type { TeamProfileV1 } from "@ax/lib/shared/team-community";
 import { GitHubEnvTest } from "../../profile/github-env.ts";
 import {
@@ -27,11 +25,6 @@ const profile: TeamProfileV1 = {
     efficiency: { tool_calls: 40, tool_failures: 2, verification_calls: 10 },
 };
 
-const stubDb = Layer.mock(SurrealClient, {
-    query: <T extends unknown[] = unknown[]>() => Effect.succeed([] as unknown as T),
-    raw: null as never,
-});
-
 const handlers: ContractWebHandler[] = [];
 afterAll(async () => {
     for (const handler of handlers) await handler.dispose();
@@ -56,7 +49,6 @@ describe("GET /api/team", () => {
         });
         const handler = makeContractWebHandler({
             ingestStream: null,
-            services: stubDb,
             github: github.layer,
         });
         handlers.push(handler);
@@ -105,7 +97,6 @@ describe("GET /api/team", () => {
         const github = GitHubEnvTest({ responses: {} });
         const handler = makeContractWebHandler({
             ingestStream: null,
-            services: stubDb,
             github: github.layer,
         });
         handlers.push(handler);
@@ -159,7 +150,6 @@ describe("GET /api/team", () => {
         });
         const handler = makeContractWebHandler({
             ingestStream: null,
-            services: stubDb,
             github: github.layer,
         });
         handlers.push(handler);

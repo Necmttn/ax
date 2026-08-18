@@ -1,7 +1,8 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { buildGuidanceWriteStatements, guidanceFromSignal } from "./guidance.ts";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
+import { guidanceFromSignal, type GuidanceDraft } from "./guidance.ts";
 import { deriveSignalsForSelfImprove, type SignalInput } from "./signals.ts";
 
 export type SelfImproveCommand =
@@ -22,58 +23,163 @@ export function guidanceNextSql(): string {
 SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before
     , created_at
 FROM guidance_version
-WHERE status = "proposed"
+WHERE status = 'proposed'
 ORDER BY created_at DESC
-LIMIT 5;`;
+LIMIT 5`;
 }
 
-export const guidanceNext = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+const GuidanceNextRow = Schema.Struct({
+    id: Schema.String,
+    guidance: Schema.String,
+    version: Schema.String,
+    text: Schema.String,
+    status: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    risk: Schema.NullOr(Schema.String),
+    evidence: Schema.NullOr(Schema.String),
+    metrics_before: Schema.NullOr(Schema.String),
+    created_at: TimestampColumn,
+});
+
+export const guidanceNext = (): Effect.Effect<unknown, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query(guidanceNextSql());
-        return result?.[0] ?? [];
+        const read = yield* CacheRead;
+        return yield* read.rows(GuidanceNextRow, guidanceNextSql());
     });
 
 export function sessionSummarySql(): string {
     return `
-SELECT id, project, cwd, started_at, ended_at,
-    (ended_at ?? started_at) AS last_seen_at,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id)) AS tool_calls,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id AND has_error = true)) AS failures
-FROM session
+SELECT s.id AS id, s.project AS project, s.cwd AS cwd, s.started_at AS started_at, s.ended_at AS ended_at,
+    COALESCE(s.ended_at, s.started_at) AS last_seen_at,
+    (SELECT count(*) FROM tool_call t WHERE t.session = s.id) AS tool_calls,
+    (SELECT count(*) FROM tool_call t WHERE t.session = s.id AND t.has_error = TRUE) AS failures
+FROM session s
 ORDER BY last_seen_at DESC
-LIMIT 5;`;
+LIMIT 5`;
 }
 
-export const sessionSummary = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+const SessionSummaryRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+    last_seen_at: Schema.NullOr(TimestampColumn),
+    // count(*) decodes as BIGINT, never Schema.Number - see @ax/lib/duckdb/columns.
+    tool_calls: NumberFromBigIntColumn,
+    failures: NumberFromBigIntColumn,
+});
+
+export const sessionSummary = (): Effect.Effect<unknown, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query(sessionSummarySql());
-        return result?.[0] ?? [];
+        const read = yield* CacheRead;
+        return yield* read.rows(SessionSummaryRow, sessionSummarySql());
     });
 
+/**
+ * Documentation/test text only - NOT what `deriveWeeklyGuidance` executes.
+ * The real reads are three separate bound-parameter DuckDB statements (see
+ * below); this stays as a readable summary of what they select, using the
+ * same guarded `CURRENT_TIMESTAMP` cast (@ax/lib/duckdb/clause daysAgoExpr)
+ * the real queries use, so it also passes check:timestamp-cast.
+ */
 export function weeklyEvidenceSql(days: number): string {
+    const cutoff = `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(${days} AS INTEGER) * INTERVAL '1 day')`;
     return `
-SELECT id, project, started_at AS startedAt FROM session WHERE started_at > time::now() - ${days}d;
-SELECT session AS sessionId, command_norm AS commandNorm, has_error AS hasError, ts FROM tool_call WHERE ts > time::now() - ${days}d;
-SELECT session AS sessionId, status, ts FROM plan_snapshot WHERE ts > time::now() - ${days}d;`;
+SELECT id, project, started_at AS startedAt FROM session WHERE started_at > ${cutoff};
+SELECT session AS sessionId, command_norm AS commandNorm, has_error AS hasError, ts FROM tool_call WHERE ts > ${cutoff};
+SELECT session AS sessionId, ts FROM plan_snapshot WHERE ts > ${cutoff};`;
 }
 
-export const deriveWeeklyGuidance = (days = 7): Effect.Effect<unknown, DbError, SurrealClient> =>
+const SessionEvidenceRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(TimestampColumn),
+});
+const ToolCallEvidenceRow = Schema.Struct({
+    session: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+    has_error: Schema.Boolean,
+    ts: TimestampColumn,
+});
+// plan_snapshot has no `status` column in the DuckDB schema.
+// SignalInput.planSnapshots.status is optional and unused by every current
+// signal deriver (see signals.ts), so it is mapped to `null` below rather
+// than selected.
+const PlanSnapshotEvidenceRow = Schema.Struct({
+    session: Schema.String,
+    ts: TimestampColumn,
+});
+
+export interface DeriveWeeklyGuidanceResult {
+    readonly guidanceCount: number;
+    readonly guidance: readonly GuidanceDraft[];
+    /**
+     * Reads go through `CacheRead` (the published DuckDB snapshot); there is
+     * no write side. `guidance`/`guidance_version` writes only happen inside
+     * ingest, under the ingest lock (`withCacheWrite` in
+     * @ax/lib/duckdb/seam) - this command is a standalone CLI invocation,
+     * never an ingest stage, so it holds no lock and has no legal write
+     * target. So this returns the derived drafts as DATA ONLY, un-persisted,
+     * until a follow-up (an ingest derive-stage, or a dedicated locked write
+     * path) gives this command one.
+     */
+    readonly persisted: false;
+}
+
+export const deriveWeeklyGuidance = (
+    days = 7,
+): Effect.Effect<DeriveWeeklyGuidanceResult, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query(weeklyEvidenceSql(days));
+        const read = yield* CacheRead;
+        const within = withinDaysClause("started_at", days);
+        const withinTs = withinDaysClause("ts", days);
+        const [sessionRows, toolCallRows, planSnapshotRows] = yield* Effect.all([
+            read.rows(
+                SessionEvidenceRow,
+                `SELECT id, project, started_at FROM session WHERE TRUE ${within.sql}`,
+                within.params,
+            ),
+            read.rows(
+                ToolCallEvidenceRow,
+                `SELECT session, command_norm, has_error, ts FROM tool_call WHERE TRUE ${withinTs.sql}`,
+                withinTs.params,
+            ),
+            read.rows(
+                PlanSnapshotEvidenceRow,
+                `SELECT session, ts FROM plan_snapshot WHERE TRUE ${withinTs.sql}`,
+                withinTs.params,
+            ),
+        ]);
+
         const input: SignalInput = {
-            sessions: (result?.[0] ?? []) as SignalInput["sessions"],
-            toolCalls: (result?.[1] ?? []) as SignalInput["toolCalls"],
-            planSnapshots: (result?.[2] ?? []) as SignalInput["planSnapshots"],
+            sessions: sessionRows.map((r) => ({
+                id: r.id,
+                project: r.project,
+                startedAt: r.started_at?.toISOString() ?? null,
+            })),
+            toolCalls: toolCallRows.map((r) => ({
+                sessionId: r.session,
+                commandNorm: r.command_norm,
+                hasError: r.has_error,
+                ts: r.ts.toISOString(),
+            })),
+            planSnapshots: planSnapshotRows.map((r) => ({
+                sessionId: r.session,
+                status: null,
+                ts: r.ts.toISOString(),
+            })),
         };
         const guidance = deriveSignalsForSelfImprove(input).map(guidanceFromSignal);
-        for (const draft of guidance) {
-            yield* db.query(buildGuidanceWriteStatements(draft).join("\n"));
+        if (guidance.length > 0) {
+            console.error(
+                `ax self-improve weekly: derived ${guidance.length} guidance draft(s) but did NOT persist them - `
+                + "writes only happen inside ingest, under the ingest lock; this command is not an ingest stage. "
+                + "See DeriveWeeklyGuidanceResult.persisted in self-improve/commands.ts.",
+            );
         }
-        return { guidanceCount: guidance.length, guidance };
+        return { guidanceCount: guidance.length, guidance, persisted: false };
     });
 
-export const selfImproveWeekly = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+export const selfImproveWeekly = (): Effect.Effect<DeriveWeeklyGuidanceResult, CacheReadError, CacheRead> =>
     deriveWeeklyGuidance(7);

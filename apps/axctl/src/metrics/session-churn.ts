@@ -1,13 +1,10 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { enrichRowsWithTelemetryCost } from "../queries/telemetry-rollup.ts";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { eqClause, inClause, sinceClause } from "@ax/lib/duckdb/clause";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
 import {
     canonicalEditToolName,
-    editToolSqlFilter,
     isApplyPatchCall,
     isEditTool,
     toolClassInputOf,
@@ -18,7 +15,30 @@ import { applyPatchDelta } from "./session-loc.ts";
 import { sessionProjectClause } from "./session-filter.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId } from "./util.ts";
-import { chunked, numOrZero, sessionRefList, strOrNull } from "./util.ts";
+import { chunked, numOrZero, sessionIdsClause, strOrNull } from "./util.ts";
+
+const SessionBaseRow = Schema.Struct({ session: Schema.String, source: Schema.String });
+const SessionOnlyRow = Schema.Struct({ session: Schema.String });
+const ProducedLinkRow = Schema.Struct({ session: Schema.String, commit: Schema.String });
+const TouchedRow = Schema.Struct({
+    commit: Schema.String, file: Schema.String, path: Schema.NullOr(Schema.String),
+    old_path: Schema.NullOr(Schema.String), new_path: Schema.NullOr(Schema.String),
+    additions: Schema.NullOr(NumberFromBigIntColumn), deletions: Schema.NullOr(NumberFromBigIntColumn),
+});
+const EditEventRow = Schema.Struct({
+    session: Schema.String, ts: TimestampColumn, name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String), input_json: Schema.NullOr(Schema.String),
+});
+const CommandEventRow = Schema.Struct({
+    session: Schema.String, ts: TimestampColumn, kind: Schema.String, status: Schema.String,
+    command_norm: Schema.NullOr(Schema.String), tool_call_ref: Schema.NullOr(Schema.String),
+});
+const ToolTextRow = Schema.Struct({ id: Schema.String, command_text: Schema.NullOr(Schema.String) });
+const HookEventRow = Schema.Struct({
+    session: Schema.String, ts: TimestampColumn, provider_status: Schema.String,
+    effect: Schema.String, exit_code: Schema.NullOr(NumberFromBigIntColumn),
+    command: Schema.String, hook_name: Schema.String,
+});
 
 export interface ChurnEvent {
     readonly session: string;
@@ -265,24 +285,23 @@ export const computeSessionChurn = (
 };
 
 export const fetchSessionChurnSummary = (
+    read: CacheReadService,
     input: FetchSessionChurnInput,
-): Effect.Effect<SessionChurnSummary, DbError, SurrealClient> =>
+): Effect.Effect<SessionChurnSummary, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 1000);
         const project = input.project ?? null;
         const source = input.source ?? null;
         // Deref-free scan over session's own (indexed) columns; ordering is
         // irrelevant here - ids feed a Set and events are re-sorted in JS.
-        const clauses: string[] = [];
-        if (input.since) clauses.push(`started_at >= ${surrealDate(input.since)}`);
-        if (project !== null) clauses.push(sessionProjectClause(project));
-        if (source !== null) clauses.push(`source = ${surrealString(source)}`);
-        const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-        const baseRows = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(id) AS session, source
+        const since = sinceClause("started_at", input.since);
+        const projectFilter = project === null ? { sql: "", params: [] } : sessionProjectClause(project);
+        const sourceFilter = eqClause("source", source);
+        const baseRows = yield* read.rows(SessionBaseRow, `
+SELECT id AS session, source
 FROM session
-${where};`))?.[0] ?? [];
+WHERE TRUE ${since.sql} ${projectFilter.sql} ${sourceFilter.sql}`,
+            [...since.params, ...projectFilter.params, ...sourceFilter.params]);
 
         const sessionIds = uniqueCleanSessionIds(baseRows.map((row) => String(row.session ?? "")));
         const sourceBySession = new Map<string, string | null>();
@@ -297,7 +316,7 @@ ${where};`))?.[0] ?? [];
             return computeSessionChurn([], new Map(), new Map(), options);
         }
 
-        const candidateSessionIds = yield* fetchChurnCandidateSessionIds(sessionIds);
+        const candidateSessionIds = yield* fetchChurnCandidateSessionIds(read, sessionIds);
         if (candidateSessionIds.length === 0) {
             return computeSessionChurn([], new Map(), new Map(), options);
         }
@@ -308,11 +327,11 @@ ${where};`))?.[0] ?? [];
         );
 
         const [health, landed, edits, commandEvents, hookEvents] = yield* Effect.all([
-            fetchSessionHealthMap(candidateSessionIds),
-            fetchLandedLocBySession(candidateSessionIds),
-            fetchEditEvents(candidateSessionIds, candidateSourceBySession),
-            fetchCommandOutcomeEvents(candidateSessionIds, candidateSourceBySession),
-            fetchHookEvents(candidateSessionIds, candidateSourceBySession),
+            fetchSessionHealthMap(read, candidateSessionIds),
+            fetchLandedLocBySession(read, candidateSessionIds),
+            fetchEditEvents(read, candidateSessionIds, candidateSourceBySession),
+            fetchCommandOutcomeEvents(read, candidateSessionIds, candidateSourceBySession),
+            fetchHookEvents(read, candidateSessionIds, candidateSourceBySession),
         ], { concurrency: 5 });
 
         const summary = computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed.bySession, health, {
@@ -321,6 +340,7 @@ ${where};`))?.[0] ?? [];
         });
 
         const hotSessions = yield* enrichRowsWithTelemetryCost(
+            read,
             summary.hotSessions,
             (r) => r.session,
             (r, cost) => ({
@@ -333,72 +353,74 @@ ${where};`))?.[0] ?? [];
     });
 
 const fetchChurnCandidateSessionIds = (
+    read: CacheReadService,
     sessionIds: readonly string[],
-): Effect.Effect<string[], DbError, SurrealClient> =>
+): Effect.Effect<string[], CacheReadError> =>
     Effect.gen(function* () {
         if (sessionIds.length === 0) return [];
-        const db = yield* SurrealClient;
         const chunks = chunked(sessionIds, IN_CHUNK);
 
         const [commandResults, hookResults] = yield* Effect.all([
             Effect.all(
-                chunks.map((ids) =>
-                    db.query<[Array<Record<string, unknown>>]>(
-                        // De-dupe in JS instead of GROUP BY session; grouping
-                        // non-key fields is the slow path on large SurrealDB tables.
-                        `SELECT type::string(session) AS session`
+                chunks.map((ids) => {
+                    const sessions = sessionIdsClause("session", ids);
+                    return read.rows(SessionOnlyRow,
+                        // De-dupe in JS: candidates are merged across chunks
+                        // AND across the command_outcome + hook_command_invocation
+                        // queries below, so a per-query GROUP BY session
+                        // wouldn't dedupe the combined set anyway.
+                        `SELECT session`
                         + ` FROM command_outcome`
-                        + ` WHERE session IN [${sessionRefList(ids)}]`
-                        + ` AND (kind = "expected_feedback" OR status = "error");`,
-                    ),
-                ),
+                        + ` WHERE TRUE ${sessions.sql}`
+                        + ` AND (kind = 'expected_feedback' OR status = 'error')`, sessions.params);
+                }),
                 { concurrency: 4 },
             ),
             Effect.all(
-                chunks.map((ids) =>
-                    db.query<[Array<Record<string, unknown>>]>(
-                        `SELECT type::string(session) AS session`
+                chunks.map((ids) => {
+                    const sessions = sessionIdsClause("session", ids);
+                    return read.rows(SessionOnlyRow,
+                        `SELECT session`
                         + ` FROM hook_command_invocation`
-                        + ` WHERE session IN [${sessionRefList(ids)}]`
-                        + ` AND (provider_status = "blocking_error"`
-                        + ` OR effect = "blocked"`
-                        + ` OR (exit_code IS NOT NONE AND exit_code != 0));`,
-                    ),
-                ),
+                        + ` WHERE TRUE ${sessions.sql}`
+                        + ` AND (provider_status = 'blocking_error'`
+                        + ` OR effect = 'blocked'`
+                        + ` OR (exit_code IS NOT NULL AND exit_code <> 0))`, sessions.params);
+                }),
                 { concurrency: 4 },
             ),
         ], { concurrency: 2 });
 
         const candidates = new Set<string>();
-        const addRows = (rows: readonly Record<string, unknown>[]) => {
+        const addRows = (rows: readonly { readonly session: string }[]) => {
             for (const row of rows) {
                 const session = cleanSessionId(String(row.session ?? ""));
                 if (session.length > 0) candidates.add(session);
             }
         };
-        for (const batch of commandResults) addRows(batch?.[0] ?? []);
-        for (const batch of hookResults) addRows(batch?.[0] ?? []);
+        for (const batch of commandResults) addRows(batch);
+        for (const batch of hookResults) addRows(batch);
         return sessionIds.filter((session) => candidates.has(session));
     });
 
 export const fetchLandedLocBySession = (
+    read: CacheReadService,
     sessionIds: readonly string[],
-): Effect.Effect<LandedLoc, DbError, SurrealClient> =>
+): Effect.Effect<LandedLoc, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const out = new Map<string, ChurnLines>();
         const commitTotals = new Map<string, { added: number; removed: number }>();
         if (sessionIds.length === 0) return { bySession: out, commits: [] };
 
         const producedRows = (yield* Effect.all(
-            chunked(sessionIds, IN_CHUNK).map((ids) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(in) AS session, type::string(out) AS commit`
-                    + ` FROM produced WHERE in IN [${sessionRefList(ids)}];`,
-                ),
-            ),
+            chunked(sessionIds, IN_CHUNK).map((ids) => {
+                const sessions = sessionIdsClause("in_id", ids);
+                return read.rows(ProducedLinkRow,
+                    `SELECT in_id AS session, out_id AS commit FROM produced WHERE TRUE ${sessions.sql}`,
+                    sessions.params);
+            }),
             { concurrency: 4 },
-        )).flatMap((batch) => batch?.[0] ?? []);
+        )).flatMap((batch) => batch);
 
         const sessionsByCommit = new Map<string, Set<string>>();
         for (const row of producedRows) {
@@ -416,14 +438,15 @@ export const fetchLandedLocBySession = (
 
         const commitIds = [...sessionsByCommit.keys()];
         const touchedRows = (yield* Effect.all(
-            chunked(commitIds, IN_CHUNK).map((ids) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(in) AS commit, type::string(out) AS file, out.path AS path, old_path, new_path, additions, deletions`
-                    + ` FROM touched WHERE in IN [${recordRefList("commit", ids)}];`,
-                ),
-            ),
+            chunked(commitIds, IN_CHUNK).map((ids) => {
+                const commits = inClause("t.in_id", ids);
+                return read.rows(TouchedRow,
+                    `SELECT t.in_id AS commit, t.out_id AS file, f.path, t.old_path, t.new_path, t.additions, t.deletions`
+                    + ` FROM touched t LEFT JOIN file f ON f.id = t.out_id WHERE TRUE ${commits.sql}`,
+                    commits.params);
+            }),
             { concurrency: 4 },
-        )).flatMap((batch) => batch?.[0] ?? []);
+        )).flatMap((batch) => batch);
 
         const seenTouched = new Set<string>();
         for (const row of touchedRows) {
@@ -463,21 +486,21 @@ export const fetchLandedLocBySession = (
     });
 
 const fetchEditEvents = (
+    read: CacheReadService,
     sessionIds: readonly string[],
     sourceBySession: ReadonlyMap<string, string | null>,
-): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+): Effect.Effect<ChurnEvent[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         if (sessionIds.length === 0) return [];
         const rows = (yield* Effect.all(
-            chunked(sessionIds, IN_CHUNK).map((ids) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, name, command_norm, input_json`
-                    + ` FROM tool_call WHERE session IN [${sessionRefList(ids)}] AND ${editToolSqlFilter} ORDER BY ts ASC;`,
-                ),
-            ),
+            chunked(sessionIds, IN_CHUNK).map((ids) => {
+                const sessions = sessionIdsClause("session", ids);
+                return read.rows(EditEventRow,
+                    `SELECT session, ts, name, command_norm, input_json`
+                    + ` FROM tool_call WHERE TRUE ${sessions.sql} ORDER BY ts ASC`, sessions.params);
+            }),
             { concurrency: 4 },
-        )).flatMap((batch) => batch?.[0] ?? []);
+        )).flatMap((batch) => batch);
 
         const events: ChurnEvent[] = [];
         for (const row of rows) {
@@ -504,23 +527,23 @@ const fetchEditEvents = (
     });
 
 const fetchCommandOutcomeEvents = (
+    read: CacheReadService,
     sessionIds: readonly string[],
     sourceBySession: ReadonlyMap<string, string | null>,
-): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+): Effect.Effect<ChurnEvent[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         if (sessionIds.length === 0) return [];
         // Deref-free: command_text lives on tool_call only and is batch-joined
         // below for the few rows whose normalized command is ambiguous.
         const rows = (yield* Effect.all(
-            chunked(sessionIds, IN_CHUNK).map((ids) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_norm, type::string(tool_call) AS tool_call_ref`
-                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}];`,
-                ),
-            ),
+            chunked(sessionIds, IN_CHUNK).map((ids) => {
+                const sessions = sessionIdsClause("session", ids);
+                return read.rows(CommandEventRow,
+                    `SELECT session, ts, kind, status, command_norm, tool_call AS tool_call_ref`
+                    + ` FROM command_outcome WHERE TRUE ${sessions.sql}`, sessions.params);
+            }),
             { concurrency: 4 },
-        )).flatMap((batch) => batch?.[0] ?? []);
+        )).flatMap((batch) => batch);
 
         interface PendingOutcome {
             readonly session: string;
@@ -563,7 +586,7 @@ const fetchCommandOutcomeEvents = (
                 continue;
             }
             if (!commandNormNeedsText(norm)) continue;
-            const toolCallKey = recordKeyPart(strOrNull(row.tool_call_ref), "tool_call");
+            const toolCallKey = strOrNull(row.tool_call_ref);
             if (toolCallKey === null || toolCallKey.length === 0) continue;
             pending.push({ session, tsMs, eventKind, toolCallKey });
         }
@@ -571,17 +594,17 @@ const fetchCommandOutcomeEvents = (
         if (pending.length > 0) {
             const keys = [...new Set(pending.map((item) => item.toolCallKey))];
             const textRows = (yield* Effect.all(
-                chunked(keys, IN_CHUNK).map((ids) =>
-                    db.query<[Array<Record<string, unknown>>]>(
-                        `SELECT type::string(id) AS id, command_text FROM tool_call WHERE id IN [${recordRefList("tool_call", ids)}];`,
-                    ),
-                ),
+                chunked(keys, IN_CHUNK).map((ids) => {
+                    const calls = inClause("id", ids);
+                    return read.rows(ToolTextRow,
+                        `SELECT id, command_text FROM tool_call WHERE TRUE ${calls.sql}`, calls.params);
+                }),
                 { concurrency: 4 },
-            )).flatMap((batch) => batch?.[0] ?? []);
+            )).flatMap((batch) => batch);
 
             const textByKey = new Map<string, string | null>();
             for (const row of textRows) {
-                const key = recordKeyPart(strOrNull(row.id), "tool_call");
+                const key = strOrNull(row.id);
                 if (key !== null && key.length > 0) textByKey.set(key, strOrNull(row.command_text));
             }
             for (const item of pending) {
@@ -594,21 +617,21 @@ const fetchCommandOutcomeEvents = (
     });
 
 const fetchHookEvents = (
+    read: CacheReadService,
     sessionIds: readonly string[],
     sourceBySession: ReadonlyMap<string, string | null>,
-): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+): Effect.Effect<ChurnEvent[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         if (sessionIds.length === 0) return [];
         const rows = (yield* Effect.all(
-            chunked(sessionIds, IN_CHUNK).map((ids) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, provider_status, effect, exit_code, command, hook_name`
-                    + ` FROM hook_command_invocation WHERE session IN [${sessionRefList(ids)}] ORDER BY ts ASC;`,
-                ),
-            ),
+            chunked(sessionIds, IN_CHUNK).map((ids) => {
+                const sessions = sessionIdsClause("session", ids);
+                return read.rows(HookEventRow,
+                    `SELECT session, ts, provider_status, effect, exit_code, command, hook_name`
+                    + ` FROM hook_command_invocation WHERE TRUE ${sessions.sql} ORDER BY ts ASC`, sessions.params);
+            }),
             { concurrency: 4 },
-        )).flatMap((batch) => batch?.[0] ?? []);
+        )).flatMap((batch) => batch);
 
         const events: ChurnEvent[] = [];
         for (const row of rows) {
@@ -887,13 +910,6 @@ const churnOptions = (
     limit,
     ...(input.generatedAt !== undefined ? { generatedAt: input.generatedAt } : {}),
 });
-
-const recordRefList = (table: string, ids: readonly string[]): string =>
-    ids
-        .map((id) => recordKeyPart(id, table))
-        .filter((id): id is string => id !== null && id.length > 0)
-        .map((id) => recordLiteral(table, id))
-        .join(", ");
 
 const touchedIdentity = (row: Record<string, unknown>): string | null => {
     const file = strOrNull(row.file);

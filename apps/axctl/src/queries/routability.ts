@@ -12,8 +12,10 @@
  *
  * Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { JUDGMENT_GUARD_RE } from "./routing-tune.ts";
 import { MODEL_ALIASES, reprice } from "./reprice.ts";
 import type { RepriceUsage, ModelPricing } from "./reprice.ts";
@@ -443,38 +445,53 @@ const sinceDays = (d: number): number => Math.max(1, Math.trunc(d));
  * Uses text_excerpt (~500 chars) rather than full text - adequate for
  * JUDGMENT_GUARD_RE pattern matching which targets first-sentence keywords.
  */
-const TURNS_SQL = (days: number) => `
+const TURNS_SQL = `
 SELECT
-    type::string(id) AS turn_id,
-    type::string(session) AS session_id,
+    id AS turn_id,
+    session AS session_id,
     seq,
     role,
     intent_kind,
     text_excerpt AS text
 FROM turn
-WHERE ts > time::now() - ${sinceDays(days)}d;
+WHERE ts > ${daysAgoExpr};
 `;
 
+const TurnRow = Schema.Struct({
+    turn_id: Schema.String,
+    session_id: Schema.String,
+    seq: NumberFromBigIntColumn,
+    role: Schema.String,
+    intent_kind: Schema.NullOr(Schema.String),
+    text: Schema.NullOr(Schema.String),
+});
+
 /**
- * Tool names + command_norm per turn in the window. tool_call.turn is
- * option<record<turn>>, so we filter NONE. command_norm (normalized head
- * command) disambiguates Codex's overloaded exec_command; it is NONE for
- * non-exec tools, mapped to null on the JS side. No index on turn alone; the
- * ts filter limits the scan to the same window as the turn query.
+ * Tool names + command_norm per turn in the window. `tool_call.turn` is
+ * nullable, so we filter it out. command_norm (normalized head command)
+ * disambiguates Codex's overloaded exec_command; it is NULL for non-exec
+ * tools, mapped to null on the JS side. No index on turn alone; the ts filter
+ * limits the scan to the same window as the turn query.
  */
-const TOOL_CALLS_SQL = (days: number) => `
+const TOOL_CALLS_SQL = `
 SELECT
-    type::string(turn) AS turn_id,
+    turn AS turn_id,
     name,
     command_norm
 FROM tool_call
-WHERE ts > time::now() - ${sinceDays(days)}d
-  AND turn != NONE;
+WHERE ts > ${daysAgoExpr}
+  AND turn IS NOT NULL;
 `;
+
+const ToolCallRow = Schema.Struct({
+    turn_id: Schema.String,
+    name: Schema.String,
+    command_norm: Schema.NullOr(Schema.String),
+});
 
 /**
  * Per-turn token usage for MAIN-agent turns, Claude AND Codex. Positive
- * allowlist (source IN ['claude','codex']) rather than a denylist:
+ * allowlist (source IN ('claude','codex')) rather than a denylist:
  * claude-subagent is a distinct source value (excluded), and the other
  * providers (opencode/cursor/pi) are not yet classified, so admitting them
  * would pollute the denominator. Each admitted turn's `source` tags its
@@ -482,9 +499,9 @@ WHERE ts > time::now() - ${sinceDays(days)}d
  * -> gpt-5-nano/gpt-5-mini). All Codex turn_token_usage rows are main-agent
  * (Codex has no subagent cost split), so no subagent carve-out is needed.
  */
-const TURN_USAGE_SQL = (days: number) => `
+const TURN_USAGE_SQL = `
 SELECT
-    type::string(turn) AS turn_id,
+    turn AS turn_id,
     source,
     prompt_tokens,
     completion_tokens,
@@ -492,11 +509,22 @@ SELECT
     cache_creation_input_tokens,
     estimated_cost_usd
 FROM turn_token_usage
-WHERE ts > time::now() - ${sinceDays(days)}d
-  AND source IN ['claude', 'codex'];
+WHERE ts > ${daysAgoExpr}
+  AND source IN ('claude', 'codex');
 `;
 
-/** Pricing catalog - same query and field mapping as dispatch-analytics. */
+const TurnUsageRow = Schema.Struct({
+    turn_id: Schema.String,
+    source: Schema.String,
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+});
+
+/** Pricing catalog - same query and field mapping as dispatch-analytics /
+ *  routing-backtest.ts's AgentModelSchema. */
 const AGENT_MODELS_SQL = `
 SELECT
     name,
@@ -507,6 +535,14 @@ SELECT
 FROM agent_model;
 `;
 
+const AgentModelRow = Schema.Struct({
+    name: Schema.String,
+    input_per_million_usd: Schema.NullOr(Schema.Number),
+    output_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_read_per_million_usd: Schema.NullOr(Schema.Number),
+    cache_creation_per_million_usd: Schema.NullOr(Schema.Number),
+});
+
 /** Map a turn_token_usage.source value to a routability provider. */
 function providerOfSource(source: string): RoutabilityProvider | null {
     if (source === "claude") return "claude";
@@ -515,7 +551,7 @@ function providerOfSource(source: string): RoutabilityProvider | null {
 }
 
 /**
- * Pull main-agent turns (Claude + Codex) from SurrealDB, group into class-run
+ * Pull main-agent turns (Claude + Codex) from the DuckDB cache, group into class-run
  * spans per (provider, session), classify + reprice each provider separately,
  * and return a combined RoutabilityResult with a per-provider breakdown.
  * Mirrors fetchCostSplit in cost-analytics.ts: flat queries + JS join/aggregate,
@@ -529,19 +565,14 @@ function providerOfSource(source: string): RoutabilityProvider | null {
  */
 export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
     function* (input: RoutabilityInput) {
-        const db = yield* SurrealClient;
+        const days = sinceDays(input.days);
 
-        const [turnRows, toolCallRows, usageRows, agentModelRows] = yield* db.query<[
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-            Array<Record<string, unknown>>,
-        ]>(
-            TURNS_SQL(input.days) +
-            TOOL_CALLS_SQL(input.days) +
-            TURN_USAGE_SQL(input.days) +
-            AGENT_MODELS_SQL,
-        );
+        const [turnRows, toolCallRows, usageRows, agentModelRows] = yield* Effect.all([
+            cacheRows(TurnRow, { sql: TURNS_SQL, params: [days] }, "routability turns"),
+            cacheRows(ToolCallRow, { sql: TOOL_CALLS_SQL, params: [days] }, "routability tool calls"),
+            cacheRows(TurnUsageRow, { sql: TURN_USAGE_SQL, params: [days] }, "routability turn usage"),
+            cacheRows(AgentModelRow, { sql: AGENT_MODELS_SQL, params: [] }, "routability agent models"),
+        ], { concurrency: 4 });
 
         // ---- tool calls: turn_id → ToolCallFact[] (carries command_norm) ---
         const toolsByTurn = new Map<string, ToolCallFact[]>();

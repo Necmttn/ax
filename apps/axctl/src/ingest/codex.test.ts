@@ -3,7 +3,6 @@ import { agentEventRecordKey } from "./provider-events.ts";
 import { SkillName } from "@ax/lib/brands";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
-    __testBuildCodexBatchStatements,
     __testCompactCodexToolCall,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
@@ -12,7 +11,15 @@ import {
     codexPayloadMaxBytes,
     codexProgressEvery,
     shouldSnapshotCodexRaw,
+    toCodexNormalizedBatch,
 } from "./codex.ts";
+import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { codexSourceForThread } from "./source-origin.ts";
+
+const normalizedCodexBatch = (
+    batch: Parameters<typeof toCodexNormalizedBatch>[0],
+    payloadMaxBytes: number,
+) => toCodexNormalizedBatch(batch, payloadMaxBytes);
 
 // Fixture skill names are plain string literals; brand via the schema constructor.
 const sn = (s: string): SkillName => SkillName.make(s);
@@ -193,13 +200,7 @@ describe("Codex transcript extraction", () => {
         });
         expect(extracted?.turnTokenUsages).toEqual([]);
 
-        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
-        expect(sql).toContain("UPSERT session_token_usage:`codex_usage`");
-        expect(sql).toContain("model: \"gpt-5.5\"");
-        expect(sql).toContain("prompt_tokens: 1000");
-        expect(sql).toContain("completion_tokens: 125");
-        expect(sql).toContain("cache_read_input_tokens: 250");
-        expect(sql).toContain("context_window: 258400");
+        expect(normalizedCodexBatch(extracted!, 1200).sessions[0]?.model).toBe("gpt-5.5");
     });
 
     test("tags subagent sessions (thread_source) with source codex-subagent", () => {
@@ -229,18 +230,14 @@ describe("Codex transcript extraction", () => {
             }),
         ];
 
-        const subSql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines("subagent"))!, 1200).join("\n");
-        expect(subSql).toContain('source: "codex-subagent"');
-        expect(subSql).not.toContain('source: "codex"');
-
-        const mainSql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines("user"))!, 1200).join("\n");
-        expect(mainSql).toContain('source: "codex"');
-        expect(mainSql).not.toContain('source: "codex-subagent"');
+        expect(codexSourceForThread(__testExtractCodexJsonlLines(lines("subagent"))!.session.thread_source))
+            .toBe("codex-subagent");
+        expect(codexSourceForThread(__testExtractCodexJsonlLines(lines("user"))!.session.thread_source))
+            .toBe("codex");
 
         // No thread_source (older transcripts) defaults to main codex.
-        const legacySql = __testBuildCodexBatchStatements(__testExtractCodexJsonlLines(lines(null))!, 1200).join("\n");
-        expect(legacySql).toContain('source: "codex"');
-        expect(legacySql).not.toContain('source: "codex-subagent"');
+        expect(codexSourceForThread(__testExtractCodexJsonlLines(lines(null))!.session.thread_source))
+            .toBe("codex");
     });
 
     test("does not treat model_provider as a concrete model", () => {
@@ -271,9 +268,8 @@ describe("Codex transcript extraction", () => {
             }),
         ]);
 
-        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
-        expect(sql).not.toContain("model: \"openai\"");
-        expect(sql).toContain("model: NONE");
+        expect(extracted?.session.model).toBeNull();
+        expect(normalizedCodexBatch(extracted!, 1200).sessions[0]?.model).toBeNull();
     });
 
 
@@ -450,15 +446,12 @@ describe("Codex transcript extraction", () => {
         });
         expect(extracted?.turnTokenUsages).toEqual([]);
 
-        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
-        expect(sql).toContain("UPSERT session_token_usage:`codex_token_count`");
-        expect(sql).toContain("prompt_tokens: 123");
-        expect(sql).toContain("completion_tokens: 67");
-        expect(sql).toContain("cache_read_input_tokens: 45");
-        expect(sql).toContain("estimated_tokens: 190");
-        expect(sql).toContain('\\"token_source_quality\\":\\"explicit\\"');
-        expect(sql).toContain('\\"token_source_detail\\":\\"codex_token_count.total_token_usage\\"');
-        expect(sql).toContain('\\"total_token_usage\\"');
+        expect(extracted?.tokenUsage?.totalTokenUsage).toMatchObject({
+            input_tokens: 123,
+            cached_input_tokens: 45,
+            output_tokens: 67,
+            total_tokens: 190,
+        });
     });
 
     test("writes Codex per-turn token usage for token_count after a response item", () => {
@@ -513,11 +506,7 @@ describe("Codex transcript extraction", () => {
             completionTokens: 100,
             usageQuality: "provider_turn",
         });
-        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
-        expect(sql).toContain("UPSERT turn_token_usage:`codex_turn_usage__");
-        expect(sql).toContain("__seq_000001`");
-        expect(sql).toContain("fresh_input_tokens: 200");
-        expect(sql).toContain("estimated_cost_usd:");
+        expect(extracted?.turnTokenUsages[0]?.usageSource).toBe("codex_token_count.last_token_usage");
     });
 
     // Plan 003 fix round 1: `codexTurnTokenUsageFromPayload`'s `first_total`
@@ -602,22 +591,28 @@ describe("Codex transcript extraction", () => {
             freshInputTokens: 250_000,
         });
 
-        const statements = __testBuildCodexBatchStatements(extracted, 1200);
-        const turn1 = statements.find((s) => s.includes("turn_token_usage") && s.includes("seq: 1,"));
-        const turn2 = statements.find((s) => s.includes("turn_token_usage") && s.includes("seq: 2,"));
-        expect(turn1).toBeDefined();
-        expect(turn2).toBeDefined();
+        const turn1 = extracted.turnTokenUsages[0]!;
+        const turn2 = extracted.turnTokenUsages[1]!;
+        const priceTurn = (turn: typeof turn1) => estimateCost({
+            modelKey: normalizeModelName(turn.model),
+            promptTokens: turn.promptTokens,
+            completionTokens: turn.completionTokens,
+            cacheCreationInputTokens: turn.cacheCreationInputTokens,
+            cacheReadInputTokens: turn.cacheReadInputTokens,
+            estimatedTokens: turn.estimatedTokens,
+            aggregated: turn.usageQuality === "first_total",
+        });
 
         // gpt-5.6-terra: base input $2/M, tier input $4/M above 200k.
         // first_total (aggregated, suppressed): 250k @ $2/M = $0.5 flat, base
         // rate - NOT the $1 the tier would have produced.
-        expect(turn1).toContain("estimated_input_cost_usd: 0.5");
-        expect(turn1).toContain("estimated_cost_usd: 0.5");
+        expect(priceTurn(turn1).inputUsd).toBe(0.5);
+        expect(priceTurn(turn1).totalUsd).toBe(0.5);
         // derived_delta (request-grain, tier applies): 250k @ $4/M = $1 -
         // same fresh-input token count as turn 1, different (correct)
         // dollar value because the grain differs.
-        expect(turn2).toContain("estimated_input_cost_usd: 1");
-        expect(turn2).toContain("estimated_cost_usd: 1");
+        expect(priceTurn(turn2).inputUsd).toBe(1);
+        expect(priceTurn(turn2).totalUsd).toBe(1);
     });
 
     test("links adjacent provider events with linear parent edges while preserving tool-result parents", () => {
@@ -824,9 +819,9 @@ describe("Codex transcript extraction", () => {
                 }),
             },
         ]);
-        const sql = __testBuildCodexBatchStatements(extracted, 1200).join("\n");
-        expect(sql).toContain("->invoked:");
-        expect(sql).toContain("session = session:`codex-session`");
+        const batch = normalizedCodexBatch(extracted, 1200);
+        expect(batch.syntheticSkillInvocations).toHaveLength(2);
+        expect(batch.toolCallSkillRelations).toHaveLength(2);
 
         expect(extracted.toolCalls).toHaveLength(2);
         const execCall = extracted.toolCalls.find((call) => call.toolName === "exec_command");
@@ -1009,21 +1004,6 @@ describe("Codex transcript extraction", () => {
         expect(outputEvent.text).toHaveLength(1200);
         expect(outputEvent.text).toBe(outputEvent.textExcerpt);
         expect(outputEvent.text).not.toBe(largeOutput);
-        const raw = outputEvent.raw as { output?: unknown };
-        expect(raw).toMatchObject({
-            type: "function_call_output",
-            call_id: "call_large",
-        });
-
-        expect(raw.output).toMatchObject({
-            truncated: true,
-            bytes: expect.any(Number),
-        });
-        const compactedOutput = raw.output as { excerpt?: unknown };
-        expect(typeof compactedOutput.excerpt).toBe("string");
-        if (typeof compactedOutput.excerpt === "string") {
-            expect(compactedOutput.excerpt.length).toBeLessThan(largeOutput.length);
-        }
     });
 
     test("streaming extraction drains completed tool calls after their output arrives", () => {
@@ -1137,7 +1117,7 @@ describe("Codex transcript extraction", () => {
             },
         ]);
 
-        const secondBatchSql = __testBuildCodexBatchStatements(batches[1]!, 1200).join("\n");
+        const secondBatch = normalizedCodexBatch(batches[1]!, 1200);
         const parentKey = agentEventRecordKey({
             provider: "codex",
             providerSessionId: "codex-stream-parent",
@@ -1151,9 +1131,16 @@ describe("Codex transcript extraction", () => {
             seq: 2,
         });
 
-        expect(secondBatchSql).not.toContain(`UPSERT agent_event:\`${parentKey}\``);
-        expect(secondBatchSql).toContain(`RELATE agent_event:\`${parentKey}\`->agent_event_child:`);
-        expect(secondBatchSql).toContain(`->agent_event:\`${childKey}\``);
+        expect(secondBatch.events.some((event) => agentEventRecordKey({
+            provider: event.provider,
+            providerSessionId: event.providerSessionId,
+            ...(event.providerEventId == null ? {} : { providerEventId: event.providerEventId }),
+            seq: event.seq,
+        }) === parentKey)).toBe(false);
+        expect(secondBatch.agentEventParentEdges).toContainEqual(expect.objectContaining({
+            parentEventKey: parentKey,
+            childEventKey: childKey,
+        }));
     });
 
     test("turn IDs use centralized turnRecordKey format", () => {
@@ -1268,11 +1255,14 @@ describe("Codex transcript extraction", () => {
         expect(extracted).not.toBeNull();
         if (!extracted) return;
 
-        const sql = __testBuildCodexBatchStatements(extracted, 1200).join("\n");
-        expect(sql).toContain("->edited:`");
-        expect(sql).toContain("tool = \"apply_patch\"");
-        expect(sql).toContain("path_seen = \"src/ingest/codex.ts\"");
-        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest/codex.ts\"");
+        expect(normalizedCodexBatch(extracted, 1200).toolFileEvidence).toContainEqual(
+            expect.objectContaining({
+                kind: "edited",
+                toolName: "apply_patch",
+                pathSeen: "src/ingest/codex.ts",
+                path: "/Users/necmttn/Projects/ax/src/ingest/codex.ts",
+            }),
+        );
     });
 });
 
@@ -1354,8 +1344,7 @@ describe("codex reasoning signals", () => {
         expect(extracted?.session.reasoning_effort).toBe("medium");
         expect(extracted?.tokenUsage?.reasoningOutputTokens).toBe(75);
 
-        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
-        expect(sql).toContain("reasoning_output_tokens: 75");
+        expect(extracted?.tokenUsage?.reasoningOutputTokens).toBe(75);
     });
 
     test("falls back to collaboration_mode.settings.reasoning_effort when payload.effort missing", () => {

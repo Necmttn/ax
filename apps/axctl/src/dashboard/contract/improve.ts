@@ -47,8 +47,8 @@ const toActionFailure = (result: ImproveActionResult) => {
 export const ImproveGroupLive = HttpApiBuilder.group(AxApi, "improve", (handlers) =>
     handlers
         .handle("improveList", () =>
-            // asJsonValue: proposal rows carry SurrealDB RecordId instances,
-            // which Schema.Unknown's encode rejects - see common.ts.
+            // asJsonValue: forces plain JSON data, which Schema.Unknown's
+            // encode requires - see common.ts.
             orInternal(fetchImproveProposals().pipe(
                 Effect.map((proposals) => asJsonValue({ proposals })),
             )))

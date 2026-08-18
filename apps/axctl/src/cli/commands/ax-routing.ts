@@ -18,6 +18,7 @@
 import { Effect, FileSystem, Path } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { compileRouting, ROUTING_CLASSES } from "../../queries/dispatch-analytics.ts";
 import {
     defaultRoutingTablePath,
@@ -69,7 +70,8 @@ const tuneCommand = Command.make(
             }
             const tablePath = optionValue(out) ?? defaultRoutingTablePath();
             const table = yield* loadEffectiveRoutingTable(tablePath);
-            const proposals = yield* fetchTuneProposals({ sinceDays: days, table });
+            const read = yield* CacheRead;
+            const proposals = yield* fetchTuneProposals(read, { sinceDays: days, table });
 
             // Parse --apply before the empty-proposals check: an explicit apply
             // against an empty re-mine must fail loudly, not "keep up" silently.
@@ -262,15 +264,15 @@ export const axRoutingRuntime: RuntimeManifest = {
     routing: {
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
+            fallback: "cache",
             subcommands: {
-                tune: "db",
+                tune: "cache",
                 compile: "none",
                 show: "none",
                 // begin/end only need quota (they provide QuotaEnvLive themselves);
                 // report queries the graph. Keyed on argv[1]="impact", so the whole
-                // group shares one runtime - "db", consistent with ax analytics.
-                impact: "db",
+                // group shares one runtime, consistent with ax analytics.
+                impact: "cache",
             },
         },
         hidden: false,

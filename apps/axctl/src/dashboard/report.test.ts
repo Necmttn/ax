@@ -1,15 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import type { DashboardData } from "./report.ts";
 import { renderDashboardHtml, writeDashboard } from "./report.ts";
 
-/** Mock SurrealClient that returns empty result sets for every query, so
- *  `fetchDashboardData` produces a zeroed-out DashboardData without a real DB. */
-function makeEmptyDb() {
-    return makeTestSurrealClient({ denyWrites: true }).layer;
-}
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("dashboard report", { requireFts: true });
 
 const sampleData: DashboardData = {
     generatedAt: "2026-05-10T00:00:00.000Z",
@@ -148,7 +145,10 @@ describe("dashboard report renderer", () => {
 });
 
 describe("writeDashboard (@effect/platform write path)", () => {
-    test("creates the parent dir and writes the rendered HTML to disk", async () => {
+    dtest("creates the parent dir and writes the rendered HTML to disk", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-report-cache-"), dylibPath, () => Effect.void),
+        );
         const program = Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
             const dir = yield* fs.makeTempDirectory({ prefix: "ax-report-test-" });
@@ -159,7 +159,11 @@ describe("writeDashboard (@effect/platform write path)", () => {
             return { result, onDisk };
         }).pipe(
             Effect.provide(
-                Layer.mergeAll(makeEmptyDb(), BunFileSystem.layer, BunPath.layer),
+                Layer.mergeAll(
+                    readFixture(fixture.snapshotPath, dylibPath),
+                    BunFileSystem.layer,
+                    BunPath.layer,
+                ),
             ),
         );
 

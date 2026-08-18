@@ -152,7 +152,7 @@ export function QuotaShowcase() {
         </div>
         <div className="col">
           <div className="h">runs on your machine</div>
-          No SurrealDB involved at all - this is the one ax command with zero graph. Responses
+          No local cache involved at all - this is the one ax command with zero graph. Responses
           cache at <code>~/.ax/quota-cache.json</code> (60s TTL) so statusline and menubar can
           poll freely without hammering the endpoint.
         </div>

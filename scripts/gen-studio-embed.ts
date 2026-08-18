@@ -29,7 +29,7 @@ const STUB = `// AUTO-GENERATED stub - replaced with the embedded studio assets 
 //
 // Committed empty so a fresh clone, \`tsc\`, and \`bun test\` all resolve this
 // module. When the map is empty, \`serveStudioAsset\` falls back to reading the
-// studio build off disk (apps/studio/dist) - which is what \`ax serve\` from
+// studio build off disk (apps/studio/dist) - which is what \`ax studio\` from
 // source uses for dogfooding. The compiled binary has no source tree, so its
 // build bakes the assets in here via \`{ type: "file" }\` imports instead.
 export const STUDIO_EMBED: Record<string, string> = {};

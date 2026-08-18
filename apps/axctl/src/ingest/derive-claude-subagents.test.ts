@@ -1,550 +1,178 @@
-/**
- * Tests for derive-claude-subagents.ts - focused on F7: repository inheritance
- * and backfill behaviour.
- *
- * These tests do NOT hit a real DB. They inject a mock SurrealClientShape
- * and verify the SQL/upsert calls are correct.
- */
-import { describe, expect, test, afterAll } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { describe, expect } from "bun:test";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { Effect, Layer } from "effect";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
-import { makeMockDb } from "@ax/lib/testing/surreal";
+import { Effect, Layer, Schema } from "effect";
 import { AxConfig, makeTestConfig } from "@ax/lib/config";
-import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
+import { FixturePlatform, publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { deriveClaudeSubagents, subagentsStage } from "./derive-claude-subagents.ts";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("Claude subagents", { requireFts: true });
 
-/**
- * Minimal AxConfig layer that provides a transcripts dir that doesn't exist
- * (so discover() returns [] immediately) plus dummy DB config.
- */
-function makeEmptyTranscriptsConfig() {
-    return Layer.effect(AxConfig, makeTestConfig({
-        paths: {
-            home: "/nonexistent",
-            transcriptsDir: "/nonexistent-path-for-tests",
-            skillDirs: [],
-            commandDirs: [],
-            codexDir: "/nonexistent-path-for-tests",
-            piDir: "/nonexistent-path-for-tests",
-            opencodeDir: "/nonexistent-path-for-tests",
-            cursorUserDir: "/nonexistent-path-for-tests",
-            dataDir: "/nonexistent",
-            claudeUsageDir: "/nonexistent",
-            repoListFile: "/nonexistent",
-        },
-        knobs: {
-            claudeConcurrency: 4,
-            codexConcurrency: 1,
-            codexProgressEvery: 10,
-            codexFlushEvery: 500,
-            codexRawMaxBytes: 5 * 1024 * 1024,
-            codexPayloadMaxBytes: 1200,
-        },
-    })).pipe(Layer.provide(BunFileSystem.layer));
-}
+const configLayer = (transcriptsDir: string) => Layer.effect(AxConfig, makeTestConfig({
+    paths: {
+        home: transcriptsDir,
+        transcriptsDir,
+        skillDirs: [],
+        commandDirs: [],
+        codexDir: join(transcriptsDir, "codex"),
+        piDir: join(transcriptsDir, "pi"),
+        opencodeDir: join(transcriptsDir, "opencode"),
+        cursorUserDir: join(transcriptsDir, "cursor"),
+        dataDir: join(transcriptsDir, "data"),
+        claudeUsageDir: join(transcriptsDir, "usage"),
+        repoListFile: join(transcriptsDir, "repos"),
+    },
+    knobs: {
+        claudeConcurrency: 4,
+        codexConcurrency: 1,
+        codexProgressEvery: 10,
+        codexFlushEvery: 500,
+        codexRawMaxBytes: 5 * 1024 * 1024,
+        codexPayloadMaxBytes: 1200,
+    },
+}));
 
-/** Convenience: merge db+config layers and run the stage. */
-async function runWith(
-    dbLayer: Layer.Layer<SurrealClient>,
-    configLayer: Layer.Layer<AxConfig> = makeEmptyTranscriptsConfig(),
-) {
-    return Effect.runPromise(
-        deriveClaudeSubagents().pipe(
-            // `extractFileWithSessionId` is now FileSystem-native; provide the
-            // REAL Bun-backed FileSystem + Path against the existing tmp-dir
-            // fixtures (not the in-memory mock) so this test exercises the
-            // production read path unchanged.
-            Effect.provide(
-                Layer.mergeAll(dbLayer, configLayer, BunFileSystem.layer, BunPath.layer),
-            ),
-        ),
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Tests: repository backfill (F7)
-// ---------------------------------------------------------------------------
-
-describe("repository backfill (F7)", () => {
-    test("backfill: existing subagent with repository=NONE gets parent's repository copied", async () => {
-        const responses = new Map<string, unknown[][]>();
-
-        // Skill catalog query
-        responses.set("SELECT name FROM skill", [[{ name: "test-skill" }]]);
-
-        // Backfill SELECT: find subagents with no repository, with parent data.
-        // id and parent_repository must be RecordId instances (as the real DB driver
-        // returns for record-typed fields) so the instanceof guards pass.
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[
-            {
-                id: new RecordId("session", "claude-subagent-abc"),
-                parent_repository: new RecordId("repository", "my-repo"),
-                parent_checkout: "checkout:abc123",
-                parent_cwd: "/home/user/project",
-            },
-        ]]);
-
-        const { calls, layer } = makeMockDb(responses, { denyWrites: false });
-        await runWith(layer);
-
-        // Should have issued the backfill SELECT query
-        const backfillSelect = calls.find(
-            (c) =>
-                c.sql.includes('source = "claude-subagent"') &&
-                c.sql.includes("repository IS NONE"),
-        );
-        expect(backfillSelect).toBeDefined();
-
-        // Should have issued an UPDATE for the found subagent
-        const updateCall = calls.find(
-            (c) =>
-                c.sql.includes("claude-subagent-abc") &&
-                (c.sql.includes("SET repository") || c.sql.includes("repository =")),
-        );
-        expect(updateCall).toBeDefined();
-
-        // repository is now embedded as a record literal in SQL - not a binding
-        if (updateCall) {
-            expect(updateCall.sql).toContain("repository = repository:`my-repo`");
-            expect(updateCall.bindings?.["repo"]).toBeUndefined();
-            expect(updateCall.bindings?.["checkout"]).toBe("checkout:abc123");
-            expect(updateCall.bindings?.["cwd"]).toBe("/home/user/project");
-        }
-    });
-
-    test("backfill idempotent: when no subagents have missing repository, no UPDATE issued", async () => {
-        const responses = new Map<string, unknown[][]>();
-        responses.set("SELECT name FROM skill", [[]]);
-        // Backfill query returns empty - no subagents need repair
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
-
-        const { calls, layer } = makeMockDb(responses, { denyWrites: false });
-        await runWith(layer);
-
-        // No UPDATE query for backfill
-        const updateCalls = calls.filter(
-            (c) =>
-                c.sql.includes("SET repository") &&
-                c.sql.includes("claude-subagent"),
-        );
-        expect(updateCalls.length).toBe(0);
-    });
-
-    test("stats: repositoryBackfilled reflects count of backfilled rows", async () => {
-        const responses = new Map<string, unknown[][]>();
-        responses.set("SELECT name FROM skill", [[]]);
-        // Two rows need backfill (RecordId instances as the real DB driver returns
-        // for record-typed fields)
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[
-            {
-                id: new RecordId("session", "claude-subagent-aaa"),
-                parent_repository: new RecordId("repository", "repo-x"),
-                parent_checkout: null,
-                parent_cwd: "/tmp/repo-x",
-            },
-            {
-                id: new RecordId("session", "claude-subagent-bbb"),
-                parent_repository: new RecordId("repository", "repo-y"),
-                parent_checkout: "checkout:def456",
-                parent_cwd: "/tmp/repo-y",
-            },
-        ]]);
-
-        const { layer } = makeMockDb(responses, { denyWrites: false });
-        const stats = await runWith(layer);
-
-        expect(stats.repositoryBackfilled).toBe(2);
-    });
-
-    test("stats: repositoryInherited is 0 when no new subagents are discovered", async () => {
-        const responses = new Map<string, unknown[][]>();
-        responses.set("SELECT name FROM skill", [[]]);
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
-
-        const { layer } = makeMockDb(responses, { denyWrites: false });
-        const stats = await runWith(layer);
-
-        expect(stats.repositoryInherited).toBe(0);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Helpers: real-filesystem fixture for manifest-discovery tests
-// ---------------------------------------------------------------------------
-
-/**
- * Temp directories created by the fixture tests – cleaned up in afterAll.
- */
-const tmpDirs: string[] = [];
-
-afterAll(async () => {
-    await Promise.all(tmpDirs.map((d) => rm(d, { recursive: true, force: true })));
-});
-
-/**
- * Build a minimal discoverable fixture on disk:
- *
- *   <root>/
- *     -test-project/
- *       <parentSessionId>/
- *         subagents/
- *           agent-<agentId>.jsonl  ← first line triggers parseManifest
- *
- * Returns { root, parentSessionId, agentId, subagentSessionId, agentFile }.
- */
-async function buildFixture(opts: {
-    agentId: string;
-    parentSessionId: string;
-    /** Optional cwd written into the jsonl line so the extractor picks it up. */
-    cwdInFile?: string;
-    /** Optional model name written onto the assistant message so the extractor captures it. */
-    modelInFile?: string;
-    /** Optional meta.json content to write next to the jsonl. */
+const writeSubagent = async (root: string, input: {
+    parent: string;
+    agent: string;
+    cwd?: string;
+    model?: string;
     meta?: Record<string, string>;
-}) {
-    const root = await mkdtemp(join(tmpdir(), "ax-test-subagent-"));
-    tmpDirs.push(root);
-
-    const projectDir = "-test-project";
-    const sessionDir = join(root, projectDir, opts.parentSessionId, "subagents");
-    await mkdir(sessionDir, { recursive: true });
-
-    const agentFile = join(sessionDir, `agent-${opts.agentId}.jsonl`);
-    const firstLine: Record<string, string> = {
-        agentId: opts.agentId,
-        sessionId: opts.parentSessionId,
+}) => {
+    const dir = join(root, "project-a", input.parent, "subagents");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `agent-${input.agent}.jsonl`);
+    const first = {
         type: "user",
-        timestamp: "2026-01-01T00:00:00.000Z",
+        agentId: input.agent,
+        sessionId: input.parent,
+        timestamp: "2026-06-17T10:00:00.000Z",
+        cwd: input.cwd,
+        message: { role: "user", content: "Inspect the code" },
     };
-    if (opts.cwdInFile) firstLine["cwd"] = opts.cwdInFile;
-
-    // Write first line (gives parseManifest what it needs: agentId + sessionId)
-    // and a second line so finish() produces a non-null session.
-    const secondLine: Record<string, unknown> = {
-        agentId: opts.agentId,
-        sessionId: opts.parentSessionId,
+    const last = {
         type: "assistant",
-        timestamp: "2026-01-01T00:00:01.000Z",
+        agentId: input.agent,
+        sessionId: input.parent,
+        timestamp: "2026-06-17T10:01:00.000Z",
+        cwd: input.cwd,
+        message: { role: "assistant", content: [{ type: "text", text: "Done" }], model: input.model },
     };
-    // Wrap model in a message object so the extractor reads `message.model`.
-    if (opts.modelInFile) {
-        secondLine["message"] = { model: opts.modelInFile };
-    }
-    await Bun.write(agentFile, JSON.stringify(firstLine) + "\n" + JSON.stringify(secondLine) + "\n");
+    await Bun.write(path, `${JSON.stringify(first)}\n${JSON.stringify(last)}\n`);
+    if (input.meta) await Bun.write(path.replace(/\.jsonl$/, ".meta.json"), JSON.stringify(input.meta));
+    return { path, child: `claude-subagent-${input.agent}` };
+};
 
-    // Write optional meta.json sibling.
-    if (opts.meta) {
-        const metaFile = agentFile.replace(/\.jsonl$/, ".meta.json");
-        await Bun.write(metaFile, JSON.stringify(opts.meta));
-    }
-
-    return {
-        root,
-        parentSessionId: opts.parentSessionId,
-        agentId: opts.agentId,
-        subagentSessionId: `claude-subagent-${opts.agentId}`,
-        agentFile,
-    };
-}
-
-/** Config layer that points transcriptsDir at a real temp root. */
-function makeFixtureConfig(transcriptsDir: string) {
-    return Layer.effect(AxConfig, makeTestConfig({
-        paths: {
-            home: "/nonexistent",
-            transcriptsDir,
-            skillDirs: [],
-            commandDirs: [],
-            codexDir: "/nonexistent",
-            piDir: "/nonexistent",
-            opencodeDir: "/nonexistent",
-            cursorUserDir: "/nonexistent",
-            dataDir: "/nonexistent",
-            claudeUsageDir: "/nonexistent",
-            repoListFile: "/nonexistent",
-        },
-        knobs: {
-            claudeConcurrency: 4,
-            codexConcurrency: 1,
-            codexProgressEvery: 10,
-            codexFlushEvery: 500,
-            codexRawMaxBytes: 5 * 1024 * 1024,
-            codexPayloadMaxBytes: 1200,
-        },
-    })).pipe(Layer.provide(BunFileSystem.layer));
-}
-
-// ---------------------------------------------------------------------------
-// Tests: repository inheritance on new subagents (F7 – new-subagent path)
-// ---------------------------------------------------------------------------
-
-describe("repository inheritance on new subagents (F7)", () => {
-    test("new subagent with no extractor-cwd inherits repository+checkout+cwd from parent", async () => {
-        const fixture = await buildFixture({
-            agentId: "test-agent-001",
-            parentSessionId: "parent-ses-inherit-no-cwd",
-            // no cwdInFile → extractor will produce session.cwd = null
-        });
-
-        const responses = new Map<string, unknown[][]>();
-        responses.set("SELECT name FROM skill", [[]]);
-        // Parent row has repository, checkout, cwd
-        responses.set("parent-ses-inherit-no-cwd", [[
-            {
-                id: `session:⟨${fixture.parentSessionId}⟩`,
-                repository: "repository:test-repo",
-                checkout: "checkout:abc123",
-                cwd: "/home/user/test-project",
-            },
-        ]]);
-        // Backfill: no rows need repair
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
-
-        const { upserts, layer } = makeMockDb(responses, { denyWrites: false });
-        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
-
-        // Stage should have discovered 1 subagent and written it
-        expect(stats.discovered).toBe(1);
-        expect(stats.written).toBe(1);
-        expect(stats.missingParent).toBe(0);
-
-        // repositoryInherited must be > 0 (parent had a repository value)
-        expect(stats.repositoryInherited).toBeGreaterThan(0);
-
-        // Verify the upsert payload for the subagent session
-        const upsertCall = upserts.find(
-            (c) => String(c.id).includes(fixture.subagentSessionId),
-        );
-        expect(upsertCall).toBeDefined();
-        if (upsertCall) {
-            expect(upsertCall.content["repository"]).toBe("repository:test-repo");
-            expect(upsertCall.content["checkout"]).toBe("checkout:abc123");
-            // cwd inherits from parent because extractor produced none
-            expect(upsertCall.content["cwd"]).toBe("/home/user/test-project");
-        }
+describe("deriveClaudeSubagents on real DuckDB", () => {
+    dtest("backfills repository data for an existing child", async () => {
+        const transcriptsDir = tempDir("ax-subagent-empty-");
+        let stats: unknown;
+        let child: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-subagent-backfill-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session", {
+                    id: "parent", source: "claude", repository: "repo", checkout: "checkout", cwd: "/repo",
+                });
+                yield* write.put("session", { id: "child", source: "claude-subagent" });
+                yield* write.put("spawned", {
+                    id: "spawn", in_id: "parent", out_id: "child", ts: new Date(), tool: "Agent",
+                });
+                stats = yield* deriveClaudeSubagents(write).pipe(
+                    Effect.provide(configLayer(transcriptsDir)),
+                    Effect.provide(FixturePlatform),
+                );
+                child = (yield* write.rows(Schema.Struct({
+                    repository: Schema.String,
+                    checkout: Schema.String,
+                    cwd: Schema.String,
+                }), "SELECT repository, checkout, cwd FROM session WHERE id = ?", ["child"]))[0];
+            }),
+        ));
+        expect(stats).toMatchObject({ discovered: 0, repositoryBackfilled: 1, repositoryInherited: 0 });
+        expect(child).toEqual({ repository: "repo", checkout: "checkout", cwd: "/repo" });
     });
 
-    test("new subagent with extractor-cwd keeps its own cwd but still inherits repository+checkout", async () => {
-        const fixture = await buildFixture({
-            agentId: "test-agent-002",
-            parentSessionId: "parent-ses-inherit-with-cwd",
-            cwdInFile: "/home/user/subagent-working-dir",
-        });
-
-        const responses = new Map<string, unknown[][]>();
-        responses.set("SELECT name FROM skill", [[]]);
-        // Parent row
-        responses.set("parent-ses-inherit-with-cwd", [[
-            {
-                id: `session:⟨${fixture.parentSessionId}⟩`,
-                repository: "repository:test-repo-2",
-                checkout: "checkout:def456",
-                cwd: "/home/user/parent-project",
-            },
-        ]]);
-        responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
-
-        const { upserts, layer } = makeMockDb(responses, { denyWrites: false });
-        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
-
-        expect(stats.discovered).toBe(1);
-        expect(stats.written).toBe(1);
-
-        const upsertCall = upserts.find(
-            (c) => String(c.id).includes(fixture.subagentSessionId),
-        );
-        expect(upsertCall).toBeDefined();
-        if (upsertCall) {
-            // repository and checkout unconditionally inherited from parent
-            expect(upsertCall.content["repository"]).toBe("repository:test-repo-2");
-            expect(upsertCall.content["checkout"]).toBe("checkout:def456");
-            // cwd must be the extractor-produced value, NOT the parent's cwd
-            expect(upsertCall.content["cwd"]).toBe("/home/user/subagent-working-dir");
-            expect(upsertCall.content["cwd"]).not.toBe("/home/user/parent-project");
-        }
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: model attribution (Phase 1 fix)
-// ---------------------------------------------------------------------------
-
-/** Shared mock parent row for model/meta tests. */
-function makeParentResponse(parentSessionId: string): Map<string, unknown[][]> {
-    const responses = new Map<string, unknown[][]>();
-    responses.set("SELECT name FROM skill", [[]]);
-    responses.set(parentSessionId, [[
-        {
-            id: `session:⟨${parentSessionId}⟩`,
-            repository: null,
-            checkout: null,
-            cwd: "/home/user/project",
-        },
-    ]]);
-    responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
-    return responses;
-}
-
-describe("model attribution on subagent session", () => {
-    test("model from assistant message.model lands on the session upsert", async () => {
-        const fixture = await buildFixture({
-            agentId: "model-test-001",
-            parentSessionId: "parent-model-001",
-            modelInFile: "claude-sonnet-4-6",
-        });
-
-        const { upserts, layer } = makeMockDb(
-            makeParentResponse("parent-model-001"),
-            { denyWrites: false },
-        );
-        await runWith(layer, makeFixtureConfig(fixture.root));
-
-        const upsertCall = upserts.find((c) => String(c.id).includes(fixture.subagentSessionId));
-        expect(upsertCall).toBeDefined();
-        expect(upsertCall?.content["model"]).toBe("claude-sonnet-4-6");
-    });
-
-    test("model is undefined on upsert when no assistant message carries model", async () => {
-        const fixture = await buildFixture({
-            agentId: "model-test-002",
-            parentSessionId: "parent-model-002",
-            // no modelInFile → extractor produces session.model = null
-        });
-
-        const { upserts, layer } = makeMockDb(
-            makeParentResponse("parent-model-002"),
-            { denyWrites: false },
-        );
-        await runWith(layer, makeFixtureConfig(fixture.root));
-
-        const upsertCall = upserts.find((c) => String(c.id).includes(fixture.subagentSessionId));
-        expect(upsertCall).toBeDefined();
-        // null → coerced to undefined → not stored (consistent with upsertSessions pattern)
-        expect(upsertCall?.content["model"]).toBeUndefined();
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: meta.json enrichment on spawned edge
-// ---------------------------------------------------------------------------
-
-describe("meta.json enrichment on spawned edge", () => {
-    test("meta fields land in the RELATE query when meta.json is present", async () => {
-        const fixture = await buildFixture({
-            agentId: "meta-test-001",
-            parentSessionId: "parent-meta-001",
+    dtest("writes a child with inherited repository data and dispatch metadata", async () => {
+        const transcriptsDir = tempDir("ax-subagent-files-");
+        const fixture = await writeSubagent(transcriptsDir, {
+            parent: "parent",
+            agent: "agent-1",
+            model: "claude-sonnet-4-6",
             meta: {
                 agentType: "design-curator",
-                description: "Accessibility critique share view",
+                description: "Check accessibility",
                 name: "critic-a11y",
-                toolUseId: "toolu_01Xshe123abc",
+                toolUseId: "toolu_1",
             },
         });
-
-        const { calls, layer } = makeMockDb(
-            makeParentResponse("parent-meta-001"),
-            { denyWrites: false },
-        );
-        await runWith(layer, makeFixtureConfig(fixture.root));
-
-        const relateCall = calls.find(
-            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
-        );
-        expect(relateCall).toBeDefined();
-        if (relateCall) {
-            expect(relateCall.sql).toContain("agent_type");
-            expect(relateCall.sql).toContain("design-curator");
-            expect(relateCall.sql).toContain("description");
-            expect(relateCall.sql).toContain("Accessibility critique share view");
-            expect(relateCall.sql).toContain("agent_name");
-            expect(relateCall.sql).toContain("critic-a11y");
-            expect(relateCall.sql).toContain("tool_use_id");
-            expect(relateCall.sql).toContain("toolu_01Xshe123abc");
-        }
+        let stats: unknown;
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-subagent-write-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session", {
+                    id: "parent", source: "claude", repository: "repo", checkout: "checkout", cwd: "/parent",
+                });
+                stats = yield* deriveClaudeSubagents(write).pipe(
+                    Effect.provide(configLayer(transcriptsDir)),
+                    Effect.provide(FixturePlatform),
+                );
+                row = (yield* write.rows(Schema.Struct({
+                    source: Schema.String,
+                    repository: Schema.String,
+                    checkout: Schema.String,
+                    cwd: Schema.String,
+                    model: Schema.String,
+                    agent_type: Schema.String,
+                    description: Schema.String,
+                    agent_name: Schema.String,
+                    tool_use_id: Schema.String,
+                }), `SELECT s.source, s.repository, s.checkout, s.cwd, s.model,
+                    sp.agent_type, sp.description, sp.agent_name, sp.tool_use_id
+                    FROM session s JOIN spawned sp ON sp.out_id = s.id WHERE s.id = ?`, [fixture.child]))[0];
+            }),
+        ));
+        expect(stats).toMatchObject({ discovered: 1, written: 1, missingParent: 0, repositoryInherited: 1 });
+        expect(row).toEqual({
+            source: "claude-subagent",
+            repository: "repo",
+            checkout: "checkout",
+            cwd: "/parent",
+            model: "claude-sonnet-4-6",
+            agent_type: "design-curator",
+            description: "Check accessibility",
+            agent_name: "critic-a11y",
+            tool_use_id: "toolu_1",
+        });
     });
 
-    test("missing meta.json is tolerated: RELATE runs without meta fields", async () => {
-        const fixture = await buildFixture({
-            agentId: "meta-test-002",
-            parentSessionId: "parent-meta-002",
-            // no meta → no meta.json written
-        });
-
-        const { calls, layer } = makeMockDb(
-            makeParentResponse("parent-meta-002"),
-            { denyWrites: false },
-        );
-        // Should not throw
-        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
-        expect(stats.written).toBe(1);
-
-        const relateCall = calls.find(
-            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
-        );
-        expect(relateCall).toBeDefined();
-        // Meta clauses absent when file not present
-        if (relateCall) {
-            expect(relateCall.sql).not.toContain("agent_type");
-            expect(relateCall.sql).not.toContain("tool_use_id");
-        }
+    dtest("keeps extractor cwd and skips an unchanged file", async () => {
+        const transcriptsDir = tempDir("ax-subagent-cwd-");
+        const fixture = await writeSubagent(transcriptsDir, { parent: "parent", agent: "agent-2", cwd: "/child" });
+        let second: unknown;
+        let cwd = "";
+        await runWithPlatform(publishCacheFixture(tempDir("ax-subagent-skip-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("session", { id: "parent", source: "claude", repository: "repo", cwd: "/parent" });
+                yield* deriveClaudeSubagents(write).pipe(
+                    Effect.provide(configLayer(transcriptsDir)),
+                    Effect.provide(FixturePlatform),
+                );
+                second = yield* deriveClaudeSubagents(write).pipe(
+                    Effect.provide(configLayer(transcriptsDir)),
+                    Effect.provide(FixturePlatform),
+                );
+                cwd = (yield* write.rows(Schema.Struct({ cwd: Schema.String }),
+                    "SELECT cwd FROM session WHERE id = ?", [fixture.child]))[0]!.cwd;
+            }),
+        ));
+        expect(second).toMatchObject({ discovered: 1, written: 0, skippedUnchanged: 1 });
+        expect(cwd).toBe("/child");
     });
+});
 
-    test("unparseable meta.json is tolerated: RELATE still runs", async () => {
-        const fixture = await buildFixture({
-            agentId: "meta-test-003",
-            parentSessionId: "parent-meta-003",
-        });
-        // Overwrite with invalid JSON
-        const metaFile = fixture.agentFile.replace(/\.jsonl$/, ".meta.json");
-        await Bun.write(metaFile, "not-valid-json{{{");
-
-        const { calls, layer } = makeMockDb(
-            makeParentResponse("parent-meta-003"),
-            { denyWrites: false },
-        );
-        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
-        expect(stats.written).toBe(1);
-
-        const relateCall = calls.find(
-            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
-        );
-        expect(relateCall).toBeDefined();
-    });
-
-    test("partial meta.json only emits present fields", async () => {
-        const fixture = await buildFixture({
-            agentId: "meta-test-004",
-            parentSessionId: "parent-meta-004",
-            meta: {
-                agentType: "codebase-analyzer",
-                // description, name, toolUseId intentionally absent
-            },
-        });
-
-        const { calls, layer } = makeMockDb(
-            makeParentResponse("parent-meta-004"),
-            { denyWrites: false },
-        );
-        await runWith(layer, makeFixtureConfig(fixture.root));
-
-        const relateCall = calls.find(
-            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
-        );
-        expect(relateCall).toBeDefined();
-        if (relateCall) {
-            expect(relateCall.sql).toContain("agent_type");
-            expect(relateCall.sql).toContain("codebase-analyzer");
-            // Absent fields must not appear
-            expect(relateCall.sql).not.toContain("tool_use_id");
-            expect(relateCall.sql).not.toContain("agent_name");
-        }
+describe("subagentsStage", () => {
+    dtest("keeps the required dependencies", () => {
+        expect(subagentsStage.meta.deps).toEqual(["claude", "codex"]);
     });
 });

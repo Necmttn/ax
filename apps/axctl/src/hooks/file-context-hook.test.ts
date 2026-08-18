@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import {
     adaptClaudePayload,
+    buildFileContextHookResponse,
     filterSuppressed,
     finalizeInjection,
     generateLookupCandidates,
@@ -13,6 +16,8 @@ import {
     shouldInjectFileMemory,
     type FileContextHookDecision,
 } from "./file-context-hook.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("file-context-hook (duckdb)", { requireFts: true });
 
 interface PriorSessionInit {
     readonly session?: string;
@@ -643,4 +648,43 @@ describe("finalizeInjection", () => {
         expect(result.inject).toBe(false);
         expect(result.reason).toBe("no_prior_sessions");
     });
+});
+
+describe("buildFileContextHookResponse resolves from the snapshot alone", () => {
+    // A hook fire used to open a live database connection and wait up to a 5s
+    // connect timeout when nothing was listening - on a machine with no daemon
+    // running, every edit paid that. `buildFileContextHookResponse` is now
+    // `Effect<FileContextHookResponse, CacheReadError, CacheRead>`, so the only
+    // thing it can read is the published snapshot, and this pins the result:
+    // milliseconds, from a file, with no server anywhere.
+    dtest("answers in milliseconds, with no server running", async () => {
+        {
+            const fixture = await runWithPlatform(
+                publishCacheFixture(
+                    tempDir("ax-file-context-hook-nodb-"),
+                    dylibPath,
+                    (w) => w.put("file", { id: "file:a", path: "src/ingest/codex.ts" }),
+                ),
+            );
+
+            const startMs = performance.now();
+            const response = await readThroughFixture(
+                fixture,
+                dylibPath,
+                buildFileContextHookResponse({
+                    event: "pre-edit",
+                    task: "fix the ingest bug",
+                    files: ["src/ingest/codex.ts"],
+                    format: "plain",
+                }),
+            );
+            const elapsedMs = performance.now() - startMs;
+
+            // Well under the 5s connect timeout a stalled dial used to cost -
+            // this is milliseconds, not seconds.
+            expect(elapsedMs).toBeLessThan(2000);
+            expect(response.inject).toBe(false); // no prior sessions in this tiny fixture
+            expect(response.reason).toBe("no_prior_sessions");
+        }
+    }, 60_000);
 });

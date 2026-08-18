@@ -17,13 +17,17 @@
  * Sibling of `retro emit` / `retro list` / `retro reflect`.
  */
 
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 import { encodeJson } from "@ax/lib/decode";
 import { homedir } from "node:os";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
+import { listStoredProposals } from "../improve/judgment-proposals.ts";
+import { listStoredRetros } from "../queries/judgment-retros.ts";
 import {
     parseRetroCorrections,
     parseRetroFailed,
@@ -136,10 +140,11 @@ export const INVESTIGATION_PROMPTS: readonly string[] = [
 ];
 
 /**
- * SurrealDB may return `duration::days(...)` as a plain int OR as a duration
- * object/string like `"32d"`/`{ secs: 2764800 }` depending on driver version.
- * Coerce to a non-negative integer day count; fall back to ISO diff against
- * created_at when nothing else parses.
+ * Coerce `raw` to a non-negative integer day count, accepting a plain int, a
+ * duration string like `"32d"`, or a duration object like `{ secs: N }`; falls
+ * back to an ISO diff against `created_at` when nothing else parses. Exported
+ * for its own unit coverage; the current write path (`days_since_accepted`
+ * below) computes the day count directly from `created_at` instead.
  */
 export const coerceDaysSinceAccepted = (
     raw: unknown,
@@ -176,15 +181,16 @@ export const coerceDaysSinceAccepted = (
     return 0;
 };
 
-const idToString = (raw: unknown): string => {
-    if (raw === null || raw === undefined) return "";
-    if (typeof raw === "string") return raw;
-    if (typeof raw === "object" && raw !== null && "tb" in raw && "id" in raw) {
-        const r = raw as { tb: unknown; id: unknown };
-        return `${String(r.tb ?? "")}:${String(r.id ?? "")}`;
-    }
-    return String(raw);
-};
+const MetaSkillRow = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+});
+const OpportunityAggRow = Schema.Struct({
+    experiment_id: Schema.String,
+    opportunities_count: NumberFromBigIntColumn,
+    addressed_count: NumberFromBigIntColumn,
+});
 
 const flagValue = (args: string[], name: string): string | undefined => {
     const hit = args.find((a) => a.startsWith(`--${name}=`));
@@ -323,7 +329,7 @@ export const buildMetaSnapshot = (input: {
 
 export const cmdRetroMeta = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<void, JudgmentError, CacheRead | Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const sinceRaw = flagValue(args, "since");
@@ -338,114 +344,96 @@ export const cmdRetroMeta = (
         // / `--pretty` are not supported; the CLI is always-JSON for now.
         const pretty = args.includes("--pretty");
 
-        const db = yield* SurrealClient;
+        const cutoff = new Date(Date.now() - sinceDays * 86_400_000);
+        const [storedRetros, skillRows, proposals] = yield* Effect.all([
+            listStoredRetros({ since: cutoff, limit: limitRetros }),
+            cacheRows(MetaSkillRow, {
+                sql: "SELECT name, scope, description FROM skill ORDER BY name",
+                params: [],
+            }, "retro meta skills"),
+            listStoredProposals(1_000),
+        ], { concurrency: 3 });
 
-        const [retrosRes, skillsRes, openPropsRes, expsRes, expStatusRes] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id, session, source, tried, worked, failed, next,
-                        type::string(created_at) AS created_at
-                 FROM retro
-                 WHERE created_at > time::now() - ${sinceDays}d
-                 ORDER BY created_at DESC LIMIT ${limitRetros};`,
-            ),
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT name, scope, description FROM skill ORDER BY name;`,
-            ),
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT dedupe_sig, form, title, frequency, confidence
-                 FROM proposal
-                 WHERE status = 'open'
-                 ORDER BY frequency DESC LIMIT 20;`,
-            ),
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id, proposal.title AS title, artifact_path, locked_verdict, created_at
-                 FROM experiment
-                 WHERE locked_verdict IS NONE
-                 ORDER BY created_at DESC LIMIT 20;`,
-            ),
-            db.query<[Array<Record<string, unknown>>]>(
-                `SELECT
-                    id,
-                    proposal.dedupe_sig AS proposal_dedupe_sig,
-                    proposal.title AS proposal_title,
-                    proposal.form AS proposal_form,
-                    artifact_path,
-                    created_at,
-                    type::string(created_at) AS created_at_iso,
-                    duration::days(time::now() - created_at) AS days_since_accepted,
-                    (SELECT count() FROM opportunity WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS opportunities_count,
-                    (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed_count,
-                    (SELECT kind, suggested, type::string(observed_at) AS observed_at
-                     FROM checkpoint
-                     WHERE experiment = $parent.id
-                     ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint,
-                    locked_verdict
-                 FROM experiment
-                 ORDER BY created_at DESC;`,
-            ),
-        ], { concurrency: 5 });
-
-        const rawRetros = retrosRes?.[0] ?? [];
-        const retros: RetroMetaRow[] = rawRetros.map((r) => ({
-            id: idToString(r.id),
-            session: idToString(r.session),
-            source: String(r.source ?? ""),
-            tried: String(r.tried ?? ""),
-            worked: r.worked == null ? null : String(r.worked),
-            failed: r.failed == null ? null : String(r.failed),
-            next: r.next == null ? null : String(r.next),
-            created_at: String(r.created_at ?? ""),
+        const retros: RetroMetaRow[] = storedRetros.map((r) => ({
+            id: `retro:${r.id}`,
+            session: `session:${r.session}`,
+            source: r.source,
+            tried: r.tried,
+            worked: r.worked,
+            failed: r.failed,
+            next: r.next,
+            created_at: r.created_at.toISOString(),
         }));
 
-        const skills: SkillRow[] = (skillsRes?.[0] ?? []).map((s) => ({
-            name: String(s.name ?? ""),
-            scope: String(s.scope ?? ""),
-            description: String(s.description ?? ""),
+        const skills: SkillRow[] = skillRows.map((s) => ({
+            name: s.name,
+            scope: s.scope,
+            description: s.description ?? "",
         }));
 
-        const openProposals: OpenProposalRow[] = (openPropsRes?.[0] ?? []).map((p) => ({
-            dedupe_sig: String(p.dedupe_sig ?? ""),
-            form: String(p.form ?? ""),
-            title: String(p.title ?? ""),
-            frequency: Number(p.frequency ?? 0),
-            confidence: String(p.confidence ?? "low"),
-        }));
+        const openProposals: OpenProposalRow[] = proposals
+            .filter((proposal) => proposal.status === "open")
+            .sort((a, b) => b.frequency - a.frequency)
+            .slice(0, 20)
+            .map((proposal) => ({
+                dedupe_sig: proposal.dedupe_sig,
+                form: proposal.form,
+                title: proposal.title,
+                frequency: proposal.frequency,
+                confidence: proposal.confidence,
+            }));
 
-        const acceptedExperiments: AcceptedExperimentRow[] = (expsRes?.[0] ?? []).map((e) => ({
-            id: idToString(e.id),
-            title: String(e.title ?? ""),
-            artifact_path: e.artifact_path == null ? null : String(e.artifact_path),
-            locked_verdict: e.locked_verdict == null ? null : String(e.locked_verdict),
-        }));
+        const experiments = proposals.flatMap((proposal) => proposal.experiment
+            ? [{ proposal, experiment: proposal.experiment }]
+            : []);
+        const acceptedExperiments: AcceptedExperimentRow[] = experiments
+            .filter(({ experiment }) => experiment.locked_verdict === null)
+            .sort((a, b) => b.experiment.created_at.getTime() - a.experiment.created_at.getTime())
+            .slice(0, 20)
+            .map(({ proposal, experiment }) => ({
+                id: `experiment:${experiment.id}`,
+                title: proposal.title,
+                artifact_path: experiment.artifact_path,
+                locked_verdict: experiment.locked_verdict,
+            }));
 
-        const experimentStatus: ExperimentStatusRow[] = (expStatusRes?.[0] ?? []).map((e) => {
-            const opps = Number(e.opportunities_count ?? 0);
-            const addressed = Number(e.addressed_count ?? 0);
+        const experimentIds = experiments.map(({ experiment }) => experiment.id);
+        const opportunityRows = experimentIds.length === 0 ? [] : yield* cacheRows(OpportunityAggRow, {
+            sql: `SELECT in_id AS experiment_id, count(*) AS opportunities_count,
+                         count(*) FILTER (WHERE was_addressed) AS addressed_count
+                  FROM opportunity WHERE in_id IN (${experimentIds.map(() => "?").join(", ")})
+                  GROUP BY in_id`,
+            params: experimentIds,
+        }, "retro meta opportunities");
+        const opportunityByExperiment = new Map(opportunityRows.map((row) => [
+            row.experiment_id,
+            { opportunities: row.opportunities_count, addressed: row.addressed_count },
+        ] as const));
+
+        const experimentStatus: ExperimentStatusRow[] = experiments.map(({ proposal, experiment }) => {
+            const counts = opportunityByExperiment.get(experiment.id);
+            const opps = counts?.opportunities ?? 0;
+            const addressed = counts?.addressed ?? 0;
             const ratio = opps > 0 ? addressed / opps : 0;
-            const createdAtIso = e.created_at_iso == null ? null : String(e.created_at_iso);
-            const days = coerceDaysSinceAccepted(e.days_since_accepted, createdAtIso);
-            const cp = e.latest_checkpoint;
-            let latest: ExperimentStatusCheckpoint | null = null;
-            if (cp && typeof cp === "object") {
-                const c = cp as Record<string, unknown>;
-                latest = {
-                    kind: String(c.kind ?? ""),
-                    suggested: c.suggested == null ? null : String(c.suggested),
-                    observed_at: String(c.observed_at ?? ""),
-                };
-            }
+            const days = Math.max(0, Math.floor((Date.now() - experiment.created_at.getTime()) / 86_400_000));
+            const checkpoint = experiment.checkpoints.at(-1);
+            const latest: ExperimentStatusCheckpoint | null = checkpoint ? {
+                kind: checkpoint.kind,
+                suggested: checkpoint.suggested,
+                observed_at: checkpoint.observed_at.toISOString(),
+            } : null;
             return {
-                experiment_id: idToString(e.id),
-                proposal_dedupe_sig: String(e.proposal_dedupe_sig ?? ""),
-                proposal_title: String(e.proposal_title ?? ""),
-                proposal_form: String(e.proposal_form ?? ""),
-                artifact_path: e.artifact_path == null ? null : String(e.artifact_path),
+                experiment_id: `experiment:${experiment.id}`,
+                proposal_dedupe_sig: proposal.dedupe_sig,
+                proposal_title: proposal.title,
+                proposal_form: proposal.form,
+                artifact_path: experiment.artifact_path,
                 days_since_accepted: days,
                 opportunities_count: opps,
                 addressed_count: addressed,
                 address_ratio: ratio,
                 latest_checkpoint: latest,
-                locked_verdict: e.locked_verdict == null ? null : String(e.locked_verdict),
+                locked_verdict: experiment.locked_verdict,
             };
         });
 

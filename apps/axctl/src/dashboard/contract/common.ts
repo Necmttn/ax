@@ -14,10 +14,11 @@ export const orInternal = <A, R>(effect: Effect.Effect<A, unknown, R>): Effect.E
 
 /**
  * Force a payload to plain JSON data. `Schema.Unknown`'s JSON codec REJECTS
- * class instances on encode (empty 400 HttpApiSchemaError), and raw
- * SurrealDB rows carry `RecordId` instances. The legacy route table
- * serialized responses with `JSON.stringify`, so a stringify round-trip is
- * byte-identical to the legacy wire. Use on any handler that returns raw
- * query rows rather than JS-mapped plain objects.
+ * class instances on encode (empty 400 HttpApiSchemaError), and undecoded
+ * `CacheRead.raw` rows can carry native driver values (e.g. `Date`
+ * instances for TIMESTAMP columns) instead of plain JSON data. The legacy
+ * route table serialized responses with `JSON.stringify`, so a stringify
+ * round-trip is byte-identical to the legacy wire. Use on any handler that
+ * returns raw query rows rather than JS-mapped plain objects.
  */
 export const asJsonValue = <A>(value: A): unknown => JSON.parse(JSON.stringify(value));

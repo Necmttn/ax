@@ -1,13 +1,34 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 
 /**
  * Lab - hidden power-user area (footer link, no nav tab).
  * Hosts the experimental/exploratory surfaces that earned demotion from the
- * top nav, plus a read-only SQL console over POST /api/query.
+ * top nav. (The SQL console that used to live here read a live daemon over
+ * POST /api/query; studio is ephemeral now - it opens a published snapshot
+ * and exits when the last client disconnects, so there is no daemon left to
+ * hold an ad-hoc query console open against. Retired rather than reworked.)
+ *
+ * Graph explorer is gated server-side behind AX_ENABLE_GRAPH_EXPLORER=1
+ * (`/api/graph-explorer` answers 404 `graph_explorer_disabled` otherwise -
+ * see dashboard/router/routes/insights.ts). The link used to render
+ * unconditionally regardless of that flag, so most visitors clicked into a
+ * dead end (#834) - the daemon's `/api/version` capability list is the
+ * single source of truth for whether the flag is on, so gate on it here too.
  */
 export function LabRoute() {
+    // Same query key IngestSplash already uses for its own /api/version probe
+    // (mounted on every route via InstrumentChrome) - shares that cache entry
+    // instead of firing a second identical request.
+    const version = useQuery({
+        queryKey: ["daemon-version"],
+        queryFn: () => api.version(),
+        staleTime: 60_000,
+        retry: false,
+    });
+    const graphExplorerEnabled = version.data?.capabilities.includes("graph-explorer") ?? false;
+
     return (
         <section className="panel">
             <header>
@@ -19,68 +40,23 @@ export function LabRoute() {
                 <Link to="/canvas" className="badge review" style={{ textDecoration: "none" }}>
                     Session canvas →
                 </Link>
-                <Link to="/graph" className="badge review" style={{ textDecoration: "none" }}>
-                    Graph explorer →
-                </Link>
+                {graphExplorerEnabled ? (
+                    <Link to="/graph" className="badge review" style={{ textDecoration: "none" }}>
+                        Graph explorer →
+                    </Link>
+                ) : (
+                    <span
+                        className="badge review"
+                        style={{ opacity: 0.5, cursor: "not-allowed" }}
+                        title="Disabled - set AX_ENABLE_GRAPH_EXPLORER=1 on the daemon to enable this experimental endpoint."
+                    >
+                        Graph explorer (disabled) →
+                    </span>
+                )}
                 <Link to="/lab/sigils" className="badge review" style={{ textDecoration: "none" }}>
                     Archetype sigils →
                 </Link>
             </div>
-
-            <SqlConsole />
         </section>
-    );
-}
-
-function SqlConsole() {
-    const [sql, setSql] = useState("SELECT count() FROM session GROUP ALL;");
-    const [output, setOutput] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [busy, setBusy] = useState(false);
-    const [durationMs, setDurationMs] = useState<number | null>(null);
-
-    const run = async () => {
-        setBusy(true);
-        setError(null);
-        try {
-            const res = await api.query(sql);
-            setOutput(JSON.stringify(res.result, null, 2));
-            setDurationMs(res.durationMs);
-        } catch (err) {
-            setOutput(null);
-            setDurationMs(null);
-            setError(err instanceof Error ? err.message : String(err));
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    return (
-        <div>
-            <header>
-                <h3 style={{ margin: "0 0 4px" }}>SQL console</h3>
-                <span className="meta">
-                    read-only - the daemon accepts SELECT, RETURN, and INFO statements
-                </span>
-            </header>
-            <textarea
-                value={sql}
-                onChange={(e) => setSql(e.target.value)}
-                rows={4}
-                spellCheck={false}
-                style={{ width: "100%", fontFamily: "monospace", margin: "8px 0" }}
-                aria-label="SurrealQL query"
-            />
-            <div className="actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" className="badge keep" onClick={() => void run()} disabled={busy}>
-                    {busy ? "Running…" : "Run"}
-                </button>
-                {durationMs !== null ? <span className="meta">{durationMs}ms</span> : null}
-            </div>
-            {error ? <div className="error">Error: {error}</div> : null}
-            {output !== null ? (
-                <pre style={{ overflow: "auto", maxHeight: 480, marginTop: 12 }}>{output}</pre>
-            ) : null}
-        </div>
     );
 }

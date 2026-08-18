@@ -44,13 +44,13 @@ const makeEnvironmentInput: DesktopEnvironment.MakeDesktopEnvironmentInput = {
     userDataDir: Electron.app.getPath("userData"),
     platform: process.platform,
     processArch: process.arch,
-    // Dev-only fallbacks. When packaged, DesktopEnvironment resolves the real
-    // per-arch vendored binaries under <resourcesPath>/bin/<arch>/ (staged by
-    // scripts/fetch-binaries.ts); these values are then ignored. In dev, both
-    // are looked up on PATH. NOTE: bun must be the real `bun` binary, NOT
-    // `process.execPath` (that's the Electron binary) - `ax serve` is a bun
-    // program (uses @effect/platform-bun) and fails under Electron's node.
-    surrealBinaryPath: process.env.AX_SURREAL_PATH ?? "surreal",
+    // Dev-only fallback. When packaged, DesktopEnvironment resolves the real
+    // per-arch vendored `bun` binary under <resourcesPath>/bin/<arch>/ (staged
+    // by scripts/fetch-binaries.ts); this value is then ignored. In dev it is
+    // looked up on PATH. NOTE: this must be the real `bun` binary, NOT
+    // `process.execPath` (that's the Electron binary) - `ax studio`/`ax
+    // ingest` are bun programs (use @effect/platform-bun) and fail under
+    // Electron's node.
     bunBinaryPath: process.env.AX_BUN_PATH ?? "bun",
     // Canonical ax data dir: mirror @ax/lib config + daemon install scripts so
     // desktop and the CLI daemon agree on the rocksdb location.

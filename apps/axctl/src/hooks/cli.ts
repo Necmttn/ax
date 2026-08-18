@@ -28,6 +28,7 @@ import { installHookFile, stripAxMarker } from "./sdk-install.ts";
 import { installDispatcher, resolveDispatcherPath, resolveShimPath } from "./dispatch-install.ts";
 import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
+import { catchCacheReadErrorAndExit } from "../cli/output.ts";
 import { benchHook, renderLedger } from "./bench.ts";
 import type { HookDefinition } from "@ax/hooks-sdk/define";
 import { fetchHookLatencyRegression, renderHookLatency } from "../queries/hook-latency.ts";
@@ -35,8 +36,9 @@ import { fetchHookLatencyRegression, renderHookLatency } from "../queries/hook-l
 /**
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
  * opencode). Spliced into the existing `hooksCommand` group in cli/index.ts.
- * Every handler provides `HookProviderRegistryDefault`; SurrealClient +
- * FileSystem + Path come from AppLayer.
+ * Every handler provides `HookProviderRegistryDefault`; CacheRead + FileSystem
+ * + Path come from the `cache` runtime (`withCache` in cli/index.ts -
+ * `readAllHooks` reads the published DuckDB snapshot, see hooks/config.ts).
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));
@@ -260,7 +262,7 @@ const installCommand = Command.make(
             // install the single positional file.
             if (all) {
                 const workspaceDir = expandTilde(dir);
-                // --daemon installs the shim (POST to `ax serve`, fall back to the
+                // --daemon installs the shim (POST to `ax studio`, fall back to the
                 // bundle); default installs the dispatcher directly.
                 const commandPath = daemon
                     ? yield* resolveShimPath(workspaceDir)
@@ -373,17 +375,9 @@ const backtestCommand = Command.make(
             const providerFilter = optionValue(provider) ?? null;
             const toolNames = hookDef.matcher?.tools ? [...hookDef.matcher.tools] : [];
 
-            // Fetch rows from DB (read-only SELECTs). DB unavailable -> friendly error + exit.
+            // Fetch rows from the published cache. A typed cache error gets a stable CLI message.
             const fetched = yield* fetchRows(days, toolNames, providerFilter).pipe(
-                Effect.catchTag("DbError", (e) =>
-                    Effect.promise(async () => {
-                        process.stderr.write(
-                            `DB unreachable or query failed: ${e.message}\n` +
-                            "Start the DB with 'axctl daemon start' and retry.\n",
-                        );
-                        process.exit(1);
-                    }),
-                ),
+                catchCacheReadErrorAndExit("ax hooks backtest"),
             );
 
             // Replay through the hook with GitEnvLive (state-dependent checks
@@ -419,6 +413,13 @@ const benchCommand = Command.make(
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
 ).pipe(Command.withDescription("Latency ledger for an SDK hook: per-fire p50/p95 (spawn) + fires/day + installed-chain budget (--days=30 --runs=20 --budget-ms=250 --json)"));
 
+/** The three non-"unavailable" cache failures read the same way to a user. */
+const failWithCacheError = (message: string): Effect.Effect<void> =>
+    Effect.promise(async () => {
+        process.stderr.write(`Cache query failed: ${message}\n`);
+        process.exit(1);
+    });
+
 const latencyCommand = Command.make(
     "latency",
     {
@@ -433,15 +434,25 @@ const latencyCommand = Command.make(
                     console.log(asJson ? prettyPrint(report) : renderHookLatency(report));
                 }),
             ),
-            Effect.catchTag("DbError", (e) =>
-                Effect.promise(async () => {
-                    process.stderr.write(
-                        `DB unreachable or query failed: ${e.message}\n` +
-                        "Start the DB with 'axctl daemon start' and retry.\n",
-                    );
-                    process.exit(1);
-                }),
-            ),
+            // The reader answers from the published DuckDB snapshot, so the
+            // handled failures are exactly its four cache errors - listed by
+            // TAG, not swallowed with a bare `Effect.catch`. A catch-all here
+            // would report every unrelated failure as "cache query failed" and
+            // still exit 1, which is a misleading diagnosis rather than a
+            // handled error; anything else must stay on the error channel.
+            Effect.catchTags({
+                CacheUnavailableError: (e) =>
+                    Effect.promise(async () => {
+                        // By far the most common one, and it names its own fix.
+                        process.stderr.write(
+                            `${e.message}\nRun 'ax ingest' to publish a snapshot, then retry.\n`,
+                        );
+                        process.exit(1);
+                    }),
+                DuckDbQueryError: (e) => failWithCacheError(e.message),
+                DuckDbUnsupportedTypeError: (e) => failWithCacheError(e.message),
+                DuckDbDecodeError: (e) => failWithCacheError(e.message),
+            }),
         ),
 ).pipe(Command.withDescription("Regression lens over hook_command_invocation.duration_ms: compare recent (--days, default 7) vs baseline (--baseline, default 21) p95 per hook; flags regressions (factor 1.5, min 15ms delta, min 20 samples). Empty-state when duration_ms is absent. (--json)"));
 

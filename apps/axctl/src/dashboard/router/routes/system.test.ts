@@ -11,10 +11,15 @@ describe("systemRoutes", () => {
         expect(matchRoute(systemRoutes, "POST", "/api/query").kind).toBe("unmatched");
     });
 
-    test("GET /api/version reports live_ingest=false without a streaming sidecar", async () => {
-        // No serveDashboard boot in tests => no Durable Streams sidecar, the
-        // same shape as the compiled binary. The studio reads this flag to
-        // engage its polling fallback instead of hitting the 503.
+    test("GET /api/version cannot contradict itself about the OTLP receiver", async () => {
+        // live_ingest is genuinely retired: the in-browser ingest trigger and
+        // its Durable Streams sidecar are gone.
+        //
+        // otlp_receiver is the interesting one. It was hardcoded `false` while
+        // `capabilities` in the SAME body carried "otlp", and `POST /v1/logs`
+        // on that port answered 200 - so the two halves disagreed and the
+        // boolean was the wrong half. It is now derived from the capability
+        // list, and this asserts the two agree rather than pinning a literal.
         const matched = matchRoute(systemRoutes, "GET", "/api/version");
         if (matched.kind !== "matched") throw new Error("expected /api/version to match");
         const res = await matched.match.route.run(
@@ -29,7 +34,11 @@ describe("systemRoutes", () => {
         expect(res.status).toBe(200);
         const body = await res.json() as { live_ingest: boolean; otlp_receiver: boolean; capabilities: string[] };
         expect(body.live_ingest).toBe(false);
+        expect(body.otlp_receiver).toBe(body.capabilities.includes("otlp"));
+        expect(body.capabilities).toContain("otlp");
         expect(body.otlp_receiver).toBe(true);
-        expect(body.capabilities).toContain("ingest");
+        expect(body.capabilities).toContain("sessions");
+        // Retired alongside the live-ingest trigger (studio ephemeral, wave 3).
+        expect(body.capabilities).not.toContain("ingest");
     });
 });

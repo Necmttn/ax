@@ -1,19 +1,31 @@
+/**
+ * Session View against a REAL published DuckDB snapshot.
+ *
+ * The two `fetchSessionView` cases below used to run on `testing/surreal.ts`'s
+ * route-table fake, matching on SQL SUBSTRINGS (`sql.includes("FROM invoked")`)
+ * and answering canned rows. That fake is why the v2 cut-over could ship this
+ * path green while it returned nothing: it answers whatever the case wants,
+ * whatever the statement says and whatever engine is behind it. Rows now come
+ * out of a snapshot the seam published, through the same `CacheRead` the CLI
+ * resolves, so a wrong JOIN or a wrong column contract fails here.
+ *
+ * `Judgment` stays a test layer: role edges live in the SQLite sidecar, which
+ * this chunk does not touch.
+ */
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import type {
-    SessionLink,
-    SessionTopSkill,
-} from "@ax/lib/shared/dashboard-types";
-import {
-    SESSION_SKILL_ROLES_SQL,
-    sessionSkillRolesQuery,
-} from "../queries/session-view.ts";
+import { Effect, Layer } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { SessionLink, SessionTopSkill, SessionViewPayload } from "@ax/lib/shared/dashboard-types";
+import { EmptyJudgmentTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     fetchSessionView,
     groupSessionSkillsByRole,
     selectSessionChildrenToExpand,
 } from "./session-view.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-view", { requireFts: true });
 
 const makeChild = (id: string): SessionLink => ({
     session_id: id,
@@ -63,96 +75,142 @@ describe("Session View shape helpers", () => {
     });
 });
 
-describe("session view role query", () => {
-    it("keeps skill names in bindings instead of interpolating them", () => {
-        const sql = sessionSkillRolesQuery.sql({
-            skillNames: ["debug-skill"],
+const PRIMARY = "019e0ad4-0000-0000-0000-000000000001";
+const CHILD = "claude-subagent-a41ef01d6ca8d521c";
+const T = (iso: string): Date => new Date(iso);
+
+/** One parent session with two turns, three invoked skills and one spawned
+ *  child - the smallest corpus that exercises every join in the view. */
+const CORPUS = (w: CacheWriteService) =>
+    Effect.gen(function* () {
+        yield* w.putMany("session", [
+            {
+                id: PRIMARY,
+                source: "claude",
+                project: "test-project",
+                cwd: "/tmp/test-project",
+                started_at: T("2026-05-28T10:00:00.000Z"),
+                ended_at: T("2026-05-28T10:10:00.000Z"),
+            },
+            {
+                id: CHILD,
+                source: "claude-subagent",
+                project: "test-project",
+                cwd: "/tmp/test-project",
+                started_at: T("2026-05-28T10:01:00.000Z"),
+                ended_at: T("2026-05-28T10:05:00.000Z"),
+            },
+        ]);
+        yield* w.putMany("turn", [
+            {
+                id: "turn-one",
+                session: PRIMARY,
+                seq: 1,
+                ts: T("2026-05-28T10:00:01.000Z"),
+                role: "user",
+                message_kind: "user",
+                intent_kind: "task",
+                text: "Please inspect the complete normalized turn.",
+                text_excerpt: "Please inspect the complete…",
+                has_tool_use: false,
+                has_error: false,
+            },
+            {
+                id: "turn-two",
+                session: PRIMARY,
+                seq: 2,
+                ts: T("2026-05-28T10:00:02.000Z"),
+                role: "assistant",
+                message_kind: "assistant",
+                intent_kind: "response",
+                text: "I inspected the complete normalized turn.",
+                text_excerpt: "I inspected the complete…",
+                has_tool_use: false,
+                has_error: true,
+            },
+            {
+                // Excluded by message_kind - pins that the NOT IN filter still
+                // bites once the `IS NULL` arm was added to it.
+                id: "turn-system",
+                session: PRIMARY,
+                seq: 3,
+                ts: T("2026-05-28T10:00:03.000Z"),
+                role: "user",
+                message_kind: "system",
+                intent_kind: null,
+                text: "a system turn nobody asked for",
+                text_excerpt: null,
+                has_tool_use: false,
+                has_error: false,
+            },
+        ]);
+        yield* w.putMany("skill", [
+            { id: "skill-plan", name: "plan-skill", scope: "user", dir_path: "/s/plan", content_hash: "h1" },
+            { id: "skill-debug", name: "debug-skill", scope: "user", dir_path: "/s/debug", content_hash: "h2" },
+            { id: "skill-raw", name: "raw-skill", scope: "user", dir_path: "/s/raw", content_hash: "h3" },
+        ]);
+        yield* w.putMany(
+            "invoked",
+            [
+                ...Array.from({ length: 8 }, (_, i) => ["skill-plan", i] as const),
+                ...Array.from({ length: 3 }, (_, i) => ["skill-debug", i] as const),
+                ...Array.from({ length: 2 }, (_, i) => ["skill-raw", i] as const),
+            ].map(([skill, i]) => ({
+                id: `inv-${skill}-${i}`,
+                in_id: "turn-one",
+                out_id: skill,
+                session: PRIMARY,
+                ts: T("2026-05-28T10:00:05.000Z"),
+            })),
+        );
+        yield* w.put("compaction", {
+            id: "compact-one",
+            session: PRIMARY,
+            harness: "claude",
+            ts: T("2026-05-28T10:04:00.000Z"),
+            strategy: "summarize",
+            source_confidence: "explicit",
+            // `trigger` is a reserved word - this row is what proves the read
+            // quotes it rather than emitting a statement DuckDB rejects.
+            trigger: "auto",
+            tokens_before: 150000,
+            kept_count: 12,
+            summary: "kept the seam work",
         });
-
-        expect(sql).toBe(SESSION_SKILL_ROLES_SQL.trim());
-        expect(sql).toContain("IN $skills");
-        expect(sql).not.toContain("debug-skill");
-        expect(sessionSkillRolesQuery.bindings?.({ skillNames: ["debug-skill"] }))
-            .toEqual({ skills: ["debug-skill"] });
+        yield* w.put("spawned", {
+            id: "spawn-one",
+            in_id: PRIMARY,
+            out_id: CHILD,
+            ts: T("2026-05-28T10:01:00.000Z"),
+            tool: "Agent",
+            nickname: "worker",
+        });
     });
 
-    it("maps invalid role rows to null at the typed query seam", () => {
-        expect(
-            sessionSkillRolesQuery.mapRow(
-                { skill_name: "debug-skill", role_name: "debugging" },
-                0,
-            ),
-        ).toEqual({ skill_name: "debug-skill", role_name: "debugging" });
-        expect(
-            sessionSkillRolesQuery.mapRow({ skill_name: "debug-skill" }, 0),
-        ).toBeNull();
-    });
-});
+const publish = (prefix: string) =>
+    runWithPlatform(publishCacheFixture(tempDir(prefix), dylibPath, CORPUS));
 
 describe("fetchSessionView", () => {
-    it("includes ordered normalized turns in the requested text mode", async () => {
-        const primaryId = "019e0ad4-0000-0000-0000-000000000001";
-        let turnQueries = 0;
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            fallback: (sql) => {
-                if (sql.includes("FROM turn")) {
-                    turnQueries += 1;
-                    return [[
-                        {
-                            id: "turn:one",
-                            seq: 1,
-                            ts: "2026-05-28T10:00:01Z",
-                            role: "user",
-                            message_kind: "user",
-                            intent_kind: "task",
-                            text: "Please inspect the complete normalized turn.",
-                            text_excerpt: "Please inspect the complete…",
-                            has_error: false,
-                        },
-                        {
-                            id: "turn:two",
-                            seq: 2,
-                            ts: "2026-05-28T10:00:02Z",
-                            role: "assistant",
-                            message_kind: "assistant",
-                            intent_kind: "response",
-                            text: "I inspected the complete normalized turn.",
-                            text_excerpt: "I inspected the complete…",
-                            has_error: true,
-                        },
-                    ]];
-                }
-
-                if (sql.includes("FROM session:")) {
-                    return [[{
-                        id: `session:⟨${primaryId}⟩`,
-                        project: "test-project",
-                        cwd: "/tmp/test-project",
-                        source: "pi",
-                        started_at: "2026-05-28T10:00:00Z",
-                        ended_at: "2026-05-28T10:10:00Z",
-                    }]];
-                }
-
-                return [[]];
-            },
-        });
+    dtest("includes ordered normalized turns in the requested text mode", async () => {
+        const fixture = await publish("ax-session-view-turns-");
+        const layer = Layer.mergeAll(
+            readFixture(fixture.snapshotPath, dylibPath),
+            EmptyJudgmentTestLayer,
+        );
 
         const result = await Effect.runPromise(
             fetchSessionView({
-                sessionId: primaryId,
+                sessionId: PRIMARY,
                 expand: new Set(),
                 expandAll: false,
                 turns: "excerpt",
-            }).pipe(Effect.provide(tc.layer)),
+            }).pipe(Effect.provide(layer)) as Effect.Effect<SessionViewPayload, unknown>,
         );
 
-        expect(turnQueries).toBe(1);
         expect(result.turns).toEqual([
             {
                 seq: 1,
-                ts: "2026-05-28T10:00:01Z",
+                ts: "2026-05-28T10:00:01.000Z",
                 role: "user",
                 message_kind: "user",
                 intent_kind: "task",
@@ -161,7 +219,7 @@ describe("fetchSessionView", () => {
             },
             {
                 seq: 2,
-                ts: "2026-05-28T10:00:02Z",
+                ts: "2026-05-28T10:00:02.000Z",
                 role: "assistant",
                 message_kind: "assistant",
                 intent_kind: "response",
@@ -172,123 +230,112 @@ describe("fetchSessionView", () => {
 
         const fullResult = await Effect.runPromise(
             fetchSessionView({
-                sessionId: primaryId,
+                sessionId: PRIMARY,
                 expand: new Set(),
                 expandAll: false,
                 turns: "full",
-            }).pipe(Effect.provide(tc.layer)),
+            }).pipe(Effect.provide(layer)) as Effect.Effect<SessionViewPayload, unknown>,
         );
 
-        expect(turnQueries).toBe(2);
         expect(fullResult.turns?.[0]).toEqual({
             seq: 1,
-            ts: "2026-05-28T10:00:01Z",
+            ts: "2026-05-28T10:00:01.000Z",
             role: "user",
             message_kind: "user",
             intent_kind: "task",
             text: "Please inspect the complete normalized turn.",
             has_error: false,
         });
-    });
+    }, 60_000);
 
-    it("owns expansion and by-role grouping for the session show read shape", async () => {
-        const primaryId = "019e0ad4-0000-0000-0000-000000000001";
-        const childId = "claude-subagent-a41ef01d6ca8d521c";
+    dtest("owns expansion and by-role grouping for the session show read shape", async () => {
+        const fixture = await publish("ax-session-view-expand-");
         const seenRoleBindings: unknown[] = [];
-        let turnQueries = 0;
-
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            fallback: (sql, bindings) => {
-                if (sql.includes("FROM turn")) {
-                    turnQueries += 1;
-                    return [[]];
-                }
-
-                if (sql.includes("FROM plays_role")) {
-                    seenRoleBindings.push(bindings);
-                    return [
-                        [
-                            { skill_name: "plan-skill", role_name: "planning" },
-                            { skill_name: "debug-skill", role_name: "debugging" },
-                        ],
-                    ];
-                }
-
-                const isChild = sql.includes(`session:⟨${childId}⟩`);
-
-                if (sql.includes("FROM session:")) {
-                    const id = isChild ? childId : primaryId;
-                    return [
-                        [
-                            {
-                                id: `session:⟨${id}⟩`,
-                                project: "test-project",
-                                cwd: "/tmp/test-project",
-                                source: "claude",
-                                started_at: "2026-05-28T10:00:00Z",
-                                ended_at: "2026-05-28T10:10:00Z",
-                            },
-                        ],
-                    ];
-                }
-
-                if (sql.includes("FROM invoked")) {
-                    return [
-                        isChild
-                            ? []
-                            : [
-                                  { skill: "plan-skill", count: 8, last_used: null },
-                                  { skill: "debug-skill", count: 3, last_used: null },
-                                  { skill: "raw-skill", count: 2, last_used: null },
-                              ],
-                    ];
-                }
-
-                if (sql.includes("FROM spawned") && sql.includes("WHERE in =")) {
-                    return [
-                        isChild
-                            ? []
-                            : [
-                                  {
-                                      child: `session:⟨${childId}⟩`,
-                                      project: "test-project",
-                                      started_at: "2026-05-28T10:01:00Z",
-                                      nickname: "worker",
-                                      tool: "Agent",
-                                      ts: "2026-05-28T10:01:00Z",
-                                  },
-                              ],
-                    ];
-                }
-
-                return [[]];
-            },
-        });
 
         const result = await Effect.runPromise(
             fetchSessionView({
-                sessionId: primaryId,
+                sessionId: PRIMARY,
                 expand: new Set(["a41ef01"]),
                 expandAll: false,
                 byRole: true,
             }).pipe(
-                Effect.provide(tc.layer),
-            ),
+                Effect.provide(Layer.mergeAll(
+                    readFixture(fixture.snapshotPath, dylibPath),
+                    judgmentTestLayer((_sql, params) => {
+                        seenRoleBindings.push(params);
+                        return [
+                            { skill_id: "skill-plan", role_name: "planning" },
+                            { skill_id: "skill-debug", role_name: "debugging" },
+                        ];
+                    }),
+                )),
+            ) as Effect.Effect<SessionViewPayload, unknown>,
         );
 
-        expect(result.session.overview?.id).toBe(primaryId);
+        expect(result.session.overview?.id).toBe(PRIMARY);
+        expect(result.session.overview?.project).toBe("test-project");
+        // The counts come out of a real GROUP BY over `invoked` JOIN `skill`,
+        // which is where a BIGINT decoded as Schema.Number would have silently
+        // emptied the list instead of raising.
+        expect(result.session.top_skills).toEqual([
+            { skill: "plan-skill", count: 8, last_used: "2026-05-28T10:00:05.000Z" },
+            { skill: "debug-skill", count: 3, last_used: "2026-05-28T10:00:05.000Z" },
+            { skill: "raw-skill", count: 2, last_used: "2026-05-28T10:00:05.000Z" },
+        ]);
+        expect(result.session.children.map((child) => child.session_id)).toEqual([CHILD]);
         expect(result.expanded_subagents).toHaveLength(1);
-        expect(result.expanded_subagents[0]?.overview?.id).toBe(childId);
+        expect(result.expanded_subagents[0]?.overview?.id).toBe(CHILD);
+        expect(result.expanded_subagents[0]?.parent?.session_id).toBe(PRIMARY);
         expect(result.by_role).toEqual([
             { role: "planning", skills: [{ skill: "plan-skill", count: 8 }] },
             { role: "debugging", skills: [{ skill: "debug-skill", count: 3 }] },
             { role: null, skills: [{ skill: "raw-skill", count: 2 }] },
         ]);
-        expect(seenRoleBindings).toEqual([
-            { skills: ["plan-skill", "debug-skill", "raw-skill"] },
+        // The sidecar is asked for the ids the CACHE resolved, so this also
+        // pins that the skill-name lookup actually returned rows.
+        // Order is the cache's, not the caller's, so compare as a set.
+        expect(result.compactions).toEqual([
+            {
+                harness: "claude",
+                ts: "2026-05-28T10:04:00.000Z",
+                strategy: "summarize",
+                source_confidence: "explicit",
+                trigger: "auto",
+                tokens_before: 150000,
+                kept_count: 12,
+                summary: "kept the seam work",
+            },
         ]);
-        expect(turnQueries).toBe(0);
+        expect(seenRoleBindings).toHaveLength(1);
+        expect([...(seenRoleBindings[0] as ReadonlyArray<string>)].sort()).toEqual([
+            "skill-debug",
+            "skill-plan",
+            "skill-raw",
+        ]);
         expect("turns" in result).toBe(false);
-    });
+    }, 60_000);
+
+    dtest("a session the snapshot does not hold reads as not-found, not as empty-but-present", async () => {
+        // The negative control. Every assertion above would ALSO pass against a
+        // reader that returns nothing for every id - which is exactly the state
+        // this chunk fixes - so the suite has to show the two apart.
+        const fixture = await publish("ax-session-view-missing-");
+        const result = await Effect.runPromise(
+            fetchSessionView({
+                sessionId: "019e0ad4-0000-0000-0000-00000000dead",
+                expand: new Set(),
+                expandAll: false,
+                turns: "excerpt",
+            }).pipe(
+                Effect.provide(Layer.mergeAll(
+                    readFixture(fixture.snapshotPath, dylibPath),
+                    EmptyJudgmentTestLayer,
+                )),
+            ) as Effect.Effect<SessionViewPayload, unknown>,
+        );
+
+        expect(result.session.overview).toBeNull();
+        expect(result.session.top_skills).toEqual([]);
+        expect(result.turns).toEqual([]);
+    }, 60_000);
 });

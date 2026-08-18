@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { DigestItem } from "./model.ts";
 import { salience } from "./rank.ts";
 import { recommend } from "../improve/recommend.ts";
@@ -73,9 +73,16 @@ export const quotaToItem = (
 
 // ---- Effect wrappers ----
 
+/**
+ * Open-proposal count. Proposals are DURABLE JUDGMENT, so they live in the
+ * SQLite sidecar rather than the rebuildable DuckDB cache - which is why this
+ * source takes the `Judgment` service instead of the live reader the other two
+ * take. The sidecar is not snapshot-published, so a service tag here is safe
+ * inside ingest: it answers from the same rows a CLI read would see.
+ */
 export const improveItems = (
     now: Date,
-): Effect.Effect<DigestItem[], DbError, SurrealClient> =>
+): Effect.Effect<DigestItem[], JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const proposals = yield* recommend({ limit: 100 });
         const item = improveToItem(proposals.length, now);
@@ -83,14 +90,15 @@ export const improveItems = (
     });
 
 export const costItems = (
+    read: CacheReadService,
     now: Date,
     windowDays: number,
-): Effect.Effect<DigestItem[], DbError, SurrealClient> =>
+): Effect.Effect<DigestItem[], CacheReadError> =>
     Effect.gen(function* () {
         // Fetch candidates for savings estimate
-        const candidates = yield* fetchDispatchCandidates({ sinceDays: windowDays });
+        const candidates = yield* fetchDispatchCandidates(read, { sinceDays: windowDays });
         // Fetch dispatches summary for inherit_pct (not available on CandidatesResult)
-        const dispatches = yield* fetchDispatches({ sinceDays: windowDays, limit: 1 });
+        const dispatches = yield* fetchDispatches(read, { sinceDays: windowDays, limit: 1 });
         const savingsPerWeekUsd = (candidates.total_est_savings_usd * 7) / windowDays;
         const inheritPct = dispatches.inherit_pct;
         const item = costToItem({ savingsPerWeekUsd, inheritPct }, now);
@@ -98,12 +106,13 @@ export const costItems = (
     });
 
 export const churnItems = (
+    read: CacheReadService,
     now: Date,
     windowDays: number,
-): Effect.Effect<DigestItem[], DbError, SurrealClient> =>
+): Effect.Effect<DigestItem[], CacheReadError> =>
     Effect.gen(function* () {
         const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-        const summary = yield* fetchSessionChurnSummary({ since, limit: 50 });
+        const summary = yield* fetchSessionChurnSummary(read, { since, limit: 50 });
         // Pick the single worst session by repair LOC (repairLinesAdded)
         const worst = summary.hotSessions.reduce<
             typeof summary.hotSessions[number] | null

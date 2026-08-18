@@ -1,21 +1,20 @@
 /**
  * End-to-end pure pipeline: realistic evidence bundles -> the
- * deriveSignalsFromEvidence composition -> every statement builder in stage
- * write order. Also pins two cross-cutting contracts the per-rule suites
+ * deriveSignalsFromEvidence composition. It also pins a cross-cutting contract the per-rule suites
  * can't see:
  *   - the composition stays equivalent to the stage loop's per-bundle
  *     accumulation in derive-signals.ts (composition-drift guard);
- *   - was_corrected UPDATEs target turn ids byte-equal to the ones the
- *     ingest writer RELATEs invoked edges under (the 43e59a58-class
+ *   - was_corrected updates target turn ids byte-equal to the ones the
+ *     ingest writer uses for invoked edges (the 43e59a58-class
  *     divergence that left was_corrected silently dead).
  */
 import { describe, expect, test } from "bun:test";
 import { SkillName } from "@ax/lib/brands";
 import { turnRecordKey } from "@ax/lib/ids";
-import { skillRecordKey } from "@ax/lib/skill-id";
-import { buildNormalizedSyntheticSkillInvocationStatements } from "../normalized/transcripts.ts";
+import { skillRowId } from "@ax/lib/stable-id";
 import {
     deriveCorrections,
+    correctedInvokedTurnKeys,
     deriveDiagnosticsFromToolCalls,
     deriveFrictionFromCorrections,
     deriveFrictionFromToolCalls,
@@ -24,16 +23,6 @@ import {
     deriveSignalsFromEvidence,
     deriveSkillPairs,
 } from "./core.ts";
-import {
-    buildCorrectedByStatements,
-    buildDiagnosticEventStatements,
-    buildFrictionEventStatements,
-    buildProposedStatements,
-    buildRecoveredStatements,
-    buildSkillPairStatements,
-    buildWasCorrectedStatements,
-    correctedInvokedTurnKeys,
-} from "./statements.ts";
 import type { CorrectionEdge, SessionTurns, SignalEvidence, SkillPairAccum, ToolCallLike } from "./types.ts";
 
 // Fixture skill names are plain string literals; brand them through the
@@ -90,7 +79,7 @@ const failedToolCalls: ToolCallLike[] = [
 
 const skillNames = ["superpowers:systematic-debugging", "diagnose", "commit"].map(sn);
 
-describe("deriveSignalsFromEvidence -> statement builders (stage write order)", () => {
+describe("deriveSignalsFromEvidence", () => {
     test("full pipeline on one realistic session", () => {
         const derived = deriveSignalsFromEvidence(
             { bundles: [session], skillNames, failedToolCalls },
@@ -104,10 +93,10 @@ describe("deriveSignalsFromEvidence -> statement builders (stage write order)", 
         expect(derived.corrections[0]).toMatchObject({ fromTurnKey: "s1_4", toTurnKey: "s1_6", pattern: "no", correctedSeq: 4 });
         // rule 4: mentioned superpowers:systematic-debugging, never invoked it
         expect(derived.proposed).toHaveLength(1);
-        expect(derived.proposed[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey(sn("superpowers:systematic-debugging")) });
+        expect(derived.proposed[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRowId("superpowers:systematic-debugging") });
         // rule 6: error at seq 2 recovered by diagnose at seq 3
         expect(derived.recoveries).toHaveLength(1);
-        expect(derived.recoveries[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey(sn("diagnose")) });
+        expect(derived.recoveries[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRowId("diagnose") });
         // rule 5: diagnose (seq 3) + commit (seq 4) pair within the window
         expect(derived.skillPairs).toHaveLength(1);
         expect(derived.skillPairs[0]).toMatchObject({ pair: { count: 1, lastSeen: "2026-06-01T10:00:30.000Z" } });
@@ -117,23 +106,6 @@ describe("deriveSignalsFromEvidence -> statement builders (stage write order)", 
         expect(derived.diagnosticEvents).toHaveLength(1);
         expect(derived.diagnosticEvents[0]?.kind).toBe("tool_failure");
 
-        // statement layer, in stage write order
-        const stmts = [
-            ...buildCorrectedByStatements(derived.corrections),
-            ...buildWasCorrectedStatements(correctedInvokedTurnKeys(derived.corrections)),
-            ...buildProposedStatements(derived.proposed),
-            ...buildSkillPairStatements(derived.skillPairs),
-            ...buildRecoveredStatements(derived.recoveries),
-            ...buildFrictionEventStatements(derived.frictionEvents),
-            ...buildDiagnosticEventStatements(derived.diagnosticEvents),
-        ];
-        // 1 corrected_by + 4 was_corrected (seqs 1..4) + 1 proposed + 1 pair
-        // + 1 recovered + 2 friction + 1 diagnostic
-        expect(stmts).toHaveLength(11);
-        expect(stmts[0]).toContain("-> corrected_by:`s1_4__s1_6` ->");
-        expect(stmts.filter((s) => s.startsWith("UPDATE invoked SET was_corrected = true"))).toHaveLength(4);
-        expect(stmts.filter((s) => s.startsWith("UPSERT friction_event:"))).toHaveLength(2);
-        expect(stmts.filter((s) => s.startsWith("UPSERT diagnostic_event:"))).toHaveLength(1);
     });
 
     test("includeSkillPairs=false (since-scoped derive) suppresses pairs only - all else identical", () => {
@@ -184,23 +156,10 @@ describe("deriveSignalsFromEvidence -> statement builders (stage write order)", 
 });
 
 describe("was_corrected turn-key contract with the ingest writer", () => {
-    test("UPDATE targets are byte-equal to the turn ids the writer RELATEs invoked edges under", () => {
+    test("update targets are byte-equal to the turn ids used for invoked edges", () => {
         const derived = deriveSignalsFromEvidence(
             { bundles: [session], skillNames, failedToolCalls: [] },
             { includeSkillPairs: false },
-        );
-        const updates = buildWasCorrectedStatements(correctedInvokedTurnKeys(derived.corrections));
-
-        // The same (session, seq) the correction marks - written by the
-        // ingest path that RELATEs turn->invoked->skill edges.
-        const writerStmts = buildNormalizedSyntheticSkillInvocationStatements([
-            { sessionId: session.sessionId, seq: 4, ts: "2026-06-01T10:00:30.000Z", skillName: sn("commit") },
-        ]);
-        const relate = writerStmts.find((s) => s.includes("->invoked:"));
-        const turnRef = `turn:\`${turnRecordKey(session.sessionId, 4)}\``;
-        expect(relate).toStartWith(`RELATE ${turnRef}->invoked:`);
-        expect(updates).toContain(
-            `UPDATE invoked SET was_corrected = true WHERE in = ${turnRef} RETURN NONE;`,
         );
         // Full window for correctedSeq 4: seqs 1..4, centralized key format.
         expect(correctedInvokedTurnKeys(derived.corrections)).toEqual(

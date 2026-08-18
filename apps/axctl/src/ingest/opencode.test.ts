@@ -6,12 +6,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
-    __testBuildOpenCodeBatchStatements,
+    __testToOpenCodeNormalizedBatch,
     __testFindOpenCodeDbCandidates,
     __testIncludeOpenCodeByMtime,
     extractOpenCodeDatabase,
 } from "./opencode.ts";
-import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { turnRecordKey } from "./record-keys.ts";
 
 const findOpenCodeDbCandidates = (opencodeDir: string, cutoffMs: number): Promise<string[]> =>
     Effect.runPromise(
@@ -248,20 +248,11 @@ describe("OpenCode SQLite extraction", () => {
                 hasError: false,
             });
 
-            const toolCallKey = toolCallRecordKey({
-                sessionId: "ses-tools",
-                seq: 1,
-                callId: "call-grep-1",
-            });
-            const sql = __testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n");
-            expect(sql).toContain("UPSERT tool:");
-            expect(sql).toContain("UPSERT tool_call:");
-            expect(sql).toContain(`tool_call:\`${toolCallKey}\``);
-            expect(sql).toContain("RELATE turn:");
-            expect(sql).toContain("->invoked:");
-            expect(sql).toContain("opencode:grep");
-            expect(sql).toContain("RELATE tool_call:");
-            expect(sql).toContain("kind = \"invoked_skill\"");
+            const batch = __testToOpenCodeNormalizedBatch(extracted, dbPath);
+            expect(batch.toolCalls).toHaveLength(1);
+            expect(batch.syntheticSkillInvocations.map((row) => String(row.skillName)))
+                .toContain("opencode:grep");
+            expect(batch.toolCallSkillRelations).toHaveLength(1);
         });
     });
 
@@ -349,10 +340,8 @@ describe("OpenCode SQLite extraction", () => {
                 event.providerEventId === "step-finish:prt-step-reset" &&
                 (event.metrics as { sourceConfidence?: string } | undefined)?.sourceConfidence === "derived"
             )).toBe(true);
-            const sql = __testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n");
-            expect(sql).toContain("UPSERT compaction:");
-            expect(sql).toContain('source_confidence: "derived"');
-            expect(sql).toContain("tokens_before: 76000");
+            expect(__testToOpenCodeNormalizedBatch(extracted, dbPath).compactions)
+                .toEqual(extracted.compactions);
         });
     });
 
@@ -402,7 +391,7 @@ describe("OpenCode SQLite extraction", () => {
 
             expect(extracted.compactions).toHaveLength(0);
             expect(extracted.providerEvents.some((event) => event.type === "compaction")).toBe(false);
-            expect(__testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n")).not.toContain("UPSERT compaction:");
+            expect(__testToOpenCodeNormalizedBatch(extracted, dbPath).compactions).toHaveLength(0);
         });
     });
 
@@ -528,17 +517,16 @@ describe("OpenCode SQLite extraction", () => {
             const seqByEventId = new Map(
                 extracted.providerEvents.map((event) => [event.providerEventId, event.seq]),
             );
-            const statements = __testBuildOpenCodeBatchStatements(extracted, dbPath);
-            const sql = statements.join("\n");
+            const batch = __testToOpenCodeNormalizedBatch(extracted, dbPath);
 
             expect(seqByEventId).toEqual(new Map([
                 ["msg-a-1", 1],
                 ["msg-b-1", 1],
                 ["msg-a-2", 2],
             ]));
-            expect(sql).toContain("session: session:`session\\`a`");
-            expect(sql).toContain("session: session:`session\\nb`");
-            expect(sql).not.toContain("session: session:`session`a`");
+            expect(batch.turns.map((turn) => turn.sessionId).sort()).toEqual([
+                "session\nb", "session`a", "session`a",
+            ]);
         });
     });
 

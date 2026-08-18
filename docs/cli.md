@@ -9,7 +9,8 @@ can drift - `axctl <command> --help` is authoritative.
 axctl ingest [--since=N] [--reset] [--stages=<list>]   # backfill the graph
 axctl ingest here [--since=Nd] [--stages=<list>]       # scope ingest to the git repo at $PWD
 axctl derive <signals|intents>              # re-run a derive pass standalone
-axctl serve                                 # live web dashboard
+axctl studio                                # ephemeral web dashboard (exits when the client disconnects)
+axctl otlpd                                 # OTLP spool receiver (telemetry micro-listener)
 axctl mcp                                   # MCP server (stdio) - read-only graph queries for agents
 axctl report                                # one-shot static HTML
 axctl tui                                   # interactive terminal dashboard
@@ -90,7 +91,7 @@ axctl version [--check|--banner]
 
 > `axctl --help` lists the everyday commands plus the read-only insight
 > surfaces (`ingest`, `sessions`, `signals`, `improve`, `retro`, `recall`,
-> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `contribute`,
+> `skills`, `hooks`, `roles`, `serve`, `otlpd`, `mcp`, `tui`, `share`, `contribute`,
 > `install`, `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
 > `report`, `context`, `hook`, `project`, `evidence`, `classifiers`,
 > `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
@@ -149,7 +150,7 @@ PR branch or a commit SHA for now.
 ## OTLP receiver health
 
 `ax otel [--days=N] [--json]` is the read surface for the OTLP receiver (the
-`/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax serve` exposes). It
+`/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax otlpd` exposes). It
 answers "is harness telemetry flowing, and is it reaching my sessions?":
 
 - **Signal health**: per `(harness, signal)` an all-time row count plus how long
@@ -336,10 +337,9 @@ The 17 tools, each mirroring the matching CLI command:
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
 > reviews - so v0 exposes no mutating tools.
 >
-> **Run it from source** (the `bin/axctl` shim does this). Unlike live ingest,
-> the MCP server pulls in no native deps (just the JS MCP SDK + the SurrealDB
-> client), so the compiled standalone binary should serve it too - that path is
-> just untested in v0.
+> **Works from source AND from the compiled binary.** DuckDB *is* a native dep,
+> but `libduckdb` is embedded at build time, so `dist/axctl mcp` answers a real
+> `tools/list` handshake with the full roster - verified, not assumed.
 >
 > `sessions_here` / `sessions_near` are intentionally deferred - they need a
 > git/cwd-resolved repository key, a documented follow-up.
@@ -367,16 +367,10 @@ During iteration, use `ax team sync --yes` (or `ax team trust --yes` for a hook)
 
 ## Live ingest in the dashboard
 
-`axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**
-tab): it triggers an in-process ingest run and streams progress to a per-run
-[Durable Stream](superpowers/research/durable-streams-api.md) named
-`ingest:<runId>`. The live view replays history from the start and then
-continues live, so a mid-run refresh or reconnect rehydrates finished stages
-and resumes the tail (offset-resume, not raw SSE). An `IngestStreamBus` seam
-keeps the local Durable-Streams-in-Bun backing swappable for a hosted backend
-without touching producers or UI; the CLI `axctl ingest` and its terminal
-animation are unchanged.
-
-> Live ingest requires running ax **from source** (the `bin/axctl` shim already
-> does). The compiled standalone binary serves the dashboard but disables live
-> ingest, since native lmdb can't be bundled into the `--compile` binary.
+Retired (studio ephemeral, wave 3 of the v2 DuckDB migration): `axctl studio`
+no longer exposes an in-browser ingest trigger - an on-demand process that
+exits when its client disconnects cannot also own a detached background
+ingest run's lifecycle. `GET /api/events` still tails `ingest_event` (now read
+off the published DuckDB snapshot) for whatever `axctl ingest` run happens to
+be in flight, wherever it was started from; the CLI `axctl ingest` and its
+terminal animation are unchanged.

@@ -1,28 +1,9 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { prettyPrint, surrealLiteral } from "@ax/lib/json";
-import { stableDigest } from "@ax/lib/ids";
-import { recordRef } from "../ingest/evidence-writers.ts";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { NO_CLAUSE, andAll, withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";
 
 export const ENFORCE_WORKTREE_CASE_KEY = "enforce_worktree_next_worktree";
-
-const CASE_TITLE = "Enforce worktree hook leads to worktree correction";
-const CASE_SELECTOR = {
-    table: "hook_command_invocation",
-    commandContains: "enforce-worktree",
-    targetRequiresToolCall: true,
-};
-const CASE_RULE = {
-    kind: "short_horizon_tool_window",
-    windowToolCalls: 3,
-    passedWhen: [
-        "a following tool command creates a git worktree",
-        "or a following tool command changes into a worktree path",
-    ],
-    failedWhen: [
-        "following tool commands continue without an observable worktree correction",
-    ],
-};
 
 export interface FeedbackBacktestOptions {
     readonly sinceDays?: number | undefined;
@@ -31,16 +12,16 @@ export interface FeedbackBacktestOptions {
     readonly persist?: boolean | undefined;
 }
 
-interface HookBacktestCandidateRow {
-    readonly id: string;
-    readonly session: string;
-    readonly tool_call: string;
-    readonly ts: Date | string;
-    readonly hook_name: string;
-    readonly command: string;
-    readonly provider_status: string;
-    readonly effect: string;
-}
+const HookBacktestCandidateSchemaRow = Schema.Struct({
+    id: Schema.String,
+    session: Schema.String,
+    tool_call: Schema.String,
+    ts: TimestampColumn,
+    hook_name: Schema.String,
+    command: Schema.String,
+    provider_status: Schema.String,
+    effect: Schema.String,
+});
 
 interface ToolCallWindowRow {
     readonly id?: string | undefined;
@@ -50,6 +31,15 @@ interface ToolCallWindowRow {
     readonly command_norm?: string | null | undefined;
     readonly has_error?: boolean | null | undefined;
 }
+
+const ToolCallWindowSchemaRow = Schema.Struct({
+    id: Schema.String,
+    seq: Schema.NullOr(NumberFromBigIntColumn),
+    name: Schema.NullOr(Schema.String),
+    command_text: Schema.NullOr(Schema.String),
+    command_norm: Schema.NullOr(Schema.String),
+    has_error: Schema.Boolean,
+});
 
 export interface FeedbackCaseResultRow {
     readonly target_id: string;
@@ -75,48 +65,32 @@ export interface FeedbackBacktestSummary {
     readonly results: readonly FeedbackCaseResultRow[];
 }
 
-const sqlDate = (value: Date | string): string => {
-    const iso = value instanceof Date ? value.toISOString() : String(value);
-    return `d${surrealLiteral(iso)}`;
-};
-
-const sqlJsonString = (value: unknown): string => surrealLiteral(prettyPrint(value));
-
-const normalizeRecordString = (value: string): string =>
-    value
-        .replace(/^session:`(.+)`$/, "session:`$1`")
-        .replace(/^hook_command_invocation:`?([^`]+)`?$/, "hook_command_invocation:$1");
-
-const sessionIdFromRecordString = (value: string): string =>
-    value
-        .replace(/^session:/, "")
-        .replace(/^`/, "")
-        .replace(/`$/, "");
-
-const candidateWhere = (opts: FeedbackBacktestOptions): string => {
-    const where = [
-        "string::contains(command, 'enforce-worktree')",
-        "tool_call IS NOT NONE",
-    ];
-    if (opts.sinceDays !== undefined) {
-        if (!Number.isFinite(opts.sinceDays) || opts.sinceDays <= 0) {
-            throw new Error(`--since must be a positive integer, got ${opts.sinceDays}`);
-        }
-        where.push(`ts >= time::now() - ${Math.trunc(opts.sinceDays)}d`);
+/** Candidate-query WHERE clause: the fixed hook-command predicate, plus an
+ *  optional `--since` recency filter. `sinceDays` is validated (positive
+ *  integer) before it reaches `withinDaysClause`, which needs a real count. */
+const candidateFilter = (opts: FeedbackBacktestOptions): Clause => {
+    if (opts.sinceDays !== undefined && (!Number.isFinite(opts.sinceDays) || opts.sinceDays <= 0)) {
+        throw new Error(`--since must be a positive integer, got ${opts.sinceDays}`);
     }
-    return where.join(" AND ");
+    return andAll([
+        { sql: "WHERE contains(command, 'enforce-worktree') AND tool_call IS NOT NULL", params: [] },
+        opts.sinceDays === undefined ? NO_CLAUSE : withinDaysClause("ts", Math.trunc(opts.sinceDays)),
+    ]);
 };
 
-export function buildEnforceWorktreeCandidateQuery(opts: FeedbackBacktestOptions): string {
+export function buildEnforceWorktreeCandidateClause(opts: FeedbackBacktestOptions): Clause {
     const tail = Math.max(1, Math.trunc(opts.tail ?? 100));
-    return [
-        "SELECT <string>id AS id, <string>session AS session, <string>tool_call AS tool_call,",
-        "       ts, hook_name, command, provider_status, effect",
-        "FROM hook_command_invocation",
-        `WHERE ${candidateWhere(opts)}`,
-        "ORDER BY ts DESC",
-        `LIMIT ${tail}`,
-    ].join("\n");
+    const filter = candidateFilter(opts);
+    return {
+        sql: [
+            "SELECT id, session, tool_call, ts, hook_name, command, provider_status, effect",
+            "FROM hook_command_invocation",
+            filter.sql,
+            "ORDER BY ts DESC",
+            `LIMIT ${tail}`,
+        ].join("\n"),
+        params: filter.params,
+    };
 }
 
 export function classifyEnforceWorktreeWindow(
@@ -156,44 +130,43 @@ export function classifyEnforceWorktreeWindow(
     };
 }
 
-function caseTypeStatement(window: number): string {
-    return `UPSERT ${recordRef("feedback_case_type", ENFORCE_WORKTREE_CASE_KEY)} MERGE { name: ${surrealLiteral(ENFORCE_WORKTREE_CASE_KEY)}, title: ${surrealLiteral(CASE_TITLE)}, target_kind: "hook_command_invocation", selector_json: ${sqlJsonString(CASE_SELECTOR)}, rule_kind: "deterministic", rule_json: ${sqlJsonString({ ...CASE_RULE, windowToolCalls: window })}, status: "active", updated_at: time::now() };`;
-}
-
-function resultStatement(result: FeedbackCaseResultRow): string {
-    const resultKey = `${ENFORCE_WORKTREE_CASE_KEY}__${stableDigest(result.target_id, 20)}`;
-    return `UPSERT ${recordRef("feedback_case_result", resultKey)} MERGE { case_type: ${recordRef("feedback_case_type", ENFORCE_WORKTREE_CASE_KEY)}, target_kind: "hook_command_invocation", target: ${normalizeRecordString(result.target_id)}, session: ${result.session}, ts: ${sqlDate(result.ts)}, status: ${surrealLiteral(result.status)}, reason: ${surrealLiteral(result.reason)}, window_json: ${sqlJsonString(result.window)}, evidence_json: ${sqlJsonString({ hookName: result.hook_name, hookCommand: result.hook_command, providerStatus: result.provider_status, triggerSeq: result.trigger_seq, triggerCommand: result.trigger_command })}, observed_at: time::now() };`;
-}
-
-export function buildFeedbackCasePersistStatements(
-    results: readonly FeedbackCaseResultRow[],
-    window: number,
-): readonly string[] {
-    return [
-        caseTypeStatement(window),
-        ...results.map(resultStatement),
-    ];
-}
-
 const selectOne = <A>(rows: readonly A[] | undefined): A | null => rows?.[0] ?? null;
+
+const TRIGGER_TOOL_CALL_SQL =
+    "SELECT id, seq, name, command_text, command_norm, has_error FROM tool_call WHERE id = ?;";
+
+const WINDOW_TOOL_CALL_SQL = (limit: number) => `
+SELECT id, seq, name, command_text, command_norm, has_error
+FROM tool_call
+WHERE session = ? AND seq > ?
+ORDER BY seq ASC
+LIMIT ${Math.max(1, Math.trunc(limit))};
+`;
 
 export const backtestEnforceWorktreeCase = Effect.fn("queries.backtestEnforceWorktreeCase")(
     function* (opts: FeedbackBacktestOptions = {}) {
-        const db = yield* SurrealClient;
         const window = Math.max(1, Math.trunc(opts.window ?? 3));
-        const [candidates] = yield* db.query<[HookBacktestCandidateRow[]]>(buildEnforceWorktreeCandidateQuery(opts));
+        const candidates = yield* cacheRows(
+            HookBacktestCandidateSchemaRow,
+            buildEnforceWorktreeCandidateClause(opts),
+            "feedback case candidates",
+        );
         const results: FeedbackCaseResultRow[] = [];
 
         for (const candidate of candidates) {
-            const [triggerRows] = yield* db.query<[ToolCallWindowRow[]]>(
-                `SELECT <string>id AS id, seq, name, command_text, command_norm, has_error FROM ${candidate.tool_call};`,
+            const triggerRows = yield* cacheRows(
+                ToolCallWindowSchemaRow,
+                { sql: TRIGGER_TOOL_CALL_SQL, params: [candidate.tool_call] },
+                "feedback case trigger tool call",
             );
             const trigger = selectOne(triggerRows);
             const triggerSeq = typeof trigger?.seq === "number" ? trigger.seq : null;
-            const [windowRows] = triggerSeq === null
-                ? [[] as ToolCallWindowRow[]]
-                : yield* db.query<[ToolCallWindowRow[]]>(
-                    `SELECT <string>id AS id, seq, name, command_text, command_norm, has_error FROM tool_call WHERE string::contains(<string>session, ${surrealLiteral(sessionIdFromRecordString(candidate.session))}) AND seq > ${triggerSeq} ORDER BY seq ASC LIMIT ${window};`,
+            const windowRows = triggerSeq === null
+                ? []
+                : yield* cacheRows(
+                    ToolCallWindowSchemaRow,
+                    { sql: WINDOW_TOOL_CALL_SQL(window), params: [candidate.session, triggerSeq] },
+                    "feedback case window tool calls",
                 );
             const classification = classifyEnforceWorktreeWindow(trigger, windowRows);
             results.push({
@@ -211,11 +184,17 @@ export const backtestEnforceWorktreeCase = Effect.fn("queries.backtestEnforceWor
             });
         }
 
-        if (opts.persist !== false) {
-            const statements = buildFeedbackCasePersistStatements(results, window);
-            for (let i = 0; i < statements.length; i += 100) {
-                yield* db.query(statements.slice(i, i + 100).join(""));
-            }
+        // v2: writes only happen inside `ax ingest`, under the ingest lock
+        // (see packages/lib/src/duckdb/seam.ts) - `withCacheWrite` refuses at
+        // runtime for any caller that does not hold that lock, which this CLI
+        // backtest never does. `feedback_case_type`/`feedback_case_result`
+        // are also read by nothing else in the codebase, so there is no
+        // consumer waiting on the row - persistence is dropped, not moved.
+        if (opts.persist === true) {
+            yield* Effect.logWarning(
+                "ax hooks cases: --persist has no effect on the DuckDB cache - writes only happen inside " +
+                    "ax ingest, under the ingest lock. Results are computed and printed, not stored.",
+            );
         }
 
         const passed = results.filter((row) => row.status === "passed").length;
@@ -237,9 +216,6 @@ export const backtestEnforceWorktreeCase = Effect.fn("queries.backtestEnforceWor
 const dateText = (value: Date | string): string =>
     value instanceof Date ? value.toISOString() : String(value);
 
-const sessionText = (value: string): string =>
-    sessionIdFromRecordString(value);
-
 const clip = (value: string | null | undefined, max = 100): string => {
     if (!value) return "";
     const oneLine = value.replace(/\s+/g, " ").trim();
@@ -256,7 +232,7 @@ export function formatFeedbackBacktestSummary(summary: FeedbackBacktestSummary):
     for (const result of summary.results) {
         lines.push([
             dateText(result.ts),
-            sessionText(result.session),
+            result.session,
             result.status,
             result.trigger_seq === null ? "" : String(result.trigger_seq),
             result.reason,

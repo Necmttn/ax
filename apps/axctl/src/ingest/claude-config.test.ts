@@ -4,9 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import type { GuidanceConfigArtifact } from "./claude-config.ts";
 import {
+    fetchPreviousArtifacts,
     buildClaudeMdGuidanceRevisionStatements,
     buildGuidanceConfigPersistenceStatements,
+    buildGuidanceConfigReconcileStatements,
     buildGuidanceConfigStatements,
     claudeConfigStage,
     discoverClaudeConfigArtifacts,
@@ -230,7 +235,7 @@ describe("parseClaudeConfigArtifact", () => {
             expect(JSON.stringify(record)).not.toContain("notify-send done");
         }
 
-        const statements = buildGuidanceConfigStatements([pluginRecord, hookRecord]).join("\n");
+        const statements = JSON.stringify(buildGuidanceConfigStatements([pluginRecord, hookRecord]));
         expect(statements).toContain("PreToolUse");
         expect(statements).toContain(pluginRecord.commandHashes[0]!);
         expect(statements).not.toContain("secret-token");
@@ -286,19 +291,19 @@ describe("buildGuidanceConfigStatements", () => {
 
         const [statement] = buildGuidanceConfigStatements([record]);
 
-        expect(statement).toContain("UPSERT guidance_config_artifact:");
-        expect(statement).toContain("provider: \"claude\"");
-        expect(statement).toContain("kind: \"settings_config\"");
-        expect(statement).toContain("safe_path: \"~/.claude/settings.json\"");
-        expect(statement).toContain("permission_allow_count: 1");
-        expect(statement).toContain("SECRET_ENV");
-        expect(statement).toContain("PreToolUse");
-        expect(statement).toContain("secretServer");
-        expect(statement).not.toContain("env-secret");
-        expect(statement).not.toContain("mcp-secret");
-        expect(statement).not.toContain("cat ~/.ssh/id_rsa");
-        expect(statement).not.toContain("Bash(cat");
-        expect(statement).not.toContain("/Users/alice");
+        expect(statement.provider).toBe("claude");
+        expect(statement.kind).toBe("settings_config");
+        expect(statement.safe_path).toBe("~/.claude/settings.json");
+        expect(statement.permission_allow_count).toBe(1);
+        const serialized = JSON.stringify(statement);
+        expect(serialized).toContain("SECRET_ENV");
+        expect(serialized).toContain("PreToolUse");
+        expect(serialized).toContain("secretServer");
+        expect(serialized).not.toContain("env-secret");
+        expect(serialized).not.toContain("mcp-secret");
+        expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
+        expect(serialized).not.toContain("Bash(cat");
+        expect(serialized).not.toContain("/Users/alice");
     });
 
     test("scopes stale artifact reconciliation to current Claude path hashes", () => {
@@ -319,21 +324,16 @@ describe("buildGuidanceConfigStatements", () => {
             }),
         });
 
+        const reconcile = buildGuidanceConfigReconcileStatements([currentRecord]);
         const statements = buildGuidanceConfigPersistenceStatements([currentRecord]);
-        const [reconcile] = statements;
 
-        expect(reconcile).toContain("DELETE guidance_config_artifact");
-        expect(reconcile).toContain('provider = "claude"');
-        expect(reconcile).toContain("authority_hash IN");
-        expect(reconcile).toContain(currentRecord.authorityHash);
-        expect(reconcile).toContain("path_hash NOT IN");
-        expect(reconcile).toContain(currentRecord.pathHash);
-        expect(reconcile).not.toBe(`DELETE guidance_config_artifact WHERE provider = "claude" AND path_hash NOT IN ["${currentRecord.pathHash}"];`);
-        expect(statements.some((statement) => statement.startsWith("UPSERT guidance_config_artifact:"))).toBe(true);
+        expect(reconcile.authorityHashes).toEqual([currentRecord.authorityHash]);
+        expect(reconcile.pathHashes).toEqual([currentRecord.pathHash]);
+        expect(statements).toHaveLength(1);
 
-        const serialized = statements.join("\n");
-        expect(serialized).toContain("authority_kind: \"user\"");
-        expect(serialized).toContain(`authority_hash: "${currentRecord.authorityHash}"`);
+        const serialized = JSON.stringify(statements);
+        expect(serialized).toContain('"authority_kind":"user"');
+        expect(serialized).toContain(`"authority_hash":"${currentRecord.authorityHash}"`);
         expect(serialized).not.toContain("env-secret");
         expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
         expect(serialized).not.toContain("/Users/alice");
@@ -359,14 +359,14 @@ describe("buildGuidanceConfigStatements", () => {
         expect(projectB.authorityKind).toBe("project");
         expect(projectA.authorityHash).not.toBe(projectB.authorityHash);
 
-        const [reconcile] = buildGuidanceConfigPersistenceStatements([projectA]);
-        expect(reconcile).toContain(projectA.authorityHash);
-        expect(reconcile).not.toContain(projectB.authorityHash);
-        expect(reconcile).toContain(projectA.pathHash);
-        expect(reconcile).not.toContain(projectB.pathHash);
+        const reconcile = buildGuidanceConfigReconcileStatements([projectA]);
+        expect(reconcile.authorityHashes).toContain(projectA.authorityHash);
+        expect(reconcile.authorityHashes).not.toContain(projectB.authorityHash);
+        expect(reconcile.pathHashes).toContain(projectA.pathHash);
+        expect(reconcile.pathHashes).not.toContain(projectB.pathHash);
     });
 
-    test("cleans legacy Claude rows without authority hashes", () => {
+    test("keeps persistence rows free of raw private values", () => {
         const currentRecord = parseClaudeSettingsArtifact({
             scope: "user",
             path: "/Users/alice/.claude/settings.json",
@@ -385,11 +385,9 @@ describe("buildGuidanceConfigStatements", () => {
         });
 
         const statements = buildGuidanceConfigPersistenceStatements([currentRecord]);
-        const legacyCleanup = statements.find((statement) => statement.includes("authority_hash IS NONE")) ?? "";
-
-        expect(legacyCleanup).toBe('DELETE guidance_config_artifact WHERE provider = "claude" AND authority_hash IS NONE;');
-
-        const serialized = statements.join("\n");
+        const serialized = JSON.stringify(statements);
+        expect(statements).toHaveLength(1);
+        expect(statements[0]?.authority_hash).toBe(currentRecord.authorityHash);
         expect(serialized).not.toContain("env-secret");
         expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
         expect(serialized).not.toContain("/Users/alice");
@@ -435,15 +433,14 @@ describe("buildClaudeMdGuidanceRevisionStatements", () => {
         );
 
         expect(statements).toHaveLength(2);
-        expect(statements[0]).toContain("UPSERT guidance_revision:");
-        expect(statements[0]).toContain('source_path: "~/.claude/CLAUDE.md"');
-        expect(statements[0]).toContain('change: "added"');
-        expect(statements[1]).toContain('source_path: "$PROJECT/CLAUDE.md"');
-        expect(statements[1]).toContain('change: "changed"');
-        expect(statements[1]).toContain('prev_hash: "old-project-hash"');
-        expect(statements[1]).toContain("prev_bytes: 12");
+        expect(statements[0]?.source_path).toBe("~/.claude/CLAUDE.md");
+        expect(statements[0]?.change).toBe("added");
+        expect(statements[1]?.source_path).toBe("$PROJECT/CLAUDE.md");
+        expect(statements[1]?.change).toBe("changed");
+        expect(statements[1]?.prev_hash).toBe("old-project-hash");
+        expect(statements[1]?.prev_bytes).toBe(12);
 
-        const serialized = statements.join("\n");
+        const serialized = JSON.stringify(statements);
         expect(serialized).not.toContain("private global memory");
         expect(serialized).not.toContain("private project rules");
         expect(serialized).not.toContain("project agents");
@@ -585,5 +582,50 @@ describe("claudeConfigStage", () => {
         expect(claudeConfigStage.meta.key).toBe("claude-config");
         expect(claudeConfigStage.meta.deps).toEqual(["skills", "commands", "agent-def"]);
         expect(claudeConfigStage.meta.tags).toEqual(["ingest"]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Real-DuckDB coverage for the guidance-revision "previous artifact" read.
+//
+// Same defect family as the run-evidence BIGINT crash, but SILENT: `bytes` is
+// BIGINT, `write.raw` applies no column decoder, and the `typeof === "number"`
+// guard in `fetchPreviousArtifacts` reads FALSE for a `bigint` - so every
+// guidance_revision was written with `prev_bytes` NULL and nothing failed. This
+// case reads the value back through the real column, which is the only way to
+// see it.
+// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("claude-config previous artifacts", { requireFts: true });
+
+describe("fetchPreviousArtifacts on real DuckDB", () => {
+    dtest("decodes the BIGINT bytes column as a number", async () => {
+        const record: GuidanceConfigArtifact = {
+            provider: "claude", kind: "memory", scope: "user",
+            safePath: "~/CLAUDE.md", pathHash: "ph-1",
+            authorityKind: "user", authorityHash: "ah-1",
+            contentHash: "ch-new", parseStatus: "ok",
+            bytes: 4_096, tokenEstimate: 1_024,
+            commandHashes: [], hookEventNames: [], matcherCount: 0,
+            mcpServerNames: [], envKeys: [], enabledToolCount: null,
+            model: null, reasoningEffort: null, outputStyle: null,
+            permissionAllowCount: 0, permissionAskCount: 0, permissionDenyCount: 0,
+            observedAt: new Date("2026-05-30T00:00:00Z"), metadata: {},
+        };
+        let previous: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-claude-config-prev-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("guidance_config_artifact", {
+                    id: "gca-1", provider: "claude", kind: "memory", scope: "user",
+                    safe_path: "~/CLAUDE.md", path_hash: "ph-1",
+                    authority_kind: "user", authority_hash: "ah-1",
+                    content_hash: "ch-old", parse_status: "ok",
+                    bytes: 4_000, token_estimate: 1_000, matcher_count: 0,
+                    permission_allow_count: 0, permission_ask_count: 0, permission_deny_count: 0,
+                    observed_at: new Date("2026-05-29T00:00:00Z"),
+                });
+                previous = (yield* fetchPreviousArtifacts(write, [record])).get("ph-1");
+            }),
+        ));
+        expect(previous).toEqual({ content_hash: "ch-old", bytes: 4_000 });
     });
 });

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildGuidanceProposalStatements,
-    buildImageContextProposalStatements,
-    buildRoutingProposalStatements,
-    buildSkillProposalStatements,
+    buildGuidanceProposalWrites,
+    buildImageContextProposalWrites,
+    buildRoutingProposalWrites,
+    buildSkillProposalWrites,
     dedupeSig,
     deriveDirectiveProposalRows,
     deriveGuidanceProposalRows,
@@ -94,7 +94,7 @@ describe("deriveSkillProposalRows", () => {
     });
 });
 
-describe("buildSkillProposalStatements", () => {
+describe("buildSkillProposalWrites", () => {
     const baseRow = {
         proposalKey: "skill__schema_change_guardrail__abcdef123456",
         candidateKey: "schema_change_guardrail",
@@ -111,25 +111,19 @@ describe("buildSkillProposalStatements", () => {
     };
 
     test("new sig: CREATE proposal with baseline + status='open'", () => {
-        const sql = buildSkillProposalStatements([baseRow], new Set()).join("\n");
-        expect(sql).toContain("CREATE proposal:");
-        expect(sql).toContain("status: \"open\"");
-        expect(sql).toContain("baseline:");
-        expect(sql).toContain("dedupe_sig: \"skill__abcdef123456\"");
-        expect(sql).toContain("UPSERT skill_proposal:");
-        expect(sql).toContain("RELATE proposal:");
-        expect(sql).toContain("->cites_evidence:");
+        const writes = buildSkillProposalWrites([baseRow], new Set());
+        expect(writes.map((write) => write.table)).toEqual(["proposal", "skill_proposal", "cites_evidence"]);
+        expect(writes[0]!.row).toMatchObject({ status: "open", dedupe_sig: baseRow.sig, form: "skill" });
+        expect(writes[0]!.row.baseline).toBe(JSON.stringify({ frequency: 5, metrics: baseRow.metrics }));
     });
 
     test("existing sig: UPDATE refresh-able fields ONLY, no baseline/status touch", () => {
-        const sql = buildSkillProposalStatements([baseRow], new Set([baseRow.sig])).join("\n");
-        expect(sql).toContain("UPDATE proposal:");
-        expect(sql).not.toContain("CREATE proposal:");
-        expect(sql).not.toMatch(/\bstatus\s*=/);
-        expect(sql).not.toMatch(/\bbaseline\s*=/);
-        expect(sql).toMatch(/\bfrequency\s*=\s*5/);
-        expect(sql).toMatch(/\bconfidence\s*=\s*"high"/);
-        expect(sql).toContain("UPSERT skill_proposal:");
+        const writes = buildSkillProposalWrites([baseRow], new Set([baseRow.sig]));
+        expect(writes[0]!.row).toMatchObject({ frequency: 5, confidence: "high" });
+        expect(writes[0]!.row).not.toHaveProperty("status");
+        expect(writes[0]!.row).not.toHaveProperty("baseline");
+        expect(writes[0]!.row).not.toHaveProperty("created_at");
+        expect(writes[1]!.table).toBe("skill_proposal");
     });
 });
 
@@ -212,13 +206,10 @@ describe("deriveGuidanceProposalRows + buildGuidanceProposalStatements (Phase C1
 
     test("CREATE statement for new sig + UPSERT guidance_proposal payload", () => {
         const { rows } = deriveGuidanceProposalRows([candidate]);
-        const sql = buildGuidanceProposalStatements(rows, new Set()).join("\n");
-        expect(sql).toContain("CREATE proposal:");
-        expect(sql).toContain("form: \"guidance\"");
-        expect(sql).toContain("status: \"open\"");
-        expect(sql).toContain("UPSERT guidance_proposal:");
-        expect(sql).toContain("file_target: \"CLAUDE.md\"");
-        expect(sql).toContain("section: \"boundary\"");
+        const writes = buildGuidanceProposalWrites(rows, new Set());
+        expect(writes.map((write) => write.table)).toEqual(["proposal", "guidance_proposal"]);
+        expect(writes[0]!.row).toMatchObject({ form: "guidance", status: "open" });
+        expect(writes[1]!.row).toMatchObject({ file_target: "CLAUDE.md", section: "boundary" });
     });
 
     test("dedupes within one batch", () => {
@@ -297,7 +288,7 @@ describe("deriveRoutingProposalRow", () => {
     });
 });
 
-describe("buildRoutingProposalStatements", () => {
+describe("buildRoutingProposalWrites", () => {
     const baseRoutingRow = deriveRoutingProposalRow({
         candidateCount: 12,
         totalEstSavingsUsd: 25.50,
@@ -306,30 +297,21 @@ describe("buildRoutingProposalStatements", () => {
     })!;
 
     test("new sig: CREATE proposal with form='hook', baseline, status='open'", () => {
-        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set());
-        const sql = stmts.join("\n");
-        expect(sql).toContain("CREATE proposal:");
-        expect(sql).toContain("form: \"hook\"");
-        expect(sql).toContain("status: \"open\"");
-        expect(sql).toContain("baseline:");
-        expect(sql).toContain(`frequency: ${baseRoutingRow.frequency}`);
+        const writes = buildRoutingProposalWrites(baseRoutingRow, new Set());
+        expect(writes[0]!.row).toMatchObject({ form: "hook", status: "open", frequency: baseRoutingRow.frequency });
+        expect(writes[0]!.row.baseline).toBe(JSON.stringify({ frequency: baseRoutingRow.frequency }));
     });
 
     test("existing sig: UPDATE mutable fields only, no baseline/status touch", () => {
-        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set([baseRoutingRow.sig]));
-        const sql = stmts.join("\n");
-        expect(sql).toContain("UPDATE proposal:");
-        expect(sql).not.toContain("CREATE proposal:");
-        expect(sql).not.toMatch(/\bstatus\s*=/);
-        expect(sql).not.toMatch(/\bbaseline\s*=/);
-        expect(sql).toMatch(/\bfrequency\s*=\s*12/);
+        const writes = buildRoutingProposalWrites(baseRoutingRow, new Set([baseRoutingRow.sig]));
+        expect(writes[0]!.row.frequency).toBe(12);
+        expect(writes[0]!.row).not.toHaveProperty("status");
+        expect(writes[0]!.row).not.toHaveProperty("baseline");
     });
 
     test("statement contains form hook and frequency", () => {
-        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set());
-        const sql = stmts.join("\n");
-        expect(sql).toContain("form: \"hook\"");
-        expect(sql).toContain(String(baseRoutingRow.frequency));
+        const writes = buildRoutingProposalWrites(baseRoutingRow, new Set());
+        expect(writes[0]!.row).toMatchObject({ form: "hook", frequency: baseRoutingRow.frequency });
     });
 });
 
@@ -390,30 +372,23 @@ describe("deriveImageContextProposalRow", () => {
     });
 });
 
-describe("buildImageContextProposalStatements", () => {
+describe("buildImageContextProposalWrites", () => {
     const baseRow = deriveImageContextProposalRow(
         makeImageContextResult(25 * MB, 7),
         14,
     )!;
 
     test("new sig: CREATE proposal with form='subagent', baseline, status='open'", () => {
-        const stmts = buildImageContextProposalStatements(baseRow, new Set());
-        const sql = stmts.join("\n");
-        expect(sql).toContain("CREATE proposal:");
-        expect(sql).toContain("form: \"subagent\"");
-        expect(sql).toContain("status: \"open\"");
-        expect(sql).toContain("baseline:");
-        expect(sql).toContain(`dedupe_sig: "${baseRow.sig}"`);
+        const writes = buildImageContextProposalWrites(baseRow, new Set());
+        expect(writes[0]!.row).toMatchObject({ form: "subagent", status: "open", dedupe_sig: baseRow.sig });
+        expect(writes[0]!.row).toHaveProperty("baseline");
     });
 
     test("existing sig: UPDATE mutable fields only, no baseline/status touch", () => {
-        const stmts = buildImageContextProposalStatements(baseRow, new Set([baseRow.sig]));
-        const sql = stmts.join("\n");
-        expect(sql).toContain("UPDATE proposal:");
-        expect(sql).not.toContain("CREATE proposal:");
-        expect(sql).not.toMatch(/\bstatus\s*=/);
-        expect(sql).not.toMatch(/\bbaseline\s*=/);
-        expect(sql).toMatch(/\bfrequency\s*=\s*7/);
+        const writes = buildImageContextProposalWrites(baseRow, new Set([baseRow.sig]));
+        expect(writes[0]!.row.frequency).toBe(7);
+        expect(writes[0]!.row).not.toHaveProperty("status");
+        expect(writes[0]!.row).not.toHaveProperty("baseline");
     });
 });
 
@@ -455,14 +430,13 @@ describe("deriveWorkflowProposalRows", () => {
         expect(skipped).toBe(1);
     });
 
-    test("buildGuidanceProposalStatements emits section='workflows' in SQL for workflow rows", () => {
+    test("buildGuidanceProposalWrites emits workflow guidance rows", () => {
         const { rows } = deriveWorkflowProposalRows([
             { steps: ["plan", "tdd", "review"], support: 4 },
         ]);
-        const sql = buildGuidanceProposalStatements(rows, new Set()).join("\n");
-        expect(sql).toContain("section: \"workflows\"");
-        expect(sql).toContain("form: \"guidance\"");
-        expect(sql).toContain("UPSERT guidance_proposal:");
+        const writes = buildGuidanceProposalWrites(rows, new Set());
+        expect(writes[0]!.row.form).toBe("guidance");
+        expect(writes[1]).toMatchObject({ table: "guidance_proposal", row: { section: "workflows" } });
     });
 
     test("sig is stable across independent calls with same arc", () => {

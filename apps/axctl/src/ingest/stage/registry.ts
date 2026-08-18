@@ -1,6 +1,9 @@
 import { Context, Layer } from "effect";
 import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
+import type { DbError } from "@ax/lib/errors";
+import type { CacheReadError, CacheWriteError } from "@ax/lib/duckdb/seam";
+import type { JudgmentError } from "@ax/lib/sqlite";
 import { skillsStage } from "../skills.ts";
 import { commandsStage } from "../commands.ts";
 import { agentDefStage } from "../agent-def.ts";
@@ -11,6 +14,8 @@ import { codexStage } from "../codex.ts";
 import { piStage, ompStage } from "../pi.ts";
 import { opencodeStage } from "../opencode.ts";
 import { cursorStage } from "../cursor.ts";
+import { otelSpoolStage } from "../otel-spool.ts";
+import { hookFireSpoolStage } from "../hook-fire-spool.ts";
 import { subagentsStage } from "../derive-claude-subagents.ts";
 import { claudeSidecarsStage } from "../claude-sidecars.ts";
 import { invokedPositionsStage } from "../backfill-invoked-positions.ts";
@@ -45,10 +50,23 @@ export type { StageDef } from "./types.ts";
  *  enforced at test time in registry.test.ts. */
 export type IngestStageKey = (typeof ALL_STAGES)[number]["meta"]["key"];
 
+/**
+ * The stage error channel (F3).
+ *
+ * It is a UNION, not a single error type, because a stage can fail in four
+ * ways: a systemic stored-data failure a stage escalates itself (`DbError`,
+ * e.g. file-isolation.ts's consecutive-failure circuit breaker), writing the
+ * lock-held cache (`CacheWriteError`) and reading live rows through the writer
+ * (`CacheReadError`), and the judgment-domain stages writing the SQLite
+ * sidecar (`JudgmentError`). Widening it here rather than per stage is what
+ * lets the registry hold all of them under one type.
+ */
+export type IngestStageError = DbError | CacheWriteError | CacheReadError | JudgmentError;
+
 export interface StageRegistryShape {
-    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
-    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown> | undefined;
-    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown>>;
+    readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
+    readonly byKey: (key: string) => StageDef<BaseStageStats, unknown, IngestStageError> | undefined;
+    readonly byTag: (tag: IngestStageTag) => ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>;
 }
 
 export class StageRegistry extends Context.Service<StageRegistry, StageRegistryShape>()(
@@ -57,7 +75,7 @@ export class StageRegistry extends Context.Service<StageRegistry, StageRegistryS
 
 /** Provide a registry by passing the typed list of co-located stage definitions. */
 export const StageRegistryLive = (
-    stages: ReadonlyArray<StageDef<BaseStageStats, unknown>>,
+    stages: ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>>,
 ): Layer.Layer<StageRegistry> =>
     Layer.succeed(StageRegistry, {
         all: () => stages,
@@ -66,7 +84,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, ompStage, opencodeStage, cursorStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage, runEvidenceStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, ompStage, opencodeStage, cursorStage, otelSpoolStage, hookFireSpoolStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage, runEvidenceStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

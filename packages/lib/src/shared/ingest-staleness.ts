@@ -14,7 +14,7 @@
  */
 
 /** The `ingest_run` columns the stranded check reads. Shape is shared by
- *  doctor's raw HTTP probe and the reaper's SurrealClient query. */
+ *  doctor's probe and the reaper's query. */
 export interface IngestRunHeartbeatRow {
     readonly id?: unknown;
     readonly started_at?: unknown;
@@ -25,6 +25,28 @@ export interface IngestRunHeartbeatRow {
  *  stranded. Doctor, the ingest-start reaper and the daemon reaper share it so
  *  they can never disagree about what "stuck" means. */
 export const REAP_GRACE_SECONDS = 60;
+
+/**
+ * The heartbeat as milliseconds, or `null` when there is nothing usable.
+ *
+ * Two callers hand this two different types: doctor's raw HTTP probe sees a
+ * JSON string, while a graph read sees whatever its client decoded - the
+ * DuckDB seam decodes a TIMESTAMP to a `Date`. A `Date.parse(String(value))`
+ * round-trip would stringify one through `"Wed Aug 15 2026 12:00:00 GMT+0000"`
+ * - which parses, but only to whole seconds, so a `Date` would silently lose
+ * its milliseconds on the way to a millisecond comparison. A `Date` is read
+ * directly instead.
+ */
+const heartbeatMs = (value: unknown): number | null => {
+    if (value instanceof Date) {
+        const ms = value.getTime();
+        return Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value !== "string" || value.length === 0) return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
 
 /**
  * Is this "running" row crash residue? Every clean exit path (ok / error /
@@ -38,8 +60,12 @@ export const isStrandedRun = (
     nowMs: number,
     staleAfterMs: number,
 ): boolean => {
-    const beat = Date.parse(String(row.last_progress_at ?? row.started_at ?? ""));
-    if (!Number.isFinite(beat)) return true;
+    // `??` on the RAW values, not on the parsed ones: a row that HAS a
+    // `last_progress_at` which does not parse is unreadable residue, and must
+    // stay stranded rather than quietly falling back to a recent `started_at`
+    // and reading as live. Only an absent field falls through.
+    const beat = heartbeatMs(row.last_progress_at ?? row.started_at);
+    if (beat === null) return true;
     return nowMs - beat > staleAfterMs;
 };
 
@@ -80,3 +106,29 @@ export const formatStaleIngestWarning = (input: {
     return `ax: graph is stale - last successful ingest ${formatAge(ageMs)} ago; ` +
         `results may be incomplete. Run 'ax ingest' ('ax doctor' to diagnose).`;
 };
+
+/**
+ * Freshness drive (wave 3, daemon subtraction): with no LaunchAgent watcher
+ * to tail transcripts in the background, a stale graph now has nothing
+ * standing between "the user ran `ax cost`" and "the graph fixes itself" -
+ * so a read command that finds the graph stale spawns a background `ax
+ * ingest` itself (see `apps/axctl/src/queries/ingest-staleness.ts`).
+ *
+ * Debounced so a burst of commands (a shell alias, a script, a human mashing
+ * `ax cost` while it "isn't working") forks at most one ingest per window,
+ * not one per invocation.
+ */
+export const FRESHNESS_SPAWN_DEBOUNCE_MS = 15 * 60_000;
+
+/**
+ * Pure debounce decision: should a background ingest be spawned right now?
+ * `lastSpawnAtMs` is `null` when nothing has been recorded yet (always
+ * spawns). Dep-free so it is unit-testable without touching a filesystem or
+ * a real subprocess - the caller supplies both.
+ */
+export const shouldSpawnBackgroundIngest = (input: {
+    readonly lastSpawnAtMs: number | null;
+    readonly nowMs: number;
+    readonly debounceMs: number;
+}): boolean =>
+    input.lastSpawnAtMs === null || input.nowMs - input.lastSpawnAtMs >= input.debounceMs;

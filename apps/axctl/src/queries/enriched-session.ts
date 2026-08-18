@@ -19,8 +19,8 @@
  */
 
 import { Effect } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import type {
     SessionDetailPayload,
     SessionInsightsPayload,
@@ -80,7 +80,7 @@ export interface EnrichedSession {
 
 /**
  * Injectable fetchers - lets tests assert which fetchers run for a given
- * options matrix without a live SurrealDB. Production uses the real fetchers.
+ * options matrix without opening a database. Production uses the real fetchers.
  */
 export interface EnrichedSessionFetchers {
     readonly fetchView: typeof fetchSessionView;
@@ -104,13 +104,13 @@ const defaultFetchers: EnrichedSessionFetchers = {
 export const fetchEnrichedSession: (
     opts: EnrichedSessionOptions,
     fetchers?: EnrichedSessionFetchers,
-) => Effect.Effect<EnrichedSession, DbError, SurrealClient> = Effect.fn(
+) => Effect.Effect<EnrichedSession, CacheReadError | JudgmentError, CacheRead | Judgment> = Effect.fn(
     "queries.fetchEnrichedSession",
 )(function* (opts, fetchers = defaultFetchers) {
     const baseEffect: Effect.Effect<
         { view: SessionViewPayload | null; detail: SessionDetailPayload | null },
-        DbError,
-        SurrealClient
+        CacheReadError | JudgmentError,
+        CacheRead | Judgment
     > = opts.base.kind === "view"
         ? fetchers
             .fetchView({

@@ -1,6 +1,5 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 
 export interface RecentInjectsQueryParams {
     readonly sessionRid: string;
@@ -8,24 +7,29 @@ export interface RecentInjectsQueryParams {
     readonly windowMinutes: number;
 }
 
-function safePath(p: string): string {
-    if (p.includes("'")) {
-        throw new Error(`hook dedup: file path contains a single quote and would break SQL: ${p}`);
-    }
-    return `'${p}'`;
-}
-
-export function buildRecentInjectsQuery(params: RecentInjectsQueryParams): string {
-    const list = params.filePaths.map(safePath).join(", ");
+export function buildRecentInjectsQuery(params: RecentInjectsQueryParams): {
+    readonly sql: string;
+    readonly params: ReadonlyArray<string | Date>;
+} {
+    const placeholders = params.filePaths.map(() => "?").join(", ");
     const win = Math.max(1, Math.trunc(params.windowMinutes));
-    return [
+    // The window cutoff is computed here, in JS, and bound as a plain
+    // timestamp parameter rather than as a `CURRENT_TIMESTAMP - INTERVAL`
+    // expression - see @ax/lib/duckdb/clause's `agoExpr` doc comment for why
+    // that expression needs two casts to bind at all. There is no `minutesAgoExpr`
+    // sibling there (this window is minutes, not days/hours); binding the
+    // cutoff directly sidesteps the whole cast question, and every value
+    // should bind as itself rather than as an expression anyway.
+    const since = new Date(Date.now() - win * 60_000);
+    const sql = [
         "SELECT file_path FROM hook_fire",
-        `WHERE session = ${params.sessionRid}`,
+        "WHERE session = ?",
         "  AND inject = true",
-        `  AND file_path IN [${list}]`,
-        `  AND ts >= time::now() - ${win}m`,
+        `  AND file_path IN (${placeholders})`,
+        "  AND ts >= ?",
         "LIMIT 100;",
     ].join("\n");
+    return { sql, params: [params.sessionRid, ...params.filePaths, since] };
 }
 
 export interface FindRecentInjectsParams {
@@ -40,27 +44,27 @@ function parseSessionRid(value: string): string | null {
     const table = value.slice(0, idx);
     const id = value.slice(idx + 1);
     if (!table || !id) return null;
-    // Bare-alphanumeric-only IDs are safe unquoted. Anything else (hyphens,
-    // dots, UUIDs) gets backtick-wrapped - bare hyphens in SurrealQL parse as
-    // subtraction operators and break the query.
-    if (/^[A-Za-z0-9_]+$/.test(id)) return `${table}:${id}`;
-    return `${table}:\`${id.replace(/`/g, "")}\``;
+    return `${table}:${id.replaceAll("`", "")}`;
 }
 
 export const findRecentInjects = (
     params: FindRecentInjectsParams,
-): Effect.Effect<ReadonlySet<string>, DbError, SurrealClient> =>
+): Effect.Effect<ReadonlySet<string>, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         if (!params.sessionId || params.filePaths.length === 0) return new Set<string>();
         const sessionRid = parseSessionRid(params.sessionId);
         if (!sessionRid) return new Set<string>();
 
-        const db = yield* SurrealClient;
-        const sql = buildRecentInjectsQuery({
+        const cache = yield* CacheRead;
+        const query = buildRecentInjectsQuery({
             sessionRid,
             filePaths: params.filePaths,
             windowMinutes: params.windowMinutes,
         });
-        const [rows] = yield* db.query<[{ file_path: string }[]]>(sql);
+        const rows = yield* cache.rows(
+            Schema.Struct({ file_path: Schema.String }),
+            query.sql,
+            query.params,
+        );
         return new Set(rows.map((r) => r.file_path));
     });

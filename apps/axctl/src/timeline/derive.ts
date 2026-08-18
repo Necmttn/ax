@@ -1,6 +1,6 @@
 /**
  * Pure timeline derivation - raw typed rows in, SessionTimeline out. No Effect,
- * no SurrealDB, no LLM: every event is a deterministic projection of ingested
+ * no database, no LLM: every event is a deterministic projection of ingested
  * data, so this whole module is unit-testable with plain fixtures.
  */
 import { jsonArrayField, jsonRecordField } from "@ax/lib/decode";

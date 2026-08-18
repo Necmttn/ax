@@ -1,22 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer, PlatformError } from "effect";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, Layer, PlatformError, Schema } from "effect";
+import { BunPath } from "@effect/platform-bun";
+import { FixturePlatform, publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { pathToProjectSlug } from "@ax/lib/shared/project-slug";
 import {
-    buildCommitLookupQueries,
-    buildCommitUpsertStatement,
-    buildFileLookupQueries,
-    buildFileUpsertStatement,
-    buildProducedRelationStatements,
-    buildCanonicalProjectUpdate,
     buildSessionCheckoutWhere,
-    buildSessionCheckoutUpdateStatement,
     buildSessionRepoWhere,
-    buildTouchedRelationStatements,
-    producedRelationRecordKey,
-    touchedRelationRecordKey,
     deriveRepositoryDisplayName,
     nestedCheckoutPaths,
     ingestGit,
@@ -25,338 +15,81 @@ import {
     REPO_LIST_FILE,
 } from "./git.ts";
 
-describe("git ingest relation statements", () => {
-    test("scopes touched idempotency by commit and checkout", () => {
-        const common = {
-            commitId: "commit:`repo__abc`",
-            files: [
-                {
-                    fileId: "file:`repo__src_index_ts`",
-                    additions: 2,
-                    deletions: 1,
-                },
-            ],
-            repositoryId: "repository:`repo`",
-            ts: "2026-05-09T00:00:00.000Z",
-        };
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("git ingest", { requireFts: true });
 
-        const checkoutA = buildTouchedRelationStatements({
-            ...common,
-            checkoutId: "checkout:`a`",
-        });
-        const checkoutB = buildTouchedRelationStatements({
-            ...common,
-            checkoutId: "checkout:`b`",
-        });
-
-        // Deterministic edge keys differ across checkouts so sibling worktree evidence is preserved
-        const keyA = touchedRelationRecordKey("commit:`repo__abc`", "file:`repo__src_index_ts`", "checkout:`a`");
-        const keyB = touchedRelationRecordKey("commit:`repo__abc`", "file:`repo__src_index_ts`", "checkout:`b`");
-        expect(keyA).not.toBe(keyB);
-        expect(checkoutA.join("\n")).toContain(`touched:\`${keyA}\``);
-        expect(checkoutB.join("\n")).toContain(`touched:\`${keyB}\``);
-        expect(checkoutA.join("\n")).toContain("repository = repository:`repo`");
-        expect(checkoutB.join("\n")).toContain("repository = repository:`repo`");
-        expect(checkoutA.join("\n")).toContain("checkout = checkout:`a`");
-        expect(checkoutB.join("\n")).toContain("checkout = checkout:`b`");
-        expect(checkoutA.join("\n")).not.toContain("checkout:`b`");
-        expect(checkoutB.join("\n")).not.toContain("checkout:`a`");
-    });
-
-    test("touchedRelationRecordKey is deterministic per commit file checkout", () => {
-        expect(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"))
-            .toBe(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"));
-    });
-
-    test("touchedRelationRecordKey normalizes record-literal formatting", () => {
-        expect(touchedRelationRecordKey("commit:c1", "file:f1", "checkout:co1"))
-            .toBe(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"));
-    });
-
-    test("producedRelationRecordKey normalizes record-literal formatting", () => {
-        expect(producedRelationRecordKey("session:s1", "commit:c1"))
-            .toBe(producedRelationRecordKey("session:`s1`", "commit:`c1`"));
-    });
-
-    test("touched relation statements upsert deterministic relation ids", () => {
-        const statements = buildTouchedRelationStatements({
-            commitId: "commit:`c1`",
-            repositoryId: "repository:`r1`",
-            checkoutId: "checkout:`co1`",
-            ts: "2026-05-10T00:00:00.000Z",
-            files: [{ fileId: "file:`f1`", additions: 1, deletions: 2 }],
-        });
-        expect(statements.join("\n")).toContain("touched:");  // explicit edge id
-        expect(statements.join("\n")).toContain("RELATE commit:`c1`->touched:");
-        expect(statements.join("\n")).not.toContain("UPSERT touched:");
-        expect(statements.join("\n")).toContain("repository = repository:`r1`");
-        expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
-    });
-
-    test("produced relation statements include repository checkout and ts", () => {
-        const statements = buildProducedRelationStatements({
-            sessionIds: ["session:`s1`"],
-            commitId: "commit:`c1`",
-            repositoryId: "repository:`r1`",
-            checkoutId: "checkout:`co1`",
-            ts: "2026-05-10T00:00:00.000Z",
-        });
-        expect(statements.join("\n")).toContain("RELATE session:`s1`->produced:");
-        expect(statements.join("\n")).not.toContain("UPSERT produced:");
-        expect(statements.join("\n")).toContain("repository = repository:`r1`");
-        expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
-        expect(statements.join("\n")).toContain('ts = d"2026-05-10T00:00:00.000Z"');
-    });
-
-    test("looks up commits canonically before legacy checkout path rows", () => {
-        expect(
-            buildCommitLookupQueries({
-                repositoryId: "repository:`repo`",
-                stableRepo: "remote__repo",
-                checkoutPath: "/tmp/worktree-a",
-                sha: "abc123",
-            }),
-        ).toEqual([
-            'SELECT id FROM commit WHERE repository = repository:`repo` AND repo = "remote__repo" AND sha = "abc123" LIMIT 1;',
-            'SELECT id FROM commit WHERE repo = "remote__repo" AND sha = "abc123" LIMIT 1;',
-            'SELECT id FROM commit WHERE repository = repository:`repo` AND sha = "abc123" LIMIT 1;',
-            'SELECT id FROM commit WHERE repo = "/tmp/worktree-a" AND sha = "abc123" LIMIT 1;',
-        ]);
-    });
-
-    test("looks up files canonically before legacy checkout path rows", () => {
-        expect(
-            buildFileLookupQueries({
-                repositoryId: "repository:`repo`",
-                stableRepo: "remote__repo",
-                checkoutPath: "/tmp/worktree-a",
-                path: "src/index.ts",
-            }),
-        ).toEqual([
-            'SELECT id FROM file WHERE repository = repository:`repo` AND repo = "remote__repo" AND path = "src/index.ts" LIMIT 1;',
-            'SELECT id FROM file WHERE repo = "remote__repo" AND path = "src/index.ts" LIMIT 1;',
-            'SELECT id FROM file WHERE repository = repository:`repo` AND path = "src/index.ts" LIMIT 1;',
-            'SELECT id FROM file WHERE repo = "/tmp/worktree-a" AND path = "src/index.ts" LIMIT 1;',
-        ]);
-    });
-
-    test("writes commit and file node repo fields with stable repository identity", () => {
-        const commitStatement = buildCommitUpsertStatement({
-            id: "commit:`repo__abc123`",
-            stableRepo: "remote__repo",
-            repositoryId: "repository:`repo`",
-            sha: "abc123",
-            message: "msg",
-            author: "Ada",
-            ts: "2026-05-09T00:00:00.000Z",
-        });
-        const fileStatement = buildFileUpsertStatement({
-            id: "file:`repo__src_index_ts`",
-            stableRepo: "remote__repo",
-            repositoryId: "repository:`repo`",
-            path: "src/index.ts",
-        });
-
-        expect(commitStatement).toContain('repo: "remote__repo"');
-        expect(fileStatement).toContain('repo: "remote__repo"');
-        expect(commitStatement).not.toContain("/tmp/worktree-a");
-        expect(fileStatement).not.toContain("/tmp/worktree-a");
-        expect(commitStatement).not.toContain("checkout:");
-        expect(fileStatement).not.toContain("checkout:");
-    });
-
-    test("links sessions to checkout with exact path boundary", () => {
-        const where = buildSessionRepoWhere("/tmp/worktree-a");
-        const statement = buildSessionCheckoutUpdateStatement(
-            "/tmp/worktree-a",
-            "repository:`repo`",
-            "checkout:`checkout-a`",
-        );
-
-        expect(where).toBe(
-            '(cwd = "/tmp/worktree-a" OR string::starts_with(cwd ?? "", "/tmp/worktree-a/"))',
-        );
-        expect(statement).toBe(
-            'UPDATE session SET repository = repository:`repo`, checkout = checkout:`checkout-a` WHERE (cwd = "/tmp/worktree-a" OR string::starts_with(cwd ?? "", "/tmp/worktree-a/")) RETURN NONE;',
-        );
-        expect(statement).not.toContain("/tmp/worktree-ab");
-    });
-
-    test("excludes nested checkout roots from parent checkout session linking", () => {
-        expect(
-            nestedCheckoutPaths("/repo", [
-                "/repo",
-                "/repo/.worktrees/feature-a",
-                "/repo/.worktrees/feature-a/packages/app",
-                "/repo2/.worktrees/feature-b",
-            ]),
-        ).toEqual([
-            "/repo/.worktrees/feature-a/packages/app",
-            "/repo/.worktrees/feature-a",
-        ]);
-
-        const where = buildSessionCheckoutWhere("/repo", ["/repo/.worktrees/feature-a"]);
-        const statement = buildSessionCheckoutUpdateStatement(
-            "/repo",
-            "repository:`repo`",
-            "checkout:`main`",
-            ["/repo/.worktrees/feature-a"],
-        );
-
-        expect(where).toBe(
-            '((cwd = "/repo" OR string::starts_with(cwd ?? "", "/repo/")) AND NOT ((cwd = "/repo/.worktrees/feature-a" OR string::starts_with(cwd ?? "", "/repo/.worktrees/feature-a/"))))',
-        );
-        expect(statement).toContain("checkout = checkout:`main`");
-        expect(statement).toContain("AND NOT");
-        expect(statement).toContain("/repo/.worktrees/feature-a/");
-    });
-
+describe("git path derivation", () => {
     test("derives repository display name from remote before checkout path", () => {
-        expect(
-            deriveRepositoryDisplayName(
-                "github.com/acme/myapp",
-                "/Users/necmttn/Projects/myapp/.claude/worktrees/fix-kg",
-            ),
-        ).toBe("myapp");
-        expect(deriveRepositoryDisplayName(null, "/tmp/worktree-a")).toBe("worktree-a");
+        expect(deriveRepositoryDisplayName("github.com/Necmttn/ax", "/tmp/other")).toBe("ax");
+        expect(deriveRepositoryDisplayName(null, "/Users/me/Projects/local-repo")).toBe("local-repo");
     });
 
-    test("canonicalizes session.project off the repository edge, collapsing every harness + worktree", () => {
-        // Same repo, sessions keyed many ways: claude dash-slug, codex raw cwd,
-        // worktree slugs. Keying the rewrite on the `repository` edge (not cwd)
-        // unifies them all - including orphan-worktree sessions whose checkout
-        // dir no longer exists on disk - onto one canonical slug.
-        const statement = buildCanonicalProjectUpdate(
-            "repository:`remote__github_com_necmttn_ax__1714814dc1199312`",
-            "-Users-necmttn-Projects-ax",
-        );
-        expect(statement).toBe(
-            'UPDATE session SET project = "-Users-necmttn-Projects-ax" ' +
-                "WHERE repository = repository:`remote__github_com_necmttn_ax__1714814dc1199312` " +
-                'AND (project IS NONE OR project != "-Users-necmttn-Projects-ax") RETURN NONE;',
-        );
+    test("finds nested checkout roots under the parent checkout", () => {
+        expect(nestedCheckoutPaths("/repo", ["/repo", "/repo/.claude/worktrees/a", "/other"]))
+            .toEqual(["/repo/.claude/worktrees/a"]);
+    });
+
+    test("binds repository and checkout paths as parameters", () => {
+        const repo = buildSessionRepoWhere("/repo/it's-main");
+        expect(repo.sql).not.toContain("/repo");
+        expect(repo.params).toEqual(["/repo/it's-main", "/repo/it's-main/%"]);
+
+        const checkout = buildSessionCheckoutWhere("/repo", ["/repo/worktree"]);
+        expect(checkout.sql).not.toContain("/repo");
+        expect(checkout.params).toEqual(["/repo", "/repo/%", "/repo/worktree", "/repo/worktree/%"]);
     });
 });
 
-describe("ingestGit repoPaths bypass", () => {
-    test("when repoPaths is provided, only that path's repo is written", async () => {
-        // Minimal stubs so writeRepo / linkedSessionCount / etc. don't crash.
-        // Return an empty array for any SELECT, and void for UPDATE/UPSERT/RELATE.
-        const fakeDb = makeTestSurrealClient();
-        const issued = fakeDb.captured;
-
-        // Use this test checkout as the target - it is a real git repo in CI
-        // and in local worktrees, so buildRepoInfo succeeds without depending
-        // on a developer-specific path.
-        const repoRoot = process.cwd();
-
-        const result = await Effect.runPromise(
-            ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
-                Effect.provide(
-                    Layer.mergeAll(
-                        fakeDb.layer,
-                        BunFileSystem.layer,
-                        BunPath.layer,
-                    ),
-                ),
-            ),
-        );
-
-        // We got at least one repo processed (the path we supplied).
-        expect(result.repos).toBe(1);
-
-        // At least one UPSERT or SELECT should reference the repo - just confirm
-        // something was issued (meaning discovery was bypassed and writeRepo ran).
-        expect(issued.length).toBeGreaterThan(0);
-    });
-
-    test("issues a canonical-project UPDATE keyed by the repository edge", async () => {
-        const fakeDb = makeTestSurrealClient();
-        const issued = fakeDb.captured;
-
-        const repoRoot = process.cwd();
-        const expectedSlug = pathToProjectSlug(repoRoot);
-
-        await Effect.runPromise(
-            ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
-                Effect.provide(
-                    Layer.mergeAll(
-                        fakeDb.layer,
-                        BunFileSystem.layer,
-                        BunPath.layer,
-                    ),
-                ),
-            ),
-        );
-
-        const canonical = issued.find(
-            (sql) => sql.includes("SET project =") && sql.includes("WHERE repository ="),
-        );
-        expect(canonical).toBeDefined();
-        expect(canonical).toContain(`SET project = "${expectedSlug}"`);
-    });
-
-    test("when repoPaths is empty array, falls back to discovery (returns 0 repos on empty DB)", async () => {
-        const fakeDb = makeTestSurrealClient();
-
-        const result = await Effect.runPromise(
-            ingestGit({ repoPaths: [], sinceDays: 1 }).pipe(
-                Effect.provide(
-                    Layer.mergeAll(
-                        fakeDb.layer,
-                        BunFileSystem.layer,
-                        BunPath.layer,
-                    ),
-                ),
-            ),
-        );
-
-        // Empty repoPaths → falls back to discoverRepos → nothing discovered from
-        // empty DB sessions → 0 repos.
-        expect(result.repos).toBe(0);
-    });
-});
-
-describe("git discovery best-effort tolerance (review fix #1)", () => {
+describe("git discovery best-effort tolerance", () => {
     const permissionDenied = (method: string, path: string) =>
         PlatformError.systemError({
-            _tag: "PermissionDenied",
-            module: "FileSystem",
-            method,
-            pathOrDescriptor: path,
+            _tag: "PermissionDenied", module: "FileSystem", method, pathOrDescriptor: path,
         });
 
-    test("readRepoListFile recovers a non-NotFound (PermissionDenied) repo-list read to []", async () => {
+    test("readRepoListFile recovers a permission error to an empty list", async () => {
         const out = await Effect.runPromise(
-            readRepoListFile().pipe(
-                Effect.provide(
-                    layerTestFileSystem(
-                        {},
-                        { errors: { [REPO_LIST_FILE]: permissionDenied("readFileString", REPO_LIST_FILE) } },
-                    ),
-                ),
-            ),
+            readRepoListFile().pipe(Effect.provide(layerTestFileSystem(
+                {}, { errors: { [REPO_LIST_FILE]: permissionDenied("readFileString", REPO_LIST_FILE) } },
+            ))),
         );
-        // A faulty optional-config read must NOT abort - it yields an empty list.
         expect(out).toEqual([]);
     });
 
-    test("isGitRepo recovers a non-NotFound (PermissionDenied) .git probe to false", async () => {
+    test("isGitRepo recovers a permission error to false", async () => {
         const probePath = "/locked-repo/.git";
         const out = await Effect.runPromise(
             isGitRepo("/locked-repo").pipe(
-                Effect.provide(
-                    Layer.merge(
-                        layerTestFileSystem(
-                            {},
-                            { errors: { [probePath]: permissionDenied("exists", probePath) } },
-                        ),
-                        BunPath.layer,
-                    ),
-                ),
+                Effect.provide(Layer.merge(
+                    layerTestFileSystem({}, { errors: { [probePath]: permissionDenied("exists", probePath) } }),
+                    BunPath.layer,
+                )),
             ),
         );
-        // A failed discovery probe means "not a repo", not a defect.
         expect(out).toBe(false);
+    });
+});
+
+describe("git ingest on real DuckDB", () => {
+    dtest("uses the requested repository path and writes its checkout", async () => {
+        const repoRoot = process.cwd();
+        let stats: unknown;
+        let rows: readonly unknown[] = [];
+
+        await runWithPlatform(publishCacheFixture(tempDir("ax-git-ingest-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                stats = yield* ingestGit(write, { repoPaths: [repoRoot], sinceDays: 1 }).pipe(
+                    Effect.provide(FixturePlatform),
+                );
+                rows = yield* write.rows(
+                    Schema.Struct({ root_path: Schema.String, checkout_count: Schema.Number }),
+                    `SELECT r.root_path, count(c.id)::INTEGER AS checkout_count
+                     FROM repository r
+                     JOIN checkout c ON c.repository = r.id
+                     GROUP BY r.root_path`,
+                );
+            }),
+        ));
+
+        expect(stats).toMatchObject({ repos: 1 });
+        expect(rows).toEqual([{ root_path: repoRoot, checkout_count: 1 }]);
     });
 });

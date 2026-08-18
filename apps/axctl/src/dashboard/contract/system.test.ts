@@ -1,29 +1,30 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
+import { Effect, Layer, Option } from "effect";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { DuckDbQueryError } from "@ax/lib/duckdb/errors";
 import { AX_VERSION } from "../../cli/version.ts";
 import { API_VERSION } from "../capabilities.ts";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
-/** Stub DB: SELECT echoes a canned row set; "boom" SQL fails with DbError. */
-const stubDb = Layer.mock(SurrealClient, {
-    query: <T extends unknown[] = unknown[]>(sql: string, _bindings?: Record<string, unknown> | undefined): Effect.Effect<T, DbError, never> =>
+/** Stub CacheRead: `rows`/`first` (fetchWorktreesOverview's many small
+ *  queries) degrade to empty, same as a real dylib-less test run - that
+ *  view only asserts response shape, not content. `raw` (/api/self-improve)
+ *  echoes a canned row, or fails with a DuckDbQueryError for SQL containing
+ *  "boom" (see system.ts's module doc). */
+const stubCacheReadService: CacheReadService = {
+    rows: () => Effect.succeed([]),
+    first: () => Effect.succeed(Option.none()),
+    raw: (sql) =>
         sql.includes("boom")
-            ? Effect.fail(new DbError({ operation: "query", message: "boom: db exploded" }))
-            : Effect.succeed([[{ ok: true }]] as unknown as T),
-    // `raw` is the only non-effect member, so Layer.mock requires it; the
-    // contract handlers never touch it.
-    raw: null as never,
-});
+            ? Effect.fail(new DuckDbQueryError({ sql, message: "boom: db exploded" }))
+            : Effect.succeed({ columns: [], rows: [{ ok: true }], rowsChanged: 0 }),
+    snapshotPath: "(test stub)",
+};
+const stubCacheRead = Layer.succeed(CacheRead)(stubCacheReadService);
 
 const handlers: ContractWebHandler[] = [];
-function make(liveIngest = false): ContractWebHandler {
-    // A truthy fake stream handle is enough: version only null-checks it.
-    const h = makeContractWebHandler({
-        ingestStream: liveIngest ? ({} as never) : null,
-        services: stubDb,
-    });
+function make(): ContractWebHandler {
+    const h = makeContractWebHandler({ cacheRead: stubCacheRead });
     handlers.push(h);
     return h;
 }
@@ -44,15 +45,17 @@ describe("isContractRequest", () => {
     test("owns exactly the migrated (method, path) pairs", () => {
         // /api/version is in the contract (docs, generated client) but is
         // ROUTED to the DB-free legacy row so the daemon's identity probe
-        // keeps answering when SurrealDB is down - see web-handler.ts.
+        // keeps answering when the DB is down - see web-handler.ts.
         expect(isContractRequest("GET", "/api/version")).toBe(false);
-        expect(isContractRequest("POST", "/api/query")).toBe(true);
+        expect(isContractRequest("GET", "/api/worktrees")).toBe(true);
         expect(isContractRequest("GET", "/docs")).toBe(true);
         expect(isContractRequest("GET", "/openapi.json")).toBe(true);
         // Non-GET on a migrated GET path stays with the legacy table (its
         // method-ANY quirk) until the family is fully cut over.
         expect(isContractRequest("POST", "/api/version")).toBe(false);
-        expect(isContractRequest("GET", "/api/query")).toBe(false);
+        // Retired (studio ephemeral, wave 3): never routes anywhere now.
+        expect(isContractRequest("POST", "/api/query")).toBe(false);
+        expect(isContractRequest("GET", "/api/graph-health")).toBe(false);
         // The deliberately-unmigrated route never routes here.
         expect(isContractRequest("GET", "/api/graph-explorer")).toBe(false);
     });
@@ -60,76 +63,25 @@ describe("isContractRequest", () => {
 
 describe("contract system group", () => {
     test("GET /api/version matches the legacy response shape", async () => {
-        const { handler } = make(true);
+        const { handler } = make();
         const res = await handler(req("GET", "/api/version"));
         expect(res.status).toBe(200);
-        const body = await res.json() as Record<string, unknown>;
+        const body = await res.json() as {
+            readonly version: string;
+            readonly api_version: number;
+            readonly capabilities: readonly string[];
+            readonly live_ingest: boolean;
+            readonly otlp_receiver: boolean;
+        };
         expect(body.version).toBe(AX_VERSION);
         expect(body.api_version).toBe(API_VERSION);
         expect(body.capabilities).toContain("sessions");
-        expect(body.live_ingest).toBe(true);
-        expect(body.otlp_receiver).toBe(true);
-    });
-
-    test("version reports live_ingest false when the sidecar is down", async () => {
-        const { handler } = make(false);
-        const res = await handler(req("GET", "/api/version"));
-        expect(((await res.json()) as { live_ingest: boolean }).live_ingest).toBe(false);
-    });
-
-    test("POST /api/query rejects non-read SQL with 400 (legacy parity)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "DELETE FROM session" }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({
-            error: "Only a single SELECT, RETURN, or INFO statement is allowed",
-        });
-    });
-
-    test("POST /api/query rejects a stacked write after a read (multi-statement)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT 1; DELETE FROM session" }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({
-            error: expect.stringContaining("single"),
-        });
-    });
-
-    test("POST /api/query still accepts a single read with a trailing semicolon", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session;" }));
-        expect(res.status).toBe(200);
-    });
-
-    test("POST /api/query rejects empty SQL with 400", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "   " }));
-        expect(res.status).toBe(400);
-        await expect(res.json()).resolves.toMatchObject({ error: "SQL is required" });
-    });
-
-    test("POST /api/query returns result + durationMs", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT * FROM session" }));
-        expect(res.status).toBe(200);
-        const body = await res.json() as { result: unknown; durationMs: number };
-        expect(body.result).toEqual([[{ ok: true }]]);
-        expect(typeof body.durationMs).toBe("number");
-    });
-
-    test("POST /api/query maps DbError to 400 (legacy parity)", async () => {
-        const { handler } = make();
-        const res = await handler(req("POST", "/api/query", { sql: "SELECT boom" }));
-        expect(res.status).toBe(400);
-        const body = await res.json() as { error: string };
-        expect(body.error).toContain("boom");
-    });
-
-    test("GET /api/graph-health passes rows through", async () => {
-        const { handler } = make();
-        const res = await handler(req("GET", "/api/graph-health"));
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual([[{ ok: true }]]);
+        // live_ingest is retired (the in-browser trigger + sidecar are gone).
+        // otlp_receiver must AGREE with the capability list in the same body -
+        // it was hardcoded `false` while "otlp" was advertised and
+        // `POST /v1/logs` answered 200.
+        expect(body.live_ingest).toBe(false);
+        expect(body.otlp_receiver).toBe(body.capabilities.includes("otlp"));
     });
 
     test("GET /api/worktrees returns activity + git", async () => {
@@ -157,7 +109,10 @@ describe("contract docs", () => {
         expect(res.status).toBe(200);
         const spec = await res.json() as { paths: Record<string, unknown> };
         expect(Object.keys(spec.paths)).toEqual(expect.arrayContaining([
-            "/api/version", "/api/query", "/api/graph-health", "/api/worktrees", "/api/self-improve",
+            "/api/version", "/api/worktrees", "/api/self-improve",
+        ]));
+        expect(Object.keys(spec.paths)).not.toEqual(expect.arrayContaining([
+            "/api/query", "/api/graph-health",
         ]));
     });
 });

@@ -1,7 +1,6 @@
 import { Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { AxConfigLive } from "./config.ts";
-import { SurrealClientLive } from "./db.ts";
 import { ProcessServiceLive } from "./process.ts";
 import { LiveTraceLayer } from "./live-traces/Tracer.ts";
 import { TraceSinkLive, TraceTransportTag } from "./live-traces/Sink.ts";
@@ -17,7 +16,12 @@ import { otlpTelemetryFromEnv } from "./otel.ts";
  *      CLI entrypoints layer `ConsoleTransportLayer` on top when `--debug` is set.
  *   2. TraceSinkLive - buffered sink + flush daemon over the transport
  *   3. LiveTraceLayer - Effect tracer decorator that emits to the sink
- *   4. SurrealClient, AxConfig, ProcessService - library services
+ *   4. AxConfig, ProcessService - library services
+ *
+ * NO database client. Storage reaches callers through two narrower seams -
+ * `CacheRead` for the published DuckDB snapshot and `withCacheWrite` under the
+ * ingest lock for the live one - so a consumer of `AppLayer` acquires no engine
+ * handle on the way in.
  *
  * The Ingest Stage registry is NOT included here. CLI entrypoints compose
  * `StageRegistryDefault` on top of `AppLayer` via `IngestRuntimeLayer`.
@@ -43,8 +47,7 @@ const PlatformLive = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 // `provideMerge` re-exposes them so consumers still see FileSystem + Path.
 const AxConfigProvided = AxConfigLive.pipe(Layer.provideMerge(PlatformLive));
 
-const AppLayerSansTransport = SurrealClientLive.pipe(
-    Layer.provideMerge(AxConfigProvided),
+const AppLayerSansTransport = AxConfigProvided.pipe(
     Layer.merge(ProcessServiceLive),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),

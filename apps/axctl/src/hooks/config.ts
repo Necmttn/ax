@@ -1,7 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
 import { decodeJsonOrNull, jsonParseErrorText } from "@ax/lib/decode";
 import { findGitRoot } from "../project/git.ts";
@@ -30,7 +29,7 @@ import type {
  * declarations with fired-count evidence from `hook_command_invocation`.
  *
  * Pure codec logic lives in the providers; this layer owns the FileSystem and
- * DB seams (deps: HookProviderRegistry | FileSystem | Path | SurrealClient).
+ * cache seams (deps: HookProviderRegistry | FileSystem | Path | CacheRead).
  */
 
 const SCOPES: ReadonlyArray<HookScope> = ["global", "project", "local"];
@@ -109,8 +108,8 @@ export const readAllHooks = (
     opts: ReadOptions = {},
 ): Effect.Effect<
     ReadonlyArray<ConfiguredHookWithEvidence>,
-    PlatformError | HookConfigParseError | HookConfigSchemaError | DbError,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    PlatformError | HookConfigParseError | HookConfigSchemaError,
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
 > =>
     Effect.gen(function* () {
         const registry = yield* HookProviderRegistry;

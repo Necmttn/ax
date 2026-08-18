@@ -52,21 +52,35 @@ const startup = Effect.gen(function* () {
     // 4. Wire before-quit / activate / window-all-closed / SIGINT / SIGTERM.
     yield* lifecycle.register;
 
-    // 5. Phase 2: hand control to the backend supervisor. It runs arbitration,
-    //    orders surreal -> ax serve (or attaches to an existing pair), and opens
+    // 5. Phase 2: hand control to the backend supervisor. It runs arbitration
+    //    (spawns `ax studio`, or attaches to an already-running one), and opens
     //    the window once the backend is ready.
     yield* backendManager.start;
 
     // 5b. Keep the graph fresh while the app is open (IDE daemon model - no
     //     background agent). Fire an immediate ingest catch-up, then one every
-    //     few minutes, reusing the running daemon's live-ingest pipeline via
-    //     POST /api/ingest. Forked into the program scope so it is interrupted on
-    //     shutdown. Self-healing: a failed run (e.g. serve not ready at the first
-    //     tick) is logged and retried on the next tick, so it is safe to start
-    //     here without gating on backend readiness. See
+    //     few minutes, by spawning `bun <axSourceEntry> ingest --since=<N>` as a
+    //     short-lived child process (wave 3, `c-desktop-realign`: `ax studio`
+    //     is a read-only ephemeral process now - there is no more `POST
+    //     /api/ingest` daemon endpoint to trigger a run through). Forked into
+    //     the program scope so it is interrupted on shutdown. Self-healing: a
+    //     failed run is logged and retried on the next tick (never gated on
+    //     backend readiness - ingest owns its own snapshot publish, independent
+    //     of whether `ax studio` is up). See
     //     docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md
     yield* Effect.forkScoped(
-        DesktopIngestScheduler.run({ sinceDays: 7, interval: Duration.minutes(2) }),
+        DesktopIngestScheduler.run({
+            env: {
+                bunBinaryPath: environment.bunBinaryPath,
+                axSourceEntry: environment.axSourceEntry,
+                axSourceRoot: AxBackendManager.deriveAxSourceRoot(
+                    environment.axSourceEntry,
+                    environment.path,
+                ),
+            },
+            sinceDays: 7,
+            interval: Duration.minutes(2),
+        }),
     );
 
     // 6. Phase 3: kick off an electron-updater check. The update feed comes from
@@ -148,14 +162,14 @@ const scopedProgram = Effect.scoped(
         // Explicitly tear down the supervised backend BEFORE the scope-close
         // `markComplete` finalizer unblocks the before-quit handler (the manager's
         // own stop finalizer runs on the outer layer scope, which races app exit
-        // and orphans the spawned processes). Bounded by a timeout so a stuck
-        // stop can never hang the quit: the spawned `bun ax serve` ignores
+        // and orphans the spawned process). Bounded by a timeout so a stuck
+        // stop can never hang the quit: the spawned `bun ax studio` ignores
         // SIGTERM, so teardown depends on the supervisor's forceKill SIGKILL; if
         // that doesn't land in time we still proceed to quit rather than wedge
         // the app. `stop` is idempotent (the finalizer backstop is harmless).
-        // KNOWN ISSUE (found by live spawn dogfooding): if forceKill doesn't
-        // escalate, the spawned ax-serve can outlive the app - see the
-        // SupervisedProcess SIGKILL-escalation TODO.
+        // KNOWN ISSUE (found by live spawn dogfooding, pre-dates this port): if
+        // forceKill doesn't escalate, the spawned `ax studio` can outlive the
+        // app - see the SupervisedProcess SIGKILL-escalation TODO.
         yield* backendManager.stop().pipe(
             Effect.timeout(Duration.seconds(6)),
             Effect.ignore,

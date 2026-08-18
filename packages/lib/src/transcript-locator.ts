@@ -2,7 +2,7 @@
  * TranscriptLocator - given a session id, find its on-disk JSONL transcript
  * and identify the harness (claude vs codex) that produced it.
  *
- * Strategy is DB-first, disk-fallback:
+ * Strategy is CACHE-first, disk-fallback:
  *   1. Read the persisted `raw_file` column off the session row. Synthetic
  *      session ids (e.g. `claude-subagent-<agentId>`) don't match the
  *      filename patterns the disk search scans for, so the hint is the only
@@ -19,10 +19,10 @@
  */
 
 import { homedir } from "node:os";
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { SurrealClient } from "./db.ts";
-import { toBareSessionId, toSessionRid } from "./shared/session-id.ts";
+import { CacheRead } from "./duckdb/seam.ts";
+import { toBareSessionId } from "./shared/session-id.ts";
 
 export type Harness = "claude" | "codex";
 
@@ -123,29 +123,42 @@ const findCodexJsonl = (
         return null;
     });
 
+const RawFileRow = Schema.Struct({ raw_file: Schema.NullOr(Schema.String) });
+
 /** Pull the persisted transcript path (`raw_file`) off the session row.
- *  Defensive: DB error or missing row degrades to null so the search-based
+ *  Defensive: cache error or missing row degrades to null so the search-based
  *  fallback still runs. Mirrors the shape of the other defensive resolvers
- *  in the inspector (see `resolveParent`). */
-const resolveRawFileFromDb = (sessionId: string): Effect.Effect<string | null, never, SurrealClient> =>
+ *  in the inspector (see `resolveParent`).
+ *
+ *  NOTE the failure mode this hides, and why it still degrades rather than
+ *  fails: a `null` here is indistinguishable from "no hint recorded", and the
+ *  disk search that follows CANNOT find a synthetic subagent id
+ *  (`claude-subagent-<agentId>` matches no on-disk filename). So a broken read
+ *  here is not an error the caller sees - it is a subagent transcript that
+ *  reports "not found". That is the silent regression this port removes, and
+ *  the reason the id is a BOUND parameter now: the Surreal spelling spliced a
+ *  record id into statement text against a table nothing writes any more. */
+const resolveRawFileFromCache = (
+    sessionId: string,
+): Effect.Effect<string | null, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sessionRid = toSessionRid(toBareSessionId(sessionId));
-        const [rows] = yield* db.query<[Array<{ raw_file: string | null }>]>(`
-            SELECT raw_file FROM ${sessionRid} LIMIT 1;
-        `);
-        const row = rows[0];
-        if (!row) return null;
-        return typeof row.raw_file === "string" && row.raw_file.length > 0 ? row.raw_file : null;
+        const cache = yield* CacheRead;
+        const rows = yield* cache.rows(
+            RawFileRow,
+            "SELECT raw_file FROM session WHERE id = ? LIMIT 1",
+            [toBareSessionId(sessionId)],
+        );
+        const raw = rows[0]?.raw_file;
+        return typeof raw === "string" && raw.length > 0 ? raw : null;
     }).pipe(Effect.catch((err) =>
         Effect.sync(() => {
-            console.error("transcript-locator resolveRawFileFromDb failed:", err);
+            console.error("transcript-locator resolveRawFileFromCache failed:", err);
             return null as string | null;
         }),
     ));
 
 /** Disk-only resolution: try the hint, then claude search, then codex search.
- *  No DB dep so it can be exercised without a SurrealClient layer. */
+ *  No stored-data dep, so it can be exercised without any read seam. */
 const findOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
@@ -181,15 +194,15 @@ export const locateTranscript = (
 ): Effect.Effect<
     FoundTranscript,
     TranscriptNotFoundError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheRead | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
-        const hint = yield* resolveRawFileFromDb(sessionId);
+        const hint = yield* resolveRawFileFromCache(sessionId);
         return yield* findOnDisk(sessionId, hint);
     });
 
 /** Disk-only variant exposed for tests that don't want to spin up a fake
- *  SurrealClient just to exercise the hint + search logic. */
+ *  read seam just to exercise the hint + search logic. */
 export const locateTranscriptOnDisk = (
     sessionId: string,
     rawFileHint: string | null,

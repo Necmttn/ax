@@ -23,7 +23,7 @@ const REQUIREMENTS = [
     n: "01",
     title: "Capture while context is warm",
     body:
-      "The reflection has to land while the agent still has its context loaded. ax does this pull-based - a background watcher ingests sessions as they land, and /retro drains the pending ones using idle plan quota. No Stop hook wedged into the turn (it would fire per-turn and block the agent).",
+      "The reflection has to land while the agent still has its context loaded. ax does this pull-based - a stale read quietly forks a catch-up ingest, and /retro drains the pending ones using idle plan quota. No Stop hook wedged into the turn (it would fire per-turn and block the agent).",
   },
   {
     n: "02",
@@ -179,15 +179,15 @@ export function ManifestoContent() {
       <p>The surface is small on purpose:</p>
       <ul>
         <li>
-          <code>ax install</code> sets up the local graph and the background
-          watcher that tails your Claude Code and Codex transcript directories.
-          One command, one time. No Stop hook - it would fire per turn and block
-          the agent.
+          <code>ax install</code> sets up the local graph. Read a stale graph
+          and ax quietly forks a catch-up <code>ax ingest</code> against your
+          Claude Code and Codex transcripts. No Stop hook - it would fire per
+          turn and block the agent.
         </li>
         <li>
           <code>ax retro</code> (the slash-command skill) drains the pending
-          sessions the watcher ingested, walking you through triage in Claude
-          Code while idle plan quota does the reflection work.
+          sessions your last ingest picked up, walking you through triage in
+          Claude Code while idle plan quota does the reflection work.
         </li>
         <li>
           <code>ax improve list</code> shows the proposal queue derived from
@@ -202,7 +202,7 @@ export function ManifestoContent() {
           the outcome.
         </li>
         <li>
-          <code>ax serve</code> opens the improve-first dashboard - proposal
+          <code>ax studio</code> opens the improve-first dashboard - proposal
           deck, impact engine, and the experiments strip of past bets, measured.
         </li>
       </ul>

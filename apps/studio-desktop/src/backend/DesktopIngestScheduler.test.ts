@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as DesktopIngestScheduler from "./DesktopIngestScheduler.ts";
 
@@ -11,38 +13,86 @@ import * as DesktopIngestScheduler from "./DesktopIngestScheduler.ts";
 // Fakes
 // ---------------------------------------------------------------------------
 
+/** `ax ingest` is always built via `ChildProcess.make` (never piped), so this
+ *  narrows the `Command` union for assertions without a cast at every call site. */
+function asStandardCommand(command: ChildProcess.Command): ChildProcess.StandardCommand {
+    if (command._tag !== "StandardCommand") {
+        throw new Error(`expected a StandardCommand, got ${command._tag}`);
+    }
+    return command;
+}
+
+const testEnv: DesktopIngestScheduler.IngestEnv = {
+    bunBinaryPath: "/opt/ax/bun",
+    axSourceEntry: "/repo/apps/axctl/src/cli/index.ts",
+    axSourceRoot: "/repo",
+};
+
 /**
- * An HttpClient that records every request it is asked to execute and replies
- * with the supplied status. Lets a test assert what the ingest scheduler POSTs
- * without a real `ax serve` daemon.
+ * A `ChildProcessSpawner` that records every command spawned and resolves
+ * each spawn's exit code immediately with the given status - `ax ingest` is a
+ * one-shot run, so the fake never needs a real process lifecycle.
  */
-const recordingClient = (status = 200) => {
-    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-    const client = HttpClient.make((request) => {
-        requests.push(request);
+const recordingSpawner = (exitStatus = 0) => {
+    const commands: Array<ChildProcess.Command> = [];
+    const spawner = ChildProcessSpawner.make((command: ChildProcess.Command) => {
+        commands.push(command);
         return Effect.succeed(
-            HttpClientResponse.fromWeb(request, new Response(null, { status })),
+            ChildProcessSpawner.makeHandle({
+                pid: ChildProcessSpawner.ProcessId(1000 + commands.length),
+                exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitStatus)),
+                isRunning: Effect.succeed(false),
+                kill: () => Effect.void,
+                stdin: Sink.drain,
+                stdout: Stream.empty,
+                stderr: Stream.empty,
+                all: Stream.empty,
+                getInputFd: () => Sink.drain,
+                getOutputFd: () => Stream.empty,
+                unref: Effect.succeed(Effect.void),
+            }),
         );
     });
-    return { client, requests } as const;
+    return { spawner, commands } as const;
 };
 
 // ---------------------------------------------------------------------------
 // triggerIngest
 // ---------------------------------------------------------------------------
 
-test("triggerIngest POSTs to the local serve /api/ingest endpoint", async () => {
-    const { client, requests } = recordingClient();
+test("triggerIngest spawns `bun <axSourceEntry> ingest --since=<sinceDays>`", async () => {
+    const { spawner, commands } = recordingSpawner();
 
     await Effect.runPromise(
-        DesktopIngestScheduler.triggerIngest(7).pipe(
-            Effect.provideService(HttpClient.HttpClient, client),
+        DesktopIngestScheduler.triggerIngest(testEnv, 7).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
     );
 
-    expect(requests.length).toBe(1);
-    expect(requests[0]!.method).toBe("POST");
-    expect(requests[0]!.url).toContain("/api/ingest");
+    expect(commands.length).toBe(1);
+    const command = asStandardCommand(commands[0]!);
+    expect(command.command).toBe("/opt/ax/bun");
+    expect(command.args).toEqual([
+        "/repo/apps/axctl/src/cli/index.ts",
+        "ingest",
+        "--since=7",
+    ]);
+    expect(command.options.cwd).toBe("/repo");
+    // Without extendEnv:true the child gets NO environment at all (not even
+    // PATH/HOME) - see the comment in DesktopIngestScheduler.ts.
+    expect(command.options.extendEnv).toBe(true);
+});
+
+test("triggerIngest does not throw on a non-zero exit (logs and swallows)", async () => {
+    const { spawner, commands } = recordingSpawner(1);
+
+    await Effect.runPromise(
+        DesktopIngestScheduler.triggerIngest(testEnv, 1).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+    );
+
+    expect(commands.length).toBe(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -50,22 +100,23 @@ test("triggerIngest POSTs to the local serve /api/ingest endpoint", async () => 
 // ---------------------------------------------------------------------------
 
 test("run fires an initial ingest immediately, before any interval elapses", async () => {
-    const { client, requests } = recordingClient();
+    const { spawner, commands } = recordingSpawner();
 
     const program = Effect.scoped(
         Effect.gen(function* () {
             yield* Effect.forkScoped(
                 DesktopIngestScheduler.run({
+                    env: testEnv,
                     sinceDays: 7,
                     interval: Duration.minutes(5),
                 }),
             );
             // No interval elapses; only the immediate first run should have fired.
             yield* TestClock.adjust(Duration.zero);
-            return requests.length;
+            return commands.length;
         }),
     ).pipe(
-        Effect.provideService(HttpClient.HttpClient, client),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(TestClock.layer()),
     );
 
@@ -73,27 +124,28 @@ test("run fires an initial ingest immediately, before any interval elapses", asy
 });
 
 test("run fires again after each configured interval", async () => {
-    const { client, requests } = recordingClient();
+    const { spawner, commands } = recordingSpawner();
 
     const counts = await Effect.runPromise(
         Effect.scoped(
             Effect.gen(function* () {
                 yield* Effect.forkScoped(
                     DesktopIngestScheduler.run({
+                        env: testEnv,
                         sinceDays: 1,
                         interval: Duration.minutes(5),
                     }),
                 );
                 yield* TestClock.adjust(Duration.zero);
-                const afterInitial = requests.length;
+                const afterInitial = commands.length;
                 yield* TestClock.adjust(Duration.minutes(5));
-                const afterFirstTick = requests.length;
+                const afterFirstTick = commands.length;
                 yield* TestClock.adjust(Duration.minutes(5));
-                const afterSecondTick = requests.length;
+                const afterSecondTick = commands.length;
                 return { afterInitial, afterFirstTick, afterSecondTick };
             }),
         ).pipe(
-            Effect.provideService(HttpClient.HttpClient, client),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
             Effect.provide(TestClock.layer()),
         ),
     );
@@ -106,17 +158,29 @@ test("run fires again after each configured interval", async () => {
 });
 
 test("a failed ingest run does not stop the loop - it recovers on the next tick", async () => {
-    // The serve daemon is briefly unreachable: the first run fails, later runs
+    // The first spawn attempt fails outright (e.g. bun not found); later ticks
     // succeed. The scheduler must keep ticking rather than die on first failure.
-    let calls = 0;
-    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-    const client = HttpClient.make((request) => {
-        requests.push(request);
-        calls += 1;
-        return calls === 1
-            ? Effect.die(new Error("connection refused"))
+    const calls = { count: 0 };
+    const commands: Array<ChildProcess.Command> = [];
+    const spawner = ChildProcessSpawner.make((command: ChildProcess.Command) => {
+        commands.push(command);
+        calls.count += 1;
+        return calls.count === 1
+            ? Effect.die(new Error("ENOENT: bun not found"))
             : Effect.succeed(
-                  HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })),
+                  ChildProcessSpawner.makeHandle({
+                      pid: ChildProcessSpawner.ProcessId(2000 + commands.length),
+                      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+                      isRunning: Effect.succeed(false),
+                      kill: () => Effect.void,
+                      stdin: Sink.drain,
+                      stdout: Stream.empty,
+                      stderr: Stream.empty,
+                      all: Stream.empty,
+                      getInputFd: () => Sink.drain,
+                      getOutputFd: () => Stream.empty,
+                      unref: Effect.succeed(Effect.void),
+                  }),
               );
     });
 
@@ -125,18 +189,19 @@ test("a failed ingest run does not stop the loop - it recovers on the next tick"
             Effect.gen(function* () {
                 yield* Effect.forkScoped(
                     DesktopIngestScheduler.run({
+                        env: testEnv,
                         sinceDays: 1,
                         interval: Duration.minutes(5),
                     }),
                 );
                 yield* TestClock.adjust(Duration.zero);
-                const afterFailed = requests.length;
+                const afterFailed = commands.length;
                 yield* TestClock.adjust(Duration.minutes(5));
-                const afterRecovery = requests.length;
+                const afterRecovery = commands.length;
                 return { afterFailed, afterRecovery };
             }),
         ).pipe(
-            Effect.provideService(HttpClient.HttpClient, client),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
             Effect.provide(TestClock.layer()),
         ),
     );

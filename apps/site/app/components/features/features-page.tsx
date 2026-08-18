@@ -114,25 +114,25 @@ export function FeaturesPage() {
               <line x1="62" y1="44" x2="26" y2="64" stroke="#6b6b66" strokeWidth="1" />
             </svg>
             <span className="gname">graph</span>
-            <span className="gsub">SurrealDB · local</span>
+            <span className="gsub">DuckDB · local</span>
           </div>
         </div>
 
         <div className="section-body">
           <p>
-            A LaunchAgent (<code>com.necmttn.ax-watch</code>) tails your Claude and Codex transcript
-            directories and runs <code>ax ingest --since=1</code> in the background within seconds of a
-            new turn. A weekly self-improve cron for deep-scan backfill is on the roadmap (wire-up
-            pending). Nothing is uploaded, queued, or phoned home - every read stays on the same
-            filesystem your agent already writes to.
+            Reading drives the refresh: a command that finds the graph stale quietly forks a
+            catch-up <code>ax ingest --since=1</code> in the background, debounced - no LaunchAgent,
+            no tailing, nothing running while you're not using ax. A weekly self-improve cron for
+            deep-scan backfill is on the roadmap (wire-up pending). Nothing is uploaded, queued, or
+            phoned home - every read stays on the same filesystem your agent already writes to.
           </p>
         </div>
 
         <div className="cadence">
           <div className="item">
-            <span className="k">live</span>
+            <span className="k">read-driven</span>
             <span className="v">
-              <b>LaunchAgent</b> tails new turns, ingests in ~2s
+              <b>ax ingest</b> forks quietly when a read finds the graph stale
             </span>
           </div>
           <div className="item">
@@ -159,7 +159,7 @@ export function FeaturesPage() {
 
         <div className="graph-wrap">
           <div className="ascii-graph">
-            <span className="c">{`// schema sketch - SurrealDB v3, ns=ax, db=main`}</span>
+            <span className="c">{`// schema sketch - DuckDB, embedded`}</span>
             {`\n\n       `}
             <span className="n">session</span>
             {` ────▶ `}
@@ -640,7 +640,7 @@ export function FeaturesPage() {
             <span className="desc">Walk the intervention queue. Accept emits a task brief; lint reconciles the marker.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">ax serve</span>
+            <span className="cmd">ax studio</span>
             <span className="desc">
               Local web dashboard at <code className="inline">127.0.0.1:1738</code> with the same data the TUI sees.
             </span>
@@ -659,7 +659,7 @@ export function FeaturesPage() {
             <span className="cmd">
               ax ingest <span className="arg">--since=N</span>
             </span>
-            <span className="desc">What the LaunchAgent calls on every new transcript. Idempotent; safe to rerun.</span>
+            <span className="desc">What a stale read forks automatically, or you call it yourself. Idempotent; safe to rerun.</span>
           </div>
         </div>
       </section>
@@ -669,33 +669,33 @@ export function FeaturesPage() {
         <div className="section-head">
           <span className="section-num">07 / Local-first</span>
           <h2>
-            One process, one database, <em>one laptop.</em>
+            No daemon, one database, <em>one laptop.</em>
           </h2>
           <p className="section-lede">
-            ax is a single binary that runs as a LaunchAgent, talks only to localhost, and stores
-            everything in a SurrealDB instance you own.
+            ax is a single binary. It opens a local DuckDB file on demand, talks only to
+            localhost, and stores everything in a database you own.
           </p>
         </div>
 
         <div className="local-grid">
           <div className="local-card">
             <span className="lc-eye">database</span>
-            <span className="lc-val">127.0.0.1:8521</span>
+            <span className="lc-val">~/.ax/cache/ax-snapshot.duckdb</span>
             <span className="lc-desc">
-              SurrealDB v3, schemafull. Namespace <code className="inline">ax</code>, db{" "}
-              <code className="inline">main</code>.
+              DuckDB, a single embedded file. Rebuilt from your transcripts, git history, and
+              skills on <code className="inline">ax ingest</code>.
             </span>
           </div>
           <div className="local-card">
             <span className="lc-eye">dashboard</span>
             <span className="lc-val">127.0.0.1:1738</span>
-            <span className="lc-desc">Web UI for the graph, findings, and intervention queue. No auth - it&apos;s your loopback.</span>
+            <span className="lc-desc">Web UI for the graph, findings, and intervention queue. Opens on demand with <code className="inline">ax studio</code>; no auth - it&apos;s your loopback.</span>
           </div>
           <div className="local-card">
             <span className="lc-eye">daemon</span>
-            <span className="lc-val">LaunchAgent</span>
+            <span className="lc-val">none required</span>
             <span className="lc-desc">
-              macOS + Linux, installed by <code className="inline">ax install</code>. Survives reboots.
+              <code className="inline">ax ingest</code> writes under a lock; <code className="inline">ax studio</code> reads a snapshot and exits when you close it.
             </span>
           </div>
           <div className="local-card">

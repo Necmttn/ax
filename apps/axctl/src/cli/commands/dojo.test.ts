@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { gatedTest } from "@ax/lib/testing/gated-test";
 import {
     isValidKind,
     localDate,
@@ -330,9 +331,10 @@ describe("spar-score skill-spar brief dispatch (pure)", () => {
 // ---------------------------------------------------------------------------
 
 const LIVE_SMOKE = process.env["AX_LIVE_SMOKE"] === "1";
+const liveTest = gatedTest({ reason: "AX_LIVE_SMOKE=1 is not set", when: !LIVE_SMOKE });
 
 describe("spar-plan --skill live smoke", () => {
-    test.skipIf(!LIVE_SMOKE)(
+    liveTest(
         "writes a skill brief that round-trips through parseSkillSparBrief",
         () => {
             // Use 'caveman' as a well-known skill - it is installed in .ax/skills.

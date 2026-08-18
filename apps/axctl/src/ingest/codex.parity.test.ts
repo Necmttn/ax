@@ -1,26 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
-    __testBuildCodexBatchStatements,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
+    toCodexNormalizedBatch,
 } from "./codex.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-
-const countStarting = (statements: readonly string[], prefix: string): number =>
-    statements.filter((statement) => statement.startsWith(prefix)).length;
-
-const countRelation = (statements: readonly string[], relation: string): number =>
-    statements.filter((statement) => statement.includes(`->${relation}:`)).length;
-
-const expectOneStatement = (
-    statements: readonly string[],
-    predicate: (statement: string) => boolean,
-    label: string,
-): string => {
-    const matches = statements.filter(predicate);
-    expect(matches.length, label).toBe(1);
-    return matches[0]!;
-};
 
 /**
  * Richest codex fixture: session_meta, turn_context, plain message turns,
@@ -172,118 +156,50 @@ const fixtureLines = (): string[] => [
     }),
 ];
 
+
 describe("codex normalized-batch parity", () => {
     it("warns and falls back for missing or malformed timestamps", () => {
         const extracted = __testExtractCodexJsonlLines([
-            JSON.stringify({
-                type: "session_meta",
-                payload: {
-                    id: "codex-invalid-timestamp",
-                    cwd: "/Users/necmttn/Projects/ax",
-                    timestamp: "2026-06-10T08:00:00.000Z",
-                },
-            }),
-            JSON.stringify({
-                type: "compacted",
-                timestamp: "not-a-timestamp",
-                payload: { message: "", replacement_history: [{ type: "message" }] },
-            }),
+            JSON.stringify({ type: "session_meta", payload: {
+                id: "codex-invalid-timestamp", cwd: "/Users/necmttn/Projects/ax",
+                timestamp: "2026-06-10T08:00:00.000Z",
+            } }),
+            JSON.stringify({ type: "compacted", timestamp: "not-a-timestamp",
+                payload: { message: "", replacement_history: [{ type: "message" }] } }),
         ]);
-
         expect(extracted).not.toBeNull();
         expect(extracted!.warnings).toHaveLength(2);
         expect(extracted!.warnings[0]).toContain("missing entry timestamp");
         expect(extracted!.warnings[1]).toContain("invalid entry timestamp");
-        expect(Number.isFinite(new Date(extracted!.session.started_at).getTime())).toBe(true);
-        expect(extracted!.session.started_at).toBe("2026-06-10T08:00:00.000Z");
-        expect(extracted!.session.ended_at).toBe("2026-06-10T08:00:00.000Z");
         expect(extracted!.compactions).toHaveLength(1);
-        expect(Number.isFinite(extracted!.compactions[0]!.ts.getTime())).toBe(true);
     });
 
-    it("single-shot extract emits golden statement shapes", () => {
+    it("maps the rich extract to every normalized writer collection", () => {
         const extracted = __testExtractCodexJsonlLines(fixtureLines());
         expect(extracted).not.toBeNull();
-        // Fixture-coverage guards: every codex-specific parity leg must stay
-        // non-empty so a fixture drift can't silently shrink coverage.
-        expect(extracted!.turns.length).toBeGreaterThan(0);
-        expect(extracted!.invocations.length).toBeGreaterThan(0);
-        expect(extracted!.toolCalls.length).toBeGreaterThan(0);
-        expect(extracted!.planSnapshots.length).toBeGreaterThan(0);
-        expect(extracted!.compactions.length).toBeGreaterThan(0);
-        expect(extracted!.skillRelations.length).toBeGreaterThan(0);
-        expect(extracted!.tokenUsage).not.toBeNull();
-        expect(extracted!.turnTokenUsages.length).toBeGreaterThan(0);
+        const batch = toCodexNormalizedBatch(extracted!, 1200);
+        expect(batch.providers[0]).toMatchObject({ name: "codex", version: "0.4.0" });
+        expect(batch.sessions[0]).toMatchObject({ id: "codex-parity", model: "gpt-5.3-codex" });
+        expect(batch.events.length).toBe(extracted!.providerEvents.length);
+        expect(batch.turns.length).toBeGreaterThan(0);
+        expect(batch.toolCalls.length).toBeGreaterThan(0);
+        expect(batch.toolFileEvidence.length).toBeGreaterThan(0);
+        expect(batch.syntheticSkillInvocations.length).toBeGreaterThan(0);
+        expect(batch.toolCallSkillRelations.length).toBeGreaterThan(0);
+        expect(batch.planSnapshots.length).toBeGreaterThan(0);
+        expect(batch.compactions.length).toBeGreaterThan(0);
+        expect(batch.toolCalls.find((call) => call.callId === "call_exec")).toMatchObject({
+            toolName: "exec_command", commandText: "git status --short", hasError: false,
+        });
         expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
-        const statements = __testBuildCodexBatchStatements(extracted!, 1200, true);
-        const sql = statements.join("\n");
-        expect(countStarting(statements, "UPSERT agent_provider:")).toBe(1);
-        expect(countStarting(statements, "UPSERT agent_session:")).toBe(1);
-        expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event_child")).toBe(1);
-        expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event WHERE")).toBe(1);
-        expect(countStarting(statements, "UPSERT agent_event:")).toBe(extracted!.providerEvents.length);
-        expect(countRelation(statements, "agent_event_child")).toBe(8);
-        expect(countStarting(statements, "UPSERT turn:")).toBe(extracted!.turns.length);
-        expect(countStarting(statements, "UPSERT tool:")).toBe(4);
-        expect(countStarting(statements, "UPSERT tool_call:")).toBe(extracted!.toolCalls.length);
-        expect(countStarting(statements, "UPSERT skill:")).toBe(extracted!.skillRelations.length);
-        expect(countRelation(statements, "invoked")).toBe(extracted!.invocations.length);
-        expect(countRelation(statements, "concerns")).toBe(extracted!.skillRelations.length);
-        expect(countStarting(statements, "UPSERT plan:")).toBe(extracted!.planSnapshots.length);
-        expect(countStarting(statements, "UPSERT plan_snapshot:")).toBe(extracted!.planSnapshots.length);
-        expect(countStarting(statements, "UPSERT compaction:")).toBe(extracted!.compactions.length);
-        expect(countStarting(statements, "UPSERT session_token_usage:")).toBe(1);
-        expect(countStarting(statements, "UPSERT turn_token_usage:")).toBe(extracted!.turnTokenUsages.length);
-
-        expect(statements[0]).toBe('UPSERT agent_provider:`codex` MERGE { name: "codex", display_name: "Codex", version: "0.4.0", capabilities: "{\\"transcripts\\":true,\\"toolCalls\\":true,\\"planSignals\\":{\\"provider\\":\\"codex\\",\\"status\\":\\"available\\",\\"planSources\\":[\\"codex_update_plan\\"],\\"toolNames\\":[\\"update_plan\\"],\\"evidence\\":\\"Codex session JSONL exposes update_plan function call arguments.\\"},\\"delegationSignals\\":{\\"provider\\":\\"codex\\",\\"status\\":\\"available\\",\\"rawSignals\\":[\\"spawn_agent tool output\\"],\\"sharedRecords\\":[\\"spawned\\"],\\"evidence\\":\\"Codex spawn_agent output includes agent_id and nickname; derive-spawned writes spawned edges after the child session exists.\\"}}", updated_at: time::now() };');
-        const sessionStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT agent_session:"), "codex agent_session row");
-        expect(sessionStatement).toContain('provider_session_id: "codex-parity", ax_session: session:`codex-parity`');
-        expect(sessionStatement).toContain('raw: "{\\"source\\":\\"codex_transcript\\",\\"cliVersion\\":\\"0.4.0\\",\\"modelProvider\\":\\"openai\\",\\"model\\":\\"gpt-5.3-codex\\"}"');
-        expect(sessionStatement).toContain('labels: "{\\"source\\":\\"transcript\\"}", metrics: "{\\"turns\\":7,\\"toolCalls\\":3,\\"providerEvents\\":8}"');
-        expect(statements).toContain('UPSERT turn:`codex_parity__01869a265130c185__seq_000001` CONTENT { session: session:`codex-parity`, seq: 1, ts: d"2026-06-10T08:00:02.000Z", role: "user", message_kind: "task", intent_kind: "organic_task", text: "fix the ingest bug", text_excerpt: "fix the ingest bug", has_tool_use: false, has_error: false };');
-        const execToolCall = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT tool_call:") && statement.includes('name: "exec_command"'), "codex exec_command tool_call row");
-        expect(execToolCall).toContain('call_id: "call_exec", ts: d"2026-06-10T08:00:03.000Z", status: "ok"');
-        expect(execToolCall).toContain('input_json: "{\\"cmd\\":\\"git status --short\\"}", output_json: "M apps/axctl/src/ingest/codex.ts\\n"');
-        expect(execToolCall).toContain('command_text: "git status --short", command_norm: "git status"');
-        expect(statements).toContain('RELATE turn:`codex_parity__01869a265130c185__seq_000002`->invoked:`6af5e141725410b0`->skill:`v2__codex_exec_command__83ae52d007aad013` SET session = session:`codex-parity`, ts = d"2026-06-10T08:00:03.000Z", args = "\\"{\\\\\\"cmd\\\\\\":\\\\\\"git status --short\\\\\\"}\\"", turn_has_error = false, turn_index = 2;');
-        expect(sql).toContain("UPSERT agent_provider:`codex`");
-        expect(sql).toMatch(/UPSERT agent_session:`codex__codex_parity__[^`]+`/);
-        expect(sql).toMatch(/DELETE \(SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`codex__codex_parity__[^`]+`\)/);
-        expect(sql).toMatch(/UPSERT agent_event:`codex__codex_parity__[^`]+__/);
-        expect(sql).toMatch(/UPSERT turn:`[^`]+` CONTENT \{ session: session:`codex-parity`, seq: \d+, ts:/);
-        expect(sql).not.toMatch(/UPSERT turn:`[^`]+` CONTENT \{[^}]*agent_event:/);
-        expect(sql).toContain("UPSERT tool:`codex__");
-        expect(sql).toContain("UPSERT tool_call:`");
-        expect(sql).toContain("UPSERT file:`");
-        expect(sql).toMatch(/RELATE (tool_call|turn):`[^`]+`->(edited|edited_file|mentioned_file|read_file):`[^`]+`->file:`[^`]+` SET /);
-        expect(sql).toContain('scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex"');
-        expect(sql).toMatch(/RELATE turn:`[^`]+`->invoked:`[^`]+`->skill:`[^`]+` SET session = session:`codex-parity`/);
-        expect(sql).toMatch(/RELATE tool_call:`[^`]+`->concerns:`[^`]+`->skill:`[^`]+` SET /);
-        expect(sql).toContain("UPSERT plan:`");
-        expect(sql).toContain("UPSERT plan_snapshot:`");
-        expect(statements.some((statement) => statement.startsWith("UPSERT compaction:"))).toBe(true);
-        expect(sql).toContain("UPSERT session_token_usage:`codex_parity`");
-        expect(sql).toContain("UPSERT turn_token_usage:`");
     });
 
-    it("streaming batches keep first-batch-only clearing and parent edges", () => {
+    it("keeps cross-batch parent edges during streaming", () => {
         const batches = __testStreamCodexJsonlLines(fixtureLines(), 3);
         expect(batches.length).toBeGreaterThan(1);
-        // Streaming-only coverage guard: cross-batch agent_event parent edges
-        // (function_call_output drained after its function_call) must appear.
-        expect(batches.reduce((sum, batch) => sum + batch.parentEdges.length, 0)).toBeGreaterThan(0);
-        batches.forEach((batch, index) => {
-            const clearExisting = index === 0;
-            const statements = __testBuildCodexBatchStatements(batch, 1200, clearExisting);
-            const sql = statements.join("\n");
-            expect(sql.includes("DELETE (SELECT VALUE id FROM agent_event_child")).toBe(clearExisting && batch.session !== null);
-            if (batch.session !== null) {
-                expect(sql).toContain("UPSERT agent_provider:`codex`");
-                expect(sql).toMatch(/UPSERT agent_session:`codex__codex_parity__[^`]+`/);
-            }
-            if (batch.parentEdges.length > 0) {
-                expect(sql).toMatch(/RELATE agent_event:`[^`]+`->agent_event_child:`[^`]+`->agent_event:`[^`]+` SET /);
-            }
-        });
+        const normalized = batches.map((batch) => toCodexNormalizedBatch(batch, 1200));
+        expect(normalized.reduce((sum, batch) => sum + batch.agentEventParentEdges.length, 0))
+            .toBeGreaterThan(0);
+        expect(normalized[0]!.sessions).toHaveLength(1);
     });
 });

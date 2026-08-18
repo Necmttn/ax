@@ -1,12 +1,13 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect, FileSystem, Option, Path } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
+import type { CacheReadError, CacheWriteError } from "@ax/lib/duckdb/seam";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -22,6 +23,7 @@ import {
     type SessionRow,
 } from "../../dashboard/sessions-query.ts";
 import { ingestTranscripts } from "../../ingest/transcripts.ts";
+import { withConfigWrite } from "../../config-core/reconcile.ts";
 import {
     AGGREGATE_LEGEND,
     GROUP_BY_KEYS,
@@ -39,8 +41,8 @@ import { fetchSessionChurnSummary, formatSessionChurnSummary } from "../../metri
 import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
-import { resolveStudioTarget } from "../../dashboard/serve-instance.ts";
-import { resolvePwdRepository, type PwdResolution } from "../../pwd.ts";
+import { resolveStudioTarget } from "../banner.ts";
+import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
@@ -61,7 +63,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export const projectRootForHere = (
-    pwd: Pick<PwdResolution, "repoRoot" | "mainRepoRoot">,
+    pwd: Pick<PwdIdentity, "repoRoot" | "mainRepoRoot">,
 ): string => {
     const { repoRoot, mainRepoRoot } = pwd;
     if (!mainRepoRoot || mainRepoRoot === repoRoot) return repoRoot;
@@ -138,7 +140,11 @@ const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
     opts: StaleCheckOpts,
-): Effect.Effect<void, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<
+    void,
+    DbError | CacheReadError | CacheWriteError,
+    CacheRead | AxConfig | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         if (opts.noStaleCheck) return;
         const threshold =
@@ -169,7 +175,7 @@ const maybeAutoIngestStale = (
             // whole query indefinitely. On timeout we interrupt it and fall
             // through to the read with possibly-stale data, telling the user how
             // to finish the backfill explicitly.
-            const outcome = yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
+            const outcome = yield* withConfigWrite((write) => ingestTranscripts(write, { project, sinceDays: 7 })).pipe(
                 Effect.catchTag("PlatformError", (e) => Effect.die(e)),
                 Effect.timeoutOption(`${AUTO_BACKFILL_TIMEOUT_SECONDS} seconds`),
             );
@@ -206,15 +212,29 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
             ? null
             : requirePositiveInt("sessions here", "limit", input.limit);
 
-        const pwdResolution = yield* resolvePwdRepository().pipe(
+        // The cache's repository ROW id, not the git-derived key. They are
+        // different strings: the DuckDB writer content-hashes row ids, and
+        // `session.repository` holds that hash - so the old
+        // `repositoryRecordId.id` matched nothing here and this command would
+        // have answered "no sessions" rather than failing.
+        const pwdResolution = yield* resolvePwdCacheRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl sessions here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
-        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
         yield* maybeAutoIngestStale("sessions here", pwdResolution.repoRoot, input.staleCheck);
-        const allRows = yield* listSessionsHere({ repositoryKey, days });
+        if (pwdResolution.repositoryId === null) {
+            // Nothing ingested for this repo yet. Say so instead of printing an
+            // empty table that reads like "you did no work here".
+            process.stderr.write(
+                `axctl sessions here: nothing ingested for ${pwdResolution.mainRepoRoot} yet - ` +
+                "run `ax ingest here`\n",
+            );
+        }
+        const allRows = pwdResolution.repositoryId === null
+            ? []
+            : yield* listSessionsHere({ repositoryId: pwdResolution.repositoryId, days });
 
         // claude-subagent sessions are orchestrated children and routinely
         // outnumber real sessions by 10x+; hide them by default (mirrors
@@ -313,14 +333,17 @@ const cmdSessionsNear = (input: {
         const json = wantsJsonFlag(input.json);
 
         // Resolve repository via pwd (near is always pwd-scoped)
-        const pwdResolution = yield* resolvePwdRepository().pipe(
+        const pwdResolution = yield* resolvePwdCacheRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 stderrExit(`axctl sessions near: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
         const repoRoot = pwdResolution.repoRoot;
-        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        // null when the cache has never seen this repo; `listSessionsNear`
+        // already treats a null repository as "unscoped", which is the honest
+        // answer for a window nothing was ingested for.
+        const repositoryId = pwdResolution.repositoryId;
 
         yield* maybeAutoIngestStale("sessions near", repoRoot, input.staleCheck);
 
@@ -349,7 +372,7 @@ const cmdSessionsNear = (input: {
             to = window.to;
         }
 
-        const rows = yield* listSessionsNear({ from, to, repositoryKey });
+        const rows = yield* listSessionsNear({ from, to, repositoryId });
         const studio = yield* Effect.promise(() => resolveStudioTarget());
         const { sessions, next } = buildSessionsNext(rows, { studio });
 
@@ -677,7 +700,9 @@ const cmdSessionsMetrics = (input: {
         }
         let project = input.project;
         if (input.here) {
-            const pwd = yield* resolvePwdRepository().pipe(
+            // `projectRootForHere` reads only `repoRoot`/`mainRepoRoot`, so
+            // this needs the git identity and no database at all.
+            const pwd = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
@@ -718,7 +743,8 @@ const cmdSessionsMetrics = (input: {
             return;
         }
 
-        const rows = yield* fetchSessionMetrics({ since, limit: input.limit, project });
+        const read = yield* CacheRead;
+        const rows = yield* fetchSessionMetrics(read, { since, limit: input.limit, project });
         if (input.json) {
             console.log(prettyPrint(rows));
             return;
@@ -787,7 +813,8 @@ export const cmdSessionsChurn = (input: {
     Effect.gen(function* () {
         let project = input.project;
         if (input.here) {
-            const pwd = yield* resolvePwdRepository().pipe(
+            // Same as metrics: roots only, no engine.
+            const pwd = yield* resolvePwdIdentity().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
                     stderrExit(`axctl sessions churn: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
@@ -800,7 +827,8 @@ export const cmdSessionsChurn = (input: {
         const sinceDays = input.sinceDays ?? 30;
         const since = new Date(Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86400 * 1000);
 
-        const summary = yield* fetchSessionChurnSummary({
+        const read = yield* CacheRead;
+        const summary = yield* fetchSessionChurnSummary(read, {
             since,
             project,
             source: input.source,
@@ -852,6 +880,33 @@ export const sessionsCommand = Command.make("sessions").pipe(
     ]),
 );
 
+/**
+ * `sessions` splits across runtimes, so the family declares its routing per
+ * subcommand rather than as one static entry.
+ *
+ * `show`'s whole chain - `fetchEnrichedSession` -> `fetchSessionView` ->
+ * `fetchSessionDetail` plus `fetchSessionDurabilityDetail` and the prefix
+ * fallback - reads the published snapshot, so it routes through `withCache`.
+ *
+ * The whole family is now on `"cache"`. The readers named below as blockers
+ * landed with the wave-3 read chunks - `here`/`around`/`near` with
+ * `dashboard/sessions-query.ts` (#816), `compare` with
+ * `dashboard/session-compare.ts` (#816) - and the family's
+ * `maybeAutoIngestStale` preflight no longer carries a Surreal leg. Each
+ * subcommand was RUN under the proxy before this flip; see the chunk's PR.
+ */
 export const sessionsRuntime: RuntimeManifest = {
-    sessions: "db",
+    sessions: {
+        kind: "db-conditional",
+        fallback: "cache",
+        subcommands: {
+            here: "cache",
+            around: "cache",
+            near: "cache",
+            show: "cache",
+            compare: "cache",
+            metrics: "cache",
+            churn: "cache",
+        },
+    },
 };

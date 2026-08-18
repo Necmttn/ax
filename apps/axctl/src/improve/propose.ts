@@ -1,11 +1,6 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import {
-    recordRef,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
+import { Judgment } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 
 /**
@@ -28,7 +23,7 @@ const common = {
     evidence: Schema.optional(Schema.String),
     /** hypothesis with {{placeholders}} hydrated at serve time - numbers stay live */
     hypothesis_template: Schema.optional(Schema.String),
-    /** read-only SurrealQL (SELECT/RETURN) whose first row fills the template */
+    /** read-only DuckDB SELECT whose first row fills the template */
     evidence_query: Schema.optional(Schema.String),
 };
 
@@ -95,7 +90,7 @@ export interface ProposeResult {
  * relating a filed proposal back to its retro) address the same record instead
  * of rebuilding the prefix.
  */
-export const proposalKey = (sig: string): string => `agent__${sig}`;
+export const proposalKey = (sig: string): string => stableId("proposal", [sig]);
 
 const PAYLOAD_TABLE: Record<ProposeInput["form"], string> = {
     skill: "skill_proposal",
@@ -105,108 +100,48 @@ const PAYLOAD_TABLE: Record<ProposeInput["form"], string> = {
     automation: "automation_proposal",
 };
 
-const opt = (v: string | undefined): string => surrealOptionString(v ?? null);
-
-const payloadFields = (input: ProposeInput): ReadonlyArray<readonly [string, string]> => {
+const payloadRow = (input: ProposeInput): Readonly<Record<string, string | null>> => {
     switch (input.form) {
         case "skill":
-            return [
-                ["trigger_pattern", surrealString(input.payload.trigger_pattern)],
-                ["suspected_gap", surrealString(input.payload.suspected_gap)],
-                ["proposed_behavior", surrealString(input.payload.proposed_behavior)],
-                ["expected_impact", opt(input.payload.expected_impact)],
-            ];
+            return {
+                trigger_pattern: input.payload.trigger_pattern,
+                suspected_gap: input.payload.suspected_gap,
+                proposed_behavior: input.payload.proposed_behavior,
+                expected_impact: input.payload.expected_impact ?? null,
+            };
         case "subagent":
-            return [
-                ["bounded_role", surrealString(input.payload.bounded_role)],
-                ["delegation_trigger", surrealString(input.payload.delegation_trigger)],
-                [
-                    "example_task_patterns",
-                    `[${(input.payload.example_task_patterns ?? []).map(surrealString).join(", ")}]`,
-                ],
-            ];
+            return {
+                bounded_role: input.payload.bounded_role,
+                delegation_trigger: input.payload.delegation_trigger,
+                example_task_patterns: JSON.stringify(input.payload.example_task_patterns ?? []),
+            };
         case "hook":
-            return [
-                ["event_name", surrealString(input.payload.event_name)],
-                ["target_tool", opt(input.payload.target_tool)],
-                ["hook_command", surrealString(input.payload.hook_command)],
-                ["recovery_path", opt(input.payload.recovery_path)],
-                ["smoke_test_command", opt(input.payload.smoke_test_command)],
-                ["disable_command", opt(input.payload.disable_command)],
-                ["failure_mode", opt(input.payload.failure_mode)],
-            ];
+            return {
+                event_name: input.payload.event_name,
+                target_tool: input.payload.target_tool ?? null,
+                hook_command: input.payload.hook_command,
+                recovery_path: input.payload.recovery_path ?? null,
+                smoke_test_command: input.payload.smoke_test_command ?? null,
+                disable_command: input.payload.disable_command ?? null,
+                failure_mode: input.payload.failure_mode ?? null,
+            };
         case "guidance":
-            return [
-                ["file_target", surrealString(input.payload.file_target)],
-                ["section", opt(input.payload.section)],
-                ["suggested_text", surrealString(input.payload.suggested_text)],
-            ];
+            return {
+                file_target: input.payload.file_target,
+                section: input.payload.section ?? null,
+                suggested_text: input.payload.suggested_text,
+            };
         case "automation":
-            return [
-                ["trigger_signal", surrealString(input.payload.trigger_signal)],
-                ["schedule", opt(input.payload.schedule)],
-                ["action", surrealString(input.payload.action)],
-                ["recovery_path", opt(input.payload.recovery_path)],
-                ["smoke_test_command", opt(input.payload.smoke_test_command)],
-                ["disable_command", opt(input.payload.disable_command)],
-                ["failure_mode", opt(input.payload.failure_mode)],
-            ];
+            return {
+                trigger_signal: input.payload.trigger_signal,
+                schedule: input.payload.schedule ?? null,
+                action: input.payload.action,
+                recovery_path: input.payload.recovery_path ?? null,
+                smoke_test_command: input.payload.smoke_test_command ?? null,
+                disable_command: input.payload.disable_command ?? null,
+                failure_mode: input.payload.failure_mode ?? null,
+            };
     }
-};
-
-/** Pure statement builder - testable without a DB. */
-export const buildProposeStatements = (
-    input: ProposeInput,
-    sig: string,
-    isNew: boolean,
-): string[] => {
-    const key = proposalKey(sig);
-    const proposalRef = recordRef("proposal", key);
-    const payloadRef = recordRef(PAYLOAD_TABLE[input.form], key);
-    const frequency = input.frequency ?? 1;
-    const baseline = JSON.stringify({
-        origin: "agent",
-        evidence: input.evidence ?? null,
-        frequency,
-    });
-
-    const stmts: string[] = [];
-    if (isNew) {
-        stmts.push(
-            `CREATE ${proposalRef} CONTENT ${surrealObject([
-                ["form", surrealString(input.form)],
-                ["title", surrealString(input.title)],
-                ["hypothesis", surrealString(input.hypothesis)],
-                ["dedupe_sig", surrealString(sig)],
-                ["frequency", String(frequency)],
-                ["confidence", surrealString(input.confidence)],
-                ["status", surrealString("open")],
-                ["origin", surrealString("agent")],
-                ["baseline", surrealOptionString(baseline)],
-                ["hypothesis_template", surrealOptionString(input.hypothesis_template ?? null)],
-                ["evidence_query", surrealOptionString(input.evidence_query ?? null)],
-                ["updated_at", "time::now()"],
-            ])};`,
-        );
-    } else {
-        stmts.push(
-            `UPDATE proposal SET ${[
-                ["hypothesis", surrealString(input.hypothesis)],
-                ["frequency", "frequency + 1"],
-                ["confidence", surrealString(input.confidence)],
-                ["updated_at", "time::now()"],
-            ]
-                .map(([name, value]) => `${name} = ${value}`)
-                .join(", ")} WHERE dedupe_sig = ${surrealString(sig)};`,
-        );
-    }
-    stmts.push(
-        `UPSERT ${payloadRef} MERGE ${surrealObject([
-            ["proposal", proposalRef],
-            ...payloadFields(input),
-        ])};`,
-    );
-    return stmts;
 };
 
 export const decodeProposeInput = (raw: unknown) =>
@@ -218,15 +153,15 @@ export class ImproveProposeInputError extends Schema.TaggedErrorClass<ImprovePro
     message: Schema.String,
 }) {}
 
-/** Same guard as the dashboard SQL console: read-only statements only. */
+/** Evidence hydration runs against the DuckDB cache, so only SQL SELECT is valid. */
 export const isReadOnlyEvidenceQuery = (sql: string): boolean =>
-    /^(SELECT|RETURN)\b/i.test(sql.trim());
+    /^SELECT\b/i.test(sql.trim());
 
 export const runPropose = Effect.fn("improve.runPropose")(function* (raw: unknown) {
     const input = yield* decodeProposeInput(raw);
     if (input.evidence_query !== undefined && !isReadOnlyEvidenceQuery(input.evidence_query)) {
         return yield* new ImproveProposeInputError({
-            message: "evidence_query must be a read-only SELECT or RETURN statement",
+            message: "evidence_query must be a read-only SELECT statement",
         });
     }
     if ((input.hypothesis_template === undefined) !== (input.evidence_query === undefined)) {
@@ -235,14 +170,51 @@ export const runPropose = Effect.fn("improve.runPropose")(function* (raw: unknow
         });
     }
     const sig = dedupeSig(input.form, normalizeTitle(input.title));
-    const db = yield* SurrealClient;
-    const existing = yield* db.query<[Array<{ id: unknown }>]>(
-        `SELECT id FROM proposal WHERE dedupe_sig = ${surrealString(sig)} LIMIT 1;`,
+    const judgment = yield* Judgment;
+    const id = proposalKey(sig);
+    const frequency = input.frequency ?? 1;
+    const now = new Date();
+    const baseline = JSON.stringify({ origin: "agent", evidence: input.evidence ?? null, frequency });
+    const isNew = yield* judgment.transaction((transaction) =>
+        Effect.gen(function* () {
+            const existing = yield* transaction.raw(
+                "SELECT id FROM proposal WHERE dedupe_sig = ? LIMIT 1",
+                [sig],
+            );
+            const fresh = existing.length === 0;
+            if (fresh) {
+                yield* transaction.put("proposal", {
+                    id,
+                    form: input.form,
+                    title: input.title,
+                    hypothesis: input.hypothesis,
+                    dedupe_sig: sig,
+                    frequency,
+                    confidence: input.confidence,
+                    status: "open",
+                    origin: "agent",
+                    hypothesis_template: input.hypothesis_template ?? null,
+                    evidence_query: input.evidence_query ?? null,
+                    reject_reason: null,
+                    baseline,
+                    created_at: now,
+                    updated_at: now,
+                });
+            } else {
+                yield* transaction.exec(
+                    "UPDATE proposal SET hypothesis = ?, frequency = frequency + 1, confidence = ?, updated_at = ? WHERE dedupe_sig = ?",
+                    [input.hypothesis, input.confidence, now, sig],
+                );
+            }
+            const payloadTable = PAYLOAD_TABLE[input.form];
+            yield* transaction.put(payloadTable, {
+                id: stableId(payloadTable, [id]),
+                proposal: id,
+                ...payloadRow(input),
+            });
+            return fresh;
+        }),
     );
-    const isNew = (existing[0] ?? []).length === 0;
-    for (const stmt of buildProposeStatements(input, sig, isNew)) {
-        yield* db.query(stmt);
-    }
     return {
         status: isNew ? "created" : "bumped",
         sig,

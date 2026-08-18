@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { cacheReadResults } from "../testing/cache-read.ts";
 import { fetchSessionDurabilityDetail } from "./reverted-commits.ts";
 
 const SID = "019e0ad4-c977-7ab8-0000-000000000001";
@@ -10,27 +10,20 @@ const db = (
     produced: Array<Record<string, unknown>>,
     fixes: Array<Record<string, unknown>> = [],
     capture?: { sqls: string[] },
-) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
-            capture?.sqls.push(sql);
-            if (sql.includes("FROM later_fixed_by")) return Effect.succeed([fixes] as unknown as T);
-            return Effect.succeed([produced] as unknown as T);
-        },
-    } as never);
+) => cacheReadResults([produced, fixes], capture?.sqls);
 
 const featureRow = {
     commit: "commit:`feat_key`",
     sha: "92417acaeaa7afcee3f7b61cc89f4b02373aa5f8",
     message: "feat: add widget",
-    ts: "2026-05-25T02:13:28Z",
+    ts: new Date("2026-05-25T02:13:28Z"),
     reverted: true,
 };
 const durableRow = {
     commit: "commit:`durable_key`",
     sha: "1111111aaaaaaa1111111aaaaaaa1111111aaaaa",
     message: "chore: keep me",
-    ts: "2026-05-25T03:00:00Z",
+    ts: new Date("2026-05-25T03:00:00Z"),
     reverted: null,
 };
 const fixRow = {
@@ -38,7 +31,7 @@ const fixRow = {
     fix: "commit:`fix_key`",
     fix_sha: "134bd7bd67f2177c134bd7bd67f2177c134bd7bd",
     fix_message: "fix: widget broke",
-    fix_ts: "2026-05-26T08:00:00Z",
+    fix_ts: new Date("2026-05-26T08:00:00Z"),
     days_between: 1.24,
     confidence: "high",
 };
@@ -82,7 +75,7 @@ describe("fetchSessionDurabilityDetail", () => {
             commitId: "commit:`fix_key`",
             sha: fixRow.fix_sha,
             message: "fix: widget broke",
-            ts: "2026-05-26T08:00:00Z",
+            ts: "2026-05-26T08:00:00.000Z",
             daysBetween: 1.24,
             confidence: "high",
         });
@@ -102,9 +95,10 @@ describe("fetchSessionDurabilityDetail", () => {
             fetchSessionDurabilityDetail(SID).pipe(Effect.provide(db([featureRow], [fixRow], capture))),
         );
         expect(capture.sqls).toHaveLength(2);
-        expect(capture.sqls[0]).toContain(`FROM produced WHERE in = session:⟨${SID}⟩`);
-        expect(capture.sqls[0]).toContain("LIMIT 200");
-        expect(capture.sqls[1]).toContain("FROM later_fixed_by WHERE in IN [commit:`feat_key`]");
+        expect(capture.sqls[0]).toContain("FROM produced p JOIN");
+        expect(capture.sqls[0]).toContain("LIMIT ?");
+        expect(capture.sqls[1]).toContain("FROM later_fixed_by l JOIN");
+        expect(capture.sqls[1]).toContain("l.in_id IN (?)");
     });
 
     test("duplicate produced edges for one commit are de-duplicated", async () => {

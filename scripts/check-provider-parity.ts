@@ -1,18 +1,17 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from "node:fs";
-import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+import { DUCKDB_TABLE_NAMES } from "@ax/schema/parse-duckdb-schema";
+import { parseSqliteTables } from "@ax/schema/sidecar-ddl";
 import {
     PROVIDER_PARITY_FEATURES,
     PROVIDER_PARITY_PROVIDERS,
 } from "../apps/axctl/src/ingest/provider-parity.ts";
 
-const schemaTables = (): Set<string> => {
-    const schema = schemaSurql;
-    return new Set(
-        [...schema.matchAll(/^DEFINE TABLE(?: IF NOT EXISTS)? ([A-Za-z_][A-Za-z0-9_]*)/gm)]
-            .map((match) => match[1]!),
-    );
-};
+/** Every table a provider writer can legitimately name: the rebuildable DuckDB
+ *  cache (`schema.duckdb.sql`) plus the SQLite judgment sidecar
+ *  (`schema.sidecar.sql`). A table lives in exactly one of the two, so a name
+ *  found in either is real; only a name in neither is a broken matrix entry. */
+const schemaTables = (): Set<string> => new Set([...DUCKDB_TABLE_NAMES, ...parseSqliteTables()]);
 
 const fail = (message: string): never => {
     process.stderr.write(`[check-provider-parity] ${message}\n`);

@@ -7,6 +7,7 @@
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { DigestSnapshot, decodeSnapshotOrNull } from "../../digest/model.ts";
 import { buildAndWrite, defaultDigestPath } from "../../digest/snapshot.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -23,7 +24,8 @@ const cmdDigest = (input: { readonly json: boolean; readonly refresh: boolean })
     Effect.gen(function* () {
         let snap: DigestSnapshot | null;
         if (input.refresh) {
-            snap = yield* buildAndWrite(new Date(), 14);
+            const read = yield* CacheRead;
+            snap = yield* buildAndWrite(read, new Date(), 14);
         } else {
             const text = yield* Effect.promise(async () => {
                 const f = Bun.file(defaultDigestPath());
@@ -57,7 +59,7 @@ export const digestCommand = Command.make(
 
 export const digestRuntime: RuntimeManifest = {
     digest: {
-        runtime: "db",
+        runtime: "cache",
         hidden: false,
     },
 };

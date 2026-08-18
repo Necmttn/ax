@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
+import { Effect, Schema } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { join } from "node:path";
+import { AxConfigTest } from "@ax/lib/config";
+import { CacheRead, CacheReadLayer } from "@ax/lib/duckdb/seam";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     attachWorkflowCandidateProposalEvidence,
     buildWorkflowCandidateReport,
     buildWorkflowCandidateGuidanceProposalPlan,
+    workflowCandidateStoredProposalId,
     buildWorkflowCandidateProposalListReport,
     buildWorkflowCandidateHarnessProposalPlan,
     buildWorkflowCandidateTopicClassifierFixtureRows,
@@ -63,6 +68,7 @@ import {
     withWorkflowCandidateReviewPipelineLifecycle,
     workflowCandidateTopicHarnessGateFailures,
     workflowCandidateScore,
+    applyGraphWriteRows,
     type WorkflowCandidateEmbeddingHelperGraphEdgeRow,
     type WorkflowCandidateEmbeddingHelperGraphFactRow,
     type WorkflowCandidateEvidenceRow,
@@ -72,6 +78,17 @@ import {
 } from "./classifiers-workflow-candidates.ts";
 
 const properties = (value: unknown) => JSON.stringify(value);
+
+// `applies the harness graph write plan` below is a REAL DuckDB round trip
+// (write through `applyGraphWriteRows` -> `withConfigWrite`, the same front
+// door `runClassifiersWorkflowCandidates` uses for `--apply-harness-facts` /
+// `--apply-review-facts`, then read the rows back through a fresh
+// `CacheReadLayer`), so it needs a working libduckdb.
+const { dylibPath: duckdbDylibPath, dtest: duckdbTest, tempDir: duckdbTempDir } = await duckdbTestSetup(
+    "classifiers workflow-candidates graph write plan apply",
+    { requireFts: true },
+);
+
 
 const groups: WorkflowCandidateGroupRow[] = [
     {
@@ -582,10 +599,19 @@ describe("classifiers workflow-candidates", () => {
         expect(plan.summary.statement_count).toBe(plan.statements.length);
         expect(plan.summary.proposals[0].dedupe_sig).toStartWith("guidance__workflow_candidate__");
         expect(plan.summary.proposals[0].title).toBe("Require applied classifier results for surrealml");
-        expect(plan.statements.join("\n")).toContain("CREATE proposal:");
-        expect(plan.statements.join("\n")).toContain("UPSERT guidance_proposal:");
-        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
-        expect(plan.statements.join("\n")).toContain("classifier_graph_node:");
+        // `statements` are DESCRIPTIONS of the writes the persist step performs,
+        // not executable SQL - asserting on that text alone previously let the
+        // missing `cites_evidence` write stay hidden, since the string always
+        // contained the edge whether or not anything wrote it.
+        const described = plan.statements.join("\n");
+        expect(described).toContain("PUT proposal");
+        expect(described).toContain("PUT guidance_proposal");
+        expect(described).toContain("PUT cites_evidence");
+        // The reported id must be the id the row is STORED under, so the
+        // proposal_id in a report resolves against the proposal table.
+        expect(plan.summary.proposals[0].proposal_id).toBe(
+            `proposal:${workflowCandidateStoredProposalId(plan.summary.proposals[0].dedupe_sig, new Set())}`,
+        );
     });
 
     test("guidance proposal dry-run includes planned statements without changing ids", () => {
@@ -1146,7 +1172,7 @@ describe("classifiers workflow-candidates", () => {
             fact_statement_count: 1,
         });
         expect(writePlan.statements.join("\n")).toContain("workflow_topic_candidate_review");
-        expect(writePlan.statements.join("\n")).toContain("UPSERT classifier_graph_fact");
+        expect(writePlan.statements.join("\n")).toContain("PUT classifier_graph_fact");
     });
 
     test("renders persisted topic review facts inside topic reports and packs", () => {
@@ -3212,7 +3238,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(plan.summary.proposals[0].dedupe_sig).toStartWith("harness_check__workflow_candidate__");
         expect(plan.statements.join("\n")).toContain("harness_check");
-        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
+        expect(plan.statements.join("\n")).toContain("PUT cites_evidence");
         expect(plan.summary.statements).toEqual(plan.statements);
     });
 
@@ -5220,8 +5246,112 @@ describe("classifiers workflow-candidates", () => {
             edge_statement_count: 2,
             fact_statement_count: 1,
         });
-        expect(writePlan.statements.join("\n")).toContain("UPSERT classifier_graph_fact");
+        expect(writePlan.statements.join("\n")).toContain("PUT classifier_graph_fact");
         expect(writePlan.statements.join("\n")).toContain("workflow_topic_harness_check");
+    });
+
+    // Real DuckDB round trip: apply a harness graph write plan's `.rows`
+    // through the actual seam (`applyGraphWriteRows` -> `withConfigWrite`,
+    // the same front door `--apply-harness-facts` uses), then read the
+    // `classifier_graph_node` / `classifier_graph_edge` / `classifier_graph_fact`
+    // rows back out of the published snapshot and assert their contents -
+    // "the write plan built" is not evidence on this migration; a row that
+    // decodes back out with the right `source_kind` is.
+    duckdbTest("applies the harness graph write plan, round-tripping into DuckDB", async () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "group:output-required-roundtrip",
+                label: "verification-event:verification_request:output_required",
+                properties_json: properties({
+                    classifier_key: "verification-event",
+                    label: "verification_request",
+                    target: "output_required",
+                    proposed_action: "add_verification_gate",
+                    support_count: 2,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:surrealml-output-required-roundtrip",
+                subject: "group:output-required-roundtrip",
+                properties_json: properties({
+                    result_id: "classifier_result:verification_event__0_1_0__event_window__roundtrip",
+                    turn: "turn:surrealml-output-required-roundtrip",
+                    confidence: 0.84,
+                    text_excerpt: "Did you create classifier? I do not want just html, I want to see the results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+        const projection = buildWorkflowCandidateTopicHarnessGraphProjection(report);
+        const writePlan = buildWorkflowCandidateTopicHarnessGraphWritePlan(projection);
+        expect(writePlan.rows.length).toBe(5);
+
+        const dataDir = duckdbTempDir("ax-workflow-candidates-apply-");
+        const snapshotPath = join(dataDir, "test-snapshot.duckdb");
+        const previousSnapshotEnv = process.env.AX_DUCKDB_SNAPSHOT;
+        process.env.AX_DUCKDB_SNAPSHOT = snapshotPath;
+        try {
+            await Effect.runPromise(applyGraphWriteRows(writePlan.rows).pipe(
+                Effect.provide(AxConfigTest({ paths: { dataDir } })),
+                Effect.provide(BunFileSystem.layer),
+                Effect.provide(BunPath.layer),
+            ) as Effect.Effect<void, unknown>);
+
+            const readLayer = CacheReadLayer({
+                snapshotPath,
+                ...(duckdbDylibPath === null ? {} : { assetPath: duckdbDylibPath }),
+            });
+            const nodes = await Effect.runPromise(Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* read.rows(
+                    Schema.Struct({ id: Schema.String, source_kind: Schema.String }),
+                    "SELECT id, source_kind FROM classifier_graph_node WHERE source_kind = ?",
+                    ["workflow_topic_harness_check"],
+                );
+            }).pipe(Effect.provide(readLayer)) as Effect.Effect<
+                ReadonlyArray<{ readonly id: string; readonly source_kind: string }>,
+                unknown
+            >);
+            expect(nodes.length).toBe(2);
+            expect(nodes.every((row) => row.source_kind === "workflow_topic_harness_check")).toBe(true);
+
+            const facts = await Effect.runPromise(Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* read.rows(
+                    Schema.Struct({ graph_id: Schema.String, object: Schema.NullOr(Schema.String), predicate: Schema.String }),
+                    "SELECT graph_id, object, predicate FROM classifier_graph_fact WHERE source_kind = ?",
+                    ["workflow_topic_harness_check"],
+                );
+            }).pipe(Effect.provide(readLayer)) as Effect.Effect<
+                ReadonlyArray<{ readonly graph_id: string; readonly object: string | null; readonly predicate: string }>,
+                unknown
+            >);
+            expect(facts.length).toBe(1);
+            expect(facts[0]).toMatchObject({
+                object: "group:output-required-roundtrip",
+                predicate: "passed",
+            });
+        } finally {
+            if (previousSnapshotEnv === undefined) delete process.env.AX_DUCKDB_SNAPSHOT;
+            else process.env.AX_DUCKDB_SNAPSHOT = previousSnapshotEnv;
+        }
     });
 
     test("renders persisted topic harness graph fact lists", () => {

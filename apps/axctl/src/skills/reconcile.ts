@@ -1,7 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { reconcileByScope, type ScopedReconcileReport } from "../config-core/reconcile.ts";
 import { SkillSourceRegistry } from "./sources/registry.ts";
 import type { SkillRecord } from "./sources/types.ts";
@@ -68,11 +67,12 @@ export const discoverAllSkills = (
  * every ingest self-heals.
  */
 export const reconcileSkills = (
+    write: CacheWriteService,
     opts?: { readonly dryRun?: boolean; readonly repoRoot?: string | null },
 ): Effect.Effect<
     ScopedReconcileReport,
-    DbError | PlatformError,
-    SkillSourceRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    CacheWriteError | PlatformError,
+    SkillSourceRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const snapshot = yield* discoverAllSkills(opts?.repoRoot ?? null);
@@ -86,7 +86,7 @@ export const reconcileSkills = (
             byScope.set(rec.scopeTag, arr);
         }
         // A degraded snapshot resurrects/touches but never tombstones.
-        return yield* reconcileByScope("skill", byScope, {
+        return yield* reconcileByScope(write, "skill", byScope, {
             dryRun: opts?.dryRun ?? false,
             tombstone: snapshot.complete,
         });

@@ -18,10 +18,10 @@
  *   content_hash, dir_path }.
  */
 import { homedir } from "node:os";
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
-import { surrealValue } from "@ax/lib/shared/surql";
 import { guidanceConfigAuthorityHashesForScan } from "../ingest/claude-config.ts";
 import { normalizeLastUsed, UNUSED_RECENT_SQL, UNUSED_SUMMARY_SQL } from "./unused-skills.ts";
 import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
@@ -146,16 +146,47 @@ export interface ContextBudgetResult {
 }
 
 const BUDGET_SQL = `
-SELECT id, name, scope, bytes, string::len(description ?? "") AS desc_len, content_hash, dir_path
+SELECT id, name, scope, bytes, LENGTH(COALESCE(description, '')) AS desc_len, content_hash, dir_path
 FROM skill;
 `;
 
-const CONFIG_BUDGET_SQL = (authorityHashes: readonly string[]) => `
+const BudgetSkillRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    scope: Schema.String,
+    bytes: Schema.NullOr(NumberFromBigIntColumn),
+    desc_len: NumberFromBigIntColumn,
+    content_hash: Schema.String,
+    dir_path: Schema.String,
+});
+
+const UsageSummaryRow = Schema.Struct({
+    skill_id: Schema.String,
+    total_inv: NumberFromBigIntColumn,
+    last_used: TimestampColumn,
+});
+
+const UsageRecentRow = Schema.Struct({
+    skill_id: Schema.String,
+    recent: NumberFromBigIntColumn,
+});
+
+const CONFIG_BUDGET_SQL = (authorityHashes: readonly string[]): string => `
 SELECT kind, scope, safe_path, authority_hash, bytes, token_estimate, mcp_server_names_json
 FROM guidance_config_artifact
-WHERE provider = "claude"
-AND authority_hash IN ${surrealValue(authorityHashes)};
+WHERE provider = 'claude'
+AND authority_hash IN (${authorityHashes.map(() => "?").join(", ")});
 `;
+
+const GuidanceConfigBudgetSchemaRow = Schema.Struct({
+    kind: Schema.String,
+    scope: Schema.String,
+    safe_path: Schema.String,
+    authority_hash: Schema.String,
+    bytes: NumberFromBigIntColumn,
+    token_estimate: NumberFromBigIntColumn,
+    mcp_server_names_json: Schema.NullOr(Schema.String),
+});
 
 const isClaudeMdBudgetRow = (row: GuidanceConfigBudgetRow): boolean =>
     (row.kind === "memory" || row.kind === "guidance_doc") &&
@@ -286,29 +317,26 @@ const idStr = (v: unknown) => String(v ?? "");
 
 export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
     function* () {
-        const db = yield* SurrealClient;
         const authorityHashes = guidanceConfigAuthorityHashesForScan({
             home: process.env.HOME ?? homedir(),
             projectRoot: process.cwd(),
         });
         // budget rows + bulk usage (per skill id) over the invoked edge table,
         // computed deref-free - see unused-skills.ts for the perf rationale.
-        const [rawRes, summaryRes, recentRes, configRes, contentTypes] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(BUDGET_SQL),
-            db.query<[Array<Record<string, unknown>>]>(UNUSED_SUMMARY_SQL),
-            db.query<[Array<Record<string, unknown>>]>(UNUSED_RECENT_SQL(WINDOW_DAYS)),
-            db.query<[Array<GuidanceConfigBudgetRow>]>(CONFIG_BUDGET_SQL(authorityHashes)),
+        const [raw, summaryRows, recentRows, guidanceRows, contentTypes] = yield* Effect.all([
+            cacheRows(BudgetSkillRow, { sql: BUDGET_SQL, params: [] }, "context budget skills"),
+            cacheRows(UsageSummaryRow, { sql: UNUSED_SUMMARY_SQL, params: [] }, "context budget usage summary"),
+            cacheRows(UsageRecentRow, { sql: UNUSED_RECENT_SQL(WINDOW_DAYS), params: [WINDOW_DAYS] }, "context budget recent usage"),
+            cacheRows(GuidanceConfigBudgetSchemaRow, { sql: CONFIG_BUDGET_SQL(authorityHashes), params: [...authorityHashes] }, "context budget guidance config"),
             fetchContentTypeBreakdown(),
         ], { concurrency: 4 });
-        const raw = rawRes?.[0] ?? [];
-        const guidanceRows = configRes?.[0] ?? [];
 
         const usageById = new Map<string, { uses: number; last: string | null }>();
-        for (const r of summaryRes?.[0] ?? []) {
+        for (const r of summaryRows) {
             usageById.set(idStr(r.skill_id), { uses: Number(r.total_inv ?? 0), last: normalizeLastUsed(r.last_used) });
         }
         const recentById = new Map<string, number>();
-        for (const r of recentRes?.[0] ?? []) recentById.set(idStr(r.skill_id), Number(r.recent ?? 0));
+        for (const r of recentRows) recentById.set(idStr(r.skill_id), Number(r.recent ?? 0));
 
         // Group by content_hash: sum usage across the mirror ids, keep canonical.
         interface Group { canonical: Record<string, unknown>; canonicalScope: string; uses: number; window: number; last: string | null; }
@@ -435,14 +463,36 @@ ORDER BY ts DESC
 LIMIT ${Math.max(1, Math.trunc(limit))};
 `;
 
+const SkillDriftSchemaRow = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    change: Schema.String,
+    content_hash: Schema.String,
+    prev_hash: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(NumberFromBigIntColumn),
+    prev_bytes: Schema.NullOr(NumberFromBigIntColumn),
+    ts: TimestampColumn,
+});
+
 const GUIDANCE_DRIFT_SQL = (limit: number) => `
 SELECT source_path, scope, change, content_hash, prev_hash, bytes, prev_bytes, observed_at
 FROM guidance_revision
-WHERE string::ends_with(source_path, "CLAUDE.md")
-AND change IS NOT NONE
+WHERE ends_with(source_path, 'CLAUDE.md')
+AND change IS NOT NULL
 ORDER BY observed_at DESC
 LIMIT ${Math.max(1, Math.trunc(limit))};
 `;
+
+const GuidanceDriftSchemaRow = Schema.Struct({
+    source_path: Schema.String,
+    scope: Schema.String,
+    change: Schema.NullOr(Schema.String),
+    content_hash: Schema.NullOr(Schema.String),
+    prev_hash: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(NumberFromBigIntColumn),
+    prev_bytes: Schema.NullOr(NumberFromBigIntColumn),
+    observed_at: TimestampColumn,
+});
 
 const isoTimestamp = (value: unknown): string =>
     value instanceof Date ? value.toISOString() : String(value ?? "");
@@ -502,10 +552,9 @@ export const buildContextDriftRows = (
 
 export const fetchSkillDrift = Effect.fn("queries.fetchSkillDrift")(
     function* (opts: { readonly limit: number }) {
-        const db = yield* SurrealClient;
         const [skillRows, guidanceRows] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(DRIFT_SQL(opts.limit)).pipe(Effect.map((r) => r?.[0] ?? [])),
-            db.query<[Array<Record<string, unknown>>]>(GUIDANCE_DRIFT_SQL(opts.limit)).pipe(Effect.map((r) => r?.[0] ?? [])),
+            cacheRows(SkillDriftSchemaRow, { sql: DRIFT_SQL(opts.limit), params: [] }, "skill drift"),
+            cacheRows(GuidanceDriftSchemaRow, { sql: GUIDANCE_DRIFT_SQL(opts.limit), params: [] }, "guidance drift"),
         ], { concurrency: 2 });
 
         const changes = buildContextDriftRows({ skillRows, guidanceRows, limit: opts.limit });

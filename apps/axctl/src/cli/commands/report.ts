@@ -6,7 +6,8 @@
 import { Effect } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import { Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
+import { LooseRowSchema } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { prettyPrint } from "@ax/lib/json";
 import { INSIGHT_VIEWS, insightSqlForView } from "../../queries/insights.ts";
 import { enrichInsightRows } from "../../queries/insights-enrich.ts";
@@ -24,13 +25,18 @@ const cmdInsights = (input: { readonly view: InsightView; readonly limit: number
         // at parse time - the old isInsightView/exit(2) guard was dead code
         // through the CLI and is intentionally gone.
         const limit = requirePositiveInt("insights", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            insightSqlForView(input.view, limit),
+        // The view is chosen at runtime out of 30 differently-shaped queries,
+        // so the column set is not known here and rows decode as
+        // `LooseRowSchema` - which is also what turns each view's `COUNT(*)`
+        // BIGINT cells into numbers before they reach the formatter.
+        const result = yield* cacheRows(
+            LooseRowSchema,
+            { sql: insightSqlForView(input.view, limit), params: [] },
+            `insights.${input.view}`,
         );
         // Classifier views resolve their per-row context here via indexed
         // lookups (the correlated $parent.session form scanned ~1s/row).
-        const rows = yield* enrichInsightRows(input.view, result?.[0] ?? []);
+        const rows = yield* enrichInsightRows(input.view, [...result] as Array<Record<string, unknown>>);
         console.log(formatInsightRows(input.view, [...rows], { json: input.json }));
     });
 
@@ -100,8 +106,18 @@ export const timelineCommand = Command.make(
     "Highlight/event timeline for a session (segments + ranked events, LLM-free). --json for the full structure.",
 ));
 
+/**
+ * All three are on the v2 cache runtime. An earlier chunk left `report` and
+ * `insights` on the old runtime and recorded them as blocked on "~1100 lines of
+ * SurrealQL across 31 views" - **that reading was wrong**. `queries/insights.ts`
+ * was already DuckDB dialect (#819); what still reached the old engine was the
+ * two HANDLERS, `cmdInsights` above and the five statements in
+ * `dashboard/report.ts`. The throwing proxy that reported the block named a
+ * FAILURE, not a layer, and the SQL was never opened before the size was
+ * asserted.
+ */
 export const reportRuntime: RuntimeManifest = {
-    report: { runtime: "db", hidden: true },
-    insights: { runtime: "db", hidden: true },
-    timeline: { runtime: "db", hidden: true },
+    report: { runtime: "cache", hidden: true },
+    insights: { runtime: "cache", hidden: true },
+    timeline: { runtime: "cache", hidden: true },
 };

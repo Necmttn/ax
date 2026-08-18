@@ -1,0 +1,57 @@
+name: Build DuckDB
+
+# Manual-only: nothing consumes these artifacts yet (no release step wires
+# them into a published binary), and the full matrix costs ~3 runner-hours
+# per run, so a tag push must not trigger it automatically.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: duckdb-macos-arm64
+            runner: macos-14
+          - artifact: duckdb-linux-arm64
+            runner: ubuntu-24.04-arm
+            static_libcpp: 1
+          - artifact: duckdb-linux-amd64
+            runner: ubuntu-24.04
+            static_libcpp: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Build and run air-gap smoke
+        env:
+          STATIC_LIBCPP: ${{ matrix.static_libcpp }}
+        run: scripts/build-duckdb.sh
+
+      - name: Upload DuckDB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/duckdb/duckdb
+            dist/duckdb/libduckdb.*
+          if-no-files-found: error

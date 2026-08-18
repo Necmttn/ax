@@ -8,16 +8,25 @@ For the contribution flow (PR conventions, commit style, ground rules) see
 
 ## Setup
 
+`ax` embeds DuckDB (the graph, published as a read-only snapshot) and a SQLite
+sidecar (judgment/proposal state, schema applied automatically on open) - no
+daemon to start.
+
 ```bash
 git clone https://github.com/Necmttn/ax ~/Projects/ax
 cd ~/Projects/ax
 bun install
-bun scripts/db-start.sh          # SurrealDB on 127.0.0.1:8521
-bun scripts/apply-schema.sh
-bun src/cli/index.ts ingest --since=7
+bash scripts/build-duckdb.sh              # builds libduckdb (fts linked statically) into dist/duckdb/
+export AX_DUCKDB_DYLIB="$PWD/dist/duckdb/libduckdb.dylib"   # libduckdb.so on Linux
+bun apps/axctl/src/cli/index.ts ingest --since=7
 ```
 
-Requirements: Bun ≥ 1.3, SurrealDB ≥ 3.0.
+`AX_DUCKDB_DYLIB` must point at a real file - there is no upstream-release
+fallback for FTS (the shipped build links the `fts` extension statically;
+upstream `libduckdb` release artifacts cannot `LOAD fts`). Export it once in
+your shell profile.
+
+Requirements: Bun ≥ 1.3.
 
 ## Verify
 
@@ -33,46 +42,39 @@ CI runs both - failing either blocks merge.
 While developing, skip the compiled binary and run the TypeScript directly:
 
 ```bash
-bun src/cli/index.ts serve --port=1738
-bun src/cli/index.ts insights friction --limit=10
-bun src/cli/index.ts recall "auth middleware"
+bun apps/axctl/src/cli/index.ts serve --port=1738
+bun apps/axctl/src/cli/index.ts insights friction --limit=10
+bun apps/axctl/src/cli/index.ts recall "auth middleware"
 ```
 
-## `ax-dev` - disposable dev build alongside stable `ax`
+## `ax-dev` - dev build alongside stable `ax`
 
 Install a global `ax-dev` that runs **this source checkout** against an
-**isolated, disposable DB**, so you can test latest changes without touching
-your real graph. The stable `ax` (released binary, prod DB on `:8521`) is left
-untouched.
+**isolated data dir**, so you can test latest changes without touching your
+real graph. The stable `ax` (released binary) is left untouched.
 
 ```bash
 bash scripts/install-dev.sh        # writes ~/.local/bin/ax-dev (a source shim)
-ax-dev db                          # start a disposable SurrealDB on :8522 (data: ~/.local/share/ax-dev)
-ax-dev ingest --since=1            # ingest into the dev DB
+ax-dev ingest --since=1            # ingest into the dev data dir
 ax-dev serve                       # dev dashboard (full live ingest works - runs from source)
 ax-dev -v                          # shows git provenance: which sha/branch you're on
-ax-dev db --reset                  # wipe + restart the dev DB
-ax-dev db stop                     # stop it
 rm -rf ~/.local/share/ax-dev       # nuke the dev stack entirely
 ```
 
 How the isolation works:
 
-- The shim exports `AX_DATA_DIR=~/.local/share/ax-dev` and
-  `AX_DB_URL=ws://127.0.0.1:8522`, then `exec bun <checkout>/apps/axctl/src/cli/index.ts`.
-  No rebuild - it always runs your current working tree.
-- `ax-dev db` runs SurrealDB **on demand** (no launchd agent, so no label
-  collision with the stable daemon) and applies the schema with bucket paths
-  rewritten to the dev data dir.
+- The shim exports `AX_DATA_DIR=~/.local/share/ax-dev`, then
+  `exec bun <checkout>/apps/axctl/src/cli/index.ts`. No rebuild - it always
+  runs your current working tree.
 - Re-run `scripts/install-dev.sh` from a different checkout to re-point `ax-dev`
   at it (the checkout path is baked into the shim).
 
 Notes:
 
-- Use `ax-dev db status` (not `ax-dev doctor`) for the dev DB - `doctor` reports
-  the stable launchd daemon, which the dev stack intentionally doesn't run.
-- Tune the location/port with `AX_DEV_DATA_DIR` / `AX_DEV_DB_URL` before running
-  `install-dev.sh`, or override `AX_DATA_DIR` / `AX_DB_URL` per invocation.
+- Tune the location with `AX_DEV_DATA_DIR` before running `install-dev.sh`, or
+  override `AX_DATA_DIR` per invocation.
+- `AX_DUCKDB_DYLIB` (see Setup) applies to `ax-dev` the same as `ax` - it isn't
+  part of the per-checkout data isolation.
 
 ## What gets stored
 
@@ -107,18 +109,20 @@ defined in [`CONTEXT.md`](../CONTEXT.md). Architectural decisions live in
 
 ## Inspecting the graph
 
-Local connection defaults:
+The graph is a plain DuckDB file, published as a read-only snapshot at
+`AX_DUCKDB_SNAPSHOT` (default `~/.ax/cache/ax-snapshot.duckdb`). Open it
+directly with the `duckdb` CLI shell built by `scripts/build-duckdb.sh`
+(`dist/duckdb/duckdb`), read-only so you never race a live ingest:
 
-- endpoint: `ws://127.0.0.1:8521`
-- namespace: `ax`, database: `main`
-- credentials: `root` / `root` (loopback only)
+```bash
+dist/duckdb/duckdb -readonly ~/.ax/cache/ax-snapshot.duckdb
+```
 
-Open with [Surrealist](https://surrealdb.com/surrealist) or hit it from the
-CLI. Some queries to try:
+Some queries to try:
 
 ```sql
 -- which commands fail most often
-SELECT name, command_norm, exit_code, count() AS failures
+SELECT name, command_norm, exit_code, count(*) AS failures
 FROM tool_call
 WHERE has_error = true
 GROUP BY name, command_norm, exit_code
@@ -126,15 +130,10 @@ ORDER BY failures DESC
 LIMIT 20;
 
 -- recent friction events with context
-SELECT kind, text, session.project AS project, ts
-FROM friction_event
-ORDER BY ts DESC
-LIMIT 20;
-
--- repositories with the most checkouts (worktrees)
-SELECT name, remote_url, array::len(->has_checkout->checkout) AS checkouts
-FROM repository
-ORDER BY updated_at DESC
+SELECT f.kind, f.text, s.project, f.ts
+FROM friction_event f
+JOIN session s ON s.id = f.session
+ORDER BY f.ts DESC
 LIMIT 20;
 ```
 
@@ -156,10 +155,12 @@ Full surface in [`docs/insights-cli-reference.md`](insights-cli-reference.md).
 
 `axctl install` sets up:
 
-- SurrealDB daemon on `127.0.0.1:8521`
 - launchd watcher on `~/.claude/projects/` and `~/.codex/sessions/`
 - background `axctl ingest --since=1` after recent transcript changes
 - onboarding for git-tracking your global Claude/Codex/skill dirs
+
+No daemon holds the graph open - each `axctl ingest` writes the live DuckDB
+database and publishes a fresh read-only snapshot for query commands to read.
 
 Logs land in `~/.local/share/ax/logs/`. Manual control:
 

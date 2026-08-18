@@ -24,17 +24,10 @@
  */
 
 import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
-import {
-    recordRef,
-    surrealObject,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { stableId } from "@ax/lib/stable-id";
 import { fail as sharedFail, parseCsvFlag } from "./commands/shared.ts";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
@@ -43,6 +36,7 @@ import {
     type RetroPlanRegistrationPlan,
     validateInterventionFailureMode,
 } from "../improve/lifecycle.ts";
+import { findStoredProposal } from "../improve/judgment-proposals.ts";
 
 export type PlanForm = "skill" | "hook" | "guidance" | "automation";
 
@@ -153,12 +147,12 @@ export const parseRetroPlanArgs = (
 };
 
 const proposalKeyFor = (slug: string, sig: string): string =>
-    `retro_meta__${safeKeyPart(slug).slice(0, 40)}__${sig.slice(-12)}`;
+    stableId("proposal", ["retro_meta", slug, sig]);
 
 export interface PlanBuildResult {
     readonly proposalKey: string;
     /**
-     * Experiment key derived from proposalKey + nowMs. NULL when
+     * Experiment key derived from the proposal key. NULL when
      * args.leaveOpen is set - no experiment row is created in that mode.
      */
     readonly experimentKey: string | null;
@@ -166,21 +160,22 @@ export interface PlanBuildResult {
     readonly experimentStatus: RetroPlanRegistrationPlan["experimentStatus"];
     readonly safetyMessage: string | null;
     readonly sig: string;
-    readonly statements: readonly string[];
 }
 
 /**
- * Pure builder: turn validated args into the SurrealQL statements that
- * insert proposal + per-form payload + experiment. Kept pure so the
- * test file can assert on the SQL shape without a DB.
+ * Pure builder: derive the stable keys and lifecycle statuses a retro plan
+ * writes under - proposal key, experiment key, dedupe signature, and the
+ * registration's proposal/experiment status. Kept pure so the test file can
+ * assert on key derivation without a DB.
  *
- * cites_evidence edges to retro records are intentionally NOT emitted -
- * the schema's `cites_evidence TO` union does not yet include `retro`.
- * Provenance is captured inside `proposal.baseline` JSON.
+ * Deliberately does NOT return statement text: `cmdRetroPlan` never executes
+ * any such text - the actual writes go through `judgment.transaction` below,
+ * field by field - and statement text asserted on by tests but reported
+ * nowhere earns nothing but false confidence.
  */
-export const buildRetroPlanStatements = (
+export const buildRetroPlanKeys = (
     args: RetroPlanArgs,
-    nowMs: number = Date.now(),
+    _nowMs: number = Date.now(),
 ): PlanBuildResult => {
     const normTitle = normalizeTitle(args.title);
     const sig = dedupeSig(args.form, normTitle);
@@ -190,97 +185,9 @@ export const buildRetroPlanStatements = (
         leaveOpen: args.leaveOpen,
         safetyContract: args.safety,
     });
-    const experimentKey = registration.createExperiment ? `${proposalKey}__${nowMs.toString(36)}` : null;
-
-    const proposalRef = recordRef("proposal", proposalKey);
-
-    // Embed frequency snapshot into baseline so the checkpoint verdict math
-    // (current_frequency vs baseline.frequency) has a fixed reference point
-    // even after derive-retro-proposals re-counts on later passes.
-    const baseline = JSON.stringify({
-        source: "retro_meta_plan",
-        slug: args.slug,
-        plan_path: args.planPath,
-        evidence_retros: args.evidenceRetros,
-        frequency: args.frequency,
-    });
-
-    const statements: string[] = [];
-
-    statements.push(
-        `CREATE ${proposalRef} CONTENT ${surrealObject([
-            ["form", surrealString(args.form)],
-            ["title", surrealString(args.title)],
-            ["hypothesis", surrealString(args.hypothesis)],
-            ["dedupe_sig", surrealString(sig)],
-            ["frequency", String(args.frequency)],
-            ["confidence", surrealString(args.confidence)],
-            ["status", surrealString(registration.proposalStatus)],
-            ["baseline", surrealOptionString(baseline)],
-            ["updated_at", "time::now()"],
-        ])};`,
-    );
-
-    const payloadRef = recordRef(`${args.form}_proposal`, proposalKey);
-    if (args.form === "skill") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_pattern", surrealString(`retro_meta·slug=${args.slug}`)],
-                ["suspected_gap", surrealString(args.hypothesis)],
-                ["proposed_behavior", surrealString(`see plan: ${args.planPath}`)],
-                ["expected_impact", surrealOptionString(null)],
-            ])};`,
-        );
-    } else if (args.form === "guidance") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString("CLAUDE.md")],
-                ["section", surrealOptionString(null)],
-                ["suggested_text", surrealString(`see plan: ${args.planPath}`)],
-            ])};`,
-        );
-    } else if (args.form === "hook") {
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["event_name", surrealString("PreToolUse")],
-                ["target_tool", surrealOptionString(null)],
-                ["hook_command", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
-                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
-                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
-                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
-            ])};`,
-        );
-    } else {
-        // automation
-        statements.push(
-            `CREATE ${payloadRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["trigger_signal", surrealString(`retro_meta·slug=${args.slug}`)],
-                ["schedule", surrealOptionString(null)],
-                ["action", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
-                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
-                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
-                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
-            ])};`,
-        );
-    }
-
-    if (experimentKey !== null) {
-        const experimentRef = recordRef("experiment", experimentKey);
-        statements.push(
-            `CREATE ${experimentRef} CONTENT ${surrealObject([
-                ["proposal", proposalRef],
-                ["artifact_path", surrealString(args.artifactPath ?? args.planPath)],
-                ["scaffolded_at", "time::now()"],
-                ["status", surrealString(registration.experimentStatus ?? "scaffolded")],
-            ])};`,
-        );
-    }
+    const experimentKey = registration.createExperiment
+        ? stableId("experiment", [proposalKey])
+        : null;
 
     return {
         proposalKey,
@@ -289,13 +196,12 @@ export const buildRetroPlanStatements = (
         experimentStatus: registration.experimentStatus,
         safetyMessage: registration.safetyMessage,
         sig,
-        statements,
     };
 };
 
 export const cmdRetroPlan = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<void, JudgmentError, Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const parsed = parseRetroPlanArgs(args, { checkPlanPath: false });
@@ -305,25 +211,101 @@ export const cmdRetroPlan = (
         if (!planExists) {
             fail(`--plan-path file not found: ${parsed.planPath}`);
         }
-        const built = buildRetroPlanStatements(parsed);
+        const built = buildRetroPlanKeys(parsed);
 
-        const db = yield* SurrealClient;
-
-        const existing = yield* db.query<[Array<{ id: unknown; dedupe_sig: string }>]>(
-            `SELECT id, dedupe_sig FROM proposal WHERE dedupe_sig = ${surrealString(built.sig)} LIMIT 1;`,
-        );
-        const hit = (existing?.[0] ?? [])[0];
+        const judgment = yield* Judgment;
+        const hit = yield* findStoredProposal(built.sig);
         if (hit) {
-            const existingId = typeof hit.id === "string"
-                ? hit.id
-                : `proposal:${(hit.id as { id?: string })?.id ?? ""}`;
+            const existingId = `proposal:${hit.id}`;
             console.error(
                 `ax retro plan: proposal with dedupe_sig ${built.sig} already exists (${existingId}); refusing to overwrite`,
             );
             process.exit(3);
         }
 
-        yield* db.query(built.statements.join("\n"));
+        const now = new Date();
+        const payloadKey = stableId(`${parsed.form}_proposal`, [built.proposalKey]);
+        const baseline = JSON.stringify({
+            source: "retro_meta_plan",
+            slug: parsed.slug,
+            plan_path: parsed.planPath,
+            evidence_retros: parsed.evidenceRetros,
+            frequency: parsed.frequency,
+        });
+        yield* judgment.transaction((tx) => Effect.gen(function* () {
+            yield* tx.put("proposal", {
+                id: built.proposalKey,
+                form: parsed.form,
+                title: parsed.title,
+                hypothesis: parsed.hypothesis,
+                dedupe_sig: built.sig,
+                frequency: parsed.frequency,
+                confidence: parsed.confidence,
+                status: built.proposalStatus,
+                origin: "agent",
+                hypothesis_template: null,
+                evidence_query: null,
+                reject_reason: null,
+                baseline,
+                created_at: now,
+                updated_at: now,
+            });
+            if (parsed.form === "skill") {
+                yield* tx.put("skill_proposal", {
+                    id: payloadKey,
+                    proposal: built.proposalKey,
+                    trigger_pattern: `retro_meta·slug=${parsed.slug}`,
+                    suspected_gap: parsed.hypothesis,
+                    proposed_behavior: `see plan: ${parsed.planPath}`,
+                    expected_impact: null,
+                });
+            } else if (parsed.form === "guidance") {
+                yield* tx.put("guidance_proposal", {
+                    id: payloadKey,
+                    proposal: built.proposalKey,
+                    file_target: "CLAUDE.md",
+                    section: null,
+                    suggested_text: `see plan: ${parsed.planPath}`,
+                });
+            } else if (parsed.form === "hook") {
+                yield* tx.put("hook_proposal", {
+                    id: payloadKey,
+                    proposal: built.proposalKey,
+                    event_name: "PreToolUse",
+                    target_tool: null,
+                    hook_command: `see plan: ${parsed.planPath}`,
+                    recovery_path: parsed.safety.recoveryPath ?? null,
+                    smoke_test_command: parsed.safety.smokeTestCommand ?? null,
+                    disable_command: parsed.safety.disableCommand ?? null,
+                    failure_mode: parsed.safety.failureMode ?? null,
+                });
+            } else {
+                yield* tx.put("automation_proposal", {
+                    id: payloadKey,
+                    proposal: built.proposalKey,
+                    trigger_signal: `retro_meta·slug=${parsed.slug}`,
+                    schedule: null,
+                    action: `see plan: ${parsed.planPath}`,
+                    recovery_path: parsed.safety.recoveryPath ?? null,
+                    smoke_test_command: parsed.safety.smokeTestCommand ?? null,
+                    disable_command: parsed.safety.disableCommand ?? null,
+                    failure_mode: parsed.safety.failureMode ?? null,
+                });
+            }
+            if (built.experimentKey !== null) {
+                yield* tx.put("experiment", {
+                    id: built.experimentKey,
+                    proposal: built.proposalKey,
+                    artifact: null,
+                    artifact_path: parsed.artifactPath ?? parsed.planPath,
+                    scaffolded_at: now,
+                    created_at: now,
+                    locked_verdict: null,
+                    status: built.experimentStatus ?? "scaffolded",
+                    task_path: null,
+                });
+            }
+        }));
 
         if (parsed.json || !process.stdout.isTTY) {
             console.log(prettyPrint({

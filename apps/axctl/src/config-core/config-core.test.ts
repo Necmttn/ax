@@ -2,15 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
 import { parseFrontmatter, readList, setFrontmatterList } from "./frontmatter.ts";
 import { addSkillToAgent, removeSkillFromAgent } from "./agent-scope-edit.ts";
 import { reconcileTable, reconcileByScope } from "./reconcile.ts";
 import { ConfigParseError } from "./errors.ts";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 
 const FS = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 const runFs = <A, E>(eff: Effect.Effect<A, E, any>) =>
@@ -117,86 +118,94 @@ describe("agent-scope-edit", () => {
     });
 });
 
-describe("reconcileTable", () => {
-    const recordingDb = (calls: { sql: string; bindings?: Record<string, unknown> | undefined }[], rows: unknown[][]) => {
-        let i = 0;
-        return makeTestSurrealClient({
-            fallback: (sql, bindings) => {
-                calls.push({ sql, bindings });
-                return [rows[i++] ?? []];
-            },
-        }).layer;
-    };
-    const run = <A, E>(eff: Effect.Effect<A, E, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
-        Effect.runPromise(eff.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>);
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("config reconcile", { requireFts: true });
 
-    // query order: SELECT absent, SELECT live, [UPDATE absent], UPDATE revivable, UPDATE live
-    test("live run: pre-selects then tombstone/resurrect/touch with $names binding", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        // wouldTombstone=1, livePresent=9 -> liveTotal=10, 1/10 < 0.5 so not skipped
-        const layer = recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [7], [1, 2, 3, 4, 5, 6, 7, 8, 9]]);
-        const report = await run(reconcileTable("skill", ["a", "b"]), layer);
-        expect(report).toMatchObject({ table: "skill", tombstoned: 1, resurrected: 1, touched: 9, dryRun: false, tombstoneSkipped: false, wouldTombstone: 1 });
-        expect(calls[0]!.sql).toStartWith("SELECT"); // wouldTombstone probe
-        expect(calls[0]!.bindings).toEqual({ names: ["a", "b"] });
-        expect(calls[2]!.sql).toContain("SET deleted_at = time::now()");
-        expect(calls[2]!.sql).toContain("NOT IN $names");
-        expect(calls[3]!.sql).toContain("deleted_at = NONE");
+const skill = (name: string, scope = "user", deletedAt: Date | null = null) => ({
+    id: `${scope}-${name}`, name, scope, dir_path: `/skills/${name}`,
+    content_hash: name, deleted_at: deletedAt,
+});
+
+describe("reconcileTable on real DuckDB", () => {
+    dtest("tombstones absent rows, revives deleted rows, and touches live rows", async () => {
+        let report: unknown;
+        let rows: ReadonlyArray<{ name: string; deleted_at: Date | null }> = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-reconcile-live-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("skill", [
+                    skill("keep"), skill("gone"), skill("revive", "user", new Date("2026-01-01")),
+                    ...Array.from({ length: 8 }, (_, index) => skill(`live-${index}`)),
+                ]);
+                report = yield* reconcileTable(
+                    write, "skill", ["keep", "revive", ...Array.from({ length: 8 }, (_, index) => `live-${index}`)],
+                    { scope: "user" },
+                );
+                rows = yield* write.rows(
+                    Schema.Struct({ name: Schema.String, deleted_at: Schema.NullOr(TimestampColumn) }),
+                    "SELECT name, deleted_at FROM skill WHERE name IN ('gone', 'revive') ORDER BY name",
+                );
+            }),
+        ));
+        expect(report).toMatchObject({ tombstoned: 1, resurrected: 1, tombstoneSkipped: false });
+        expect(rows[0]!.name).toBe("gone");
+        expect(rows[0]!.deleted_at).toBeInstanceOf(Date);
+        expect(rows[1]).toEqual({ name: "revive", deleted_at: null });
     });
 
-    test("dry-run never UPDATEs", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1], [2, 3, 4], [9]]); // would=1, present=3, revivable=1
-        const report = await run(reconcileTable("agent_def", ["x"], { dryRun: true }), layer);
-        expect(report).toMatchObject({ tombstoned: 1, resurrected: 1, touched: 3, dryRun: true, tombstoneSkipped: false });
-        expect(calls.every((c) => c.sql.startsWith("SELECT"))).toBe(true);
+    dtest("dry-run reports changes and does not mutate rows", async () => {
+        let report: unknown;
+        let deletedAt: Date | null = null;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-reconcile-dry-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("skill", [
+                    skill("keep"), skill("gone"),
+                    ...Array.from({ length: 8 }, (_, index) => skill(`live-${index}`)),
+                ]);
+                report = yield* reconcileTable(
+                    write, "skill", ["keep", ...Array.from({ length: 8 }, (_, index) => `live-${index}`)],
+                    { dryRun: true, scope: "user" },
+                );
+                const row = yield* write.first(
+                    Schema.Struct({ deleted_at: Schema.NullOr(TimestampColumn) }),
+                    "SELECT deleted_at FROM skill WHERE name = 'gone'",
+                );
+                deletedAt = row.pipe((option) => option._tag === "Some" ? option.value.deleted_at : null);
+            }),
+        ));
+        expect(report).toMatchObject({ wouldTombstone: 1, tombstoned: 1, dryRun: true });
+        expect(deletedAt).toBeNull();
     });
 
-    test("SAFETY: refuses to tombstone an implausible share of the table", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        // wouldTombstone=8, livePresent=2 -> 8/10 = 0.8 > 0.5 -> implausible, skipped
-        const layer = recordingDb(calls, [[1, 2, 3, 4, 5, 6, 7, 8], [1, 2]]);
-        const report = await run(reconcileTable("skill", ["a", "b"]), layer);
-        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "implausible", wouldTombstone: 8 });
-        expect(calls.some((c) => c.sql.startsWith("UPDATE") && c.sql.includes("deleted_at = time::now()"))).toBe(false);
-    });
-
-    test("SAFETY: empty snapshot tombstones nothing", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1, 2, 3], []]);
-        const report = await run(reconcileTable("skill", []), layer);
-        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "empty" });
-    });
-
-    test("SAFETY: tombstone:false (degraded discovery) skips the destructive pass", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1], [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]]);
-        const report = await run(reconcileTable("skill", ["a"], { tombstone: false }), layer);
-        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "incomplete" });
-    });
-
-    test("scoped: a scope constrains every predicate to `scope = $scope`", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [], [1, 2, 3, 4, 5, 6, 7, 8, 9]]);
-        await run(reconcileTable("skill", ["a"], { scope: "user" }), layer);
-        expect(calls.every((c) => c.sql.includes("scope = $scope"))).toBe(true);
-        expect(calls.every((c) => (c.bindings as { scope?: string }).scope === "user")).toBe(true);
-    });
-
-    test("reconcileByScope reconciles each scope independently, never cross-scope", async () => {
-        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        // 2 scopes x 5 queries = 10; all would=0 so nothing is skipped.
-        const layer = recordingDb(calls, Array.from({ length: 10 }, () => [] as unknown[]));
-        const byScope = new Map<string, string[]>([
-            ["user", ["a", "b"]],
-            ["plugin:x", ["c"]],
+    dtest("refuses empty, incomplete, and implausible tombstone passes", async () => {
+        const reports: unknown[] = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-reconcile-safe-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("skill", Array.from({ length: 10 }, (_, index) => skill(`row-${index}`)));
+                reports.push(yield* reconcileTable(write, "skill", [], { scope: "user" }));
+                reports.push(yield* reconcileTable(write, "skill", ["row-0"], { scope: "user", tombstone: false }));
+                reports.push(yield* reconcileTable(write, "skill", ["row-0", "row-1"], { scope: "user" }));
+            }),
+        ));
+        expect(reports).toEqual([
+            expect.objectContaining({ tombstoneSkipped: true, skipReason: "empty", tombstoned: 0 }),
+            expect.objectContaining({ tombstoneSkipped: true, skipReason: "incomplete", tombstoned: 0 }),
+            expect.objectContaining({ tombstoneSkipped: true, skipReason: "implausible", tombstoned: 0 }),
         ]);
-        const report = await run(reconcileByScope("skill", byScope), layer);
-        expect(report.perScope.map((p) => p.scope)).toEqual(["user", "plugin:x"]);
-        // every query is scope-constrained - a `user` reconcile can't touch `plugin:x`.
-        expect(calls.every((c) => c.sql.includes("scope = $scope"))).toBe(true);
-        const scopes = new Set(calls.map((c) => (c.bindings as { scope?: string }).scope));
-        expect([...scopes].sort()).toEqual(["plugin:x", "user"]);
-        expect(report).toMatchObject({ table: "skill", tombstoned: 0, tombstoneSkipped: false });
+    });
+
+    dtest("reconciles each owned scope independently", async () => {
+        let report: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-reconcile-scope-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("skill", [skill("a"), skill("c", "plugin:x")]);
+                report = yield* reconcileByScope(write, "skill", new Map([
+                    ["user", ["a"]],
+                    ["plugin:x", ["c"]],
+                ]));
+            }),
+        ));
+        expect(report).toMatchObject({
+            table: "skill", tombstoned: 0, tombstoneSkipped: false,
+            perScope: [{ scope: "user" }, { scope: "plugin:x" }],
+        });
     });
 });

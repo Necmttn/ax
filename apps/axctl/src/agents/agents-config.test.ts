@@ -4,27 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { userSource, projectSource } from "./source.ts";
 import { AgentSourceRegistryFrom } from "./registry.ts";
 import { scopeAgent, readAllAgents } from "./config.ts";
 import { reconcileAgents } from "./reconcile.ts";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 
 const FS = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
-
-/** Mock SurrealClient that records the SQL it sees and replays fixtures. */
-interface QueryRecorder {
-    calls: string[];
-}
-const recordingDb = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown[]>) => {
-    let i = 0;
-    return makeTestSurrealClient({
-        fallback: (sql) => {
-            recorder.calls.push(sql);
-            return [fixtures[i++] ?? []];
-        },
-    }).layer;
-};
 
 let prevAgentDirs: string | undefined;
 let dir: string;
@@ -151,62 +138,58 @@ describe("agents scope round-trip (real fs)", () => {
     });
 });
 
-describe("reconcileAgents (mock SurrealClient)", () => {
-    test("discovers on-disk names then issues tombstone/resurrect/touch updates", async () => {
-        writeAgent("reviewer", "---\nname: reviewer\nskills:\n  - tdd\n---\nbody");
-        writeAgent("planner", "---\nname: planner\n---\nbody");
-        const rec: QueryRecorder = { calls: [] };
 
-        // 2 on-disk agents; query order = SELECT absent, SELECT live, UPDATE x3.
-        // would=0 (fixture[2]) keeps the safety guard from tripping.
-        const report = await Effect.runPromise(
-            reconcileAgents().pipe(
-                Effect.provide(Layer.mergeAll(recordingDb(rec, [[], [1, 2], [], [], [1, 2]]), FS, reg())),
-            ) as Effect.Effect<any, never, never>,
-        );
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("agent config", { requireFts: true });
 
-        expect((report as { table: string }).table).toBe("agent_def");
-        // reconcileTable issues the three non-dry-run UPDATEs (after two pre-SELECTs).
-        const joined = rec.calls.join("\n");
-        expect(joined).toContain("UPDATE agent_def SET deleted_at = time::now() WHERE name NOT IN $names");
-        expect(joined).toContain("UPDATE agent_def SET deleted_at = NONE");
-        expect(joined).toContain("UPDATE agent_def SET last_seen_at = time::now() WHERE name IN $names");
-        expect(rec.calls.length).toBe(5);
-    });
-
-    test("dry-run issues SELECTs only, no UPDATEs", async () => {
-        writeAgent("reviewer", "---\nname: reviewer\n---\nbody");
-        const rec: QueryRecorder = { calls: [] };
-        await Effect.runPromise(
-            reconcileAgents({ dryRun: true }).pipe(
-                Effect.provide(Layer.mergeAll(recordingDb(rec, [[], [], []]), FS, reg())),
-            ) as Effect.Effect<any, never, never>,
-        );
-        expect(rec.calls.every((c) => c.startsWith("SELECT"))).toBe(true);
-    });
+const agentRow = (name: string, deletedAt: Date | null = null) => ({
+    id: name, name, scope: "user", dir_path: `/agents/${name}.md`,
+    skills: "[]", content_hash: name, deleted_at: deletedAt,
 });
 
-describe("readAllAgents", () => {
-    test("annotates on-disk agents with graph lifecycle status", async () => {
+describe("agent database behavior on real DuckDB", () => {
+    dtest("reconcile discovers names and updates lifecycle rows", async () => {
+        writeAgent("reviewer", "---\nname: reviewer\n---\nbody");
+        writeAgent("planner", "---\nname: planner\n---\nbody");
+        let report: unknown;
+        let goneDeleted = false;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-agent-reconcile-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("agent_def", [
+                    agentRow("reviewer"), agentRow("planner"), agentRow("gone"),
+                    ...Array.from({ length: 8 }, (_, index) => agentRow(`extra-${index}`)),
+                ]);
+                for (let index = 0; index < 8; index += 1) {
+                    writeAgent(`extra-${index}`, `---\nname: extra-${index}\n---\nbody`);
+                }
+                report = yield* reconcileAgents(write).pipe(
+                    Effect.provide(Layer.mergeAll(FS, reg())),
+                );
+                const rows = yield* write.raw("SELECT deleted_at FROM agent_def WHERE name = 'gone'");
+                goneDeleted = rows.rows[0]?.deleted_at instanceof Date;
+            }),
+        ));
+        expect(report).toMatchObject({ table: "agent_def", tombstoned: 1, tombstoneSkipped: false });
+        expect(goneDeleted).toBe(true);
+    });
+
+    dtest("readAllAgents joins disk records to live and deleted graph rows", async () => {
         writeAgent("reviewer", "---\nname: reviewer\nskills:\n  - tdd\n---\nbody");
         writeAgent("planner", "---\nname: planner\n---\nbody");
-        const rec: QueryRecorder = { calls: [] };
-        // First query is the SELECT name, deleted_at FROM agent_def.
-        const graphRows = [
-            { name: "reviewer", deleted_at: null },
-            { name: "stale", deleted_at: "2026-01-01T00:00:00Z" },
-        ];
-
-        const rows = await Effect.runPromise(
+        const fixture = await runWithPlatform(publishCacheFixture(
+            tempDir("ax-agent-read-"), dylibPath,
+            (write) => write.putMany("agent_def", [
+                agentRow("reviewer"), agentRow("stale", new Date("2026-01-01")),
+            ]),
+        ));
+        const rows = await runWithPlatform(
             readAllAgents({ includeDeleted: true }).pipe(
-                Effect.provide(Layer.mergeAll(recordingDb(rec, [graphRows]), FS, reg())),
-            ) as Effect.Effect<any, never, never>,
+                Effect.provide(Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), FS, reg())),
+            ),
         );
-
-        const list = rows as { name: string; status: string }[];
-        const byName = new Map(list.map((r) => [r.name, r.status]));
-        expect(byName.get("reviewer")).toBe("live"); // on disk + live in graph
-        expect(byName.get("planner")).toBe("uningested"); // on disk, not yet in graph
-        expect(byName.get("stale")).toBe("deleted"); // tombstoned, gone from disk
+        expect(new Map(rows.map((row) => [row.name, row.status]))).toEqual(new Map([
+            ["planner", "uningested"],
+            ["reviewer", "live"],
+            ["stale", "deleted"],
+        ]));
     });
 });

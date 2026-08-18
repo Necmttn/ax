@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { Effect, Layer } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
-import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
+import type { Judgment } from "@ax/lib/sqlite";
 import { ProcessServiceTest } from "@ax/lib/process";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import {
@@ -426,18 +426,22 @@ const defaultProcMock = ProcessServiceTest({
 
 const defaultFs = layerTestFileSystem({ [`${SKILL_DIR}/SKILL.md`]: SKILL_MD_CONTENT });
 
+/** A real-decode CacheRead fake (@ax/lib/testing/cache). */
+const resolveCache = (routes: TestCacheOptions["routes"]) =>
+    makeTestCacheRead(routes !== undefined ? { routes } : {});
+
 /** Run resolveSkillSparTask and unwrap the result. */
 const runResolve = (
     skillName: string,
     opts: ResolveSkillSparOpts | undefined,
-    tc: ReturnType<typeof makeTestSurrealClient>,
+    cache: ReturnType<typeof resolveCache>,
     proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
     fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
     repositoryKey: string | null = null,
 ) =>
     Effect.runPromise(
         resolveSkillSparTask(skillName, "/repo", repositoryKey, opts).pipe(
-            Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
+            Effect.provide(Layer.mergeAll(cache.layer, proc, fs)),
         ),
     );
 
@@ -445,7 +449,7 @@ const runResolve = (
 const runExpectCaptureFail = async (
     skillName: string,
     opts: ResolveSkillSparOpts | undefined,
-    tc: ReturnType<typeof makeTestSurrealClient>,
+    cache: ReturnType<typeof resolveCache>,
     msgSubstring: string,
     proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
     fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
@@ -453,7 +457,7 @@ const runExpectCaptureFail = async (
 ) => {
     const exit = await Effect.runPromiseExit(
         resolveSkillSparTask(skillName, "/repo", repositoryKey, opts).pipe(
-            Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
+            Effect.provide(Layer.mergeAll(cache.layer, proc, fs)),
         ),
     );
     expect(exit._tag).toBe("Failure");
@@ -469,27 +473,18 @@ describe("resolveSkillSparTask", () => {
     // Test 1: invoked-only history → resolves to the invoking session
     // -----------------------------------------------------------------------
     test("invoked-only: resolves to the most-recent invoking session", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                // invoked + loaded multi-statement: invoked has one row, loaded is empty
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                // session bulk fetch: source only (first_user_message derived from turn)
-                "source FROM": [
-                    [{ id: "session:s1", source: "claude" }],
-                ],
-                // turn text_excerpt for the picked session
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Fix the bug" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            // invoked has one row, loaded is empty (two separate bound queries)
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            // session bulk fetch: id + source (first_user_message derived from turn)
+            "id, source FROM session": [{ id: "session:s1", source: "claude" }],
+            // turn text_excerpt for the picked session
+            "FROM turn WHERE session": [{ text_excerpt: "Fix the bug" }],
         });
 
-        const result = await runResolve("my-skill", undefined, tc);
+        const result = await runResolve("my-skill", undefined, cache);
         expect(result.baselineSession).toBe("session:s1");
         expect(result.task).toBe("Fix the bug");
         expect(result.skill).toBe("my-skill");
@@ -503,25 +498,16 @@ describe("resolveSkillSparTask", () => {
     // Test 2: loaded-only history → resolves to the loading session
     // -----------------------------------------------------------------------
     test("loaded-only: resolves to the most-recent loading session", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                // invoked empty, loaded has one row
-                "FROM invoked WHERE out": [
-                    [],
-                    [{ sid: "session:s2", ts: "2026-02-05T00:00:00.000Z" }],
-                ],
-                "source FROM": [
-                    [{ id: "session:s2", source: "claude" }],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Do the loaded task" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            // invoked empty, loaded has one row
+            "FROM invoked WHERE out_id": [],
+            "FROM loaded WHERE out_id": [{ sid: "session:s2", ts: "2026-02-05T00:00:00.000Z" }],
+            "id, source FROM session": [{ id: "session:s2", source: "claude" }],
+            "FROM turn WHERE session": [{ text_excerpt: "Do the loaded task" }],
         });
 
-        const result = await runResolve("my-skill", undefined, tc);
+        const result = await runResolve("my-skill", undefined, cache);
         expect(result.baselineSession).toBe("session:s2");
         expect(result.task).toBe("Do the loaded task");
     });
@@ -530,28 +516,19 @@ describe("resolveSkillSparTask", () => {
     // Test 3: both invoked + loaded → max ts wins
     // -----------------------------------------------------------------------
     test("both invoked + loaded: most-recent edge-ts wins", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                // s1 invoked on Jan 10, s2 loaded on Jan 15 → s2 should win
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [{ sid: "session:s2", ts: "2026-01-15T00:00:00.000Z" }],
-                ],
-                "source FROM": [
-                    [
-                        { id: "session:s1", source: "claude" },
-                        { id: "session:s2", source: "claude" },
-                    ],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Newer task" }]],
-            },
+        // s1 invoked on Jan 10, s2 loaded on Jan 15 → s2 should win
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [{ sid: "session:s2", ts: "2026-01-15T00:00:00.000Z" }],
+            "id, source FROM session": [
+                { id: "session:s1", source: "claude" },
+                { id: "session:s2", source: "claude" },
+            ],
+            "FROM turn WHERE session": [{ text_excerpt: "Newer task" }],
         });
 
-        const result = await runResolve("my-skill", undefined, tc);
+        const result = await runResolve("my-skill", undefined, cache);
         expect(result.baselineSession).toBe("session:s2");
         expect(result.task).toBe("Newer task");
     });
@@ -560,95 +537,67 @@ describe("resolveSkillSparTask", () => {
     // Test 4: no history → SparCaptureError
     // -----------------------------------------------------------------------
     test("no invoked/loaded history → SparCaptureError", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [[], []],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [],
+            "FROM loaded WHERE out_id": [],
         });
 
-        await runExpectCaptureFail("my-skill", undefined, tc, "no sessions found");
+        await runExpectCaptureFail("my-skill", undefined, cache, "no sessions found");
     });
 
     // -----------------------------------------------------------------------
     // Test 5: unknown skill → SparCaptureError
     // -----------------------------------------------------------------------
     test("unknown skill → SparCaptureError", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [[]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [],
         });
 
-        await runExpectCaptureFail("ghost-skill", undefined, tc, "unknown skill ghost-skill");
+        await runExpectCaptureFail("ghost-skill", undefined, cache, "unknown skill ghost-skill");
     });
 
     // -----------------------------------------------------------------------
     // Test 6: synthetic skill → SparCaptureError
     // -----------------------------------------------------------------------
     test("synthetic skill → SparCaptureError", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:bash", name: "Bash", dir_path: "(synthetic)" }],
-                ],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:bash", dir_path: "(synthetic)" }],
         });
 
-        await runExpectCaptureFail("Bash", undefined, tc, "synthetic/tool skill");
+        await runExpectCaptureFail("Bash", undefined, cache, "synthetic/tool skill");
     });
 
     // -----------------------------------------------------------------------
     // Test 7: explicit opts.sessionId → uses it directly (no invoked/loaded)
     // -----------------------------------------------------------------------
     test("opts.sessionId: uses specified session directly, skips edge history", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                // Session existence check (no first_user_message - derived from turn)
-                "FROM session:": [
-                    [{ id: "session:s42" }],
-                ],
-                // Turn text_excerpt for the explicit session
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Custom task" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            // Session existence check (no first_user_message - derived from turn)
+            "session WHERE id = ?": [{ id: "session:s42" }],
+            // Turn text_excerpt for the explicit session
+            "FROM turn WHERE session": [{ text_excerpt: "Custom task" }],
         });
 
-        const result = await runResolve("my-skill", { sessionId: "session:s42" }, tc);
+        const result = await runResolve("my-skill", { sessionId: "session:s42" }, cache);
         expect(result.baselineSession).toBe("session:s42");
         expect(result.task).toBe("Custom task");
 
         // The invoked/loaded queries must NOT have been issued
-        expect(tc.captured.some((sql) => sql.includes("FROM invoked"))).toBe(false);
+        expect(cache.captured.some((sql) => sql.includes("FROM invoked"))).toBe(false);
     });
 
     // -----------------------------------------------------------------------
     // Test 8: opts.sha → parentSha is <sha>^
     // -----------------------------------------------------------------------
     test("opts.sha: parentSha resolved as sha^", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                "source FROM": [
-                    [{ id: "session:s1", source: "claude" }],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Task text" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            "id, source FROM session": [{ id: "session:s1", source: "claude" }],
+            "FROM turn WHERE session": [{ text_excerpt: "Task text" }],
         });
 
         // proc mock that verifies the sha^ call
@@ -662,7 +611,7 @@ describe("resolveSkillSparTask", () => {
             },
         });
 
-        const result = await runResolve("my-skill", { sha: "abc1234" }, tc, shaProcMock);
+        const result = await runResolve("my-skill", { sha: "abc1234" }, cache, shaProcMock);
         expect(result.parentSha).toBe("parentsha456");
         // Must have called git rev-parse ... abc1234^
         expect(capturedArgs.some((a) => a.includes("abc1234^"))).toBe(true);
@@ -672,21 +621,12 @@ describe("resolveSkillSparTask", () => {
     // Test 9: no opts → parentSha is HEAD
     // -----------------------------------------------------------------------
     test("no opts: parentSha resolved from HEAD", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                "source FROM": [
-                    [{ id: "session:s1", source: "claude" }],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "HEAD task" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            "id, source FROM session": [{ id: "session:s1", source: "claude" }],
+            "FROM turn WHERE session": [{ text_excerpt: "HEAD task" }],
         });
 
         const capturedArgs: string[][] = [];
@@ -699,7 +639,7 @@ describe("resolveSkillSparTask", () => {
             },
         });
 
-        const result = await runResolve("my-skill", undefined, tc, headProcMock);
+        const result = await runResolve("my-skill", undefined, cache, headProcMock);
         expect(result.parentSha).toBe("headsha999");
         expect(capturedArgs.some((a) => a.includes("HEAD"))).toBe(true);
         // Must NOT have been called with ^
@@ -710,18 +650,13 @@ describe("resolveSkillSparTask", () => {
     // Test 10: missing SKILL.md → SparCaptureError
     // -----------------------------------------------------------------------
     test("no SKILL.md → SparCaptureError", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
         });
 
         // Empty FS: no SKILL.md
         const emptyFs = layerTestFileSystem({});
-        await runExpectCaptureFail("my-skill", undefined, tc, "no SKILL.md", defaultProcMock, emptyFs);
+        await runExpectCaptureFail("my-skill", undefined, cache, "no SKILL.md", defaultProcMock, emptyFs);
     });
 
     // -----------------------------------------------------------------------
@@ -732,30 +667,21 @@ describe("resolveSkillSparTask", () => {
         // s2 appears once (invoked Jan 10). If the cross-table merge keeps the
         // MAX ts for s1 (Jan 20), s1 beats s2; if it wrongly kept s1's invoked
         // ts (Jan 1), s2 (Jan 10) would win. Asserting s1 locks the max merge.
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [
-                        { sid: "session:s1", ts: "2026-01-01T00:00:00.000Z" },
-                        { sid: "session:s2", ts: "2026-01-10T00:00:00.000Z" },
-                    ],
-                    [{ sid: "session:s1", ts: "2026-01-20T00:00:00.000Z" }],
-                ],
-                "source FROM": [
-                    [
-                        { id: "session:s1", source: "claude" },
-                        { id: "session:s2", source: "claude" },
-                    ],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Winner via loaded ts" }]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [
+                { sid: "session:s1", ts: "2026-01-01T00:00:00.000Z" },
+                { sid: "session:s2", ts: "2026-01-10T00:00:00.000Z" },
+            ],
+            "FROM loaded WHERE out_id": [{ sid: "session:s1", ts: "2026-01-20T00:00:00.000Z" }],
+            "id, source FROM session": [
+                { id: "session:s1", source: "claude" },
+                { id: "session:s2", source: "claude" },
+            ],
+            "FROM turn WHERE session": [{ text_excerpt: "Winner via loaded ts" }],
         });
 
-        const result = await runResolve("my-skill", undefined, tc);
+        const result = await runResolve("my-skill", undefined, cache);
         expect(result.baselineSession).toBe("session:s1");
         expect(result.task).toBe("Winner via loaded ts");
     });
@@ -763,103 +689,75 @@ describe("resolveSkillSparTask", () => {
     // -----------------------------------------------------------------------
     // Test: repositoryKey scopes the candidate fetch (record-literal WHERE)
     // -----------------------------------------------------------------------
-    test("repositoryKey emits a repository = repository:<key> filter on the session fetch", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                "source FROM": [
-                    [{ id: "session:s1", source: "claude" }],
-                ],
-                "text_excerpt, seq FROM turn WHERE session": [[{ text_excerpt: "Repo task" }]],
+    test("repositoryKey binds a repository = ? filter on the session fetch", async () => {
+        let repoParams: readonly unknown[] | undefined;
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            "id, source FROM session": (_sql, params) => {
+                repoParams = params;
+                return [{ id: "session:s1", source: "claude" }];
             },
+            "FROM turn WHERE session": [{ text_excerpt: "Repo task" }],
         });
 
-        // repositoryKey provided → scoping WHERE clause must be emitted on the bulk-fetch.
+        // repositoryKey provided → scoping WHERE clause must be emitted (bound
+        // param, not string-interpolated) on the bulk-fetch.
         await Effect.runPromise(
             resolveSkillSparTask("my-skill", "/repo", "local__abc").pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, defaultProcMock, defaultFs)),
+                Effect.provide(Layer.mergeAll(cache.layer, defaultProcMock, defaultFs)),
             ),
         );
-        const fetchSql = tc.captured.find((s) => s.includes("source FROM"));
+        const fetchSql = cache.captured.find((s) => s.includes("id, source FROM session"));
         expect(fetchSql).toBeDefined();
-        expect(fetchSql).toContain("WHERE repository = repository:`local__abc`");
+        expect(fetchSql).toContain("AND repository = ?");
+        expect(repoParams).toContain("local__abc");
     });
 
     // -----------------------------------------------------------------------
     // Test 11: non-claude sessions filtered, remaining none → SparCaptureError
     // -----------------------------------------------------------------------
     test("only non-claude sessions in history → SparCaptureError", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                // source = codex, not claude
-                "source FROM": [
-                    [{ id: "session:s1", source: "codex" }],
-                ],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            // source = codex, not claude
+            "id, source FROM session": [{ id: "session:s1", source: "codex" }],
         });
 
-        await runExpectCaptureFail("my-skill", undefined, tc, "no main (source=claude) sessions");
+        await runExpectCaptureFail("my-skill", undefined, cache, "no main (source=claude) sessions");
     });
 
     // -----------------------------------------------------------------------
     // Task 12: auto-pick session has no first user turn → SparCaptureError
     // -----------------------------------------------------------------------
     test("auto-pick session with no first user turn → SparCaptureError (empty-task guard)", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM invoked WHERE out": [
-                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
-                    [],
-                ],
-                "source FROM": [
-                    [{ id: "session:s1", source: "claude" }],
-                ],
-                // turn query returns empty: no user turns in this session
-                "text_excerpt, seq FROM turn WHERE session": [[]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "FROM invoked WHERE out_id": [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+            "FROM loaded WHERE out_id": [],
+            "id, source FROM session": [{ id: "session:s1", source: "claude" }],
+            // turn query returns empty: no user turns in this session
+            "FROM turn WHERE session": [],
         });
 
-        await runExpectCaptureFail("my-skill", undefined, tc, "has no first user message");
+        await runExpectCaptureFail("my-skill", undefined, cache, "has no first user message");
     });
 
     // -----------------------------------------------------------------------
     // Task 13: explicit sessionId with no first user turn → SparCaptureError
     // -----------------------------------------------------------------------
     test("explicit sessionId with no first user turn → SparCaptureError (empty-task guard)", async () => {
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "FROM skill WHERE name": [
-                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
-                ],
-                "FROM session:": [
-                    [{ id: "session:s42" }],
-                ],
-                // turn query returns empty
-                "text_excerpt, seq FROM turn WHERE session": [[]],
-            },
+        const cache = resolveCache({
+            "FROM skill WHERE name": [{ id: "skill:myskill", dir_path: SKILL_DIR }],
+            "session WHERE id = ?": [{ id: "session:s42" }],
+            // turn query returns empty
+            "FROM turn WHERE session": [],
         });
 
-        await runExpectCaptureFail("my-skill", { sessionId: "session:s42" }, tc, "has no first user message");
+        await runExpectCaptureFail("my-skill", { sessionId: "session:s42" }, cache, "has no first user message");
     });
 });
 
@@ -868,14 +766,28 @@ describe("resolveSkillSparTask", () => {
 // ---------------------------------------------------------------------------
 
 describe("scoreSkillSpar", () => {
-    // AxConfig is required by fetchSessionMetrics (churn scan reads AxConfig.knobs).
-    const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
+    const paired = (routes: TestCacheOptions["routes"]) =>
+        makeTestCacheRead(routes !== undefined ? { routes } : {});
 
     const runScore = <A>(
-        eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
-        tcLayer: Layer.Layer<SurrealClient>,
+        eff: Effect.Effect<A, unknown, CacheRead | Judgment>,
+        layer: Layer.Layer<CacheRead>,
     ): Promise<A> =>
-        Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer))));
+        Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer))));
+
+    /**
+     * findVariantSession binds `cwd` as a positional `?` parameter (never
+     * string-interpolated), so route selection can no longer key off the cwd
+     * appearing in the SQL text - both arms issue the identical statement.
+     * Dispatch on the bound cwd instead.
+     */
+    const armRoute = (armA: ReadonlyArray<unknown> | null, armB: ReadonlyArray<unknown> | null) =>
+        (_sql: string, params?: ReadonlyArray<unknown>) => {
+            const cwd = String(params?.[0] ?? "");
+            if (cwd.includes("spar-arm-a")) return armA ? [...armA] : [];
+            if (cwd.includes("spar-arm-b")) return armB ? [...armB] : [];
+            return [];
+        };
 
     const MAIN_ROOT = "/main/repo";
 
@@ -890,22 +802,16 @@ describe("scoreSkillSpar", () => {
     // Test 1: both arm sessions found → known verdict
     // -----------------------------------------------------------------------
     test("both arms present → score returned with known verdict (regression on empty metrics)", async () => {
-        // Route by cwd substring: findVariantSession SQL includes the absolute cwd.
-        // spar-arm-a / spar-arm-b appear only in those two queries; all other
-        // queries fall through to the default [[]] → null/0/false metrics.
+        // spar-arm-a / spar-arm-b are dispatched by bound cwd param; all other
+        // queries fall through to the default [] → null/0/false metrics.
         // With empty metrics: variant.landed = false → verdict = "regression".
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "spar-arm-a": [[{ id: "session:arm-a" }]],
-                "spar-arm-b": [[{ id: "session:arm-b" }]],
-                // stamp SELECT labels → null (will issue UPDATE, but query is OK)
-            },
+        const { layer } = paired({
+            "cwd = ?": armRoute([{ id: "session:arm-a" }], [{ id: "session:arm-b" }]),
         });
 
         const result = await runScore(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
 
         expect(result.sessionA).toBe("session:arm-a");
@@ -916,26 +822,20 @@ describe("scoreSkillSpar", () => {
         expect(result.a).toBeDefined();
         expect(result.b).toBeDefined();
 
-        // Both sessions got stampSparSession calls (SELECT labels + UPDATE each).
-        const stampUpdates = tc.captured.filter((s) => s.startsWith("UPDATE"));
-        expect(stampUpdates.length).toBeGreaterThanOrEqual(2);
     });
 
     // -----------------------------------------------------------------------
     // Test 2: arm A session missing → SparCaptureError mentioning "arm A"
     // -----------------------------------------------------------------------
     test("arm A session missing → SparCaptureError mentioning 'arm A'", async () => {
-        // No route for spar-arm-a → default [[]] → findVariantSession → null
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "spar-arm-b": [[{ id: "session:arm-b" }]],
-            },
+        // No rows for arm A's cwd → findVariantSession → null
+        const { layer } = paired({
+            "cwd = ?": armRoute(null, [{ id: "session:arm-b" }]),
         });
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -948,17 +848,14 @@ describe("scoreSkillSpar", () => {
     // Test 3: arm B session missing → SparCaptureError mentioning "arm B"
     // -----------------------------------------------------------------------
     test("arm B session missing → SparCaptureError mentioning 'arm B'", async () => {
-        // Arm A is found; arm B has no route → findVariantSession returns null.
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "spar-arm-a": [[{ id: "session:arm-a" }]],
-            },
+        // Arm A is found; arm B has no rows → findVariantSession returns null.
+        const { layer } = paired({
+            "cwd = ?": armRoute([{ id: "session:arm-a" }], null),
         });
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -976,39 +873,36 @@ describe("scoreSkillSpar", () => {
         // -COST_TOL), no extra repair → "win". A SWAPPED wiring (B baseline /
         // A variant) would give +1.2 → "regression", so this asserts the seam.
         //
-        // findVariantSession routes by cwd substring (spar-arm-a / spar-arm-b).
-        // The cost + produced queries are shared across both metric fetches;
-        // each carries BOTH sessions' rows and the per-call clean-id lookup
-        // picks the right one (mirrors spar.test.ts's metric-row idiom).
-        const tc = makeTestSurrealClient({
-            denyWrites: true,
-            routes: {
-                "spar-arm-a": [[{ id: "session:arm-a" }]],
-                "spar-arm-b": [[{ id: "session:arm-b" }]],
-                // cost: arm-a = $2.00 (baseline), arm-b = $0.80 (variant, cheaper)
-                "FROM session_token_usage": [[
-                    { session: "session:arm-a", model: "claude", estimated_cost_usd: 2.0 },
-                    { session: "session:arm-b", model: "claude", estimated_cost_usd: 0.8 },
-                ]],
-                // both arms produced a commit → landed = true for both
-                "FROM produced": [[
-                    { session: "session:arm-a", commit: "commit:ca" },
-                    { session: "session:arm-b", commit: "commit:cb" },
-                ]],
-                "FROM touched": [[
-                    { commit: "commit:ca", file: "file:f1", path: "src/a.ts", additions: 10, deletions: 2 },
-                    { commit: "commit:cb", file: "file:f2", path: "src/b.ts", additions: 10, deletions: 2 },
-                ]],
-                // turns/wall: shared bare object (symmetric, not the asymmetry axis)
-                "AS turn_count": [
-                    { turn_count: 15, s: "2026-06-01T00:00:00.000Z", e: "2026-06-01T00:05:00.000Z" },
-                ],
-            },
+        // findVariantSession dispatches on the bound cwd param (spar-arm-a /
+        // spar-arm-b). The cost + produced queries are shared across both
+        // metric fetches; each carries BOTH sessions' rows and the per-call
+        // clean-id lookup picks the right one (mirrors spar.test.ts's
+        // metric-row idiom).
+        const { layer } = paired({
+            "cwd = ?": armRoute([{ id: "session:arm-a" }], [{ id: "session:arm-b" }]),
+            // cost: arm-a = $2.00 (baseline), arm-b = $0.80 (variant, cheaper)
+            "FROM session_token_usage": [
+                { session: "session:arm-a", model: "claude", estimated_tokens: 2_000, estimated_cost_usd: 2.0 },
+                { session: "session:arm-b", model: "claude", estimated_tokens: 800, estimated_cost_usd: 0.8 },
+            ],
+            // both arms produced a commit → landed = true for both
+            "FROM produced": [
+                { session: "session:arm-a", commit: "commit:ca" },
+                { session: "session:arm-b", commit: "commit:cb" },
+            ],
+            "FROM touched": [
+                { commit: "commit:ca", file: "file:f1", path: "src/a.ts", additions: 10, deletions: 2 },
+                { commit: "commit:cb", file: "file:f2", path: "src/b.ts", additions: 10, deletions: 2 },
+            ],
+            // turns/wall: shared row (symmetric, not the asymmetry axis)
+            "AS turn_count": [
+                { turn_count: 15, started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T00:05:00.000Z" },
+            ],
         });
 
         const result = await runScore(
             scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
-            tc.layer,
+            layer,
         );
 
         expect(result.sessionA).toBe("session:arm-a");
@@ -1029,12 +923,12 @@ describe("scoreSkillSpar", () => {
     // Test 5: malformed created_at → SparCaptureError (no RangeError escape)
     // -----------------------------------------------------------------------
     test("malformed created_at → SparCaptureError before any session lookup", async () => {
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const { layer, captured } = paired({});
         const badBrief: SkillSparBrief = { ...SCORE_BRIEF, createdAt: "not-a-date" };
 
         const exit = await Effect.runPromiseExit(
             scoreSkillSpar(badBrief, MAIN_ROOT, new Date()).pipe(
-                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+                Effect.provide(Layer.merge(layer, EmptyJudgmentTestLayer)),
             ),
         );
         expect(exit._tag).toBe("Failure");
@@ -1042,7 +936,7 @@ describe("scoreSkillSpar", () => {
             expect(JSON.stringify(exit.cause)).toContain("malformed created_at");
         }
         // Failed before issuing any query (no findVariantSession call).
-        expect(tc.captured.length).toBe(0);
+        expect(captured.length).toBe(0);
     });
 });
 

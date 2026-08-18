@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import type {
     GraphExplorerEdge,
     GraphExplorerMode,
@@ -36,76 +35,77 @@ const NODE_KINDS = new Set<GraphNodeKind>([
 // The five turn-derived metrics (task_label, user/assistant/correction turn
 // counts) plus interruptions are precomputed once per session during the
 // `session-health` ingest stage and stored on `session_health`. This query
-// reads them via a single per-row `session_health` subquery instead of the
-// ~5 correlated scans over the 400k-row `turn` table that hung the endpoint
-// (GitHub issue #77). The `task_label` derivation - the two-tier organic-task
-// fallback with boilerplate filtering - now lives in
-// `src/lib/shared/task-label.ts` (consumed by the ingest derivation).
+// LEFT JOINs `session_health`/`delivery_outcome`/`pull_request` (each UNIQUE
+// on session, so the join adds at most one row) instead of running any of
+// those lookups as correlated scans over the 400k-row `turn` table, which is
+// what hung the endpoint (GitHub issue #77). Only phase_span's SUM and
+// produced's COUNT stay as scalar subqueries, since neither is
+// unique-per-session. The `task_label` derivation - the two-tier organic-task
+// fallback with boilerplate filtering - lives in `src/lib/shared/task-label.ts`
+// (consumed by the ingest derivation).
 export const FILE_ATTENTION_SQL = `
 SELECT
-    <string>session AS source_id,
-    (
-        (SELECT task_label FROM session_health WHERE session = $parent.session LIMIT 1)[0].task_label
-        ??
-        session.project
-        ??
-        <string>session
-    ) AS source_label,
-    "session" AS source_kind,
-    (session.project ?? session.cwd ?? session.source ?? NONE) AS source_subtitle,
-    <string>file AS target_id,
-    file.path AS target_label,
-    "file" AS target_kind,
-    (file.lang ?? file.kind ?? NONE) AS target_subtitle,
-    "edited" AS relation,
-    weight,
-    last_seen,
-    session.started_at AS source_started_at,
-    session.ended_at AS source_ended_at,
-    ((SELECT user_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].user_turns ?? 0) AS source_user_turns,
-    ((SELECT assistant_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].assistant_turns ?? 0) AS source_assistant_turns,
-    ((SELECT correction_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].correction_turns ?? 0) AS source_corrections,
-    ((SELECT interruptions FROM session_health WHERE session = $parent.session LIMIT 1)[0].interruptions ?? 0) AS source_interruptions,
-    ((SELECT math::sum(duration_ms) AS total, session FROM phase_span WHERE session = $parent.session AND user_turns = 0 GROUP BY session)[0].total ?? NONE) AS source_hands_free_ms,
-    array::len((SELECT id FROM produced WHERE in = $parent.session)) AS source_produced_commits,
-    ((SELECT status FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].status ?? NONE) AS source_delivery_status,
-    ((SELECT review_pain FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].review_pain ?? NONE) AS source_review_pain,
-    ((SELECT pr_size FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_size ?? NONE) AS source_pr_size,
-    ((SELECT pull_request.title AS pr_title FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_title ?? NONE) AS source_pr_title
+    agg.session AS source_id,
+    COALESCE(h.task_label, s.project, agg.session) AS source_label,
+    'session' AS source_kind,
+    COALESCE(s.project, s.cwd, s.source) AS source_subtitle,
+    agg.file AS target_id,
+    f.path AS target_label,
+    'file' AS target_kind,
+    COALESCE(f.lang, f.kind) AS target_subtitle,
+    'edited' AS relation,
+    agg.weight AS weight,
+    agg.last_seen AS last_seen,
+    s.started_at AS source_started_at,
+    s.ended_at AS source_ended_at,
+    COALESCE(h.user_turns, 0) AS source_user_turns,
+    COALESCE(h.assistant_turns, 0) AS source_assistant_turns,
+    COALESCE(h.correction_turns, 0) AS source_corrections,
+    COALESCE(h.interruptions, 0) AS source_interruptions,
+    (SELECT SUM(ps.duration_ms) FROM phase_span ps WHERE ps.session = agg.session AND ps.user_turns = 0) AS source_hands_free_ms,
+    (SELECT count(*) FROM produced pd WHERE pd.in_id = agg.session) AS source_produced_commits,
+    d.status AS source_delivery_status,
+    d.review_pain AS source_review_pain,
+    d.pr_size AS source_pr_size,
+    pr.title AS source_pr_title
 FROM (
     SELECT
-        in.session AS session,
-        out AS file,
-        count() AS weight,
-        time::max(ts) AS last_seen
-    FROM edited
-    WHERE out.path IS NOT NONE
-      AND ($q = "" OR string::lowercase(out.path) CONTAINS $q OR string::lowercase(in.session.project ?? "") CONTAINS $q)
-    GROUP BY session, file
-)
-ORDER BY weight DESC, last_seen DESC
-LIMIT $limit;`;
+        t.session AS session,
+        e.out_id AS file,
+        count(*) AS weight,
+        MAX(e.ts) AS last_seen
+    FROM edited e
+    JOIN turn t ON t.id = e.in_id
+    JOIN file f2 ON f2.id = e.out_id
+    LEFT JOIN session s2 ON s2.id = t.session
+    WHERE f2.path IS NOT NULL
+      AND (? = '' OR lower(f2.path) LIKE '%' || ? || '%' OR lower(COALESCE(s2.project, '')) LIKE '%' || ? || '%')
+    GROUP BY t.session, e.out_id
+) agg
+LEFT JOIN session s ON s.id = agg.session
+LEFT JOIN file f ON f.id = agg.file
+LEFT JOIN session_health h ON h.session = agg.session
+LEFT JOIN delivery_outcome d ON d.session = agg.session
+LEFT JOIN pull_request pr ON pr.id = d.pull_request
+ORDER BY agg.weight DESC, agg.last_seen DESC
+LIMIT ?;`;
 
 export function validateFileAttentionSql(sql = FILE_ATTENTION_SQL): ReadonlyArray<string> {
     const warnings: string[] = [];
-    if (!sql.includes("$q")) warnings.push("missing parameterized q binding");
-    if (!sql.includes("$limit")) warnings.push("missing parameterized limit binding");
-    if (/GROUP\s+BY\s+[^;\n]*\bin\.session\b/i.test(sql)) {
-        warnings.push("groups by dereferenced in.session expression");
+    if ((sql.match(/\?/g) ?? []).length < 4) {
+        warnings.push("missing the 3 lowercase-filter bindings + 1 limit binding");
     }
-    if (/math::max\s*\(\s*ts\s*\)/i.test(sql)) {
-        warnings.push("uses math::max for datetime aggregation");
+    if (!/GROUP\s+BY\s+t\.session\s*,\s*e\.out_id/i.test(sql)) {
+        warnings.push("missing aggregate subquery grouped by session and file");
     }
-    if (!/time::max\s*\(\s*ts\s*\)/i.test(sql)) {
-        warnings.push("missing datetime-friendly time::max aggregation");
+    // issue #77: turn-derived metrics are precomputed on session_health - the
+    // ONLY reference to the turn table must be the single JOIN inside the
+    // aggregate subquery, never a second/outer-row scan.
+    const turnRefs = (sql.match(/\bturn\b/gi) ?? []).length;
+    if (turnRefs !== 1) {
+        warnings.push("turn table must be referenced exactly once (inside the aggregate subquery)");
     }
-    if (!/FROM\s*\(\s*SELECT[\s\S]*GROUP\s+BY\s+session\s*,\s*file[\s\S]*\)/i.test(sql)) {
-        warnings.push("missing aggregate subquery grouped by session and file aliases");
-    }
-    if (/FROM\s+turn/i.test(sql)) {
-        warnings.push("per-row turn-table scan reintroduced; read precomputed session_health metrics");
-    }
-    if (!/session_health[\s\S]*task_label/i.test(sql)) {
+    if (!/session_health/i.test(sql) || !/task_label/i.test(sql)) {
         warnings.push("missing precomputed task_label decoration from session_health");
     }
     if (!/session_health/i.test(sql) || !/delivery_outcome/i.test(sql) || !/produced/i.test(sql) || !/phase_span/i.test(sql)) {
@@ -503,7 +503,7 @@ const clampLimit = (limit: number | undefined): number => {
 
 export const fetchGraphExplorer = (
     params: GraphExplorerParams = {},
-): Effect.Effect<GraphExplorerPayload, DbError, SurrealClient> =>
+): Effect.Effect<GraphExplorerPayload, never, CacheRead> =>
     Effect.gen(function* () {
         const modeResolution = resolveGraphExplorerMode(params.mode);
         const query = typeof params.q === "string" && params.q.trim().length > 0
@@ -520,16 +520,22 @@ export const fetchGraphExplorer = (
             });
         }
 
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            FILE_ATTENTION_SQL,
-            { q: query?.toLowerCase() ?? "", limit },
+        const read = yield* CacheRead;
+        const q = query?.toLowerCase() ?? "";
+        const rows = yield* read.raw(FILE_ATTENTION_SQL, [q, q, q, limit]).pipe(
+            Effect.map((r) => r.rows as ReadonlyArray<Record<string, unknown>>),
+            Effect.catch((err) =>
+                Effect.sync(() => {
+                    console.error("ax graph-explorer fetchGraphExplorer failed:", err);
+                    return [] as ReadonlyArray<Record<string, unknown>>;
+                }),
+            ),
         );
 
         return rowsToGraphPayload({
             mode: modeResolution.effectiveMode,
             query,
-            rows: rows?.[0] ?? [],
+            rows,
             warnings: modeResolution.warnings,
         });
     });

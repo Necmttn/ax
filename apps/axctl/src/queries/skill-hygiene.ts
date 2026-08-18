@@ -1,15 +1,19 @@
 /**
  * Skill-hygiene candidates query: unclassified skills with ≥N invocations.
  *
- * Uses three FLAT queries joined in JS - no record derefs inside aggregates.
- * The `invoked` edge table has ~87k rows; stacking `out.name` derefs inside
- * a GROUP BY aggregate caused a production hang. Lesson documented in CLAUDE.md.
+ * Uses three FLAT queries joined in JS - one per fact, none of them nested.
+ *
+ * THE ANSWER SPANS BOTH v2 ENGINES, so it is worth naming which half is which:
+ * (1) and (2) are DERIVED from transcripts and disk, so they come from the
+ * DuckDB cache (`CacheRead`); (3) is a DECISION the user made, so it comes from
+ * the SQLite judgment sidecar through `fetchClassifiedSkillIds` - never from the
+ * cache, which does not hold `plays_role` at all.
  *
  *   (1) Aggregate invocation + distinct-session counts from `invoked`, grouped
- *       by `out` (skill id). A single `in.session` deref is safe; the production
- *       hang was STACKED derefs (out.deleted_at + in.session) on 87k+ edges.
+ *       by the skill id.
  *   (2) Fetch all skill rows (id, name, dir_path, content_hash) - small table.
- *   (3) Fetch classified skill ids via plays_role (user/frontmatter/brief sources).
+ *   (3) Fetch classified skill ids via plays_role (user/frontmatter/brief
+ *       sources) from the judgment sidecar.
  *
  * JS join steps:
  *   - Build byId map from (2)
@@ -29,8 +33,10 @@
  * false - for unclassified skills, silently excluding every one of them, so
  * classify reported "none found" while weighted reported a positive count).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { fetchClassifiedSkillIds } from "../dashboard/role-queries.ts";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
@@ -64,21 +70,14 @@ export interface SkillHygieneInput {
 }
 
 // ---------------------------------------------------------------------------
-// SQL - deref-free, three flat statements
+// SQL - deref-free, two flat statements
 // ---------------------------------------------------------------------------
 
-// Record ids are coerced to strings IN SQL via type::string() (sibling idiom,
-// dispatch-analytics.ts) - the SDK can return RecordId objects, and String()
-// on those yields garbage that misses every JS map lookup.
-// GROUP BY on the function-aliased field (sid) verified against the live
-// SurrealDB 3 instance (127.0.0.1:8521) on 2026-06-12.
+// DuckDB stores ids as strings, so each result joins directly in JavaScript.
 // Invocation counts are deliberately ALL-TIME (lifetime hygiene signal; no
 // sinceDays window).
-const SQL = `
-SELECT type::string(out) AS sid, count() AS invocations, array::len(array::distinct(in.session)) AS sessions FROM invoked GROUP BY sid;
-SELECT type::string(id) AS id, name, dir_path, content_hash FROM skill;
-SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
-`;
+const HygieneCountRow = Schema.Struct({ sid: Schema.String, invocations: NumberFromBigIntColumn, sessions: NumberFromBigIntColumn });
+const HygieneSkillRow = Schema.Struct({ id: Schema.String, name: Schema.String, dir_path: Schema.NullOr(Schema.String), content_hash: Schema.NullOr(Schema.String) });
 
 // ---------------------------------------------------------------------------
 // Query
@@ -87,17 +86,16 @@ SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "b
 export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function* (
     input: SkillHygieneInput,
 ) {
-    const db = yield* SurrealClient;
-    const [counts, skills, classified] = yield* db.query<[
-        Array<{ sid: string; invocations: number; sessions: number }>,
-        Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
-        Array<string>,
-    ]>(SQL);
+    const [counts, skills, classified] = yield* Effect.all([
+        cacheRows(HygieneCountRow, { sql: "SELECT out_id AS sid, count(*) AS invocations, count(DISTINCT session) AS sessions FROM invoked GROUP BY out_id", params: [] }, "skill hygiene counts"),
+        cacheRows(HygieneSkillRow, { sql: "SELECT id, name, dir_path, content_hash FROM skill", params: [] }, "skill hygiene catalog"),
+        fetchClassifiedSkillIds(),
+    ]);
 
     // Build lookup structures from the flat result sets
-    const classifiedIds = new Set(classified ?? []);
+    const classifiedIds = new Set(classified);
     const byId = new Map(
-        (skills ?? []).map((s) => [s.id, s]),
+        skills.map((s) => [s.id, s]),
     );
 
     // Join each count row to its skill metadata (drop synthetic shims here unless
@@ -108,7 +106,7 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
         readonly classified: boolean;
     }
     const cand: Cand[] = [];
-    for (const c of counts ?? []) {
+    for (const c of counts) {
         const skill = byId.get(c.sid);
         if (!skill) continue;                                  // no matching skill row
         if (!input.includeSynthetic && skill.dir_path === "(synthetic)") continue; // tool shims, not real skills

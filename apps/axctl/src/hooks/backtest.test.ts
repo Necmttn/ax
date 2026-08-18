@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { formatReport, replayRows, summarize } from "./backtest.ts";
+import { buildBacktestRowsQuery, formatReport, replayRows, summarize } from "./backtest.ts";
 import { GitEnvTest } from "@ax/hooks-sdk/git-env";
 import enforceWorktree from "@ax/hooks-sdk/hooks/enforce-worktree";
 
@@ -30,6 +30,16 @@ const rows = [
         ts: new Date("2026-06-02"),
     },
 ];
+
+describe("buildBacktestRowsQuery", () => {
+    test("binds tool and provider filters", () => {
+        const query = buildBacktestRowsQuery(["Bash", "Edit"], "codex");
+        expect(query.sql).toContain("tc.name IN (?, ?)");
+        expect(query.sql).toContain("s.source = ?");
+        expect(query.sql).not.toContain("codex");
+        expect(query.paramsAfterSince).toEqual(["Bash", "Edit", "codex"]);
+    });
+});
 
 describe("replayRows", () => {
     test("verdict per row; summary aggregates correctly", async () => {

@@ -10,15 +10,16 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 
 import {
-    fetchDispatches,
-    fetchDispatchCandidates,
-    fetchDispatchEconomy,
+    fetchDispatches as fetchDispatchesWithRead,
+    fetchDispatchCandidates as fetchDispatchCandidatesWithRead,
+    fetchDispatchEconomy as fetchDispatchEconomyWithRead,
     compileRouting,
     renderRoutingTableMarkdown,
     replaceSkillRoutingSection,
@@ -40,22 +41,26 @@ const runCompileRouting = (outPath: string) =>
 type QueryResult = Array<Record<string, unknown>>;
 
 /**
- * Build a mock SurrealClient Layer from canned per-query results.
+ * Build a mock `CacheRead` Layer from canned per-query results.
  * The implementation returns results[0..n] in the order the SQL queries arrive
  * (multi-statement query returns multiple result arrays).
  */
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => {
-            return Effect.succeed(results as [QueryResult, ...QueryResult[]]);
-        },
-        // biome-ignore lint: other methods not needed
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
+const makeMockDb = (results: QueryResult[]): Layer.Layer<CacheRead> =>
+    makeTestCacheRead({ responses: results }).layer;
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
+const run = <A>(eff: Effect.Effect<A, unknown, CacheRead>, layer: Layer.Layer<CacheRead>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
+
+const withRead = <A, E>(
+    f: (read: import("@ax/lib/duckdb/seam").CacheReadService) => Effect.Effect<A, E>,
+) => Effect.gen(function* () { return yield* f(yield* CacheRead); });
+
+const fetchDispatches = (opts: Parameters<typeof fetchDispatchesWithRead>[1]) =>
+    withRead((read) => fetchDispatchesWithRead(read, opts));
+const fetchDispatchCandidates = (opts: Parameters<typeof fetchDispatchCandidatesWithRead>[1]) =>
+    withRead((read) => fetchDispatchCandidatesWithRead(read, opts));
+const fetchDispatchEconomy = (opts: Parameters<typeof fetchDispatchEconomyWithRead>[1]) =>
+    withRead((read) => fetchDispatchEconomyWithRead(read, opts));
 
 // ---------------------------------------------------------------------------
 // ROUTING_CLASSES
@@ -1102,6 +1107,9 @@ describe("fetchDispatches - NaN-guard (countField adoption)", () => {
             parent_id: "session:p1",
             child_id: "session:c1",
             ts: "2026-06-01T00:00:00.000Z",
+            agent_type: null,
+            description: null,
+            tool_use_id: null,
         };
         const layer = makeMockDb([[spawnedRow], [], [], [], []]);
         const result = await run(fetchDispatches({ sinceDays: 14, limit: 10 }), layer);

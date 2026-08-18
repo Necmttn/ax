@@ -1,12 +1,12 @@
 /**
- * Validation helpers for role names and skill names used in SurrealDB record
- * literals. These are validated at the boundary (on user-controlled input)
- * rather than at interpolation time, giving clear error messages before any
- * broken value reaches a SurrealQL string.
+ * Validation helpers for role names and skill names before they reach a
+ * stored record or a SQL string. These are validated at the boundary (on
+ * user-controlled input) rather than at interpolation time, giving clear
+ * error messages before any broken value reaches a query.
  *
- * Background: `recordLiteral` (src/lib/ids.ts) embeds names as
- * `table:\`<name>\`` - a backtick, semicolon, or null byte in the name breaks
- * out of the literal (local SQL injection via brief / frontmatter / CLI args).
+ * Background: a backtick, semicolon, or null byte in the name can break out
+ * of a quoted literal (local SQL injection via brief / frontmatter / CLI
+ * args), so names are normalized and checked here first.
  */
 
 /** Role names: lowercase alphanumeric + underscore/hyphen, starting with a letter. */

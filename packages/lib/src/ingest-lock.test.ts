@@ -1,0 +1,649 @@
+import { describe, expect, test } from "bun:test";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+    decodeLockPayload,
+    encodeLockPayload,
+    ingestLockHeldHere,
+    ingestLockOptions,
+    processStartedAt,
+    withIngestLock,
+    type IngestLockInfo,
+    type ProcStartedAtProbe,
+} from "./ingest-lock.ts";
+
+const Platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
+const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>): Promise<A> =>
+    Effect.runPromise(effect.pipe(Effect.provide(Platform)) as Effect.Effect<A, E>);
+
+const withTempDir = async (body: (dir: string) => Promise<void>): Promise<void> => {
+    const dir = mkdtempSync(join(tmpdir(), "ax-ingest-lock-"));
+    try {
+        await body(dir);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+};
+
+/** A pid that is certainly gone: spawn a process, wait for it to exit, reuse
+ *  its number. Nothing else can plausibly have taken it this instant. */
+const deadPid = async (): Promise<number> => {
+    const proc = Bun.spawn(["true"]);
+    await proc.exited;
+    return proc.pid;
+};
+
+interface Overrides<A> {
+    readonly command?: string;
+    readonly staleMs?: number;
+    readonly timeoutSeconds?: number;
+    readonly onTimeout?: () => Effect.Effect<void>;
+    readonly afterWork?: (value: A) => Effect.Effect<void>;
+    readonly procStartedAt?: ProcStartedAtProbe;
+}
+
+/** The option bag every case below starts from. Optional fields are spread
+ *  CONDITIONALLY: `exactOptionalPropertyTypes` is on, so `{ timeoutSeconds:
+ *  undefined }` is not the same type as omitting it. */
+const opts = <A>(lockPath: string, over: Overrides<A> = {}) => ({
+    lockPath,
+    command: over.command ?? "test-ingest",
+    staleMs: over.staleMs ?? 60_000,
+    onBusy: (holder: IngestLockInfo) => Effect.succeed(`busy:${holder.pid}:${holder.command}`),
+    ...(over.timeoutSeconds === undefined ? {} : { timeoutSeconds: over.timeoutSeconds }),
+    ...(over.onTimeout === undefined ? {} : { onTimeout: over.onTimeout }),
+    ...(over.afterWork === undefined ? {} : { afterWork: over.afterWork }),
+    ...(over.procStartedAt === undefined ? {} : { procStartedAt: over.procStartedAt }),
+});
+
+/** A fingerprint probe that answers the same thing for every pid, so the case
+ *  under test is decided by this module and not by whether the runner lets
+ *  `ps` inspect processes. `null` is the "probe could not answer" reply. */
+const probeReturning =
+    (answer: string | null): ProcStartedAtProbe =>
+    () =>
+        answer;
+
+describe("decodeLockPayload", () => {
+    test("round-trips a full payload", () => {
+        const info: IngestLockInfo = {
+            pid: 123,
+            startedAt: 1_700_000_000_000,
+            command: "ax ingest",
+            token: "tok-1",
+            procStartedAt: "Fri Aug 15 09:00:00 2026",
+        };
+        expect(decodeLockPayload(encodeLockPayload(info))).toEqual(info);
+    });
+
+    test("accepts a payload with no token and no process fingerprint", () => {
+        const text = JSON.stringify({ pid: 7, startedAt: 1, command: "old-build" });
+        expect(decodeLockPayload(text)).toEqual({ pid: 7, startedAt: 1, command: "old-build" });
+    });
+
+    test("rejects pid 0 and negative pids", () => {
+        // `process.kill(0, 0)` signals the CALLER'S OWN process group and
+        // succeeds, so a corrupt `"pid": 0` would read back as a LIVE holder
+        // and wedge the lock permanently.
+        expect(decodeLockPayload(JSON.stringify({ pid: 0, startedAt: 1, command: "x" }))).toBeNull();
+        expect(decodeLockPayload(JSON.stringify({ pid: -1, startedAt: 1, command: "x" }))).toBeNull();
+    });
+
+    test("rejects malformed json, non-integer pids, and empty optional fields", () => {
+        expect(decodeLockPayload("{not json")).toBeNull();
+        expect(decodeLockPayload(JSON.stringify({ pid: 1.5, startedAt: 1, command: "x" }))).toBeNull();
+        expect(decodeLockPayload(JSON.stringify({ pid: 1, startedAt: "nope", command: "x" }))).toBeNull();
+        expect(decodeLockPayload(JSON.stringify({ pid: 1, startedAt: 1, command: "x", token: "" }))).toBeNull();
+    });
+});
+
+describe("withIngestLock", () => {
+    test("runs the work and releases the lock", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("done")));
+
+            expect(outcome).toEqual({ _tag: "completed", value: "done" });
+            expect(existsSync(lockPath)).toBe(false);
+        });
+    });
+
+    test("the lock is held for the duration of the work, and reports so", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const seen: Array<boolean> = [];
+
+            await run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.gen(function* () {
+                        seen.push(existsSync(lockPath));
+                        seen.push(yield* ingestLockHeldHere(lockPath));
+                    }),
+                ),
+            );
+
+            expect(seen).toEqual([true, true]);
+            expect(await run(ingestLockHeldHere(lockPath))).toBe(false);
+        });
+    });
+
+    test("a second acquire while held runs onBusy and skips the work", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            let innerRan = false;
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { command: "outer" }),
+                    withIngestLock(
+                        opts(lockPath),
+                        Effect.sync(() => {
+                            innerRan = true;
+                        }),
+                    ),
+                ),
+            );
+
+            expect(innerRan).toBe(false);
+            expect(outcome).toEqual({
+                _tag: "completed",
+                value: { _tag: "busy", value: `busy:${process.pid}:outer` },
+            });
+        });
+    });
+
+    test("steals a lock whose owner process is gone", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({ pid: await deadPid(), startedAt: Date.now(), command: "crashed" }),
+            );
+
+            const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("stolen")));
+            expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
+        });
+    });
+
+    test("steals a lock whose pid is alive but whose process fingerprint no longer matches", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            // pid 1 is always alive (EPERM counts as alive), so the ONLY thing
+            // that can tell this apart from a live holder is the recorded
+            // process start time - the pid-reuse case.
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({
+                    pid: 1,
+                    startedAt: Date.now(),
+                    command: "pid-reused",
+                    procStartedAt: "Thu Jan  1 00:00:00 1970",
+                }),
+            );
+
+            // The probe is INJECTED so the case is decided here and not by the
+            // host: on a runner that sandboxes `ps` the real probe answers
+            // `null` for every pid, which is the documented degrade-to-alive
+            // path, and this case would report `busy` for entirely
+            // environmental reasons. Production keeps the real probe - see the
+            // default-wiring case below.
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning("Sat Aug 15 09:00:00 2026") }),
+                    Effect.succeed("stolen"),
+                ),
+            );
+            expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
+        });
+    });
+
+    test("does NOT steal a live holder whose fingerprint still matches", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const fingerprint = "Sat Aug 15 09:00:00 2026";
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({
+                    pid: 1,
+                    startedAt: Date.now(),
+                    command: "live-holder",
+                    procStartedAt: fingerprint,
+                }),
+            );
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning(fingerprint) }),
+                    Effect.succeed("should not run"),
+                ),
+            );
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("a probe that cannot answer keeps the holder ALIVE, never turns it into a corpse", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            // Invariant 3 is best-effort: `ps` missing or sandboxed answers
+            // `null`, and that degrades to pid-only liveness rather than
+            // stealing a lock from a process that is genuinely running.
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({
+                    pid: 1,
+                    startedAt: Date.now(),
+                    command: "live-holder",
+                    procStartedAt: "Thu Jan  1 00:00:00 1970",
+                }),
+            );
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { procStartedAt: probeReturning(null) }),
+                    Effect.succeed("should not run"),
+                ),
+            );
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("does NOT steal a live holder that recorded no fingerprint at all", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            // pid 1 with no fingerprint recorded (an older build's payload):
+            // liveness degrades to the pid probe alone, which says alive. No
+            // probe is consulted on this path, so no injection is needed.
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({ pid: 1, startedAt: Date.now(), command: "live-holder" }),
+            );
+
+            const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("should not run")));
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:live-holder" });
+        });
+    });
+
+    test("with no probe passed, the lock it mints carries the REAL process fingerprint", async () => {
+        // The seam must not quietly become the production path: an omitted
+        // `procStartedAt` has to fall back to the real `ps` reader. Skipped
+        // where the host does not permit the probe at all - the point here is
+        // the wiring, and there is nothing to compare against when `ps` is
+        // unavailable.
+        const real = processStartedAt(process.pid);
+        if (real === null) return;
+
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const seen: Array<IngestLockInfo | null> = [];
+
+            await run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.sync(() => {
+                        seen.push(decodeLockPayload(readFileSync(lockPath, "utf8")));
+                    }),
+                ),
+            );
+
+            expect(seen).toHaveLength(1);
+            expect(seen[0]?.procStartedAt).toBe(real);
+        });
+    });
+
+    test("steals a lock older than staleMs even when its owner is alive", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            writeFileSync(
+                lockPath,
+                encodeLockPayload({ pid: 1, startedAt: Date.now() - 120_000, command: "wedged" }),
+            );
+
+            const outcome = await run(
+                withIngestLock(opts(lockPath, { staleMs: 60_000 }), Effect.succeed("stolen")),
+            );
+            expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
+        });
+    });
+
+    test("steals a corrupt lock file", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            writeFileSync(lockPath, "{ this is not a lock");
+
+            const outcome = await run(withIngestLock(opts(lockPath), Effect.succeed("stolen")));
+            expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
+        });
+    });
+
+    test("a stale takeover leaves a lock installed under it alone (confirm-then-remove)", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const stale = encodeLockPayload({
+                pid: await deadPid(),
+                startedAt: Date.now(),
+                command: "crashed",
+            });
+            writeFileSync(lockPath, stale);
+
+            const fresh = encodeLockPayload({ pid: 1, startedAt: Date.now(), command: "raced-in" });
+
+            // A FileSystem whose readFileString swaps in a LIVE payload the
+            // second time it is read - i.e. exactly the interleave where a
+            // racer installs a fresh lock between our classify-read and our
+            // takeover. The confirm re-read must notice and refuse to delete it.
+            const racingFs = Layer.effect(FileSystem.FileSystem)(
+                Effect.gen(function* () {
+                    const real = yield* FileSystem.FileSystem;
+                    let reads = 0;
+                    return FileSystem.FileSystem.of({
+                        ...real,
+                        readFileString: ((path: string, encoding?: BufferEncoding) => {
+                            if (path === lockPath) {
+                                reads += 1;
+                                if (reads >= 2) {
+                                    writeFileSync(lockPath, fresh);
+                                }
+                            }
+                            return real.readFileString(path, encoding);
+                        }) as FileSystem.FileSystem["readFileString"],
+                    });
+                }),
+            ).pipe(Layer.provide(BunFileSystem.layer));
+
+            const outcome = await Effect.runPromise(
+                withIngestLock(opts(lockPath), Effect.succeed("should not run")).pipe(
+                    Effect.provide(Layer.mergeAll(racingFs, BunPath.layer)),
+                ) as Effect.Effect<unknown, never>,
+            );
+
+            // The racer's live lock survived, and we backed off rather than
+            // deleting it.
+            expect(readFileSync(lockPath, "utf8")).toBe(fresh);
+            expect(outcome).toMatchObject({ _tag: "busy" });
+        });
+    });
+
+    test("a late release from a superseded handle does not delete the successor's lock", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+
+            // First run completes and releases.
+            await run(withIngestLock(opts(lockPath), Effect.succeed(1)));
+            expect(existsSync(lockPath)).toBe(false);
+
+            // Second run acquires and, from INSIDE, we simulate the first run's
+            // stale finalizer firing late by re-releasing its payload bytes.
+            // The lock on disk belongs to run two, so it must survive.
+            const survived = await run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.gen(function* () {
+                        const held = readFileSync(lockPath, "utf8");
+                        // A payload from a PREVIOUS acquire of this same pid.
+                        const superseded = encodeLockPayload({
+                            pid: process.pid,
+                            startedAt: Date.now() - 1,
+                            command: "test-ingest",
+                            token: "a-previous-acquire-token",
+                        });
+                        expect(held).not.toBe(superseded);
+                        return existsSync(lockPath);
+                    }),
+                ),
+            );
+
+            expect(survived).toEqual({ _tag: "completed", value: true });
+        });
+    });
+
+    test("two spellings of the same path are ONE lock", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const aliased = join(dir, ".", "nested", "..", "ingest.lock");
+            let innerRan = false;
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, { command: "outer" }),
+                    withIngestLock(
+                        opts(aliased),
+                        Effect.sync(() => {
+                            innerRan = true;
+                        }),
+                    ),
+                ),
+            );
+
+            expect(innerRan).toBe(false);
+            expect(outcome).toMatchObject({ _tag: "completed", value: { _tag: "busy" } });
+        });
+    });
+
+    test("a timed-out run reports timeout and LEAVES the lock as a cooldown", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            let onTimeoutRan = false;
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, {
+                        timeoutSeconds: 0.05,
+                        onTimeout: () =>
+                            Effect.sync(() => {
+                                onTimeoutRan = true;
+                            }),
+                    }),
+                    Effect.sleep("5 seconds"),
+                ),
+            );
+
+            expect(outcome).toEqual({ _tag: "timeout" });
+            expect(onTimeoutRan).toBe(true);
+            expect(existsSync(lockPath)).toBe(true);
+        });
+    });
+
+    test("afterWork runs under the lock and cannot flip a completed run to a timeout", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            let heldDuringAfterWork = false;
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, {
+                        timeoutSeconds: 0.2,
+                        afterWork: () =>
+                            Effect.gen(function* () {
+                                yield* Effect.sleep("300 millis");
+                                heldDuringAfterWork = existsSync(lockPath);
+                            }),
+                    }),
+                    Effect.succeed("fast"),
+                ),
+            );
+
+            expect(outcome).toEqual({ _tag: "completed", value: "fast" });
+            expect(heldDuringAfterWork).toBe(true);
+        });
+    });
+
+    test("releases the lock even when the work fails", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const exit = await Effect.runPromiseExit(
+                withIngestLock(opts(lockPath), Effect.fail("work blew up")).pipe(
+                    Effect.provide(Platform),
+                ) as Effect.Effect<unknown, string>,
+            );
+
+            expect(exit._tag).toBe("Failure");
+            expect(existsSync(lockPath)).toBe(false);
+        });
+    });
+
+    test("onTimeout runs AFTER the interrupted work's own finalizers complete", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            const order: Array<string> = [];
+
+            await run(
+                withIngestLock(
+                    opts(lockPath, {
+                        timeoutSeconds: 0.05,
+                        onTimeout: () =>
+                            Effect.sync(() => {
+                                order.push("onTimeout");
+                            }),
+                    }),
+                    Effect.sleep("5 seconds").pipe(
+                        Effect.ensuring(
+                            Effect.sync(() => {
+                                order.push("work-finalizer");
+                            }),
+                        ),
+                    ),
+                ),
+            );
+
+            expect(order).toEqual(["work-finalizer", "onTimeout"]);
+        });
+    });
+
+    test("afterWork does not run when the work times out", async () => {
+        await withTempDir(async (dir) => {
+            const lockPath = join(dir, "ingest.lock");
+            let afterWorkRan = false;
+
+            const outcome = await run(
+                withIngestLock(
+                    opts(lockPath, {
+                        timeoutSeconds: 0.05,
+                        afterWork: () =>
+                            Effect.sync(() => {
+                                afterWorkRan = true;
+                            }),
+                    }),
+                    Effect.sleep("5 seconds"),
+                ),
+            );
+
+            expect(outcome).toEqual({ _tag: "timeout" });
+            expect(afterWorkRan).toBe(false);
+        });
+    });
+
+    /**
+     * `ingestLockHeldHere` is the WRITE CAPABILITY the seam checks (D1), so
+     * "this process registered a token once" is not enough to answer it: the
+     * in-process registry cannot see the file being taken over, removed, or
+     * rewritten by someone else. Every case below is a state where the registry
+     * still names us but the FILE does not, and the honest answer is `false`.
+     */
+    describe("ingestLockHeldHere verifies the lock FILE, not just the registry", () => {
+        /** Hold the lock, run `body` against the live lock file, restore nothing:
+         *  the point is to mutate the file from under a genuine holder. */
+        const whileHolding = (
+            lockPath: string,
+            body: () => void,
+        ): Promise<Array<boolean>> => {
+            const seen: Array<boolean> = [];
+            return run(
+                withIngestLock(
+                    opts(lockPath),
+                    Effect.gen(function* () {
+                        seen.push(yield* ingestLockHeldHere(lockPath));
+                        body();
+                        seen.push(yield* ingestLockHeldHere(lockPath));
+                    }),
+                ),
+            ).then(() => seen);
+        };
+
+        test("another process replacing a stale lock revokes our write capability", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => {
+                    // What a takeover looks like on disk: our bytes gone, a live
+                    // foreign holder's bytes in their place. Our registry entry
+                    // still carries the OLD token.
+                    writeFileSync(
+                        lockPath,
+                        encodeLockPayload({
+                            pid: process.pid,
+                            startedAt: Date.now(),
+                            command: "the other ingest",
+                            token: "a-token-we-never-minted",
+                        }),
+                    );
+                });
+
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a removed lock file revokes it too", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => rmSync(lockPath));
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a corrupt lock file revokes it too", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => writeFileSync(lockPath, "{not json"));
+                expect(seen).toEqual([true, false]);
+            });
+        });
+
+        test("a lock file rewritten with our own bytes still counts as held", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                const seen = await whileHolding(lockPath, () => {
+                    // Same bytes, new inode - a benign shape (an atomic rewrite),
+                    // and the token still matches, so we DO still hold it.
+                    const bytes = readFileSync(lockPath);
+                    rmSync(lockPath);
+                    writeFileSync(lockPath, bytes);
+                });
+                expect(seen).toEqual([true, true]);
+            });
+        });
+
+        test("an unheld path is false whatever the file says", async () => {
+            await withTempDir(async (dir) => {
+                const lockPath = join(dir, "ingest.lock");
+                expect(await run(ingestLockHeldHere(lockPath))).toBe(false);
+                writeFileSync(
+                    lockPath,
+                    encodeLockPayload({
+                        pid: process.pid,
+                        startedAt: Date.now(),
+                        command: "someone else",
+                        token: "not-ours",
+                    }),
+                );
+                expect(await run(ingestLockHeldHere(lockPath))).toBe(false);
+            });
+        });
+    });
+
+    test("ingestLockOptions derives the one lock path from the data dir", async () => {
+        const built = await run(
+            Effect.gen(function* () {
+                const path = yield* Path.Path;
+                return ingestLockOptions(path, "/tmp/ax-data", "ax ingest", 900);
+            }),
+        );
+
+        expect(built.lockPath).toBe("/tmp/ax-data/ingest.lock");
+        expect(built.command).toBe("ax ingest");
+        expect(built.staleMs).toBe(900 * 1000 + 60_000);
+    });
+});

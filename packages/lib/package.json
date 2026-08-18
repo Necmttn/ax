@@ -12,12 +12,19 @@
     "./shared/path": "./src/shared/path.ts",
     "./shared/team-community": "./src/shared/team-community.ts",
     "./shared/team-fetch": "./src/shared/team-fetch.ts",
+    "./duckdb": "./src/duckdb/index.ts",
+    "./sqlite": "./src/sqlite/index.ts",
+    "./duckdb/internal": "./src/duckdb/internal.ts",
+    "./duckdb/self-time": "./src/duckdb/self-time.ts",
+    "./testing/duckdb-dylib": "./src/testing/duckdb-dylib.ts",
+    "./testing/gated-test": "./src/testing/gated-test.ts",
+    "./testing/cache": "./src/testing/cache.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
-    "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"
-    }
+    },
+    "./testing/cache-fixture": "./src/testing/cache-fixture.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -25,11 +32,11 @@
   "dependencies": {
     "@ax/onboarding-prompt": "workspace:*",
     "@effect/platform-bun": "catalog:",
-    "effect": "catalog:",
-    "surrealdb": "^2.0.0"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@ax/schema": "workspace:*"
   }
 }

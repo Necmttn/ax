@@ -6,14 +6,14 @@
  * with the original skill, Arm B runs with the edited skill active (global
  * swap during Arm B only, restored immediately after).
  */
-import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AxConfig } from "@ax/lib/config";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
+import { Effect, FileSystem, Schema } from "effect";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { andAll, eqClause, inClause } from "@ax/lib/duckdb/clause";
 import { posixPath } from "@ax/lib/shared/path";
-import { surrealString, refListSource, recordKeyPart } from "@ax/lib/shared/surreal";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
+import { cleanSessionId } from "../metrics/util.ts";
 import {
     scoreSpar,
     fetchSessionMetrics,
@@ -328,6 +328,15 @@ export const buildSkillSparBrief = (
  *      session in JS, filter to source=claude, pick most-recent.
  * 4. Resolve parentSha from `opts.sha^` or git HEAD.
  */
+const SkillLookupRow = Schema.Struct({
+    id: Schema.String,
+    dir_path: Schema.NullOr(Schema.String),
+});
+const SessionIdRow = Schema.Struct({ id: Schema.String });
+const TextExcerptRow = Schema.Struct({ text_excerpt: Schema.NullOr(Schema.String) });
+const SkillEdgeRow = Schema.Struct({ sid: Schema.String, ts: TimestampColumn });
+const SessionSourceRow = Schema.Struct({ id: Schema.String, source: Schema.NullOr(Schema.String) });
+
 export const resolveSkillSparTask = (
     skillName: string,
     repoRoot: string,
@@ -335,21 +344,20 @@ export const resolveSkillSparTask = (
     opts?: ResolveSkillSparOpts,
 ): Effect.Effect<
     SkillSparTask,
-    DbError | ProcessError | SparCaptureError,
-    SurrealClient | ProcessService | FileSystem.FileSystem
+    CacheReadError | ProcessError | SparCaptureError,
+    CacheRead | ProcessService | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const fs = yield* FileSystem.FileSystem;
         const proc = yield* ProcessService;
 
         // 1. Skill row lookup ---------------------------------------------------
-        const skillQueryRows = yield* db.query<[
-            Array<{ id: string; name: string; dir_path: string | null }>,
-        ]>(
-            `SELECT type::string(id) AS id, name, dir_path FROM skill WHERE name = ${surrealString(skillName)} LIMIT 1;`,
-        );
-        const skillRow = skillQueryRows?.[0]?.[0] ?? null;
+        const skillRow = (yield* read.rows(
+            SkillLookupRow,
+            `SELECT id, dir_path FROM skill WHERE name = ? LIMIT 1`,
+            [skillName],
+        ))[0] ?? null;
         if (!skillRow) {
             return yield* Effect.fail(new SparCaptureError(`unknown skill ${skillName}`));
         }
@@ -359,7 +367,7 @@ export const resolveSkillSparTask = (
             );
         }
         const skillDir = skillRow.dir_path ?? "";
-        const skillId = skillRow.id; // "skill:`abc`" - already type::string
+        const skillId = skillRow.id; // bare skill id (VARCHAR PK)
 
         // 2. SKILL.md snapshot --------------------------------------------------
         const skillMdPath = `${skillDir}/SKILL.md`;
@@ -377,13 +385,12 @@ export const resolveSkillSparTask = (
             // first user turn (first_user_message is not stored on session rows;
             // it is derived via the turn table - see enrichSessions in
             // apps/axctl/src/dashboard/sessions-query.ts).
-            const key = recordKeyPart(opts.sessionId, "session") ?? opts.sessionId;
-            const sessRows = yield* db.query<[
-                Array<{ id: string }>,
-            ]>(
-                `SELECT type::string(id) AS id FROM ${recordLiteral("session", key)};`,
-            );
-            const sess = sessRows?.[0]?.[0] ?? null;
+            const key = cleanSessionId(opts.sessionId);
+            const sess = (yield* read.rows(
+                SessionIdRow,
+                `SELECT id FROM session WHERE id = ?`,
+                [key],
+            ))[0] ?? null;
             if (!sess) {
                 return yield* Effect.fail(
                     new SparCaptureError(`session ${opts.sessionId} not found`),
@@ -392,10 +399,12 @@ export const resolveSkillSparTask = (
             baselineSession = sess.id;
 
             // Derive first user turn text_excerpt (the canonical first-message field).
-            const promptRows = yield* db.query<[Array<{ text_excerpt: string | null }>]>(
-                `SELECT text_excerpt, seq FROM turn WHERE session = ${recordLiteral("session", key)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
-            );
-            const promptText = promptRows?.[0]?.[0]?.text_excerpt ?? null;
+            const promptRow = (yield* read.rows(
+                TextExcerptRow,
+                `SELECT text_excerpt FROM turn WHERE session = ? AND role = 'user' ORDER BY seq ASC LIMIT 1`,
+                [key],
+            ))[0] ?? null;
+            const promptText = promptRow?.text_excerpt ?? null;
             if (!promptText) {
                 return yield* Effect.fail(
                     new SparCaptureError(
@@ -405,22 +414,30 @@ export const resolveSkillSparTask = (
             }
             task = promptText;
         } else {
-            // Infer from invoked + loaded edge history (deref-free, two flat queries).
-            const edgeRows = yield* db.query<[
-                Array<{ sid: string; ts: string }>,
-                Array<{ sid: string; ts: string }>,
-            ]>(
-                `SELECT type::string(session) AS sid, type::string(ts) AS ts FROM invoked WHERE out = ${skillId} AND session IS NOT NONE;\n` +
-                `SELECT type::string(in) AS sid, type::string(ts) AS ts FROM loaded WHERE out = ${skillId};`,
-            );
-            const [invokedRows, loadedRows] = edgeRows;
+            // Infer from invoked + loaded edge history (deref-free, two flat
+            // queries fanned out together; UNION ALL would also work but the
+            // two tables have distinct session-ref columns, so two bound
+            // queries stay simpler than aliasing both into one statement).
+            const [invokedRows, loadedRows] = yield* Effect.all([
+                read.rows(
+                    SkillEdgeRow,
+                    `SELECT session AS sid, ts FROM invoked WHERE out_id = ? AND session IS NOT NULL`,
+                    [skillId],
+                ),
+                read.rows(
+                    SkillEdgeRow,
+                    `SELECT in_id AS sid, ts FROM loaded WHERE out_id = ?`,
+                    [skillId],
+                ),
+            ]);
 
-            // Merge: keep max edge-ts per session across both tables.
-            const maxBySid = new Map<string, string>();
-            for (const row of [...(invokedRows ?? []), ...(loadedRows ?? [])]) {
-                if (!row.sid || !row.ts) continue;
+            // Merge: keep max edge-ts (epoch ms) per session across both tables.
+            const maxBySid = new Map<string, number>();
+            for (const row of [...invokedRows, ...loadedRows]) {
+                if (!row.sid) continue;
+                const ts = row.ts.getTime();
                 const prev = maxBySid.get(row.sid);
-                if (!prev || row.ts > prev) maxBySid.set(row.sid, row.ts);
+                if (prev === undefined || ts > prev) maxBySid.set(row.sid, ts);
             }
 
             if (maxBySid.size === 0) {
@@ -431,31 +448,24 @@ export const resolveSkillSparTask = (
                 );
             }
 
-            // Bulk-fetch session rows (source filter + task text). When a
-            // `repositoryKey` is known (run inside a git repo), scope candidates
-            // to THIS repo so the chosen task is re-runnable in the parentSha
-            // worktree - a global pick could hand back a task from an unrelated
-            // repo. `repository` is a record-typed field, so it filters via a
-            // record literal (same shape as listSessionsNear). Absent key (not in
-            // a git tree) → global selection (v1 limitation, task may be cross-repo).
+            // Bulk-fetch session rows (source filter). When a `repositoryKey`
+            // is known (run inside a git repo), scope candidates to THIS repo
+            // so the chosen task is re-runnable in the parentSha worktree - a
+            // global pick could hand back a task from an unrelated repo.
+            // Absent key (not in a git tree) → global selection (v1
+            // limitation, task may be cross-repo).
             const candidateSids = [...maxBySid.keys()];
-            // first_user_message is NOT stored on the session row - it must be
-            // derived from the first user turn (see enrichSessions in
-            // apps/axctl/src/dashboard/sessions-query.ts). Exclude it from the
-            // bulk fetch and derive it separately after picking the best session.
-            const pick = repositoryKey
-                ? ["id", "source", "repository"]
-                : ["id", "source"];
-            const repoClause = repositoryKey
-                ? ` WHERE repository = ${recordLiteral("repository", repositoryKey)}`
-                : "";
-            const sessionRows = yield* db.query<[
-                Array<{ id: string; source: string | null }>,
-            ]>(
-                `SELECT type::string(id) AS id, source FROM ${refListSource(candidateSids, pick)}${repoClause};`,
+            const clause = andAll([
+                inClause("id", candidateSids),
+                eqClause("repository", repositoryKey),
+            ]);
+            const sessionRows = yield* read.rows(
+                SessionSourceRow,
+                `SELECT id, source FROM session WHERE TRUE ${clause.sql}`,
+                clause.params,
             );
 
-            const mainSessions = (sessionRows?.[0] ?? []).filter((s) => s.source === "claude");
+            const mainSessions = sessionRows.filter((s) => s.source === "claude");
             if (mainSessions.length === 0) {
                 return yield* Effect.fail(
                     new SparCaptureError(
@@ -465,9 +475,9 @@ export const resolveSkillSparTask = (
             }
 
             // Pick the session whose most-recent edge-ts is highest.
-            let best: { id: string; ts: string } | null = null;
+            let best: { id: string; ts: number } | null = null;
             for (const sess of mainSessions) {
-                const ts = maxBySid.get(sess.id) ?? "";
+                const ts = maxBySid.get(sess.id) ?? -Infinity;
                 if (!best || ts > best.ts) {
                     best = { id: sess.id, ts };
                 }
@@ -475,11 +485,12 @@ export const resolveSkillSparTask = (
             baselineSession = best!.id;
 
             // Derive the task text from the first user turn in the chosen session.
-            const bestKey = recordKeyPart(best!.id, "session") ?? best!.id;
-            const promptRows = yield* db.query<[Array<{ text_excerpt: string | null }>]>(
-                `SELECT text_excerpt, seq FROM turn WHERE session = ${recordLiteral("session", bestKey)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
-            );
-            const promptText = promptRows?.[0]?.[0]?.text_excerpt ?? null;
+            const promptRow = (yield* read.rows(
+                TextExcerptRow,
+                `SELECT text_excerpt FROM turn WHERE session = ? AND role = 'user' ORDER BY seq ASC LIMIT 1`,
+                [best!.id],
+            ))[0] ?? null;
+            const promptText = promptRow?.text_excerpt ?? null;
             if (!promptText) {
                 return yield* Effect.fail(
                     new SparCaptureError(
@@ -543,16 +554,17 @@ export const scoreSkillSpar = (
     sinceForChurn: Date,
 ): Effect.Effect<
     { sessionA: string; sessionB: string; a: SparMetrics; b: SparMetrics; score: SparScore },
-    DbError | SparCaptureError,
-    SurrealClient | AxConfig
+    CacheReadError | JudgmentError | SparCaptureError,
+    CacheRead | Judgment
 > =>
     Effect.gen(function* () {
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);
         const cwdB = posixPath.join(mainRepoRoot, brief.worktreeB);
         const sinceMs = Date.parse(brief.createdAt);
-        // Guard a malformed created_at: NaN would flow into surrealDate(new
-        // Date(NaN)) inside findVariantSession and throw a RangeError OUTSIDE
-        // the typed error channel. Fail in-channel instead.
+        // Guard a malformed created_at: NaN would flow into `new Date(NaN)`
+        // inside findVariantSession, whose `.toISOString()` bound-param
+        // encoding throws a RangeError OUTSIDE the typed error channel. Fail
+        // in-channel instead.
         if (Number.isNaN(sinceMs)) {
             return yield* Effect.fail(
                 new SparCaptureError(`malformed created_at in brief ${brief.id}`),

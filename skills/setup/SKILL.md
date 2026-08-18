@@ -6,8 +6,8 @@ description: Install + verify ax (the agent experience layer). Triggers when the
 # ax:setup
 
 Install and verify ax - the local agent-experience graph. After this skill
-the user has the `ax` CLI on PATH, a running SurrealDB, the launchd watcher
-reacting to new transcripts, and the ax skills loaded into Claude Code.
+the user has the `ax` CLI on PATH, an ingested local graph (embedded DuckDB,
+no daemon to run or watch), and the ax skills loaded into Claude Code.
 
 This skill is intentionally narrow: install + verify only. For day-to-day
 use see `ax:retro` (experiment loop), `ax:extract-workflow` (reconstruct
@@ -48,16 +48,16 @@ shell rc - tell them to add `$HOME/.local/bin` to PATH.
 
 ```bash
 ax --version              # expect axctl v0.1.x
-ax doctor --json          # expect ok: true for db + watcher + skills
+ax doctor --json          # expect ok: true for cache + skills
 ax skills taste --limit=5 # rank top skills - proof the graph populated
 ```
 
 Specific failure modes:
-- DB connection refused → `scripts/db-start.sh` from the ax repo, or
-  `brew services start surrealdb`.
-- Watcher not loaded (macOS) → `axctl install` re-runs the launchd
-  registration. On Linux the watcher isn't supported - manual
-  `ax ingest --since=1` periodically.
+- `cache` check fails / no successful ingest recorded → run `ax ingest`.
+  There is no daemon to start - the graph is a published DuckDB snapshot,
+  rebuilt on demand. A stale graph also self-heals: any DB-backed command
+  forks a debounced background `ax ingest` on its own (`AX_NO_AUTO_INGEST=1`
+  to opt out).
 - Zero skill invocations after ingest → user has a different Claude
   transcripts path. Set `AX_TRANSCRIPTS_DIR` and re-ingest.
 
@@ -85,8 +85,9 @@ ax skills weighted        # the re-ranked list, now role-weighted
 ```
 
 If `classify` reports "no unclassified skills", the user hasn't used enough yet -
-say so and revisit after a few days (the watcher keeps ingesting). One-off
-override without a brief: `ax skills tag <skill> <role>`.
+say so and revisit after a few days (re-run `ax ingest`, or let the
+freshness drive top it up automatically). One-off override without a brief:
+`ax skills tag <skill> <role>`.
 
 Also surface the config front door when relevant:
 - `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked).
@@ -113,9 +114,9 @@ hook (`ax hooks init` scaffolds it; install with
 | Component | Where | Owner |
 |---|---|---|
 | `ax` / `axctl` CLI | `~/.local/bin/ax` (symlink to `~/.local/share/ax/bin/axctl`) | install.sh |
-| SurrealDB | `127.0.0.1:8521` (ns=`ax`, db=`main`) | scripts/db-start.sh |
-| Launchd watcher (macOS) | `com.necmttn.ax-watch` reacts to new transcripts | `axctl install` |
-| Weekly checkpoint (optional) | `com.necmttn.ax-checkpoint` runs experiment-loop math | `bun run checkpoint:install` from the repo |
+| DuckDB cache | `~/.local/share/ax/` (embedded, no daemon to run or watch) | `ax ingest` |
+| Freshness drive | forks a debounced background `ax ingest` when the graph is stale | automatic, on any DB-backed command |
+| OTLP receiver (optional, macOS) | `com.necmttn.ax-otlpd` LaunchAgent | `ax install --telemetry` |
 | Claude skills | `ax:setup` (this one), `ax:retro` (experiment loop), `ax:extract-workflow` (recipe reconstruction), `ax:release-announcement` (release notes from git + session evidence) | `npx skills add Necmttn/ax` |
 
 ## After install
@@ -142,14 +143,11 @@ ax project context --json       # grounding for the current repo
   session, skill invocation, edit, and commit. Surfaces what skills you
   actually use, what context to ground on, and which repeated workflows
   are worth packaging.
-- **"Is my data shared?"** No. Everything stays in your local SurrealDB
-  at `127.0.0.1:8521`. No telemetry leaves the box.
+- **"Is my data shared?"** No. Everything stays in a local embedded DuckDB
+  cache under `~/.local/share/ax/`. No telemetry leaves the box.
 - **"How do I uninstall?"**
   ```bash
-  bash scripts/uninstall-watcher.sh
-  bash scripts/uninstall-daemon.sh
-  rm ~/.local/bin/ax ~/.local/bin/axctl
-  rm -rf ~/.local/share/ax
+  ax uninstall --purge
   ```
 
 ## What this skill is NOT for

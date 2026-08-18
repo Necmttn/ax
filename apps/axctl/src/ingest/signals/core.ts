@@ -1,12 +1,13 @@
 /**
  * Pure signal-derivation core: typed evidence rows in -> Friction Event /
- * Diagnostic Event records + edge specs out. No Effect, no SurrealClient -
- * every classification rule here is exercised by core.test.ts on fixture
- * rows shaped like real transcripts. This is where signal-quality bugs live;
- * keep new rules here, not in the stage wiring.
+ * Diagnostic Event records + edge specs out. No Effect and no database client
+ * of any kind - every classification rule here is exercised by core.test.ts on
+ * fixture rows shaped like real transcripts. This is where signal-quality bugs
+ * live; keep new rules here, not in the stage wiring.
  */
 import type { SkillName } from "@ax/lib/brands";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { turnRecordKey } from "@ax/lib/ids";
+import { edgeRowId, skillRowId } from "@ax/lib/stable-id";
 import {
     isoTimestamp,
     nonEmptyString,
@@ -76,7 +77,7 @@ export function isHarnessInjected(text: string): boolean {
  * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
  * the lexicographically-smaller skill key always sits in the `in` slot. A
  * short hash of the joined keys keeps the id stable + length-bounded
- * regardless of skill-name length (Surreal record-id segment escaping).
+ * regardless of skill-name length.
  */
 export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     edgeId: string;
@@ -84,8 +85,7 @@ export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     toKey: string;
 } {
     const [lo, hi] = skillKeyA < skillKeyB ? [skillKeyA, skillKeyB] : [skillKeyB, skillKeyA];
-    const hash = Bun.hash(`${lo}__${hi}`).toString(16).slice(0, 12);
-    return { edgeId: `${lo.slice(0, 24)}__${hi.slice(0, 24)}__${hash}`, fromKey: lo, toKey: hi };
+    return { edgeId: edgeRowId("skill_paired", lo, hi), fromKey: lo, toKey: hi };
 }
 
 const PAIR_WINDOW = 3;
@@ -266,9 +266,11 @@ export function deriveDiagnosticsFromToolCalls(
     return out;
 }
 
-/** Pure grouping of raw turn rows into per-session bundles. Session ids come
- *  back from Surreal as either `session:⟨id⟩` strings or `{ tb, id }` objects;
- *  both normalize to the bare key. First row wins for repo/checkout/cwd meta. */
+/** Pure grouping of raw turn rows into per-session bundles. DuckDB returns a
+ *  session id as a plain string; the legacy Surreal shapes (`session:⟨id⟩` and
+ *  `{ tb, id }`) are still normalized here because rows written before the
+ *  cut-over survive in cached fixtures. All three land on the bare key. First
+ *  row wins for repo/checkout/cwd meta. */
 export function groupTurnsBySession(
     rows: ReadonlyArray<TurnRow & { session: unknown }>,
 ): SessionTurns[] {
@@ -385,7 +387,7 @@ export function deriveProposed(
             const end = Math.min(text.length, idx + name.length + 40);
             out.push({
                 fromTurnKey: rawTurnKey(turn.id),
-                skillKey: skillRecordKey(name),
+                skillKey: skillRowId(name),
                 skillName: name,
                 ts: tsToIso(turn.ts),
                 contextExcerpt: text.slice(start, end),
@@ -425,8 +427,8 @@ export function deriveSkillPairs(
                     if (sa === sb) continue;
                     // Same turn pair: avoid double-counting the unordered pair.
                     if (i === j && sa > sb) continue;
-                    const keyA = skillRecordKey(sa);
-                    const keyB = skillRecordKey(sb);
+                    const keyA = skillRowId(sa);
+                    const keyB = skillRowId(sb);
                     const { edgeId, fromKey, toKey } = skillPairedEdgeId(keyA, keyB);
                     const ts = tsToIso(b.ts);
                     const existing = accum.get(edgeId);
@@ -470,7 +472,7 @@ export function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
             for (const name of skills) {
                 out.push({
                     fromTurnKey: errorTurnKey,
-                    skillKey: skillRecordKey(name),
+                    skillKey: skillRowId(name),
                     skillName: name,
                     ts: tsToIso(next.ts),
                     errorExcerpt: excerpt,
@@ -563,4 +565,14 @@ export function deriveSignalsFromEvidence(
         diagnosticEvents,
         turnCount,
     };
+}
+
+export function correctedInvokedTurnKeys(corrections: readonly CorrectionEdge[]): string[] {
+    return [...new Set(corrections.flatMap((edge) => {
+        const firstSeq = Math.max(1, edge.correctedSeq - 3);
+        return Array.from(
+            { length: edge.correctedSeq - firstSeq + 1 },
+            (_, index) => turnRecordKey(edge.correctedSession, firstSeq + index),
+        );
+    }))];
 }

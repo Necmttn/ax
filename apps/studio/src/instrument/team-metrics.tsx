@@ -585,13 +585,13 @@ function TeamBoardsPanel() {
     const q = useQuery({ queryKey: ["team", "boards"], queryFn: () => api.team() });
 
     if (q.isLoading && !q.data) {
-        return <Notice title="loading team boards" detail="Fetching the org rollup from your local daemon." />;
+        return <Notice title="loading team boards" detail="Fetching the org rollup from ax studio." />;
     }
     if (q.error && !q.data) {
         const msg = String((q.error as Error)?.message ?? q.error);
         return (
             <Notice title="team boards unavailable"
-                detail={`${msg} - the /api/team endpoint needs a current ax daemon. Start it with \`ax serve\`, and push snapshots with \`ax team push\`.`} />
+                detail={`${msg} - the /api/team endpoint needs ax studio open. Run \`ax studio\`, and push snapshots with \`ax team push\`.`} />
         );
     }
     if (!q.data) {

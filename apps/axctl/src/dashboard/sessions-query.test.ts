@@ -1,261 +1,122 @@
 /**
- * Tests for src/dashboard/sessions-query.ts
- *
- * Uses a mock SurrealClient to verify that each function emits the expected
- * SurrealQL clauses without requiring a live DB connection.
+ * Tests for src/dashboard/sessions-query.ts, against a REAL published DuckDB
+ * cache fixture. The window semantics (repository scope, date bounds, project
+ * filter) and the turn-count/first-user-message enrichment are all asserted
+ * by seeding real `session`/`turn` rows and reading them back, not by
+ * inspecting SQL text.
  */
-import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { BunFileSystem } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
-import { AxConfig, AxConfigTest } from "@ax/lib/config";
-import {
-    makeTestSurrealClient,
-    type TestSurrealQueryCall,
-} from "@ax/lib/testing/surreal";
-import {
-    listSessionsHere,
-    listSessionsAround,
-    listSessionsNear,
-} from "./sessions-query.ts";
+import { describe, expect } from "bun:test";
+import { Effect } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { listSessionsAround, listSessionsHere, listSessionsNear } from "./sessions-query.ts";
 
-// ---------------------------------------------------------------------------
-// Mock DB helper
-// ---------------------------------------------------------------------------
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("sessions-query", { requireFts: true });
 
-function makeMockDb(opts?: {
-    sessionRows?: ReadonlyArray<Record<string, unknown>>;
-}): { layer: Layer.Layer<SurrealClient>; captured: TestSurrealQueryCall[] } {
-    // First query call (the session list) answers with `sessionRows`; the
-    // follow-up enrichment queries fall back to `[[]]`.
-    const tc = makeTestSurrealClient({
-        denyWrites: true,
-        ...(opts?.sessionRows ? { responses: [[[...opts.sessionRows]]] } : {}),
+const NOW = new Date();
+const daysAgo = (n: number): Date => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+const FIXTURE = (w: CacheWriteService) =>
+    Effect.gen(function* () {
+        yield* w.putMany("session", [
+            {
+                id: "s1",
+                repository: "r1",
+                source: "claude",
+                project: "p",
+                cwd: "/w/ax",
+                started_at: daysAgo(1),
+            },
+            {
+                id: "s2",
+                repository: "r2",
+                source: "claude",
+                project: "other",
+                cwd: "/w/other",
+                started_at: daysAgo(1),
+            },
+            {
+                id: "s3",
+                repository: "r1",
+                source: "codex",
+                project: "p",
+                cwd: "/w/ax",
+                started_at: daysAgo(20),
+            },
+        ]);
+        yield* w.putMany("turn", [
+            { id: "t1", session: "s1", seq: 1, ts: daysAgo(1), role: "user", text_excerpt: "first message" },
+            { id: "t2", session: "s1", seq: 2, ts: daysAgo(1), role: "assistant", text_excerpt: "reply" },
+            { id: "t3", session: "s1", seq: 3, ts: daysAgo(1), role: "user", text_excerpt: "second user turn" },
+            { id: "t4", session: "s2", seq: 1, ts: daysAgo(1), role: "user", text_excerpt: "other session" },
+        ]);
     });
-    return { layer: tc.layer, captured: tc.calls };
-}
-
-// enrichSessions reads its fan-out width from AxConfig.knobs, so the mock DB
-// layer is merged with a test AxConfig (defaults; no env overrides needed).
-const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
-
-async function run<A>(
-    eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
-    layer: Layer.Layer<SurrealClient>,
-): Promise<A> {
-    return Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer))));
-}
-
-// ---------------------------------------------------------------------------
-// Tests: listSessionsHere
-// ---------------------------------------------------------------------------
 
 describe("listSessionsHere", () => {
-    test("uses repository literal and default days=14", async () => {
-        const { layer, captured } = makeMockDb();
+    dtest("scopes by repository and the default 14-day window, enriching turn_count + first_user_message", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-"), dylibPath, FIXTURE));
 
-        await run(
-            listSessionsHere({ repositoryKey: "remote__github_com_foo_bar__abc123" }),
-            layer,
-        );
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryId: "r1" }));
 
-        expect(captured).toHaveLength(1);
-        const { sql, bindings } = captured[0]!;
-        // Record literal must be embedded in SQL - NOT a binding
-        expect(sql).toContain("repository = repository:`remote__github_com_foo_bar__abc123`");
-        expect(sql).not.toContain("$repository");
-        expect(bindings?.["repository"]).toBeUndefined();
-        expect(sql).toContain("14d");
-        expect(sql).toContain("time::now()");
+        // s3 is repository r1 but 20 days old - outside the default 14d window.
+        expect(rows.map((r) => r.id)).toEqual(["s1"]);
+        expect(rows[0]).toMatchObject({ turn_count: 3, first_user_message: "first message" });
     });
 
-    test("respects custom --days value", async () => {
-        const { layer, captured } = makeMockDb();
+    dtest("respects a custom --days window", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-days-"), dylibPath, FIXTURE));
 
-        await run(
-            listSessionsHere({ repositoryKey: "remote__test__abc", days: 7 }),
-            layer,
-        );
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryId: "r1", days: 30 }));
 
-        expect(captured[0]!.sql).toContain("7d");
-        expect(captured[0]!.sql).not.toContain("14d");
-    });
-
-    test("enriches turn_count and first_user_message via per-session indexed lookups", async () => {
-        const { layer, captured } = makeMockDb({
-            sessionRows: [
-                {
-                    id: "session:`s1`",
-                    started_at: "2026-05-28T00:00:00Z",
-                    ended_at: null,
-                    source: "claude",
-                    project: "p",
-                    repository: "repository:`r`",
-                },
-            ],
-        });
-
-        await run(
-            listSessionsHere({ repositoryKey: "remote__test__abc" }),
-            layer,
-        );
-
-        // First call: session list (no turn_count/first_user_message in projection).
-        expect(captured[0]!.sql).not.toContain("turn_count");
-        // One enrichment query per session, using the literal session id (NOT a
-        // `session IN [...]` membership scan) so the turn_session_seq index is hit.
-        expect(captured).toHaveLength(2);
-        const enrich = captured[1]!.sql;
-        expect(enrich).toContain("FROM ONLY session:`s1`");
-        expect(enrich).toContain("count() FROM turn WHERE session = session:`s1`");
-        expect(enrich).toContain("AND role = 'user'");
-        expect(enrich).toContain("LIMIT 1");
-        expect(enrich).not.toContain("session IN");
-        // Regression #540: SurrealDB >=3.1.2 rejects `SELECT VALUE x ... ORDER BY seq`
-        // ("Missing order idiom `seq` in statement selection") because the order
-        // idiom is absent from the projection. The first-user-message subquery must
-        // therefore select `seq` and pluck the field rather than use SELECT VALUE.
-        expect(enrich).not.toMatch(/SELECT\s+VALUE\b[^)]*ORDER BY seq/);
-        expect(enrich).toMatch(/SELECT text_excerpt, seq FROM turn[^)]*ORDER BY seq/);
-    });
-
-    test("orders by started_at DESC", async () => {
-        const { layer, captured } = makeMockDb();
-        await run(
-            listSessionsHere({ repositoryKey: "remote__test__abc" }),
-            layer,
-        );
-        expect(captured[0]!.sql).toContain("ORDER BY started_at DESC");
+        expect(rows.map((r) => r.id).sort()).toEqual(["s1", "s3"]);
     });
 });
-
-// ---------------------------------------------------------------------------
-// Tests: listSessionsAround
-// ---------------------------------------------------------------------------
 
 describe("listSessionsAround", () => {
-    test("passes from/to as Date bindings and uses default days=3", async () => {
-        const { layer, captured } = makeMockDb();
-        const centre = new Date("2025-03-15T12:00:00Z");
+    dtest("windows ±days around the centre date, no repository scope", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-around-"), dylibPath, FIXTURE));
 
-        await run(listSessionsAround({ date: centre }), layer);
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsAround({ date: daysAgo(1), days: 3 }));
 
-        expect(captured).toHaveLength(1);
-        const { sql, bindings } = captured[0]!;
-        expect(sql).toContain("$from");
-        expect(sql).toContain("$to");
-        expect(bindings).toBeDefined();
-        expect(bindings!.from).toBeInstanceOf(Date);
-        expect(bindings!.to).toBeInstanceOf(Date);
-
-        // window should be ±3 days around centre
-        const from = bindings!.from as Date;
-        const to = bindings!.to as Date;
-        const diffDays = (to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000);
-        expect(diffDays).toBeCloseTo(6, 1);
+        expect(rows.map((r) => r.id).sort()).toEqual(["s1", "s2"]);
     });
 
-    test("respects custom days", async () => {
-        const { layer, captured } = makeMockDb();
-        const centre = new Date("2025-03-15T12:00:00Z");
+    dtest("applies the project filter when given", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-around-project-"), dylibPath, FIXTURE));
 
-        await run(listSessionsAround({ date: centre, days: 7 }), layer);
-
-        const from = captured[0]!.bindings!.from as Date;
-        const to = captured[0]!.bindings!.to as Date;
-        const diffDays = (to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000);
-        expect(diffDays).toBeCloseTo(14, 1);
-    });
-
-    test("includes project filter clause when project is set", async () => {
-        const { layer, captured } = makeMockDb();
-
-        await run(
-            listSessionsAround({ date: new Date(), project: "-Users-foo-bar" }),
-            layer,
+        const rows = await readThroughFixture(
+            fixture,
+            dylibPath,
+            listSessionsAround({ date: daysAgo(1), days: 3, project: "other" }),
         );
 
-        const { sql, bindings } = captured[0]!;
-        expect(sql).toContain("AND project = $project");
-        expect(bindings!.project).toBe("-Users-foo-bar");
-    });
-
-    test("omits project clause when project is null", async () => {
-        const { layer, captured } = makeMockDb();
-
-        await run(
-            listSessionsAround({ date: new Date(), project: null }),
-            layer,
-        );
-
-        expect(captured[0]!.sql).not.toContain("$project");
-    });
-
-    test("no repository WHERE filter (around is not repo-scoped)", async () => {
-        const { layer, captured } = makeMockDb();
-        await run(listSessionsAround({ date: new Date() }), layer);
-        // The SELECT projection contains "repository" but the WHERE clause should not
-        expect(captured[0]!.sql).not.toContain("AND repository");
+        expect(rows.map((r) => r.id)).toEqual(["s2"]);
     });
 });
 
-// ---------------------------------------------------------------------------
-// Tests: listSessionsNear
-// ---------------------------------------------------------------------------
-
 describe("listSessionsNear", () => {
-    test("passes from/to Date bindings", async () => {
-        const { layer, captured } = makeMockDb();
-        const from = new Date("2025-03-14T12:00:00Z");
-        const to = new Date("2025-03-15T18:00:00Z");
+    dtest("windows [from, to], scoped by repository when given", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-near-"), dylibPath, FIXTURE));
 
-        await run(listSessionsNear({ from, to }), layer);
-
-        const { sql, bindings } = captured[0]!;
-        expect(sql).toContain("$from");
-        expect(sql).toContain("$to");
-        expect(bindings!.from).toBe(from);
-        expect(bindings!.to).toBe(to);
-    });
-
-    test("includes repository literal when repositoryKey is provided", async () => {
-        const { layer, captured } = makeMockDb();
-
-        await run(
-            listSessionsNear({
-                from: new Date("2025-03-14T00:00:00Z"),
-                to: new Date("2025-03-15T00:00:00Z"),
-                repositoryKey: "remote__github_com_foo_bar__abc123",
-            }),
-            layer,
+        const rows = await readThroughFixture(
+            fixture,
+            dylibPath,
+            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryId: "r1" }),
         );
 
-        const { sql: nearSql, bindings: nearBindings } = captured[0]!;
-        // Record literal must be embedded in SQL - NOT a binding
-        expect(nearSql).toContain("AND repository = repository:`remote__github_com_foo_bar__abc123`");
-        expect(nearSql).not.toContain("$repository");
-        expect(nearBindings?.["repository"]).toBeUndefined();
+        expect(rows.map((r) => r.id)).toEqual(["s1"]);
     });
 
-    test("omits repository WHERE filter when repositoryKey is null", async () => {
-        const { layer, captured } = makeMockDb();
+    dtest("omits the repository filter when repositoryKey is null", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-near-any-repo-"), dylibPath, FIXTURE));
 
-        await run(
-            listSessionsNear({
-                from: new Date(),
-                to: new Date(),
-                repositoryKey: null,
-            }),
-            layer,
+        const rows = await readThroughFixture(
+            fixture,
+            dylibPath,
+            listSessionsNear({ from: daysAgo(2), to: daysAgo(0), repositoryId: null }),
         );
 
-        // SELECT projection always has "repository" column; WHERE must not have it
-        expect(captured[0]!.sql).not.toContain("AND repository");
-    });
-
-    test("orders by started_at DESC", async () => {
-        const { layer, captured } = makeMockDb();
-        await run(listSessionsNear({ from: new Date(), to: new Date() }), layer);
-        expect(captured[0]!.sql).toContain("ORDER BY started_at DESC");
+        expect(rows.map((r) => r.id).sort()).toEqual(["s1", "s2"]);
     });
 });

@@ -1,20 +1,17 @@
 /**
  * Shared business logic for the `axctl improve` mutations. Phase C10
  * needed accept/reject/verdict callable from both the CLI handler and the
- * dashboard HTTP endpoint, so the SurrealQL + scaffold orchestration lives
+ * dashboard HTTP endpoint, so the query + scaffold orchestration lives
  * here in one place. Each function takes the proposal's `dedupe_sig`
  * (preferred) or full record id and returns a structured result the caller
  * (CLI or HTTP) can render however it likes.
  */
 
 import { Effect, FileSystem, type PlatformError } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError, type JudgmentService } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { recordRef, surrealString } from "@ax/lib/shared/surql";
-import { surrealLiteral } from "@ax/lib/json";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import {
     type InterventionSafetyContract,
     PROPOSAL_STATUS_ACCEPTED,
@@ -26,6 +23,7 @@ import {
 import { interventionFormSpec, isInterventionForm, type InterventionForm } from "./intervention-forms.ts";
 import { scaffoldSkill, type ScaffoldInput, type ScaffoldResult } from "./skill-scaffold.ts";
 import { renderTaskFile, type TaskInput } from "./task-template.ts";
+import { findStoredProposal, type StoredProposal } from "./judgment-proposals.ts";
 
 export type ImproveActionStatus =
     | "ok"
@@ -74,49 +72,8 @@ export interface VerdictResult {
     readonly message?: string;
 }
 
-interface ProposalRow {
-    readonly id: string | { tb: string; id: string };
-    readonly form: string;
-    readonly title: string;
-    readonly hypothesis: string;
-    readonly dedupe_sig: string;
-    readonly frequency?: number;
-    readonly confidence?: string;
-    readonly status: string;
-    readonly baseline?: string | null;
-    readonly skill_payload?: Record<string, unknown> | null;
-}
-
-interface FullProposalRow extends ProposalRow {
-    readonly subagent_payload?: {
-        readonly bounded_role?: string | null;
-        readonly delegation_trigger?: string | null;
-        readonly example_task_patterns?: readonly string[] | null;
-    } | null;
-    readonly guidance_payload?: {
-        readonly file_target?: string | null;
-        readonly section?: string | null;
-        readonly suggested_text?: string | null;
-    } | null;
-    readonly hook_payload?: {
-        readonly event_name?: string | null;
-        readonly target_tool?: string | null;
-        readonly hook_command?: string | null;
-        readonly recovery_path?: string | null;
-        readonly smoke_test_command?: string | null;
-        readonly disable_command?: string | null;
-        readonly failure_mode?: string | null;
-    } | null;
-    readonly automation_payload?: {
-        readonly trigger_signal?: string | null;
-        readonly schedule?: string | null;
-        readonly action?: string | null;
-        readonly recovery_path?: string | null;
-        readonly smoke_test_command?: string | null;
-        readonly disable_command?: string | null;
-        readonly failure_mode?: string | null;
-    } | null;
-}
+type ProposalRow = StoredProposal;
+type FullProposalRow = StoredProposal;
 
 // Shared inner: wrap a scaffoldSkill call in the PlatformError→{error} recovery
 // so callers can map filesystem faults to a `missing_payload` result rather than
@@ -165,20 +122,7 @@ export const shouldScaffoldWorkflowSkill = (
 ): boolean =>
     row.form === "guidance" && row.guidance_payload?.section === "workflows";
 
-const fetchFullProposal = (idLiteral: string) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[FullProposalRow[]]>(
-            `SELECT *,
-                (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-                (SELECT * FROM subagent_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
-                (SELECT * FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
-                (SELECT * FROM hook_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-                (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload
-            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
-        );
-        return (result?.[0] ?? [])[0] ?? null;
-    });
+const fetchFullProposal = findStoredProposal;
 
 /** Default directory for .ax/tasks/ task brief files. */
 const defaultTaskDir = (): string =>
@@ -299,7 +243,7 @@ const taskInputBuilders = {
  */
 const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
     const shortId = row.dedupe_sig;
-    const proposalId = `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`;
+    const proposalId = `proposal:${row.id}`;
     if (!isInterventionForm(row.form)) {
         throw new Error(`unsupported proposal form: ${row.form}`);
     }
@@ -347,26 +291,39 @@ const validateSig = (sig: string): void => {
     }
 };
 
-// Disambiguates same-millisecond acceptProposal calls within a process run.
-// Cross-process collisions for the same proposal are not a concern because
-// acceptProposal is short-lived and proposalKey is content-derived.
-const KEY_COUNTER = (() => {
-    let i = 0;
-    return () => (++i).toString(36);
-})();
+const saveAcceptedExperiment = (
+    judgment: JudgmentService,
+    proposalId: string,
+    experimentId: string,
+    status: string,
+    values: { readonly artifactPath?: string; readonly taskPath?: string },
+) => judgment.transaction((transaction) => Effect.gen(function* () {
+    const now = new Date();
+    yield* transaction.exec(
+        "UPDATE proposal SET status = ?, updated_at = ? WHERE id = ?",
+        [PROPOSAL_STATUS_ACCEPTED, now, proposalId],
+    );
+    yield* transaction.put("experiment", {
+        id: experimentId,
+        proposal: proposalId,
+        artifact: null,
+        artifact_path: values.artifactPath ?? null,
+        scaffolded_at: values.artifactPath === undefined ? null : now,
+        created_at: now,
+        locked_verdict: null,
+        status,
+        task_path: values.taskPath ?? null,
+    });
+}));
 
 export const acceptProposal = (
     opts: AcceptOptions,
-): Effect.Effect<AcceptResult, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<AcceptResult, JudgmentError | PlatformError.PlatformError, Judgment | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const idLiteral = surrealLiteral(opts.sigOrId);
-        const row = yield* fetchFullProposal(idLiteral);
+        const row = yield* fetchFullProposal(opts.sigOrId);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
-        const proposalKey = recordKeyPart(row.id, "proposal");
-        if (!proposalKey) {
-            return { status: "not_found", message: "proposal.id has unexpected shape" };
-        }
+        const proposalKey = row.id;
         const acceptPlan = planAcceptCandidate({
             form: row.form,
             proposalStatus: row.status,
@@ -374,11 +331,7 @@ export const acceptProposal = (
             safetyContract: safetyContractForRow(row),
         });
         if (acceptPlan.status === "wrong_status") {
-            const db = yield* SurrealClient;
-            const existingResult = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id, artifact_path, type::string(scaffolded_at) AS scaffolded_at, locked_verdict FROM experiment WHERE proposal = ${recordRef("proposal", proposalKey)} LIMIT 1;`,
-            );
-            const existing = (existingResult?.[0] ?? [])[0];
+            const existing = row.experiment;
             const result: AcceptResult = {
                 status: "wrong_status",
                 message: acceptPlan.message,
@@ -387,10 +340,10 @@ export const acceptProposal = (
                 return {
                     ...result,
                     existing_experiment: {
-                        id: String(existing.id ?? ""),
-                        artifact_path: existing.artifact_path === null ? null : String(existing.artifact_path ?? ""),
-                        scaffolded_at: existing.scaffolded_at === null ? null : String(existing.scaffolded_at ?? ""),
-                        locked_verdict: existing.locked_verdict === null ? null : String(existing.locked_verdict ?? ""),
+                        id: `experiment:${existing.id}`,
+                        artifact_path: existing.artifact_path,
+                        scaffolded_at: existing.scaffolded_at?.toISOString() ?? null,
+                        locked_verdict: existing.locked_verdict,
                     },
                 };
             }
@@ -404,9 +357,9 @@ export const acceptProposal = (
         }
         const experimentStatus = acceptPlan.experimentStatus;
 
-        const experimentKey = `${proposalKey}__${Date.now().toString(36)}_${KEY_COUNTER()}`;
+        const experimentKey = stableId("experiment", [proposalKey]);
         const experimentId = `experiment:${experimentKey}`;
-        const db = yield* SurrealClient;
+        const judgment = yield* Judgment;
 
         // autoScaffold=true && form=skill: legacy direct-write path
         if (opts.autoScaffold && row.form === "skill") {
@@ -430,15 +383,9 @@ export const acceptProposal = (
                     artifact_path: scaffold.path,
                 };
             }
-            yield* db.query(`
-                UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
-                UPSERT ${recordRef("experiment", experimentKey)} MERGE {
-                    proposal: ${recordRef("proposal", proposalKey)},
-                    artifact_path: ${surrealLiteral(scaffold.path)},
-                    scaffolded_at: time::now(),
-                    status: '${experimentStatus}'
-                };
-            `);
+            yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, {
+                artifactPath: scaffold.path,
+            });
             return {
                 status: "ok",
                 proposal_id: `proposal:${proposalKey}`,
@@ -482,15 +429,9 @@ export const acceptProposal = (
                     artifact_path: wfScaffold.path,
                 };
             }
-            yield* db.query(`
-                UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
-                UPSERT ${recordRef("experiment", experimentKey)} MERGE {
-                    proposal: ${recordRef("proposal", proposalKey)},
-                    artifact_path: ${surrealLiteral(wfScaffold.path)},
-                    scaffolded_at: time::now(),
-                    status: '${experimentStatus}'
-                };
-            `);
+            yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, {
+                artifactPath: wfScaffold.path,
+            });
             return {
                 status: "ok",
                 proposal_id: `proposal:${proposalKey}`,
@@ -532,14 +473,7 @@ export const acceptProposal = (
         const tmpPath = `${taskPath}.tmp.${process.pid}`;
         yield* fs.writeFileString(tmpPath, taskContent);
 
-        yield* db.query(`
-            UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
-            UPSERT ${recordRef("experiment", experimentKey)} MERGE {
-                proposal: ${recordRef("proposal", proposalKey)},
-                task_path: ${surrealLiteral(taskPath)},
-                status: '${experimentStatus}'
-            };
-        `).pipe(
+        yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, { taskPath }).pipe(
             // Best-effort cleanup of the staged temp file on DB failure (matches
             // main's `try { unlinkSync(tmpPath); } catch {}`): force tolerates an
             // already-absent temp and `ignore` swallows any other fault so the
@@ -566,10 +500,9 @@ export interface RejectOptions {
 
 export const rejectProposal = (
     opts: RejectOptions,
-): Effect.Effect<RejectResult, DbError, SurrealClient> =>
+): Effect.Effect<RejectResult, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const idLiteral = surrealLiteral(opts.sigOrId);
-        const row = yield* fetchFullProposal(idLiteral);
+        const row = yield* fetchFullProposal(opts.sigOrId);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
         const rejectPlan = planRejectCandidate({
             proposalStatus: row.status,
@@ -578,11 +511,11 @@ export const rejectProposal = (
         if (rejectPlan.status === "wrong_status") {
             return { status: "wrong_status", message: rejectPlan.message };
         }
-        const proposalKey = recordKeyPart(row.id, "proposal");
-        if (!proposalKey) return { status: "not_found", message: "proposal.id unexpected" };
-        const db = yield* SurrealClient;
-        yield* db.query(
-            `UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_REJECTED}', reject_reason = ${surrealString(rejectPlan.reason)}, updated_at = time::now();`,
+        const proposalKey = row.id;
+        const judgment = yield* Judgment;
+        yield* judgment.exec(
+            "UPDATE proposal SET status = ?, reject_reason = ?, updated_at = ? WHERE id = ?",
+            [PROPOSAL_STATUS_REJECTED, rejectPlan.reason, new Date(), proposalKey],
         );
         return {
             status: "ok",
@@ -598,7 +531,7 @@ export interface SetVerdictOptions {
 
 export const setVerdict = (
     opts: SetVerdictOptions,
-): Effect.Effect<VerdictResult, DbError, SurrealClient> =>
+): Effect.Effect<VerdictResult, JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const verdictPlan = planLockVerdict({
             requestedVerdict: opts.verdict,
@@ -610,30 +543,26 @@ export const setVerdict = (
                 message: verdictPlan.message,
             };
         }
-        const idLiteral = surrealLiteral(opts.sigOrId);
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, locked_verdict, (SELECT id FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0].id AS latest_checkpoint
-            FROM experiment WHERE proposal.dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
-        );
-        const row = (result?.[0] ?? [])[0];
+        const proposal = yield* findStoredProposal(opts.sigOrId);
+        const row = proposal?.experiment;
         if (!row) {
             return { status: "not_found", message: `no experiment matched ${opts.sigOrId}` };
         }
         const lockPlan = planLockVerdict({
             requestedVerdict: opts.verdict,
-            lockedVerdict: row.locked_verdict == null ? null : String(row.locked_verdict),
+            lockedVerdict: row.locked_verdict,
         });
         if (lockPlan.status !== "ok") {
             return { status: lockPlan.status, message: lockPlan.message };
         }
         const lockedVerdict = lockPlan.verdict;
-        const experimentId = String(row.id ?? "");
-        const stmts = [`UPDATE ${experimentId} SET locked_verdict = ${surrealString(lockedVerdict)};`];
-        const latestCp = row.latest_checkpoint;
-        if (latestCp) {
-            stmts.push(`UPDATE ${String(latestCp)} SET user_verdict = ${surrealString(lockedVerdict)};`);
-        }
-        yield* db.query(stmts.join(""));
-        return { status: "ok", experiment_id: experimentId, verdict: lockedVerdict };
+        const judgment = yield* Judgment;
+        const latestCp = row.checkpoints.at(-1);
+        yield* judgment.transaction((transaction) => Effect.gen(function* () {
+            yield* transaction.exec("UPDATE experiment SET locked_verdict = ? WHERE id = ?", [lockedVerdict, row.id]);
+            if (latestCp) {
+                yield* transaction.exec("UPDATE checkpoint SET user_verdict = ? WHERE id = ?", [lockedVerdict, latestCp.id]);
+            }
+        }));
+        return { status: "ok", experiment_id: `experiment:${row.id}`, verdict: lockedVerdict };
     });

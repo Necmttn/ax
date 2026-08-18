@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
-import { AppLayer } from "@ax/lib/layers";
+import { CacheReadLive } from "@ax/lib/duckdb/seam";
 import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
@@ -257,19 +257,27 @@ export async function cmdShareWithDeps(
     if (parsed.open) await deps.open(ref);
 }
 
+const SharePlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
 const liveShareDeps: ShareCommandDeps = {
     exportArtifact: (sessionId, axVersion) =>
         Effect.runPromise(
             exportSessionShare(sessionId, axVersion).pipe(
                 catchDbErrorAndExit("axctl share"),
-                Effect.provide(AppLayer),
+                // `ax share` is declared runtime "none" - it must never open a
+                // live database connection. `exporter.ts` reads through the
+                // DuckDB cache, so only CacheRead is needed here.
+                Effect.provide(CacheReadLive),
                 Effect.scoped,
             ),
         ),
     locateTranscript: (sessionId) =>
         Effect.runPromise(
             locateShareTranscript(sessionId).pipe(
-                Effect.provide(AppLayer),
+                // `locateShareTranscript` needs CacheRead (the `raw_file` hint
+                // off the published snapshot) + the filesystem, never a live
+                // database connection - see recover.ts's own R-channel comment.
+                Effect.provide(Layer.merge(CacheReadLive, SharePlatformLayer)),
                 Effect.scoped,
             ),
         ),

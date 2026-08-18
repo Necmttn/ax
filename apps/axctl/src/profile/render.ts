@@ -3,7 +3,12 @@
  * ProfileV1. Privacy invariants live HERE, not at the edge: cost only when
  * includeCost; aggregates only (nothing in this module touches transcript
  * content, project names, or paths). Environment (github login, today,
- * hook files, rules text) is injected so the Effect needs only SurrealClient.
+ * hook files, rules text) is injected so the Effect needs no ambient env
+ * reads.
+ *
+ * Every fetch* this composes - `./queries.ts` and
+ * `../queries/cost-analytics.ts` - reads the published snapshot through
+ * `CacheRead`, so that is the whole of `buildProfile`'s data requirement.
  */
 import { Effect } from "effect";
 import { fetchContentTypeBreakdown } from "../queries/content-types.ts";

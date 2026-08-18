@@ -1,85 +1,52 @@
-import { describe, expect, test } from "bun:test";
-import { Effect, Layer, Path } from "effect";
+import { describe, expect } from "bun:test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { Effect } from "effect";
 import { AxConfigTest } from "@ax/lib/config";
-import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { FixturePlatform, publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { ingestTranscripts } from "./transcripts.ts";
 
-// Integration regression for the claude fold onto the shared JSONL work-unit:
-// a real `ingestTranscripts` run end-to-end (flat-tree walk -> work-unit ->
-// per-file parse/write -> watermark commit), then an identical second run that
-// must SKIP every file via the watermark. The test FS `stat` returns a stable
-// (mtime=epoch0, size=len), so an unchanged transcript matches its mark.
-//
-// Stateful fake of `ingest_file_state`: SELECT returns prior commits, UPSERT
-// records them. claude_transcript triggers the one-time id-unify migration, so
-// the responder also tracks its sentinel row.
-function statefulClaudeDb() {
-    const marks = new Map<string, { path: string; mtime_ms: number; size: number }>();
-    let migrationDone = false;
-    return makeTestSurrealClient({
-        fallback: (sql) => {
-            if (sql.includes("__watermark_migration__")) {
-                if (sql.includes("UPSERT")) {
-                    migrationDone = true;
-                    return [[]];
-                }
-                return [migrationDone ? [{ id: "sentinel" }] : []];
-            }
-            if (sql.includes("DELETE") && sql.includes("ingest_file_state")) return [[]];
-            if (sql.includes("UPSERT ingest_file_state")) {
-                const path = /path: "([^"]*)"/.exec(sql)?.[1];
-                const mtime = Number(/mtime_ms: (-?\d+)/.exec(sql)?.[1] ?? "0");
-                const size = Number(/size: (-?\d+)/.exec(sql)?.[1] ?? "0");
-                if (path) marks.set(path, { path, mtime_ms: mtime, size });
-                return [[]];
-            }
-            if (sql.includes("FROM ingest_file_state")) {
-                return [Array.from(marks.values())];
-            }
-            // skill catalog + all normalized-batch / token / hook writes -> no-op
-            return [[]];
-        },
-    }).layer;
-}
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("Claude transcript watermark", { requireFts: true });
 
-const fixture = [
-    JSON.stringify({
+const transcript = [
+    {
         type: "user",
         uuid: "u1",
+        sessionId: "sess",
         timestamp: "2026-06-10T09:00:00.000Z",
-        cwd: "/Users/x/proj",
+        cwd: "/repo",
         message: { role: "user", content: "fix the ingest bug" },
-    }),
-    JSON.stringify({
+    },
+    {
         type: "assistant",
         uuid: "a1",
+        sessionId: "sess",
         timestamp: "2026-06-10T09:00:01.000Z",
-        cwd: "/Users/x/proj",
-        message: { model: "claude-sonnet-4-5", content: [{ type: "text", text: "done" }] },
-    }),
-].join("\n");
+        cwd: "/repo",
+        message: { role: "assistant", model: "claude-sonnet-4-5", content: [{ type: "text", text: "done" }] },
+    },
+].map((row) => JSON.stringify(row)).join("\n");
 
-describe("claude ingest watermark (work-unit fold)", () => {
-    test("first run parses the transcript; identical second run skips it", async () => {
-        const testFs = layerTestFileSystem({
-            "/transcripts/-Users-x-proj/sess.jsonl": fixture,
-        });
-        const TestLayer = Layer.mergeAll(
-            AxConfigTest({ paths: { transcriptsDir: "/transcripts" } }),
-            statefulClaudeDb(),
-            Path.layer,
-        ).pipe(Layer.provideMerge(testFs));
-
-        const run = () => Effect.runPromise(ingestTranscripts().pipe(Effect.provide(TestLayer)));
-
-        const first = await run();
-        expect(first.files).toBe(1);
-        expect(first.sessions).toBe(1);
-
-        // Same bytes, same stat -> watermark matches -> the work-unit skips it.
-        const second = await run();
-        expect(second.files).toBe(0);
-        expect(second.sessions).toBe(0);
+describe("Claude ingest watermark on real DuckDB", () => {
+    dtest("the second run skips an unchanged transcript", async () => {
+        const transcriptsDir = tempDir("ax-claude-watermark-files-");
+        const projectDir = join(transcriptsDir, "-repo");
+        await mkdir(projectDir, { recursive: true });
+        await Bun.write(join(projectDir, "sess.jsonl"), transcript);
+        let first: unknown;
+        let second: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-claude-watermark-cache-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const run = ingestTranscripts(write).pipe(
+                    Effect.provide(AxConfigTest({ paths: { transcriptsDir } })),
+                    Effect.provide(FixturePlatform),
+                );
+                first = yield* run;
+                second = yield* run;
+            }),
+        ));
+        expect(first).toMatchObject({ files: 1, sessions: 1, records: 2 });
+        expect(second).toMatchObject({ files: 0, sessions: 0, records: 0 });
     });
 });

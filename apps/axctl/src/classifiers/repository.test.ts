@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildClassifierPersistenceStatements, classifierRunKey } from "./repository.ts";
+import { classifierPersistenceRows, classifierRunKey } from "./repository.ts";
 import { reactionEventClassifier } from "./reaction-event/index.ts";
 import type { ClassifierResult } from "./core.ts";
 
@@ -22,10 +22,10 @@ const result: ClassifierResult = {
     ts: new Date("2026-05-30T00:03:00Z"),
 };
 
-describe("classifier repository statements", () => {
-    test("builds definition, run, result and graph edge statements", () => {
+describe("classifier repository rows", () => {
+    test("builds definition, run, result, classification, and citation rows", () => {
         const runKey = classifierRunKey(new Date("2026-05-30T00:00:00Z"), [reactionEventClassifier]);
-        const sql = buildClassifierPersistenceStatements({
+        const rows = classifierPersistenceRows({
             runKey,
             startedAt: new Date("2026-05-30T00:00:00Z"),
             finishedAt: new Date("2026-05-30T00:00:01Z"),
@@ -55,21 +55,17 @@ describe("classifier repository statements", () => {
                 },
             ],
             sinceDays: 1,
-        }).join("\n");
+        });
 
-        expect(sql).toContain("UPSERT classifier_definition:`reaction_event__0_1_0`");
-        expect(sql).toContain("UPSERT classifier_run:");
-        expect(sql).toContain("UPSERT classifier_result:`reaction_event__0_1_0__event_window__abc`");
-        expect(sql).toContain("classifier_definition: classifier_definition:`reaction_event__0_1_0`");
-        expect(sql).toContain("DELETE cites_evidence WHERE in = classifier_result:`reaction_event__0_1_0__event_window__abc`");
-        expect(sql).toContain("RELATE turn:`u1`->has_classification:");
-        expect(sql).toContain("RELATE classifier_result:`reaction_event__0_1_0__event_window__abc`->cites_evidence:");
-        expect(sql).toContain("->turn:`u1`");
-        expect(sql).toContain("->turn:`a1`");
-        expect(sql).toContain("previous_assistant");
-        expect(sql).toContain("->tool_call:`tc1`");
-        expect(sql).toContain("recent_tool_failure");
-        expect(sql).toContain("->file:`src_app_ts`");
-        expect(sql).toContain("previous_assistant_file");
+        expect(rows.definitions).toHaveLength(1);
+        expect(rows.run).toMatchObject({ id: runKey, result_count: 1 });
+        expect(rows.results[0]).toMatchObject({ id: result.key, classifier_run: runKey });
+        expect(rows.classifications[0]).toMatchObject({ in_id: "u1", out_id: result.key });
+        expect(rows.citations.map((row) => [row.out_table, row.out_id, row.kind])).toEqual([
+            ["turn", "u1", "classified_turn"],
+            ["turn", "a1", "previous_assistant"],
+            ["tool_call", "tc1", "recent_tool_failure"],
+            ["file", "src_app_ts", "previous_assistant_file"],
+        ]);
     });
 });

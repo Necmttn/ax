@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, type Layer } from "effect";
+import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 import {
     createImpactEstimateCache,
@@ -25,20 +26,13 @@ const proposal = (over: Partial<ProposalDto>): ProposalDto =>
         ...over,
     }) as ProposalDto;
 
-type QueryResult = Array<Record<string, unknown>>;
-const makeDb = (resultsPerCall: QueryResult[][]) => {
-    let call = 0;
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => {
-            const r = resultsPerCall[Math.min(call, resultsPerCall.length - 1)];
-            call += 1;
-            return Effect.succeed(r);
-        },
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
+/** A real-decode CacheRead fake (@ax/lib/testing/cache) - empty routes ->
+ *  every query returns zero rows, which is enough for the estimators that
+ *  never touch CacheRead (guidance/skill/fallback) and a valid zero baseline
+ *  for the ones that do (hook, routing). */
+const cacheRead = (routes: TestCacheOptions["routes"] = {}) => makeTestCacheRead({ routes });
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
+const run = <A>(eff: Effect.Effect<A, unknown, CacheRead>, layer: Layer.Layer<CacheRead>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 describe("parseBaseline", () => {
@@ -56,7 +50,7 @@ describe("estimateImpact", () => {
                 form: "guidance",
                 baseline: '{"frequency":9,"evidence":"9 corrections across 4 sessions"}',
             })),
-            makeDb([[[]]]),
+            cacheRead().layer,
         );
         expect(est.kind).toBe("correction_pressure");
         // headline = LIVE frequency (matches the card chip); frozen baseline (9) becomes a growth note
@@ -69,7 +63,7 @@ describe("estimateImpact", () => {
     test("skill: frequency + tool from baseline", async () => {
         const est = await run(
             estimateImpact(proposal({ form: "skill", baseline: '{"tool":"Bash","frequency":12}' })),
-            makeDb([[[]]]),
+            cacheRead().layer,
         );
         // live frequency (7 on the fixture), not the frozen baseline 12
         expect(est.headline).toContain("7×");
@@ -78,6 +72,9 @@ describe("estimateImpact", () => {
     });
 
     test("hook with target_tool: addressable failures from tool_call stats", async () => {
+        // Two `tool_call` count(*) queries hit the same table: the total and
+        // the `status = ?` failure count. Distinguish by SQL shape, exactly
+        // as the real DuckDB statements differ.
         const est = await run(
             estimateImpact(proposal({
                 form: "hook",
@@ -91,7 +88,9 @@ describe("estimateImpact", () => {
                     failure_mode: null,
                 },
             } as Partial<ProposalDto>)),
-            makeDb([[[{ n: 200 }], [{ n: 14 }]]]),
+            cacheRead({
+                "FROM tool_call": (sql) => sql.includes("status = ?") ? [{ n: 14 }] : [{ n: 200 }],
+            }).layer,
         );
         expect(est.kind).toBe("addressable_failures");
         expect(est.headline).toContain("14 failures");
@@ -100,11 +99,11 @@ describe("estimateImpact", () => {
     });
 
     test("routing proposal: recomputes savings via dispatch candidates", async () => {
-        // fetchDispatchCandidates issues one multi-statement query; an
-        // oversized empty tuple satisfies its destructuring with zero rows.
+        // fetchDispatchCandidates is CacheRead-native; empty routes -> zero
+        // rows everywhere, which is a valid (empty) baseline.
         const est = await run(
             estimateImpact(proposal({ form: "hook", title: ROUTING_PROPOSAL_TITLE })),
-            makeDb([[Array.from({ length: 8 }, () => []) as unknown as QueryResult]]),
+            cacheRead().layer,
         );
         expect(est.kind).toBe("savings_usd");
         expect(est.confidence).toBe("estimated");
@@ -114,7 +113,7 @@ describe("estimateImpact", () => {
     test("fallback: frequency", async () => {
         const est = await run(
             estimateImpact(proposal({ form: "automation" })),
-            makeDb([[[]]]),
+            cacheRead().layer,
         );
         expect(est.kind).toBe("frequency");
         expect(est.headline).toContain("7×");
@@ -124,7 +123,7 @@ describe("estimateImpact", () => {
 describe("estimateImpactCached", () => {
     test("second call within TTL skips recompute", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const cache = createImpactEstimateCache();
         const a = await run(estimateImpactCached(p, 1_000, cache), layer);
         const b = await run(estimateImpactCached(p, 2_000, cache), layer);
@@ -133,7 +132,7 @@ describe("estimateImpactCached", () => {
 
     test("expired entry recomputes", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const cache = createImpactEstimateCache();
         const a = await run(estimateImpactCached(p, 1_000, cache), layer);
         const b = await run(estimateImpactCached(p, 1_000 + 11 * 60_000, cache), layer);
@@ -143,7 +142,7 @@ describe("estimateImpactCached", () => {
 
     test("independent cache adapters isolate same-sig estimates", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
-        const layer = makeDb([[[]]]);
+        const layer = cacheRead().layer;
         const a = await run(estimateImpactCached(p, 1_000, createImpactEstimateCache()), layer);
         const b = await run(estimateImpactCached(p, 2_000, createImpactEstimateCache()), layer);
         expect(b).not.toBe(a);

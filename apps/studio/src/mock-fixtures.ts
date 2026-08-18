@@ -517,7 +517,7 @@ const EMPTY_SESSION_INSIGHTS: SessionInsightsPayload = {
 
 const EMPTY_TOOL_FAILURES: ToolFailuresResponse = { rows: [], total: 0 } as never;
 const EMPTY_GRAPH: GraphExplorerPayload = { mode: "file-attention", limit: 0, nodes: [], edges: [], query: null } as never;
-const EMPTY_SKILL_GRAPH: SkillGraphPayload = { min_count: 0, limit: 0, node_count: 0, edge_count: 0, max_edge_count: 0, nodes: [], edges: [] };
+const EMPTY_SKILL_GRAPH: SkillGraphPayload = { minCount: 0, limit: 0, node_count: 0, edge_count: 0, max_edge_count: 0, nodes: [], edges: [] };
 const EMPTY_RECALL: RecallResponse = { q: "", hits: [], commits: [], skills: [], truncated: false, total_count: 0, total_counts: { turn: 0, commit: 0, skill: 0 }, window: { offset: 0, limit: 50 } };
 /** Deterministic ~14-week activity series for the mock Mission Control / wrapped. */
 const MOCK_WRAPPED_DAYS = ((): WrappedProfile["usage"]["days"] => {
@@ -664,14 +664,6 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     }
     if (path === "/api/improve/analyze-brief") {
         return { brief: "## Task: Deep-analysis pass (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
-    }
-
-    // Lab SQL console
-    if (path === "/api/query" && method === "POST") {
-        return {
-            result: [[{ note: "mock mode - connect a local daemon to run real queries" }]],
-            durationMs: 0,
-        } as unknown as T;
     }
 
     notFound();

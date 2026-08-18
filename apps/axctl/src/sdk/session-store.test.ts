@@ -3,7 +3,6 @@ import {
     AxSessionStoreKeyError,
     axSessionStoreKey,
     axSessionStoreSubpath,
-    buildClaudeSdkAppendStatements,
     claudeSdkAppendPayloadToAgentEventBatch,
     parseAxSessionStoreKey,
 } from "./session-store.ts";
@@ -190,29 +189,4 @@ describe("Claude SDK append payloads", () => {
         ]);
     });
 
-    test("builds append statements without clearing existing provider events", () => {
-        const statements = buildClaudeSdkAppendStatements({
-            key: {
-                projectKey: "Users-necmttn-Projects-ax",
-                sessionId: "9f8c1b34-5ff5-4c87-a6fb-cc9bb48ef567",
-                subpath: "subagents/worker-1.jsonl",
-            },
-            events: [
-                {
-                    providerEventId: "worker-1-event-1",
-                    seq: 1,
-                    ts: "2026-06-18T00:00:01.000Z",
-                    type: "message",
-                },
-            ],
-        });
-        const sql = statements.join("\n");
-
-        expect(sql).toContain("UPSERT agent_session:");
-        expect(sql).toContain("UPSERT agent_event:");
-        expect(sql).not.toContain("DELETE (SELECT VALUE id FROM agent_event");
-        expect(sql).not.toContain("DELETE (SELECT VALUE id FROM agent_event_child");
-        expect(sql).toContain('\\"entrypoint\\":\\"sdk');
-        expect(sql).toContain('\\"subpath\\":\\"subagents/worker-1.jsonl');
-    });
 });

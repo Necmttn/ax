@@ -1,5 +1,6 @@
 /**
- * Default port for `ax serve` (the local dashboard daemon).
+ * Default port for `ax studio` (the local dashboard server; ephemeral as of
+ * wave 3 - it binds this port only while a client is connected).
  *
  * Single source of truth so user-facing copy (the agent onboarding prompt,
  * ingest dry-run hint, CLI flag default) can't drift from the actual serve

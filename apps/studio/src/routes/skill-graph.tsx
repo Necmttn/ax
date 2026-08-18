@@ -173,7 +173,7 @@ export function SkillGraphRoute() {
                 <h2>Skill graph</h2>
                 <span className="meta">
                     {data
-                        ? `${fmtCount(data.node_count)} skills · ${fmtCount(data.edge_count)} pairs · min count ${data.min_count}`
+                        ? `${fmtCount(data.node_count)} skills · ${fmtCount(data.edge_count)} pairs · min count ${data.minCount}`
                         : "Skill pair graph"}
                 </span>
             </header>
@@ -216,7 +216,7 @@ export function SkillGraphRoute() {
             >
                 {data && data.nodes.length === 0 ? (
                     <p style={{ padding: 16, color: "var(--muted)" }}>
-                        No pairs at min count {data.min_count}. Try lowering it.
+                        No pairs at min count {data.minCount}. Try lowering it.
                     </p>
                 ) : null}
                 <svg width={box.w} height={box.h} style={{ display: "block" }}>

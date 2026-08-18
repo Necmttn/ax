@@ -27,7 +27,7 @@ const PROPOSALS = [
     kind: "skill",
     id: "skill__292666ce747117ee",
     rate: "3/wk",
-    title: "SurrealDB schema change guardrail",
+    title: "DuckDB schema change guardrail",
     evidence: "Schema changes need a tighter migration/apply/query verification loop.",
   },
 ];
@@ -184,7 +184,7 @@ export function ImproveLoopShowcase() {
           Mined from the local graph, applied to your own agent files. Nothing auto-edits:
           accept emits a brief, an agent does the work, <code>ax improve lint</code> checks
           it landed. The whole deck - proposals, impact, and past bets measured at +3/+10/+30
-          sessions - lives in the studio improve dashboard: <code>ax serve</code>.
+          sessions - lives in the studio improve dashboard: <code>ax studio</code>.
         </div>
       </section>
     </section>

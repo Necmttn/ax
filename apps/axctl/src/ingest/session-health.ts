@@ -1,44 +1,42 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { deriveTaskLabel } from "@ax/lib/shared/task-label";
-import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { isoTimestamp, recordKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { stableId } from "@ax/lib/stable-id";
 import { tokenQualityLabels, type TokenSourceQuality } from "./token-quality.ts";
 
 type JsonRecord = Record<string, unknown>;
 
 interface SessionRow {
     readonly id: unknown;
-    readonly source?: string;
-    readonly model?: string;
-    readonly started_at?: TimestampInput;
-    readonly ended_at?: TimestampInput;
+    readonly source?: string | null;
+    readonly model?: string | null;
+    readonly started_at?: TimestampInput | null;
+    readonly ended_at?: TimestampInput | null;
 }
 
 interface TurnRow {
     readonly session: unknown;
-    readonly seq?: number;
-    readonly role?: string;
-    readonly message_kind?: string;
-    readonly intent_kind?: string;
-    readonly text_excerpt?: string;
-    readonly has_error?: boolean;
+    readonly seq?: number | null;
+    readonly role?: string | null;
+    readonly message_kind?: string | null;
+    readonly intent_kind?: string | null;
+    readonly text_excerpt?: string | null;
+    readonly has_error?: boolean | null;
 }
 
 interface ToolCallRow {
     readonly session: unknown;
-    readonly name?: string;
-    readonly command_norm?: string;
-    readonly input_json?: string;
-    readonly output_json?: string;
-    readonly output_excerpt?: string;
-    readonly error_text?: string;
-    readonly has_error?: boolean;
+    readonly name?: string | null;
+    readonly command_norm?: string | null;
+    readonly input_json?: string | null;
+    readonly output_json?: string | null;
+    readonly output_excerpt?: string | null;
+    readonly error_text?: string | null;
+    readonly has_error?: boolean | null;
 }
 
 interface PlanSnapshotRow {
@@ -46,8 +44,8 @@ interface PlanSnapshotRow {
 }
 
 interface InsightMetricRow {
-    readonly subject_id?: string;
-    readonly metrics?: string;
+    readonly subject_id?: string | null;
+    readonly metrics?: string | null;
 }
 
 export interface SessionTokenUsage {
@@ -96,9 +94,6 @@ export interface SessionHealthStats {
     readonly sessionTokenUsage: number;
     readonly sessionHealth: number;
 }
-
-const sqlOptionFloat = (value: number | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : Number(value.toFixed(4)).toString();
 
 function parseMetrics(input: string | null | undefined): JsonRecord {
     if (!input) return {};
@@ -316,83 +311,6 @@ export function __testBuildSessionHealthRows(input: Parameters<typeof buildRows>
     return buildRows(input);
 }
 
-function workflowEpochStatements(firstSuperpowersAt: string | null): string[] {
-    const gsdEnds = firstSuperpowersAt ? surrealDate(firstSuperpowersAt) : "NONE";
-    const superpowersStarts = firstSuperpowersAt ? surrealDate(firstSuperpowersAt) : "NONE";
-    return [
-        `UPSERT ${recordRef("workflow_epoch", "gsd")} MERGE ${surrealObject([
-            ["name", surrealString("gsd")],
-            ["starts_at", "NONE"],
-            ["ends_at", gsdEnds],
-            ["evidence_kind", surrealOptionString("derived_skill_invocation")],
-            ["evidence_ref", surrealOptionString("first superpowers skill invocation")],
-            ["notes", surrealOptionString("Sessions before first observed Superpowers skill invocation.")],
-        ])};`,
-        `UPSERT ${recordRef("workflow_epoch", "superpowers")} MERGE ${surrealObject([
-            ["name", surrealString("superpowers")],
-            ["starts_at", superpowersStarts],
-            ["ends_at", "NONE"],
-            ["evidence_kind", surrealOptionString("derived_skill_invocation")],
-            ["evidence_ref", surrealOptionString("first superpowers skill invocation")],
-            ["notes", surrealOptionString("Sessions at or after first observed Superpowers skill invocation.")],
-        ])};`,
-    ];
-}
-
-export const __testWorkflowEpochStatements = workflowEpochStatements;
-
-function tokenUsageStatement(row: SessionTokenUsage): string {
-    const existingActualTokenUsage =
-        "prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE";
-    return `UPSERT ${recordRef("session_token_usage", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
-        ["session", recordRef("session", row.sessionKey)],
-        ["source", surrealString(row.source)],
-        ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
-        // Never clobber a model the transcript-priced pass already wrote: the
-        // subagent ingest writes the real per-transcript model, while this
-        // pass only knows session.model (null for sources that don't set it).
-        ["model", row.model === null ? "IF model != NONE THEN model ELSE NONE END" : surrealOptionString(row.model)],
-        ["prompt_tokens", `IF ${existingActualTokenUsage} THEN prompt_tokens ELSE ${surrealOptionInt(row.promptTokens)} END`],
-        ["completion_tokens", `IF ${existingActualTokenUsage} THEN completion_tokens ELSE ${surrealOptionInt(row.completionTokens)} END`],
-        ["cache_creation_input_tokens", `IF ${existingActualTokenUsage} THEN cache_creation_input_tokens ELSE ${surrealOptionInt(row.cacheCreationInputTokens)} END`],
-        ["cache_read_input_tokens", `IF ${existingActualTokenUsage} THEN cache_read_input_tokens ELSE ${surrealOptionInt(row.cacheReadInputTokens)} END`],
-        ["estimated_tokens", `IF ${existingActualTokenUsage} THEN estimated_tokens ELSE ${Math.trunc(row.estimatedTokens).toString(10)} END`],
-        ["transcript_bytes", Math.trunc(row.transcriptBytes).toString(10)],
-        ["context_window", surrealOptionInt(row.contextWindow)],
-        ["labels", `IF ${existingActualTokenUsage} THEN labels ELSE ${surrealJsonOption(row.labels)} END`],
-        ["metrics", `IF ${existingActualTokenUsage} THEN metrics ELSE ${surrealJsonOption(row.metrics)} END`],
-        ["ts", surrealDate(row.ts)],
-    ])};`;
-}
-
-export const __testTokenUsageStatement = tokenUsageStatement;
-
-function sessionHealthStatement(row: SessionHealth): string {
-    return `UPSERT ${recordRef("session_health", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
-        ["session", recordRef("session", row.sessionKey)],
-        ["source", surrealString(row.source)],
-        ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
-        ["turns", row.turns.toString(10)],
-        ["tool_calls", row.toolCalls.toString(10)],
-        ["tool_errors", row.toolErrors.toString(10)],
-        ["user_corrections", row.userCorrections.toString(10)],
-        ["interruptions", row.interruptions.toString(10)],
-        ["subagent_dispatches", row.subagentDispatches.toString(10)],
-        ["plan_snapshots", row.planSnapshots.toString(10)],
-        ["estimated_tokens", Math.trunc(row.estimatedTokens).toString(10)],
-        ["cache_read_ratio", sqlOptionFloat(row.cacheReadRatio)],
-        ["cache_creation_ratio", sqlOptionFloat(row.cacheCreationRatio)],
-        ["context_pressure", surrealString(row.contextPressure)],
-        ["task_label", surrealOptionString(row.taskLabel)],
-        ["user_turns", row.userTurns.toString(10)],
-        ["assistant_turns", row.assistantTurns.toString(10)],
-        ["correction_turns", row.correctionTurns.toString(10)],
-        ["labels", surrealJsonOption(row.labels)],
-        ["metrics", surrealJsonOption(row.metrics)],
-        ["ts", surrealDate(row.ts)],
-    ])};`;
-}
-
 const FIRST_SUPERPOWERS_MIN_YEAR = 2000;
 const FIRST_SUPERPOWERS_MAX_YEAR = 2100;
 
@@ -407,81 +325,136 @@ function normalizeFirstSuperpowersAt(value: TimestampInput | null | undefined): 
 
 export const __testNormalizeFirstSuperpowersAt = normalizeFirstSuperpowersAt;
 
-const fetchFirstSuperpowersAt = (): Effect.Effect<string | null, DbError, SurrealClient> =>
+const fetchFirstSuperpowersAt = (write: CacheWriteService): Effect.Effect<string | null, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[{ first_superpowers?: TimestampInput | null }[]]>(`
-SELECT time::min(ts) AS first_superpowers
-FROM invoked
-WHERE out.name CONTAINS "superpowers:"
-GROUP ALL;`);
-        return normalizeFirstSuperpowersAt(result?.[0]?.[0]?.first_superpowers);
+        const result = yield* write.rows(Schema.Struct({ first_superpowers: Schema.NullOr(TimestampColumn) }), `
+SELECT min(i.ts) AS first_superpowers
+FROM invoked i JOIN skill s ON s.id = i.out_id
+WHERE s.name LIKE '%superpowers:%'`);
+        return normalizeFirstSuperpowersAt(result[0]?.first_superpowers);
     });
 
 const sinceWhere = (field: string, sinceDays: number | undefined): string =>
-    sinceDays && sinceDays > 0 ? `WHERE ${field} > time::now() - ${sinceDays}d` : "";
+    sinceDays && sinceDays > 0 ? `WHERE ${field} > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
 
 export const deriveSessionHealth = (
+    write: CacheWriteService,
     opts: { sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<SessionHealthStats, DbError, SurrealClient> =>
+): Effect.Effect<SessionHealthStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const firstSuperpowersAt = yield* fetchFirstSuperpowersAt();
+        const firstSuperpowersAt = yield* fetchFirstSuperpowersAt(write);
+        const SessionDbRow = Schema.Struct({
+            id: Schema.String, source: Schema.NullOr(Schema.String), model: Schema.NullOr(Schema.String),
+            started_at: Schema.NullOr(TimestampColumn), ended_at: Schema.NullOr(TimestampColumn),
+        });
+        const TurnDbRow = Schema.Struct({
+            session: Schema.String, seq: Schema.NullOr(Schema.BigInt), role: Schema.NullOr(Schema.String),
+            message_kind: Schema.NullOr(Schema.String), intent_kind: Schema.NullOr(Schema.String),
+            text_excerpt: Schema.NullOr(Schema.String), has_error: Schema.NullOr(Schema.Boolean),
+        });
+        const ToolDbRow = Schema.Struct({
+            session: Schema.String, name: Schema.NullOr(Schema.String), command_norm: Schema.NullOr(Schema.String),
+            input_json: Schema.NullOr(Schema.String), output_json: Schema.NullOr(Schema.String),
+            output_excerpt: Schema.NullOr(Schema.String), error_text: Schema.NullOr(Schema.String),
+            has_error: Schema.NullOr(Schema.Boolean),
+        });
+        const SessionRefRow = Schema.Struct({ session: Schema.String });
+        const InsightDbRow = Schema.Struct({ subject_id: Schema.NullOr(Schema.String), metrics: Schema.NullOr(Schema.String) });
         const [sessions, turns, toolCalls, planSnapshots, insightMetrics] = yield* Effect.all([
-            db.query<[SessionRow[]]>(`
-SELECT id, source, model, type::string(started_at) AS started_at, type::string(ended_at) AS ended_at
+            write.rows(SessionDbRow, `
+SELECT id, source, model, started_at, ended_at
 FROM session
 ${sinceWhere("started_at", opts.sinceDays)}
-ORDER BY started_at DESC;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[TurnRow[]]>(`
+ORDER BY started_at DESC`),
+            write.rows(TurnDbRow, `
 SELECT session, seq, role, message_kind, intent_kind, text_excerpt, has_error
 FROM turn
-${sinceWhere("ts", opts.sinceDays)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[ToolCallRow[]]>(`
+${sinceWhere("ts", opts.sinceDays)}`),
+            write.rows(ToolDbRow, `
 SELECT session, name, command_norm, input_json, output_json, output_excerpt, error_text, has_error
 FROM tool_call
-${sinceWhere("ts", opts.sinceDays)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[PlanSnapshotRow[]]>(`
+${sinceWhere("ts", opts.sinceDays)}`),
+            write.rows(SessionRefRow, `
 SELECT session
 FROM plan_snapshot
-${sinceWhere("ts", opts.sinceDays)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[InsightMetricRow[]]>(`
+${sinceWhere("ts", opts.sinceDays)}`),
+            write.rows(InsightDbRow, `
 SELECT subject_id, metrics
 FROM insight
-WHERE kind = "claude_insights";`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+WHERE kind = 'claude_insights'`),
         ], { concurrency: 5 });
 
         const { usages, health } = buildRows({
             sessions,
-            turns,
-            toolCalls,
+            turns: turns.map((row) => ({
+                ...row, seq: row.seq === null ? null : Number(row.seq),
+            })),
+            toolCalls: toolCalls.map((row) => ({
+                ...row,
+            })),
             planSnapshots,
             insightMetrics,
             firstSuperpowersAt,
         });
-        const statements = [
-            ...workflowEpochStatements(firstSuperpowersAt),
-            ...usages.map(tokenUsageStatement),
-            ...health.map(sessionHealthStatement),
-        ];
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        yield* write.putMany("workflow_epoch", [
+            cacheRow({ id: "gsd", name: "gsd", starts_at: null, ends_at: tsParam(firstSuperpowersAt),
+                evidence_kind: "derived_skill_invocation", evidence_ref: "first superpowers skill invocation",
+                notes: "Sessions before first observed Superpowers skill invocation." }),
+            cacheRow({ id: "superpowers", name: "superpowers", starts_at: tsParam(firstSuperpowersAt), ends_at: null,
+                evidence_kind: "derived_skill_invocation", evidence_ref: "first superpowers skill invocation",
+                notes: "Sessions at or after first observed Superpowers skill invocation." }),
+        ]);
+        for (const row of usages) {
+            // Numeric columns are projected DOUBLE at the READ boundary, not
+            // cast in JS afterwards. `write.raw` applies no column decoder, so
+            // a BIGINT cell arrives as a JS bigint; every consumer then needs
+            // its own guard, and a `typeof x === "number"` guard reads FALSE on
+            // one and silently stores null. Doing it in the projection is the
+            // one place that cannot be forgotten per-consumer.
+            const existing = yield* write.raw(
+                `SELECT CAST(prompt_tokens AS DOUBLE) AS prompt_tokens,
+                        CAST(completion_tokens AS DOUBLE) AS completion_tokens,
+                        CAST(cache_creation_input_tokens AS DOUBLE) AS cache_creation_input_tokens,
+                        CAST(cache_read_input_tokens AS DOUBLE) AS cache_read_input_tokens,
+                        CAST(estimated_tokens AS DOUBLE) AS estimated_tokens,
+                        labels, metrics, model
+                 FROM session_token_usage WHERE id = ?`,
+                [row.sessionKey],
+            );
+            const values = existing.rows[0] as Record<string, unknown> | undefined;
+            const hasActual = values !== undefined && ["prompt_tokens", "completion_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+                .some((key) => values[key] !== null && values[key] !== undefined);
+            yield* write.put("session_token_usage", cacheRow({
+                id: row.sessionKey, session: row.sessionKey, source: row.source,
+                workflow_epoch: row.workflowEpoch, model: row.model ?? (values?.model as string | null | undefined) ?? null,
+                prompt_tokens: hasActual ? values?.prompt_tokens as number : row.promptTokens,
+                completion_tokens: hasActual ? values?.completion_tokens as number : row.completionTokens,
+                cache_creation_input_tokens: hasActual ? values?.cache_creation_input_tokens as number : row.cacheCreationInputTokens,
+                cache_read_input_tokens: hasActual ? values?.cache_read_input_tokens as number : row.cacheReadInputTokens,
+                estimated_tokens: hasActual ? (values?.estimated_tokens as number | undefined) ?? row.estimatedTokens : row.estimatedTokens,
+                transcript_bytes: row.transcriptBytes, context_window: row.contextWindow,
+                labels: hasActual ? (values?.labels as string | null | undefined) ?? jsonParam(row.labels) : jsonParam(row.labels),
+                metrics: hasActual ? (values?.metrics as string | null | undefined) ?? jsonParam(row.metrics) : jsonParam(row.metrics),
+                ts: tsParam(row.ts) ?? new Date(),
+            }));
+        }
+        yield* write.putMany("session_health", health.map((row) => cacheRow({
+            id: stableId("session_health", [row.sessionKey]), session: row.sessionKey, source: row.source,
+            workflow_epoch: row.workflowEpoch, turns: row.turns, tool_calls: row.toolCalls,
+            tool_errors: row.toolErrors, user_corrections: row.userCorrections, interruptions: row.interruptions,
+            subagent_dispatches: row.subagentDispatches, plan_snapshots: row.planSnapshots,
+            estimated_tokens: row.estimatedTokens, cache_read_ratio: row.cacheReadRatio,
+            cache_creation_ratio: row.cacheCreationRatio, context_pressure: row.contextPressure,
+            task_label: row.taskLabel, user_turns: row.userTurns, assistant_turns: row.assistantTurns,
+            correction_turns: row.correctionTurns, labels: jsonParam(row.labels), metrics: jsonParam(row.metrics),
+            ts: tsParam(row.ts) ?? new Date(),
+        })));
         return {
             workflowEpochs: 2,
             sessionTokenUsage: usages.length,
             sessionHealth: health.length,
         };
     });
-
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        deriveSessionHealth({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<SessionHealthStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -503,13 +476,13 @@ export class SessionHealthStageStats extends BaseStageStats.extend<SessionHealth
     sessionHealth: Schema.Number,
 }) {}
 
-export const sessionHealthStage: StageDef<SessionHealthStageStats, SurrealClient> = {
+export const sessionHealthStage: StageDef<SessionHealthStageStats, never, CacheWriteError> = {
     meta: StageMeta.make({ key: "session-health", deps: ["signals"], tags: ["derive", "health"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveSessionHealth({ sinceDays });
+            const result = yield* deriveSessionHealth(write, { sinceDays });
             return SessionHealthStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `scored ${result.sessionHealth} session health records, ${result.sessionTokenUsage} token usages`,

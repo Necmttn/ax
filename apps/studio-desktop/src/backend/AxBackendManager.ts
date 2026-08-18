@@ -1,58 +1,41 @@
 /**
- * Phase 2 / Task 2.3 - two-process backend supervisor.
+ * Phase 2 / Task 2.3 - single-process backend supervisor.
  *
- * `AxBackendManager` owns the ax daemon pair for the desktop app. On `start` it
- * runs the attach-vs-spawn arbitration ({@link AxDaemonArbitration}) and then:
+ * `ax studio` is one ephemeral process that reads a published DuckDB
+ * snapshot and self-exits when idle (see
+ * `apps/axctl/src/dashboard/server.ts`). `AxBackendManager` owns exactly ONE
+ * {@link SupervisedProcess}. On `start` it runs the attach-vs-spawn
+ * arbitration ({@link AxDaemonArbitration}) and then:
  *
- * - `attach`        -> a healthy CLI daemon pair is already running; do NOT
- *                      spawn anything. Mark the backend ready and open the
- *                      window against the existing pair.
- * - `spawn`         -> nothing is listening; spawn `surreal` then (once it is
- *                      HTTP-ready) `ax serve`, then mark ready + open the window.
- * - `spawn-ax-only` -> an existing healthy `surreal` is up but `ax serve` is
- *                      down; spawn only `ax serve` against the existing surreal.
- * - `conflict`      -> the ports are taken by something we don't understand; do
- *                      NOT stomp it. Log + leave the window closed (no dialog in
- *                      v0 - see the conflict branch below).
+ * - `attach` -> a healthy `ax studio` is already answering on the port
+ *               (another desktop instance, or a manual CLI run). Do NOT
+ *               spawn a second one; mark ready and open the window against
+ *               it.
+ * - `spawn`  -> nothing is answering; spawn our own supervised `ax studio`,
+ *               await its readiness, then mark ready and open the window.
  *
- * Each daemon is an independent {@link SupervisedProcess} (spawn + HTTP
- * readiness + exponential-backoff restart). The manager sequences them
- * (surreal gates ax-serve) and tears them down in REVERSE order on `stop`
- * (ax serve before surreal) so ax serve closes its DB connection before the DB
- * disappears.
+ * There is no other process to sequence in front of it, no schema to apply (a
+ * published DuckDB snapshot already carries its schema - see
+ * `packages/lib/src/duckdb/schema.duckdb.sql`), and no "spawn-ax-only" /
+ * "conflict" split: a spawned process that never reports ready within its
+ * timeout already IS the conflict signal (see `abortNotReady` below).
  *
- * The two supervised processes are vended through an injectable factory
- * ({@link MakeSupervisedProcess}, defaulting to {@link makeSupervisedProcess})
- * so unit tests can stub start/stop without launching real OS processes.
- *
- * Crash-restart ordering: each `SupervisedProcess` restarts itself on crash. ax
- * serve reconnects to surreal on boot, so a surreal restart does not strictly
- * require a manual ax-serve bounce in the steady state. As a belt-and-suspenders
- * measure the manager passes surreal a `SupervisedProcessHooks.onExit` hook
- * (threaded through {@link MakeSupervisedProcess}) that bounces ax serve
- * (`stop` + `start`) when surreal exits, so ax serve reconnects to the fresh DB
- * promptly instead of limping on a dead connection. The bounce is guarded
- * against teardown (manager `stopping` + `DesktopState.quitting`) and only fires
- * once ax serve has been started. Self-restart + reconnect-on-boot still back it
- * up.
- *
- * Attach -> spawn live transition: in `attach` mode we reuse an external CLI
- * daemon we do NOT supervise. After opening the window the manager forks a
- * readiness poller (into its own scope) that re-probes the attached daemon every
- * {@link ATTACH_POLL_INTERVAL}; on {@link ATTACH_FAILURE_THRESHOLD} consecutive
- * failed probes (debounced against a transient blip) it logs the takeover and
- * runs the spawn path ({@link startSpawn}) to bring up our own supervised pair,
- * then stops polling (SupervisedProcess crash-restart covers further failures).
- * The transition is latched (runs at most once), bails during
+ * Attach -> spawn live transition: in `attach` mode we reuse an external
+ * `ax studio` process we do NOT supervise. After opening the window the
+ * manager forks a readiness poller (into its own scope) that re-probes the
+ * attached process every {@link ATTACH_POLL_INTERVAL}; on
+ * {@link ATTACH_FAILURE_THRESHOLD} consecutive failed probes (debounced
+ * against a transient blip) it logs the takeover and spawns our own
+ * supervised process ({@link startSpawn}), then stops polling
+ * (`SupervisedProcess` crash-restart covers further failures). The
+ * transition is latched (runs at most once), bails during
  * `stopping`/`quitting`, and the poller fiber is torn down by the manager's
  * `stop`/scope so it never leaks or races teardown.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
@@ -63,13 +46,11 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
-import * as DesktopSchema from "./DesktopSchema.ts";
 import {
-    AX_SERVE_PORT,
+    AX_STUDIO_PORT,
     type ArbitrationDecision,
     probeArbitration,
-    probeDaemon,
-    SURREAL_PORT,
+    probeStudio,
 } from "./AxDaemonArbitration.ts";
 import {
     makeSupervisedProcess,
@@ -83,14 +64,14 @@ import {
 // Tuning
 // ---------------------------------------------------------------------------
 
-/** Daemon boot can be slow on a cold rocksdb; give each process a full minute. */
+/** `ax studio` boot can be slow the first time it opens a cold snapshot; give it a full minute. */
 const READINESS_TIMEOUT = Duration.seconds(60);
 
 /**
  * Attach-mode readiness poller cadence + debounce. After attaching to an
- * external CLI daemon we re-probe it on this interval; once this many probes
- * fail back-to-back we treat the daemon as gone and transition attach -> spawn.
- * A small grace before the first probe avoids racing a daemon that is mid-boot.
+ * external `ax studio` we re-probe it on this interval; once this many probes
+ * fail back-to-back we treat it as gone and transition attach -> spawn. A
+ * small grace before the first probe avoids racing a process that is mid-boot.
  */
 const ATTACH_POLL_INTERVAL = Duration.seconds(5);
 const ATTACH_POLL_INITIAL_GRACE = Duration.seconds(5);
@@ -101,12 +82,9 @@ const ATTACH_FAILURE_THRESHOLD = 2;
 // ---------------------------------------------------------------------------
 
 /**
- * The factory used to vend a single supervised process. Defaults to
+ * The factory used to vend the supervised process. Defaults to
  * {@link makeSupervisedProcess}; tests inject a stub that records start/stop
- * without launching a real process. The optional `hooks` argument is threaded
- * through to {@link makeSupervisedProcess} so the manager can react to a
- * process becoming ready / exiting (e.g. bounce ax-serve when surreal
- * restarts); stub factories may ignore it or invoke it to simulate lifecycle.
+ * without launching a real process.
  */
 export type MakeSupervisedProcess = (
     config: SupervisedProcessConfig,
@@ -122,16 +100,16 @@ export type MakeSupervisedProcess = (
 
 /**
  * Arbitration seam. The live layer runs the real {@link probeArbitration}
- * probes; tests inject a fixed decision.
+ * probe; tests inject a fixed decision.
  *
- * `probeDaemon` is the per-daemon health probe the attach-mode readiness poller
- * re-runs to detect the external CLI daemon going away (separate from the
- * boot-time `probe` that folds all three probes into a decision). Exposed on the
- * seam so tests can stub it (healthy -> unhealthy) without hitting the network.
+ * `probeStudio` is the health probe the attach-mode readiness poller re-runs
+ * to detect the external `ax studio` process going away (separate from the
+ * boot-time `probe` that turns it into a decision). Exposed on the seam so
+ * tests can stub it (healthy -> unhealthy) without hitting the network.
  */
 export interface AxArbitrationShape {
     readonly probe: Effect.Effect<ArbitrationDecision, never, HttpClient.HttpClient>;
-    readonly probeDaemon: Effect.Effect<boolean, never, HttpClient.HttpClient>;
+    readonly probeStudio: Effect.Effect<boolean, never, HttpClient.HttpClient>;
 }
 
 export class AxArbitration extends Context.Service<AxArbitration, AxArbitrationShape>()(
@@ -140,20 +118,18 @@ export class AxArbitration extends Context.Service<AxArbitration, AxArbitrationS
 
 export const arbitrationLayer = Layer.succeed(
     AxArbitration,
-    AxArbitration.of({ probe: probeArbitration, probeDaemon }),
+    AxArbitration.of({ probe: probeArbitration, probeStudio }),
 );
 
 /**
- * Minimal environment the manager needs to build the two process configs.
- * Derived from {@link DesktopEnvironment} in the live layer; supplied directly
- * in tests so the manager can be exercised without an Electron `app`.
+ * Minimal environment the manager needs to build the process config. Derived
+ * from {@link DesktopEnvironment} in the live layer; supplied directly in
+ * tests so the manager can be exercised without an Electron `app`.
  */
 export interface AxBackendEnvironment {
-    readonly surrealBinaryPath: string;
     readonly bunBinaryPath: string;
     readonly axSourceEntry: string;
-    readonly axDataDir: string;
-    /** cwd for `ax serve` (the ax source root: repo root in dev, `ax-src` packaged). */
+    /** cwd for `ax studio` (the ax source root: repo root in dev, `ax-src` packaged). */
     readonly axSourceRoot: string;
 }
 
@@ -163,7 +139,7 @@ export class AxBackendEnvironmentTag extends Context.Service<
 >()("@ax/studio-desktop/backend/AxBackendEnvironment") {}
 
 /**
- * Derive the ax source root (cwd for `ax serve`) from `axSourceEntry`.
+ * Derive the ax source root (cwd for `ax studio`) from `axSourceEntry`.
  * `<root>/apps/axctl/src/cli/index.ts` -> up four dirs from `dirname` -> `<root>`.
  */
 export const deriveAxSourceRoot = (
@@ -176,71 +152,30 @@ export const environmentLayer = Layer.effect(
     Effect.gen(function* () {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         return AxBackendEnvironmentTag.of({
-            surrealBinaryPath: environment.surrealBinaryPath,
             bunBinaryPath: environment.bunBinaryPath,
             axSourceEntry: environment.axSourceEntry,
-            axDataDir: environment.axDataDir,
             axSourceRoot: deriveAxSourceRoot(environment.axSourceEntry, environment.path),
         });
     }),
 );
 
 // ---------------------------------------------------------------------------
-// Config builders
+// Config builder
 // ---------------------------------------------------------------------------
 
 /**
- * surreal process config. `--allow-experimental=files` is required for ax's v3
- * file buckets; rocksdb lives at `<axDataDir>/db`, agreeing with the CLI daemon
- * (`scripts/db-start.sh`).
+ * `ax studio` process config. Runs the ax CLI source through `bun`, reading
+ * the published DuckDB snapshot directly (no `AX_DB_*` connection env - there
+ * is no daemon to point at any more).
  */
-export const makeSurrealConfig = (env: AxBackendEnvironment): SupervisedProcessConfig => ({
-    name: "surreal",
-    executablePath: env.surrealBinaryPath,
-    args: [
-        "start",
-        "--user",
-        "root",
-        "--pass",
-        "root",
-        "--bind",
-        `127.0.0.1:${SURREAL_PORT}`,
-        "--log",
-        "info",
-        "--allow-experimental=files",
-        `rocksdb://${env.axDataDir}/db`,
-    ],
-    cwd: env.axSourceRoot,
-    // Allow the buckets dir so bucket-backed schema imports are not denied
-    // (mirrors the CLI install's surreal plist; see DesktopSchema + issue #251).
-    env: {
-        SURREAL_BUCKET_FOLDER_ALLOWLIST: `${env.axDataDir}/buckets`,
-    },
-    readiness: {
-        url: new URL(`http://127.0.0.1:${SURREAL_PORT}/health`),
-        timeout: READINESS_TIMEOUT,
-    },
-});
-
-/**
- * `ax serve` process config. Runs the ax CLI source through `bun`, pointed at
- * the surreal we (or the existing daemon) brought up via the canonical
- * `AX_DB_*` env defaults from `@ax/lib`.
- */
-export const makeAxServeConfig = (env: AxBackendEnvironment): SupervisedProcessConfig => ({
-    name: "ax-serve",
+export const makeAxStudioConfig = (env: AxBackendEnvironment): SupervisedProcessConfig => ({
+    name: "ax-studio",
     executablePath: env.bunBinaryPath,
-    args: [env.axSourceEntry, "serve", `--port=${AX_SERVE_PORT}`],
+    args: [env.axSourceEntry, "studio", `--port=${AX_STUDIO_PORT}`],
     cwd: env.axSourceRoot,
-    env: {
-        // Mirror packages/lib/src/db.ts envConfig() defaults so ax serve and the
-        // surreal we spawn agree on the connection.
-        AX_DB_URL: `ws://127.0.0.1:${SURREAL_PORT}`,
-        AX_DB_NS: "ax",
-        AX_DB_DB: "main",
-    },
+    env: {},
     readiness: {
-        url: new URL(`http://127.0.0.1:${AX_SERVE_PORT}/api/version`),
+        url: new URL(`http://127.0.0.1:${AX_STUDIO_PORT}/api/version`),
         timeout: READINESS_TIMEOUT,
     },
 });
@@ -251,8 +186,7 @@ export const makeAxServeConfig = (env: AxBackendEnvironment): SupervisedProcessC
 
 export interface AxBackendManagerSnapshot {
     readonly mode: ArbitrationDecision["mode"] | null;
-    readonly surreal: SupervisedProcessSnapshot | null;
-    readonly axServe: SupervisedProcessSnapshot | null;
+    readonly studio: SupervisedProcessSnapshot | null;
 }
 
 export interface AxBackendManagerShape {
@@ -271,15 +205,7 @@ export class AxBackendManager extends Context.Service<
 const { logInfo, logError } =
     DesktopObservability.makeComponentLogger("ax-backend-manager");
 
-interface ManagerProcesses {
-    readonly surreal: SupervisedProcess | null;
-    readonly axServe: SupervisedProcess | null;
-}
-
-const make = (
-    makeProcess: MakeSupervisedProcess,
-    applySchema: DesktopSchema.ApplySchema = DesktopSchema.noopApplySchema,
-) =>
+const make = (makeProcess: MakeSupervisedProcess) =>
     Effect.gen(function* () {
         const parentScope = yield* Scope.Scope;
         const arbitration = yield* AxArbitration;
@@ -289,21 +215,11 @@ const make = (
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const httpClient = yield* HttpClient.HttpClient;
         const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
-        // Fetched once so `applySchema` can be fully provided at its call site,
-        // keeping the public `start`/`stop` effects requirement-free (R = never).
-        const fileSystem = yield* FileSystem.FileSystem;
-        const pathService = yield* Path.Path;
 
         const mode = yield* Ref.make<ArbitrationDecision["mode"] | null>(null);
-        const procs = yield* Ref.make<ManagerProcesses>({
-            surreal: null,
-            axServe: null,
-        });
-        // Latched true for the lifetime of `stop`/teardown so the surreal
-        // restart hook never respawns ax-serve while the manager is shutting
-        // down (the hook runs in the supervisor's fiber, concurrently with
-        // stop). Combined with `quitting`, this guards the bounce against every
-        // teardown path (explicit stop, scope-close finalizer, app quit).
+        const studioProc = yield* Ref.make<SupervisedProcess | null>(null);
+        // Latched true for the lifetime of `stop`/teardown so the attach
+        // poller never spawns while the manager is shutting down.
         const stopping = yield* Ref.make(false);
         // Latched true once the attach -> spawn transition has fired so it can
         // never run twice (the poller stops itself after winning the latch, but
@@ -311,12 +227,9 @@ const make = (
         const transitioned = yield* Ref.make(false);
 
         // Provide the supervised-process deps once; the factory's `Scope` is the
-        // manager's parent scope so processes live as long as the manager.
-        const buildProcess = (
-            config: SupervisedProcessConfig,
-            hooks?: SupervisedProcessHooks,
-        ) =>
-            makeProcess(config, hooks).pipe(
+        // manager's parent scope so the process lives as long as the manager.
+        const buildProcess = (config: SupervisedProcessConfig) =>
+            makeProcess(config).pipe(
                 Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                 Effect.provideService(HttpClient.HttpClient, httpClient),
                 Effect.provideService(
@@ -337,133 +250,37 @@ const make = (
             );
         });
 
-        // Conservative bail when a spawned process never reports ready: log
-        // loudly and leave the window closed (mirrors the `conflict` branch's
-        // handling). We do NOT start downstream processes or open the window
-        // over a backend that never came up. Never throws.
-        const abortNotReady = (name: string) =>
-            logError(
-                "backend process did not report ready within timeout; not opening window",
-                { process: name, surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
-            );
-
-        // Belt-and-suspenders: when surreal exits (and is about to self-restart)
-        // bounce ax-serve so it reconnects to the fresh surreal on boot rather
-        // than limping on a dead DB connection until its own next restart.
-        // Runs from surreal's supervisor fiber (its `onExit`), concurrently with
-        // any teardown - hence the guards. `axServe.stop`/`start` are themselves
-        // mutex-guarded by SupervisedProcess, so the bounce can't race itself.
-        const bounceAxServe = Effect.gen(function* () {
-            // Don't respawn while shutting down (explicit stop, finalizer, quit).
-            if (yield* Ref.get(stopping)) {
-                return;
-            }
-            if (yield* Ref.get(desktopState.quitting)) {
-                return;
-            }
-            // Only bounce if ax-serve has actually been started by this manager.
-            const axServe = (yield* Ref.get(procs)).axServe;
-            if (!axServe) {
-                return;
-            }
-            yield* logInfo("surreal restarted; bouncing ax-serve", {
-                surrealPort: SURREAL_PORT,
-                axServePort: AX_SERVE_PORT,
-            });
-            // Re-check the guards after the stop (teardown may have begun while
-            // we awaited it) before bringing ax-serve back up.
-            yield* axServe.stop();
-            if (yield* Ref.get(stopping)) {
-                return;
-            }
-            if (yield* Ref.get(desktopState.quitting)) {
-                return;
-            }
-            // Re-read the handle: `stop()`/teardown clears `procs`, so a null
-            // here means the manager was torn down mid-bounce - do not respawn.
-            const stillTracked = (yield* Ref.get(procs)).axServe;
-            if (stillTracked !== axServe) {
-                return;
-            }
-            yield* axServe.start;
-        }).pipe(
-            Effect.catchCause((cause) =>
-                logError("failed to bounce ax-serve after surreal restart", {
-                    cause: String(cause),
-                }),
-            ),
+        // Conservative bail when the spawned process never reports ready: log
+        // loudly and leave the window closed. A timeout here IS the "something
+        // occupies the port and we don't understand it" signal the old
+        // arbitration's separate `conflict` mode used to report. Never throws.
+        const abortNotReady = logError(
+            "ax studio did not report ready within timeout; not opening window",
+            { studioPort: AX_STUDIO_PORT },
         );
 
-        // Surreal lifecycle hooks. `onExit` fires when surreal's run finalizes
-        // (just before its own backoff restart is scheduled); that is the moment
-        // to schedule the ax-serve bounce. We use `onExit` rather than `onReady`
-        // because `onReady` resets `restartAttempt` to 0 before firing, so it
-        // cannot distinguish the initial boot from a restart - whereas `onExit`
-        // never fires on initial boot at all.
-        const surrealHooks: SupervisedProcessHooks = {
-            onExit: () => bounceAxServe,
-        };
-
-        const startSpawn = (withSurreal: boolean) =>
-            Effect.gen(function* () {
-                let surreal: SupervisedProcess | null = null;
-                if (withSurreal) {
-                    surreal = yield* buildProcess(makeSurrealConfig(env), surrealHooks);
-                    yield* Ref.update(procs, (p) => ({ ...p, surreal }));
-                    // Start surreal and await its readiness before ax serve so
-                    // ax serve never races a missing DB. If surreal never
-                    // reports ready, bail conservatively: do not start ax serve,
-                    // do not open the window over a dead backend.
-                    yield* surreal.start;
-                    const surrealReady = yield* awaitReady(surreal, "surreal");
-                    if (!surrealReady) {
-                        yield* abortNotReady("surreal");
-                        return;
-                    }
-                    // We own surreal, so we own the schema (IDE daemon model - no
-                    // CLI `ax install` LaunchAgents apply it). Apply it now that
-                    // the DB is ready and before ax serve connects. Fail-soft.
-                    // Provide deps here so `start` stays requirement-free.
-                    yield* applySchema(env).pipe(
-                        Effect.provideService(
-                            ChildProcessSpawner.ChildProcessSpawner,
-                            spawner,
-                        ),
-                        Effect.provideService(FileSystem.FileSystem, fileSystem),
-                        Effect.provideService(Path.Path, pathService),
-                    );
-                }
-
-                const axServe = yield* buildProcess(makeAxServeConfig(env));
-                yield* Ref.update(procs, (p) => ({ ...p, axServe }));
-                yield* axServe.start;
-                const axServeReady = yield* awaitReady(axServe, "ax-serve");
-                if (!axServeReady) {
-                    yield* abortNotReady("ax-serve");
-                    return;
-                }
-
-                yield* markReadyAndOpenWindow;
-
-                // Surreal-crash -> ax-serve bounce is now wired via the surreal
-                // `onExit` hook (see `bounceAxServe` / `surrealHooks` above):
-                // when surreal exits and self-restarts, we bounce ax-serve so it
-                // reconnects to the fresh DB instead of limping on a dead
-                // connection. The self-restart + reconnect-on-boot still backs
-                // it up in the steady state.
-            });
+        const startSpawn = Effect.gen(function* () {
+            const studio = yield* buildProcess(makeAxStudioConfig(env));
+            yield* Ref.set(studioProc, studio);
+            yield* studio.start;
+            const ready = yield* awaitReady(studio);
+            if (!ready) {
+                yield* abortNotReady;
+                return;
+            }
+            yield* markReadyAndOpenWindow;
+        });
 
         // ---- Attach -> spawn live transition -------------------------------
         //
-        // In `attach` mode we reuse the external CLI daemon and own none of its
-        // processes; if it dies the window is pointed at a dead backend. The
-        // poller below re-probes that daemon and, on a sustained failure, takes
-        // over by running the spawn path (our own supervised pair).
+        // In `attach` mode we reuse the external `ax studio` process and own
+        // none of its lifecycle; if it dies the window is pointed at a dead
+        // backend. The poller below re-probes it and, on a sustained failure,
+        // takes over by spawning our own supervised process.
 
         // Run the takeover at most once. Wins the `transitioned` latch via CAS
         // (compare-and-set); if it was already set, another path beat us - no-op.
         const transitionAttachToSpawn = Effect.gen(function* () {
-            // Never take over while shutting down.
             if (yield* Ref.get(stopping)) {
                 return false;
             }
@@ -476,32 +293,30 @@ const make = (
             if (!won) {
                 return false;
             }
-            yield* logInfo(
-                "attached daemon went away; transitioning attach->spawn",
-                { surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
-            );
+            yield* logInfo("attached ax studio went away; transitioning attach->spawn", {
+                studioPort: AX_STUDIO_PORT,
+            });
             yield* Ref.set(mode, "spawn");
-            // Bring up our own supervised pair (surreal + ax-serve). From here
-            // SupervisedProcess crash-restart covers further failures, so the
-            // caller stops the poller once this returns true.
-            yield* startSpawn(true);
+            // Bring up our own supervised process. From here SupervisedProcess
+            // crash-restart covers further failures, so the caller stops the
+            // poller once this returns true.
+            yield* startSpawn;
             return true;
         });
 
-        // One poll tick: re-probe the attached daemon, tracking consecutive
+        // One poll tick: re-probe the attached process, tracking consecutive
         // failures in `failures`. Returns `true` once the transition has fired
         // (signals the repeat loop to stop). Probe failures are total (the probe
         // collapses errors to `false`), so this never fails the fiber.
         const pollTick = (failures: Ref.Ref<number>): Effect.Effect<boolean> =>
             Effect.gen(function* () {
-                // Stop quietly if teardown began between ticks.
                 if (yield* Ref.get(stopping)) {
                     return true;
                 }
                 if (yield* Ref.get(desktopState.quitting)) {
                     return true;
                 }
-                const healthy = yield* arbitration.probeDaemon.pipe(
+                const healthy = yield* arbitration.probeStudio.pipe(
                     Effect.provideService(HttpClient.HttpClient, httpClient),
                 );
                 if (healthy) {
@@ -509,7 +324,7 @@ const make = (
                     return false;
                 }
                 const consecutive = yield* Ref.updateAndGet(failures, (n) => n + 1);
-                yield* logInfo("attached daemon probe failed", {
+                yield* logInfo("attached ax studio probe failed", {
                     consecutive,
                     threshold: ATTACH_FAILURE_THRESHOLD,
                 });
@@ -548,97 +363,69 @@ const make = (
 
             switch (decision.mode) {
                 case "attach":
-                    // A healthy CLI daemon pair already owns the ports. We do not
-                    // own its lifecycle, so attach the window to it AND fork a
-                    // readiness poller that takes over (attach -> spawn) if the
-                    // external daemon dies. Forked into the manager's parent
-                    // scope so `stop`/scope-close interrupts it (no leaked fiber).
+                    // A healthy ax studio already owns the port. We do not own
+                    // its lifecycle, so attach the window to it AND fork a
+                    // readiness poller that takes over (attach -> spawn) if it
+                    // dies. Forked into the manager's parent scope so
+                    // `stop`/scope-close interrupts it (no leaked fiber).
                     yield* markReadyAndOpenWindow;
                     yield* Effect.forkIn(attachReadinessPoller, parentScope);
                     return;
                 case "spawn":
-                    yield* startSpawn(true);
-                    return;
-                case "spawn-ax-only":
-                    yield* startSpawn(false);
-                    return;
-                case "conflict":
-                    // Ports occupied by something unhealthy we don't understand.
-                    // Conservative: surface it loudly and leave the window closed.
-                    // No ElectronDialog service exists in v0; a minimal error
-                    // dialog is deferred (Task 2.4 manual gate / future work).
-                    yield* logError(
-                        "daemon arbitration conflict: ports occupied by an unhealthy process; not starting backend",
-                        { surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
-                    );
+                    yield* startSpawn;
                     return;
             }
         }).pipe(Effect.withSpan("ax.backendManager.start"));
 
         const stop: AxBackendManagerShape["stop"] = (options) =>
             Effect.gen(function* () {
-                // Latch the teardown flag first so a concurrent surreal `onExit`
-                // hook (which may fire as we kill surreal below) bails instead of
-                // respawning ax-serve mid-shutdown.
+                // Latch the teardown flag first so a concurrent attach poller
+                // tick bails instead of transitioning mid-shutdown.
                 yield* Ref.set(stopping, true);
-                // Take + clear the handles atomically so the scope-close finalizer
+                // Take + clear the handle atomically so the scope-close finalizer
                 // can't double-stop after an explicit stop (idempotent).
-                const current = yield* Ref.getAndSet(procs, {
-                    surreal: null,
-                    axServe: null,
-                });
+                const current = yield* Ref.getAndSet(studioProc, null);
                 yield* Ref.set(desktopState.backendReady, false);
-                // Reverse order: ax serve closes its DB connection before surreal
-                // (the DB) goes away.
-                if (current.axServe) {
-                    yield* current.axServe.stop(options);
-                }
-                if (current.surreal) {
-                    yield* current.surreal.stop(options);
+                if (current) {
+                    yield* current.stop(options);
                 }
             }).pipe(Effect.withSpan("ax.backendManager.stop"));
 
         const snapshot: Effect.Effect<AxBackendManagerSnapshot> = Effect.gen(
             function* () {
-                const current = yield* Ref.get(procs);
+                const current = yield* Ref.get(studioProc);
                 return {
                     mode: yield* Ref.get(mode),
-                    surreal: current.surreal ? yield* current.surreal.snapshot : null,
-                    axServe: current.axServe ? yield* current.axServe.snapshot : null,
+                    studio: current ? yield* current.snapshot : null,
                 } satisfies AxBackendManagerSnapshot;
             },
         );
 
-        // Drain both on scope close (quit) - ax serve before surreal.
+        // Drain on scope close (quit).
         yield* Effect.addFinalizer(() => stop());
 
         return AxBackendManager.of({ start, stop, snapshot });
     });
 
-/** Poll interval + cap for the readiness gate between surreal and ax serve. */
+/** Poll interval + cap for the readiness gate while spawning. */
 const READINESS_POLL_INTERVAL = Duration.millis(100);
 const READINESS_POLL_TIMEOUT = Duration.seconds(65);
 
 /**
- * Await a supervised process becoming ready. The SupervisedProcess forks its
+ * Await the supervised process becoming ready. `SupervisedProcess` forks its
  * own readiness probe + flips `ready` on its snapshot; here we poll that
- * snapshot so the manager can SEQUENCE surreal -> ax serve.
+ * snapshot.
  *
  * Bounded by {@link READINESS_POLL_TIMEOUT} (slightly above the process's own
- * 60s readiness timeout). Returns `true` once the process reports ready, or
- * `false` if it never does within the timeout (the caller gates progression on
- * this so a never-ready daemon does not open the window over a dead backend).
- * Never fails.
+ * 60s readiness timeout). Returns `true` once it reports ready, or `false` if
+ * it never does within the timeout (the caller gates progression on this so a
+ * never-ready process does not open the window over a dead backend). Never
+ * fails.
  */
-const awaitReady = (
-    proc: SupervisedProcess,
-    name: string,
-): Effect.Effect<boolean> =>
+const awaitReady = (proc: SupervisedProcess): Effect.Effect<boolean> =>
     proc.snapshot.pipe(
         Effect.flatMap((snap) =>
-            snap.ready
-                ? Effect.void
-                : Effect.fail(new Error(`${name} not ready yet`)),
+            snap.ready ? Effect.void : Effect.fail(new Error("ax studio not ready yet")),
         ),
         Effect.retry(Schedule.spaced(READINESS_POLL_INTERVAL)),
         Effect.timeout(READINESS_POLL_TIMEOUT),
@@ -655,10 +442,8 @@ const awaitReady = (
  * `DesktopBackendOutputLog` to be provided by the caller. The {@link liveLayer}
  * bundles the live arbitration + environment derivations.
  */
-export const layer = (
-    makeProcess: MakeSupervisedProcess = makeSupervisedProcess,
-    applySchema: DesktopSchema.ApplySchema = DesktopSchema.noopApplySchema,
-) => Layer.effect(AxBackendManager, make(makeProcess, applySchema));
+export const layer = (makeProcess: MakeSupervisedProcess = makeSupervisedProcess) =>
+    Layer.effect(AxBackendManager, make(makeProcess));
 
 /**
  * Live layer: the real supervisor wired with live arbitration + the
@@ -666,7 +451,7 @@ export const layer = (
  * (`ChildProcessSpawner`, `HttpClient`, `DesktopBackendOutputLog`,
  * `DesktopState`, `DesktopWindow`, `DesktopEnvironment`) to `main.ts`.
  */
-export const liveLayer = layer(makeSupervisedProcess, DesktopSchema.applySchema).pipe(
+export const liveLayer = layer(makeSupervisedProcess).pipe(
     Layer.provide(arbitrationLayer),
     Layer.provide(environmentLayer),
 );

@@ -8,8 +8,7 @@ import {
     type ShareGraph,
     type ShareTurn,
 } from "./artifact.ts";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
 import type {
     SessionOverview,
     SessionTokenUsageDetail,
@@ -18,25 +17,24 @@ import type {
     ToolCallDto,
 } from "@ax/lib/shared/dashboard-types";
 import { categoryOf } from "@ax/lib/shared/tool-presentation";
-import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
-import { resolveTurnContent } from "../queries/session-turn-content.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import type { SessionTimeline } from "../timeline/types.ts";
 import {
-    sessionChildrenQuery,
-    sessionOverviewQuery,
-    sessionShareFilesQuery,
-    sessionShareTimelineQuery,
-    sessionShareTurnsQuery,
-    sessionShareTurnToolCallsQuery,
-    sessionShareHookFiresQuery,
-    sessionShareHarnessHooksQuery,
-    sessionTokenUsageQuery,
-    sessionTurnTokenUsageQuery,
-    sessionToolCallsQuery,
-    sessionTopSkillsQuery,
+    fetchSessionChildren,
+    fetchSessionOverview,
+    fetchSessionShareFiles,
+    fetchSessionShareTimeline,
+    fetchSessionShareTurns,
+    fetchSessionShareTurnToolCalls,
+    fetchSessionShareHookFires,
+    fetchSessionShareHarnessHooks,
+    fetchSessionTokenUsage,
+    fetchSessionTurnTokenUsage,
+    fetchSessionToolCalls,
+    fetchSessionTopSkills,
+    resolveTurnContent,
     type ShareTurnToolCall,
-} from "../queries/session-detail.ts";
+} from "./session-share-queries.ts";
 
 export interface ShareArtifactParts {
     readonly axVersion: string;
@@ -229,6 +227,15 @@ export function buildShareArtifactFromParts(
     };
 }
 
+/**
+ * Validate + strip any `session:⟨...⟩` / `session:...` ref decoration a
+ * caller might still pass, returning the BARE session id - `session.id` in
+ * the DuckDB schema is the provider-native uuid verbatim, with no ref
+ * wrapper (see schema.duckdb.sql's ROW IDS "CARVE-OUT" note). `null` when the
+ * (unwrapped) id doesn't look like a session id at all - the caller treats
+ * that as "session not found" rather than building a statement with an
+ * unvalidated string.
+ */
 export function normalizeSessionRecordRef(sessionId: string): string | null {
     const bare = sessionId.startsWith("session:⟨") && sessionId.endsWith("⟩")
         ? sessionId.slice("session:⟨".length, -"⟩".length)
@@ -237,7 +244,7 @@ export function normalizeSessionRecordRef(sessionId: string): string | null {
             : sessionId;
 
     if (!SESSION_ID_RE.test(bare)) return null;
-    return `session:⟨${bare}⟩`;
+    return bare;
 }
 
 const isPresent = <T>(value: T | null): value is T => value !== null;
@@ -386,13 +393,13 @@ export const exportSessionShare = (
     sessionId: string,
     axVersion: string,
     options: ExportSessionShareOptions = {},
-): Effect.Effect<AxSessionShare | null, DbError, SurrealClient> =>
+): Effect.Effect<AxSessionShare | null, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const recordRef = normalizeSessionRecordRef(sessionId);
-        if (recordRef === null) return null;
+        const bareId = normalizeSessionRecordRef(sessionId);
+        if (bareId === null) return null;
 
         const visited = options.visited ?? new Set<string>();
-        if (visited.has(recordRef)) return null;
+        if (visited.has(bareId)) return null;
 
         // Shared budget across the whole recursion (created once at the root)
         // caps total sessions exported - a cycle/size backstop.
@@ -400,49 +407,43 @@ export const exportSessionShare = (
         const remaining = yield* Ref.updateAndGet(budget, (n) => n - 1);
         if (remaining < 0) return null;
 
-        const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, harnessHooksRaw, turnContent] =
+        const read = yield* CacheRead;
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, shareTurns, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, harnessHooksRawUnanchored, turnContent] =
             yield* Effect.all([
-                runSingleQuery(sessionOverviewQuery, params),
-                runQuery(sessionTopSkillsQuery, params),
-                runQuery(sessionToolCallsQuery, params),
-                runSingleQuery(sessionTokenUsageQuery, params),
-                runQuery(sessionTurnTokenUsageQuery, params),
-                runQuery(sessionShareTurnsQuery, params),
-                runQuery(sessionShareTimelineQuery, params),
-                runQuery(sessionShareFilesQuery, params),
-                runQuery(sessionChildrenQuery, params),
-                runQuery(sessionShareTurnToolCallsQuery, params),
-                runQuery(sessionShareHookFiresQuery, params),
-                runQuery(sessionShareHarnessHooksQuery, params),
-                resolveTurnContent(sessionId),
+                fetchSessionOverview(read, bareId),
+                fetchSessionTopSkills(read, bareId),
+                fetchSessionToolCalls(read, bareId),
+                fetchSessionTokenUsage(read, bareId),
+                fetchSessionTurnTokenUsage(read, bareId),
+                fetchSessionShareTurns(read, bareId),
+                fetchSessionShareTimeline(read, bareId),
+                fetchSessionShareFiles(read, bareId),
+                fetchSessionChildren(read, bareId),
+                fetchSessionShareTurnToolCalls(read, bareId),
+                fetchSessionShareHookFires(read, bareId),
+                fetchSessionShareHarnessHooks(read, bareId),
+                resolveTurnContent(read, bareId),
             ]);
 
         if (overview === null) return null;
 
         // Assign the SPA-only monotonic idx (used for stable DOM ids + jumps).
-        const hookFires = hookFiresRaw
-            .filter(isPresent)
-            .map((fire, idx) => ({ idx, ...fire }));
+        const hookFires = hookFiresRaw.map((fire, idx) => ({ idx, ...fire }));
 
         // Recurse into spawned subagents. The visited set carries this session
         // so a child that points back never re-expands; leaves return [].
         // Each child's spawn-edge ts is anchored to the nearest parent turn so
         // the viewer can mark where it was launched.
-        const shareTurns = turnsRaw.filter(isPresent);
         // Harness hooks: assign idx + anchor each to the nearest turn by ts.
-        const harnessHooks = harnessHooksRaw
-            .filter(isPresent)
-            .map((hook, idx) => ({
-                idx,
-                ...hook,
-                anchor_turn_seq: anchorChildToTurn(shareTurns, hook.ts),
-            }));
-        const nextVisited = new Set(visited).add(recordRef);
-        const childLinks = childLinksRaw.filter(isPresent);
+        const harnessHooks = harnessHooksRawUnanchored.map((hook, idx) => ({
+            idx,
+            ...hook,
+            anchor_turn_seq: anchorChildToTurn(shareTurns, hook.ts),
+        }));
+        const nextVisited = new Set(visited).add(bareId);
         const children = (
             yield* Effect.all(
-                childLinks.map((link) =>
+                childLinksRaw.map((link) =>
                     exportSessionShare(String(link.session_id), axVersion, {
                         visited: nextVisited,
                         spawnAnchorTurnSeq: anchorChildToTurn(shareTurns, link.ts ?? null),
@@ -461,18 +462,18 @@ export const exportSessionShare = (
         // before the filter loses rows whose turn gets dropped.
         const turns = attachTurnTokenUsage(
             attachTurnContent(
-                attachStructuredToolCalls(shareTurns, turnToolCallsRaw.filter(isPresent)),
+                attachStructuredToolCalls(shareTurns, turnToolCallsRaw),
                 turnContent,
             ).filter((turn) =>
                 turn.text.length > 0 || turn.content != null || (turn.tool_calls?.length ?? 0) > 0
             ),
-            turnTokenUsageRaw.filter(isPresent),
+            turnTokenUsageRaw,
         );
 
         // Segmented highlight timeline, computed here (where the DB still is)
         // so the static share viewer can render it daemon-free. Best-effort: a
         // timeline failure never blocks the export.
-        const sessionTimeline = yield* extractSessionTimeline(recordRef).pipe(
+        const sessionTimeline = yield* extractSessionTimeline(bareId).pipe(
             Effect.provide(SessionTimelineServiceLayer),
             Effect.catchDefect(() => Effect.succeed(null)),
         );
@@ -481,13 +482,13 @@ export const exportSessionShare = (
             axVersion,
             exportedAt: new Date().toISOString(),
             overview,
-            topSkills: topSkillsRaw.filter(isPresent),
-            toolCalls: toolCallsRaw.filter(isPresent),
+            topSkills: topSkillsRaw,
+            toolCalls: toolCallsRaw,
             tokenUsage,
             turns,
-            timeline: timelineRaw.filter(isPresent),
+            timeline: timelineRaw,
             sessionTimeline,
-            files: filesRaw.filter(isPresent),
+            files: filesRaw,
             children,
             hookFires,
             harnessHooks,

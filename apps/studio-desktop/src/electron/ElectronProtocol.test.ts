@@ -19,7 +19,6 @@ const environmentInput: DesktopEnvironment.MakeDesktopEnvironmentInput = {
   userDataDir: "/user-data",
   platform: "darwin",
   processArch: "arm64",
-  surrealBinaryPath: "surreal",
   bunBinaryPath: "bun",
   homeDir: "/home/test",
   axDataDirOverride: undefined,

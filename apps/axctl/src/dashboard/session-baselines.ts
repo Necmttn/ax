@@ -1,29 +1,12 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 
 export interface SessionBaselines {
     readonly median_cost_usd: number | null;
     readonly median_friction: number | null;
     readonly median_time_to_land_ms: number | null;
     readonly burn_p90: number | null;
-}
-
-interface CostRow {
-    readonly estimated_cost_usd: number | null;
-}
-
-interface FrictionRow {
-    readonly friction: number | null;
-}
-
-interface TimeToLandRow {
-    readonly time_to_land_ms: number | null;
-}
-
-interface BurnRow {
-    readonly estimated_tokens: number | null;
-    readonly turns: number | null;
 }
 
 const CACHE_TTL_MS = 5 * 60_000;
@@ -53,37 +36,52 @@ export const _resetBaselineCacheForTests = (): void => {
     cachedBaselines = null;
 };
 
-export const fetchSessionBaselines = (): Effect.Effect<SessionBaselines, DbError, SurrealClient> =>
+const CostRowSchema = Schema.Struct({ estimated_cost_usd: Schema.NullOr(Schema.Number) });
+const FrictionRowSchema = Schema.Struct({ friction: Schema.NullOr(NumberFromBigIntColumn) });
+const TimeToLandRowSchema = Schema.Struct({ time_to_land_ms: Schema.NullOr(NumberFromBigIntColumn) });
+const BurnRowSchema = Schema.Struct({
+    estimated_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    turns: Schema.NullOr(NumberFromBigIntColumn),
+});
+
+export const fetchSessionBaselines = (): Effect.Effect<SessionBaselines, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const now = Date.now();
         if (cachedBaselines && cachedBaselines.expiresAt > now) {
             return cachedBaselines.value;
         }
 
-        const db = yield* SurrealClient;
-        const [costRows, frictionRows, timeToLandRows, burnRows] = yield* db.query<[
-            CostRow[],
-            FrictionRow[],
-            TimeToLandRow[],
-            BurnRow[],
-        ]>(`
+        const db = yield* CacheRead;
+        // CAST to naive TIMESTAMP before subtracting: DuckDB's bare
+        // CURRENT_TIMESTAMP is TIMESTAMP WITH TIME ZONE, and ax's own icu-less
+        // build has no `-(TIMESTAMP WITH TIME ZONE, INTERVAL)` overload (that
+        // arithmetic is registered by the icu extension, which this build
+        // doesn't link) - only `-(TIMESTAMP, INTERVAL)`. Every `ts` column here
+        // is a plain UTC TIMESTAMP (see schema.duckdb.sql), so casting the
+        // comparison side to match is correct, not a workaround. Same idiom as
+        // `assertUtcClock` in packages/lib/src/duckdb/seam.ts.
+        const [costRows, frictionRows, timeToLandRows, burnRows] = yield* Effect.all([
+            db.rows(CostRowSchema, `
             SELECT estimated_cost_usd
             FROM session_token_usage
-            WHERE ts > time::now() - 30d
-              AND estimated_cost_usd IS NOT NONE;
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
+              AND estimated_cost_usd IS NOT NULL`),
+            db.rows(FrictionRowSchema, `
             SELECT (user_corrections + tool_errors) AS friction
             FROM session_health
-            WHERE ts > time::now() - 30d;
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY`),
+            db.rows(TimeToLandRowSchema, `
             SELECT time_to_land_ms
             FROM session_metrics
-            WHERE ts > time::now() - 30d
-              AND time_to_land_ms IS NOT NONE;
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
+              AND time_to_land_ms IS NOT NULL`),
+            db.rows(BurnRowSchema, `
             SELECT estimated_tokens, turns
             FROM session_health
-            WHERE ts > time::now() - 30d
+            WHERE ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL 30 DAY
               AND turns > 0
-              AND estimated_tokens > 0;
-        `);
+              AND estimated_tokens > 0`),
+        ]);
 
         const burnRates = burnRows
             .map((row) => {

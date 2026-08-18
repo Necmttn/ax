@@ -1,7 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
-import type { DbError } from "@ax/lib/errors";
 import { wantsJson } from "./output.ts";
 import { buildProjectContext, buildProjectHarness, buildProjectVerification } from "../project/context.ts";
 import type { HarnessDoctorFinding, ProjectContext, ProjectHarnessReport, ProjectVerification, VerificationCheck } from "../project/types.ts";
@@ -79,7 +78,7 @@ function printHarness(payload: ProjectHarnessReport): void {
 
 export const cmdProject = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, CacheReadError, CacheRead | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const [subcommand, ...rest] = args;
         if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {

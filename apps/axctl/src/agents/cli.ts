@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { optionValue } from "../config-core/cli-util.ts";
-import { formatReconcileScoped } from "../config-core/reconcile.ts";
+import { formatReconcileScoped, withConfigWrite } from "../config-core/reconcile.ts";
 import { AgentSourceRegistryLive } from "./registry.ts";
 import {
     readAllAgents,
@@ -19,7 +19,7 @@ import type { RuntimeManifest } from "../cli/commands/manifest.ts";
 /**
  * `ax agents` group: config/reconcile/scope/park/unpark/rm for agent definition
  * files. New top-level (hidden) group registered in cli/index.ts. Handlers
- * provide AgentSourceRegistryLive; SurrealClient/FileSystem/Path from AppLayer.
+ * provide AgentSourceRegistryLive; FileSystem and Path come from AppLayer.
  */
 
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));
@@ -58,7 +58,7 @@ const reconcileCommand = Command.make(
     "reconcile",
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
-        reconcileAgents({ dryRun }).pipe(
+        withConfigWrite((write) => reconcileAgents(write, { dryRun })).pipe(
             Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcileScoped(report))),
             Effect.provide(AgentSourceRegistryLive),
         ),
@@ -125,4 +125,4 @@ export const agentsCommand = Command.make("agents").pipe(
 );
 
 /** Routing declaration consumed by cli/index.ts (Phase 2 command-family split). */
-export const agentsRuntime: RuntimeManifest = { agents: { runtime: "db", hidden: true } };
+export const agentsRuntime: RuntimeManifest = { agents: { runtime: "cache", hidden: true } };

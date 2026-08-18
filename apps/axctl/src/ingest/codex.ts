@@ -1,9 +1,10 @@
 import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
-import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { DbError } from "@ax/lib/errors";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
-import { surrealJsonOption } from "@ax/lib/shared/surql";
-import { AppLayer } from "@ax/lib/layers";
+import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -26,12 +27,9 @@ import {
     providerPlanSignalAvailability,
     toPlanSnapshotWrite,
 } from "./plans.ts";
-import { toolCallRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import {
-    buildNormalizedTranscriptStatements,
-    type NormalizedTranscriptBatch,
-} from "./normalized/transcripts.ts";
+import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 // Codex token counts arrive as numbers OR numeric strings - the toolkit's
 // integer probe (`intField`) is this parser's `numberField`.
 import {
@@ -50,25 +48,14 @@ import {
     makeToolCallWrite,
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
-import {
-    buildSessionTokenUsageStatement,
-    buildTurnTokenUsageStatement,
-} from "./token-usage-writers.ts";
 import { decodeCodexTranscriptLine } from "./line-schemas.ts";
-import { executeStatements } from "@ax/lib/shared/statement-exec";
-import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
+import { isNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
-import {
-    clearIndexUnhealthyMarker,
-    makeAgentEventSeqRebuild,
-    withAgentEventSeqHeal,
-    writeIndexUnhealthyMarker,
-} from "./agent-event-index-heal.ts";
 import { canonicalCwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
@@ -260,17 +247,6 @@ function compactCodexToolCall(call: MutableToolCallWrite, maxBytes: number): Mut
         inputJson: compactPayload(call.inputJson, maxBytes),
         outputJson: compactPayload(call.outputJson, maxBytes),
         rawJson: compactPayload(call.rawJson, maxBytes),
-    };
-}
-
-function compactCodexFunctionOutputEventRaw(
-    payload: Record<string, unknown>,
-    maxBytes: number,
-): Record<string, unknown> {
-    return {
-        type: stringField(payload, "type") ?? "function_call_output",
-        call_id: stringField(payload, "call_id"),
-        output: compactPayload(payload.output, maxBytes),
     };
 }
 
@@ -645,7 +621,6 @@ function createCodexExtractor(
             role: "tool_call",
             text: null,
             textExcerpt: null,
-            raw: payload,
             labels: {
                 source: "codex_transcript",
                 toolName,
@@ -730,7 +705,6 @@ function createCodexExtractor(
             role: "function_call_output",
             text: result.outputExcerpt,
             textExcerpt: result.outputExcerpt,
-            raw: compactCodexFunctionOutputEventRaw(payload, payloadMaxBytes),
             labels: {
                 source: "codex_transcript",
                 callId,
@@ -858,9 +832,10 @@ function createCodexExtractor(
                 // adjacent `session_meta` records: its own first, then the
                 // FORK SOURCE's as a header. Reassigning on the second one
                 // gave the file the ancestor's identity, so the file's real
-                // session was never written and every record in it landed on
-                // the ancestor's id, colliding with that ancestor's own file
-                // on `turnRecordKey(session, seq)`.
+                // session was never written and every record in it - the
+                // child's own turns, all 596 of them in the file this was
+                // found on - landed on the ancestor's id, colliding with that
+                // ancestor's own file on `turnRecordKey(session, seq)`.
                 //
                 // The file's own meta is always first: measured across 529
                 // affected files on one machine, the first meta's `id` equals
@@ -937,7 +912,6 @@ function createCodexExtractor(
                     role: null,
                     text: null,
                     textExcerpt: null,
-                    raw: { replacement_count: Array.isArray(payload.replacement_history) ? payload.replacement_history.length : 0 },
                     labels: { source: "codex_transcript" },
                     metrics: { strategy: "history_replacement", turnSeq: seq },
                 }, session);
@@ -1000,7 +974,6 @@ function createCodexExtractor(
                         role,
                         text,
                         textExcerpt,
-                        raw: payload,
                         labels: {
                             source: "codex_transcript",
                             messageKind: kind,
@@ -1255,90 +1228,100 @@ export const __testStreamCodexFileGuarded = (
 
 export const __testCompactCodexToolCall = compactCodexToolCall;
 
-const buildCodexTokenUsageStatements = (
+const writeCodexTokenUsage = (
+    write: CacheWriteService,
     usage: CodexTokenUsage | null,
-    source: "codex" | "codex-subagent" = "codex",
-): string[] => {
-    if (!usage) return [];
-    const cost = estimateCost({
-        modelKey: usage.model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cacheCreationInputTokens: null,
-        cacheReadInputTokens: usage.cacheReadInputTokens,
-        estimatedTokens: usage.estimatedTokens,
-        // `usage.promptTokens` is `total_token_usage.input_tokens` - cumulative
-        // across the whole session at this point, not one request. See plan 003.
-        aggregated: true,
-    });
-    return [
-        // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
-        buildSessionTokenUsageStatement({
-            sessionId: usage.session,
-            source,
-            model: usage.model,
+    turnUsages: readonly CodexTurnTokenUsage[],
+    source: "codex" | "codex-subagent",
+) => Effect.gen(function* () {
+    if (usage !== null) {
+        const cost = estimateCost({
+            modelKey: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             cacheCreationInputTokens: null,
             cacheReadInputTokens: usage.cacheReadInputTokens,
-            reasoningOutputTokens: usage.reasoningOutputTokens,
             estimatedTokens: usage.estimatedTokens,
-            contextWindow: usage.contextWindow,
-            cost: { modelRefKey: usage.model, estimate: cost },
-            labels: surrealJsonOption(tokenQualityLabels({
+            aggregated: true,
+        });
+        yield* write.put("session_token_usage", cacheRow({
+            id: usage.session,
+            session: usage.session,
+            source,
+            workflow_epoch: null,
+            model: usage.model,
+            prompt_tokens: usage.promptTokens,
+            completion_tokens: usage.completionTokens,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: usage.cacheReadInputTokens,
+            reasoning_output_tokens: usage.reasoningOutputTokens,
+            estimated_tokens: usage.estimatedTokens,
+            transcript_bytes: 0,
+            context_window: usage.contextWindow,
+            model_ref: usage.model,
+            estimated_input_cost_usd: cost.inputUsd,
+            estimated_output_cost_usd: cost.outputUsd,
+            estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+            estimated_cache_read_cost_usd: cost.cacheReadUsd,
+            estimated_cost_usd: cost.totalUsd,
+            pricing_source: cost.pricingSource,
+            labels: jsonParam(tokenQualityLabels({
                 source: "codex_token_count",
                 tokenSourceQuality: "explicit",
                 tokenSourceDetail: "codex_token_count.total_token_usage",
                 model: usage.model,
                 modelSourceDetail: usage.model ? "codex_session.model_provider" : "missing_codex_model_provider",
             })),
-            metrics: surrealJsonOption({
+            metrics: jsonParam({
                 total_token_usage: usage.totalTokenUsage,
                 last_token_usage: usage.lastTokenUsage,
                 token_count_events: usage.tokenCountEvents,
             }),
-            ts: usage.ts,
-        }),
-    ];
-};
-
-const buildCodexTurnTokenUsageStatements = (
-    usages: readonly CodexTurnTokenUsage[],
-    source: "codex" | "codex-subagent" = "codex",
-): string[] =>
-    usages.map((usage) =>
-        buildTurnTokenUsageStatement({
-            sessionId: usage.session,
-            seq: usage.seq,
-            source,
-            model: usage.model,
+            burn_buckets: null,
+            ts: tsParam(usage.ts),
+        }));
+    }
+    yield* write.putMany("turn_token_usage", turnUsages.map((usage) => {
+        const cost = estimateCost({
+            modelKey: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             cacheCreationInputTokens: usage.cacheCreationInputTokens,
             cacheReadInputTokens: usage.cacheReadInputTokens,
-            freshInputTokens: usage.freshInputTokens,
             estimatedTokens: usage.estimatedTokens,
-            reasoningOutputTokens: usage.reasoningOutputTokens,
-            modelRefKey: usage.model,
-            cost: estimateCost({
-                modelKey: usage.model,
-                promptTokens: usage.promptTokens,
-                completionTokens: usage.completionTokens,
-                cacheCreationInputTokens: usage.cacheCreationInputTokens,
-                cacheReadInputTokens: usage.cacheReadInputTokens,
-                estimatedTokens: usage.estimatedTokens,
-                // `first_total` promptTokens is a cumulative sum, not one
-                // request's context - see `isCodexTurnUsageAggregated`.
-                ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
-            }),
-            usageSource: usage.usageSource,
-            usageQuality: usage.usageQuality,
-            raw: surrealJsonOption(usage.raw),
-            ts: usage.ts,
-        })
-    );
+            ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
+        });
+        const turn = turnRecordKey(usage.session, usage.seq);
+        return cacheRow({
+            id: turn,
+            session: usage.session,
+            turn,
+            seq: usage.seq,
+            source,
+            model: usage.model,
+            prompt_tokens: usage.promptTokens,
+            completion_tokens: usage.completionTokens,
+            cache_creation_input_tokens: usage.cacheCreationInputTokens,
+            cache_read_input_tokens: usage.cacheReadInputTokens,
+            reasoning_output_tokens: usage.reasoningOutputTokens,
+            fresh_input_tokens: usage.freshInputTokens,
+            estimated_tokens: usage.estimatedTokens,
+            model_ref: usage.model,
+            estimated_input_cost_usd: cost.inputUsd,
+            estimated_output_cost_usd: cost.outputUsd,
+            estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+            estimated_cache_read_cost_usd: cost.cacheReadUsd,
+            estimated_cost_usd: cost.totalUsd,
+            pricing_source: cost.pricingSource,
+            usage_source: usage.usageSource,
+            usage_quality: usage.usageQuality,
+            raw: jsonParam(usage.raw),
+            ts: tsParam(usage.ts),
+        });
+    }));
+});
 
-const toCodexNormalizedBatch = (
+export const toCodexNormalizedBatch = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
 ): NormalizedTranscriptBatch => ({
@@ -1415,24 +1398,6 @@ const toCodexNormalizedBatch = (
     compactions: batch.compactions,
 });
 
-const buildCodexBatchStatements = (
-    batch: MutableCodexExtract,
-    payloadMaxBytes: number,
-    clearExisting = true,
-): string[] => [
-    ...buildNormalizedTranscriptStatements(
-        toCodexNormalizedBatch(batch, payloadMaxBytes),
-        { clearExisting },
-    ),
-    ...buildCodexTokenUsageStatements(batch.tokenUsage, codexSourceForThread(batch.session?.thread_source)),
-    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages, codexSourceForThread(batch.session?.thread_source)),
-];
-
-export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
-
-const queryCodexStatements = (statements: readonly string[]) =>
-    executeStatements(statements, { chunkSize: 500, label: "codex" });
-
 interface CodexIngestOpts {
     sinceDays: number | undefined;
     runId: string | undefined;
@@ -1468,18 +1433,12 @@ export interface CodexStats {
 }
 
 export const ingestCodex = Effect.fn("codex.ingest")(
-    function* (opts: Partial<CodexIngestOpts> = {}) {
+    function* (write: CacheWriteService, opts: Partial<CodexIngestOpts> = {}) {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
-        const fs = yield* FileSystem.FileSystem;
-        const dataDir = cfg.paths.dataDir;
+        const path = yield* Path.Path;
         // Shared across all files this stage run: the agent_event ghost-index
         // rebuild fires at most once, memoized so file concurrency awaits one
         // in-flight rebuild + a failed rebuild is observable (#680).
-        const agentEventSeqRebuild = yield* makeAgentEventSeqRebuild(db);
-        // Set when a file exhausts the heal ladder this run; gates the
-        // clear-on-clean-completion below so we don't wipe a just-written marker.
-        let indexHealExhausted = false;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         let files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
         // `ingest here` repo scope (#680): head-peek each rollout's session_meta
@@ -1522,6 +1481,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
+        const bucketsDir = path.join(cfg.paths.dataDir, "buckets");
         const progressEvery = cfg.knobs.codexProgressEvery;
         const flushEvery = cfg.knobs.codexFlushEvery;
         const concurrency = cfg.knobs.codexConcurrency;
@@ -1541,7 +1501,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // active-file counting all live in the shared JSONL work-unit; codex
         // supplies discovery (above) and the per-file parse/write below. A file
         // whose (mtime,size) matched a prior run is skipped without re-parsing.
-        const result = yield* runJsonlProviderFiles({
+        const result = yield* runJsonlProviderFiles(write, {
             candidates: files,
             sourceKind: "codex_session",
             forceEnv: "AX_REDERIVE_CODEX",
@@ -1620,16 +1580,21 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     session: CodexSession,
                     rawPointer: string | null,
                 ) =>
-                    db.upsert(new RecordId("session", session.id), {
-                        project: session.cwd ?? undefined,
-                        cwd: session.cwd ?? undefined,
-                        model: concreteCodexModel(session) ?? undefined,
-                        reasoning_effort: session.reasoning_effort ?? undefined,
+                    write.put("session", cacheRow({
+                        id: session.id,
+                        project: session.cwd ?? null,
+                        cwd: session.cwd ?? null,
+                        model: concreteCodexModel(session) ?? null,
+                        reasoning_effort: session.reasoning_effort ?? null,
                         source: codexSourceForThread(session.thread_source),
                         started_at: new Date(session.started_at),
                         ended_at: new Date(session.ended_at),
-                        raw_file: rawPointer ?? undefined,
-                    });
+                        raw_file: rawPointer,
+                        labels: null,
+                        repository: null,
+                        checkout: null,
+                        workspace: null,
+                    }));
 
                 let providerEventsCleared = false;
                 const writeBatch = (batch: MutableCodexExtract) =>
@@ -1653,7 +1618,17 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         // NOT re-clear or they would wipe this ingest's own events.
                         const clearExisting = !providerEventsCleared;
                         providerEventsCleared = true;
-                        yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes, clearExisting));
+                        yield* writeNormalizedTranscriptBatch(
+                            write,
+                            toCodexNormalizedBatch(batch, payloadMaxBytes),
+                            { clearExisting },
+                        );
+                        yield* writeCodexTokenUsage(
+                            write,
+                            batch.tokenUsage,
+                            batch.turnTokenUsages,
+                            codexSourceForThread(batch.session?.thread_source),
+                        );
                         turnCount += batch.turns.length;
                         fileTurns += batch.turns.length;
                         toolCallCount += batch.toolCalls.length;
@@ -1713,36 +1688,21 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 // best-effort cold storage for modest files. Large Codex sessions
                 // are parsed line-by-line above; reading them again just to copy the
                 // raw transcript can dominate benchmark runs.
-                const bucketPath = `${completedSession.id}.jsonl`;
-                const rawContent = snapshotRaw
-                    ? yield* emitProgress(3).pipe(
-                        Effect.andThen(
-                            // Best-effort cold-storage copy: a file that vanished
-                            // after streaming tolerates to null so the snapshot is
-                            // simply skipped - the parsed rows are already persisted.
-                            // Matches `transcripts.ts`: NotFound recovers to null,
-                            // genuine read faults re-raise rather than being silently
-                            // swallowed.
-                            fs.readFileString(filePath).pipe(
-                                skipNotFound(null as string | null),
-                            ),
-                        ),
-                    )
-                    : null;
-                let rawPointer: string | null = null;
-                if (rawContent !== null) {
-                    rawPointer = yield* db
-                        .putFile("codex_artifacts", bucketPath, rawContent)
-                        .pipe(
-                            Effect.map(() => filePointer("codex_artifacts", bucketPath)),
-                            Effect.catch((err) =>
-                                Effect.logDebug("codex raw snapshot failed", {
-                                    sessionId: completedSession.id,
-                                    message: err.message,
-                                }).pipe(Effect.as(null as string | null)),
-                            ),
-                        );
-                }
+                //
+                // Falls back to the SOURCE PATH when the snapshot is skipped or
+                // fails, so `raw_file` still locates the transcript while the
+                // harness keeps it - see blob-gc.ts for why that fallback shape
+                // has to stay distinguishable from a real pointer.
+                if (snapshotRaw) yield* emitProgress(3);
+                const rawPointer = snapshotRaw
+                    ? (yield* putBlobFromFile(
+                        bucketsDir,
+                        "codex_artifacts",
+                        blobName(completedSession.id, ".jsonl"),
+                        filePath,
+                        { maxBytes: rawMaxBytes, sizeBytes },
+                    )) ?? filePath
+                    : filePath;
 
                 // Final session upsert carries the latest ended_at and raw artifact
                 // pointer after the streaming writes have completed.
@@ -1790,29 +1750,6 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 }
                 return true;
             }).pipe(
-                // Self-heal the agent_event ghost-index collision (#680): on a
-                // duplicate-index DbError, dedupe this session by primary id +
-                // retry; if still blocked, rebuild the index CONCURRENTLY once
-                // per stage + retry; a second failure records a doctor marker and
-                // rethrows so per-file isolation skips it (no silent skip loop).
-                (eff) =>
-                    withAgentEventSeqHeal(eff, {
-                        db,
-                        rebuild: agentEventSeqRebuild,
-                        onExhausted: (sessionId) =>
-                            Effect.sync(() => {
-                                indexHealExhausted = true;
-                            }).pipe(
-                                Effect.andThen(
-                                    writeIndexUnhealthyMarker(dataDir, sessionId, `codex file ${file.path}`),
-                                ),
-                                Effect.provideService(FileSystem.FileSystem, fs),
-                            ),
-                        onHealed: () =>
-                            clearIndexUnhealthyMarker(dataDir).pipe(
-                                Effect.provideService(FileSystem.FileSystem, fs),
-                            ),
-                    }),
                 Effect.withSpan("codex.file", {
                     // Basename only: keeps exported-trace attributes small (the full
                     // session path is reconstructable locally if ever needed).
@@ -1827,11 +1764,6 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // a manual `bun scripts/repair-agent-event-index.ts` followed by a clean
         // ingest that never re-triggers the heal). Skip the clear only when a
         // file exhausted the ladder THIS run - that just-written marker stays.
-        if (!indexHealExhausted) {
-            yield* clearIndexUnhealthyMarker(dataDir).pipe(
-                Effect.provideService(FileSystem.FileSystem, fs),
-            );
-        }
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),
@@ -1854,17 +1786,6 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         } satisfies CodexStats;
     },
 );
-
-if (import.meta.main) {
-    const sinceArg = process.argv.find((a) => a.startsWith("--since="));
-    const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await Effect.runPromise(
-        ingestCodex({ sinceDays }).pipe(
-            Effect.provide(AppLayer),
-            Effect.scoped,
-        ) as Effect.Effect<CodexStats>,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -1891,11 +1812,11 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
     failedFiles: Schema.Number,
 }) {}
 
-export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
+export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
     meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
-    run: Effect.fn(function* (ctx: IngestContext) {
+    run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
         // Capture the stage span HERE (current span = the runner's
@@ -1907,7 +1828,7 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
         // unreadable sessions root or a non-NotFound stat/stream error), so
         // it dies as a defect rather than masquerading as a recoverable
         // DbError - mirroring `claudeStage`.
-        const result = yield* ingestCodex({
+        const result = yield* ingestCodex(write, {
             sinceDays,
             runId: ctx.runId,
             onProgress: annotateStageProgress,

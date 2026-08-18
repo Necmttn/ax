@@ -13,11 +13,10 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { defaultSkillDirs, skillDirsOverridden } from "@ax/lib/paths";
-import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
@@ -72,7 +71,7 @@ function looseLineParse(raw: string): Record<string, unknown> {
     return out;
 }
 
-function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
+export function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
     const raw = fm["role"];
     if (raw === undefined || raw === null || raw === "") return [];
     const items = Array.isArray(raw) ? raw : [raw];
@@ -252,13 +251,12 @@ const collectSkills = (): Effect.Effect<
         return [...byName.values()];
     });
 
-export const ingestSkills = (): Effect.Effect<
+export const ingestSkills = (write: CacheWriteService): Effect.Effect<
     { count: number; rolesUpserted: number; edgesWritten: number },
-    DbError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheWriteError | JudgmentError,
+    Judgment | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const items = yield* collectSkills();
 
         let rolesUpserted = 0;
@@ -272,7 +270,7 @@ export const ingestSkills = (): Effect.Effect<
                     .digest("hex")
                     .slice(0, 16);
                 return Effect.gen(function* () {
-                    const skillId = yield* upsertSkillByName(db, {
+                    const skillId = yield* upsertSkillByName(write, {
                         // On-disk catalog is the canonical source of skill
                         // names - brand here so the record-key path stays
                         // SkillName end-to-end.
@@ -283,7 +281,7 @@ export const ingestSkills = (): Effect.Effect<
                         content_hash: hash,
                         bytes: item.bytes,
                     });
-                    const roleStats = yield* relateSkillRoles(db, {
+                    const roleStats = yield* relateSkillRoles({
                         skillId,
                         roles: item.skill.roles,
                     });
@@ -298,14 +296,6 @@ export const ingestSkills = (): Effect.Effect<
         yield* Effect.logDebug("skills upserted", { count, rolesUpserted, edgesWritten });
         return { count, rolesUpserted, edgesWritten };
     });
-
-if (import.meta.main) {
-    await Effect.runPromise(
-        ingestSkills().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<
-            { count: number; rolesUpserted: number; edgesWritten: number }
-        >,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef - canonical pattern for Tasks 7–20
@@ -330,13 +320,14 @@ export class SkillsStats extends BaseStageStats.extend<SkillsStats>("SkillsStats
  */
 export const skillsStage: StageDef<
     SkillsStats,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    Judgment | FileSystem.FileSystem | Path.Path,
+    CacheWriteError | JudgmentError
 > = {
     meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const { count } = yield* ingestSkills();
+            const { count } = yield* ingestSkills(write);
             return SkillsStats.make({
                 durationMs: Date.now() - t0,
                 summary: `upserted ${count} skill rows`,

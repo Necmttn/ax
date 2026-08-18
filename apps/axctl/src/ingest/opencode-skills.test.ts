@@ -6,7 +6,6 @@ import {
     resolveOpenCodeCatalogSkills,
     type OpenCodeExtract,
 } from "./opencode.ts";
-import { buildNormalizedSyntheticSkillInvocationStatements } from "./normalized/transcripts.ts";
 
 describe("openCodeLoadedSkillName (#746)", () => {
     test("reads the skill the `skill` tool loaded", () => {
@@ -98,43 +97,5 @@ describe("resolveOpenCodeCatalogSkills", () => {
     test("is a no-op against an empty catalog", () => {
         const input = extractWith([invocation("kubuntu", true)], []);
         expect(resolveOpenCodeCatalogSkills(input, new Set())).toBe(input);
-    });
-});
-
-describe("skill row write mode", () => {
-    const base = {
-        sessionId: "s1",
-        seq: 1,
-        ts: "2026-08-05T00:00:00.000Z",
-        args: {},
-    };
-
-    test("if_missing creates without clobbering an existing catalog row", () => {
-        const [skillStmt] = buildNormalizedSyntheticSkillInvocationStatements([
-            {
-                ...base,
-                skillName: SkillName.make("kubuntu"),
-                skillScope: "opencode-skill",
-                skillDirPath: "(opencode)",
-                skillContentHash: "opencode",
-                skillUpsert: "if_missing",
-            },
-        ]);
-        expect(skillStmt).toStartWith("INSERT INTO skill ");
-        expect(skillStmt).toContain("ON DUPLICATE KEY UPDATE name = name");
-    });
-
-    test("synthetic provider-tool skills keep the merge write", () => {
-        const [skillStmt] = buildNormalizedSyntheticSkillInvocationStatements([
-            {
-                ...base,
-                skillName: SkillName.make("opencode:bash"),
-                skillScope: "opencode-tool",
-                skillContentHash: "opencode",
-            },
-        ]);
-        expect(skillStmt).toStartWith("UPSERT ");
-        expect(skillStmt).toContain("MERGE");
-        expect(skillStmt).toContain('"(synthetic)"');
     });
 });

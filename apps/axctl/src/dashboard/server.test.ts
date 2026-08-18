@@ -156,10 +156,16 @@ describe("dashboard server", () => {
         expect(body.capabilities).toContain("sessions");
     });
 
-    test("unknown /api/* path preserves the legacy 200 not_found quirk", async () => {
+    test("unknown /api/* path is a 404 that names the path", async () => {
+        // Was a 200 carrying `{"error":"not_found"}` - read as success by every
+        // client, cache and uptime check, and indistinguishable from a route
+        // that answers with an error body (#855).
         const res = await handleDashboardRequest(new Request("http://127.0.0.1:1738/api/definitely-not-a-route"));
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ error: "not_found" });
+        expect(res.status).toBe(404);
+        await expect(res.json()).resolves.toEqual({
+            error: "not_found",
+            path: "/api/definitely-not-a-route",
+        });
     });
 
     // GET / serves the studio SPA (embedded or on-disk) or, failing that, the

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     buildExpireStatement,
     findStaleOpenProposals,
@@ -8,13 +8,13 @@ import {
 } from "./housekeep.ts";
 
 const makeDb = (rows: Array<Record<string, unknown>>, log: string[] = []) => {
-    const stub: SurrealClientShape = {
-        query: (sql: string) => {
+    return judgmentTestLayer((sql) => {
             log.push(sql);
-            return Effect.succeed([rows]);
-        },
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
+            return rows.map((row) => ({ ...row, updated_at: new Date(String(row.updated_at)) }));
+        }, (sql) => {
+            log.push(sql);
+            return rows.length;
+        });
 };
 
 const staleRow = {

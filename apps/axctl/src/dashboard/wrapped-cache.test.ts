@@ -1,32 +1,27 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { fetchWrappedCached, resetWrappedCacheForTest } from "./wrapped-cache.ts";
 
-type QueryResult = Array<Record<string, unknown>>;
-
-/** Mock that counts how many times the DB is hit. fetchWrapped issues one
- *  multi-statement query; the empty result arrays exercise its zero-data path. */
-const makeCountingDb = (counter: { calls: number }): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => {
+/** Stub that counts how many `raw()` calls fetchWrapped issues. fetchWrapped
+ *  fires 10 independent `read.raw(...)` queries (Effect.all, see wrapped.ts's
+ *  rawRows helper); the empty rows exercise its zero-data path. */
+const makeCountingDb = (counter: { calls: number }): Layer.Layer<CacheRead> => {
+    const stub = {
+        snapshotPath: "(test stub)",
+        rows: () => Effect.succeed([]),
+        first: () => Effect.void,
+        raw: (_sql: string, _params?: unknown) => {
             counter.calls += 1;
-            // fetchWrapped destructures a long tuple of statement results; an
-            // oversized list of empty arrays satisfies any statement count.
-            return Effect.succeed(
-                Array.from({ length: 64 }, () => [] as QueryResult) as [
-                    QueryResult,
-                    ...QueryResult[],
-                ],
-            );
+            return Effect.succeed({ columns: [], rows: [], rowsChanged: 0 });
         },
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
+    } as unknown as CacheReadService;
+    return Layer.succeed(CacheRead, stub);
 };
 
 const run = <A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
-    layer: Layer.Layer<SurrealClient>,
+    eff: Effect.Effect<A, unknown, CacheRead>,
+    layer: Layer.Layer<CacheRead>,
 ) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
 
 afterEach(() => {

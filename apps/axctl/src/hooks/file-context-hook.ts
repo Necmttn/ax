@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import type { DbError } from "@ax/lib/errors";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead, CacheReadError } from "@ax/lib/duckdb/seam";
 import { decodeJsonRecordOrNull } from "@ax/lib/decode";
 import {
     type BuildFileContextInput,
@@ -31,7 +30,7 @@ export interface FileContextHookEvidence {
 
 export const buildFileContextHookEvidence = (
     input: BuildFileContextInput,
-): Effect.Effect<FileContextHookEvidence, DbError, SurrealClient> =>
+): Effect.Effect<FileContextHookEvidence, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const signals = extractFileContextSignals(input.q, input.files);
         const files = yield* resolveFiles(signals.paths, { fuzzyFallback: false });
@@ -48,7 +47,7 @@ export const buildFileContextHookEvidence = (
         // Each evidence query is isolated: a SQL failure in one (schema drift,
         // bad cast, missing table) must not block the hook output. Degrade to
         // empty and log to stderr; the agent still gets whatever did succeed.
-        const guard = <T,>(eff: Effect.Effect<T, DbError, SurrealClient>, label: string, fallback: T) =>
+        const guard = <T,>(eff: Effect.Effect<T, CacheReadError, CacheRead>, label: string, fallback: T) =>
             eff.pipe(Effect.catch((err) =>
                 Effect.sync(() => {
                     console.error(`axctl hook ${label} query failed:`, err.message);
@@ -208,8 +207,8 @@ export function generateLookupCandidates(filePath: string, cwd: string | null): 
     return Array.from(candidates);
 }
 
-/** Claude Code's `session_id` is a bare UUID. Telemetry + dedup need a
- *  SurrealQL record literal, so prefix `session:` when no table is present. */
+/** Claude Code's `session_id` is a bare UUID. Telemetry + dedup need the
+ *  `session:`-prefixed id convention, so prefix it when no table is present. */
 export function normalizeSessionId(raw: string | null): string | null {
     if (!raw) return null;
     return raw.includes(":") ? raw : `session:${raw}`;
@@ -391,7 +390,7 @@ export function renderFileMemoryBlock(input: FileMemoryRenderInput): string {
             `Corrections targeting this file (${input.corrections.length}):`,
             ...input.corrections.slice(0, 5).map(describeCorrection),
         ]);
-        refsFooter.push("turn/session ids resolve via SurrealDB MCP or `surreal sql`");
+        refsFooter.push("turn/session ids resolve with `ax sessions show <id>`");
     }
 
     if (input.commits.length > 0) {
@@ -442,7 +441,7 @@ const DEDUP_WINDOW_MINUTES = 30;
 
 export const buildFileContextHookResponse = (
     input: FileContextHookInput,
-): Effect.Effect<FileContextHookResponse, DbError, SurrealClient> =>
+): Effect.Effect<FileContextHookResponse, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         const emptyEvidence = {
             prior_file_sessions: [] as readonly PriorFileSession[],

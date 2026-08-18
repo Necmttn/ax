@@ -6,10 +6,10 @@
  * live CLI smoke. Built incrementally across the hooks-bench plan tasks.
  */
 
-import { Effect, FileSystem, Path } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { Effect, FileSystem, Path, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { andAll, inClause, withinDaysClause } from "@ax/lib/duckdb/clause";
 import { HOME } from "@ax/lib/paths";
 import { readAllHooks } from "./config.ts";
 import type { ConfiguredHookWithEvidence } from "./config.ts";
@@ -105,31 +105,34 @@ export interface FireFrequency {
     readonly basis: string;
 }
 
+const ToolCallTotalRow = Schema.Struct({ total: NumberFromBigIntColumn });
+
 /**
  * Estimate fires/day for a tool-matching hook: COUNT tool_call rows whose
  * `name` is in the hook's matched tools over the last `days`, divided by days.
  * Non-tool hooks (no matched tools) have no tool_call basis -> perDay null.
  *
- * Datetime cutoff inlined via `surrealDate` (SurrealClient.query takes no
- * bindings; same pattern as report-queries.ts). Count idiom: top-level
- * `count() AS total ... GROUP ALL` (mirrors wrapped.ts / recall.ts; the repo
- * memory note that count needs GROUP ALL).
+ * Reads the DuckDB snapshot via `CacheRead`: the `name IN (...)` + date-window
+ * filters are bound parameters (`inClause` / `withinDaysClause`, never string-
+ * interpolated), and `count(*)` decodes through `NumberFromBigIntColumn` (a
+ * BIGINT column, not `Schema.Number`).
  */
 export const estFiresPerDay = (
     tools: readonly string[],
     days: number,
-): Effect.Effect<FireFrequency, DbError, SurrealClient> =>
+): Effect.Effect<FireFrequency, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
         if (tools.length === 0) return { perDay: null, matched: [], basis: "n/a" };
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         // Guard days so days=0 can't divide to Infinity.
         const window = Math.max(1, days);
-        const since = new Date(Date.now() - window * 86_400_000);
-        const list = tools.map((t) => surrealString(t)).join(", ");
-        const r = yield* db.query<[Array<{ total: number }>]>(
-            `SELECT count() AS total FROM tool_call WHERE name IN [${list}] AND ts > ${surrealDate(since)} GROUP ALL;`,
+        const clause = andAll([inClause("name", tools), withinDaysClause("ts", window)]);
+        const rows = yield* read.rows(
+            ToolCallTotalRow,
+            `SELECT count(*) AS total FROM tool_call WHERE TRUE ${clause.sql}`,
+            clause.params,
         );
-        const total = r?.[0]?.[0]?.total ?? 0;
+        const total = rows[0]?.total ?? 0;
         return { perDay: Math.round(total / window), matched: [...tools], basis: `tool_call/${window}d` };
     });
 
@@ -289,7 +292,8 @@ const CHAIN_PROVIDER = "claude";
  * Best-effort + soft-fail: a failed config read or summary query degrades to
  * the default-estimate path and writes a notice to STDERR (so `--json` stdout
  * stays clean) - never a silent approximation. Deps: HookProviderRegistry |
- * FileSystem | Path | SurrealClient.
+ * FileSystem | Path | CacheRead (`readAllHooks` + `queryHookSummary` both read
+ * the DuckDB snapshot).
  */
 export const gatherChain = (
     meta: InstallableHookMeta,
@@ -298,7 +302,7 @@ export const gatherChain = (
 ): Effect.Effect<
     ChainSummary | null,
     never,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
 > =>
     Effect.gen(function* () {
         const event = meta.events[0];
@@ -347,18 +351,22 @@ export const gatherChain = (
         return composeChain(event, costs, candidateP50, budgetMs, chainNames);
     });
 
+const ToolCallInputJsonRow = Schema.Struct({ input_json: Schema.NullOr(Schema.String) });
+
 /** Fetch one recent `tool_call.input_json` for `tool`, parsed to an object, or
  *  null when none / unparseable. Soft-fails (a DB error -> null) so the bench
  *  always proceeds with an empty payload body. */
 const sampleToolInput = (
     tool: string,
-): Effect.Effect<Record<string, unknown> | null, never, SurrealClient> =>
+): Effect.Effect<Record<string, unknown> | null, never, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<{ input_json: string | null }>]>(
-            `SELECT input_json FROM tool_call WHERE name = ${surrealString(tool)} AND input_json != NONE ORDER BY ts DESC LIMIT 1;`,
-        ).pipe(Effect.catch(() => Effect.succeed([[]] as [Array<{ input_json: string | null }>])));
-        const raw = rows?.[0]?.[0]?.input_json;
+        const read = yield* CacheRead;
+        const rows = yield* read.rows(
+            ToolCallInputJsonRow,
+            `SELECT input_json FROM tool_call WHERE name = ? AND input_json IS NOT NULL ORDER BY ts DESC LIMIT 1`,
+            [tool],
+        ).pipe(Effect.catch(() => Effect.succeed([])));
+        const raw = rows[0]?.input_json;
         if (typeof raw !== "string") return null;
         try {
             const parsed = JSON.parse(raw);
@@ -391,7 +399,7 @@ export const benchHook = (
 ): Effect.Effect<
     BenchLedger,
     never,
-    SurrealClient | FileSystem.FileSystem | Path.Path | HookProviderRegistry
+    CacheRead | FileSystem.FileSystem | Path.Path | HookProviderRegistry
 > =>
     Effect.gen(function* () {
         const path = yield* Path.Path;

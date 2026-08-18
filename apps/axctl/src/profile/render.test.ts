@@ -1,118 +1,207 @@
 import { describe, expect, test } from "bun:test";
-import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+import { Effect, Layer } from "effect";
+import { cacheReadTestLayer, judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { buildProfile } from "./render.ts";
 
-// Mock result order MUST match the query order in buildProfile:
-// 1 tokenTotals  2 dailyActivity  3 harnesses  4 skillInvocations
-// 5 skillScopes  6 acceptedProposals  7 costModels
-// 8 dailyActivityFull(sessions)  9 dailyActivityFull(tokens)
-// 10 sessionDurations  11 peakHour  12 spawnedCount  13 commitCount  14 topTools
-// 15 wrappedCounts(toolAgg)  16 wrappedCounts(turnCount)
-// 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
-// 18b wrappedCounts(verifyAgg)
-// 19 dailyModels  20 dailyToolCalls  21 dailyCommits
-// 22 windowedInvocations  23 windowedSessions
-// 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
-// 27 contentTypeBreakdown  28 guardrailHookEvidence  29 guardrailVerdicts
-const mockResults = [
-    [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
-    [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
-    [[{ source: "claude" }, { source: "codex" }]],
-    [[{ skill: "tdd", count: 88 }]],
-    [[{ name: "tdd", scope: "plugin:superpowers" }]],
-    [[{
-        form: "guidance", title: "Stop edit loops early",
-        hypothesis: "3+ edits means drift", confidence: "high", frequency: 12,
-        updated_at: "2026-06-10T00:00:00Z", created_at: "2026-06-01T00:00:00Z",
-    }]],
-    [[{
-        model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
-        cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
-    }, {
-        model: "haiku", sessions: 42, prompt_tokens: 1, completion_tokens: 1,
-        cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
-    }]],
-    [[{ date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 12 }]],
-    [[{ date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 120_000_000 }]],
-    [[
-        { started_at: "2026-06-12T10:00:00Z", ended_at: "2026-06-12T12:30:00Z" },
-        { started_at: "2026-06-12T09:00:00Z", ended_at: "2026-06-12T10:30:00Z" },
-    ]],
-    [[{ hour: "13", count: 42 }]],
-    [[{ count: 420 }]],
-    [[{ count: 1000 }]],
-    [[{ tool: "Bash", count: 5000 }, { tool: "Read", count: 3200 }]],
-    // 15: wrappedCounts toolAgg (Bash=verification, Read=context)
-    [[
+// EVERY statement `buildProfile` issues goes through CacheRead - it has no
+// other data requirement. `fetchCostModels` and `fetchWindowedInvocations`
+// both have entries in CACHE_ROUTES below, keyed by a fragment of their own
+// SQL; a statement missing a route surfaces as an "out of results" mock
+// failure rather than a silent wrong answer.
+
+// `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
+// CacheRead snapshot, matched below by its own "has_content" fragment (a
+// different wave-3 chunk's convention, unchanged here).
+const contentTypeRows = [
+    { ct: "content_type:code", calls: 10, bytes: 800 },
+    { ct: "content_type:text", calls: 5, bytes: 200 },
+];
+
+// One entry per queries.ts CacheRead statement, keyed by a fragment of that
+// statement's own SQL text unique enough not to collide with any other
+// statement in this file (verified by hand against queries.ts; every key
+// names the _SQL constant it targets). `cacheReadTestLayer` does NOT run
+// Schema decode (see judgment-test-layer.ts), so a field a ported function
+// calls a Date method on (fetchSessionDurations' .toISOString()) must be a
+// real `Date` here, not a string - everything else here is read via
+// Number(...)/String(...) at the call site, so plain values are safe.
+const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
+    // fetchWindowedInvocations (WINDOWED_INVOCATIONS_SQL). Keyed on the
+    // join, which is unique to this statement.
+    // `ts` is a TIMESTAMP column now, so the fixture passes real Dates; the
+    // reader renders them back to the ISO strings its callers compare.
+    "JOIN skill s ON s.id = i.out_id": [
+        { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:01:00.000Z") },
+        { session: "session:1", skill: "tdd", ts: new Date("2026-06-12T10:30:00.000Z") },
+        { session: "session:2", skill: "tdd", ts: new Date("2026-06-12T11:01:00.000Z") },
+    ],
+    // fetchCostModels (COST_MODELS_SQL). Keyed on `GROUP BY model`, which no other statement
+    // in this file uses; the `FROM session_token_usage` fragment alone would
+    // collide with fetchTokenTotals below.
+    "GROUP BY model": [
+        {
+            model: "fable", sessions: 100, prompt_tokens: 1, completion_tokens: 1,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 150,
+        },
+        {
+            model: "haiku", sessions: 42, prompt_tokens: 1, completion_tokens: 1,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
+        },
+    ],
+    // fetchTokenTotals (TOKEN_TOTALS_SQL)
+    "count(*) AS sessions\nFROM session_token_usage": [
+        { prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 },
+    ],
+    // fetchDailyActivity (DAILY_ACTIVITY_SQL)
+    "AS date\nFROM session\nWHERE started_at IS NOT NULL": [
+        { date: "2026-06-11" }, { date: "2026-06-12" },
+    ],
+    // fetchHarnesses (HARNESSES_SQL)
+    "source, count(*) AS count": [{ source: "claude" }, { source: "codex" }],
+    // fetchSkillInvocations (SKILL_INVOCATIONS_SQL)
+    "sk.name AS skill, count(*) AS count": [{ skill: "tdd", count: 88 }],
+    // fetchSkillScopes (SKILL_SCOPES_SQL)
+    "FROM skill WHERE deleted_at IS NULL": [{ name: "tdd", scope: "plugin:superpowers" }],
+    // fetchDailyActivityFull sessions half (DAILY_SESSIONS_SQL)
+    "count(*) AS sessions\nFROM session\nWHERE started_at IS NOT NULL": [
+        { date: "2026-06-11", sessions: 5 }, { date: "2026-06-12", sessions: 12 },
+    ],
+    // fetchDailyActivityFull tokens half (DAILY_TOKENS_SQL)
+    "FROM session_token_usage\nWHERE ts IS NOT NULL": [
+        { date: "2026-06-11", tokens: 100_000 }, { date: "2026-06-12", tokens: 120_000_000 },
+    ],
+    // fetchSessionDurations (SESSION_DURATIONS_SQL) - real Dates, see header note.
+    "SELECT started_at, ended_at\nFROM session": [
+        { started_at: new Date("2026-06-12T10:00:00Z"), ended_at: new Date("2026-06-12T12:30:00Z") },
+        { started_at: new Date("2026-06-12T09:00:00Z"), ended_at: new Date("2026-06-12T10:30:00Z") },
+    ],
+    // fetchPeakHour (PEAK_HOUR_SQL)
+    "strftime(started_at, '%H') AS hour": [{ hour: "13", count: 42 }],
+    // fetchSpawnedCount (SPAWNED_COUNT_SQL)
+    "FROM spawned": [{ count: 420 }],
+    // fetchCommitCount (COMMIT_COUNT_SQL)
+    "AS count\nFROM \"commit\"": [{ count: 1000 }],
+    // fetchTopTools (TOP_TOOLS_SQL)
+    "COALESCE(command_norm, name) AS tool, count(*) AS count": [
+        { tool: "Bash", count: 5000 }, { tool: "Read", count: 3200 },
+    ],
+    // fetchWrappedCounts toolAgg (TOOL_AGG_SQL) - Bash=verification, Read=context
+    "SUM(CASE WHEN has_error THEN 1 ELSE 0 END) AS failures": [
         { tool: "bun test", count: 900, failures: 10 },
         { tool: "Read", count: 2000, failures: 5 },
         { tool: "Bash", count: 3000, failures: 50 },
-    ]],
-    // 16: wrappedCounts turnCount
-    [[{ count: 41200 }]],
-    // 17: wrappedCounts distinctSkills
-    [[{ count: 56 }]],
-    // 18: wrappedCounts reposCount
-    [[{ count: 12 }]],
-    // 18b: wrappedCounts verifyAgg (full command_text: bun test=verification, Read=context)
-    [[
-        { cmd: "bun test", count: 900 },
-        { cmd: "Read", count: 2000 },
-        { cmd: "Bash", count: 3000 },
-    ]],
-    // 19: dailyModels
-    [[
+    ],
+    // fetchWrappedCounts turnCount (TURN_COUNT_SQL)
+    "count(*) AS count\nFROM turn": [{ count: 41200 }],
+    // fetchWrappedCounts distinctSkills (DISTINCT_SKILLS_SQL)
+    "    JOIN skill sk ON sk.id = i.out_id\n    WHERE TRUE": [{ count: 56 }],
+    // fetchWrappedCounts reposCount (REPOS_COUNT_SQL)
+    "    SELECT repository\n    FROM session": [{ count: 12 }],
+    // fetchWrappedCounts verifyAgg (VERIFY_AGG_SQL) - full command_text labels
+    "COALESCE(command_text, command_norm, name) AS cmd": [
+        { cmd: "bun test", count: 900 }, { cmd: "Read", count: 2000 }, { cmd: "Bash", count: 3000 },
+    ],
+    // fetchDailyModels (DAILY_MODEL_TOKENS_SQL)
+    "    model,\n    SUM(COALESCE(prompt_tokens, 0))": [
         { date: "2026-06-11", model: "fable", tokens: 80_000 },
         { date: "2026-06-12", model: "fable", tokens: 100_000_000 },
         { date: "2026-06-12", model: "haiku", tokens: 20_000_000 },
-    ]],
-    // 20: dailyToolCalls
-    [[{ date: "2026-06-11", tool_calls: 200 }, { date: "2026-06-12", tool_calls: 3900 }]],
-    // 21: dailyCommits
-    [[{ date: "2026-06-11", commits: 7 }, { date: "2026-06-12", commits: 50 }]],
-    // 22: windowedInvocations
-    [[
-        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
-        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
-        { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
-    ]],
-    // 23: windowedSessions
-    [[
-        { id: "session:1", s: "2026-06-12T10:00:00Z", e: "2026-06-12T12:30:00Z" },
-        { id: "session:2", s: "2026-06-12T09:00:00Z", e: "2026-06-12T10:30:00Z" },
-    ]],
-    // 24: deepSessions total (non-subagent session count = DEPTH denominator)
-    [[{ total: 2 }]],
-    // 25: deepSessions produced edges (session -> non-reverted commit)
-    [[
+    ],
+    // fetchDailyToolCalls (DAILY_TOOL_CALLS_SQL)
+    "AS tool_calls\nFROM tool_call": [
+        { date: "2026-06-11", tool_calls: 200 }, { date: "2026-06-12", tool_calls: 3900 },
+    ],
+    // fetchDailyCommits (DAILY_COMMITS_SQL)
+    "AS commits\nFROM \"commit\"": [
+        { date: "2026-06-11", commits: 7 }, { date: "2026-06-12", commits: 50 },
+    ],
+    // fetchDeepSessionCount total (DEEP_SESSION_TOTAL_SQL) - non-subagent
+    // session count = DEPTH denominator
+    "count(*) AS total FROM session": [{ total: 2 }],
+    // fetchDeepSessionCount produced edges (DEEP_PRODUCED_SQL) - session -> non-reverted commit
+    "FROM produced p": [
         { session: "session:1", commit: "commit:abc" },
         { session: "session:2", commit: "commit:def" },
-    ]],
-    // 26: deepSessions landed LOC per commit (commit:def landed nothing -> not deep)
-    [[
-        { commit: "commit:abc", loc: 120 },
-        { commit: "commit:def", loc: 0 },
-    ]],
-    // 27: contentTypeBreakdown
-    [[
-        { ct: "content_type:code", calls: 10, bytes: 800 },
-        { ct: "content_type:text", calls: 5, bytes: 200 },
-    ]],
-    // 28: guardrailHookEvidence
-    [[
+    ],
+    // fetchDeepSessionCount landed LOC per commit (COMMIT_LANDED_LOC_SQL) -
+    // commit:def landed nothing -> not deep
+    "FROM touched t": [{ commit: "commit:abc", loc: 120 }, { commit: "commit:def", loc: 0 }],
+    // fetchWindowedSessions (WINDOWED_SESSIONS_SQL) - real Dates, see header note.
+    "id, started_at AS s, ended_at AS e": [
+        {
+            id: "session:1",
+            s: new Date("2026-06-12T10:00:00Z"),
+            e: new Date("2026-06-12T12:30:00Z"),
+        },
+        {
+            id: "session:2",
+            s: new Date("2026-06-12T09:00:00Z"),
+            e: new Date("2026-06-12T10:30:00Z"),
+        },
+    ],
+    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
+    "FROM hook_command_invocation": [
         { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
         { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
         { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
-    ]],
-    // 29: guardrailVerdicts
-    [[
-        { verdict: "adopted", count: 4 },
-        { verdict: "regressed", count: 1 },
-        { verdict: "ignored", count: 1 },
-        { verdict: "no_longer_needed", count: 1 },
-        { verdict: "partial", count: 2 },
-    ]],
+    ],
+};
+
+const proposalRows = [{
+    id: "p1", form: "guidance", title: "Stop edit loops early",
+    hypothesis: "3+ edits means drift", confidence: "high", frequency: 12,
+    dedupe_sig: "sig", status: "accepted", origin: "agent",
+    hypothesis_template: null, evidence_query: null, reject_reason: null, baseline: null,
+    updated_at: new Date("2026-06-10T00:00:00Z"), created_at: new Date("2026-06-01T00:00:00Z"),
+}];
+const verdictRows = [
+    { verdict: "adopted", count: 4 },
+    { verdict: "regressed", count: 1 },
+    { verdict: "ignored", count: 1 },
+    { verdict: "no_longer_needed", count: 1 },
+    { verdict: "partial", count: 2 },
 ];
+
+const runProfile = <A, E>(
+    effect: Effect.Effect<A, E, unknown>,
+    proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
+    contentTypes: ReadonlyArray<Record<string, unknown>> = contentTypeRows,
+    cacheOverrides: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
+) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
+    // Dispatched by SQL text: content-type breakdown (`has_content`, a
+    // different wave-3 chunk's convention) first, then per-test overrides,
+    // then the default CACHE_ROUTES table built above. The pricing-catalog
+    // lookup inside fetchCostModels resolves when a row stores zero cost
+    // against real tokens - none of these fixtures do, so falling through to
+    // empty is the right answer for it.
+    cacheReadTestLayer((sql) => {
+        if (sql.includes("has_content")) return contentTypes;
+        for (const [key, rows] of Object.entries(cacheOverrides)) {
+            if (sql.includes(key)) return rows;
+        }
+        for (const [key, rows] of Object.entries(CACHE_ROUTES)) {
+            if (sql.includes(key)) return rows;
+        }
+        return [];
+    }),
+    judgmentTestLayer((sql) => {
+        const now = new Date();
+        if (sql.includes("FROM proposal")) return proposals;
+        if (proposals.length === 0) return [];
+        if (sql.includes("FROM experiment")) return [{
+            id: "e1", proposal: "p1", artifact: null, artifact_path: null,
+            scaffolded_at: now, created_at: now, locked_verdict: null,
+            status: "scaffolded", task_path: null,
+        }];
+        if (sql.includes("FROM checkpoint")) return verdictRows.flatMap(({ verdict, count }) =>
+            Array.from({ length: count }, (_, index) => ({
+                id: `${verdict}-${index}`, experiment: "e1", kind: "+3s", measured: {},
+                suggested: null, user_verdict: verdict, observed_at: now,
+            }))
+        );
+        return [];
+    }),
+))) as Effect.Effect<A, E>);
 
 const env = {
     github: "necmttn",
@@ -126,8 +215,7 @@ const env = {
 
 describe("buildProfile", () => {
     test("assembles a valid ProfileV1", async () => {
-        const db = makeMockDb(mockResults);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }));
 
         expect(p.v).toBe(1);
         expect(p.github).toBe("necmttn");
@@ -209,39 +297,41 @@ describe("buildProfile", () => {
     });
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {
-        const db = makeMockDb(mockResults);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: false, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: false, env }));
         expect(p.stats.cost_usd).toBeUndefined();
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
     test("no proposals -> taste has only the mix pattern from content types", async () => {
-        const noProposals = mockResults.map((r, i) => (i === 5 ? [[]] : r));
-        const db = makeMockDb(noProposals);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), []);
         expect(p.taste?.patterns).toHaveLength(1);
         expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
     });
 
     test("no proposals + no content types -> taste omitted", async () => {
-        const noTaste = mockResults.map((r, i) => (i === 5 || i === 27 ? [[]] : r));
-        const db = makeMockDb(noTaste);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
         expect(p.taste).toBeUndefined();
     });
 
     test("empty daily + durations -> activity and insights omitted", async () => {
-        // Blank out dailyFull(sessions+tokens) and sessionDurations (indices 7, 8, 9).
-        const empty = mockResults.map((r, i) => (i >= 7 && i <= 9 ? [[]] : r));
-        const db = makeMockDb(empty);
-        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        // Blank out dailyFull(sessions+tokens) and sessionDurations via a
+        // CACHE_ROUTES override - all three are now CacheRead statements.
+        const p = await runProfile(
+            buildProfile({ windowDays: 30, includeCost: true, env }),
+            proposalRows,
+            contentTypeRows,
+            {
+                "count(*) AS sessions\nFROM session\nWHERE started_at IS NOT NULL": [],
+                "FROM session_token_usage\nWHERE ts IS NOT NULL": [],
+                "SELECT started_at, ended_at\nFROM session": [],
+            },
+        );
         expect(p.activity).toBeUndefined();
         expect(p.insights).toBeUndefined();
     });
 
     test("buildProfile attaches highlights from env", async () => {
-        const db = makeMockDb(mockResults);
-        const profile = await runWithMock(db, buildProfile({
+        const profile = await runProfile(buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {
@@ -254,8 +344,7 @@ describe("buildProfile", () => {
     });
 
     test("buildProfile omits highlights when env.highlights is null", async () => {
-        const db = makeMockDb(mockResults);
-        const profile = await runWithMock(db, buildProfile({
+        const profile = await runProfile(buildProfile({
             windowDays: 30,
             includeCost: true,
             env: {

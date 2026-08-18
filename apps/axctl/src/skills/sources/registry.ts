@@ -146,7 +146,7 @@ export interface SkillSourceRegistryShape extends AdapterRegistry<SkillSource> {
  * `SkillSourceRegistry` - the skill analogue of `ClassifierRegistry`. `select`
  * fails with `AdapterNotFoundError` (domain `"skill-source"`) rather than
  * handing back `undefined`. Tag-only service (shape supplied by a `Layer`),
- * mirroring `ClassifierRegistry` / `SurrealClient`.
+ * mirroring `ClassifierRegistry`.
  */
 export class SkillSourceRegistry extends Context.Service<
     SkillSourceRegistry,

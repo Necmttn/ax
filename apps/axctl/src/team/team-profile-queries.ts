@@ -1,57 +1,58 @@
 /**
- * Repo-scoped queries for the TeamProfileV1 builder. Scoping strategy:
- * ONE indexed query resolves the repo's session ids
- * (`session_repository_started` index, same scoping as listSessionsHere);
- * everything else fetches per-row data keyed by the denormalized `session`
- * field and is filtered/aggregated against that id set in JS. Deref-free
- * SQL, JS joins (SurrealDB 3.x house rules). `session IN [list]` is a
- * non-indexed per-row membership test - never used here; tool_call is
- * fanned out per-session literal (hits tool_call_session_ts, ~1ms each,
- * same pattern as sessions-query.ts enrichSessions).
+ * Repo-scoped queries for the TeamProfileV1 builder, over the DuckDB cache
+ * through {@link CacheRead}. Scoping strategy: ONE indexed query resolves the
+ * repo's session ids (`session_repository_started` index, same scoping as
+ * listSessionsHere); everything else fetches per-row data keyed by the
+ * denormalized `session` column and is filtered/aggregated against that id
+ * set in JS. `session IN (...)` is never used here; tool_call is fanned out
+ * per-session (hits `tool_call_session_ts`, ~1ms each, same pattern as
+ * sessions-query.ts enrichSessions).
+ *
+ * `repository` is looked up ONCE by the caller (`pwd.ts`'s
+ * `resolvePwdCacheRepository` / `queries/repository-scope.ts`) and handed in
+ * as a resolved DuckDB row id - see that module's doc for why a reader cannot
+ * construct the id from git alone in v2 (content-hashed, not git-keyed).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { recordLiteral } from "@ax/lib/ids";
-
-const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
+import { Effect, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TextColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { withinDaysClause } from "@ax/lib/duckdb/clause";
 
 // --- repo session set --------------------------------------------------------
 
 export interface TeamSessionRow {
-    /** type::string(id) form, e.g. `session:⟨uuid⟩` - matches invoked/usage row keys */
     readonly id: string;
     readonly started_at: string;
     readonly source: string;
 }
 
-const TEAM_REPO_SESSIONS_SQL = (repoKey: string, d: number) => `
-SELECT
-    type::string(id) AS id,
-    type::string(started_at) AS started_at,
-    source
-FROM session
-WHERE repository = ${recordLiteral("repository", repoKey)}
-  AND started_at > time::now() - ${win(d)}
-  AND started_at IS NOT NONE;`;
+const TeamSessionDbRow = Schema.Struct({
+    id: TextColumn,
+    started_at: TimestampColumn,
+    source: TextColumn,
+});
 
 export const fetchTeamRepoSessions = Effect.fn("team.fetchTeamRepoSessions")(
-    function* (opts: { readonly repoKey: string; readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(
-                TEAM_REPO_SESSIONS_SQL(opts.repoKey, opts.windowDays),
-            )
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return rows
-            .filter((r) => r.id != null && r.started_at != null)
-            .map((r) => ({
-                id: String(r.id),
-                started_at: String(r.started_at),
-                source: String(r.source ?? "claude"),
-            })) satisfies TeamSessionRow[];
+    function* (opts: { readonly repositoryId: string | null; readonly windowDays: number }) {
+        if (opts.repositoryId === null) return [] as TeamSessionRow[];
+        const read = yield* CacheRead;
+        const since = withinDaysClause("started_at", opts.windowDays);
+        const rows = yield* read.rows(
+            TeamSessionDbRow,
+            `SELECT id, started_at, source
+             FROM session
+             WHERE repository = ? AND started_at IS NOT NULL ${since.sql}`,
+            [opts.repositoryId, ...since.params],
+        );
+        return rows.map(
+            (r): TeamSessionRow => ({
+                id: r.id,
+                started_at: r.started_at.toISOString(),
+                source: r.source,
+            }),
+        );
     },
 );
-
 // --- per-session token usage (machine window; repo-filtered in JS) -----------
 // One row per session (session_token_usage_session UNIQUE index), so a
 // whole-window scan is a few thousand rows at most - cheaper and simpler
@@ -65,39 +66,46 @@ export interface SessionUsageRow {
     readonly cost_usd: number | null;
 }
 
-const SESSION_USAGE_SQL = (d: number) => `
-SELECT
-    type::string(session) AS session,
-    model,
-    prompt_tokens ?? 0 AS prompt_tokens,
-    completion_tokens ?? 0 AS completion_tokens,
-    estimated_cost_usd AS cost_usd
-FROM session_token_usage
-WHERE ts > time::now() - ${win(d)};`;
+const SessionUsageDbRow = Schema.Struct({
+    session: TextColumn,
+    model: Schema.NullOr(TextColumn),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cost_usd: Schema.NullOr(Schema.Number),
+});
 
 export const fetchSessionUsageRows = Effect.fn("team.fetchSessionUsageRows")(
     function* (opts: { readonly windowDays: number }) {
-        const db = yield* SurrealClient;
-        const rows = yield* db
-            .query<[Array<Record<string, unknown>>]>(SESSION_USAGE_SQL(opts.windowDays))
-            .pipe(Effect.map((r) => r?.[0] ?? []));
-        return rows
-            .filter((r) => r.session != null)
-            .map((r) => ({
-                session: String(r.session),
-                model: r.model == null ? null : String(r.model),
-                prompt_tokens: Number(r.prompt_tokens ?? 0),
-                completion_tokens: Number(r.completion_tokens ?? 0),
-                cost_usd: r.cost_usd == null ? null : Number(r.cost_usd),
-            })) satisfies SessionUsageRow[];
+        const read = yield* CacheRead;
+        const since = withinDaysClause("ts", opts.windowDays);
+        const rows = yield* read.rows(
+            SessionUsageDbRow,
+            `SELECT session, model, prompt_tokens, completion_tokens, estimated_cost_usd AS cost_usd
+             FROM session_token_usage
+             WHERE 1 = 1 ${since.sql}`,
+            since.params,
+        );
+        return rows.map(
+            (r): SessionUsageRow => ({
+                session: r.session,
+                model: r.model,
+                prompt_tokens: r.prompt_tokens ?? 0,
+                completion_tokens: r.completion_tokens ?? 0,
+                cost_usd: r.cost_usd,
+            }),
+        );
     },
 );
 
-// --- tool-call command aggregate, per-session fan-out -------------------------
+// --- tool-call command aggregate, bulk IN-list ------------------------------
 // Classification (verification share) happens on the FULL command text in JS
 // (profile/tool-taxonomy.ts) - command text is never returned to the caller
 // beyond this module's aggregation input and never serialized into the
 // snapshot (counts-only privacy invariant, mirrors fetchWrappedCounts).
+//
+// One bulk `session IN (...)` query, chunked, rather than a per-session
+// fan-out: DuckDB has a real index on tool_call(session, ts) and no
+// Surreal-style membership-scan penalty for an IN-list (see clause.ts's doc).
 
 export interface ToolCmdRow {
     readonly cmd: string;
@@ -105,48 +113,50 @@ export interface ToolCmdRow {
     readonly failures: number;
 }
 
-const TOOL_AGG_FOR_SESSION_SQL = (sessionLit: string) => `
-SELECT
-    (command_text ?? command_norm ?? name) AS cmd,
-    count() AS count,
-    math::sum(IF has_error = true THEN 1 ELSE 0 END) AS failures
-FROM tool_call
-WHERE session = ${sessionLit}
-  AND (command_text ?? command_norm ?? name) IS NOT NONE
-GROUP BY cmd;`;
+const ToolAggDbRow = Schema.Struct({
+    cmd: TextColumn,
+    count: NumberFromBigIntColumn,
+    failures: NumberFromBigIntColumn,
+});
 
-/** `type::string(id)` output → clean backtick record literal (sessions-query.ts idiom). */
-const sessionLiteral = (id: string): string => {
-    let k = id.replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return `session:\`${k}\``;
+/** Bound `session IN (...)` params per chunk, so a large session set never
+ *  produces an unbounded bound-parameter list. */
+const SESSION_CHUNK = 500;
+
+const chunkOf = <T>(items: ReadonlyArray<T>, size: number): ReadonlyArray<ReadonlyArray<T>> => {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
 };
-
-const TOOL_AGG_CONCURRENCY = 8;
 
 export const fetchToolCallAggBySession = Effect.fn("team.fetchToolCallAggBySession")(
     function* (opts: { readonly sessionIds: ReadonlyArray<string> }) {
         if (opts.sessionIds.length === 0) return [] as ToolCmdRow[];
-        const db = yield* SurrealClient;
-        const perSession = yield* Effect.forEach(
-            opts.sessionIds,
-            (id) =>
-                db.query<[Array<Record<string, unknown>>]>(
-                    TOOL_AGG_FOR_SESSION_SQL(sessionLiteral(id)),
-                ).pipe(Effect.map((r) => r?.[0] ?? [])),
-            { concurrency: TOOL_AGG_CONCURRENCY },
+        const read = yield* CacheRead;
+        const perChunk = yield* Effect.forEach(
+            chunkOf(opts.sessionIds, SESSION_CHUNK),
+            (ids) =>
+                read.rows(
+                    ToolAggDbRow,
+                    `SELECT COALESCE(command_text, command_norm, name) AS cmd,
+                        COUNT(*) AS count,
+                        SUM(CASE WHEN has_error THEN 1 ELSE 0 END) AS failures
+                     FROM tool_call
+                     WHERE session IN (${ids.map(() => "?").join(", ")})
+                       AND COALESCE(command_text, command_norm, name) IS NOT NULL
+                     GROUP BY cmd`,
+                    ids,
+                ),
+            { concurrency: 4 },
         );
-        // Merge per-session command rows into one cmd -> counts map.
+        // Merge per-chunk command rows into one cmd -> counts map.
         const merged = new Map<string, { count: number; failures: number }>();
-        for (const rows of perSession) {
+        for (const rows of perChunk) {
             for (const r of rows) {
-                const cmd = String(r.cmd ?? "");
-                if (cmd.length === 0) continue;
-                const cur = merged.get(cmd) ?? { count: 0, failures: 0 };
-                cur.count += Number(r.count ?? 0);
-                cur.failures += Number(r.failures ?? 0);
-                merged.set(cmd, cur);
+                const cur = merged.get(r.cmd) ?? { count: 0, failures: 0 };
+                cur.count += r.count;
+                cur.failures += r.failures;
+                merged.set(r.cmd, cur);
             }
         }
         return [...merged.entries()].map(([cmd, v]) => ({

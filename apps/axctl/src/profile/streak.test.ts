@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { computeStreak } from "./streak.ts";
 
 // Dates are "YYYY-MM-DD" UTC day keys, as produced by
-// time::format(ts, "%Y-%m-%d") in SurrealQL (UTC per spec decision).
+// strftime(started_at, '%Y-%m-%d') (UTC per spec decision).
 describe("computeStreak", () => {
     test("counts consecutive days ending today", () => {
         const r = computeStreak(["2026-06-10", "2026-06-11", "2026-06-12"], "2026-06-12");

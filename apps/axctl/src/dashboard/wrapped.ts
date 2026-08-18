@@ -1,8 +1,9 @@
 import { Effect } from "effect";
 import { resolveArchetype } from "@ax/lib/shared/archetypes";
-import { SurrealClient } from "@ax/lib/db";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { isContextTool, isVerificationTool } from "../profile/tool-taxonomy.ts";
-import type { DbError } from "@ax/lib/errors";
 import type {
     WrappedArchetype,
     WrappedConfidence,
@@ -11,19 +12,139 @@ import type {
     WrappedProfile,
     WrappedUsageDay,
 } from "@ax/lib/shared/dashboard-types";
-import {
-    WRAPPED_DAILY_ACTIVITY_SQL,
-    WRAPPED_DAYS_LOOKBACK,
-    WRAPPED_MODEL_SQL,
-    WRAPPED_PEAK_HOUR_SQL,
-    WRAPPED_REPOSITORY_SQL,
-    WRAPPED_SKILLS_SQL,
-    WRAPPED_SPAWNED_SQL,
-    WRAPPED_TOKEN_USAGE_SQL,
-    WRAPPED_TOOLS_SQL,
-    WRAPPED_USAGE_SQL,
-    WRAPPED_VERIFY_SQL,
-} from "../queries/wrapped.ts";
+
+// The `ax wrapped` DuckDB query set, consumed via `fetchWrapped` /
+// `sanitizeWrappedProfile` elsewhere in this module and by
+// `dashboard/contract/insights.ts`. All ten queries share the same `${DAYS}d`
+// lookback bound, so every one takes the same single
+// `[WRAPPED_DAYS_LOOKBACK]` param.
+
+const WRAPPED_DAYS_LOOKBACK = 365;
+
+const WRAPPED_USAGE_SQL = `
+    SELECT
+        COUNT(DISTINCT session) AS sessions,
+        count(*) AS messages,
+        COUNT(DISTINCT strftime(ts, '%Y-%m-%d')) AS active_days
+    FROM turn
+    WHERE ts > ${daysAgoExpr}
+`;
+
+const WRAPPED_DAILY_ACTIVITY_SQL = `
+    SELECT
+        strftime(ts, '%Y-%m-%d') AS date,
+        COUNT(DISTINCT session) AS sessions,
+        count(*) AS turns
+    FROM turn
+    WHERE ts > ${daysAgoExpr} AND ts IS NOT NULL
+    GROUP BY date
+    ORDER BY date ASC
+`;
+
+const WRAPPED_PEAK_HOUR_SQL = `
+    SELECT strftime(started_at, '%H') AS hour, count(*) AS count
+    FROM session
+    WHERE started_at > ${daysAgoExpr} AND started_at IS NOT NULL
+    GROUP BY hour
+    ORDER BY count DESC
+    LIMIT 1
+`;
+
+const WRAPPED_MODEL_SQL = `
+    SELECT model, count(*) AS count
+    FROM session
+    WHERE started_at > ${daysAgoExpr} AND model IS NOT NULL
+    GROUP BY model
+    ORDER BY count DESC
+    LIMIT 1
+`;
+
+const WRAPPED_TOKEN_USAGE_SQL = `
+    SELECT
+        SUM(estimated_tokens) AS estimated_tokens,
+        SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens,
+        SUM(COALESCE(completion_tokens, 0)) AS completion_tokens,
+        count(*) AS sessions
+    FROM session_token_usage
+    WHERE ts > ${daysAgoExpr}
+`;
+
+const WRAPPED_SKILLS_SQL = `
+    SELECT sk.name AS skill, count(*) AS count
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    WHERE iv.ts > ${daysAgoExpr}
+      AND sk.name IS NOT NULL
+      AND sk.dir_path != '(synthetic)'
+    GROUP BY skill
+    ORDER BY count DESC
+    LIMIT 50
+`;
+
+// The alias avoids "tool" - tool_call has its own \`tool\` column (a ref ->
+// the tool table), and DuckDB resolves a bare GROUP BY name against a real
+// column before an output alias, which silently grouped by the wrong thing.
+const WRAPPED_TOOLS_SQL = `
+    SELECT
+        COALESCE(command_norm, name) AS tool_label,
+        count(*) AS count,
+        SUM(CASE WHEN has_error = true THEN 1 ELSE 0 END) AS failures
+    FROM tool_call
+    WHERE ts > ${daysAgoExpr}
+      AND COALESCE(command_norm, name) IS NOT NULL
+    GROUP BY tool_label
+    ORDER BY count DESC
+    LIMIT 50
+`;
+
+// Verification / context counts classify on the FULL command (`command_text`),
+// not the collapsed `command_norm` (which strips the subcommand for tools
+// outside SUBCOMMAND_TOOLS, e.g. `mvn test` -> `mvn`). Grouped to bound
+// cardinality; the command text is classified in-process and never surfaced
+// (wrapped emits counts only). See issue #471.
+const WRAPPED_VERIFY_SQL = `
+    SELECT
+        COALESCE(command_text, command_norm, name) AS cmd,
+        count(*) AS count
+    FROM tool_call
+    WHERE ts > ${daysAgoExpr}
+      AND COALESCE(command_text, command_norm, name) IS NOT NULL
+    GROUP BY cmd
+`;
+
+const WRAPPED_REPOSITORY_SQL = `
+    SELECT repository, count(*) AS count
+    FROM session
+    WHERE started_at > ${daysAgoExpr} AND repository IS NOT NULL
+    GROUP BY repository
+    ORDER BY count DESC
+    LIMIT 50
+`;
+
+const WRAPPED_SPAWNED_SQL = `
+    SELECT count(*) AS count
+    FROM spawned
+    WHERE ts > ${daysAgoExpr}
+`;
+
+/**
+ * Defensive raw-row reader: a failed query degrades to `[]` (matches the
+ * `cacheRows` contract), so one bad query in the batch below never sinks the
+ * whole rollup. Mirrors the identical helper in session-canvas.ts / triage.ts
+ * / workflow.ts.
+ */
+const rawRows = (
+    read: CacheReadService,
+    sql: string,
+    params?: ReadonlyArray<DuckDbParam>,
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, never> =>
+    read.raw(sql, params).pipe(
+        Effect.map((result) => result.rows),
+        Effect.catch((error) => {
+            console.error(`wrapped query failed: ${sql.slice(0, 60)}...`, error);
+            return Effect.succeed<ReadonlyArray<Record<string, unknown>>>([]);
+        }),
+    );
 
 export interface ArchetypeSignals {
     readonly verificationCalls: number;
@@ -417,9 +538,9 @@ const parsePeakHour = (row: Row | undefined): number | null => {
 // tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
 const refactorToolPattern = /refactor|rewrite|format/i;
 
-export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealClient> {
+export function fetchWrapped(): Effect.Effect<WrappedProfile, never, CacheRead> {
     return Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const [
             usageRows,
             dailyRows,
@@ -431,31 +552,18 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             repositoryRows,
             spawnedRows,
             verifyRows,
-        ] = yield* db.query<[
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-            Row[],
-        ]>(
-            [
-                WRAPPED_USAGE_SQL,
-                WRAPPED_DAILY_ACTIVITY_SQL,
-                WRAPPED_PEAK_HOUR_SQL,
-                WRAPPED_MODEL_SQL,
-                WRAPPED_TOKEN_USAGE_SQL,
-                WRAPPED_SKILLS_SQL,
-                WRAPPED_TOOLS_SQL,
-                WRAPPED_REPOSITORY_SQL,
-                WRAPPED_SPAWNED_SQL,
-                WRAPPED_VERIFY_SQL,
-            ].join("\n"),
-        );
+        ] = yield* Effect.all([
+            rawRows(read, WRAPPED_USAGE_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_DAILY_ACTIVITY_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_PEAK_HOUR_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_MODEL_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_TOKEN_USAGE_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_SKILLS_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_TOOLS_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_REPOSITORY_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_SPAWNED_SQL, [WRAPPED_DAYS_LOOKBACK]),
+            rawRows(read, WRAPPED_VERIFY_SQL, [WRAPPED_DAYS_LOOKBACK]),
+        ]);
 
         const usage = usageRows[0] ?? {};
         const days: WrappedUsageDay[] = queryRows(dailyRows)
@@ -475,7 +583,7 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
         const skills = queryRows(skillRows);
         const toolCount = (pred: (label: string) => boolean): number =>
             tools
-                .filter((row) => pred(toString(row.tool) ?? ""))
+                .filter((row) => pred(toString(row.tool_label) ?? ""))
                 .reduce((sum, row) => sum + toNumber(row.count), 0);
         // Verification/context classify on the full command text (verifyRows),
         // not the collapsed command_norm tool label (tools).
@@ -487,8 +595,8 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
         const contextCalls = cmdCount(isContextTool);
         const topToolRow = tools[0];
         const topSkillRow = skills[0];
-        const topTool = topToolRow && toString(topToolRow.tool)
-            ? { label: toString(topToolRow.tool)!, count: toNumber(topToolRow.count) }
+        const topTool = topToolRow && toString(topToolRow.tool_label)
+            ? { label: toString(topToolRow.tool_label)!, count: toNumber(topToolRow.count) }
             : null;
         const topSkill = topSkillRow && toString(topSkillRow.skill)
             ? { label: toString(topSkillRow.skill)!, count: toNumber(topSkillRow.count) }

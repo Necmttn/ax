@@ -1,48 +1,47 @@
 /**
  * Fetch the set of session ids tagged as spar variant sessions.
  *
- * Spar-score stamps the variant session's `labels` field with the JSON-encoded
- * string `["spar"]`. This helper returns a flat id list used by behavioral
- * analytics surfaces (`ax skills weighted`, `ax thinking`) to exclude spar
- * sessions from their rollups.
+ * `ax dojo spar-score` stamps the variant session with a `"spar"` row in the
+ * sidecar's `session_label` table. This helper returns those session ids, which
+ * behavioral-analytics surfaces (`ax skills weighted`, `ax thinking`) subtract
+ * from their rollups.
  *
  * Spec: docs/superpowers/specs/2026-06-15-spar-exclusion-tag-design.md
  */
-import { Effect } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { Judgment, TextColumn, type JudgmentError } from "@ax/lib/sqlite";
 
 /**
- * RecordIds of sessions tagged as spar variants (behavioral-analytics
- * exclusion). Returns a flat array of `RecordId` values (NOT strings).
+ * Bare session ids (no `session:` prefix, no record wrapper) labelled `spar`.
  * Returns `[]` when no spar sessions exist.
  *
- * IMPORTANT: the ids are RAW `record<session>` values, not `type::string(id)`
- * strings. `invoked.session` / `session.id` are record links, and SurrealDB
- * compares `record<session> NOT IN [<string>...]` as ALWAYS-TRUE (the string
- * IN-list silently matches nothing - documented rule, see
- * @ax/lib/shared/record-select). The exclusion at the
- * weighted aggregate binds these RecordIds so the comparison is
- * record-vs-record and actually fires. Verified empirically on the live DB:
- * a string[] param excludes 0 rows; a RecordId[] param excludes correctly.
+ * The ids are stored bare: `stampSparSession` writes `cleanSessionId(...)` into
+ * `session_label.session_id`, and in DuckDB `session.id` / `invoked.session` are
+ * plain VARCHARs. So a caller compares these strings directly - no unwrapping,
+ * no id normalization.
+ *
+ * HISTORY, because the old shape is easy to reintroduce. Under SurrealDB the
+ * ids had to be `RecordId` OBJECTS: `invoked.session` was a record link, and
+ * `record<session> NOT IN [<string>...]` silently matched nothing, so a
+ * string[] parameter excluded zero rows while looking correct. That trap is
+ * gone with the engine - both call sites had been unwrapping the RecordId back
+ * to its bare key anyway, and the wrapper was the last thing in the repo that
+ * needed the `surrealdb` package at runtime.
  *
  * Deref-free: no graph traversal. Safe against the 87k-edge invoked hang
  * (memory `weighted-query-per-edge-deref-hang`).
  */
 export const fetchSparSessionIds = (): Effect.Effect<
-    readonly RecordId[],
-    DbError,
-    SurrealClient
+    readonly string[],
+    JudgmentError,
+    Judgment
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // SELECT VALUE id returns the raw RecordId values (the surreal SDK's
-        // record-id form), NOT a string projection - so NOT IN against this
-        // array is a record-vs-record comparison.
-        const result = yield* db.query<[Array<unknown>]>(
-            `SELECT VALUE id FROM session WHERE labels != NONE AND string::contains(labels, 'spar');`,
+        const judgment = yield* Judgment;
+        const rows = yield* judgment.rows(
+            Schema.Struct({ session_id: TextColumn }),
+            "SELECT session_id FROM session_label WHERE label = ? ORDER BY session_id",
+            ["spar"],
         );
-        const rows = result?.[0] ?? [];
-        return rows.filter((r): r is RecordId => r instanceof RecordId);
+        return rows.map((row) => row.session_id);
     });

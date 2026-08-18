@@ -57,14 +57,18 @@ The 🟢 line's `host` tells you which device owns it; the `age` flags a stale c
 
 ## Local setup
 
+`ax` embeds DuckDB + a SQLite sidecar - no daemon to start. See
+[`docs/development.md`](docs/development.md#setup) for the full setup
+(building `libduckdb` and exporting `AX_DUCKDB_DYLIB`).
+
 ```bash
 bun install
-bun scripts/db-start.sh
-bun scripts/apply-schema.sh
+bash scripts/build-duckdb.sh
+export AX_DUCKDB_DYLIB="$PWD/dist/duckdb/libduckdb.dylib"   # libduckdb.so on Linux
 bun apps/axctl/src/cli/index.ts ingest --since=7   # or: bun run ingest --since=7
 ```
 
-Requirements: Bun ≥ 1.3, SurrealDB ≥ 3.0.
+Requirements: Bun ≥ 1.3.
 
 ## Repo layout
 
@@ -99,8 +103,13 @@ discoverable by an agent. See `skills/ship-checklist/SKILL.md`.
 - `Effect` v4-beta for pipelines and the service layer. See
   [`CLAUDE.md`](CLAUDE.md) for Effect best practices and where to look up
   patterns.
-- SurrealDB v3 SCHEMAFULL - top-level fields explicit, nested objects
-  JSON-encoded as strings (no `flexible<object>` in v3).
+- Two stores, and picking the right one is the first question about any write:
+  the **DuckDB cache** for anything rebuildable from disk
+  (`packages/schema/src/schema.duckdb.sql`), the **SQLite judgment sidecar** for
+  decisions a rebuild must not drop (`schema.sidecar.sql`). Nested objects are
+  JSON-encoded into a `VARCHAR` and decoded at the read seam. See the storage
+  seam section of [`CLAUDE.md`](CLAUDE.md) before adding a query - getting the
+  side wrong returns a wrong answer rather than an error.
 
 ## Reporting issues
 
@@ -127,7 +136,7 @@ mechanics that don't belong on the public page.
 
 ### Naming in code vs. copy
 
-- Visitor-facing copy is always **`ax`** (`ax doctor`, `ax serve`, `ax retro`),
+- Visitor-facing copy is always **`ax`** (`ax doctor`, `ax studio`, `ax retro`),
   never `axctl`.
 - `axctl` is the npm package / binary name - use it only when the technical
   layer genuinely matters (`axctl install`, the `bin/axctl` shim). User stories

@@ -27,22 +27,32 @@ const day = (iso: string): string => iso.slice(0, 10);
 export const buildTeamProfile = Effect.fn("team.buildTeamProfile")(
     function* (opts: {
         readonly org: string;
+        /** Git-derived key, carried into the output `repo_key` field only -
+         *  never used to query the DB (see `repositoryId`). */
         readonly repoKey: string;
+        /** The DuckDB cache's `repository` row id, or `null` when the cache has
+         *  never ingested this repo - the profile then has zero sessions. */
+        readonly repositoryId: string | null;
         readonly windowDays: number;
         readonly share: TeamShare;
         readonly includeCost: boolean;
         readonly env: TeamProfileEnv;
     }) {
-        const { org, repoKey, windowDays, share, includeCost, env } = opts;
+        const { org, repoKey, repositoryId, windowDays, share, includeCost, env } = opts;
 
         // 1. Repo session set (indexed; the ONLY query that names the repo).
-        const sessions = yield* fetchTeamRepoSessions({ repoKey, windowDays });
+        const sessions = yield* fetchTeamRepoSessions({ repositoryId, windowDays });
         const sessionIds = new Set(sessions.map((s) => s.id));
 
         // 2. Machine-window per-row fetches, repo-filtered in JS.
         const usageAll = yield* fetchSessionUsageRows({ windowDays });
         const usage = usageAll.filter((u) => sessionIds.has(u.session));
         const invocationsAll = yield* fetchWindowedInvocations({ windowDays });
+        // Both sides are now DuckDB-bare session ids off the same column
+        // family, so they compare directly. This used to route the left side
+        // through `toBareSessionId`, because `fetchWindowedInvocations` was
+        // still Surreal-backed and returned decorated `session:⟨uuid⟩` ids
+        // while `fetchTeamRepoSessions` was already ported.
         const invocations = invocationsAll.filter((i) => sessionIds.has(i.session));
 
         // 3. Per-session indexed tool_call fan-out (repo-scoped by construction).

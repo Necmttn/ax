@@ -1,8 +1,8 @@
 import { posixPath } from "@ax/lib/shared/path";
-import { prettyPrint } from "@ax/lib/json";
+import { stableId } from "@ax/lib/stable-id";
 import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
-import { recordRef, surrealJson, surrealJsonText, surrealJsonTextOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import type {
     WorkflowCandidatePromotionMode,
     WorkflowCandidateProposalStatusFilter,
@@ -121,16 +121,18 @@ import type {
     WorkflowCandidateProposalPlan,
     CandidateBuildInput,
     WorkflowCandidateGuidancePendingReviewTaskSummary,
+    WorkflowCandidateGraphWriteRow,
 } from "./workflow-candidate-types.ts";
 import { workflowCandidateGuidancePendingReviewTaskSchema } from "./workflow-candidate-types.ts";
-export const workflowCandidateSql = `
-SELECT graph_id, label, properties_json
-FROM classifier_graph_node
-WHERE source_kind = $sourceKind AND kind = "classifier_candidate_group";
-SELECT graph_id, subject, object, properties_json
-FROM classifier_graph_fact
-WHERE source_kind = $sourceKind AND kind = "classifier_candidate_evidence";
-`;
+/**
+ * `CacheRead.rows` answers one query at a time, so a group query and an
+ * evidence query are kept separate here; every call site issues both and
+ * zips the two result sets into one pair.
+ */
+export const workflowCandidateGroupSql =
+    "SELECT graph_id, label, properties_json FROM classifier_graph_node WHERE source_kind = ? AND kind = 'classifier_candidate_group'";
+export const workflowCandidateEvidenceSql =
+    "SELECT graph_id, subject, object, properties_json FROM classifier_graph_fact WHERE source_kind = ? AND kind = 'classifier_candidate_evidence'";
 
 export const WORKFLOW_CANDIDATE_PROPOSAL_PREFIX = "guidance__workflow_candidate__" as const;
 export const WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX = "harness_check__workflow_candidate__" as const;
@@ -436,8 +438,39 @@ export const workflowCandidateProposalTitle = (
     return `Workflow guardrail for ${task.label}`;
 };
 
+/**
+ * What the caller already knows about stored proposals: either just their
+ * dedupe sigs, or a sig -> stored-row-id map.
+ *
+ * The map form is what you want. A proposal that already exists keeps its
+ * ORIGINAL row id on refresh, and only the caller (which read the proposal
+ * table) can know it - so with a bare Set, a refreshed proposal's reported id
+ * and evidence edges would point at a freshly derived id instead of the row
+ * that actually gets updated.
+ */
+export type WorkflowCandidateExistingProposals =
+    | ReadonlySet<string>
+    | ReadonlyMap<string, string>;
+
+const existingSigSet = (existing: WorkflowCandidateExistingProposals): ReadonlySet<string> =>
+    existing instanceof Map ? new Set(existing.keys()) : existing as ReadonlySet<string>;
+
+/**
+ * The row id a promoted proposal is stored under.
+ *
+ * MUST stay identical to the derivation in `persistGuidanceProposalPlan` /
+ * `persistHarnessProposalPlan` (cli/classifiers-workflow-candidates.ts): the
+ * report's `proposal_id` and the `cites_evidence` edges are both keyed on it,
+ * and an id that disagrees with the persisted row produces a report naming a
+ * record that does not exist and edges that dangle. Neither fails loudly.
+ */
+export const workflowCandidateStoredProposalId = (
+    sig: string,
+    existing: WorkflowCandidateExistingProposals,
+): string => (existing instanceof Map ? existing.get(sig) : undefined) ?? stableId("proposal", [sig]);
+
 export const workflowCandidateProposalKey = (title: string, sig: string): string =>
-    `guidance__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
+    stableId("proposal", ["workflow_guidance", title, sig]);
 
 export const workflowCandidateSuggestedGuidance = (
     task: WorkflowCandidatePromotionTask,
@@ -467,7 +500,7 @@ export const workflowCandidateProposalHypothesis = (
 
 export const buildWorkflowCandidateGuidanceProposalPlan = (
     report: WorkflowCandidateReport,
-    existingSigs: ReadonlySet<string>,
+    existing: WorkflowCandidateExistingProposals,
     opts: {
         readonly fileTarget?: string;
         readonly section?: string;
@@ -516,68 +549,34 @@ export const buildWorkflowCandidateGuidanceProposalPlan = (
 
         const title = workflowCandidateProposalTitle(task, report);
         const sig = workflowCandidateProposalSig(task);
-        const proposalKey = workflowCandidateProposalKey(title, sig);
-        const proposalRef = recordRef("proposal", proposalKey);
-        const payloadRef = recordRef("guidance_proposal", proposalKey);
+        const proposalKey = workflowCandidateStoredProposalId(sig, existing);
+        const payloadKey = stableId("guidance_proposal", [proposalKey]);
         const fileTarget = opts.fileTarget ?? "AGENTS.md";
         const section = opts.section ?? "Workflow Candidate Guardrails";
         const candidateIds = task.candidate_ids ?? [task.candidate_id];
-        const baseline = prettyPrint({
-            source: "workflow_candidates",
-            frequency: Math.max(1, candidateIds.length),
-            candidate_ids: candidateIds,
-            recommendation: task.recommended_artifact,
-        });
-        const existing = existingSigs.has(sig);
-
-        if (existing) {
-            statements.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
-                    ["frequency", String(Math.max(1, candidateIds.length))],
-                    ["confidence", surrealString(task.recommended_artifact.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        } else {
-            statements.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("guidance")],
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
-                    ["dedupe_sig", surrealString(sig)],
-                    ["frequency", String(Math.max(1, candidateIds.length))],
-                    ["confidence", surrealString(task.recommended_artifact.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        }
+        const isExisting = existingSigSet(existing).has(sig);
 
         statements.push(
-            `UPSERT ${payloadRef} MERGE ${surrealObject([
-                ["proposal", proposalRef],
-                ["file_target", surrealString(fileTarget)],
-                ["section", surrealOptionString(section)],
-                ["suggested_text", surrealString(workflowCandidateSuggestedGuidance(task, report))],
-            ])};`,
+            isExisting
+                ? `UPDATE proposal ${proposalKey} (guidance, sig=${sig})`
+                : `PUT proposal ${proposalKey} (guidance, sig=${sig})`,
         );
+        statements.push(`PUT guidance_proposal ${payloadKey} -> ${fileTarget}`);
         for (const candidateId of candidateIds) {
             const candidateKey = safeKeyPart(candidateId);
-            const edgeKey = `${proposalKey}__${candidateKey}`;
-            statements.push(
-                `DELETE ${recordRef("cites_evidence", edgeKey)};`,
-                `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidateId)} SET count = 1, kind = "workflow_candidate", ts = time::now();`,
-            );
+            // The edge itself is written by `persistGuidanceProposalPlan`, which
+            // is the only place that knows the proposal's REAL row id: this
+            // builder's `proposalKey` hashes ["workflow_guidance", title, sig]
+            // while the persisted row is keyed on the dedupe sig alone. Building
+            // the edge here would point it at an id no row has.
+            statements.push(`PUT cites_evidence -> ${candidateId} (${candidateKey})`);
         }
 
         proposals.push({
             candidate_id: task.candidate_id,
             ...(task.candidate_ids === undefined ? {} : { candidate_ids: task.candidate_ids }),
             proposal_id: `proposal:${proposalKey}`,
-            guidance_payload_id: `guidance_proposal:${proposalKey}`,
+            guidance_payload_id: `guidance_proposal:${payloadKey}`,
             dedupe_sig: sig,
             title,
             file_target: fileTarget,
@@ -2529,36 +2528,19 @@ export function renderWorkflowCandidateGuidancePendingReviewContextRepairText(
     return `${lines.join("\n").trimEnd()}\n`;
 }
 
-export const workflowCandidateTurnContextRowSql = (turnId: string): string => {
-    const turnKey = recordKeyPart(turnId, "turn") ?? turnId;
-    return `
-SELECT
-    type::string(id) AS id,
-    type::string(session) AS session_id,
-    seq,
-    role,
-    text,
-    text_excerpt
-FROM ${recordRef("turn", turnKey)};
-`.trim();
-};
+/**
+ * DuckDB `turn` lookup by bare id, keyed via `CacheRead.rows`. `turnKey` (the
+ * `?` binding) is `recordKeyPart(turnId, "turn")` - the ax-wide record-key
+ * parser: it just strips a `table:` prefix a caller may still be carrying,
+ * it never builds SQL syntax.
+ */
+export const workflowCandidateTurnContextRowSql =
+    "SELECT id, session AS session_id, seq, role, text, text_excerpt FROM turn WHERE id = ?";
 
-export const workflowCandidatePreviousAssistantSql = (sessionId: string, seq: number): string => {
-    const sessionKey = recordKeyPart(sessionId, "session") ?? sessionId;
-    return `
-SELECT
-    type::string(id) AS id,
-    type::string(session) AS session_id,
-    seq,
-    role,
-    text,
-    text_excerpt
-FROM turn
-WHERE session = ${recordRef("session", sessionKey)} AND seq < ${Math.trunc(seq)} AND role = "assistant"
-ORDER BY seq DESC
-LIMIT 1;
-`.trim();
-};
+/** Most recent assistant turn strictly before `seq` in `sessionId`. */
+export const workflowCandidatePreviousAssistantSql =
+    "SELECT id, session AS session_id, seq, role, text, text_excerpt FROM turn " +
+    "WHERE session = ? AND seq < ? AND role = 'assistant' ORDER BY seq DESC LIMIT 1";
 
 export const pendingReviewTaskDecisionSummary = (input: {
     readonly parsed: WorkflowCandidateGuidancePendingReviewTaskParsed;
@@ -3512,58 +3494,84 @@ export function buildWorkflowCandidateTopicHarnessGraphProjection(
     };
 }
 
+/**
+ * Shared row-builder for both graph write plans below (harness-check and
+ * candidate-review) - identical node/edge/fact shapes, differing only in the
+ * `sourceKind` tag stamped onto every row. `id` and `graph_id` both carry the
+ * projection's id, so the record id and the `graph_id` field always agree.
+ */
+const buildWorkflowCandidateGraphWriteRows = (
+    projection: {
+        readonly nodes: readonly { readonly id: string; readonly kind: string; readonly label: string; readonly properties: Record<string, unknown> }[];
+        readonly edges: readonly { readonly id: string; readonly kind: string; readonly from: string; readonly to: string; readonly evidence_path: string; readonly properties: Record<string, unknown> }[];
+        readonly facts: readonly { readonly id: string; readonly kind: string; readonly subject: string; readonly predicate: string; readonly object: string | null; readonly value: unknown; readonly evidence_edges: readonly string[]; readonly properties: Record<string, unknown> }[];
+    },
+    sourceKind: string,
+): { readonly nodeRows: WorkflowCandidateGraphWriteRow[]; readonly edgeRows: WorkflowCandidateGraphWriteRow[]; readonly factRows: WorkflowCandidateGraphWriteRow[] } => {
+    const nodeRows = projection.nodes.map((node) => ({
+        table: "classifier_graph_node" as const,
+        row: cacheRow({
+            id: node.id,
+            graph_id: node.id,
+            kind: node.kind,
+            label: node.label,
+            properties_json: jsonParam(node.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_node ${node.id}`,
+    }));
+    const edgeRows = projection.edges.map((edge) => ({
+        table: "classifier_graph_edge" as const,
+        row: cacheRow({
+            id: edge.id,
+            graph_id: edge.id,
+            kind: edge.kind,
+            from_id: edge.from,
+            to_id: edge.to,
+            evidence_path: edge.evidence_path,
+            properties_json: jsonParam(edge.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_edge ${edge.id}`,
+    }));
+    const factRows = projection.facts.map((fact) => ({
+        table: "classifier_graph_fact" as const,
+        row: cacheRow({
+            id: fact.id,
+            graph_id: fact.id,
+            kind: fact.kind,
+            subject: fact.subject,
+            predicate: fact.predicate,
+            object: fact.object ?? null,
+            value_json: jsonParam(fact.value ?? null),
+            evidence_edges_json: jsonParam(fact.evidence_edges),
+            properties_json: jsonParam(fact.properties),
+            source_kind: sourceKind,
+        }),
+        label: `PUT classifier_graph_fact ${fact.id}`,
+    }));
+    return { nodeRows, edgeRows, factRows };
+};
+
 export function buildWorkflowCandidateTopicHarnessGraphWritePlan(
     projection: WorkflowCandidateTopicHarnessGraphProjection,
 ): WorkflowCandidateTopicHarnessGraphWritePlan {
     const sourceKind = "workflow_topic_harness_check";
-    const nodeStatements = projection.nodes.map((node) =>
-        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(node.id)],
-            ["kind", surrealString(node.kind)],
-            ["label", surrealString(node.label)],
-            ["properties_json", surrealJson(node.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const edgeStatements = projection.edges.map((edge) =>
-        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(edge.id)],
-            ["kind", surrealString(edge.kind)],
-            ["from_id", surrealString(edge.from)],
-            ["to_id", surrealString(edge.to)],
-            ["evidence_path", surrealString(edge.evidence_path)],
-            ["properties_json", surrealJson(edge.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const factStatements = projection.facts.map((fact) =>
-        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(fact.id)],
-            ["kind", surrealString(fact.kind)],
-            ["subject", surrealString(fact.subject)],
-            ["predicate", surrealString(fact.predicate)],
-            ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonTextOption(fact.value)],
-            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
-            ["properties_json", surrealJson(fact.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    const { nodeRows, edgeRows, factRows } = buildWorkflowCandidateGraphWriteRows(projection, sourceKind);
+    const rows = [...nodeRows, ...edgeRows, ...factRows];
+    const statements = rows.map((entry) => entry.label);
     return {
         schema: "ax.workflow_topic_harness_graph_write_plan.v1",
         source_projection_schema: projection.schema,
         topic: projection.topic,
         statements,
+        rows,
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         totals: {
             statement_count: statements.length,
-            node_statement_count: nodeStatements.length,
-            edge_statement_count: edgeStatements.length,
-            fact_statement_count: factStatements.length,
+            node_statement_count: nodeRows.length,
+            edge_statement_count: edgeRows.length,
+            fact_statement_count: factRows.length,
         },
     };
 }
@@ -5425,54 +5433,21 @@ export function buildWorkflowCandidateTopicReviewGraphWritePlan(
     projection: WorkflowCandidateTopicReviewGraphProjection,
 ): WorkflowCandidateTopicReviewGraphWritePlan {
     const sourceKind = "workflow_topic_candidate_review";
-    const nodeStatements = projection.nodes.map((node) =>
-        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(node.id)],
-            ["kind", surrealString(node.kind)],
-            ["label", surrealString(node.label)],
-            ["properties_json", surrealJson(node.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const edgeStatements = projection.edges.map((edge) =>
-        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(edge.id)],
-            ["kind", surrealString(edge.kind)],
-            ["from_id", surrealString(edge.from)],
-            ["to_id", surrealString(edge.to)],
-            ["evidence_path", surrealString(edge.evidence_path)],
-            ["properties_json", surrealJson(edge.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const factStatements = projection.facts.map((fact) =>
-        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
-            ["graph_id", surrealString(fact.id)],
-            ["kind", surrealString(fact.kind)],
-            ["subject", surrealString(fact.subject)],
-            ["predicate", surrealString(fact.predicate)],
-            ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonTextOption(fact.value)],
-            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
-            ["properties_json", surrealJson(fact.properties)],
-            ["source_kind", surrealString(sourceKind)],
-            ["updated_at", "time::now()"],
-        ])};`
-    );
-    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    const { nodeRows, edgeRows, factRows } = buildWorkflowCandidateGraphWriteRows(projection, sourceKind);
+    const rows = [...nodeRows, ...edgeRows, ...factRows];
+    const statements = rows.map((entry) => entry.label);
     return {
         schema: "ax.workflow_topic_review_graph_write_plan.v1",
         source_projection_schema: projection.schema,
         topic: projection.topic,
         statements,
+        rows,
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         totals: {
             statement_count: statements.length,
-            node_statement_count: nodeStatements.length,
-            edge_statement_count: edgeStatements.length,
-            fact_statement_count: factStatements.length,
+            node_statement_count: nodeRows.length,
+            edge_statement_count: edgeRows.length,
+            fact_statement_count: factRows.length,
         },
     };
 }
@@ -5959,7 +5934,7 @@ export const workflowCandidateHarnessProposalTitle = (candidate: WorkflowCandida
 
 export function buildWorkflowCandidateHarnessProposalPlan(
     report: WorkflowCandidateTopicReport,
-    existingSigs: ReadonlySet<string>,
+    existing: WorkflowCandidateExistingProposals,
     opts: {
         readonly dryRun?: boolean;
         readonly includeStatements?: boolean;
@@ -5978,54 +5953,17 @@ export function buildWorkflowCandidateHarnessProposalPlan(
     for (const { candidate, recommendation } of harnessCandidates) {
         const sig = workflowCandidateHarnessProposalSig(candidate, report.topic);
         const title = workflowCandidateHarnessProposalTitle(candidate, report.topic);
-        const proposalKey = `harness_check__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
-        const proposalRef = recordRef("proposal", proposalKey);
-        const existing = existingSigs.has(sig);
-        const baseline = prettyPrint({
-            source: "workflow_topic_report",
-            topic: report.topic,
-            candidate_id: candidate.group_id,
-            recommendation,
-            examples: candidate.examples,
-        });
-        const hypothesis = [
-            recommendation.rationale,
-            `Evidence-backed workflow candidate: ${candidate.label}.`,
-            "The check should fail when the agent stops before producing applied classifier result evidence.",
-        ].join(" ");
+        const proposalKey = workflowCandidateStoredProposalId(sig, existing);
+        const isExisting = existingSigSet(existing).has(sig);
 
-        if (existing) {
-            statements.push(
-                `UPDATE ${proposalRef} SET ${[
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(hypothesis)],
-                    ["frequency", String(Math.max(1, candidate.support_count))],
-                    ["confidence", surrealString(recommendation.confidence)],
-                    ["updated_at", "time::now()"],
-                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
-            );
-        } else {
-            statements.push(
-                `CREATE ${proposalRef} CONTENT ${surrealObject([
-                    ["form", surrealString("harness_check")],
-                    ["title", surrealString(title)],
-                    ["hypothesis", surrealString(hypothesis)],
-                    ["dedupe_sig", surrealString(sig)],
-                    ["frequency", String(Math.max(1, candidate.support_count))],
-                    ["confidence", surrealString(recommendation.confidence)],
-                    ["status", surrealString("open")],
-                    ["baseline", surrealOptionString(baseline)],
-                    ["updated_at", "time::now()"],
-                ])};`,
-            );
-        }
-
-        const candidateKey = safeKeyPart(candidate.group_id);
-        const edgeKey = `${proposalKey}__${candidateKey}`;
         statements.push(
-            `DELETE ${recordRef("cites_evidence", edgeKey)};`,
-            `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidate.group_id)} SET count = ${Math.max(1, candidate.support_count)}, kind = "workflow_candidate", ts = time::now();`,
+            isExisting
+                ? `UPDATE proposal ${proposalKey} (harness_check, sig=${sig})`
+                : `PUT proposal ${proposalKey} (harness_check, sig=${sig})`,
         );
+        // The edge row is written by `persistHarnessProposalPlan`, which holds
+        // the write seam; this only records that the write is planned.
+        statements.push(`PUT cites_evidence -> ${candidate.group_id} (${safeKeyPart(candidate.group_id)})`);
         proposals.push({
             candidate_id: candidate.group_id,
             proposal_id: `proposal:${proposalKey}`,

@@ -1,14 +1,13 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect, Option, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
+import { Judgment } from "@ax/lib/sqlite";
 import { prettyPrint } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { surrealString } from "@ax/lib/shared/surreal";
 import { homedir } from "node:os";
 import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
-import { acceptProposal, rejectProposal } from "../../improve/actions.ts";
+import { acceptProposal, rejectProposal, setVerdict } from "../../improve/actions.ts";
 import { lintFiles } from "../../improve/lint.ts";
 import { listProposals, normalizeListProposalsInput, type ProposalRow } from "../../improve/list.ts";
 import { recommend, normalizeRecommendInput, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
@@ -425,7 +424,6 @@ const cmdImproveVerdict = (input: {
         const positional = input.id;
         const setValue = input.set;
         const json = input.json;
-        const db = yield* SurrealClient;
         if (positional === undefined) {
             const list = yield* listVerdicts();
             if (json) { console.log(prettyPrint(list)); return; }
@@ -461,15 +459,7 @@ const cmdImproveVerdict = (input: {
             if (row.locked_verdict) {
                 fail(`experiment already locked: ${String(row.locked_verdict)}`);
             }
-            const experimentId = String(row.id ?? "");
-            const latestCp = checkpoints[0];
-            const stmts: string[] = [
-                `UPDATE ${experimentId} SET locked_verdict = ${surrealString(setValue)};`,
-            ];
-            if (latestCp?.id) {
-                stmts.push(`UPDATE ${String(latestCp.id)} SET user_verdict = ${surrealString(setValue)};`);
-            }
-            yield* db.query(stmts.join(""));
+            yield* setVerdict({ sigOrId: positional, verdict: setValue });
             console.log(`verdict locked: ${setValue}`);
             return;
         }
@@ -518,10 +508,10 @@ const improveVerdictCommand = Command.make(
 ).pipe(Command.withDescription("Show experiment verdict state; --set adopted|ignored|regressed|partial|no_longer_needed locks it"));
 
 /**
- * `axctl improve reset --yes` - drop every experiment-loop row in DB.
+ * `axctl improve reset --yes` - delete every sidecar experiment-loop row.
  *
  * Destructive. Used by UAT to start from a clean slate before re-running
- * the full propose -> accept -> verdict flow. Wipes the 9 experiment-loop
+ * the full propose -> accept -> verdict flow. Wipes the eight judgment
  * tables in dependency order; underlying evidence (friction_event,
  * skill_candidate, etc) is left alone so re-derivation can rebuild
  * proposals against the same signal.
@@ -530,29 +520,22 @@ const cmdImproveReset = (input: { readonly yes: boolean }) =>
     Effect.gen(function* () {
         if (!input.yes) {
             fail(
-                "axctl improve reset: refusing to wipe without --yes\n" +
-                "  drops: checkpoint, opportunity, experiment, cites_evidence,\n" +
-                "         skill_proposal, subagent_proposal, hook_proposal,\n" +
+                "ax improve reset: refusing to wipe without --yes\n" +
+                "  drops: checkpoint, experiment, skill_proposal,\n" +
+                "         subagent_proposal, hook_proposal,\n" +
                 "         guidance_proposal, automation_proposal, proposal",
             );
         }
-        const db = yield* SurrealClient;
-        // Dependency order: checkpoint -> opportunity -> experiment ->
-        // cites_evidence -> per-form payloads -> proposal. Relations cascade
-        // via REFERENCE ON DELETE CASCADE on the schema, but we delete
-        // bottom-up to keep this explicit + auditable.
-        yield* db.query(`
-            DELETE checkpoint;
-            DELETE opportunity;
-            DELETE experiment;
-            DELETE cites_evidence;
-            DELETE skill_proposal;
-            DELETE subagent_proposal;
-            DELETE hook_proposal;
-            DELETE guidance_proposal;
-            DELETE automation_proposal;
-            DELETE proposal;
-        `);
+        const judgment = yield* Judgment;
+        // Delete child judgment rows before their proposal owner.
+        yield* judgment.transaction((transaction) => Effect.gen(function* () {
+            for (const table of [
+                "checkpoint", "experiment", "skill_proposal", "subagent_proposal",
+                "hook_proposal", "guidance_proposal", "automation_proposal", "proposal",
+            ]) {
+                yield* transaction.exec(`DELETE FROM ${table}`);
+            }
+        }));
         console.log("experiment-loop state cleared. Run \`ax ingest --stages=proposals,opportunities\` to rebuild.");
     });
 
@@ -700,4 +683,23 @@ export const improveCommand = Command.make("improve").pipe(
     ]),
 );
 
-export const improveRuntime: RuntimeManifest = { improve: "db" };
+export const improveRuntime: RuntimeManifest = {
+    improve: {
+        kind: "db-conditional",
+        fallback: "cache",
+        subcommands: {
+            recommend: "cache",
+            lint: "cache",
+            list: "cache",
+            show: "cache",
+            accept: (args) => args.includes("--with-agent") ? "cache" : "cache",
+            reject: "cache",
+            verdict: "cache",
+            reset: "cache",
+            checkpoint: "cache",
+            propose: "cache",
+            analyze: "none",
+            housekeep: "cache",
+        },
+    },
+};

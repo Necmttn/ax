@@ -8,14 +8,14 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { Effect, Layer } from "effect";
 import type {
     SessionDetailPayload,
     SessionInsightsPayload,
     SessionViewPayload,
 } from "@ax/lib/shared/dashboard-types";
 import type { SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
+import { EmptyCacheReadTestLayer, EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import {
     fetchEnrichedSession,
     type EnrichedSessionFetchers,
@@ -66,8 +66,12 @@ const makeFetchers = (): { fetchers: EnrichedSessionFetchers; calls: Calls } => 
 const run = (opts: EnrichedSessionOptions, fetchers: EnrichedSessionFetchers) =>
     Effect.runPromise(
         fetchEnrichedSession(opts, fetchers).pipe(
-            // Satisfy the SurrealClient requirement; the stubs never touch it.
-            Effect.provide(makeTestSurrealClient({ denyWrites: true }).layer),
+            // This suite asserts WHICH fetchers the facade runs for a given
+            // options matrix - every fetcher is a stub, so no layer here is
+            // ever queried. The facade's requirements just have to be
+            // satisfiable. (The real read shape is pinned in
+            // dashboard/session-view.test.ts, against a real snapshot.)
+            Effect.provide(Layer.mergeAll(EmptyCacheReadTestLayer, EmptyJudgmentTestLayer)),
         ),
     );
 

@@ -45,7 +45,7 @@ describe("renderExperimentList", () => {
 });
 
 describe("team command routing", () => {
-  it("routes team push through the database runtime", () => {
-    expect(resolveRuntime(teamRuntime.team!, ["team", "push"])).toBe("db");
+  it("routes team push on the cache runtime", () => {
+    expect(resolveRuntime(teamRuntime.team!, ["team", "push"])).toBe("cache");
   });
 });

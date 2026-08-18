@@ -8,9 +8,9 @@ description: Guided experiment-loop retrospective over the ax agent-experience g
 Closes the self-improvement loop. Claude orchestrates `ax improve …`
 commands; the user decides each row.
 
-Assumes `ax` (axctl) is on PATH and the local SurrealDB is running. If
-`ax improve list` fails with a connection error, tell the user
-`scripts/db-start.sh` and stop.
+Assumes `ax` (axctl) is on PATH. If `ax improve list` fails, tell the user
+to check `docs/development.md#setup` (DuckDB dylib setup - no daemon
+required) and stop.
 
 ## When to fire
 
@@ -133,7 +133,7 @@ Order open proposals by `frequency` desc. For each, in turn:
 
    > **Schema change guardrail** (skill · freq=9 · confidence=high)
    > Hypothesis: schema edits often surface in fix-chains within ~14d.
-   > Trigger: fix commits overlap SurrealDB schema files.
+   > Trigger: fix commits overlap schema files.
    > Behavior: run schema lint + one read/write smoke before edit.
 
 3. Ask the user: **accept**, **reject**, or **skip**.
@@ -280,7 +280,8 @@ without explicit user confirmation in this session.
   is already finalized; show the locked value and move on.
 - `ax hooks summary` returns nothing → retry with `--since=30`; if
   still empty, the hook telemetry pipeline is idle, surface as a TODO.
-- DB connection refused → tell the user `scripts/db-start.sh`.
+- Read/query error → tell the user to check `docs/development.md#setup`
+  (`AX_DUCKDB_DYLIB`).
 
 ## Anti-patterns
 

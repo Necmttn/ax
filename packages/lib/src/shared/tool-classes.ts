@@ -1,4 +1,3 @@
-import { surrealString } from "./surql.ts";
 
 // ---------------------------------------------------------------------------
 // Canonical tool-name / command classification - the ONE source of truth
@@ -9,7 +8,7 @@ import { surrealString } from "./surql.ts";
 //  - timeline  (`apps/axctl/src/timeline/providers.ts`)         - unified
 //    event kinds for the session timeline.
 //  - metrics   (`apps/axctl/src/metrics/*`, #170)               - edit/read
-//    predicates + SurrealQL filter fragments for session_metrics.
+//    predicates + SQL filter fragments for session_metrics.
 //
 // Claude has dedicated Edit/Write/Read/Grep tools; Codex/Pi edit via
 // `apply_patch` (as a tool name OR as the base command of an `exec_command`)
@@ -140,21 +139,3 @@ const CANONICAL_EDIT_NAMES: Record<string, string> = {
  */
 export const canonicalEditToolName = (name: string): string =>
     CANONICAL_EDIT_NAMES[norm(name)] ?? name;
-
-const sqlList = (values: Iterable<string>): string =>
-    [...values].map((v) => surrealString(v)).join(", ");
-
-/**
- * SurrealQL filter fragment matching edit-class tool_calls. MUST be ANDed
- * onto a `session IN [...]` bounded WHERE (see hang-safety note above).
- * `command_norm` is compared as stored (the shell tokenizer emits the literal
- * argv0, lowercase in practice); NONE never matches an IN-list.
- */
-export const editToolSqlFilter: string =
-    `(string::lowercase(name) IN [${sqlList(EDIT_TOOL_NAMES)}]`
-    + ` OR command_norm IN [${sqlList(EDIT_COMMANDS)}])`;
-
-/** SurrealQL filter fragment matching edit-class OR read/search-class tool_calls. */
-export const editOrReadToolSqlFilter: string =
-    `(string::lowercase(name) IN [${sqlList(new Set([...EDIT_TOOL_NAMES, ...READ_TOOL_NAMES]))}]`
-    + ` OR command_norm IN [${sqlList(new Set([...EDIT_COMMANDS, ...READ_COMMANDS]))}])`;

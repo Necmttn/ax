@@ -5,15 +5,14 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { surrealLiteral } from "@ax/lib/json";
-import type { DbError } from "@ax/lib/errors";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import {
     type InterventionSafetyContract,
     interventionSafetyMessage,
     missingInterventionSafetyGates,
 } from "./lifecycle.ts";
 import { interventionFormSpec } from "./intervention-forms.ts";
+import { findStoredProposal } from "./judgment-proposals.ts";
 
 export interface ShowInput { readonly sigOrId: string; }
 
@@ -53,31 +52,9 @@ export interface ShowResult {
 
 export const showExperiment = (
     input: ShowInput,
-): Effect.Effect<ShowResult | null, DbError, SurrealClient> =>
+): Effect.Effect<ShowResult | null, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const idLit = surrealLiteral(input.sigOrId);
-        const db = yield* SurrealClient;
-        const pRows = yield* db.query<[ReadonlyArray<{
-            dedupe_sig: string; title: string; form: string; hypothesis: string;
-            status: string; confidence: string; frequency: number; updated_at: string;
-            hook_payload?: {
-                recovery_path?: string | null;
-                smoke_test_command?: string | null;
-                disable_command?: string | null;
-                failure_mode?: string | null;
-            } | null;
-            automation_payload?: {
-                recovery_path?: string | null;
-                smoke_test_command?: string | null;
-                disable_command?: string | null;
-                failure_mode?: string | null;
-            } | null;
-        }>]>(`SELECT dedupe_sig, title, form, hypothesis, status, confidence, frequency,
-                type::string(updated_at) AS updated_at,
-                (SELECT recovery_path, smoke_test_command, disable_command, failure_mode FROM hook_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-                (SELECT recovery_path, smoke_test_command, disable_command, failure_mode FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload
-            FROM proposal WHERE dedupe_sig = ${idLit} OR id = ${idLit} LIMIT 1;`);
-        const prow = (pRows?.[0] ?? [])[0];
+        const prow = yield* findStoredProposal(input.sigOrId);
         if (!prow) return null;
         const safetyPayloadKey = interventionFormSpec(prow.form)?.safetyPayloadKey;
         const rawSafety = safetyPayloadKey === "hook_payload"
@@ -89,7 +66,7 @@ export const showExperiment = (
             shortId: prow.dedupe_sig, title: prow.title, form: prow.form,
             hypothesis: prow.hypothesis, status: prow.status,
             confidence: prow.confidence, frequency: prow.frequency,
-            updatedAt: prow.updated_at,
+            updatedAt: (prow.updated_at ?? prow.created_at).toISOString(),
             safety: rawSafety === null ? null : {
                 recoveryPath: rawSafety?.recovery_path ?? null,
                 smokeTestCommand: rawSafety?.smoke_test_command ?? null,
@@ -97,30 +74,16 @@ export const showExperiment = (
                 failureMode: rawSafety?.failure_mode ?? null,
             },
         };
-        const eRows = yield* db.query<[ReadonlyArray<{
-            id: string; status: string; artifact_path: string | null;
-            task_path: string | null; locked_verdict: string | null;
-        }>]>(`SELECT type::string(id) AS id, status, artifact_path, task_path, locked_verdict
-            FROM experiment WHERE proposal.dedupe_sig = ${idLit} LIMIT 1;`);
-        const erow = (eRows?.[0] ?? [])[0];
+        const erow = prow.experiment;
         const experiment: ShowExperiment | null = erow ? {
             id: erow.id, status: erow.status,
             artifactPath: erow.artifact_path, taskPath: erow.task_path,
             lockedVerdict: erow.locked_verdict,
         } : null;
-        let checkpoints: ShowCheckpoint[] = [];
-        if (experiment) {
-            const cRows = yield* db.query<[ReadonlyArray<{
-                kind: string; observed_at: string; measured: Record<string, unknown>;
-                suggested: string | null; user_verdict: string | null;
-            }>]>(`SELECT kind, type::string(observed_at) AS observed_at, measured, suggested, user_verdict
-                FROM checkpoint WHERE experiment = ${experiment.id}
-                ORDER BY observed_at DESC LIMIT 10;`);
-            checkpoints = (cRows?.[0] ?? []).map((r) => ({
-                kind: r.kind, observedAt: r.observed_at, measured: r.measured,
-                suggested: r.suggested, userVerdict: r.user_verdict,
-            }));
-        }
+        const checkpoints: ShowCheckpoint[] = erow?.checkpoints.slice(-10).reverse().map((r) => ({
+            kind: r.kind, observedAt: r.observed_at.toISOString(), measured: { ...r.measured },
+            suggested: r.suggested, userVerdict: r.user_verdict,
+        })) ?? [];
         return { proposal, experiment, checkpoints };
     });
 

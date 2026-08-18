@@ -15,11 +15,9 @@
  * (a few keys per call) and an indexed-or-full `session_token_usage` select
  * (`fetchSessionCostMap`) - no edge derefs.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { refListSource } from "@ax/lib/shared/record-select";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import type { CacheReadError, CacheReadService } from "@ax/lib/duckdb/seam";
 import {
     builtInPricingCatalog,
     estimateCost,
@@ -29,7 +27,25 @@ import {
     type AgentModelPricingRow,
     type ModelPricing,
 } from "../ingest/model-pricing.ts";
-import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
+import { chunked, cleanSessionId, numOrNull, numOrZero, sessionIdsClause, strOrNull } from "./util.ts";
+
+const NullableNumber = Schema.NullOr(Schema.Number);
+const NullableBigIntNumber = Schema.NullOr(NumberFromBigIntColumn);
+const AgentModelPricingSchema = Schema.Struct({
+    name: Schema.String,
+    provider: Schema.String,
+    input_per_million_usd: NullableNumber,
+    output_per_million_usd: NullableNumber,
+    cache_creation_per_million_usd: NullableNumber,
+    cache_read_per_million_usd: NullableNumber,
+    input_above_200k_per_million_usd: NullableNumber,
+    output_above_200k_per_million_usd: NullableNumber,
+    cache_creation_above_200k_per_million_usd: NullableNumber,
+    cache_read_above_200k_per_million_usd: NullableNumber,
+    fast_multiplier: NullableNumber,
+    context_window: NullableBigIntNumber,
+    pricing_source: Schema.NullOr(Schema.String),
+});
 
 /** Prefix marking a cost we estimated at read time (vs. priced at ingest). */
 export const ESTIMATED_PRICING_PREFIX = "estimated:";
@@ -106,26 +122,27 @@ const FALLBACK_MODEL_KEYS = ["gpt-5", "claude-opus-4", "claude-sonnet-4"] as con
  * fresher than the compiled-in table).
  */
 export const loadPricingCatalogForModels = (
+    read: CacheReadService,
     models: ReadonlyArray<string | null | undefined>,
-): Effect.Effect<Map<string, ModelPricing>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, ModelPricing>, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const keys = new Set<string>(FALLBACK_MODEL_KEYS);
         for (const model of models) {
             const key = normalizeModelName(model);
-            // recordLiteral throws on `/newline/NUL keys - skip rather than defect.
-            if (key && !/[`\n\u0000]/.test(key)) keys.add(key);
+            if (key) keys.add(key);
         }
-        const refs = refListSource([...keys].map((k) => recordLiteral("agent_model", k)));
-        const rows = (yield* db.query<[AgentModelPricingRow[]]>(
+        const names = sessionIdsClause("name", [...keys]);
+        const rows = yield* read.rows(
+            AgentModelPricingSchema,
             `SELECT name, provider, input_per_million_usd, output_per_million_usd,`
             + ` cache_creation_per_million_usd, cache_read_per_million_usd,`
             + ` input_above_200k_per_million_usd, output_above_200k_per_million_usd,`
             + ` cache_creation_above_200k_per_million_usd, cache_read_above_200k_per_million_usd,`
             + ` fast_multiplier, context_window, pricing_source`
-            + ` FROM ${refs};`,
-        ))?.[0] ?? [];
-        return mergePricingCatalogs(builtInPricingCatalog(), pricingRowsToCatalog(rows));
+            + ` FROM agent_model WHERE TRUE ${names.sql}`,
+            names.params,
+        );
+        return mergePricingCatalogs(builtInPricingCatalog(), pricingRowsToCatalog(rows as AgentModelPricingRow[]));
     });
 
 // ---------------------------------------------------------------------------
@@ -144,13 +161,20 @@ export interface SessionCostEntry {
     readonly estimated: boolean;
 }
 
-/** Snake_case usage row as read back from `session_token_usage`. */
-interface SessionUsageRow extends UsageCostFields {
-    readonly session: string;
-}
+const SessionUsageSchema = Schema.Struct({
+    session: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: NullableBigIntNumber,
+    completion_tokens: NullableBigIntNumber,
+    cache_creation_input_tokens: NullableBigIntNumber,
+    cache_read_input_tokens: NullableBigIntNumber,
+    estimated_tokens: NumberFromBigIntColumn,
+    estimated_cost_usd: NullableNumber,
+    pricing_source: Schema.NullOr(Schema.String),
+});
 
 const USAGE_SELECT =
-    `SELECT type::string(session) AS session, model, prompt_tokens, completion_tokens,`
+    `SELECT session, model, prompt_tokens, completion_tokens,`
     + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
     + ` estimated_cost_usd, pricing_source FROM session_token_usage`;
 
@@ -169,20 +193,23 @@ const IN_CHUNK = 500;
  * Keys are normalized with `cleanSessionId` - look up with the same.
  */
 export const fetchSessionCostMap = (
+    read: CacheReadService,
     sessionIds: readonly string[] | null,
-): Effect.Effect<Map<string, SessionCostEntry>, DbError, SurrealClient> =>
+): Effect.Effect<Map<string, SessionCostEntry>, CacheReadError> =>
     Effect.gen(function* () {
         const out = new Map<string, SessionCostEntry>();
         if (sessionIds !== null && sessionIds.length === 0) return out;
-        const db = yield* SurrealClient;
         const usageRows = sessionIds === null
-            ? (yield* db.query<[SessionUsageRow[]]>(`${USAGE_SELECT};`))?.[0] ?? []
+            ? yield* read.rows(SessionUsageSchema, USAGE_SELECT)
             : (yield* Effect.all(
                 chunked(sessionIds, IN_CHUNK).map((ids) =>
-                    db.query<[SessionUsageRow[]]>(`${USAGE_SELECT} WHERE session IN [${sessionRefList(ids)}];`)),
+                    {
+                        const sessions = sessionIdsClause("session", ids);
+                        return read.rows(SessionUsageSchema, `${USAGE_SELECT} WHERE TRUE ${sessions.sql}`, sessions.params);
+                    }),
                 { concurrency: 4 },
-            )).flatMap((batch) => batch?.[0] ?? []);
-        const catalog = yield* loadPricingCatalogForModels(usageRows.map((u) => u.model));
+            )).flatMap((batch) => batch);
+        const catalog = yield* loadPricingCatalogForModels(read, usageRows.map((u) => u.model));
         for (const u of usageRows) {
             const filled = fillEstimatedCost({
                 model: strOrNull(u.model),

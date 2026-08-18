@@ -19,8 +19,9 @@
  * JS join: estimate tokens from bytes, drop synthetic + null-bytes + under-budget,
  * attach invocation count, sort by estimated tokens desc, apply limit.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,10 +53,14 @@ export const estimateTokens = (bytes: number): number =>
 // SQL - deref-free, two flat statements
 // ---------------------------------------------------------------------------
 
-const SQL = `
-SELECT type::string(id) AS id, name, bytes, dir_path, content_hash FROM skill;
-SELECT type::string(out) AS sid, count() AS invocations FROM invoked GROUP BY sid;
-`;
+const BloatSkillRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    bytes: Schema.NullOr(NumberFromBigIntColumn),
+    dir_path: Schema.NullOr(Schema.String),
+    content_hash: Schema.NullOr(Schema.String),
+});
+const BloatCountRow = Schema.Struct({ sid: Schema.String, invocations: NumberFromBigIntColumn });
 
 // Internal row carrying the content hash needed for plugin-namespace dedup.
 interface BloatRowWithHash extends SkillBloatRow {
@@ -69,18 +74,17 @@ interface BloatRowWithHash extends SkillBloatRow {
 export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
     input: SkillBloatInput,
 ) {
-    const db = yield* SurrealClient;
-    const [skills, counts] = yield* db.query<[
-        Array<{ id: string; name: string; bytes: number | null; dir_path: string | null; content_hash: string | null }>,
-        Array<{ sid: string; invocations: number }>,
-    ]>(SQL);
+    const [skills, counts] = yield* Effect.all([
+        cacheRows(BloatSkillRow, { sql: "SELECT id, name, bytes, dir_path, content_hash FROM skill", params: [] }, "skill bloat catalog"),
+        cacheRows(BloatCountRow, { sql: "SELECT out_id AS sid, count(*) AS invocations FROM invoked GROUP BY out_id", params: [] }, "skill bloat counts"),
+    ]);
 
     const invById = new Map(
-        (counts ?? []).map((c) => [c.sid, Number(c.invocations ?? 0)]),
+        counts.map((c) => [c.sid, c.invocations]),
     );
 
     const rows: BloatRowWithHash[] = [];
-    for (const s of skills ?? []) {
+    for (const s of skills) {
         if (s.dir_path === "(synthetic)") continue;        // tool shims, not real skills
         if (s.bytes == null) continue;                     // un-ingested body size
         const bytes = Number(s.bytes);
@@ -107,5 +111,11 @@ export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
     );
 
     deduped.sort((a, b) => b.estTokens - a.estTokens);
-    return deduped.slice(0, input.limit).map(({ contentHash: _ch, ...row }) => row);
+    // `total` is the count BEFORE the limit. The renderer used to report
+    // `rows.length`, so `--limit=4` announced "4 skills over budget" on a
+    // machine with 40 - a page size printed as a fact about the user's setup.
+    return {
+        total: deduped.length,
+        rows: deduped.slice(0, input.limit).map(({ contentHash: _ch, ...row }) => row),
+    };
 });

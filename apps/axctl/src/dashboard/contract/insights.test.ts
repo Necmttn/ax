@@ -1,19 +1,16 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { DbError } from "@ax/lib/errors";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheUnavailableError } from "@ax/lib/duckdb/seam";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { isContractRequest, makeContractWebHandler, type ContractWebHandler } from "./web-handler.ts";
 
-/** Stub DB returning empty result tuples - enough for null/empty paths. */
-const emptyDb = Layer.mock(SurrealClient, {
-    query: <T extends unknown[] = unknown[]>(_sql: string, _bindings?: Record<string, unknown> | undefined) =>
-        Effect.succeed([[]] as unknown as T),
-    raw: null as never,
-});
+/** Stub snapshot returning no rows - enough for null/empty paths. */
+const emptyCache = makeTestCacheRead().layer;
 
 const handlers: ContractWebHandler[] = [];
-function make(services: Parameters<typeof makeContractWebHandler>[0]["services"] = emptyDb): ContractWebHandler {
-    const h = makeContractWebHandler({ ingestStream: null, services });
+function make(cacheRead: Parameters<typeof makeContractWebHandler>[0]["cacheRead"] = emptyCache): ContractWebHandler {
+    const h = makeContractWebHandler({ ingestStream: null, cacheRead });
     handlers.push(h);
     return h;
 }
@@ -50,10 +47,15 @@ describe("isContractRequest - insights + hardening", () => {
 });
 
 describe("insights handlers", () => {
-    test("recall with empty q answers the canned empty page without touching the DB", async () => {
-        const poisoned = Layer.mock(SurrealClient, {
-            query: () => Effect.die(new Error("DB must not be touched for empty q")),
-            raw: null as never,
+    test("recall with empty q answers the canned empty page without touching the snapshot", async () => {
+        // The poison is on `CacheRead` because that is the seam the handler
+        // actually resolves. Poisoning a service no handler reads would pass
+        // whether or not the short-circuit exists.
+        const poisoned = Layer.mock(CacheRead, {
+            rows: () => Effect.die(new Error("snapshot must not be read for empty q")),
+            first: () => Effect.die(new Error("snapshot must not be read for empty q")),
+            raw: () => Effect.die(new Error("snapshot must not be read for empty q")),
+            snapshotPath: "(poisoned)",
         });
         const { handler } = make(poisoned);
         const res = await handler(get("/api/recall?q=%20"));
@@ -80,15 +82,19 @@ describe("insights handlers", () => {
 describe("contract handler self-healing", () => {
     test("a failed layer build answers 500 and recovers on the next request", async () => {
         let attempts = 0;
-	    const flaky = Layer.effect(SurrealClient)(Effect.suspend(() => {
-	        attempts += 1;
-	        if (attempts === 1) {
-	            return Effect.fail(new DbError({ operation: "connect", message: "db down at boot" }));
-	        }
-	        return Effect.succeed({
-                query: () => Effect.succeed([[]]),
-                raw: null,
-            } as unknown as SurrealClientShape);
+        const flaky = Layer.effect(CacheRead)(Effect.suspend(() => {
+            attempts += 1;
+            if (attempts === 1) {
+                return Effect.fail(
+                    new CacheUnavailableError({ path: "(none)", message: "db down at boot" }),
+                );
+            }
+            return Effect.succeed({
+                rows: () => Effect.succeed([]),
+                first: () => Effect.succeed(null),
+                raw: () => Effect.succeed([]),
+                snapshotPath: "(rebuilt)",
+            } as unknown as CacheRead["Service"]);
         }));
         const { handler } = make(flaky);
 

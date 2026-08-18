@@ -1,23 +1,34 @@
 import { Cause, Effect, Exit, Option, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
+import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
+import { posixPath } from "@ax/lib/shared/path";
+import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import { duckdbAssetPathOption } from "../duckdb-embed-wiring.ts";
+import type { FileSystem } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { ProcessService } from "@ax/lib/process";
 import {
-    buildIngestEventStatement,
-    buildIngestRunFinishStatement,
-    buildIngestRunStartStatement,
-    buildIngestStageFinishStatement,
-    buildIngestStageStartStatement,
-    makeIngestEvent,
-    publishIngestEvent,
-} from "../dashboard/telemetry.ts";
+    reconcileStrandedIngestStages,
+    writeIngestEvent,
+    writeIngestRunFinish,
+    writeIngestRunStart,
+    writeIngestStageFinish,
+    writeIngestStageStart,
+} from "./telemetry.ts";
+import {
+    CurrentStageSelfTime,
+    CurrentStageSelfTimeBudget,
+    makeStageSelfTime,
+} from "@ax/lib/duckdb/self-time";
 import { runPipeline } from "./stage/runner.ts";
 import { selectByKeys, selectByTag } from "./stage/select.ts";
-import { StageRegistry, type StageRegistryShape } from "./stage/registry.ts";
+import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
 import { BaseStageStats, IngestContext, type StageDef } from "./stage/types.ts";
+import { reapStaleIngestRuns } from "./reap-runs.ts";
+import { correlateOrphanOtel } from "../otel/correlate.ts";
+import { retainRecentOtel, type OtelRetentionResult } from "../otel/retention.ts";
 
 export interface StageEventName {
     readonly source: string;
@@ -92,45 +103,34 @@ const errorText = (error: unknown): string =>
  *                     effort) - a crash must never strand the row in
  *                     "running" (#269); the defect still propagates
  *
- * The finalizer runs while the SurrealClient scope is still open (inner
+ * The finalizer runs while the cache write scope is still open (inner
  * scope unwinds before the layer closes the connection), so the last write
  * has a live connection. The interruption arm requires the process main
  * fiber to actually be interrupted on SIGINT - see BunRuntime.runMain in
  * cli/index.ts. A hard kill (SIGKILL/power loss) runs no finalizer at all;
  * `ax doctor`'s stale-run check catches those rows.
  */
-export const withIngestRunFinish = (db: SurrealClientShape, runId: string) =>
-    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | DbError, R> =>
-        Effect.onExit(effect, (exit): Effect.Effect<void, DbError> => {
+export const withIngestRunFinish = (write: CacheWriteService, runId: string) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | CacheWriteError, R> =>
+        Effect.onExit(effect, (exit): Effect.Effect<void, CacheWriteError> => {
+            const finish = (status: "ok" | "error" | "partial", metrics: unknown = {}) =>
+                writeIngestRunFinish(write, { runId, status, metrics });
             if (Exit.isSuccess(exit)) {
-                return db.query(buildIngestRunFinishStatement({ runId, status: "ok" }))
-                    .pipe(Effect.asVoid);
+                return finish("ok");
             }
             // Read the cause before the `hasInterrupts` guard: its negative
             // branch would otherwise narrow `exit` to `never`.
             const cause = exit.cause;
             if (Exit.hasInterrupts(exit)) {
-                return db.query(buildIngestRunFinishStatement({
-                    runId,
-                    status: "partial",
-                    metrics: { error: "interrupted" },
-                })).pipe(Effect.ignore);
+                return finish("partial", { error: "interrupted" }).pipe(Effect.ignore);
             }
             const failure = Cause.findErrorOption(cause);
             if (Option.isSome(failure)) {
-                return db.query(buildIngestRunFinishStatement({
-                    runId,
-                    status: "error",
-                    metrics: { error: errorText(failure.value) },
-                })).pipe(Effect.asVoid);
+                return finish("error", { error: errorText(failure.value) });
             }
             // Defect: still settle the row (never leave "running"), best
             // effort; the defect itself propagates past this finalizer.
-            return db.query(buildIngestRunFinishStatement({
-                runId,
-                status: "error",
-                metrics: { error: errorText(Cause.squash(cause)) },
-            })).pipe(Effect.ignore);
+            return finish("error", { error: errorText(Cause.squash(cause)) }).pipe(Effect.ignore);
         });
 
 const numericCounts = (value: unknown): Record<string, number> => {
@@ -145,7 +145,7 @@ const numericCounts = (value: unknown): Record<string, number> => {
 const resolveStages = (
     registry: StageRegistryShape,
     args: readonly string[],
-): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
+): ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> => {
     const hasStagesArg = args.some((a) => a.startsWith("--stages="));
     const hasDeriveOnly = args.includes("--derive-only");
     if (hasStagesArg && hasDeriveOnly) {
@@ -166,85 +166,150 @@ const resolveStages = (
     return registry.all();
 };
 
-const writeIngestEvent = (
-    db: SurrealClientShape,
-    input: {
-        readonly runId: string;
-        readonly source: string;
-        readonly stage: string;
-        readonly level: "debug" | "info" | "warn" | "error";
-        readonly message: string;
-        readonly counts?: Record<string, number>;
-    },
-): Effect.Effect<void, DbError> =>
-    Effect.gen(function* () {
-        const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
-        yield* db.query(buildIngestEventStatement(event));
-        publishIngestEvent(event);
-    }).pipe(Effect.asVoid);
+/**
+ * Settle one stage row from the stage's `Exit`, on EVERY exit path.
+ *
+ * This mirrors {@link withIngestRunFinish} deliberately: the run-level finalizer
+ * already had all four arms (success / typed failure / interruption / defect),
+ * and the stage-level wrapper had only the first two. That asymmetry is #840 -
+ * `Effect.tap` runs only on success and `Effect.catch` only on a typed failure,
+ * so an INTERRUPTED stage reached neither and its row stayed `running` forever,
+ * with no `ended_at` and no reason. Both the derive watchdog
+ * (`stage/runner.ts`, `Effect.timeoutOrElse`) and the outer run deadline
+ * interrupt stages, which is why 38 rows accumulated - 3 of them inside a run
+ * that reported `ok`, since the watchdog fails OPEN with a success sentinel.
+ *
+ * The interruption and defect arms `ignore` their write errors, exactly as the
+ * run-level finalizer does: a run that is already being torn down must not have
+ * its cause replaced by a bookkeeping failure. Success and typed failure let a
+ * write error propagate, because there the write IS the work.
+ *
+ * Exported for tests: the four arms are the contract, and crafting an `Exit`
+ * directly covers the interruption case that no end-to-end ingest test can
+ * trigger reliably.
+ */
+export const settleStage = (
+    write: CacheWriteService,
+    ledgerKey: { readonly runId: string; readonly source: string; readonly stage: string },
+    eventName: { readonly source: string; readonly stage: string },
+    exit: Exit.Exit<BaseStageStats, IngestStageError>,
+    /** The stage's own database time, from the accumulator `wrapStage` provided.
+     *  Omitted by callers that have none (tests crafting an `Exit` directly). */
+    selfMs?: number | null,
+): Effect.Effect<void, CacheWriteError> => {
+    if (Exit.isSuccess(exit)) {
+        const counts = numericCounts(exit.value);
+        return Effect.gen(function* () {
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts, selfMs });
+            yield* writeIngestEvent(write, {
+                ...ledgerKey,
+                level: "info",
+                message: `${eventName.source} ${eventName.stage} complete`,
+                counts,
+            });
+        });
+    }
+    // Read the cause before the `hasInterrupts` guard: its negative branch
+    // would otherwise narrow `exit` to `never`.
+    const cause = exit.cause;
+    const settle = (status: "error" | "interrupted", message: string) =>
+        Effect.gen(function* () {
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status, errorText: message, selfMs });
+            yield* writeIngestEvent(write, {
+                ...ledgerKey,
+                level: "error",
+                message,
+            });
+        });
+    if (Exit.hasInterrupts(exit)) {
+        // The watchdog overwrites this row with `timeout` immediately after,
+        // via `recordStageOutcome` - it knows the cap, and this arm does not.
+        return settle(
+            "interrupted",
+            "interrupted - the run ended before this stage finished (deadline, watchdog cap, or SIGINT)",
+        ).pipe(Effect.ignore);
+    }
+    const failure = Cause.findErrorOption(cause);
+    if (Option.isSome(failure)) {
+        return settle("error", errorText(failure.value));
+    }
+    // Defect: still settle the row (never leave "running"), best effort; the
+    // defect itself propagates past this finalizer.
+    return settle("error", errorText(Cause.squash(cause))).pipe(Effect.ignore);
+};
 
 const wrapStage = (
-    db: SurrealClientShape,
     runId: string,
-    stageDef: StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>,
-): StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService> => {
+    stageDef: StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>,
+): StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError> => {
     const eventName = stageEventName(stageDef.meta.key);
+    const ledgerKey = { runId, source: eventName.source, stage: eventName.stage } as const;
     return {
         ...stageDef,
-        run: (ctx: IngestContext) =>
+        run: (ctx: IngestContext, write: CacheWriteService) =>
             Effect.gen(function* () {
-                yield* db.query(buildIngestStageStartStatement({
-                    runId,
-                    source: eventName.source,
-                    stage: eventName.stage,
-                }));
-
-                return yield* stageDef.run(ctx).pipe(
-                    Effect.tap((value) => {
-                        const counts = numericCounts(value);
-                        return Effect.gen(function* () {
-                            yield* db.query(buildIngestStageFinishStatement({
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                status: "ok",
-                                counts,
-                            }));
-                            yield* writeIngestEvent(db, {
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                level: "info",
-                                message: `${eventName.source} ${eventName.stage} complete`,
-                                counts,
-                            });
-                        });
-                    }),
-                    Effect.catch((error) =>
-                        Effect.gen(function* () {
-                            const message = errorText(error);
-                            yield* db.query(buildIngestStageFinishStatement({
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                status: "error",
-                                counts: {},
-                                errorText: message,
-                            }));
-                            yield* writeIngestEvent(db, {
-                                runId,
-                                source: eventName.source,
-                                stage: eventName.stage,
-                                level: "error",
-                                message,
-                            });
-                            return yield* error;
-                        }),
+                yield* writeIngestStageStart(write, ledgerKey);
+                // One accumulator per stage, provided as a `Context.Reference`
+                // so the stage's internal fan-out (claude parses 8 files at a
+                // time) charges to the same total. Read on the exit path, after
+                // the body has finished adding to it.
+                const selfTime = makeStageSelfTime();
+                return yield* Effect.onExit(
+                    Effect.provideService(
+                        stageDef.run(ctx, write),
+                        CurrentStageSelfTime,
+                        selfTime,
                     ),
+                    // Settle writes go through the SAME charged seam as the
+                    // stage's own calls, so a stage stopped for exhausting its
+                    // self-time budget (#837) must not have its ledger write
+                    // refused by the very budget it exhausted: clear the budget
+                    // for the finalizer.
+                    (exit) =>
+                        Effect.provideService(
+                            settleStage(write, ledgerKey, eventName, exit, selfTime.ms),
+                            CurrentStageSelfTimeBudget,
+                            null,
+                        ),
                 );
             }),
     };
 };
+
+/**
+ * Settle a stage the RUNNER decided about without ever entering (or while
+ * cutting short) the stage body - the two cases the stage's own `Exit` cannot
+ * describe honestly.
+ *
+ * `timeout`: the derive watchdog capped a running stage. The stage body was
+ * interrupted, so {@link settleStage} has already written `interrupted`; this
+ * overwrites it with the precise status and the cap that fired. Ordering is
+ * guaranteed - `Effect.timeoutOrElse` completes the body's interruption
+ * (finalizers included) before it runs `orElse`.
+ *
+ * `skipped`: the stage never started, so it has NO row at all. Writing one is
+ * the point: a stage silently dropped for want of budget is indistinguishable
+ * from a stage that was never configured, and that ambiguity is what made a
+ * blank skill graph look like a broken feature rather than a starved derive.
+ */
+const recordRunnerStageOutcome = (
+    runId: string,
+    write: CacheWriteService,
+) =>
+(
+    stageKey: string,
+    outcome: { readonly status: "timeout" | "skipped"; readonly errorText: string },
+): Effect.Effect<void> =>
+    Effect.gen(function* () {
+        const eventName = stageEventName(stageKey);
+        const ledgerKey = { runId, source: eventName.source, stage: eventName.stage } as const;
+        if (outcome.status === "skipped") yield* writeIngestStageStart(write, ledgerKey);
+        yield* writeIngestStageFinish(write, {
+            ...ledgerKey,
+            status: outcome.status,
+            errorText: outcome.errorText,
+        });
+    }).pipe(Effect.ignore);
 
 export interface RunIngestOptions {
     readonly command: string;
@@ -277,6 +342,25 @@ export interface RunIngestOptions {
     readonly deadlineMs?: number;
 }
 
+/**
+ * The outcome of OTLP retention, carried OUT of the run rather than swallowed.
+ *
+ * Retention runs inside `runIngest` (not in the CLI's `afterWork`) because its
+ * DELETEs have to land in the snapshot this run publishes - housekeeping that
+ * only reaches the live database would be invisible to every reader until the
+ * next ingest. But "runs inside the run" must not mean "reports nowhere": an
+ * `Effect.ignore` here is a silent, recurring data-retention failure, and the
+ * CLI already owns a maintenance summary line built for exactly this. So the
+ * result (or the failure text) rides back on `RunIngestResult` and the caller
+ * prints it - `withIngestLock` hands the completed value to `afterWork`.
+ *
+ * Exactly one of the two fields is set.
+ */
+export interface OtelRetentionOutcome {
+    readonly result?: OtelRetentionResult;
+    readonly error?: string;
+}
+
 export interface RunIngestResult {
     readonly runId: string;
     readonly selectedStages: readonly string[];
@@ -285,6 +369,8 @@ export interface RunIngestResult {
      *  `failedFiles` from the per-file isolation guards). `durationMs` is
      *  excluded - summing wall-clocks across concurrent stages is noise. */
     readonly totals: Record<string, number>;
+    /** OTLP retention's outcome, for the caller's maintenance summary. */
+    readonly otelRetention: OtelRetentionOutcome;
 }
 
 const defaultRunId = (command: string): string =>
@@ -292,10 +378,23 @@ const defaultRunId = (command: string): string =>
 
 export const runIngest = (
     opts: RunIngestOptions,
-): Effect.Effect<RunIngestResult, DbError, SurrealClient | AxConfig | ProcessService | StageRegistry | TraceSink> =>
+): Effect.Effect<
+    RunIngestResult,
+    IngestStageError | CacheWriteError,
+    AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const cfg = yield* AxConfig;
         const registry = yield* StageRegistry;
+        return yield* withCacheWrite(
+            {
+                livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
+                lockPath: posixPath.join(cfg.paths.dataDir, "ingest.lock"),
+                schemaSql: DUCKDB_SCHEMA_SQL,
+                ...duckdbAssetPathOption(),
+            },
+            (write) => Effect.gen(function* () {
+        yield* reapStaleIngestRuns(write).pipe(Effect.ignore);
         // Deadline ownership lives with the CALLER (see RunIngestOptions.deadlineMs)
         // - forward it as-is, or apply none.
         const deadlineMs = opts.deadlineMs;
@@ -309,14 +408,33 @@ export const runIngest = (
         const runId = opts.runId?.() ?? defaultRunId(opts.command);
         const now = opts.now?.() ?? new Date();
 
-        yield* db.query(buildIngestRunStartStatement({
+        yield* writeIngestRunStart(write, {
             runId,
             command: opts.command,
-            ...(sinceDays === undefined ? {} : { sinceDays }),
-        }));
+            sinceDays: sinceDays ?? null,
+        });
+
+        // Clean up after runs that could not clean up after themselves. A
+        // finalizer cannot run on SIGKILL or power loss, so settling every stage
+        // on every exit path is necessary but never sufficient - the next run
+        // has to reconcile the residue (#840). Deliberately AFTER
+        // `reapStaleIngestRuns` above, which is what marks a stranded RUN
+        // terminal; this only touches stages whose parent run already is, so a
+        // concurrent run's live stages are untouched. Best effort: bookkeeping
+        // must not be able to fail an ingest.
+        const reconciled = yield* reconcileStrandedIngestStages(write, runId).pipe(
+            Effect.catchCause(() => Effect.succeed(0)),
+        );
+        if (reconciled > 0) {
+            yield* Effect.logInfo(
+                `ingest: reconciled ${reconciled} stage row(s) stranded at 'running' by an earlier run`,
+            );
+        }
 
         if (opts.args.includes("--reset")) {
-            yield* db.query("DELETE invoked; DELETE loaded; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;");
+            for (const table of ["invoked", "loaded", "proposed", "concerns", "recovered_by", "skill_paired", "skill"]) {
+                yield* write.exec(`DELETE FROM "${table}"`);
+            }
         }
 
         const ctx = IngestContext.make({
@@ -329,24 +447,24 @@ export const runIngest = (
         });
 
         const wrappedStages = selectedStages.map((stageDef) =>
-            wrapStage(
-                db,
-                runId,
-                stageDef as StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>,
-            )
+            wrapStage(runId, stageDef as StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>)
         );
 
         const stageStats = yield* runPipeline(
             wrappedStages,
             ctx,
-            deadlineMs === undefined ? {} : { deadlineMs },
+            write,
+            {
+                ...(deadlineMs === undefined ? {} : { deadlineMs }),
+                recordStageOutcome: recordRunnerStageOutcome(runId, write),
+            },
         ).pipe(
             LiveTrace.withTrace({
                 traceId: `ingest:${runId}`,
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
                 scope: { type: "user", id: process.env.USER ?? "local" },
             }),
-            withIngestRunFinish(db, runId),
+            withIngestRunFinish(write, runId),
             Effect.provideService(References.MinimumLogLevel, opts.verbose ? "Debug" : "Info"),
         );
 
@@ -358,10 +476,26 @@ export const runIngest = (
             }
         }
 
+        // Correlation is best-effort by design (idempotent, re-drawn every run,
+        // and a miss only costs one run's telemetry edges), so it stays ignored.
+        yield* correlateOrphanOtel(write).pipe(Effect.ignore);
+        // Retention is NOT: a failure here means OTLP rows accumulate forever.
+        // Captured and reported through the caller's maintenance summary rather
+        // than ignored, while still running inside the run so its DELETEs are in
+        // the snapshot this run publishes.
+        const otelRetention: OtelRetentionOutcome = yield* retainRecentOtel(write).pipe(
+            Effect.map((result): OtelRetentionOutcome => ({ result })),
+            Effect.catch((error): Effect.Effect<OtelRetentionOutcome> =>
+                Effect.succeed({ error: errorText(error) })),
+        );
+        yield* buildFtsIndexes(write);
         return {
             runId,
             selectedStages: selectedStages.map((s) => s.meta.key),
             status: "ok" as const,
             totals,
+            otelRetention,
         };
+            }),
+        );
     });

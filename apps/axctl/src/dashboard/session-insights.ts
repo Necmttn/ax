@@ -1,8 +1,8 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import type { SessionInsightsPayload } from "@ax/lib/shared/dashboard-types";
-import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { fetchSessionBaselines } from "./session-baselines.ts";
 
 /**
@@ -58,27 +58,6 @@ interface DiagnosticRow {
 interface InvokedRow {
     readonly skill: string;
     readonly ts: string;
-}
-
-interface MetricsRow {
-    readonly lines_added: number;
-    readonly lines_removed: number;
-    readonly durability_ratio: number | null;
-    readonly delegation_ratio: number | null;
-    readonly time_to_land_ms: number | null;
-}
-
-interface UsageRow {
-    readonly estimated_cost_usd: number | null;
-    readonly context_window: number | null;
-    readonly cache_read_input_tokens: number | null;
-    readonly prompt_tokens: number | null;
-    readonly estimated_tokens: number | null;
-}
-
-interface HealthRow {
-    readonly user_corrections: number | null;
-    readonly tool_errors: number | null;
 }
 
 interface TurnUsageRow {
@@ -159,70 +138,57 @@ const groupedChecks = (
 
 export const fetchSessionInsights = (
     bareId: string,
-): Effect.Effect<SessionInsightsPayload, DbError, SurrealClient> =>
+): Effect.Effect<SessionInsightsPayload, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const db = yield* CacheRead;
         const session = toBareSessionId(bareId);
-        const rid = toSessionRid(session);
+
+        const PhaseSchema = Schema.Struct({ phase: Schema.String, start_ts: TimestampColumn, end_ts: TimestampColumn, duration_ms: NumberFromBigIntColumn });
+        const ReactionSchema = Schema.Struct({ ts: TimestampColumn, reaction_type: Schema.String });
+        const CommitSchema = Schema.Struct({ ts: Schema.NullOr(TimestampColumn), sha: Schema.NullOr(Schema.String), reverted: Schema.NullOr(Schema.Boolean) });
+        const SpawnedSchema = Schema.Struct({ id: Schema.String, started_at: Schema.NullOr(TimestampColumn), ended_at: Schema.NullOr(TimestampColumn) });
+        const DiagnosticSchema = Schema.Struct({ kind: Schema.String, status: Schema.NullOr(Schema.String), ts: TimestampColumn });
+        const InvokedSchema = Schema.Struct({ skill: Schema.String, ts: TimestampColumn });
+        const MetricsSchema = Schema.Struct({ lines_added: NumberFromBigIntColumn, lines_removed: NumberFromBigIntColumn, durability_ratio: Schema.NullOr(Schema.Number), delegation_ratio: Schema.NullOr(Schema.Number), time_to_land_ms: Schema.NullOr(NumberFromBigIntColumn) });
+        const UsageSchema = Schema.Struct({ estimated_cost_usd: Schema.NullOr(Schema.Number), context_window: Schema.NullOr(NumberFromBigIntColumn), cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn), prompt_tokens: Schema.NullOr(NumberFromBigIntColumn), estimated_tokens: Schema.NullOr(NumberFromBigIntColumn) });
+        const HealthSchema = Schema.Struct({ user_corrections: Schema.NullOr(NumberFromBigIntColumn), tool_errors: Schema.NullOr(NumberFromBigIntColumn) });
+        const TurnUsageSchema = Schema.Struct({ seq: NumberFromBigIntColumn, prompt_tokens: Schema.NullOr(NumberFromBigIntColumn), cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn), cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn), ts: TimestampColumn });
+        const CompactionSchema = Schema.Struct({ ts: TimestampColumn });
 
         const [
-            phases,
-            negativeReactions,
-            producedCommits,
-            spawnedChildren,
-            diagnostics,
-            invokedSkills,
+            phasesRaw,
+            reactionsRaw,
+            commitsRaw,
+            childrenRaw,
+            diagnosticsRaw,
+            skillsRaw,
             metricsRows,
             usageRows,
             healthRows,
-        ] = yield* db.query<[
-            PhaseRow[],
-            ReactionRow[],
-            CommitRow[],
-            SpawnedRow[],
-            DiagnosticRow[],
-            InvokedRow[],
-            MetricsRow[],
-            UsageRow[],
-            HealthRow[],
-        ]>(`
-            SELECT phase, type::string(start_ts) AS start_ts, type::string(end_ts) AS end_ts, duration_ms
-            FROM phase_span WHERE session = ${rid} ORDER BY start_ts ASC;
+            turnUsageRaw,
+            compactionsRaw,
+        ] = yield* Effect.all([
+            db.rows(PhaseSchema, "SELECT phase, start_ts, end_ts, duration_ms FROM phase_span WHERE session = ? ORDER BY start_ts", [session]),
+            db.rows(ReactionSchema, "SELECT ts, reaction_type FROM reaction_event WHERE session = ? AND polarity = 'negative' ORDER BY ts", [session]),
+            db.rows(CommitSchema, 'SELECT c.ts, c.sha, c.reverted FROM produced p JOIN "commit" c ON c.id = p.out_id WHERE p.in_id = ?', [session]),
+            db.rows(SpawnedSchema, "SELECT s.id, s.started_at, s.ended_at FROM spawned e JOIN session s ON s.id = e.out_id WHERE e.in_id = ?", [session]),
+            db.rows(DiagnosticSchema, "SELECT kind, status, ts FROM diagnostic_event WHERE session = ? ORDER BY ts", [session]),
+            db.rows(InvokedSchema, "SELECT sk.name AS skill, i.ts FROM invoked i JOIN skill sk ON sk.id = i.out_id WHERE i.session = ? ORDER BY i.ts", [session]),
+            db.rows(MetricsSchema, "SELECT lines_added, lines_removed, durability_ratio, delegation_ratio, time_to_land_ms FROM session_metrics WHERE session = ?", [session]),
+            db.rows(UsageSchema, "SELECT estimated_cost_usd, context_window, cache_read_input_tokens, prompt_tokens, estimated_tokens FROM session_token_usage WHERE session = ?", [session]),
+            db.rows(HealthSchema, "SELECT user_corrections, tool_errors FROM session_health WHERE session = ?", [session]),
+            db.rows(TurnUsageSchema, "SELECT seq, prompt_tokens, cache_read_input_tokens, cache_creation_input_tokens, ts FROM turn_token_usage WHERE session = ? ORDER BY seq", [session]),
+            db.rows(CompactionSchema, "SELECT ts FROM compaction WHERE session = ? ORDER BY ts", [session]),
+        ], { concurrency: "unbounded" });
 
-            SELECT type::string(ts) AS ts, reaction_type
-            FROM reaction_event WHERE session = ${rid} AND polarity = "negative" ORDER BY ts ASC;
-
-            SELECT type::string(out.ts) AS ts, out.sha AS sha, out.reverted AS reverted
-            FROM produced WHERE in = ${rid};
-
-            SELECT type::string(out) AS id, type::string(out.started_at) AS started_at, type::string(out.ended_at) AS ended_at
-            FROM spawned WHERE in = ${rid};
-
-            SELECT kind, status, type::string(ts) AS ts
-            FROM diagnostic_event WHERE session = ${rid} ORDER BY ts ASC;
-
-            SELECT type::string(out) AS skill, type::string(ts) AS ts
-            FROM invoked WHERE session = ${rid} ORDER BY ts ASC;
-
-            SELECT lines_added, lines_removed, durability_ratio, delegation_ratio, time_to_land_ms
-            FROM session_metrics WHERE session = ${rid};
-
-            SELECT estimated_cost_usd, context_window, cache_read_input_tokens, prompt_tokens, estimated_tokens
-            FROM session_token_usage WHERE session = ${rid};
-
-            SELECT user_corrections, tool_errors
-            FROM session_health WHERE session = ${rid};
-        `);
-
-        const [turnUsage] = yield* db.query<[TurnUsageRow[]]>(`
-            SELECT seq, prompt_tokens, cache_read_input_tokens, cache_creation_input_tokens, type::string(ts) AS ts
-            FROM turn_token_usage WHERE session = ${rid} ORDER BY seq ASC;
-        `);
-
-        const [compactions] = yield* db.query<[CompactionRow[]]>(`
-            SELECT type::string(ts) AS ts
-            FROM compaction WHERE session = ${rid} ORDER BY ts ASC;
-        `);
+        const phases: PhaseRow[] = phasesRaw.map((row) => ({ ...row, start_ts: row.start_ts.toISOString(), end_ts: row.end_ts.toISOString() }));
+        const negativeReactions: ReactionRow[] = reactionsRaw.map((row) => ({ ...row, ts: row.ts.toISOString() }));
+        const producedCommits: CommitRow[] = commitsRaw.map((row) => ({ ...row, ts: row.ts?.toISOString() ?? null }));
+        const spawnedChildren: SpawnedRow[] = childrenRaw.map((row) => ({ ...row, started_at: row.started_at?.toISOString() ?? null, ended_at: row.ended_at?.toISOString() ?? null }));
+        const diagnostics: DiagnosticRow[] = diagnosticsRaw.map((row) => ({ ...row, ts: row.ts.toISOString() }));
+        const invokedSkills: InvokedRow[] = skillsRaw.map((row) => ({ ...row, ts: row.ts.toISOString() }));
+        const turnUsage: TurnUsageRow[] = turnUsageRaw.map((row) => ({ ...row, ts: row.ts.toISOString() }));
+        const compactions: CompactionRow[] = compactionsRaw.map((row) => ({ ts: row.ts.toISOString() }));
 
         const metrics = metricsRows[0] ?? null;
         const usage = usageRows[0] ?? null;

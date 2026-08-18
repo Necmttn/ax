@@ -1,7 +1,8 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
+import { cacheFirst, cacheRows } from "@ax/lib/duckdb/query";
+import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import { prettyPrint } from "@ax/lib/json";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
@@ -57,7 +58,21 @@ interface SearchInput {
     readonly limit: number;
 }
 
-const cmdSearch = (input: SearchInput) =>
+const SearchMatchRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    score: Schema.Number,
+});
+const SearchAggRow = Schema.Struct({
+    skill_id: Schema.String,
+    total_inv: NumberFromBigIntColumn,
+    inv_30d: NumberFromBigIntColumn,
+    last_used: Schema.NullOr(Schema.DateValid),
+});
+
+export const cmdSearch = (input: SearchInput) =>
     Effect.gen(function* () {
         const query = input.query;
         const limit = requirePositiveInt("search", "limit", input.limit);
@@ -67,92 +82,50 @@ const cmdSearch = (input: SearchInput) =>
             console.error("axctl skills search: missing query");
             process.exit(1);
         }
-        const db = yield* SurrealClient;
-        // Primary path: SurrealDB v3 BM25 FTS via the skill_search_name +
-        // skill_search_desc indexes (defined in schema/schema.surql with
-        // ngram(2, 8) tokenisation, so "test" hits "test-driven"). The
-        // `@N@` matches operator references an index by *position in the
-        // WHERE clause* (not field), and `search::score(N)` returns the
-        // BM25 score for predicate N. Combined score = sum of name +
-        // description BM25 scores; either side is NONE when only one
-        // matched, so we coerce via `math::max([score, 0])`.
-        //
-        // Time-window counts use explicit `invoked WHERE out = $parent.id`
-        // form rather than `<-invoked WHERE ts > ...`. The graph-traversal
-        // form materialises edges first then the WHERE drops every row
-        // (returns 0 even when matches exist). See issue #15.
-        // PERF (issue #31): The per-row `(SELECT count() FROM invoked
-        // WHERE out = $parent.id AND ts > 30d ...)` subquery costs ~1.5s
-        // per matched skill that happens to be one of the high-volume
-        // ones (e.g. codex:exec_command @ ~500k edges). For a search hit
-        // that includes them, total runtime jumps to 30s+. The fix is the
-        // same as cmdTaste: do the per-skill recent counters in one
-        // GROUP BY scan, then merge with the FTS-ranked result list.
-        const ftsSql = `
-SELECT
-    id,
-    name,
-    scope,
-    description,
-    (math::max([search::score(0), 0.0]) + math::max([search::score(1), 0.0])) AS score
+        // DuckDB carries no FTS index over `skill` (only turn/commit text get
+        // one), so this is a case-insensitive substring match - not a
+        // downgrade: it mirrors the same fallback behavior a missing/cold FTS
+        // index already produced before this port.
+        const lowerQuery = query.toLowerCase();
+        const matched = yield* cacheRows(SearchMatchRow, {
+            sql: `
+SELECT id, name, scope, description,
+       CAST((CASE WHEN lower(name) LIKE '%' || ? || '%' THEN 2.0 ELSE 0.0 END
+        + CASE WHEN lower(coalesce(description, '')) LIKE '%' || ? || '%' THEN 1.0 ELSE 0.0 END) AS DOUBLE) AS score
 FROM skill
-WHERE name @0@ $q OR description @1@ $q
+WHERE lower(name) LIKE '%' || ? || '%' OR lower(coalesce(description, '')) LIKE '%' || ? || '%'
 ORDER BY score DESC
-LIMIT ${limit};`;
-        const legacySql = `
-SELECT
-    id,
-    name,
-    scope,
-    description,
-    (IF string::lowercase(name) CONTAINS $q THEN 2.0 ELSE 0.0 END
-     + IF string::lowercase(description ?? '') CONTAINS $q THEN 1.0 ELSE 0.0 END) AS score
-FROM skill
-WHERE
-    string::lowercase(name) CONTAINS $q
-    OR string::lowercase(description ?? '') CONTAINS $q
-ORDER BY score DESC
-LIMIT ${limit};`;
-        // Per-skill aggregates over `invoked` in one full scan
-        // (~1-2s) - cheap relative to repeating it per matched skill.
-        const aggSql = `
-SELECT
-    out AS skill_id,
-    count() AS total_inv,
-    math::sum(IF ts > time::now() - 30d THEN 1 ELSE 0 END) AS inv_30d,
-    math::max(ts) AS last_used
+LIMIT ?`,
+            params: [lowerQuery, lowerQuery, lowerQuery, lowerQuery, limit],
+        }, "skills search matches");
+        // Per-skill aggregates over `invoked` in one full scan - cheap
+        // relative to repeating a per-skill subquery for every matched row.
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+        const aggRows = yield* cacheRows(SearchAggRow, {
+            sql: `
+SELECT out_id AS skill_id, count(*) AS total_inv,
+       count(*) FILTER (WHERE ts > ?) AS inv_30d,
+       max(ts) AS last_used
 FROM invoked
-GROUP BY out;`;
-        const matchResult = yield* db
-            .query<[Array<Record<string, unknown>>]>(ftsSql, { q: query })
-            .pipe(
-                Effect.catch(() =>
-                    db.query<[Array<Record<string, unknown>>]>(legacySql, {
-                        q: query.toLowerCase(),
-                    }),
-                ),
-            );
-        const aggResult = yield* db.query<[Array<Record<string, unknown>>]>(aggSql);
-        const matched = (matchResult?.[0] ?? []) as Array<Record<string, unknown>>;
-        const aggMap = new Map<string, Record<string, unknown>>();
-        for (const a of (aggResult?.[0] ?? []) as Array<Record<string, unknown>>) {
-            aggMap.set(String(a.skill_id ?? ""), a);
-        }
+GROUP BY out_id`,
+            params: [thirtyDaysAgo],
+        }, "skills search aggregates");
+        const aggMap = new Map(aggRows.map((a) => [a.skill_id, a] as const));
         const rows = matched
             .map((m) => {
-                const agg = aggMap.get(String(m.id ?? ""));
+                const agg = aggMap.get(m.id);
                 return {
                     name: m.name,
                     scope: m.scope,
                     description: m.description,
                     score: m.score,
-                    total_inv: agg ? Number(agg.total_inv ?? 0) : 0,
-                    inv_30d: agg ? Number(agg.inv_30d ?? 0) : 0,
+                    total_inv: agg ? agg.total_inv : 0,
+                    inv_30d: agg ? agg.inv_30d : 0,
                     last_used: agg?.last_used ?? null,
                 };
             })
             .sort((a, b) => {
-                const ds = Number(b.score ?? 0) - Number(a.score ?? 0);
+                const ds = b.score - a.score;
                 if (ds !== 0) return ds;
                 const d30 = b.inv_30d - a.inv_30d;
                 if (d30 !== 0) return d30;
@@ -175,20 +148,14 @@ GROUP BY out;`;
 
 /**
  * Issue #40: Pre-flight existence check so unknown skill names get a
- * dedicated error instead of an empty-but-success rendering. Returns true
- * if the skill exists. Pulls the SurrealClient itself rather than taking
- * it as a parameter so the helper composes naturally inside Effect.gen.
+ * dedicated error instead of an empty-but-success rendering. `null` means
+ * no skill has this name.
  */
-const skillExists = (name: string) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[unknown[]]>(
-            "SELECT id FROM skill WHERE name = $name LIMIT 1;",
-            { name },
-        );
-        const rows = result?.[0];
-        return Array.isArray(rows) && rows.length > 0;
-    });
+const SkillIdRow = Schema.Struct({ id: Schema.String });
+
+/** The skill's cache row id, or `null` if no skill has this name. */
+const resolveSkillId = (name: string) =>
+    cacheFirst(SkillIdRow, { sql: "SELECT id FROM skill WHERE name = ? LIMIT 1", params: [name] }, "skills resolve id");
 
 interface StatsInput {
     /** Optional on purpose: a bare `ax skills stats` reaches the teaching error below. */
@@ -259,20 +226,31 @@ interface RecentInput {
     readonly limit: number;
 }
 
-const cmdRecent = (input: RecentInput) =>
+const RecentInvocationRow = Schema.Struct({
+    ts: Schema.DateValid,
+    skill: Schema.String,
+    project: Schema.NullOr(Schema.String),
+});
+
+export const cmdRecent = (input: RecentInput) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("recent", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const sql = `
-SELECT ts, out.name AS skill, in.session.project AS project
-FROM invoked
-ORDER BY ts DESC
-LIMIT ${limit};`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0];
-        for (const r of rows ?? []) {
+        // `invoked.session` is denormalized directly onto the edge (see
+        // schema.duckdb.sql), so no extra hop through `turn` is needed to
+        // reach `session.project`.
+        const rows = yield* cacheRows(RecentInvocationRow, {
+            sql: `
+SELECT i.ts AS ts, sk.name AS skill, s.project AS project
+FROM invoked i
+JOIN skill sk ON sk.id = i.out_id
+LEFT JOIN session s ON s.id = i.session
+ORDER BY i.ts DESC
+LIMIT ?`,
+            params: [limit],
+        }, "skills recent");
+        for (const r of rows) {
             console.log(
-                `${r.ts}  ${r.skill}  (${prettifyProjectSlug(r.project)})`,
+                `${r.ts.toISOString()}  ${r.skill}  (${prettifyProjectSlug(r.project ?? "")})`,
             );
         }
     });
@@ -330,10 +308,10 @@ const cmdSkillsBloat = (input: SkillsBloatInput) =>
     Effect.gen(function* () {
         const budgetTokens = requirePositiveInt("skills bloat", "budget", input.budgetTokens);
         const limit = requirePositiveInt("skills bloat", "limit", input.limit);
-        const rows = yield* fetchSkillBloat({ budgetTokens, limit });
+        const { rows, total } = yield* fetchSkillBloat({ budgetTokens, limit });
 
         if (input.json) {
-            console.log(prettyPrint({ budgetTokens, skills: rows }));
+            console.log(prettyPrint({ budgetTokens, total, skills: rows }));
             return;
         }
         if (rows.length === 0) {
@@ -349,9 +327,13 @@ const cmdSkillsBloat = (input: SkillsBloatInput) =>
                 `${fmtCount(r.bytes)} B  used=${fmtCount(r.invocations)}`,
             );
         }
+        // Say what was withheld. Reporting the page size as the total made
+        // `--limit` silently change a number the user reads as a fact.
+        const shown = rows.length < total ? ` (showing top ${fmtCount(rows.length)})` : "";
         console.log(
-            `\n${rows.length} skill${rows.length === 1 ? "" : "s"} over the ` +
-            `${fmtCount(budgetTokens)}-token budget. Trim toward high-signal; length is not effort.`,
+            `\n${fmtCount(total)} skill${total === 1 ? "" : "s"} over the ` +
+            `${fmtCount(budgetTokens)}-token budget${shown}. ` +
+            `Trim toward high-signal; length is not effort.`,
         );
     });
 
@@ -411,8 +393,6 @@ const cmdSkillsWeighted = (input: SkillsWeightedInput) =>
                 doctorThreshold,
                 includeTools,
             }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills weighted"),
         );
 
         if (json) {
@@ -445,11 +425,10 @@ const cmdSkillsByRole = (input: SkillsByRoleInput) =>
         const json = wantsJsonFlag(input.json);
         const limit = requirePositiveInt("skills by-role", "limit", input.limit);
 
-        const result = yield* fetchSkillsByRole(
-            normalizeSkillsByRoleParams({ role, limit }),
-        ).pipe(
-            catchDbErrorAndExit("axctl skills by-role"),
-        );
+        // No `catchDbErrorAndExit`: this vertical's failures are
+        // `CacheReadError`/`JudgmentError`, not `DbError`. They bubble to the
+        // CLI edge exactly as `ax recall`'s do (the v2 template).
+        const result = yield* fetchSkillsByRole(normalizeSkillsByRoleParams({ role, limit }));
 
         if (json) {
             console.log(renderSkillsByRoleJson(result, role));
@@ -475,9 +454,7 @@ const cmdRolesForSkill = (input: RolesForSkillInput) =>
         const skill = input.skill;
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchRolesForSkill({ skill }).pipe(
-            catchDbErrorAndExit("axctl skills roles"),
-        );
+        const result = yield* fetchRolesForSkill({ skill });
 
         if (!result.skillExists) {
             fail(`axctl skills roles: unknown skill "${skill}"`);
@@ -503,9 +480,7 @@ const cmdRoles = (input: RolesInput) =>
     Effect.gen(function* () {
         const json = wantsJsonFlag(input.json);
 
-        const result = yield* fetchAllRoles().pipe(
-            catchDbErrorAndExit("axctl roles"),
-        );
+        const result = yield* fetchAllRoles();
 
         if (json) {
             console.log(renderAllRolesJson(result));
@@ -520,17 +495,27 @@ interface TasteInput {
     readonly includeTools: boolean;
 }
 
-const cmdTaste = (input: TasteInput) =>
+const TasteSkillRow = Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    scope: Schema.String,
+    dir_path: Schema.NullOr(Schema.String),
+});
+const TasteInvokedAggRow = Schema.Struct({
+    skill_id: Schema.String,
+    inv_total: NumberFromBigIntColumn,
+    inv_7d: NumberFromBigIntColumn,
+    inv_30d: NumberFromBigIntColumn,
+    clean_inv: NumberFromBigIntColumn,
+    corrections: NumberFromBigIntColumn,
+});
+const TasteProposedAggRow = Schema.Struct({ skill_id: Schema.String, proposals: NumberFromBigIntColumn });
+const TasteCommitsAggRow = Schema.Struct({ skill_id: Schema.String, commits_after: NumberFromBigIntColumn });
+
+export const cmdTaste = (input: TasteInput) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("taste", "limit", input.limit);
         const includeTools = input.includeTools;
-        const syntheticFilter = includeTools
-            ? ""
-            : ` AND (skill_id.dir_path IS NONE OR skill_id.dir_path != "(synthetic)")`;
-        const syntheticSkillFilter = includeTools
-            ? ""
-            : ` AND (dir_path IS NONE OR dir_path != "(synthetic)")`;
-        const db = yield* SurrealClient;
         // Composite signal: invocations (positive), errors near invocation
         // (negative), corrections within 3 turns of invocation in the same
         // session (negative - user pushed back), commits produced by sessions
@@ -563,129 +548,91 @@ const cmdTaste = (input: TasteInput) =>
         // so that the `clean_inv` / `corrections` predicates become pure
         // edge-field filters. End-to-end taste runtime drops to ~13s.
         //
-        // The query runs in three server-side stages plus a client-side
-        // merge so that *every* skill row gets a slot, not just those with
-        // invoked or proposed edges (issue #47):
-        //   (a) AGGREGATES_SQL  - per-skill counters from the invoked scan,
-        //                         then enriches with `<-proposed` /
-        //                         `<-invoked.in.session` traversals and
-        //                         `produced` join.
-        //   (b) PROPOSED_ONLY_SQL - skills with no invocations but with
-        //                           proposals, contributing the negative
-        //                           taste_score floor (-0.5 * proposals).
-        //   (c) ZERO_SQL          - skills with neither invocations nor
-        //                           proposals; rendered with score 0 so the
-        //                           total skill count is honest.
-        // Results are concatenated and sorted in TS to mirror the original
-        // ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC.
-        const aggregatesSql = `
-SELECT
-    name,
-    scope,
-    inv_total,
-    inv_7d,
-    inv_30d,
-    clean_inv,
-    corrections,
-    proposals,
-    array::len((
-        SELECT id FROM produced WHERE in IN $parent.skill_sessions
-    )) AS commits_after,
-    (
-        inv_total
-        - 2 * corrections
-        + array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions))
-        - 0.5 * proposals
-    ) AS taste_score
-FROM (
-    SELECT
-        skill_id.name AS name,
-        skill_id.scope AS scope,
-        inv_total,
-        inv_7d,
-        inv_30d,
-        clean_inv,
-        corrections,
-        array::len(skill_id<-proposed) AS proposals,
-        array::distinct(skill_id<-invoked.in.session ?? []) AS skill_sessions
-    FROM (
-        SELECT
-            out AS skill_id,
-            count() AS inv_total,
-            math::sum(IF ts > time::now() - 7d  THEN 1 ELSE 0 END) AS inv_7d,
-            math::sum(IF ts > time::now() - 30d THEN 1 ELSE 0 END) AS inv_30d,
-            math::sum(IF turn_has_error = false THEN 1 ELSE 0 END) AS clean_inv,
-            math::sum(IF was_corrected   = true  THEN 1 ELSE 0 END) AS corrections
-        FROM invoked
-        GROUP BY out
-    )
-    -- Drop orphan invocations whose target skill never had its row UPSERTed
-    -- (matches the original cmdTaste behaviour, which started FROM skill and
-    -- thus naturally excluded these). Currently happens for a handful of
-    -- legacy plugin/built-in tool names that didn't get recorded as skills.
-    -- Drop synthetic provider tools by default too: these are low-level tool
-    -- invocations, not named skills, and otherwise dominate the setup signal.
-    WHERE skill_id.name IS NOT NONE
-        ${syntheticFilter}
-);`;
-
-        // Skills with proposals but no invocations - the GROUP BY scan
-        // doesn't see them. Cheap: 137-skill count + per-skill proposal
-        // count, all via graph traversal.
-        const proposedOnlySql = `
-SELECT
-    name,
-    scope,
-    0 AS inv_total,
-    0 AS inv_7d,
-    0 AS inv_30d,
-    0 AS clean_inv,
-    0 AS corrections,
-    array::len(<-proposed) AS proposals,
-    0 AS commits_after,
-    -0.5 * array::len(<-proposed) AS taste_score
-FROM skill
-WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0${syntheticSkillFilter};`;
-
-        // Issue #47: skills with neither invocations nor proposals get
-        // dropped entirely from the merged set, so `taste --limit=200`
-        // returns ~35 rows instead of all 137. Pull them in with a flat
-        // zero score so the table reflects the real catalog.
-        const zeroSql = `
-SELECT
-    name,
-    scope,
-    0 AS inv_total,
-    0 AS inv_7d,
-    0 AS inv_30d,
-    0 AS clean_inv,
-    0 AS corrections,
-    0 AS proposals,
-    0 AS commits_after,
-    0 AS taste_score
-FROM skill
-WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) = 0${syntheticSkillFilter};`;
-
-        const [aggResult, propResult, zeroResult] = yield* Effect.all(
+        // Ported to a catalog-first join over four flat statements, so
+        // *every* skill row gets a slot (issue #47) in ONE pass instead of
+        // the original three-branch (invoked / proposed-only / zero) union:
+        //   (1) the full skill catalog (id/name/scope/dir_path - small table)
+        //   (2) per-skill invoked aggregates (inv_total/7d/30d/clean/corrections)
+        //   (3) per-skill proposed counts
+        //   (4) per-skill commits_after - `produced` rows in the DISTINCT set
+        //       of sessions that invoked this skill (a single JOIN + COUNT
+        //       DISTINCT, rather than a per-skill correlated subquery)
+        // A skill absent from (2)/(3)/(4) defaults to zero in the JS join,
+        // which is exactly the proposed-only/zero union the original
+        // three-branch query existed to reconstruct.
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+        const [skillRows, invokedAgg, proposedAgg, commitsAgg] = yield* Effect.all(
             [
-                db.query<[Array<Record<string, unknown>>]>(aggregatesSql),
-                db.query<[Array<Record<string, unknown>>]>(proposedOnlySql),
-                db.query<[Array<Record<string, unknown>>]>(zeroSql),
+                cacheRows(TasteSkillRow, { sql: "SELECT id, name, scope, dir_path FROM skill", params: [] }, "skills taste catalog"),
+                cacheRows(TasteInvokedAggRow, {
+                    sql: `
+SELECT out_id AS skill_id, count(*) AS inv_total,
+       count(*) FILTER (WHERE ts > ?) AS inv_7d,
+       count(*) FILTER (WHERE ts > ?) AS inv_30d,
+       count(*) FILTER (WHERE turn_has_error = false) AS clean_inv,
+       count(*) FILTER (WHERE was_corrected = true) AS corrections
+FROM invoked
+GROUP BY out_id`,
+                    params: [sevenDaysAgo, thirtyDaysAgo],
+                }, "skills taste invoked aggregates"),
+                cacheRows(TasteProposedAggRow, {
+                    sql: "SELECT out_id AS skill_id, count(*) AS proposals FROM proposed GROUP BY out_id",
+                    params: [],
+                }, "skills taste proposed aggregates"),
+                cacheRows(TasteCommitsAggRow, {
+                    sql: `
+SELECT i.out_id AS skill_id, count(DISTINCT p.id) AS commits_after
+FROM invoked i JOIN produced p ON p.in_id = i.session
+GROUP BY i.out_id`,
+                    params: [],
+                }, "skills taste commits aggregate"),
             ],
-            { concurrency: 3 },
+            { concurrency: 4 },
         );
-        const aggRows = aggResult?.[0] ?? [];
-        const propRows = propResult?.[0] ?? [];
-        const zeroRows = zeroResult?.[0] ?? [];
-        // Merge + sort to mirror original ORDER BY (server-side ORDER BY
-        // would force a second pass over the merged set, simpler in TS).
-        const score = (r: Record<string, unknown>) => Number(r.taste_score ?? 0);
-        const merged = [...aggRows, ...propRows, ...zeroRows].sort((a, b) => {
-            const ds = score(b) - score(a);
+        const invokedById = new Map(invokedAgg.map((r) => [r.skill_id, r] as const));
+        const proposedById = new Map(proposedAgg.map((r) => [r.skill_id, r.proposals] as const));
+        const commitsById = new Map(commitsAgg.map((r) => [r.skill_id, r.commits_after] as const));
+        interface TasteRow {
+            readonly name: string;
+            readonly scope: string;
+            readonly inv_total: number;
+            readonly inv_7d: number;
+            readonly inv_30d: number;
+            readonly clean_inv: number;
+            readonly corrections: number;
+            readonly proposals: number;
+            readonly commits_after: number;
+            readonly taste_score: number;
+        }
+        const merged: TasteRow[] = [];
+        for (const s of skillRows) {
+            if (!includeTools && s.dir_path === "(synthetic)") continue;
+            const inv = invokedById.get(s.id);
+            const proposals = proposedById.get(s.id) ?? 0;
+            const commitsAfter = commitsById.get(s.id) ?? 0;
+            const invTotal = inv?.inv_total ?? 0;
+            const corrections = inv?.corrections ?? 0;
+            merged.push({
+                name: s.name,
+                scope: s.scope,
+                inv_total: invTotal,
+                inv_7d: inv?.inv_7d ?? 0,
+                inv_30d: inv?.inv_30d ?? 0,
+                clean_inv: inv?.clean_inv ?? 0,
+                corrections,
+                proposals,
+                commits_after: commitsAfter,
+                taste_score: invTotal - 2 * corrections + commitsAfter - 0.5 * proposals,
+            });
+        }
+        // Sort to mirror the original ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC.
+        merged.sort((a, b) => {
+            const ds = b.taste_score - a.taste_score;
             if (ds !== 0) return ds;
-            const d30 = Number(b.inv_30d ?? 0) - Number(a.inv_30d ?? 0);
+            const d30 = b.inv_30d - a.inv_30d;
             if (d30 !== 0) return d30;
-            return Number(b.inv_total ?? 0) - Number(a.inv_total ?? 0);
+            return b.inv_total - a.inv_total;
         });
         const totalRows = merged.length;
         const rows = merged.slice(0, limit);
@@ -697,14 +644,14 @@ WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) = 0${syntheticSkillFi
         // 6+ digit values (e.g. codex:exec_command at 597,508) don't bleed
         // into the next column. Header width sets the floor.
         const cols = [
-            { key: "score", header: "score", get: (r: Record<string, unknown>) => fmtScore(r.taste_score) },
-            { key: "7d", header: "7d", get: (r: Record<string, unknown>) => fmtCount(r.inv_7d) },
-            { key: "30d", header: "30d", get: (r: Record<string, unknown>) => fmtCount(r.inv_30d) },
-            { key: "total", header: "total", get: (r: Record<string, unknown>) => fmtCount(r.inv_total) },
-            { key: "clean", header: "clean", get: (r: Record<string, unknown>) => fmtCount(r.clean_inv) },
-            { key: "corr", header: "corr", get: (r: Record<string, unknown>) => fmtCount(r.corrections ?? 0) },
-            { key: "prop", header: "prop", get: (r: Record<string, unknown>) => fmtCount(r.proposals ?? 0) },
-            { key: "cmts", header: "cmts", get: (r: Record<string, unknown>) => fmtCount(r.commits_after ?? 0) },
+            { key: "score", header: "score", get: (r: TasteRow) => fmtScore(r.taste_score) },
+            { key: "7d", header: "7d", get: (r: TasteRow) => fmtCount(r.inv_7d) },
+            { key: "30d", header: "30d", get: (r: TasteRow) => fmtCount(r.inv_30d) },
+            { key: "total", header: "total", get: (r: TasteRow) => fmtCount(r.inv_total) },
+            { key: "clean", header: "clean", get: (r: TasteRow) => fmtCount(r.clean_inv) },
+            { key: "corr", header: "corr", get: (r: TasteRow) => fmtCount(r.corrections) },
+            { key: "prop", header: "prop", get: (r: TasteRow) => fmtCount(r.proposals) },
+            { key: "cmts", header: "cmts", get: (r: TasteRow) => fmtCount(r.commits_after) },
         ];
         const widths = cols.map((c) =>
             Math.max(c.header.length, ...rows.map((r) => c.get(r).length)),
@@ -727,39 +674,37 @@ interface PairsInput {
     readonly limit: number;
 }
 
-const cmdPairs = (input: PairsInput) =>
+const PairedRow = Schema.Struct({
+    partner: Schema.String,
+    count: NumberFromBigIntColumn,
+    last_seen: Schema.DateValid,
+});
+
+export const cmdPairs = (input: PairsInput) =>
     Effect.gen(function* () {
         // The old missing-name guard is dead: <skill> is a required
         // Argument.string, so the CLI parser rejects the bare invocation.
         const name = input.name;
         const limit = requirePositiveInt("pairs", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const exists = yield* skillExists(name);
-        if (!exists) {
+        const skill = yield* resolveSkillId(name);
+        if (!skill) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             fail(`axctl: no skill named "${name}". try: axctl skills search "${hint}"`);
         }
         // Pairs are stored undirected (lexicographically lo->hi). Look the
         // skill up on either endpoint so callers don't have to know the
-        // canonical direction. Combine both legs into a single ranked list.
-        // Pairs are stored undirected (lexicographically lo->hi), so the
-        // queried skill could be on either endpoint. Use IF/ELSE to pick the
-        // partner regardless of position; SurrealDB lacks UNION on SELECTs.
-        const sql = `
-LET $s = (SELECT id FROM skill WHERE name = $name)[0].id;
-SELECT
-    (IF in = $s THEN out.name ELSE in.name END) AS partner,
-    count,
-    last_seen
-FROM skill_paired
-WHERE in = $s OR out = $s
-ORDER BY count DESC
-LIMIT ${limit};`;
-        const result = yield* db.query<unknown[]>(sql, { name });
-        const arr = Array.isArray(result)
-            ? [...result].reverse().find((r) => Array.isArray(r) && (r as unknown[]).length > 0)
-            : undefined;
-        const rows = (arr as Array<Record<string, unknown>> | undefined) ?? [];
+        // canonical direction; CASE picks the partner regardless of position.
+        const rows = yield* cacheRows(PairedRow, {
+            sql: `
+SELECT (CASE WHEN sp.in_id = ? THEN so.name ELSE si.name END) AS partner, sp.count, sp.last_seen
+FROM skill_paired sp
+JOIN skill si ON si.id = sp.in_id
+JOIN skill so ON so.id = sp.out_id
+WHERE sp.in_id = ? OR sp.out_id = ?
+ORDER BY sp.count DESC
+LIMIT ?`,
+            params: [skill.id, skill.id, skill.id, limit],
+        }, "skills pairs");
         if (rows.length === 0) {
             console.log("(no co-occurring skills)");
             return;
@@ -767,7 +712,7 @@ LIMIT ${limit};`;
         console.log(`${"partner".padEnd(50)}  count  last_seen`);
         for (const r of rows) {
             console.log(
-                `${String(r.partner).padEnd(50)}  ${String(r.count).padStart(5)}  ${r.last_seen ?? "-"}`,
+                `${r.partner.padEnd(50)}  ${String(r.count).padStart(5)}  ${r.last_seen.toISOString()}`,
             );
         }
     });
@@ -776,25 +721,27 @@ interface RecoveryInput {
     readonly limit: number;
 }
 
-const cmdRecovery = (input: RecoveryInput) =>
+const RecoveryRow = Schema.Struct({ skill: Schema.String, hits: NumberFromBigIntColumn });
+
+export const cmdRecovery = (input: RecoveryInput) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("recovery", "limit", input.limit);
-        const db = yield* SurrealClient;
-        const sql = `
-SELECT out.name AS skill, count() AS hits
-FROM recovered_by
-GROUP BY skill
+        const rows = yield* cacheRows(RecoveryRow, {
+            sql: `
+SELECT sk.name AS skill, count(*) AS hits
+FROM recovered_by r JOIN skill sk ON sk.id = r.out_id
+GROUP BY sk.name
 ORDER BY hits DESC
-LIMIT ${limit};`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0];
-        if (!rows || rows.length === 0) {
+LIMIT ?`,
+            params: [limit],
+        }, "skills recovery");
+        if (rows.length === 0) {
             console.log("(no recovery edges)");
             return;
         }
         console.log(`${"skill".padEnd(50)}  hits`);
         for (const r of rows) {
-            console.log(`${String(r.skill).padEnd(50)}  ${String(r.hits).padStart(4)}`);
+            console.log(`${r.skill.padEnd(50)}  ${String(r.hits).padStart(4)}`);
         }
     });
 
@@ -901,9 +848,7 @@ const tagCommand = Command.make(
             confidence,
             rationale: optionValue(rationale),
             remove,
-        }).pipe(
-            catchDbErrorAndExit("axctl skills tag"),
-        ),
+        }),
 ).pipe(
     Command.withDescription(
         "Manually assign a role to a skill (writes a plays_role edge with source=user). " +
@@ -924,7 +869,6 @@ const skillsLintCommand = Command.make(
             Effect.catchTag("PlatformError", (e) =>
                 stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
-            catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(
     Command.withDescription(
@@ -1065,6 +1009,37 @@ export const rolesCommand = Command.make(
 );
 
 export const skillsRuntime: RuntimeManifest = {
-    skills: "db",
-    roles: "db",
+    skills: {
+        kind: "db-conditional",
+        fallback: "cache",
+        subcommands: {
+            search: "cache",
+            stats: "cache",
+            recent: "cache",
+            unused: "cache",
+            taste: "cache",
+            weighted: "cache",
+            pairs: "cache",
+            recovery: "cache",
+            classify: "cache",
+            tag: "cache",
+            lint: "cache",
+            bloat: "cache",
+            loaded: "cache",
+            "by-role": "cache",
+            roles: "cache",
+            config: "none",
+            reconcile: "none",
+            scope: "none",
+            park: "none",
+            unpark: "none",
+            rm: "none",
+        },
+    },
+    // `ax roles` is PURE JUDGMENT - the role vocabulary and the tag counts both
+    // live in the SQLite sidecar - so it needs no published snapshot at all, and
+    // answers on a machine that has never run an ingest.
+    // roles-daemonless.test.ts spawns the real CLI with a snapshot path that
+    // does not exist, which an in-process test cannot check.
+    roles: "cache",
 };

@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { makeTestSurrealClient } from "./testing/surreal.ts";
+import { duckdbTestSetup } from "./testing/duckdb-dylib.ts";
+import { publishCacheFixture, readFixture, runWithPlatform } from "./testing/cache-fixture.ts";
+import type { CacheWriteService } from "./duckdb/seam.ts";
 import {
     encodeClaudeProjectSlug,
     type FoundTranscript,
@@ -14,6 +16,8 @@ import {
     TranscriptNotFoundError,
 } from "./transcript-locator.ts";
 
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("transcript-locator", { requireFts: true });
+
 // EXISTING tests of now-Effect fns: provide the REAL Bun-backed FileSystem +
 // Path against the tmp-dir fixtures (never the in-memory mock).
 const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
@@ -22,13 +26,29 @@ const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 const onDisk = (sessionId: string, hint: string | null): Promise<FoundTranscript> =>
     Effect.runPromise(locateTranscriptOnDisk(sessionId, hint).pipe(Effect.provide(FsLayer)));
 
-/** Minimal SurrealClient fake. `query` returns the raw_file the test wants
- *  resolveRawFileFromDb to see; everything else returns empty. */
-const fakeLocatorLayer = (rawFile: string | null) =>
-    makeTestSurrealClient({
-        denyWrites: true,
-        routes: { "SELECT raw_file FROM": [[{ raw_file: rawFile }]] },
-    }).layer;
+/**
+ * A REAL published snapshot holding one session row with the given `raw_file`.
+ *
+ * A stub that answered `SELECT raw_file FROM ...` with whatever the case
+ * handed it would pass identically whether the reader actually worked or
+ * read a stale table - so this publishes and re-reads a real snapshot instead.
+ * The hint is the ONLY way a synthetic subagent id resolves (no on-disk
+ * filename matches it), so a silent `null` here is a subagent transcript that
+ * reports "not found".
+ */
+const cacheLayerWith = async (sessionId: string, rawFile: string | null) => {
+    const fixture = await runWithPlatform(
+        publishCacheFixture(tempDir("ax-locator-cache-"), dylibPath, (write: CacheWriteService) =>
+            write.put("session", {
+                id: sessionId,
+                source: "claude",
+                project: "-p",
+                raw_file: rawFile,
+            }),
+        ),
+    );
+    return readFixture(fixture.snapshotPath, dylibPath);
+};
 
 describe("encodeClaudeProjectSlug", () => {
     test("standard absolute path", () => {
@@ -119,7 +139,7 @@ describe("locateTranscriptOnDisk", () => {
     });
 });
 
-describe("locateTranscript (with DB hint)", () => {
+describe("locateTranscript (with the cache hint)", () => {
     const tmpRoots: string[] = [];
     afterAll(async () => {
         for (const dir of tmpRoots) {
@@ -127,33 +147,51 @@ describe("locateTranscript (with DB hint)", () => {
         }
     });
 
-    test("uses raw_file hint from DB when the path exists on disk", async () => {
+    dtest("uses the raw_file hint from the cache when the path exists on disk", async () => {
         const dir = await mkdtemp(join(tmpdir(), "ax-locator-db-"));
         tmpRoots.push(dir);
         const file = join(dir, "agent-fromdb.jsonl");
         await writeFile(file, "");
+        const cache = await cacheLayerWith("claude-subagent-fromdb", file);
         const found = await Effect.runPromise(
             locateTranscript("claude-subagent-fromdb").pipe(
-                Effect.provide(Layer.merge(fakeLocatorLayer(file), FsLayer)),
-            ),
+                Effect.provide(Layer.merge(cache, FsLayer)),
+            ) as Effect.Effect<FoundTranscript, unknown>,
         );
         expect(found.path).toBe(file);
         expect(found.harness).toBe("claude");
-    });
+    }, 60_000);
 
-    test("null raw_file in DB plus no on-disk match throws TranscriptNotFoundError", async () => {
-        const bogus = `ax-test-db-null-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    dtest("a session id the cache does not hold gets no hint and falls through", async () => {
+        // Negative control: same fixture shape, a DIFFERENT id. If the reader
+        // silently returned null for every id, the case above could not tell.
+        const dir = await mkdtemp(join(tmpdir(), "ax-locator-miss-"));
+        tmpRoots.push(dir);
+        const file = join(dir, "agent-other.jsonl");
+        await writeFile(file, "");
+        const cache = await cacheLayerWith("claude-subagent-other", file);
+        const bogus = `ax-test-miss-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.merge(fakeLocatorLayer(null), FsLayer)),
-        );
+            Effect.provide(Layer.merge(cache, FsLayer)),
+        ) as Effect.Effect<FoundTranscript, unknown>;
         await expect(Effect.runPromise(eff)).rejects.toThrow(/session transcript not found/);
-    });
+    }, 60_000);
 
-    test("TranscriptNotFoundError preserves the session id", async () => {
-        const bogus = `ax-test-err-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    dtest("a null raw_file plus no on-disk match throws TranscriptNotFoundError", async () => {
+        const bogus = `ax-test-db-null-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const cache = await cacheLayerWith(bogus, null);
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.merge(fakeLocatorLayer(null), FsLayer)),
-        );
+            Effect.provide(Layer.merge(cache, FsLayer)),
+        ) as Effect.Effect<FoundTranscript, unknown>;
+        await expect(Effect.runPromise(eff)).rejects.toThrow(/session transcript not found/);
+    }, 60_000);
+
+    dtest("TranscriptNotFoundError preserves the session id", async () => {
+        const bogus = `ax-test-err-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const cache = await cacheLayerWith(bogus, null);
+        const eff = locateTranscript(bogus).pipe(
+            Effect.provide(Layer.merge(cache, FsLayer)),
+        ) as Effect.Effect<FoundTranscript, TranscriptNotFoundError>;
         const exit = await Effect.runPromise(Effect.exit(eff));
         expect(exit._tag).toBe("Failure");
         const failure = await Effect.runPromise(
@@ -164,5 +202,5 @@ describe("locateTranscript (with DB hint)", () => {
         expect((failure as TranscriptNotFoundError).message).toContain(
             "session transcript not found",
         );
-    });
+    }, 60_000);
 });

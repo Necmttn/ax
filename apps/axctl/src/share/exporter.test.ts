@@ -319,10 +319,10 @@ describe("buildShareArtifactFromParts", () => {
 });
 
 describe("normalizeSessionRecordRef", () => {
-    it("normalizes accepted session id forms to bracketed record refs", () => {
-        expect(normalizeSessionRecordRef("abc123")).toBe("session:⟨abc123⟩");
-        expect(normalizeSessionRecordRef("session:abc123")).toBe("session:⟨abc123⟩");
-        expect(normalizeSessionRecordRef("session:⟨abc123⟩")).toBe("session:⟨abc123⟩");
+    it("strips any record-ref decoration and returns the bare session id", () => {
+        expect(normalizeSessionRecordRef("abc123")).toBe("abc123");
+        expect(normalizeSessionRecordRef("session:abc123")).toBe("abc123");
+        expect(normalizeSessionRecordRef("session:⟨abc123⟩")).toBe("abc123");
     });
 
     it("rejects invalid session ids", () => {

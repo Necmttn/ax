@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-    buildContentDocumentStatements,
-    buildMentionsFileStatement,
+    buildContentDocumentRows,
     contentAtomRecordKey,
     contentBlockRecordKey,
     contentDocumentRecordKey,
@@ -74,8 +73,8 @@ describe("content block persistence statement builders", () => {
         expect(first).not.toBe(second);
     });
 
-    test("writes document, block, and atom rows with query dimensions", () => {
-        const statements = buildContentDocumentStatements({
+    test("builds document, block, and atom rows with query dimensions", () => {
+        const rows = buildContentDocumentRows({
             sourceKind: "artifact",
             sourceRef: ".planning/62-PLAN.md",
             artifactId: "artifact-62",
@@ -88,48 +87,11 @@ describe("content block persistence statement builders", () => {
             parsed,
         });
 
-        const sql = statements.join("\n");
         const documentKey = contentDocumentRecordKey("artifact", ".planning/62-PLAN.md");
-        const blockKey = contentBlockRecordKey(documentKey, 2);
-
-        expect(statements[0]).toBe(`DELETE content_atom WHERE document = content_document:\`${documentKey}\`;`);
-        expect(statements[1]).toBe(`DELETE content_block WHERE document = content_document:\`${documentKey}\`;`);
-        expect(sql).toContain(`UPSERT content_document:\`${documentKey}\` CONTENT`);
-        expect(sql).toContain("source_kind: \"artifact\"");
-        expect(sql).toContain("artifact: artifact:`artifact-62`");
-        expect(sql).toContain("parse_fingerprint:");
-        expect(sql).toContain("registry_version: \"content-blocks-v1\"");
-        expect(sql).toContain("classifier_versions: \"{\\\"refs\\\":\\\"1.0.0\\\"}\"");
-        expect(sql).toContain("ts: time::now()");
-        expect(sql).toContain(`UPSERT content_block:\`${blockKey}\` CONTENT`);
-        expect(sql).toContain("search_text: \"- [ ] Update src/auth/server.ts\"");
-        expect(sql).toContain("block_hash:");
-        expect(sql).toContain("UPSERT content_atom:");
-        expect(sql).toContain("workspace: workspace:`workspace-1`");
-        expect(sql).toContain("artifact_kind: \"gsd_plan\"");
-        expect(sql).toContain("kind: \"file_ref\"");
-    });
-
-    test("writes explicit atom relation statements", () => {
-        const documentKey = contentDocumentRecordKey("artifact", ".planning/62-PLAN.md");
-        const blockKey = contentBlockRecordKey(documentKey, 2);
-        const atomKey = contentAtomRecordKey(blockKey, "file_ref", 1);
-
-        const sql = buildMentionsFileStatement({
-            atomKey,
-            blockKey,
-            documentKey,
-            sourceKind: "artifact",
-            workspaceId: "workspace-1",
-            targetKey: "repo__src_auth_server_ts",
-            confidence: 0.8,
-        });
-
-        expect(sql).toContain(`RELATE content_atom:\`${atomKey}\`->mentions_file:\``);
-        expect(sql).toContain("->file:`repo__src_auth_server_ts`");
-        expect(sql).toContain(`document = content_document:\`${documentKey}\``);
-        expect(sql).toContain(`block = content_block:\`${blockKey}\``);
-        expect(sql).toContain("confidence = 0.8");
-        expect(sql).toContain("workspace = workspace:`workspace-1`");
+        expect(rows.document).toMatchObject({ id: documentKey, source_kind: "artifact", artifact: "artifact-62" });
+        expect(rows.blocks).toHaveLength(2);
+        expect(rows.blocks[1]).toMatchObject({ kind: "checklist_item", search_text: "- [ ] Update src/auth/server.ts" });
+        expect(rows.atoms).toHaveLength(2);
+        expect(rows.atoms[1]).toMatchObject({ kind: "file_ref", workspace: "workspace-1", artifact_kind: "gsd_plan" });
     });
 });

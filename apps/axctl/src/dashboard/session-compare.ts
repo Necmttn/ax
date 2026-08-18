@@ -10,18 +10,26 @@
  * Latency note: `duration_ms` is wall-clock (ended_at - started_at). Raw
  * transcripts carry no request duration / TTFT, so true per-turn model
  * latency is not derivable here - see the compare-view plan.
+ *
+ * PORTED TO DUCKDB. Session data (overview, token usage, health, produced
+ * count, per-turn spine, per-turn token usage) all read the published
+ * snapshot through `CacheRead`, via `queries/session-detail-cache.ts` -
+ * chunk 2c added the four compare-specific query definitions there (the
+ * file's own header names this chunk as their owner). The record-literal
+ * `session:⟨uuid⟩` splice this file used to build for every query is gone:
+ * DuckDB session ids are plain VARCHARs, so each id is a bound parameter.
  */
 import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { runCacheQuery, runCacheSingleQuery } from "@ax/lib/duckdb/query";
 import {
-    sessionCompareTurnsQuery,
-    sessionHealthQuery,
-    sessionOverviewQuery,
-    sessionProducedCountQuery,
-    sessionTokenUsageQuery,
-    sessionTurnTokenUsageQuery,
-} from "../queries/session-detail.ts";
+    sessionCompareTurnTokenUsageCacheQuery,
+    sessionCompareTurnsCacheQuery,
+    sessionHealthCacheQuery,
+    sessionOverviewCacheQuery,
+    sessionProducedCountCacheQuery,
+    sessionTokenUsageCacheQuery,
+} from "../queries/session-detail-cache.ts";
 import type {
     SessionCompareEntry,
     SessionComparePayload,
@@ -30,26 +38,19 @@ import type {
     SessionHealthSummary,
     SessionId,
     SessionOverview,
-    SessionTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
-import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 import { fillEstimatedCost, loadPricingCatalogForModels } from "../metrics/cost-estimate.ts";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 export interface SessionCompareOptions {
     /** Attach the per-turn timeline (P1). Off by default - summary only. */
     readonly includeTurns?: boolean;
 }
 
-// Mirrors the validation in session-detail.ts: accept real UUIDs and our
-// synthetic prefixed ids, restricted to SurrealDB's unquoted-id charset so the
-// record ref can be safely interpolated.
+// A DuckDB session id is a plain VARCHAR bound as a parameter, so this no
+// longer guards a record-literal interpolation seam - it is now purely a
+// "does this look like a real session id" sanity check on caller input.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
-
-const normalizeUuid = (sessionId: string): string =>
-    sessionId
-        .replace(/^session:⟨/, "")
-        .replace(/⟩$/, "")
-        .replace(/^session:/, "");
 
 const durationMs = (overview: SessionOverview): number | null => {
     if (!overview.started_at || !overview.ended_at) return null;
@@ -119,15 +120,14 @@ const sharedTaskLabel = (
 
 /** Build the per-turn timeline: turn spine merged with token usage (by seq),
  *  with wall-clock gaps derived from consecutive timestamps. */
-const buildTurns = (params: { recordRef: string }) =>
+const buildTurns = (sessionId: string) =>
     Effect.gen(function* () {
         const [spine, usage] = yield* Effect.all([
-            runQuery(sessionCompareTurnsQuery, params),
-            runQuery(sessionTurnTokenUsageQuery, params),
+            runCacheQuery(sessionCompareTurnsCacheQuery, { sessionId }),
+            runCacheQuery(sessionCompareTurnTokenUsageCacheQuery, { sessionId }),
         ]);
         const usageBySeq = new Map<number, { tokens: number | null; cost: number | null }>();
         for (const u of usage) {
-            if (u === null) continue;
             usageBySeq.set(u.seq, {
                 tokens: u.estimated_tokens ?? null,
                 cost: u.estimated_cost_usd ?? null,
@@ -137,7 +137,6 @@ const buildTurns = (params: { recordRef: string }) =>
         let prevMs: number | null = null;
         const turns: SessionCompareTurn[] = [];
         for (const row of spine) {
-            if (row === null) continue;
             const ms = row.ts ? new Date(row.ts).getTime() : null;
             const gap_ms =
                 prevMs !== null && ms !== null && Number.isFinite(ms) && ms >= prevMs
@@ -161,23 +160,23 @@ const buildTurns = (params: { recordRef: string }) =>
 export const fetchSessionCompare = (
     sessionIds: ReadonlyArray<string>,
     options: SessionCompareOptions = {},
-): Effect.Effect<SessionComparePayload, DbError, SurrealClient> =>
+): Effect.Effect<SessionComparePayload, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
+        const read = yield* CacheRead;
         const notFound: string[] = [];
         const entries: SessionCompareEntry[] = [];
 
         for (const sessionId of sessionIds) {
-            const uuid = normalizeUuid(sessionId);
-            if (!SESSION_ID_RE.test(uuid)) {
+            const bareId = toBareSessionId(sessionId);
+            if (!SESSION_ID_RE.test(bareId)) {
                 notFound.push(sessionId);
                 continue;
             }
-            const params = { recordRef: `session:⟨${uuid}⟩` };
             const [overview, token_usage, health, commit_count] = yield* Effect.all([
-                runSingleQuery(sessionOverviewQuery, params),
-                runSingleQuery(sessionTokenUsageQuery, params),
-                runSingleQuery(sessionHealthQuery, params),
-                runSingleQuery(sessionProducedCountQuery, params),
+                runCacheSingleQuery(sessionOverviewCacheQuery, { sessionId: bareId }),
+                runCacheSingleQuery(sessionTokenUsageCacheQuery, { sessionId: bareId }),
+                runCacheSingleQuery(sessionHealthCacheQuery, { sessionId: bareId }),
+                runCacheSingleQuery(sessionProducedCountCacheQuery, { sessionId: bareId }),
             ]);
 
             if (overview === null) {
@@ -185,7 +184,7 @@ export const fetchSessionCompare = (
                 continue;
             }
 
-            const turns = options.includeTurns ? yield* buildTurns(params) : undefined;
+            const turns = options.includeTurns ? yield* buildTurns(bareId) : undefined;
 
             entries.push({
                 session_id: overview.id,
@@ -195,10 +194,10 @@ export const fetchSessionCompare = (
                 started_at: overview.started_at,
                 ended_at: overview.ended_at,
                 duration_ms: durationMs(overview),
-                token_usage: token_usage as SessionTokenUsageDetail | null,
-                health: health as SessionHealthSummary | null,
+                token_usage,
+                health,
                 commit_count: commit_count ?? 0,
-                noise_score: noiseScore(health as SessionHealthSummary | null),
+                noise_score: noiseScore(health),
                 ...(turns ? { turns } : {}),
             });
         }
@@ -209,6 +208,7 @@ export const fetchSessionCompare = (
         // `estimated:` prefix) so "cheapest" compares real numbers - and stays
         // undecided when a session genuinely cannot be priced.
         const catalog = yield* loadPricingCatalogForModels(
+            read,
             entries.map((e) => e.token_usage?.model ?? e.model),
         );
         const priced = entries.map((entry) => {

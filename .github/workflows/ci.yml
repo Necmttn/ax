@@ -9,11 +9,101 @@ permissions:
   contents: read
 
 jobs:
+  # ax runs on its OWN DuckDB v1.5.5 build, which links the `fts` extension
+  # STATICALLY (scripts/build-duckdb.sh + scripts/duckdb/extension_config_local.cmake).
+  # The upstream release artifact cannot `LOAD fts` at all, so a job that lets
+  # `resolveTestDylib` fall through to the upstream download runs the whole
+  # DuckDB suite against a library that is missing the one extension the cache
+  # depends on - which is exactly how 36 recall/FTS/seam tests once failed here
+  # with `Install it first using "INSTALL fts"` while passing on developer
+  # machines that happen to have the extension in ~/.duckdb.
+  #
+  # So verify does not get to guess: this job produces the real artifact and
+  # hands it over. The build is expensive (~40-60min) and therefore CACHED on
+  # its own inputs - the pinned DuckDB commit and fts pin both live in the two
+  # hashed files, so a version bump busts the key and nothing else does.
+  duckdb:
+    name: DuckDB v1.5.5 (fts static)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      # The dynamic library smoke imports @ax/lib through the workspace link.
+      # Install before both the build path and the cache-hit smoke path.
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compute cache key
+        id: key
+        run: |
+          echo "value=duckdb-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-duckdb.sh', 'scripts/duckdb/extension_config_local.cmake', 'scripts/smoke-duckdb-dylib.ts') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore DuckDB build
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/duckdb
+          key: ${{ steps.key.outputs.value }}
+
+      - name: Install build tools
+        if: steps.restore.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      # Also runs the air-gap smoke itself (LOAD fts + match_bm25 with
+      # autoinstall/autoload off and every proxy pointed at a dead port).
+      - name: Build DuckDB
+        if: steps.restore.outputs.cache-hit != 'true'
+        env:
+          STATIC_LIBCPP: 1
+        run: scripts/build-duckdb.sh
+
+      # Re-run on a cache HIT too: this is what proves the restored bytes still
+      # link fts statically, so a poisoned or truncated cache entry fails here
+      # with one clear error instead of downstream as N mystery test failures.
+      - name: Air-gap smoke the provisioned artifact
+        run: |
+          set -euo pipefail
+          chmod +x dist/duckdb/duckdb
+          scripts/build-duckdb.sh --smoke-only dist/duckdb/duckdb
+          bun scripts/smoke-duckdb-dylib.ts dist/duckdb/libduckdb.so
+
+      # Saved only after the smoke passes, so a bad build never becomes the
+      # cached answer for every later run.
+      - name: Save DuckDB build
+        if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist/duckdb
+          key: ${{ steps.key.outputs.value }}
+
+      - name: Upload DuckDB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckdb-ci-linux-amd64
+          path: |
+            dist/duckdb/duckdb
+            dist/duckdb/libduckdb.so
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
+    needs: duckdb
     runs-on: ubuntu-24.04
     env:
       AX_DATA_DIR: /tmp/ax-ci
-      AX_DB_URL: ws://127.0.0.1:8521
+      # One knob, two resolvers: `resolveTestDylib`
+      # (packages/lib/src/testing/duckdb-dylib.ts) and `duckdbBinPath`
+      # (scripts/bench/duckdb-bin.ts) both prefer this dir over anything else,
+      # so no test can silently reach the upstream download.
+      DUCKDB_DIST_DIR: ${{ github.workspace }}/dist/duckdb
+      # Make a broken provisioning step FAIL rather than quietly skip every
+      # FTS-dependent suite. CI green must mean the suites ran.
+      AX_DUCKDB_REQUIRE_FTS: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -44,60 +134,41 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Start SurrealDB 3.1.0
+      - name: Download the DuckDB build
+        uses: actions/download-artifact@v4
+        with:
+          name: duckdb-ci-linux-amd64
+          path: dist/duckdb
+
+      # upload-artifact does not preserve the executable bit, so the CLI binary
+      # comes back mode 0644 and `duckdbBinPath`'s isExecutableFile() check
+      # would reject it - silently, by falling through to PATH.
+      - name: Assert the provisioned DuckDB can LOAD fts
         run: |
           set -euo pipefail
-          surreal_dir="$RUNNER_TEMP/surrealdb"
-          mkdir -p "$surreal_dir"
-          curl -sSL https://github.com/surrealdb/surrealdb/releases/download/v3.1.0/surreal-v3.1.0.linux-amd64.tgz |
-            tar -xz -C "$surreal_dir"
-          surreal_bin="$surreal_dir/surreal"
-          test "$("$surreal_bin" version | awk '{print $1}')" = "3.1.0"
-          echo "$surreal_dir" >> "$GITHUB_PATH"
-
-          mkdir -p \
-            "$AX_DATA_DIR/buckets/transcripts" \
-            "$AX_DATA_DIR/buckets/codex_artifacts"
-          SURREAL_BUCKET_FOLDER_ALLOWLIST="$AX_DATA_DIR/buckets" \
-            nohup "$surreal_bin" start \
-              --user root \
-              --pass root \
-              --bind 127.0.0.1:8521 \
-              --allow-experimental=files \
-              memory \
-              >"$RUNNER_TEMP/surreal.log" 2>&1 &
-          surreal_pid=$!
-
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8521/health >/dev/null; then
-              exit 0
-            fi
-            if ! kill -0 "$surreal_pid" 2>/dev/null; then
-              cat "$RUNNER_TEMP/surreal.log"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          cat "$RUNNER_TEMP/surreal.log"
-          exit 1
-
-      - name: Apply SurrealDB schema
-        run: bun run db:schema
+          chmod +x dist/duckdb/duckdb
+          bun scripts/smoke-duckdb-dylib.ts dist/duckdb/libduckdb.so
 
       - run: bash -n install.sh
 
       - run: bun test
 
-      - name: Run live-DB e2e suites
+      # `bun test <path>` treats its arguments as FILTERS and exits 0 when none
+      # match, so a deleted suite here reported success while running nothing -
+      # two of the four listed files no longer existed. Assert first.
+      - name: Run e2e suites
         env:
           AX_E2E_DB: "1"
         run: |
-          bun test \
-            apps/axctl/src/hooks/sdk-cli.e2e.test.ts \
-            apps/axctl/src/dashboard/sessions-query.e2e.test.ts \
-            apps/axctl/src/ingest/codex-reingest.e2e.test.ts \
-            apps/axctl/src/ingest/proposal-origin-migration.e2e.test.ts
+          set -euo pipefail
+          suites=(
+            apps/axctl/src/hooks/sdk-cli.e2e.test.ts
+            apps/axctl/src/ingest/codex-reingest.e2e.test.ts
+          )
+          for suite in "${suites[@]}"; do
+            test -f "$suite" || { echo "::error::e2e suite $suite is listed here but does not exist"; exit 1; }
+          done
+          bun test "${suites[@]}"
 
       - run: bun run typecheck
 

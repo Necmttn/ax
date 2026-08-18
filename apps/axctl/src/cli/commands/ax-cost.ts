@@ -7,6 +7,7 @@
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { printNextLinks } from "../next-format.ts";
 import {
     COST_DEFAULT_WINDOW_DAYS,
@@ -130,7 +131,7 @@ export function renderCostSessionsTable(result: CostSessionsResult): string {
     };
 
     const rendered: SessionRow[] = result.rows.map((r) => ({
-        // Strip "session:" prefix and optional SurrealDB backtick wrapping (`uuid`)
+        // Strip "session:" prefix and any backtick-wrapped id, if present
         session: r.session_id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1"),
         project: r.project ?? "",
         model: r.model ?? "?",
@@ -395,7 +396,8 @@ const cmdCostImages = (input: {
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
-        const result = yield* fetchImageContext({ sinceDays: input.sinceDays, limit: input.limit });
+        const read = yield* CacheRead;
+        const result = yield* fetchImageContext(read, { sinceDays: input.sinceDays, limit: input.limit });
 
         if (input.json) {
             console.log(prettyPrint(result));
@@ -416,7 +418,7 @@ const cmdCostImages = (input: {
         };
 
         const rendered: ImgRow[] = result.rows.map((r) => ({
-            // Strip "session:" prefix and SurrealDB backtick wrapping
+            // Strip "session:" prefix and any backtick-wrapped id
             session: r.session.replace(/^session:/, "").replace(/^`(.*)`$/, "$1").slice(0, 14),
             origin: r.origin,
             calls: integer(r.calls),
@@ -483,5 +485,5 @@ export const costCommand = Command.make("cost").pipe(
 );
 
 export const axCostRuntime: RuntimeManifest = {
-    cost: "db",
+    cost: "cache",
 };

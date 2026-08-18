@@ -20,9 +20,10 @@
  * Signals are all-time (the "is the receiver alive" question is not windowed);
  * coverage + cost are scoped to `--days`.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { fetchCostModels } from "./cost-analytics.ts";
 
 // ---------------------------------------------------------------------------
@@ -110,9 +111,8 @@ export const coveragePct = (linked: number, total: number): number =>
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /**
- * Extract the bare uuid from either an otel `session_id` (already bare) or a
- * SurrealDB session record id, which stringifies as `session:⟨uuid⟩` (or a
- * RecordId object). Returns null when no uuid is present.
+ * Extract the bare uuid from an otel `session_id` or a `session.id` - both are
+ * plain uuid strings on the DuckDB cache. Returns null when no uuid is present.
  */
 export const bareUuid = (v: unknown): string | null => {
     if (v == null) return null;
@@ -141,30 +141,42 @@ const SIGNAL_TABLES: ReadonlyArray<readonly [OtelSignalKind, string]> = [
     ["span", "otel_span"],
 ];
 
+/** `daysAgoExpr` needs a `?` placeholder for the day count - callers pass
+ *  `days` as a bound param alongside this text, same idiom as
+ *  `unused-skills.ts`'s `UNUSED_RECENT_SQL`. */
 export const buildOtelSessionIdsQuery = (table: string, days: number): string =>
     `SELECT session_id FROM ${table}`
-    + ` WHERE observed_at > time::now() - ${days}d`
-    + " AND session_id != NONE GROUP BY session_id;";
+    + ` WHERE observed_at > ${daysAgoExpr}`
+    + " AND session_id IS NOT NULL GROUP BY session_id;";
 
-export const fetchOtelRollup = (
-    input: OtelRollupInput,
-): Effect.Effect<OtelRollupResult, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
+const SignalCountRow = Schema.Struct({
+    harness: Schema.String,
+    n: NumberFromBigIntColumn,
+    last: TimestampColumn,
+});
+
+const SessionIdRow = Schema.Struct({ id: Schema.String });
+const OtelSessionIdRow = Schema.Struct({ session_id: Schema.NullOr(Schema.String) });
+const OtelCostSumRow = Schema.Struct({ v: Schema.NullOr(Schema.Number) });
+
+export const fetchOtelRollup = Effect.fn("queries.fetchOtelRollup")(
+    function* (input: OtelRollupInput) {
         const days = Math.max(1, Math.floor(input.sinceDays));
         const nowMs = Date.now();
 
         // -- signals: all-time count + freshness per (harness, signal) -------
         const signals: OtelSignalRow[] = [];
         for (const [signal, table] of SIGNAL_TABLES) {
-            const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT harness, count() AS n, time::max(observed_at) AS last FROM ${table} GROUP BY harness;`,
-            ))?.[0] ?? [];
+            const rows = yield* cacheRows(
+                SignalCountRow,
+                { sql: `SELECT harness, count(*) AS n, max(observed_at) AS last FROM ${table} GROUP BY harness;`, params: [] },
+                `otel signal counts (${table})`,
+            );
             for (const r of rows) {
                 const last = isoOf(r.last);
                 const age = last === null ? null : nowMs - new Date(last).getTime();
                 signals.push({
-                    harness: String(r.harness ?? "unknown"),
+                    harness: r.harness || "unknown",
                     signal,
                     count: numOf(r.n),
                     last_observed_at: last,
@@ -180,19 +192,23 @@ export const fetchOtelRollup = (
         // -- coverage: windowed sessions that have matching otel telemetry -----
         // Measured by session_id match, NOT the telemetry_of edge: the edge is
         // not what enrichment reads (telemetry-rollup.ts joins on session_id
-        // directly), and otel's `session_id` is a bare uuid while `session.id`
-        // is the escaped `session:⟨uuid⟩` record - so we compare bare uuids in JS.
-        const idRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id FROM session WHERE started_at > time::now() - ${days}d;`,
-        ))?.[0] ?? [];
+        // directly). Both `otel_*.session_id` and `session.id` are plain uuid
+        // strings on the DuckDB cache - bareUuid still normalises defensively.
+        const idRows = yield* cacheRows(
+            SessionIdRow,
+            { sql: `SELECT id FROM session WHERE started_at > ${daysAgoExpr};`, params: [days] },
+            "otel coverage session window",
+        );
         const windowUuids = idRows.map((r) => bareUuid(r.id)).filter((u): u is string => u !== null);
         const window_sessions = windowUuids.length;
 
         const otelSids = new Set<string>();
         for (const [, table] of SIGNAL_TABLES) {
-            const sidRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                buildOtelSessionIdsQuery(table, days),
-            ))?.[0] ?? [];
+            const sidRows = yield* cacheRows(
+                OtelSessionIdRow,
+                { sql: buildOtelSessionIdsQuery(table, days), params: [days] },
+                `otel coverage session ids (${table})`,
+            );
             for (const r of sidRows) {
                 const u = bareUuid(r.session_id);
                 if (u !== null) otelSids.add(u);
@@ -205,12 +221,20 @@ export const fetchOtelRollup = (
         // Only `claude_code.cost.usage` is summed - it is the receiver's own cost
         // signal. Token sums across per-event logs double-count badly, so they are
         // intentionally not surfaced here (see telemetry-rollup.ts for per-session use).
-        const metricRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT math::sum(value) AS v FROM otel_metric_point`
-            + ` WHERE observed_at > time::now() - ${days}d`
-            + ` AND metric = 'claude_code.cost.usage' GROUP ALL;`,
-        ))?.[0] ?? [];
-        const otlp_usd = metricRows.length > 0 ? numOf(metricRows[0]?.v) : null;
+        // A bare aggregate with no GROUP BY always returns exactly one row (v is
+        // NULL, not an empty result set, when nothing matched) - preserved here
+        // as `null`, distinct from a real $0.00.
+        const metricRows = yield* cacheRows(
+            OtelCostSumRow,
+            {
+                sql: `SELECT sum(value) AS v FROM otel_metric_point`
+                    + ` WHERE observed_at > ${daysAgoExpr}`
+                    + ` AND metric = 'claude_code.cost.usage';`,
+                params: [days],
+            },
+            "otel cost sum",
+        );
+        const otlp_usd = metricRows[0]?.v ?? null;
 
         const transcript = yield* fetchCostModels({ sinceDays: days });
 
@@ -228,4 +252,5 @@ export const fetchOtelRollup = (
                 transcript_usd: transcript.total_cost_usd ?? null,
             },
         } satisfies OtelRollupResult;
-    });
+    },
+);

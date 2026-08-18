@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
 import { HookProviderRegistryDefault } from "./providers/registry.ts";
 import {
     planInstall,
@@ -234,14 +233,10 @@ describe("filterAlreadyInstalled", () => {
 });
 
 // ---------------------------------------------------------------------------
-// installHookFile (real claude codec against tmp config + mock SurrealClient)
+// installHookFile (real claude codec against a tmp config)
 // ---------------------------------------------------------------------------
 
-const mockDb = Layer.succeed(SurrealClient, {
-    query: <T>() => Effect.sync(() => [[]] as unknown as T),
-} as never);
-
-const fullLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, HookProviderRegistryDefault, mockDb);
+const fullLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, HookProviderRegistryDefault);
 
 const runFull = <A, E>(eff: Effect.Effect<A, E, never>): Promise<A> =>
     Effect.runPromise(eff as Effect.Effect<A, never>);

@@ -68,8 +68,8 @@ describe("toSessionRid", () => {
     });
 
     test("strips embedded backticks defensively before wrapping", () => {
-        // An id with embedded backticks would break the SurrealQL parser;
-        // strip them rather than emit a syntactically broken record-id.
+        // An id with embedded backticks would break the record-id literal;
+        // strip them rather than emit a syntactically broken one.
         expect(toSessionRid("abc`def-ghi")).toBe("session:`abcdef-ghi`");
     });
 });

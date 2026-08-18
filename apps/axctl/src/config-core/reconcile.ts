@@ -1,6 +1,39 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { AxConfig } from "@ax/lib/config";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { withCacheWrite } from "@ax/lib/duckdb/seam";
+import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
+import { withIngestLock } from "@ax/lib/ingest-lock";
+import { posixPath } from "@ax/lib/shared/path";
+import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
+import { duckdbAssetPathOption } from "../duckdb-embed-wiring.ts";
+
+export const withConfigWrite = <A, E, R>(
+    use: (write: CacheWriteService) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | CacheWriteError, AxConfig | FileSystem.FileSystem | Path.Path | R> =>
+    Effect.gen(function* () {
+        const cfg = yield* AxConfig;
+        const lockPath = posixPath.join(cfg.paths.dataDir, "ingest.lock");
+        const outcome = yield* withIngestLock(
+            {
+                lockPath,
+                command: "config-write",
+                staleMs: 60_000,
+                onBusy: (holder) => Effect.die(`ingest lock is busy: ${holder.command}`),
+            },
+            withCacheWrite(
+                {
+                    livePath: posixPath.join(cfg.paths.dataDir, "ax-live.duckdb"),
+                    lockPath,
+                    schemaSql: DUCKDB_SCHEMA_SQL,
+                    ...duckdbAssetPathOption(),
+                },
+                (write) => use(write).pipe(Effect.tap(() => buildFtsIndexes(write))),
+            ),
+        );
+        if (outcome._tag === "completed") return outcome.value;
+        return yield* Effect.die(`config write did not complete: ${outcome._tag}`);
+    });
 
 /**
  * Generic soft-tombstone reconcile, shared by skills + agents. Given the set of
@@ -64,17 +97,18 @@ export const formatReconcile = (r: ReconcileReport): string => {
 };
 
 // `$scope` is appended by the caller when a scope is supplied (see scopeClause).
-const ABSENT = "name NOT IN $names AND deleted_at IS NONE"; // on disk gone -> tombstone
-const REVIVABLE = "name IN $names AND deleted_at IS NOT NONE"; // back on disk -> resurrect
-const LIVE = "name IN $names AND deleted_at IS NONE"; // present -> touch
+const allowedTable = (table: string): string => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) throw new Error(`invalid reconcile table: ${table}`);
+    return `"${table}"`;
+};
 
 export const reconcileTable = (
+    write: CacheWriteService,
     table: string,
     onDiskNames: readonly string[],
     opts: ReconcileOptions = {},
-): Effect.Effect<ReconcileReport, DbError, SurrealClient> =>
+): Effect.Effect<ReconcileReport, CacheWriteError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const names = Array.from(new Set(onDiskNames));
         const dryRun = opts.dryRun ?? false;
         const maxFraction = opts.maxTombstoneFraction ?? 0.5;
@@ -83,18 +117,20 @@ export const reconcileTable = (
         // reconcile of `user` can never touch `plugin:x`, a tool row, or a
         // project skill from another repo. Rows outside the current discovery's
         // scopes are left strictly alone.
-        const scopeClause = opts.scope !== undefined ? " AND scope = $scope" : "";
-        const bind = opts.scope !== undefined ? { names, scope: opts.scope } : { names };
-
-        const count = (rows: unknown): number => (Array.isArray(rows) ? rows.length : 0);
-        const select = (where: string) =>
-            db.query<[unknown[]]>(`SELECT id FROM ${table} WHERE ${where}${scopeClause}`, bind).pipe(
-                Effect.map(([rows]) => count(rows)),
-            );
+        const tableName = allowedTable(table);
+        const inClause = names.length === 0 ? "FALSE" : `name IN (${names.map(() => "?").join(", ")})`;
+        const scopeClause = opts.scope !== undefined ? " AND scope = ?" : "";
+        const bind = [...names, ...(opts.scope !== undefined ? [opts.scope] : [])];
+        const countWhere = (where: string) =>
+            write.first(
+                Schema.Struct({ n: Schema.BigInt }),
+                `SELECT count(*) AS n FROM ${tableName} WHERE ${where}${scopeClause}`,
+                bind,
+            ).pipe(Effect.map((row) => Number(Option.getOrElse(row, () => ({ n: 0n })).n)));
 
         // Inspect before mutating: how many would be tombstoned vs how many live.
-        const wouldTombstone = yield* select(ABSENT);
-        const liveTotal = yield* select(LIVE).pipe(Effect.map((n) => n + wouldTombstone));
+        const wouldTombstone = yield* countWhere(`NOT (${inClause}) AND deleted_at IS NULL`);
+        const liveTotal = (yield* countWhere(`${inClause} AND deleted_at IS NULL`)) + wouldTombstone;
 
         let skipReason: ReconcileReport["skipReason"] = null;
         if ((opts.tombstone ?? true) === false) skipReason = "incomplete";
@@ -104,20 +140,18 @@ export const reconcileTable = (
         const tombstoneSkipped = skipReason !== null;
 
         const mutate = (where: string, set: string) =>
-            db.query<[unknown[]]>(`UPDATE ${table} SET ${set} WHERE ${where}${scopeClause}`, bind).pipe(
-                Effect.map(([rows]) => count(rows)),
-            );
+            write.exec(`UPDATE ${tableName} SET ${set} WHERE ${where}${scopeClause}`, bind);
 
         // tombstone pass: skip entirely (0) when unsafe; report the count in dry-run.
         const tombstoned = tombstoneSkipped
             ? 0
             : dryRun
                 ? wouldTombstone
-                : yield* mutate(ABSENT, "deleted_at = time::now()");
+                : yield* mutate(`NOT (${inClause}) AND deleted_at IS NULL`, "deleted_at = CURRENT_TIMESTAMP");
         const resurrected = dryRun
-            ? yield* select(REVIVABLE)
-            : yield* mutate(REVIVABLE, "deleted_at = NONE, last_seen_at = time::now()");
-        const touched = dryRun ? liveTotal - wouldTombstone : yield* mutate(LIVE, "last_seen_at = time::now()");
+            ? yield* countWhere(`${inClause} AND deleted_at IS NOT NULL`)
+            : yield* mutate(`${inClause} AND deleted_at IS NOT NULL`, "deleted_at = NULL, last_seen_at = CURRENT_TIMESTAMP");
+        const touched = dryRun ? liveTotal - wouldTombstone : yield* mutate(`${inClause} AND deleted_at IS NULL`, "last_seen_at = CURRENT_TIMESTAMP");
 
         return { table, tombstoned, resurrected, touched, dryRun, tombstoneSkipped, skipReason, wouldTombstone };
     });
@@ -133,14 +167,15 @@ export interface ScopedReconcileReport extends ReconcileReport {
  * also gets its own safety guard, so one diverging scope can't drag the rest.
  */
 export const reconcileByScope = (
+    write: CacheWriteService,
     table: string,
     byScope: ReadonlyMap<string, readonly string[]>,
     opts: Omit<ReconcileOptions, "scope"> = {},
-): Effect.Effect<ScopedReconcileReport, DbError, SurrealClient> =>
+): Effect.Effect<ScopedReconcileReport, CacheWriteError> =>
     Effect.gen(function* () {
         const perScope: Array<{ scope: string; report: ReconcileReport }> = [];
         for (const [scope, names] of byScope) {
-            const report = yield* reconcileTable(table, names, { ...opts, scope });
+            const report = yield* reconcileTable(write, table, names, { ...opts, scope });
             perScope.push({ scope, report });
         }
         const sum = (f: (r: ReconcileReport) => number): number =>

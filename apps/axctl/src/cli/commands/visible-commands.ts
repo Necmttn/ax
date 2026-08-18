@@ -16,7 +16,7 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "signals",
     "roles",
     "hooks",
-    "serve",
+    "studio",
     "mcp",
     "tui",
     "share",
@@ -37,4 +37,5 @@ export const VISIBLE_COMMANDS: readonly string[] = [
     "digest",
     "team",
     "usage",
+    "otlpd",
 ];

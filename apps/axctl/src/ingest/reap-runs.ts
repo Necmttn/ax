@@ -8,21 +8,20 @@
  * interrupt/timeout finalizer, so doctor stops warning and run history reads
  * honestly. Idempotent: a row already settled drops out of the WHERE filter.
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { AxConfig } from "@ax/lib/config";
-import type { DbError } from "@ax/lib/errors";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import {
     isStrandedRun,
     REAP_GRACE_SECONDS,
     type IngestRunHeartbeatRow,
 } from "@ax/lib/shared/ingest-staleness";
-import { surrealJson } from "@ax/lib/shared/surql";
 
-/** `ingest_run:⟨id⟩` or `ingest_run:\`id\`` (SurrealDB escapes ids with special
- *  chars - e.g. a uuid's dashes - in angle brackets or backticks) -> the bare id
- *  that `buildIngestRunFinishStatement` re-wraps in backticks (an equivalent
- *  escape, so a uuid id still matches). */
+/** Strips a legacy `ingest_run:⟨id⟩` or `ingest_run:\`id\`` prefix/escaping
+ *  down to the bare id, in case an older row's `id` column still carries it.
+ *  `buildReapIngestRunStatement` below matches on this bare id via a plain
+ *  bound `id = ?` predicate. */
 const bareRunId = (id: unknown): string =>
     String(id)
         .replace(/^ingest_run:/, "")
@@ -54,25 +53,31 @@ export interface ReapStaleRunsResult {
  * "ok" in that gap must not be overwritten as "partial".
  */
 export function buildReapIngestRunStatement(runId: string): string {
-    return `UPDATE ingest_run:\`${runId}\` SET status = "partial", ended_at = time::now(), metrics = ${
-        surrealJson({ error: "reaped: stale running past ingest timeout" })
-    } WHERE status = 'running' RETURN NONE;`;
+    return `UPDATE ingest_run SET status = 'partial', ended_at = current_timestamp, metrics = ? WHERE id = ? AND status = 'running'`;
 }
 
 export const reapStaleIngestRuns = (
+    write: CacheWriteService,
     opts: { readonly dryRun?: boolean } = {},
-): Effect.Effect<ReapStaleRunsResult, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<ReapStaleRunsResult, CacheWriteError, AxConfig> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const config = yield* AxConfig;
         const staleAfterMs = (config.knobs.ingestTimeoutSeconds + REAP_GRACE_SECONDS) * 1000;
-        const [rows] = yield* db.query<[IngestRunHeartbeatRow[]]>(
-            "SELECT id, started_at, last_progress_at FROM ingest_run WHERE status = 'running';",
+        const rows = yield* write.rows(
+            Schema.Struct({
+                id: Schema.String,
+                started_at: TimestampColumn,
+                last_progress_at: Schema.NullOr(TimestampColumn),
+            }),
+            "SELECT id, started_at, last_progress_at FROM ingest_run WHERE status = 'running'",
         );
-        const ids = selectStrandedRunIds(rows ?? [], Date.now(), staleAfterMs);
+        const ids = selectStrandedRunIds(rows, Date.now(), staleAfterMs);
         if (!opts.dryRun) {
             for (const runId of ids) {
-                yield* db.query(buildReapIngestRunStatement(runId));
+                yield* write.exec(buildReapIngestRunStatement(runId), [
+                    JSON.stringify({ error: "reaped: stale running past ingest timeout" }),
+                    runId,
+                ]);
             }
         }
         return {

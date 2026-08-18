@@ -1,14 +1,28 @@
-import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { describe, expect } from "bun:test";
+import { Effect } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { CacheReadLayer, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
-    buildPublishStatements,
+    buildPublishRows,
     fetchWrappedCards,
     runPublishCards,
     sanitizeWrappedCards,
 } from "./wrapped-cards.ts";
+import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
 
-const card = (n: number, sensitivity = "public") => ({
+/**
+ * Runs against a REAL temp DuckDB, not a route-table fake.
+ *
+ * A stub that logs statement text and asserts on the strings passes whichever
+ * engine the writer actually talks to, which is exactly how a writer and its
+ * reader can end up on different databases with a green suite. Here the
+ * writer WRITES and the reader READS BACK, so the two halves are checked
+ * against each other.
+ */
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("wrapped cards", { requireFts: true });
+
+const card = (n: number, sensitivity = "public"): WrappedCardDto => ({
     question: `Q${n}?`,
     headline: `Headline ${n}`,
     body: `Body ${n}.`,
@@ -16,91 +30,110 @@ const card = (n: number, sensitivity = "public") => ({
     position: n,
 });
 
-const makeDb = (rows: Array<Record<string, unknown>>, log: string[] = []) => {
-    const stub: SurrealClientShape = {
-        query: (sql: string) => {
-            log.push(sql);
-            return Effect.succeed([rows]);
-        },
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
-
-describe("fetchWrappedCards", () => {
-    test("returns ordered rows", async () => {
-        const rows = await Effect.runPromise(
-            fetchWrappedCards().pipe(Effect.provide(makeDb([card(0), card(1)]))),
-        );
-        expect(rows).toHaveLength(2);
-        expect(rows[0]?.headline).toBe("Headline 0");
-    });
-});
-
 describe("sanitizeWrappedCards", () => {
-    test("drops sensitive cards", () => {
+    dtest("drops sensitive cards", () => {
         const out = sanitizeWrappedCards([card(0), card(1, "sensitive"), card(2)]);
         expect(out.map((c) => c.position)).toEqual([0, 2]);
     });
 });
 
-describe("buildPublishStatements", () => {
-    test("full replace: DELETE first, CREATE per card with index positions", () => {
-        const stmts = buildPublishStatements({
+describe("buildPublishRows", () => {
+    dtest("assigns positional ids and 0-based positions, defaulting sensitivity", () => {
+        const rows = buildPublishRows({
             cards: [
                 { question: "Q?", headline: "Big", body: "b", sensitivity: "sensitive" },
                 { question: "Q2?", headline: "Bigger", body: "b2" },
             ],
         });
-        expect(stmts[0]).toBe("DELETE wrapped_card;");
-        expect(stmts).toHaveLength(3);
-        expect(stmts[1]).toContain('sensitivity: "sensitive"');
-        expect(stmts[1]).toContain("position: 0");
-        expect(stmts[2]).toContain('sensitivity: "public"');
-        expect(stmts[2]).toContain("position: 1");
+        expect(rows.map((r) => r["id"])).toEqual(["card-0", "card-1"]);
+        expect(rows.map((r) => r["position"])).toEqual([0, 1]);
+        expect(rows.map((r) => r["sensitivity"])).toEqual(["sensitive", "public"]);
+        // series is JSON TEXT, never a native list (the DDL bans those).
+        expect(rows[0]?.["series"]).toBe("[]");
     });
 });
 
+/** Publish `cards` into a fresh cache, then read the deck back through
+ *  `CacheRead` over the published snapshot - the same path the dashboard uses. */
+const publishThenRead = async (
+    label: string,
+    body: (write: CacheWriteService) => Effect.Effect<unknown, unknown, never>,
+): Promise<ReadonlyArray<WrappedCardDto>> => {
+    const fixture = await runWithPlatform(
+        publishCacheFixture(tempDir(label), dylibPath, body),
+    );
+    return runWithPlatform(
+        fetchWrappedCards().pipe(
+            Effect.provide(
+                CacheReadLayer({
+                    snapshotPath: fixture.snapshotPath,
+                    ...(dylibPath === null ? {} : { assetPath: dylibPath }),
+                }),
+            ),
+        ),
+    ) as Promise<ReadonlyArray<WrappedCardDto>>;
+};
+
 describe("runPublishCards", () => {
-    test("publishes valid input", async () => {
-        const log: string[] = [];
-        const res = await Effect.runPromise(
-            runPublishCards({ cards: [{ question: "Q?", headline: "H", body: "b" }] }).pipe(
-                Effect.provide(makeDb([], log)),
-            ),
-        );
-        expect(res).toEqual({ status: "published", count: 1 });
-        expect(log[0]).toBe("DELETE wrapped_card;");
-        expect(log[1]).toContain("CREATE wrapped_card CONTENT");
-    });
+    dtest("writes a deck the reader can read back, in position order", async () => {
+        const deck = await publishThenRead("wrapped-publish-", (write) =>
+            runPublishCards(write, {
+                cards: [
+                    { question: "Q0?", headline: "H0", body: "b0", series: [1, 2, 3] },
+                    { question: "Q1?", headline: "H1", body: "b1", sensitivity: "sensitive" },
+                ],
+            }) as Effect.Effect<unknown, unknown, never>);
 
-    test("rejects empty card list", async () => {
+        expect(deck).toHaveLength(2);
+        expect(deck.map((c) => c.headline)).toEqual(["H0", "H1"]);
+        expect(deck.map((c) => c.position)).toEqual([0, 1]);
+        expect(deck[0]?.series).toEqual([1, 2, 3]);
+        expect(deck[1]?.sensitivity).toBe("sensitive");
+    }, 60_000);
+
+    dtest("a republish REPLACES the deck rather than appending to it", async () => {
+        const deck = await publishThenRead("wrapped-republish-", (write) =>
+            Effect.gen(function* () {
+                yield* runPublishCards(write, {
+                    cards: [
+                        { question: "old0", headline: "OLD0", body: "b" },
+                        { question: "old1", headline: "OLD1", body: "b" },
+                        { question: "old2", headline: "OLD2", body: "b" },
+                    ],
+                });
+                yield* runPublishCards(write, {
+                    cards: [{ question: "new0", headline: "NEW0", body: "b" }],
+                });
+            }) as Effect.Effect<unknown, unknown, never>);
+
+        expect(deck.map((c) => c.headline)).toEqual(["NEW0"]);
+    }, 60_000);
+
+    dtest("rejects an empty deck", async () => {
         await expect(
-            Effect.runPromise(
-                runPublishCards({ cards: [] }).pipe(Effect.provide(makeDb([]))),
-            ),
+            publishThenRead("wrapped-empty-", (write) =>
+                runPublishCards(write, { cards: [] }) as Effect.Effect<unknown, unknown, never>),
         ).rejects.toThrow("at least 1 card");
-    });
+    }, 60_000);
 
-    test("rejects more than 24 cards", async () => {
+    dtest("rejects more than 24 cards", async () => {
         const cards = Array.from({ length: 25 }, (_, i) => ({
             question: `Q${i}?`,
             headline: `H${i}`,
             body: "b",
         }));
         await expect(
-            Effect.runPromise(
-                runPublishCards({ cards }).pipe(Effect.provide(makeDb([]))),
-            ),
+            publishThenRead("wrapped-toomany-", (write) =>
+                runPublishCards(write, { cards }) as Effect.Effect<unknown, unknown, never>),
         ).rejects.toThrow("at most 24");
-    });
+    }, 60_000);
 
-    test("rejects bad sensitivity", async () => {
+    dtest("rejects an unknown sensitivity", async () => {
         await expect(
-            Effect.runPromise(
-                runPublishCards({
+            publishThenRead("wrapped-badsens-", (write) =>
+                runPublishCards(write, {
                     cards: [{ question: "Q?", headline: "H", body: "b", sensitivity: "secret" }],
-                }).pipe(Effect.provide(makeDb([]))),
-            ),
+                }) as Effect.Effect<unknown, unknown, never>),
         ).rejects.toThrow();
-    });
+    }, 60_000);
 });

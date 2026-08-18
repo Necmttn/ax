@@ -8,10 +8,10 @@
  */
 import { BunFileSystem } from "@effect/platform-bun";
 import { Effect, FileSystem } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../telemetry.ts";
+import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../../ingest/telemetry.ts";
 import { rawRoute, type AnyRoute, type EffectRunner } from "../router.ts";
 
 /**
@@ -106,12 +106,17 @@ export function formatSseComment(text: string): string {
     return `: ${text}\n\n`;
 }
 
-export function recentIngestEventsSql(sinceIso: string, limit = 50): string {
+/**
+ * `?`-parameterized: the caller binds the cutoff as a `Date` param, not a
+ * string-interpolated literal - `ingest_event.ts` is a DuckDB TIMESTAMP
+ * column.
+ */
+export function recentIngestEventsSql(limit = 50): string {
     const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;
     return `
 SELECT id, run, source, stage, level, message, counts, raw, ts
 FROM ingest_event
-WHERE ts > d"${sinceIso}"
+WHERE ts > ?
 ORDER BY ts ASC
 LIMIT ${safeLimit};`.trim();
 }
@@ -212,10 +217,10 @@ export function handleEventsRequest(runner: EffectRunner, intervalMs = 2000): Re
                 void (async () => {
                     try {
                         const result = await runner(Effect.gen(function* () {
-                            const db = yield* SurrealClient;
-                            return yield* db.query<[Array<Record<string, unknown>>]>(recentIngestEventsSql(sinceIso));
+                            const read = yield* CacheRead;
+                            return yield* read.raw(recentIngestEventsSql(50), [new Date(sinceIso)]);
                         }));
-                        for (const row of result?.[0] ?? []) {
+                        for (const row of result?.rows ?? []) {
                             if (!safeEnqueue(formatSseEvent("ingest_event", row))) return;
                             const ts = row.ts;
                             if (typeof ts === "string" || ts instanceof Date) {

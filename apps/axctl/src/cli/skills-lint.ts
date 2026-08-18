@@ -6,15 +6,14 @@
  * A brief is "filled" when its YAML frontmatter contains a non-empty
  * `primary_role: <string>`. Otherwise it is pending; leave it alone.
  */
-import { Effect, FileSystem, Path, type PlatformError } from "effect";
+import { Effect, FileSystem, Path, Schema, type PlatformError } from "effect";
 import { parse as parseYaml } from "yaml";
-import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { Judgment, type JudgmentError, type JudgmentService } from "@ax/lib/sqlite";
 import { prettyPrint } from "@ax/lib/json";
-import { recordLiteral } from "@ax/lib/ids";
 import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { surrealString } from "@ax/lib/shared/surql";
+import { edgeRowId, roleRowId } from "@ax/lib/stable-id";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -172,29 +171,18 @@ export function parseBrief(
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a skill's record key (id part only) by its name.
+ * Resolve a skill's cache row id by its name.
  * Returns null when not found.
  */
-const lookupSkillKey = (
-    db: SurrealClientShape,
+const SkillIdRow = Schema.Struct({ id: Schema.String });
+
+const lookupSkillId = (
+    read: CacheReadService,
     skillName: string,
-): Effect.Effect<string | null, DbError> =>
+): Effect.Effect<string | null, CacheReadError> =>
     Effect.gen(function* () {
-        const result = yield* db.query<[Array<{ id: unknown }>]>(
-            "SELECT id FROM skill WHERE name = $name LIMIT 1;",
-            { name: skillName },
-        );
-        const rows = result?.[0] ?? [];
-        if (rows.length === 0) return null;
-        const id = rows[0]!.id;
-        if (typeof id === "string") {
-            const colon = id.indexOf(":");
-            return colon >= 0 ? id.slice(colon + 1) : id;
-        }
-        if (id !== null && typeof id === "object" && "id" in id) {
-            return String((id as { id: unknown }).id);
-        }
-        return null;
+        const row = yield* read.first(SkillIdRow, "SELECT id FROM skill WHERE name = ? LIMIT 1", [skillName]);
+        return row._tag === "Some" ? row.value.id : null;
     });
 
 // ---------------------------------------------------------------------------
@@ -208,18 +196,19 @@ const lookupSkillKey = (
  * Returns a LintBriefResult describing what happened.
  */
 const applyBrief = (
-    db: SurrealClientShape,
+    read: CacheReadService,
+    judgment: JudgmentService,
     filePath: string,
     fm: BriefFrontmatter,
     dryRun: boolean,
-): Effect.Effect<LintBriefResult, DbError | PlatformError.PlatformError, FileSystem.FileSystem> =>
+): Effect.Effect<LintBriefResult, CacheReadError | JudgmentError | PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const { ax_classify, primary_role, secondary, confidence, rationale } = fm;
 
         // Resolve skill record id by name
-        const skillKey = yield* lookupSkillKey(db, ax_classify);
-        if (skillKey === null) {
+        const skillId = yield* lookupSkillId(read, ax_classify);
+        if (skillId === null) {
             return {
                 file: filePath,
                 action: "error" as const,
@@ -247,33 +236,33 @@ const applyBrief = (
             };
         }
 
-        // Inline record id literal (SDK RecordId bindings in db.query silently
-        // produce empty results - see src/lib/shared/graph-query.ts:132 and
-        // src/ingest/skill-role.ts:23).
-        const skillLit = recordLiteral("skill", skillKey);
-
-        // Sweep ALL prior brief-sourced edges for this skill before writing
-        // the current set (handles role shrinkage atomically).
-        yield* db.query(
-            `DELETE plays_role WHERE in = ${skillLit} AND source = "brief";`,
+        // Replace the complete brief opinion in one transaction. A failed role
+        // write cannot leave the skill with its old rows removed.
+        yield* judgment.transaction((transaction) =>
+            Effect.gen(function* () {
+                yield* transaction.exec(
+                    "DELETE FROM plays_role WHERE in_id = ? AND source = 'brief'",
+                    [skillId],
+                );
+                const since = new Date();
+                for (const roleName of allRoles) {
+                    const roleId = roleRowId(roleName);
+                    yield* transaction.exec(
+                        "INSERT INTO role (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+                        [roleId, roleName],
+                    );
+                    yield* transaction.put("plays_role", {
+                        id: edgeRowId("plays_role", skillId, roleId, "brief"),
+                        in_id: skillId,
+                        out_id: roleId,
+                        source: "brief",
+                        confidence,
+                        rationale: rationale ?? null,
+                        since,
+                    });
+                }
+            }),
         );
-
-        // Upsert role nodes + RELATE edges
-        let edgesWritten = 0;
-        const rationaleSql =
-            rationale !== undefined
-                ? `, rationale = ${surrealString(rationale)}`
-                : "";
-        for (const roleName of allRoles) {
-            const roleId = new RecordId("role", roleName);
-            yield* db.upsert(roleId, { name: roleName });
-
-            const roleLit = recordLiteral("role", roleName);
-            yield* db.query(
-                `RELATE ${skillLit}->plays_role->${roleLit} SET source = "brief", confidence = ${confidence}${rationaleSql}, since = time::now();`,
-            );
-            edgesWritten += 1;
-        }
 
         // Remove the brief file only after ALL writes succeed
         yield* fs.remove(filePath);
@@ -282,7 +271,7 @@ const applyBrief = (
             file: filePath,
             action: "applied" as const,
             skill: ax_classify,
-            edgesWritten,
+            edgesWritten: allRoles.length,
         };
     });
 
@@ -292,9 +281,10 @@ const applyBrief = (
 
 export const cmdSkillsLint = (
     opts: SkillsLintOptions,
-): Effect.Effect<void, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<void, CacheReadError | JudgmentError | PlatformError.PlatformError, CacheRead | Judgment | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
+        const judgment = yield* Judgment;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
@@ -340,15 +330,35 @@ export const cmdSkillsLint = (
             }
 
             // Filled brief - apply it (may produce an error result if skill not found)
-            const result = yield* applyBrief(db, filePath, parsed, opts.dryRun).pipe(
-                Effect.catchTag("DbError", (e) =>
+            const result = yield* applyBrief(read, judgment, filePath, parsed, opts.dryRun).pipe(
+                Effect.catchTags({
+                    CacheUnavailableError: (e) =>
+                        Effect.succeed({
+                            file: filePath,
+                            action: "error" as const,
+                            skill: parsed.ax_classify,
+                            error: `DB error: ${e.message}`,
+                        }),
+                    DuckDbQueryError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    DuckDbUnsupportedTypeError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    DuckDbDecodeError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    SidecarUnavailableError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    SidecarConnectionReplacedError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    SidecarQueryError: (e) =>
+                        Effect.succeed({ file: filePath, action: "error" as const, skill: parsed.ax_classify, error: `DB error: ${e.message}` }),
+                    SidecarDecodeError: (e) =>
                     Effect.succeed({
                         file: filePath,
                         action: "error" as const,
                         skill: parsed.ax_classify,
                         error: `DB error: ${e.message}`,
                     }),
-                ),
+                }),
             );
             results.push(result);
         }

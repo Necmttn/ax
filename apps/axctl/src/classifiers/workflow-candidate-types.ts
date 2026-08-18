@@ -1,4 +1,20 @@
 import type { ClassifierReviewPipelineInputValues, ClassifierReviewPipelineLifecycleReport, ClassifierReviewPipelineOutputVerifier } from "./review-pipeline-service.ts";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
+
+/**
+ * One row a workflow-candidate graph write plan (harness or review) will
+ * `put` into `classifier_graph_{node,edge,fact}` via the DuckDB write seam.
+ * `label` is a human-readable description, kept for `statements` and
+ * `first_failure` reporting - never executed as SQL. Mirrors the identical
+ * convention in package-operations.ts / label-mining.ts (each write-plan
+ * builder owns its own copy - three independent DuckDB write paths that
+ * happened to share a target-table shape, not one shared module).
+ */
+export interface WorkflowCandidateGraphWriteRow {
+    readonly table: "classifier_graph_node" | "classifier_graph_edge" | "classifier_graph_fact";
+    readonly row: Readonly<Record<string, DuckDbParam>>;
+    readonly label: string;
+}
 export type WorkflowCandidateTaskLikeMode = "include" | "exclude" | "only";
 export type WorkflowCandidatePromotionMode = "per-candidate" | "merge-evidence";
 export type WorkflowCandidatePromotionArtifact = "guidance" | "harness_check" | "classifier_fixture" | "review";
@@ -1001,6 +1017,7 @@ export interface WorkflowCandidateTopicHarnessGraphWritePlan {
     readonly source_projection_schema: WorkflowCandidateTopicHarnessGraphProjection["schema"];
     readonly topic: string;
     readonly statements: readonly string[];
+    readonly rows: readonly WorkflowCandidateGraphWriteRow[];
     readonly tables: readonly string[];
     readonly totals: {
         readonly statement_count: number;
@@ -1034,6 +1051,7 @@ export interface WorkflowCandidateTopicReviewGraphWritePlan {
     readonly source_projection_schema: WorkflowCandidateTopicReviewGraphProjection["schema"];
     readonly topic: string;
     readonly statements: readonly string[];
+    readonly rows: readonly WorkflowCandidateGraphWriteRow[];
     readonly tables: readonly string[];
     readonly totals: {
         readonly statement_count: number;
@@ -1352,6 +1370,10 @@ export interface WorkflowCandidateTaskDraft {
 
 export interface WorkflowCandidateProposalPlan {
     readonly summary: WorkflowCandidateProposalPromotionSummary;
+    /** Human-readable description of each write this plan performs, in order.
+     *  These are descriptions, NOT executable SQL - the same convention the
+     *  graph write plans and label-mining use; see the persist functions for
+     *  the real writes. */
     readonly statements: readonly string[];
 }
 

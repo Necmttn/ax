@@ -691,18 +691,18 @@ export const profileCommand = Command.make("profile").pipe(
 );
 
 // `interview submit` only validates JSON + writes ~/.ax/profile-highlights.json,
-// so it must not require a live SurrealDB; every other profile path reads the
+// so it must not require a live database; every other profile path reads the
 // graph. Route per-subcommand (and per-argv for the submit sub-subcommand).
 export const axProfileRuntime: RuntimeManifest = {
     profile: {
         kind: "db-conditional",
-        fallback: "db",
+        fallback: "cache",
         subcommands: {
-            show: "db",
-            publish: "db",
-            widget: "db",
-            unpublish: "db",
-            interview: (args) => (args[2] === "submit" ? "none" : "db"),
+            show: "cache",
+            publish: "cache",
+            widget: "cache",
+            unpublish: "cache",
+            interview: (args) => (args[2] === "submit" ? "none" : "cache"),
         },
     },
 };

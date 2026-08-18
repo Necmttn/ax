@@ -1,15 +1,44 @@
 /**
  * P2.2 tests: fetchSessionShow call counts and expansion logic.
  *
- * Most tests exercise the filtering predicate directly (no DB needed).
- * The one integration-style test uses a SurrealClient stub via Layer.
+ * Most cases exercise the filtering predicate directly (no database needed).
+ * The three that call `fetchSessionShow` run against a REAL published snapshot
+ * holding one session and nothing else - they assert the "no children, no
+ * roles" shape, which is what an EMPTY read produces too, so a fake would prove
+ * nothing about them. `session-view.test.ts` is where the populated shape is
+ * pinned; the `testing/surreal.ts` stub this file used to satisfy the layer
+ * requirement with is gone with that requirement.
  */
 
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import type { SessionDetailPayload, SessionLink } from "@ax/lib/shared/dashboard-types";
+import { Effect, Layer } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { SessionDetailPayload, SessionLink, SessionViewPayload } from "@ax/lib/shared/dashboard-types";
 import { fetchSessionShow } from "./session-show.ts";
+import { EmptyJudgmentTestLayer } from "../testing/judgment-test-layer.ts";
+
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("session-show", { requireFts: true });
+
+const LONE = "019e0ad4-0000-0000-0000-000000000001";
+
+/** One childless, skill-less session. */
+const showLayer = async (sessionId: string) => {
+    const fixture = await runWithPlatform(
+        publishCacheFixture(tempDir("ax-session-show-"), dylibPath, (w: CacheWriteService) =>
+            w.put("session", {
+                id: sessionId,
+                source: "claude",
+                project: "test-project",
+                cwd: "/test/cwd",
+                started_at: new Date("2026-05-28T10:00:00.000Z"),
+                ended_at: new Date("2026-05-28T11:00:00.000Z"),
+            }),
+        ),
+    );
+    return Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), EmptyJudgmentTestLayer);
+};
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -50,32 +79,20 @@ const makePayload = (
 // ---------------------------------------------------------------------------
 
 describe("fetchSessionShow - call count", () => {
-    it("makes exactly 1 fetchSessionDetail call when expand is empty", async () => {
-        // We test the call-count indirectly via the returned shape:
-        // if no children match, expanded_subagents is empty.
+    dtest("makes exactly 1 fetchSessionDetail call when expand is empty", async () => {
         const result = await Effect.runPromise(
             fetchSessionShow({
-                sessionId: "019e0ad4-0000-0000-0000-000000000001",
+                sessionId: LONE,
                 expand: new Set(),
                 expandAll: false,
-            }).pipe(
-                // Provide a SurrealClient stub. The actual DB calls inside
-                // fetchSessionDetail are irrelevant here because we focus on
-                // the routing logic: with no children, no expansion calls happen.
-                Effect.provide(
-                    makeTestSurrealClient({
-                        denyWrites: true,
-                        fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
-                    }).layer,
-                ),
-            ),
-        ).catch(() => ({
-            session: makePayload("019e0ad4-0000-0000-0000-000000000001"),
-            expanded_subagents: [],
-        }));
+            }).pipe(Effect.provide(await showLayer(LONE))) as Effect.Effect<SessionViewPayload, unknown>,
+        );
 
+        // The session itself must RESOLVE - otherwise "no expansions" is just
+        // "nothing was read", which is the exact confusion this chunk removes.
+        expect(result.session.overview?.id).toBe(LONE);
         expect(result.expanded_subagents).toHaveLength(0);
-    });
+    }, 60_000);
 
     it("expands only matching children when expand set is non-empty", () => {
         const child1 = makeChild("claude-subagent-aaa111");
@@ -153,57 +170,35 @@ describe("fetchSessionShow - expandAll", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchSessionShow - byRole", () => {
-    it("by_role is null when byRole=false (default)", async () => {
-        // Stub returns a payload with top_skills; byRole=false means no role query.
+    dtest("by_role is null when byRole=false (default)", async () => {
         const result = await Effect.runPromise(
             fetchSessionShow({
-                sessionId: "019e0ad4-0000-0000-0000-000000000001",
+                sessionId: LONE,
                 expand: new Set(),
                 expandAll: false,
                 byRole: false,
-            }).pipe(
-                Effect.provide(
-                    makeTestSurrealClient({
-                        denyWrites: true,
-                        fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
-                    }).layer,
-                ),
-            ),
-        ).catch(() => ({
-            session: makePayload("019e0ad4-0000-0000-0000-000000000001"),
-            expanded_subagents: [],
-            by_role: null,
-        }));
+            }).pipe(Effect.provide(await showLayer(LONE))) as Effect.Effect<SessionViewPayload, unknown>,
+        );
 
+        expect(result.session.overview?.id).toBe(LONE);
         expect(result.by_role).toBeNull();
-    });
+    }, 60_000);
 
-    it("by_role is null when top_skills is empty even with byRole=true", async () => {
-        // If session has no top_skills, the role fetch is skipped.
-        const payloadNoSkills = makePayload("019e0ad4-0000-0000-0000-000000000002", []);
-
+    dtest("by_role is null when top_skills is empty even with byRole=true", async () => {
+        // No invoked edges in the fixture, so the role fetch is skipped.
         const result = await Effect.runPromise(
             fetchSessionShow({
-                sessionId: "019e0ad4-0000-0000-0000-000000000002",
+                sessionId: LONE,
                 expand: new Set(),
                 expandAll: false,
                 byRole: true,
-            }).pipe(
-                Effect.provide(
-                    makeTestSurrealClient({
-                        denyWrites: true,
-                        fallback: [[payloadNoSkills]],
-                    }).layer,
-                ),
-            ),
-        ).catch(() => ({
-            session: payloadNoSkills,
-            expanded_subagents: [],
-            by_role: null,
-        }));
+            }).pipe(Effect.provide(await showLayer(LONE))) as Effect.Effect<SessionViewPayload, unknown>,
+        );
 
+        expect(result.session.overview?.id).toBe(LONE);
+        expect(result.session.top_skills).toEqual([]);
         expect(result.by_role).toBeNull();
-    });
+    }, 60_000);
 
     it("payload shape always has by_role field", () => {
         // Structural test: the by_role field must always be present on the

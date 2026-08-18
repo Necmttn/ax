@@ -71,5 +71,5 @@ export const signalsCommand = Command.make("signals").pipe(
 );
 
 export const signalsRuntime: RuntimeManifest = {
-    signals: "db",
+    signals: "cache",
 };

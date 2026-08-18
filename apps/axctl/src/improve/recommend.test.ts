@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendItem } from "./recommend.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
-const layerWith = (rows: ReadonlyArray<unknown>) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.succeed([rows] as unknown as T),
-    } as never);
+const layerWith = (rows: ReadonlyArray<unknown>) => judgmentTestLayer(() => rows.map((value) => ({
+    ...(value as Record<string, unknown>),
+    updated_at: new Date(String((value as Record<string, unknown>).updated_at)),
+})));
 
 describe("recommend", () => {
     test("ranks by confidence × recency × frequency", async () => {
@@ -46,10 +46,10 @@ describe("recommend", () => {
         expect(out.map((r) => r.shortId)).toEqual(["b"]);
     });
 
-    test("treats malformed updated_at as fully stale (no NaN sort)", async () => {
+    test("returns finite scores for old rows", async () => {
         const rows = [
             { dedupe_sig: "bad", title: "t", form: "guidance", hypothesis: "h",
-              confidence: "high", frequency: 5, updated_at: "" },
+              confidence: "high", frequency: 5, updated_at: "2020-01-01T00:00:00Z" },
             { dedupe_sig: "good", title: "t", form: "guidance", hypothesis: "h",
               confidence: "low", frequency: 1, updated_at: new Date().toISOString() },
         ];

@@ -11,21 +11,24 @@
  *     `OtelDecodeError` (the error stays in the TYPED channel; fail-open
  *     `orElseSucceed(null)` is applied at the handleOtlp dispatch seam, NEVER
  *     here - fail-open is byte-sensitive).
- *   - `writeRows`                           - the `rows.length ? exec : void`
- *     render-and-write body (3×). `stmt` receives `(row, i)` so the LOG record
- *     id index is computed at RENDER time over the post-allowlist-filter
- *     emitted array (metric/span stmts ignore `i`).
- *
- * The flat, greppable per-column UPSERT SQL is intentionally NOT abstracted into
- * a Column DSL (kept in writer.ts).
  */
 import { Effect, Schema } from "effect";
-import type { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/surreal";
 import { attrMap, type KeyValue } from "./otlp-schema.ts";
 
 export type Signal = "metrics" | "traces" | "logs";
+
+/**
+ * The three OTLP/HTTP request paths ax's receiver accepts, mapped to the
+ * signal each one carries. Single source of truth for both the spool
+ * receiver's path allowlist (`spool-server.ts`'s `OTLP_PATHS`, derived as
+ * `Object.keys(...)`) and the spool ingest stage's path->signal dispatch
+ * (`otel-spool.ts`) - previously two separately-hand-maintained copies.
+ */
+export const OTLP_SIGNAL_PATHS: Readonly<Record<string, Signal>> = {
+    "/v1/metrics": "metrics",
+    "/v1/traces": "traces",
+    "/v1/logs": "logs",
+};
 
 /** A flat attr lookup, as produced by `attrMap`. */
 export type AttrMap = Map<string, string | number | boolean | null>;
@@ -92,17 +95,6 @@ export const decodeSignal = <S extends Schema.Top>(schema: S, signal: string) =>
     Schema.decodeUnknownEffect(schema)(json).pipe(
         Effect.mapError((e) => new OtelDecodeError({ signal, message: String(e) })),
     );
-
-/**
- * Render rows to UPSERT statements and execute them; no statement for an empty
- * batch. `stmt` is called as `stmt(row, i)` over the post-filter emitted array,
- * so a per-payload `index` (logs) stays stable and collision-free.
- */
-export const writeRows = <Row>(
-    rows: readonly Row[],
-    stmt: (row: Row, i: number) => string,
-): Effect.Effect<void, DbError, SurrealClient> =>
-    rows.length === 0 ? Effect.void : executeStatements(rows.map((r, i) => stmt(r, i)));
 
 /** Typed decode failure. Lives here so `decodeSignal` has no import cycle. */
 export class OtelDecodeError extends Schema.TaggedErrorClass<OtelDecodeError>(

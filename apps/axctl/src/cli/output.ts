@@ -2,7 +2,7 @@
  * Shared CLI output helpers used across axctl subcommands.
  */
 import { Effect } from "effect";
-import { DbError } from "@ax/lib/errors";
+import type { CacheReadError } from "@ax/lib/duckdb/seam";
 
 /**
  * Detect if a command's output should be JSON.
@@ -27,15 +27,26 @@ export const wantsJsonFlag = (json: boolean): boolean =>
  */
 export const catchDbErrorAndExit =
     (prefix: string) =>
-    <A, R>(eff: Effect.Effect<A, DbError, R>): Effect.Effect<A, never, R> =>
+    <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, never, R> =>
         eff.pipe(
-            Effect.catchTag("DbError", (e) =>
+            Effect.catch((e: E) =>
                 Effect.promise(async () => {
-                    process.stderr.write(`${prefix}: DB error - ${e.message}\n`);
+                    const message = e instanceof Error ? e.message : String(e);
+                    process.stderr.write(`${prefix}: DB error - ${message}\n`);
                     process.exit(1);
                 }),
             ),
         ) as Effect.Effect<A, never, R>;
+
+/** Report a typed DuckDB cache read failure at a CLI handler boundary. */
+export const catchCacheReadErrorAndExit =
+    (prefix: string) =>
+    <A, R>(eff: Effect.Effect<A, CacheReadError, R>): Effect.Effect<A, never, R> =>
+        eff.pipe(
+            Effect.catch((error) =>
+                stderrExit(`${prefix}: cache error - ${error.message}\n`, 1),
+            ),
+        );
 
 /**
  * Write `message` to stderr and terminate the process with `code`.

@@ -1,7 +1,7 @@
 /**
- * Serve the studio SPA from `ax serve` itself, same-origin with the local
- * daemon, so the dashboard works without the hosted https studio reaching
- * across to a loopback daemon (mixed-content / Private Network Access hell -
+ * Serve the studio SPA from `ax studio` itself, same-origin with the local
+ * process, so the dashboard works without the hosted https studio reaching
+ * across to a loopback process (mixed-content / Private Network Access hell -
  * the bug this replaces).
  *
  * Two backing stores, in priority order:

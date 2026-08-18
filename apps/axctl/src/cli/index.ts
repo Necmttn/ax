@@ -2,8 +2,11 @@
 import { Cause, Effect, Exit, Layer } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Command } from "effect/unstable/cli";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { AxConfigLive } from "@ax/lib/config";
+import { ProcessServiceLive } from "@ax/lib/process";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
+import { JudgmentLive } from "../judgment.ts";
 import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
@@ -11,6 +14,7 @@ import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
 import { contextCommand, contextRuntime } from "./commands/context.ts";
 import { projectCommand, projectRuntime } from "./commands/project.ts";
 import { serveCommand, mcpCommand, tuiCommand, serveRuntime } from "./commands/serve.ts";
+import { otlpdCommand, otlpdRuntime } from "./commands/otlpd.ts";
 import { shareCommand, shareRuntime } from "./commands/share.ts";
 import { starCommand, starRuntime } from "./commands/star.ts";
 import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
@@ -62,10 +66,9 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
-import { correlateOrphanOtel } from "../otel/correlate.ts";
-import { withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
+import { BackgroundIngestSpawnerLive, withIngestStalenessPreflight } from "../queries/ingest-staleness.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
-import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
+import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
@@ -86,6 +89,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...contextRuntime,
     ...projectRuntime,
     ...serveRuntime,
+    ...otlpdRuntime,
     ...shareRuntime,
     ...starRuntime,
     ...dogfoodRuntime,
@@ -136,6 +140,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     rolesCommand,
     hooksCommand,
     serveCommand,
+    otlpdCommand,
     mcpCommand,
     tuiCommand,
     shareCommand,
@@ -174,8 +179,8 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     timelineCommand,
     versionCommand,
     updateCommand,
-    daemonCommand,
     doctorCommand,
+    daemonCommand,
     uninstallCommand,
     starCommand,
     ...devOnlyCommands,
@@ -199,43 +204,31 @@ export const rootCommand = Command.make("axctl").pipe(
 
 /**
  * Run the CLI command tree. Returns an Effect typed as needing only
- * `SurrealClient`; the cast bridges an Effect v4 beta gap where
+ * `CacheRead`; the cast bridges an Effect v4 beta gap where
  * `Command.runWith`'s `Environment` services (Stdio/Path/FileSystem/
  * Terminal/ChildProcessSpawner) are surfaced as compile-time requirements
  * even though they are satisfied implicitly at runtime. This is the only
  * place the cast lives - callers stay type-safe.
  */
-const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
-    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, CacheRead> =>
+    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<
+        void,
+        unknown,
+        CacheRead
+    >;
 
-/** CLI invocation that has had its `SurrealClient` requirement satisfied. */
+/** CLI invocation that has had every requirement satisfied. */
 type CliProgram = Effect.Effect<void, unknown, never>;
 
 /**
- * Provide AppLayer (SurrealClient + AxConfig + ProcessService) and a
- * scope so handlers that allocate scoped resources work. Used by commands
- * whose handlers actually touch SurrealDB.
- *
- * Every such command also gets the stale-graph warning (#697): one indexed
- * query, stderr only, before the command body. This is deliberately a
- * pre-flight rather than an `ensuring` finalizer because legacy handlers that
- * call `process.exit` bypass Effect finalizers; the warning must still cover
- * those stale-graph symptom paths.
- */
-const withDb = (args: ReadonlyArray<string>): CliProgram =>
-    withIngestStalenessPreflight(runCli(args)).pipe(
-        Effect.provide(AppLayer),
-        Effect.scoped,
-    );
-
-/**
- * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the
- * ingest command so the CLI handler can yield* StageRegistry.
+ * Provide IngestRuntimeLayer (`AppLayer` + `StageRegistryDefault` +
+ * `StageSourceLayers`) for the ingest command so the CLI handler can
+ * yield* StageRegistry.
  *
  * Transport selection for the ingest live-trace spans:
  *   - `--debug`            → ConsoleTransport (raw JSON events to stderr)
  *   - interactive terminal → PipelineTraceTransport (animated step pipeline)
- *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from AppLayer), so
+ *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from `AppLayer`), so
  *     machine-readable stdout (e.g. `--progress=json`) stays clean.
  * All transports write to **stderr**, never stdout.
  */
@@ -290,52 +283,87 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
                         ? pipelineTraceTransportLayer("plain", resolveProgressStages(args))
                         : undefined;
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
-    // not merged on top of the already-built AppLayer - otherwise the sink keeps
+    // not merged on top of the already-built IngestRuntimeLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
-    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
+    // `JudgmentLive` rides along because judgment-domain ingest stages (skills'
+    // frontmatter role tags, digest's open-proposal count) resolve `Judgment`.
+    // That is safe HERE and not for `CacheRead`: the sidecar has no snapshot and
+    // no publish step, so a row a stage writes is visible to the next statement
+    // in the same run - see the note in `apps/axctl/src/judgment.ts`. The daemon
+    // ingest runtime (`dashboard/serve-runtime.ts`) already merges it.
+    const layer = Layer.merge(
+        transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer,
+        JudgmentLive,
+    );
     return runCli(args).pipe(
-        // After ingest completes successfully, link orphan OTLP rows to their
-        // sessions via telemetry_of edges. Best-effort: never fails the ingest.
-        Effect.tap(() => Effect.ignore(correlateOrphanOtel())),
+        // OTLP correlation moved INSIDE the run (ingest/run.ts): it writes
+        // telemetry_of edges, so it needs the lock-held live writer, not a
+        // post-hoc tap on a runtime that no longer holds one.
+        withoutCacheRead,
         Effect.provide(layer),
         Effect.scoped,
     );
 };
 
 /**
- * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
- * commands (install/daemon/doctor/uninstall/version/update) and unknown
- * commands / typos - none of these should reach the DB, so accidental
- * access is a bug worth surfacing loudly.
+ * The no-engine runtime. Used by lifecycle commands
+ * (install/doctor/uninstall/version/update) and unknown commands / typos -
+ * none of these read stored data, so they get the platform layers and
+ * nothing that opens a file or a socket on the way in.
  */
-const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
-    const stub: SurrealClientShape = new Proxy({} as SurrealClientShape, {
-        get(_target, prop) {
-            throw new Error(
-                `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
-            );
-        },
-    });
-    // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
+const withoutDb = (args: ReadonlyArray<string>): CliProgram =>
+    // Lifecycle commands (install/setup/doctor/uninstall) are
     // @effect/platform-native and require FileSystem + Path. Provide the real
-    // Bun-backed layers here (no DB), so they run without dragging in AppLayer's
-    // SurrealClient connect path.
-    return runCli(args).pipe(
-        Effect.provideService(SurrealClient, stub),
-        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+    // Bun-backed layers here.
+    runCli(args).pipe(
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, CacheReadLive, JudgmentLive)),
     );
-};
 
-// Commands whose handlers reach into SurrealClient via AppLayer (or the
-// ingest superset layer). Anything outside this set runs through `withoutDb`
-// so the user gets fast, honest errors (e.g. "unknown command") instead of a
-// 5s connect timeout. Derived - do not hand-edit; declare runtime in the
-// owning commands/<family>.ts manifest instead. db-conditional families are
-// excluded: dispatch resolves them per-invocation via resolveRuntime.
+/**
+ * The v2 read runtime: everything a query command needs and nothing more -
+ * `CacheRead` over the published DuckDB snapshot, `AxConfig`, the platform
+ * layers, and `ProcessService` (git, for `--scope=here`).
+ *
+ * Nothing here opens a network connection, which is the whole point of the v2
+ * cut-over: `ax recall` works on a machine that has never run a database
+ * daemon.
+ */
+const withCache = (args: ReadonlyArray<string>): CliProgram =>
+    // The stale-graph warning (#697) and the freshness drive it feeds (with no
+    // ax-watch LaunchAgent, a stale graph forks its own debounced background
+    // `ax ingest`) run here, as a pre-flight rather than an `ensuring`
+    // finalizer: handlers that call `process.exit` bypass Effect finalizers,
+    // and those are exactly the paths a stale graph makes look wrong. It reads
+    // the snapshot's own freshness through `CacheRead`, so it costs one
+    // embedded query and opens nothing.
+    withIngestStalenessPreflight(runCli(args)).pipe(
+        Effect.provide(
+            Layer.mergeAll(
+                AxConfigLive.pipe(Layer.provideMerge(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+                ProcessServiceLive,
+                CacheReadLive,
+                JudgmentLive,
+                BackgroundIngestSpawnerLive,
+            ),
+        ),
+        Effect.scoped,
+    );
+
+// Commands routed onto the WRITE runtime - i.e. the ingest pipeline, which
+// takes the ingest lock and writes the live DuckDB database. Everything else
+// reads the published snapshot through `withCache`, or touches no stored data
+// at all through `withoutDb`. Derived - do not hand-edit; declare runtime in
+// the owning commands/<family>.ts manifest instead. db-conditional families
+// are excluded: dispatch resolves them per-invocation via resolveRuntime.
+//
+// The name doesn't match current semantics - it now marks commands routed
+// onto the write/ingest runtime, not literally "opens a database connection" -
+// but is load-bearing in effect-cli.test.ts, which asserts membership per
+// family.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
         .map(([name, entry]) => [name, entryRuntime(entry)] as const)
-        .filter(([, runtime]) => runtime === "db" || runtime === "ingest")
+        .filter(([, runtime]) => runtime === "ingest")
         .map(([name]) => name),
 );
 
@@ -344,13 +372,12 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set(
 export { resolveIngestStages, detectRemovedIngestFlag, insightsOnlyConflicts } from "./commands/ingest.ts";
 
 /**
- * Route raw argv to a CLI program. Mirrors the routing that used to live in
- * an async `main()` that `Effect.runPromise`d each branch - now every branch
- * RETURNS its Effect so the whole invocation runs as ONE main fiber under
- * `BunRuntime.runMain`. That makes SIGINT/SIGTERM interrupt the fiber, which
- * lets finalizers actually run (SurrealDB close, TraceSink/OTLP flush, the
- * ingest_run finish row + ingest-lock release) instead of hard-killing
- * mid-run and stranding `ingest_run` rows in status "running".
+ * Route raw argv to a CLI program. Every branch RETURNS its Effect so the
+ * whole invocation runs as ONE main fiber under `BunRuntime.runMain`. That
+ * makes SIGINT/SIGTERM interrupt the fiber, which lets finalizers actually
+ * run (DuckDB close, TraceSink/OTLP flush, the ingest_run finish row +
+ * ingest-lock release) instead of hard-killing mid-run and stranding
+ * `ingest_run` rows in status "running".
  *
  * The one remaining non-Effect legacy path (`-V`/`--version` flag printing)
  * is wrapped in `Effect.promise`; a rejection becomes a defect and flows
@@ -396,10 +423,10 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
     const declared = RUNTIME_BY_COMMAND[args[0]];
     if (declared !== undefined) {
         const runtime = resolveRuntime(declared, args);
-        return runtime === "db"
-            ? withDb(args)
-            : runtime === "ingest"
-                ? withIngest(args)
+        return runtime === "ingest"
+            ? withIngest(args)
+            : runtime === "cache"
+                ? withCache(args)
                 : withoutDb(args);
     }
     return withoutDb(args);

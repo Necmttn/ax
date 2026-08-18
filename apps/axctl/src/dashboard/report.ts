@@ -1,9 +1,11 @@
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { jsonRecordField } from "@ax/lib/decode";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { LooseRowSchema, NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
+import { CacheRead } from "@ax/lib/duckdb/seam";
 import { posixPath } from "@ax/lib/shared/path";
 import {
     recentFrictionSql,
@@ -13,6 +15,9 @@ import {
     toolFailuresSql,
 } from "../queries/insights.ts";
 import { fetchWorktreesOverview } from "./worktrees-overview.ts";
+
+// The five `../queries/insights.ts` statements this file runs read through
+// `CacheRead`.
 
 type Row = Record<string, unknown>;
 
@@ -55,50 +60,67 @@ const DEFAULT_DASHBOARD_PATH = posixPath.join(
     "dashboard.html",
 );
 
-const COUNT_SQL = `
-SELECT count() AS count FROM tool_call GROUP ALL;
-SELECT count() AS count FROM plan_snapshot GROUP ALL;
-SELECT count() AS count FROM insight GROUP ALL;
-SELECT count() AS count FROM friction_event GROUP ALL;
-SELECT count() AS count FROM diagnostic_event GROUP ALL;
-SELECT count() AS count FROM repository GROUP ALL;
-SELECT count() AS count FROM checkout GROUP ALL;
-SELECT count() AS count FROM session GROUP ALL;`;
+const CountRow = Schema.Struct({ count: NumberFromBigIntColumn });
 
-const countAt = (result: unknown[], index: number): number => {
-    const rows = result[index];
-    if (!Array.isArray(rows)) return 0;
-    const first = rows[0] as { count?: unknown } | undefined;
-    const count = Number(first?.count ?? 0);
-    return Number.isFinite(count) ? count : 0;
-};
+/** The eight table counts `fetchDashboardData` reports, each a `CacheRead`
+ *  count(*) query. Kept as a plain array (rather than one multi-statement
+ *  Surreal-style blob) because `CacheRead.rows` runs one statement per call. */
+const DASHBOARD_COUNT_TABLES: ReadonlyArray<{ readonly key: keyof DashboardCounts; readonly table: string }> = [
+    { key: "toolCalls", table: "tool_call" },
+    { key: "planSnapshots", table: "plan_snapshot" },
+    { key: "insights", table: "insight" },
+    { key: "frictionEvents", table: "friction_event" },
+    { key: "diagnosticEvents", table: "diagnostic_event" },
+    { key: "repositories", table: "repository" },
+    { key: "checkouts", table: "checkout" },
+    { key: "sessions", table: "session" },
+];
 
-const queryRows = (
-    client: SurrealClientShape,
-    sql: string,
-): Effect.Effect<readonly Row[], DbError> =>
+const fetchCounts = (): Effect.Effect<DashboardCounts, never, CacheRead> =>
     Effect.gen(function* () {
-        const result = yield* client.query<[Row[]]>(sql);
-        return result?.[0] ?? [];
+        const results = yield* Effect.all(
+            DASHBOARD_COUNT_TABLES.map(({ table }) =>
+                cacheRows(CountRow, { sql: `SELECT count(*) AS count FROM "${table}"`, params: [] }, `report.count_${table}`),
+            ),
+            { concurrency: 4 },
+        );
+        const out = {} as { -readonly [K in keyof DashboardCounts]: number };
+        DASHBOARD_COUNT_TABLES.forEach(({ key }, index) => {
+            out[key] = results[index]?.[0]?.count ?? 0;
+        });
+        return out;
     });
+
+/**
+ * One insight view, read through `CacheRead`.
+ *
+ * The column set differs per view and is not known here, so rows decode as
+ * `LooseRowSchema` - which is also what turns a `COUNT(*)` BIGINT cell into a
+ * number. Without it `renderDashboardHtml`'s `JSON.stringify` throws on the
+ * first aggregate column (see `LooseCellColumn`).
+ *
+ * `cacheRows` degrades a failed read to `[]` and logs `context` - one broken
+ * view must not take the whole report down.
+ */
+const insightRows = (sql: string, context: string): Effect.Effect<readonly Row[], never, CacheRead> =>
+    cacheRows(LooseRowSchema, { sql, params: [] }, context) as Effect.Effect<readonly Row[], never, CacheRead>;
 
 export const fetchDashboardData = (
     limit: number,
-): Effect.Effect<DashboardData, DbError, SurrealClient> =>
+): Effect.Effect<DashboardData, DbError, CacheRead> =>
     Effect.gen(function* () {
-        const client = yield* SurrealClient;
-        const [countResult, tableCounts, worktrees, repositories, friction, tools, sessions] =
+        const [counts, tableCounts, worktrees, repositories, friction, tools, sessions] =
             yield* Effect.all(
                 [
-                    client.query<unknown[]>(COUNT_SQL),
-                    queryRows(client, schemaCoverageSql()),
+                    fetchCounts(),
+                    insightRows(schemaCoverageSql(), "report.schema_coverage"),
                     // Deref-free aggregates + JS join; the legacy correlated
                     // SQL full-scanned turn/tool_call once per checkout.
                     fetchWorktreesOverview(limit),
-                    queryRows(client, repositoryOverviewSql(limit)),
-                    queryRows(client, recentFrictionSql(limit)),
-                    queryRows(client, toolFailuresSql(limit)),
-                    queryRows(client, sessionEvidenceSql(limit)),
+                    insightRows(repositoryOverviewSql(limit), "report.repository_overview"),
+                    insightRows(recentFrictionSql(limit), "report.recent_friction"),
+                    insightRows(toolFailuresSql(limit), "report.tool_failures"),
+                    insightRows(sessionEvidenceSql(limit), "report.session_evidence"),
                 ],
                 { concurrency: 6 },
             );
@@ -107,16 +129,7 @@ export const fetchDashboardData = (
 
         return {
             generatedAt: new Date().toISOString(),
-            counts: {
-                toolCalls: countAt(countResult, 0),
-                planSnapshots: countAt(countResult, 1),
-                insights: countAt(countResult, 2),
-                frictionEvents: countAt(countResult, 3),
-                diagnosticEvents: countAt(countResult, 4),
-                repositories: countAt(countResult, 5),
-                checkouts: countAt(countResult, 6),
-                sessions: countAt(countResult, 7),
-            },
+            counts,
             tableCounts,
             git,
             checkoutActivity,
@@ -129,7 +142,7 @@ export const fetchDashboardData = (
 
 export const writeDashboard = (
     opts: DashboardOpts,
-): Effect.Effect<DashboardWriteResult, DbError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<DashboardWriteResult, DbError, CacheRead | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;

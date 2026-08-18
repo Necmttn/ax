@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Effect, FileSystem } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { flushSync } from "@opentui/react";
-import type { SurrealClientShape } from "@ax/lib/db";
+import { daysAgoExpr } from "@ax/lib/duckdb/clause";
+import type { CacheReadService } from "@ax/lib/duckdb/seam";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { SKILL_DETAIL_SQL } from "../queries.ts";
 
 /**
  * Read a skill's SKILL.md body, recovering ANY filesystem failure to `null`
@@ -23,11 +23,67 @@ const readSkillBody = (filePath: string): Promise<string | null> =>
 
 /**
  * Debounce window before firing the detail query. Holding j/k spams selection
- * changes; without this we'd kick off a SKILL_DETAIL_SQL + readFile per row.
+ * changes; without this we'd kick off a detail query + readFile per row.
  * 150ms is short enough to feel instant when the user actually stops, long
  * enough to coalesce continuous keypress streams.
  */
 const DETAIL_DEBOUNCE_MS = 150;
+
+// Local copy, kept separate from `queries/skill-detail.ts`'s
+// `fetchSkillDetail` (see that file's module doc: it composes its own
+// lookups and exports no shared SQL-text constants for the TUI to import).
+// The four queries below run independently in parallel (all filtered by
+// skill name, no dependency between them) and are reassembled client-side
+// into the SkillDetailRecord shape.
+
+const SKILL_ROW_SQL = `
+    SELECT name, scope, description, dir_path, bytes
+    FROM skill
+    WHERE name = ?
+    LIMIT 1
+`;
+
+const SKILL_INVOCATION_COUNTS_SQL = `
+    SELECT
+        count(*) AS total,
+        SUM(CASE WHEN iv.ts > ${daysAgoExpr} THEN 1 ELSE 0 END) AS d7,
+        SUM(CASE WHEN iv.ts > ${daysAgoExpr} THEN 1 ELSE 0 END) AS d30,
+        MAX(iv.ts) AS last
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    WHERE sk.name = ?
+`;
+
+// `session` is denormalized directly onto the `invoked` edge row, so this
+// project lookup is a plain join, not a multi-hop traversal.
+const SKILL_RECENT_SQL = `
+    SELECT iv.ts AS ts, s.project AS project
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    LEFT JOIN session s ON s.id = iv.session
+    WHERE sk.name = ?
+    ORDER BY iv.ts DESC
+    LIMIT 10
+`;
+
+const SKILL_DAILY_SQL = `
+    SELECT iv.ts AS ts
+    FROM invoked iv
+    JOIN skill sk ON sk.id = iv.out_id
+    WHERE sk.name = ? AND iv.ts > ${daysAgoExpr}
+    ORDER BY iv.ts ASC
+`;
+
+const toIso = (value: unknown): string | null => {
+    if (value == null) return null;
+    if (typeof value === "string") return value;
+    if (value instanceof Date) return value.toISOString();
+    try {
+        return new Date(value as string).toISOString();
+    } catch {
+        return null;
+    }
+};
 
 export interface SkillDetailRecord {
     readonly skill: {
@@ -63,7 +119,7 @@ export interface SkillDetailState {
  * recent invocations + body for preview). Re-runs whenever `name` changes.
  */
 export function useSkillDetail(
-    client: SurrealClientShape,
+    read: CacheReadService,
     name: string | null,
     refreshTick = 0,
 ): SkillDetailState {
@@ -98,34 +154,64 @@ export function useSkillDetail(
         const timer = setTimeout(() => {
             if (cancelled) return;
             Effect.runPromise(
-                client.query<unknown[]>(SKILL_DETAIL_SQL, { name }),
+                Effect.all(
+                    [
+                        read.raw(SKILL_ROW_SQL, [name]),
+                        read.raw(SKILL_INVOCATION_COUNTS_SQL, [7, 30, name]),
+                        read.raw(SKILL_RECENT_SQL, [name]),
+                        read.raw(SKILL_DAILY_SQL, [name, 30]),
+                    ],
+                    { concurrency: 4 },
+                ),
             )
-                .then(async (result) => {
+                .then(async ([skillResult, countsResult, recentResult, dailyResult]) => {
                     if (cancelled) return;
-                    const payload = Array.isArray(result)
-                        ? ([...result].reverse().find((r) => r != null) as
-                              | SkillDetailRecord
-                              | undefined)
-                        : (result as SkillDetailRecord | undefined);
+                    const skillRow = skillResult.rows[0] as Record<string, unknown> | undefined;
+                    const countsRow = countsResult.rows[0] as Record<string, unknown> | undefined;
+
+                    const payload: SkillDetailRecord = {
+                        skill: skillRow
+                            ? {
+                                  name: String(skillRow.name ?? name),
+                                  scope: String(skillRow.scope ?? ""),
+                                  description: (skillRow.description as string | null) ?? null,
+                                  dir_path: (skillRow.dir_path as string | null) ?? null,
+                                  bytes: skillRow.bytes == null ? null : Number(skillRow.bytes),
+                              }
+                            : null,
+                        invocations: {
+                            total: Number(countsRow?.total ?? 0),
+                            d7: Number(countsRow?.d7 ?? 0),
+                            d30: Number(countsRow?.d30 ?? 0),
+                            last: toIso(countsRow?.last),
+                        },
+                        recent: recentResult.rows.map((row) => ({
+                            ts: toIso((row as Record<string, unknown>).ts) ?? "",
+                            project: ((row as Record<string, unknown>).project as string | null) ?? null,
+                        })),
+                        daily: dailyResult.rows.map((row) => ({
+                            ts: toIso((row as Record<string, unknown>).ts) ?? "",
+                        })),
+                    };
 
                     // Body lives on disk (dir_path/SKILL.md), not in DB - multi-file
                     // skills + cache staleness make the file canonical.
-                    let withBody = payload ?? null;
-                    const dirPath = withBody?.skill?.dir_path;
+                    let withBody = payload;
+                    const dirPath = withBody.skill?.dir_path;
                     if (typeof dirPath === "string" && dirPath.length > 0) {
                         const raw = await readSkillBody(posixPath.join(dirPath, "SKILL.md"));
                         if (raw !== null) {
                             const m = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
                             const body = (m?.[1] ?? raw).trim();
                             withBody = {
-                                ...withBody!,
-                                skill: { ...withBody!.skill!, body },
+                                ...withBody,
+                                skill: { ...withBody.skill!, body },
                             };
                         }
                         // Skill file unreadable - leave body undefined.
                     }
                     if (cancelled) return;
-                    if (withBody) cacheRef.current.set(name, withBody);
+                    cacheRef.current.set(name, withBody);
                     flushSync(() => {
                         setData(withBody);
                         setError(null);
@@ -145,7 +231,7 @@ export function useSkillDetail(
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [client, name, refreshTick]);
+    }, [read, name, refreshTick]);
 
     return { data, loading, error };
 }

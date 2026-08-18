@@ -8,9 +8,11 @@
  *
  * Migration is strangler-style, one route family at a time; endpoints not
  * yet listed here are still served by the legacy route table. SSE
- * /api/events, Durable Stream tails returned by /api/ingest, and binary
- * /api/image stay outside HttpApi routing. Live-ingest stream event payloads
- * are still schema-typed separately in @ax/lib/shared/ingest-stream-events.
+ * /api/events and binary /api/image stay outside HttpApi routing (raw
+ * ReadableStream / binary responses). `POST /api/ingest` (a Durable Streams
+ * sidecar-backed live-ingest trigger) was retired in studio ephemeral
+ * (wave 3) - an on-demand process that exits on client disconnect cannot
+ * also own a detached background ingest fiber.
  *
  * This module must stay daemon-agnostic: no imports from apps/* (the studio
  * bundles it for the browser).
@@ -31,18 +33,15 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
      *  on the wire: daemons older than the field omit it, and the hosted
      *  studio must keep decoding their responses. */
     live_ingest: Schema.optionalKey(Schema.Boolean),
-    /** Whether the OTLP receiver (/v1/traces, /v1/metrics, /v1/logs) is
-     *  available. Unlike live_ingest, this is always true: the receiver is
-     *  pure HTTP+JSON+SurrealDB with no native dependency. Optional on the
+    /** Whether this process can accept OTLP (/v1/traces, /v1/metrics,
+     *  /v1/logs) right now. DERIVED from the capability list, so it can never
+     *  contradict the `capabilities` array in the same body - it used to,
+     *  answering `false` while "otlp" was advertised and the routes returned
+     *  200. `ax studio` mounts them and appends to the spool; it is on-demand,
+     *  so the DURABLE exporter target is `ax otlpd`, not this. Optional on the
      *  wire for forward-compatibility with older daemons. */
     otlp_receiver: Schema.optionalKey(Schema.Boolean),
 }) {}
-
-/** POST /api/query rejection: non-read SQL or a database error. Legacy
- *  behavior mapped every failure on this endpoint to HTTP 400. */
-export class QueryRejected extends Schema.ErrorClass<QueryRejected>("ax/QueryRejected")({
-    error: Schema.String,
-}, { httpApiStatus: 400 }) {}
 
 /** Database/internal failure on a read endpoint - the legacy route table
  *  rendered these as `{ error }` with HTTP 500; the contract keeps that. */
@@ -60,39 +59,24 @@ export class BadRequestError extends Schema.ErrorClass<BadRequestError>("ax/BadR
     error: Schema.String,
 }, { httpApiStatus: 400 }) {}
 
-/** POST /api/query - the read-only SQL console (SELECT/RETURN/INFO only). */
-export class QueryResult extends Schema.Class<QueryResult>("ax/QueryResult")({
-    result: Schema.Unknown,
-    durationMs: Schema.Number,
-}) {}
-
 export class WorktreesResult extends Schema.Class<WorktreesResult>("ax/WorktreesResult")({
     activity: Schema.Unknown,
     git: Schema.Unknown,
 }) {}
 
 /**
- * The system family: version/capability metadata, the read-only SQL console,
- * and the legacy raw-row insight queries. The raw-row endpoints are
- * deliberately `Schema.Unknown` payloads - they pass SurrealDB rows through
- * untyped today; tightening them is contract work for a later pass, not a
- * blocker for the strangler migration.
+ * The system family: version/capability metadata and the legacy raw-row
+ * insight queries. The raw-row endpoints are deliberately `Schema.Unknown`
+ * payloads - they pass DuckDB rows through untyped today; tightening them is
+ * contract work for a later pass, not a blocker for the strangler migration.
+ *
+ * Studio ephemeral (wave 3) RETIRED `POST /api/query` (the read-only SQL
+ * console) and `GET /api/graph-health` - see system.ts's module doc for why.
  */
 export const SystemGroup = HttpApiGroup.make("system")
     .add(
         HttpApiEndpoint.get("version", "/api/version", {
             success: DaemonVersion,
-        }),
-        HttpApiEndpoint.post("query", "/api/query", {
-            // A real Schema (not bare fields) so the payload codec is JSON -
-            // bare field maps are interpreted as form-urlencoded by HttpApi.
-            payload: Schema.Struct({ sql: Schema.String }),
-            success: QueryResult,
-            error: QueryRejected,
-        }),
-        HttpApiEndpoint.get("graphHealth", "/api/graph-health", {
-            success: Schema.Unknown,
-            error: InternalError,
         }),
         HttpApiEndpoint.get("worktrees", "/api/worktrees", {
             success: WorktreesResult,
@@ -223,7 +207,12 @@ export const SkillGraphEdge = Schema.Struct({
 export type SkillGraphEdge = typeof SkillGraphEdge.Type;
 
 export const SkillGraphPayload = Schema.Struct({
-    min_count: Schema.Number,
+    // Echoes the `minCount` query param verbatim - kept in the SAME casing
+    // as the request field (matching RecallResponse.window echoing
+    // offset/limit), not the snake_case used by this struct's other,
+    // non-echoed aggregate fields. A caller that copies the response field
+    // name back onto the query string must get the same spelling (#832).
+    minCount: Schema.Number,
     limit: Schema.Number,
     node_count: Schema.Number,
     edge_count: Schema.Number,
@@ -715,11 +704,6 @@ export class ConflictError extends Schema.ErrorClass<ConflictError>("ax/Conflict
     error: Schema.String,
 }, { httpApiStatus: 409 }) {}
 
-/** Live-ingest unavailable (no sidecar) - `{ error }` HTTP 503. */
-export class ServiceUnavailableError extends Schema.ErrorClass<ServiceUnavailableError>("ax/ServiceUnavailableError")({
-    error: Schema.String,
-}, { httpApiStatus: 503 }) {}
-
 /** Skill triage decision states (mirrors dashboard-types TriageDecision). */
 export const TriageDecisionSchema = Schema.Literals(["keep", "archive", "review"]);
 
@@ -1017,30 +1001,18 @@ export const UsageGroup = HttpApiGroup.make("usage")
         }),
     );
 
-/** POST /api/ingest - trigger a live ingest run (Durable Streams sidecar). */
-export class IngestTriggerResult extends Schema.Class<IngestTriggerResult>("ax/IngestTriggerResult")({
-    runId: Schema.String,
-    /** Full sidecar stream URL the browser subscribes to directly. */
-    stream: Schema.String,
-    streamName: Schema.String,
-    streamBaseUrl: Schema.String,
-}) {}
-
 /**
- * The live family's JSON trigger endpoint. The returned Durable Stream URL is
- * not an HttpApi route, but its event payload is schema-typed in
- * @ax/lib/shared/ingest-stream-events.
+ * Studio ephemeral (wave 3) RETIRED the "live" family (`POST /api/ingest`,
+ * which triggered an in-process ingest run streaming progress through an
+ * embedded Durable Streams sidecar). A studio process that exits when its
+ * client disconnects cannot also own a detached background ingest fiber -
+ * the two lifecycles fight each other. Background freshness is a separate
+ * process now (the `c-daemon-studio` freshness drive spawns `ax ingest`
+ * independently of any studio invocation); `GET /api/events` (the raw SSE
+ * ingest-progress TAIL, unaffected by who triggered the run) stays a legacy
+ * route in `router/routes/live.ts`, now reading `ingest_event` off
+ * `CacheRead` instead of the write-frozen engine it used to poll.
  */
-export const LiveGroup = HttpApiGroup.make("live")
-    .add(
-        HttpApiEndpoint.post("ingestTrigger", "/api/ingest", {
-            payload: Schema.Struct({
-                since: Schema.optionalKey(Schema.Number),
-            }),
-            success: IngestTriggerResult,
-            error: [ServiceUnavailableError, InternalError],
-        }),
-    );
 
 /** Routing class write endpoints (upsert + delete by id). */
 export const RoutingGroup = HttpApiGroup.make("routing")
@@ -1130,7 +1102,6 @@ export const AxApi = HttpApi.make("ax")
     .add(SkillsGroup)
     .add(ImproveGroup)
     .add(UsageGroup)
-    .add(LiveGroup)
     .add(OtelGroup)
     .add(RoutingGroup)
     .add(TeamGroup)

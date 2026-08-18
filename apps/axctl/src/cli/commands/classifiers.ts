@@ -599,7 +599,6 @@ const classifiersLabelMiningCommand = Command.make(
                     process.exit(1);
                 }),
             ),
-            catchDbErrorAndExit("axctl classifiers label-mining"),
         );
     },
 ).pipe(
@@ -640,17 +639,17 @@ export const classifiersRuntime: RuntimeManifest = {
         hidden: true,
         runtime: {
             kind: "db-conditional",
-            fallback: "db",
+            fallback: "cache",
             subcommands: {
                 list: "none",
                 eval: "none",
-                explain: "db",
-                graph: "db",
-                lifecycle: "db",
+                explain: "cache",
+                graph: "cache",
+                lifecycle: "cache",
                 "package-operations": (args) =>
-                    classifiersPackageOperationsNeedsDb(args) ? "db" : "none",
-                "workflow-candidates": "db",
-                "label-mining": "db",
+                    classifiersPackageOperationsNeedsDb(args) ? "cache" : "none",
+                "workflow-candidates": "cache",
+                "label-mining": "cache",
             },
         },
     },

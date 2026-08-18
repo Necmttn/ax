@@ -1,33 +1,38 @@
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
+import { CacheRead, type CacheReadService } from "@ax/lib/duckdb/seam";
+import { CacheReadLive } from "../duckdb-embed-wiring.ts";
 import { App } from "./App.tsx";
 
+/** Bun-backed FileSystem + Path; CacheReadLayer needs FileSystem to stat the
+ *  published snapshot on each reopen check (see seam.ts's CacheReadLayer). */
+const TuiCacheLayer = Layer.merge(CacheReadLive, Layer.mergeAll(BunFileSystem.layer, BunPath.layer));
+
 /**
- * TUI entry. Acquires the SurrealClient via the application Layer (so the
- * connection is opened once and reused for every hook), boots the OpenTUI
- * CLI renderer, and tears both down cleanly on exit.
+ * TUI entry. Acquires the `CacheRead` seam over the published DuckDB
+ * snapshot (so it's opened once and reused for every hook), boots the
+ * OpenTUI CLI renderer, and tears both down cleanly on exit.
  *
  * We don't keep an Effect runtime alive for the React tree. Instead we
- * snapshot the `SurrealClient` service into a plain object once the layer
- * is built, and propagate that into hooks via React props. Each hook calls
- * `Effect.runPromise(client.query(...))` which still goes through Effect
- * for typed errors, but the lifetime is managed by us.
+ * snapshot the `CacheRead` service into a plain object once the layer is
+ * built, and propagate that into hooks via React props. Each hook calls
+ * `Effect.runPromise(read.raw(...))` which still goes through Effect for
+ * typed errors, but the lifetime is managed by us.
  */
 export async function runTui(): Promise<void> {
     const scope = await Effect.runPromise(Scope.make());
 
-    let client: SurrealClientShape;
+    let client: CacheReadService;
     try {
         const context = await Effect.runPromise(
-            Layer.buildWithScope(AppLayer, scope) as Effect.Effect<
-                Context.Context<SurrealClient>,
+            Layer.buildWithScope(TuiCacheLayer, scope) as Effect.Effect<
+                Context.Context<CacheRead>,
                 unknown
             >,
         );
-        client = Context.get(context, SurrealClient);
+        client = Context.get(context, CacheRead);
     } catch (err) {
         await Effect.runPromise(Scope.close(scope, Exit.void));
         throw err;

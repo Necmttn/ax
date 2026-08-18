@@ -1,20 +1,10 @@
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { recordListSource } from "@ax/lib/shared/record-select";
+import { inClause, type Clause } from "@ax/lib/duckdb/clause";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { SessionMetricsRow } from "./session-metrics-query.ts";
 
-/** Comma-joined `session:`key`` record-literal IN-list body for the given session ids. */
-export const sessionRefList = (sessionIds: readonly string[]): string =>
-    sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
-
-/**
- * Record-list FROM source (`[session:`k1`, ...]`) for fetching session rows by
- * id. Use this - NEVER `FROM session WHERE id IN [...]`, which silently
- * matches nothing on some tables (see @ax/lib/shared/record-select).
- */
-export const sessionRecordSource = (sessionIds: readonly string[]): string =>
-    recordListSource("session", sessionIds.map((id) => recordKeyPart(id, "session") ?? ""));
+/** A bound DuckDB `IN` filter for bare session ids. */
+export const sessionIdsClause = (column: string, sessionIds: readonly string[]): Clause =>
+    inClause(column, sessionIds);
 
 /** Split into fixed-size chunks (for bounded `IN [...]` query batches). */
 export const chunked = <T>(items: readonly T[], size: number): T[][] => {
@@ -25,14 +15,14 @@ export const chunked = <T>(items: readonly T[], size: number): T[][] => {
 
 // ---------------------------------------------------------------------------
 // Row-field coercion (shared by the metrics fetchers)
-// Deprecated re-export shim: canonical implementations live in
-// @ax/lib/shared/surreal. New callers should import directly from there.
+// Re-export shim: canonical implementations live in @ax/lib/shared/row-fields.
+// New callers should import directly from there.
 // ---------------------------------------------------------------------------
 export {
     numberOrNull as numOrNull,
     numberOrZero as numOrZero,
     stringOrNull as strOrNull,
-} from "@ax/lib/shared/surreal";
+} from "@ax/lib/shared/row-fields";
 
 /** Set absent ids to a default (mutates + returns the map). */
 export const fillDefaults = <V>(map: Map<string, V>, ids: readonly string[], def: V): Map<string, V> => {
@@ -42,8 +32,8 @@ export const fillDefaults = <V>(map: Map<string, V>, ids: readonly string[], def
 
 /** Parse an ISO datetime string to epoch ms, or null. */
 export const isoMs = (iso: unknown): number | null => {
-    if (typeof iso !== "string" || iso.length === 0) return null;
-    const t = new Date(iso).getTime();
+    if (!(iso instanceof Date) && (typeof iso !== "string" || iso.length === 0)) return null;
+    const t = iso instanceof Date ? iso.getTime() : new Date(iso).getTime();
     return Number.isFinite(t) ? t : null;
 };
 

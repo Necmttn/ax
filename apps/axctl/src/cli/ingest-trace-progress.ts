@@ -3,10 +3,10 @@ import { TraceTransportTag, type TraceTransport } from "@ax/lib/live-traces/Sink
 import { createProgressReporter, type ProgressMode, type ProgressReporter, type ProgressSink, type ProgressStage } from "./progress.ts";
 // Type-only import: `progress-tui.tsx` pulls in OpenTUI + React (incl. react's
 // jsx-dev-runtime). A *static* value import here would drag that whole subtree
-// into the module graph of every consumer of this file - notably `ax serve`,
+// into the module graph of every consumer of this file - notably `ax studio`,
 // which imports this module via `cli/index.ts` but never renders a TUI. The
 // packaged daemon stages react with only the prod jsx-runtime, so the dev
-// runtime isn't resolvable and the serve child crashed (#616). Keep the type
+// runtime isn't resolvable and the studio child crashed (#616). Keep the type
 // erased and load `initTuiProgress` lazily, only when the TUI path actually runs.
 import type { TuiProgressHandle } from "./progress-tui.tsx";
 

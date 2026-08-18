@@ -6,7 +6,6 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
-    __testBuildCursorBatchStatements,
     __testFindCursorStateDbs,
     __testIncludeCursorByMtime,
     extractCursorStateDb,
@@ -132,11 +131,10 @@ describe("Cursor state.vscdb extraction", () => {
                 text: "Implement the Cursor adapter.",
                 textExcerpt: "Implement the Cursor adapter.",
             });
-            expect(extracted.providerEvents[0]?.raw).toMatchObject({
-                cursorConversationId: "cursor-session-1",
-                cursorMessageId: "cursor-message-1",
-            });
-            expect(JSON.stringify(extracted.providerEvents[0]?.raw)).not.toContain("cursor-secret-token");
+            // agent_event no longer carries a `raw` payload at all (the
+            // prune this covers), so the secret-leak guard now checks the
+            // whole extraction result instead of a since-removed field.
+            expect(JSON.stringify(extracted)).not.toContain("cursor-secret-token");
         });
     });
 
@@ -335,13 +333,6 @@ describe("Cursor state.vscdb extraction", () => {
                 skill: "cursor:run_terminal_command_v2",
             });
 
-            const statements = __testBuildCursorBatchStatements(extracted, dbPath);
-            expect(statements.some((statement) => statement.includes("tool_call"))).toBe(true);
-            expect(statements.some((statement) => statement.includes("cursor:run_terminal_command_v2"))).toBe(true);
-            expect(statements.some((statement) => statement.includes("->invoked:"))).toBe(true);
-            expect(statements.some((statement) => statement.includes(`session = session:\`${extracted.sessions[0]?.id}\``))).toBe(true);
-            expect(statements.some((statement) => statement.includes("->concerns:"))).toBe(true);
-            expect(statements.join("\n")).toContain("git status");
         });
     });
 
@@ -380,14 +371,6 @@ describe("Cursor state.vscdb extraction", () => {
             expect(firstSessionId).not.toBe(secondSessionId);
             expect(first.providerEvents[0]?.providerSessionId).toBe(firstSessionId);
             expect(second.providerEvents[0]?.providerSessionId).toBe(secondSessionId);
-            expect(first.providerEvents[0]?.raw).toMatchObject({
-                cursorConversationId: "same-conversation",
-                cursorMessageId: "same-message",
-            });
-            expect(second.providerEvents[0]?.raw).toMatchObject({
-                cursorConversationId: "same-conversation",
-                cursorMessageId: "same-message",
-            });
 
             const firstEventKey = agentEventRecordKey({
                 provider: "cursor",
@@ -405,8 +388,11 @@ describe("Cursor state.vscdb extraction", () => {
             expect(turnRecordKey(first.turns[0]!.session, first.turns[0]!.seq)).not.toBe(
                 turnRecordKey(second.turns[0]!.session, second.turns[0]!.seq),
             );
-            expect(JSON.stringify(first.providerEvents[0]?.raw)).not.toContain("secret-a");
-            expect(JSON.stringify(second.providerEvents[0]?.raw)).not.toContain("secret-b");
+            // agent_event no longer carries a `raw` payload at all (the prune
+            // this covers), so these secret-leak guards check the whole
+            // extraction result instead of a since-removed field.
+            expect(JSON.stringify(first)).not.toContain("secret-a");
+            expect(JSON.stringify(second)).not.toContain("secret-b");
         } finally {
             await rm(dir, { recursive: true, force: true });
         }

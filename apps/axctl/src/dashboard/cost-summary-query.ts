@@ -11,10 +11,9 @@
  * from `cli/commands/costs.ts`; rows + output bytes are identical.
  */
 
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { surrealLiteral } from "@ax/lib/json";
-import type { DbError } from "@ax/lib/errors";
+import { Effect, Schema } from "effect";
+import { CacheRead, type CacheReadError, type DuckDbParam } from "@ax/lib/duckdb";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 
 /** One aggregate row (totals, by-model, or recent session). The handler reads
  *  its fields defensively, so the row stays untyped at the column level. */
@@ -37,15 +36,41 @@ export interface CostSummaryResult {
  * priced rows; optionally narrows by source and a since-day window (clamped to
  * 1..3650 days, matching the original inline logic).
  */
-const buildWhereClause = (params: CostSummaryParams): string => {
-    const where = ["estimated_cost_usd != NONE"];
-    if (params.source) where.push(`source = ${surrealLiteral(params.source)}`);
+const buildWhereClause = (params: CostSummaryParams): { sql: string; params: ReadonlyArray<DuckDbParam> } => {
+    const where = ["estimated_cost_usd IS NOT NULL"];
+    const bindings: DuckDbParam[] = [];
+    if (params.source) { where.push("source = ?"); bindings.push(params.source); }
     if (params.sinceDays !== null) {
         const since = Math.min(Math.max(Math.trunc(params.sinceDays), 1), 3650);
-        where.push(`ts > time::now() - ${since}d`);
+        // CAST to naive TIMESTAMP before subtracting: DuckDB's bare
+        // CURRENT_TIMESTAMP is TIMESTAMP WITH TIME ZONE, and ax's own icu-less
+        // build has no `-(TIMESTAMP WITH TIME ZONE, INTERVAL)` overload (that
+        // arithmetic is registered by the icu extension, which this build
+        // doesn't link) - only `-(TIMESTAMP, INTERVAL)`. `ts` itself is a plain
+        // UTC TIMESTAMP column (see schema.duckdb.sql), so casting the
+        // comparison side to match is correct, not a workaround. Same idiom as
+        // `assertUtcClock` in packages/lib/src/duckdb/seam.ts.
+        where.push("ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (? * INTERVAL 1 DAY)");
+        bindings.push(since);
     }
-    return `WHERE ${where.join(" AND ")}`;
+    return { sql: `WHERE ${where.join(" AND ")}`, params: bindings };
 };
+
+const TotalsRow = Schema.Struct({
+    sessions: NumberFromBigIntColumn, tokens: Schema.NullOr(NumberFromBigIntColumn),
+    prompt_tokens: Schema.NullOr(NumberFromBigIntColumn), completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cache_creation_input_tokens: Schema.NullOr(NumberFromBigIntColumn), cache_read_input_tokens: Schema.NullOr(NumberFromBigIntColumn),
+    cost: Schema.NullOr(Schema.Number),
+});
+const ByModelRow = Schema.Struct({
+    source: Schema.String, model: Schema.NullOr(Schema.String), pricing_source: Schema.NullOr(Schema.String),
+    ...TotalsRow.fields,
+});
+const RecentRow = Schema.Struct({
+    session: Schema.String, source: Schema.String, model: Schema.NullOr(Schema.String),
+    estimated_tokens: NumberFromBigIntColumn, estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String), ts: TimestampColumn,
+});
 
 /**
  * Run the three cost-summary scans (totals / by-model / recent) concurrently
@@ -53,36 +78,37 @@ const buildWhereClause = (params: CostSummaryParams): string => {
  */
 export const fetchCostSummaryRollup = (
     params: CostSummaryParams,
-): Effect.Effect<CostSummaryResult, DbError, SurrealClient> =>
+): Effect.Effect<CostSummaryResult, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const whereClause = buildWhereClause(params);
+        const db = yield* CacheRead;
+        const where = buildWhereClause(params);
         const limit = Math.min(Math.max(params.limit, 1), 200);
         const [totals, byModel, recent] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT count() AS sessions, math::sum(estimated_tokens) AS tokens, math::sum(prompt_tokens) AS prompt_tokens,
-       math::sum(completion_tokens) AS completion_tokens, math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
-       math::sum(cache_read_input_tokens) AS cache_read_input_tokens, math::sum(estimated_cost_usd) AS cost
+            db.rows(TotalsRow, `
+SELECT count(*) AS sessions, CAST(sum(estimated_tokens) AS BIGINT) AS tokens, CAST(sum(prompt_tokens) AS BIGINT) AS prompt_tokens,
+       CAST(sum(completion_tokens) AS BIGINT) AS completion_tokens, CAST(sum(cache_creation_input_tokens) AS BIGINT) AS cache_creation_input_tokens,
+       CAST(sum(cache_read_input_tokens) AS BIGINT) AS cache_read_input_tokens, sum(estimated_cost_usd) AS cost
 FROM session_token_usage
-${whereClause}
-GROUP ALL;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT source, model, pricing_source, count() AS sessions, math::sum(estimated_tokens) AS tokens,
-       math::sum(prompt_tokens) AS prompt_tokens, math::sum(completion_tokens) AS completion_tokens,
-       math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
-       math::sum(cache_read_input_tokens) AS cache_read_input_tokens,
-       math::sum(estimated_cost_usd) AS cost
+${where.sql}`, where.params),
+            db.rows(ByModelRow, `
+SELECT source, model, pricing_source, count(*) AS sessions, CAST(sum(estimated_tokens) AS BIGINT) AS tokens,
+       CAST(sum(prompt_tokens) AS BIGINT) AS prompt_tokens, CAST(sum(completion_tokens) AS BIGINT) AS completion_tokens,
+       CAST(sum(cache_creation_input_tokens) AS BIGINT) AS cache_creation_input_tokens,
+       CAST(sum(cache_read_input_tokens) AS BIGINT) AS cache_read_input_tokens,
+       sum(estimated_cost_usd) AS cost
 FROM session_token_usage
-${whereClause}
+${where.sql}
 GROUP BY source, model, pricing_source
 ORDER BY cost DESC
-LIMIT ${limit};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT session, source, model, estimated_tokens, estimated_cost_usd, pricing_source, type::string(ts) AS ts
+LIMIT ?`, [...where.params, limit]),
+            db.rows(RecentRow, `
+SELECT session, source, model, estimated_tokens, estimated_cost_usd, pricing_source, ts
 FROM session_token_usage
-${whereClause}
+${where.sql}
 ORDER BY ts DESC
-LIMIT ${limit};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+LIMIT ?`, [...where.params, limit]).pipe(
+                Effect.map((rows) => rows.map((row) => ({ ...row, ts: row.ts.toISOString() }))),
+            ),
         ], { concurrency: 3 });
         return { totals, byModel, recent };
     });
@@ -97,17 +123,24 @@ export type PricingRow = Record<string, unknown>;
  */
 export const fetchPricingRows = (): Effect.Effect<
     ReadonlyArray<PricingRow>,
-    DbError,
-    SurrealClient
+    CacheReadError,
+    CacheRead
 > =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(`
+        const db = yield* CacheRead;
+        const PricingSchema = Schema.Struct({
+            name: Schema.String, provider: Schema.String, display_name: Schema.NullOr(Schema.String),
+            input_per_million_usd: Schema.NullOr(Schema.Number), output_per_million_usd: Schema.NullOr(Schema.Number),
+            cache_creation_per_million_usd: Schema.NullOr(Schema.Number), cache_read_per_million_usd: Schema.NullOr(Schema.Number),
+            fast_multiplier: Schema.NullOr(Schema.Number), context_window: Schema.NullOr(NumberFromBigIntColumn),
+            pricing_source: Schema.NullOr(Schema.String),
+        });
+        const rows = yield* db.rows(PricingSchema, `
 SELECT name, provider, display_name, input_per_million_usd, output_per_million_usd,
        cache_creation_per_million_usd, cache_read_per_million_usd,
        fast_multiplier, context_window, pricing_source
 FROM agent_model
 ORDER BY provider, name
-LIMIT 5000;`).pipe(Effect.map((result) => result?.[0] ?? []));
+LIMIT 5000`);
         return rows;
     });

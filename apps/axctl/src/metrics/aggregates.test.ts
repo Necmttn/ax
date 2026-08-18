@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestCacheRead } from "@ax/lib/testing/cache";
 import { SkillName } from "@ax/lib/brands";
 import {
     aggregateGroups,
@@ -248,30 +248,30 @@ const db = (input: {
     pricing?: Array<Record<string, unknown>>;
     invoked?: Array<Record<string, unknown>>;
     seenSql?: string[];
-}) =>
-    Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) => {
+}) => {
+    const fallback = (sql: string) => {
             input.seenSql?.push(sql);
-            if (sql.includes("FROM session_token_usage")) return Effect.succeed([input.usage ?? []] as unknown as T);
-            if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
-            if (sql.includes("agent_model")) return Effect.succeed([input.pricing ?? []] as unknown as T);
-            if (sql.includes("FROM invoked")) return Effect.succeed([input.invoked ?? []] as unknown as T);
-            return Effect.succeed([input.metrics ?? []] as unknown as T);
-        },
-    } as never);
+            if (sql.includes("FROM session_token_usage")) return input.usage ?? [];
+            if (sql.includes("FROM session_health")) return input.health ?? [];
+            if (sql.includes("agent_model")) return input.pricing ?? [];
+            if (sql.includes("FROM invoked")) return input.invoked ?? [];
+            return input.metrics ?? [];
+    };
+    return makeTestCacheRead({ fallback }).layer;
+};
 
 describe("fetchAggregateRows", () => {
     test("joins metrics + health + usage on the normalized session key", async () => {
         const out = await Effect.runPromise(fetchAggregateRows({ since: null, project: null }).pipe(Effect.provide(db({
             metrics: [{
-                session: "session:`s1`", source: "claude", project: "/repo/a", cwd: "/cwd/a",
+                session: "s1", source: "claude", project: "/repo/a", cwd: "/cwd/a",
                 started_at: "2026-06-10T12:00:00Z",
                 durability_ratio: 0.5, produced_commits: 2, reverted_commits: 1,
                 lines_added: 10, lines_removed: 5,
             }],
-            health: [{ session: "session:`s1`", user_corrections: 3 }],
+            health: [{ session: "s1", user_corrections: 3 }],
             usage: [{
-                session: "session:⟨s1⟩", model: "Claude-Opus-4-6",
+                session: "s1", model: "Claude-Opus-4-6",
                 prompt_tokens: 1, completion_tokens: 1, estimated_tokens: 2,
                 estimated_cost_usd: 0.42, pricing_source: "litellm",
             }],
@@ -290,11 +290,11 @@ describe("fetchAggregateRows", () => {
     test("repo falls back to cwd; missing joins stay null; estimated provenance flagged (#175)", async () => {
         const out = await Effect.runPromise(fetchAggregateRows({ since: null, project: null }).pipe(Effect.provide(db({
             metrics: [
-                { session: "session:`s1`", source: "claude", project: null, cwd: "/cwd/only", produced_commits: 0, lines_added: 0, lines_removed: 0 },
-                { session: "session:`s2`", source: "codex", produced_commits: 1, lines_added: 1, lines_removed: 0 },
+                { session: "s1", source: "claude", project: null, cwd: "/cwd/only", produced_commits: 0, lines_added: 0, lines_removed: 0 },
+                { session: "s2", source: "codex", produced_commits: 1, lines_added: 1, lines_removed: 0 },
             ],
             usage: [{
-                session: "session:`s2`", model: "claude-haiku-4-5-20251001",
+                session: "s2", model: "claude-haiku-4-5-20251001",
                 prompt_tokens: null, completion_tokens: null,
                 estimated_tokens: 1_000_000, estimated_cost_usd: null, pricing_source: null,
             }],
@@ -315,15 +315,17 @@ describe("fetchAggregateRows", () => {
         const seenSql: string[] = [];
         await Effect.runPromise(fetchAggregateRows({ since: null, project: null }).pipe(Effect.provide(db({
             metrics: [
-                { session: "session:`s1`", produced_commits: 0, lines_added: 0, lines_removed: 0 },
-                { session: "session:`s2`", produced_commits: 1, lines_added: 1, lines_removed: 0 },
+                { session: "s1", produced_commits: 0, lines_added: 0, lines_removed: 0 },
+                { session: "s2", produced_commits: 1, lines_added: 1, lines_removed: 0 },
             ],
             seenSql,
         }))));
         const healthSql = seenSql.find((s) => s.includes("FROM session_health"))!;
-        expect(healthSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        expect(healthSql).toContain("session IN (?, ?)");
+        expect(healthSql).not.toContain("'");
         const usageSql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
-        expect(usageSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        expect(usageSql).toContain("session IN (?, ?)");
+        expect(usageSql).not.toContain("'");
     });
 
     test("empty metrics scan skips the secondary scans entirely", async () => {
@@ -342,28 +344,28 @@ describe("fetchAggregateRows", () => {
             Effect.provide(db({ seenSql })),
         ));
         const metricsSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
-        expect(metricsSql).toContain("session.started_at >=");
-        expect(metricsSql).toContain("session.project =");
+        expect(metricsSql).toContain("s.started_at >=");
+        expect(metricsSql).toContain("s.project =");
         expect(metricsSql).not.toContain("FROM invoked");
         expect(metricsSql).not.toContain("FROM edited");
     });
 });
 
 describe("fetchSkillSessionSet", () => {
-    test("indexed out-anchored lookup over the denormalised invoked.session column", async () => {
+    test("indexed out_id-anchored lookup over the denormalised invoked.session column", async () => {
         const seenSql: string[] = [];
         const out = await Effect.runPromise(fetchSkillSessionSet(SkillName.make("superpowers:tdd")).pipe(Effect.provide(db({
             invoked: [
-                { session: "session:`s1`" },
-                { session: "session:⟨s1⟩" }, // dupes collapse
-                { session: "session:`s2`" },
+                { session: "s1" },
+                { session: "s1" }, // dupes collapse
+                { session: "s2" },
             ],
             seenSql,
         }))));
         expect(out).toEqual(new Set(["s1", "s2"]));
         const sql = seenSql.find((s) => s.includes("FROM invoked"))!;
-        expect(sql).toContain("WHERE out IN [");
-        expect(sql).toContain("session != NONE");
+        expect(sql).toContain("out_id IN (");
+        expect(sql).toContain("session IS NOT NULL");
         expect(sql).not.toContain("in.session"); // the documented hang shape
     });
 

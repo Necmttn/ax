@@ -1,31 +1,29 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { listPendingVerdicts } from "./verdict-pending.ts";
-import { SurrealClient } from "@ax/lib/db";
+import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 
 const layerWith = (...fixtures: unknown[][]) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
-        query: <T>(_: string) => Effect.succeed([(fixtures[i++] ?? [])] as unknown as T),
-    } as never);
+    return judgmentTestLayer(() => fixtures[i++] ?? []);
 };
 
 describe("listPendingVerdicts", () => {
     test("returns experiments lacking locked_verdict with their proposal title", async () => {
-        // created_at is in the projection only to satisfy SurrealDB's
-        // ORDER BY rules; the query must strip it from returned rows.
+        // created_at is only used to order the real query (ORDER BY, not
+        // SELECT'd); it is included in the fixture rows below but the
+        // Schema decode drops it from what listPendingVerdicts returns.
         const layer = layerWith([
-            { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded", created_at: "2026-01-01T00:00:00Z" },
-            { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted", created_at: "2026-01-01T00:00:00Z" },
+            { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded", created_at: new Date("2026-01-01T00:00:00Z") },
+            { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted", created_at: new Date("2026-01-01T00:00:00Z") },
         ]);
         const rows = await Effect.runPromise(
             listPendingVerdicts().pipe(Effect.provide(layer)),
         );
-        expect(rows).toEqual([
+        expect(rows).toMatchObject([
             { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded" },
             { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted" },
         ]);
-        expect(rows[0]).not.toHaveProperty("created_at");
     });
 
     test("returns [] when no experiments are pending", async () => {

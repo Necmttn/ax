@@ -1,21 +1,11 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { CORRECTION_MAX_LENGTH, isCorrectionPhrase } from "@ax/lib/shared/correction-phrase";
-import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import {
-    recordRef,
-    surrealDate,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionRecord,
-    surrealOptionString,
-    surrealRecordKey,
-    surrealString,
-} from "@ax/lib/shared/surql";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
+import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { stableId } from "@ax/lib/stable-id";
 import { classifyFeedback, classifyUserAsk } from "./ask-outcome.ts";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const TurnAnalysisKey = Schema.Literal("turn-analysis");
@@ -40,8 +30,8 @@ export type TurnAnalysisSentiment = "positive" | "neutral" | "negative" | "mixed
 export type TurnAnalysisPolarity = "accept" | "reject" | "revise" | "explore" | "none";
 
 export interface TurnAnalysisInput {
-    readonly id: unknown;
-    readonly session: unknown;
+    readonly id: string;
+    readonly session: string;
     readonly seq: number;
     readonly role: string;
     readonly source?: string | null;
@@ -117,7 +107,7 @@ const clampConfidence = (value: number): number =>
     Math.max(0, Math.min(1, Number(value.toFixed(2))));
 
 export const semanticSignalKey = (kind: string, label: string): string =>
-    `${safeKeyPart(kind)}__${safeKeyPart(label)}`;
+    stableId("semantic_signal", [kind, label]);
 
 const signal = (
     kind: string,
@@ -398,8 +388,8 @@ export function classifyTurnAnalysis(
     row: TurnAnalysisInput,
     previousAssistantTurnKey: string | null = null,
 ): TurnAnalysisWrite {
-    const turnKey = recordKeyPart(row.id, "turn") ?? String(row.id);
-    const sessionKey = recordKeyPart(row.session, "session");
+    const turnKey = row.id;
+    const sessionKey = row.session;
     const speaker = speakerFor(row);
     const base = speaker === "user"
         ? classifyUserTurn(row)
@@ -432,59 +422,15 @@ export function classifyTurnAnalysis(
     };
 }
 
-const analysisRecordKey = (turnKey: string): string => turnKey;
+const analysisRecordKey = (turnKey: string): string => stableId("turn_analysis", [turnKey]);
 const expressesRecordKey = (turnKey: string, signalKey: string): string =>
-    `${safeKeyPart(turnKey).slice(0, 80)}__${safeKeyPart(signalKey).slice(0, 80)}__${Bun.hash(`${turnKey}|${signalKey}`).toString(16).slice(0, 12)}`;
+    stableId("expresses", [turnKey, signalKey]);
 const reactsToRecordKey = (fromTurnKey: string, toTurnKey: string): string =>
-    `${safeKeyPart(fromTurnKey).slice(0, 80)}__${safeKeyPart(toTurnKey).slice(0, 80)}__${Bun.hash(`${fromTurnKey}|${toTurnKey}`).toString(16).slice(0, 12)}`;
+    stableId("reacts_to", [fromTurnKey, toTurnKey]);
 
-const buildTurnAnalysisStatement = (analysis: TurnAnalysisWrite): string =>
-    `UPSERT ${recordRef("turn_analysis", analysisRecordKey(analysis.turnKey))} CONTENT ${surrealObject([
-        ["turn", recordRef("turn", analysis.turnKey)],
-        ["session", surrealOptionRecord("session", analysis.sessionKey)],
-        ["speaker", surrealString(analysis.speaker)],
-        ["act", surrealString(analysis.act)],
-        ["sentiment", surrealString(analysis.sentiment)],
-        ["polarity", surrealString(analysis.polarity)],
-        ["confidence", analysis.confidence.toString()],
-        ["method", surrealString(analysis.method)],
-        ["signals", surrealJsonTextOption(analysis.signals)],
-        ["text", surrealOptionString(analysis.text)],
-        ["ts", surrealDate(analysis.ts)],
-        ["updated_at", "time::now()"],
-    ])};`;
-
-const buildSemanticSignalStatement = (signalWrite: SemanticSignalWrite): string =>
-    `UPSERT ${recordRef("semantic_signal", signalWrite.key)} MERGE ${surrealObject([
-        ["kind", surrealString(signalWrite.kind)],
-        ["label", surrealString(signalWrite.label)],
-        ["canonical_text", surrealString(signalWrite.canonicalText)],
-        ["description", surrealOptionString(signalWrite.description ?? null)],
-        ["method", surrealString("heuristic")],
-        ["confidence", signalWrite.confidence.toString()],
-        ["first_seen", surrealDate(signalWrite.firstSeen ?? signalWrite.ts)],
-        ["last_seen", surrealDate(signalWrite.lastSeen ?? signalWrite.ts)],
-        ["metrics", surrealJsonTextOption({ source: "turn_analysis" })],
-    ])};`;
-
-const buildExpressesStatement = (analysis: TurnAnalysisWrite): string[] => {
-    if (!analysis.semanticSignal) return [];
-    const signalKey = analysis.semanticSignal.key;
-    return [
-        `RELATE ${recordRef("turn", analysis.turnKey)}->expresses:\`${surrealRecordKey(expressesRecordKey(analysis.turnKey, signalKey))}\`->${recordRef("semantic_signal", signalKey)} SET analysis = ${recordRef("turn_analysis", analysisRecordKey(analysis.turnKey))}, session = ${surrealOptionRecord("session", analysis.sessionKey)}, confidence = ${analysis.confidence}, method = ${surrealString(analysis.method)}, ts = ${surrealDate(analysis.ts)};`,
-    ];
-};
-
-const buildReactsToStatement = (analysis: TurnAnalysisWrite): string[] => {
-    if (!analysis.reactsToTurnKey) return [];
-    return [
-        `RELATE ${recordRef("turn", analysis.turnKey)}->reacts_to:\`${surrealRecordKey(reactsToRecordKey(analysis.turnKey, analysis.reactsToTurnKey))}\`->${recordRef("turn", analysis.reactsToTurnKey)} SET session = ${surrealOptionRecord("session", analysis.sessionKey)}, polarity = ${surrealString(analysis.polarity)}, act = ${surrealString(analysis.act)}, confidence = ${analysis.confidence}, signal = ${analysis.semanticSignal ? recordRef("semantic_signal", analysis.semanticSignal.key) : "NONE"}, ts = ${surrealDate(analysis.ts)};`,
-    ];
-};
-
-export const buildTurnAnalysisStatements = (
+export const buildTurnAnalysisRows = (
     analyses: readonly TurnAnalysisWrite[],
-): string[] => {
+) => {
     const signals = new Map<string, SemanticSignalWrite>();
     for (const analysis of analyses) {
         if (!analysis.semanticSignal) continue;
@@ -510,18 +456,38 @@ export const buildTurnAnalysisStatements = (
             lastSeen,
         });
     }
-    return [
-        ...analyses.map(buildTurnAnalysisStatement),
-        ...[...signals.values()].map(buildSemanticSignalStatement),
-        ...analyses.flatMap(buildExpressesStatement),
-        ...analyses.flatMap(buildReactsToStatement),
-    ];
+    return {
+        analyses: analyses.map((analysis) => cacheRow({
+            id: analysisRecordKey(analysis.turnKey), turn: analysis.turnKey, session: analysis.sessionKey,
+            speaker: analysis.speaker, act: analysis.act, sentiment: analysis.sentiment,
+            polarity: analysis.polarity, confidence: analysis.confidence, method: analysis.method,
+            signals: jsonParam(analysis.signals), text: analysis.text, ts: tsParam(analysis.ts), updated_at: new Date(),
+        })),
+        signals: [...signals.values()].map((signalWrite) => cacheRow({
+            id: signalWrite.key, kind: signalWrite.kind, label: signalWrite.label,
+            canonical_text: signalWrite.canonicalText, description: signalWrite.description ?? null,
+            method: "heuristic", confidence: signalWrite.confidence,
+            first_seen: tsParam(signalWrite.firstSeen ?? signalWrite.ts),
+            last_seen: tsParam(signalWrite.lastSeen ?? signalWrite.ts), metrics: jsonParam({ source: "turn_analysis" }),
+        })),
+        expresses: analyses.filter((analysis) => analysis.semanticSignal !== null).map((analysis) => cacheRow({
+            id: expressesRecordKey(analysis.turnKey, analysis.semanticSignal!.key), in_id: analysis.turnKey,
+            out_id: analysis.semanticSignal!.key, analysis: analysisRecordKey(analysis.turnKey),
+            session: analysis.sessionKey, confidence: analysis.confidence, method: analysis.method, ts: tsParam(analysis.ts),
+        })),
+        reactsTo: analyses.filter((analysis) => analysis.reactsToTurnKey !== null).map((analysis) => cacheRow({
+            id: reactsToRecordKey(analysis.turnKey, analysis.reactsToTurnKey!), in_id: analysis.turnKey,
+            out_id: analysis.reactsToTurnKey!, session: analysis.sessionKey, polarity: analysis.polarity,
+            act: analysis.act, confidence: analysis.confidence, signal: analysis.semanticSignal?.key ?? null,
+            ts: tsParam(analysis.ts),
+        })),
+    };
 };
 
 export function deriveTurnAnalysisRows(rows: readonly TurnAnalysisInput[]): TurnAnalysisWrite[] {
     const previousAssistantBySession = new Map<string, string>();
     return rows.map((row) => {
-        const sessionKey = recordKeyPart(row.session, "session") ?? "unknown";
+        const sessionKey = row.session;
         const previousAssistantTurnKey = previousAssistantBySession.get(sessionKey) ?? null;
         const analysis = classifyTurnAnalysis(row, previousAssistantTurnKey);
         if (analysis.speaker === "assistant") previousAssistantBySession.set(sessionKey, analysis.turnKey);
@@ -529,21 +495,19 @@ export function deriveTurnAnalysisRows(rows: readonly TurnAnalysisInput[]): Turn
     });
 }
 
-const fetchTurns = (sinceDays: number | undefined): Effect.Effect<TurnAnalysisInput[], DbError, SurrealClient> =>
+const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly TurnAnalysisInput[], CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const since = sinceWhereClause(sinceDays);
-        const [rows] = yield* db.query<[TurnAnalysisInput[]]>(`
-SELECT id, session, session.source AS source, seq, role, message_kind, intent_kind, text, text_excerpt, type::string(ts) AS ts
-FROM turn
-${since}
-ORDER BY session, seq;`);
-        return rows ?? [];
+        return yield* write.rows(Schema.Struct({
+            id: Schema.String, session: Schema.String, seq: Schema.Number, role: Schema.String,
+            source: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
+            intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
+            text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn,
+        }), `SELECT t.id, t.session, CAST(t.seq AS DOUBLE) AS seq, t.role, s.source,
+                    t.message_kind, t.intent_kind, t.text, t.text_excerpt, t.ts
+             FROM turn t JOIN session s ON s.id = t.session
+             ${sinceDays === undefined ? "" : "WHERE t.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
+             ORDER BY t.session, t.seq`, sinceDays === undefined ? [] : [sinceDays]);
     });
-
-interface ExistingAnalyzedTurnRow {
-    readonly turn?: unknown;
-}
 
 /**
  * Load the set of turn keys that already have a `turn_analysis` row. Uses the
@@ -552,37 +516,40 @@ interface ExistingAnalyzedTurnRow {
  * are normalized through `recordKeyPart(..., "turn")` so they line up exactly
  * with the `turnKey` produced by `classifyTurnAnalysis`.
  */
-const loadAnalyzedTurnKeys = (): Effect.Effect<Set<string>, DbError, SurrealClient> =>
+const loadAnalyzedTurnKeys = (write: CacheWriteService): Effect.Effect<Set<string>, CacheReadError> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const [rows] = yield* db.query<[ExistingAnalyzedTurnRow[]]>(
-            "SELECT turn FROM turn_analysis;",
-        );
+        const rows = yield* write.rows(Schema.Struct({ turn: Schema.String }), "SELECT turn FROM turn_analysis");
         const set = new Set<string>();
-        for (const row of rows ?? []) {
-            const key = recordKeyPart(row.turn, "turn");
-            if (key != null) set.add(key);
-        }
+        for (const row of rows) set.add(row.turn);
         return set;
     });
 
-export const deriveTurnAnalysis = (
-    opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
-): Effect.Effect<TurnAnalysisStats, DbError, SurrealClient> =>
+const persistTurnAnalysisRows = (write: CacheWriteService, analyses: readonly TurnAnalysisWrite[]) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const rows = buildTurnAnalysisRows(analyses);
+        yield* write.putMany("turn_analysis", rows.analyses);
+        yield* write.putMany("semantic_signal", rows.signals);
+        yield* write.putMany("expresses", rows.expresses);
+        yield* write.putMany("reacts_to", rows.reactsTo);
+    });
+
+export const deriveTurnAnalysis = (
+    write: CacheWriteService,
+    opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
+): Effect.Effect<TurnAnalysisStats, CacheReadError | CacheWriteError> =>
+    Effect.gen(function* () {
         // Escape hatch: when the derivation logic itself changes, force a full
         // reset + re-derive of every turn analysis.
         const full = process.env.AX_REDERIVE_ANALYSIS === "1";
-        const rows = yield* fetchTurns(opts.sinceDays);
+        const rows = yield* fetchTurns(write, opts.sinceDays);
         // Derive over the full ordered row set so the reacts_to "previous
         // assistant turn" lookahead has complete session context, then filter
         // down to only the turns that still need persisting.
         const allAnalyses = deriveTurnAnalysisRows(rows);
 
         if (full && opts.sinceDays === undefined) {
-            yield* db.query("DELETE reacts_to; DELETE expresses; DELETE turn_analysis; DELETE semantic_signal;");
-            yield* executeStatementsWith(db, buildTurnAnalysisStatements(allAnalyses), { chunkSize: 500 });
+            for (const table of ["reacts_to", "expresses", "turn_analysis", "semantic_signal"]) yield* write.exec(`DELETE FROM ${table}`);
+            yield* persistTurnAnalysisRows(write, allAnalyses);
             return {
                 turnsAnalyzed: allAnalyses.length,
                 signalsPromoted: new Set(allAnalyses.map((a) => a.semanticSignal?.key).filter(Boolean)).size,
@@ -597,10 +564,9 @@ export const deriveTurnAnalysis = (
         // only derive turns not yet analyzed. No blanket DELETE - the
         // turn_analysis id is the turn key, so each UPSERT lands in place. This
         // is a near-no-op on warm runs where almost every turn already exists.
-        const analyzed = yield* loadAnalyzedTurnKeys();
+        const analyzed = yield* loadAnalyzedTurnKeys(write);
         const analyses = allAnalyses.filter((a) => !analyzed.has(a.turnKey));
-        const statements = buildTurnAnalysisStatements(analyses);
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        yield* persistTurnAnalysisRows(write, analyses);
         return {
             turnsAnalyzed: analyses.length,
             signalsPromoted: new Set(analyses.map((a) => a.semanticSignal?.key).filter(Boolean)).size,
@@ -616,12 +582,12 @@ export class TurnAnalysisStageStats extends BaseStageStats.extend<TurnAnalysisSt
     reactsToEdges: Schema.Number,
 }) {}
 
-export const turnAnalysisStage: StageDef<TurnAnalysisStageStats, SurrealClient> = {
+export const turnAnalysisStage: StageDef<TurnAnalysisStageStats, never, import("./stage/registry.ts").IngestStageError> = {
     meta: StageMeta.make({ key: "turn-analysis", deps: ["outcomes"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
+    run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveTurnAnalysis({ sinceDays: sinceDaysFromCtx(ctx) });
+            const result = yield* deriveTurnAnalysis(write, { sinceDays: sinceDaysFromCtx(ctx) });
             return TurnAnalysisStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `analyzed ${result.turnsAnalyzed} turns, promoted ${result.signalsPromoted} semantic signals`,

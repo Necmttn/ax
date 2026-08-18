@@ -10,7 +10,7 @@
  * Each term: a mono $-eyebrow (the term), a serif definition, and one
  * "in the wild" usage receipt. Always "ax" in visitor copy, never "axctl".
  * Drift fixed vs the old .md: checkpoints are +3/+10/+30 SESSIONS (not days);
- * the retro loop is watcher-driven (no Stop hook); "ax skills weighted"
+ * the retro loop is pull-based, drained on demand (no Stop hook); "ax skills weighted"
  * (not "axctl skills taste"); no repo paths.
  */
 
@@ -82,7 +82,7 @@ export const GLOSSARY_GROUPS: readonly GlossaryGroup[] = [
       {
         term: "retro",
         definition:
-          "A structured reflection collected after a session: what was tried, what worked, what failed, and the next experiment to run. It is a bet on the next session, not a recap. ax drains pending retros in the background (watcher-driven) and through the /retro skill - never via a per-turn Stop hook.",
+          "A structured reflection collected after a session: what was tried, what worked, what failed, and the next experiment to run. It is a bet on the next session, not a recap. ax drains pending retros on demand through the /retro skill - never via a per-turn Stop hook.",
         usage: "Six retros this week propose the same hook - that's a pattern worth shipping.",
       },
     ],

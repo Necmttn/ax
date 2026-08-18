@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 /**
- * fetch-binaries.ts - vendor the `surreal` + `bun` binaries the packaged
- * studio-desktop app spawns at runtime (surreal :8521, `bun ... serve` :1738).
+ * fetch-binaries.ts - vendor the `bun` binary the packaged studio-desktop app
+ * spawns at runtime (`bun ... studio` / `bun ... ingest`, both on port/paths
+ * derived from `DesktopEnvironment`).
  *
- * Downloads pinned releases for the requested macOS arch(es) into
- * `resources/bin/<arch>/{surreal,bun}` and `chmod +x` them. The output dir is
- * gitignored - binaries are fetched at build/release time, not committed.
+ * The desktop app spawns a single `ax studio` process (embedded DuckDB, no
+ * separate daemon binary), so this script only needs to vendor `bun`.
+ *
+ * Downloads a pinned bun release for the requested macOS arch(es) into
+ * `resources/bin/<arch>/bun` and `chmod +x`es it. The output dir is
+ * gitignored - the binary is fetched at build/release time, not committed.
  *
  * Usage:
  *   bun run scripts/fetch-binaries.ts                # host arch only
@@ -13,9 +17,9 @@
  *   bun run scripts/fetch-binaries.ts --all          # both darwin arches
  *   bun run scripts/fetch-binaries.ts --update-hashes # recompute + print SHA256s
  *
- * Idempotent: skips a binary if it already exists and `--version` matches the
- * pinned version. SHA256 is verified against the recorded hashes (when present),
- * and every binary is sanity-checked by running `--version`.
+ * Idempotent: skips the binary if it already exists and `--version` matches the
+ * pinned version. SHA256 is verified against the recorded hash (when present),
+ * and the binary is sanity-checked by running `--version`.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -25,41 +29,31 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Exact pinned upstream versions. Bump deliberately. */
-const BINARY_VERSIONS = {
-    surreal: "3.1.0",
-    bun: "1.3.13",
-} as const;
+/** Exact pinned upstream version. Bump deliberately. */
+const BUN_VERSION = "1.3.13";
 
 /** Our internal arch dir names (match `DesktopEnvironment` path construction). */
 type Arch = "arm64" | "x64";
 
 /**
- * Per-release arch tokens. Upstream naming differs per project / per arch.
- * Confirmed against the actual GitHub release assets (2026-06):
- *   surreal: surreal-v3.1.0.darwin-{amd64,arm64}.tgz
- *   bun:     bun-darwin-{aarch64,x64}.zip
+ * Per-release arch token. Upstream naming differs per arch. Confirmed against
+ * the actual GitHub release assets (2026-06): `bun-darwin-{aarch64,x64}.zip`.
  */
-const ARCH_TOKENS: Record<Arch, { surreal: string; bun: string }> = {
-    arm64: { surreal: "arm64", bun: "aarch64" },
-    x64: { surreal: "amd64", bun: "x64" },
+const ARCH_TOKENS: Record<Arch, { bun: string }> = {
+    arm64: { bun: "aarch64" },
+    x64: { bun: "x64" },
 };
 
 /**
- * Expected SHA256 of each downloaded ARCHIVE (the `.tgz` / `.zip`), keyed by
- * arch. Empty string = not yet recorded (run with `--update-hashes`).
- *
- * - bun: taken from the upstream `SHASUMS256.txt` published with the release.
- * - surreal: upstream publishes no checksum file, so these are computed-once
- *   values pinned here; verified on download.
+ * Expected SHA256 of the downloaded ARCHIVE (the `.zip`), keyed by arch, taken
+ * from the upstream `SHASUMS256.txt` published with the release. Empty string
+ * = not yet recorded (run with `--update-hashes`).
  */
-const ARCHIVE_SHA256: Record<Arch, { surreal: string; bun: string }> = {
+const ARCHIVE_SHA256: Record<Arch, { bun: string }> = {
     arm64: {
-        surreal: "4acf3578e3cc1d57a23b44241b4dd5b30aabf8aebbe9b211430da33550f14d3d",
         bun: "5467e3f65dba526b9fea98f0cce04efafc0c63e169733ec27b876a3ad32da190",
     },
     x64: {
-        surreal: "",
         bun: "e5a6c8b64f419925232d111ecb13e25f0abf55e54f792341f987623fd0778009",
     },
 };
@@ -133,23 +127,10 @@ function adhocSign(binPath: string): void {
     }
 }
 
-function surrealUrl(arch: Arch): string {
-    const v = BINARY_VERSIONS.surreal;
-    const token = ARCH_TOKENS[arch].surreal;
-    return `https://github.com/surrealdb/surrealdb/releases/download/v${v}/surreal-v${v}.darwin-${token}.tgz`;
-}
-
 function bunUrl(arch: Arch): string {
-    const v = BINARY_VERSIONS.bun;
+    const v = BUN_VERSION;
     const token = ARCH_TOKENS[arch].bun;
     return `https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-darwin-${token}.zip`;
-}
-
-function extractTgz(archive: string, intoDir: string): void {
-    const r = spawnSync("tar", ["-xzf", archive, "-C", intoDir], {
-        encoding: "utf8",
-    });
-    if (r.status !== 0) die(`tar extract failed: ${r.stderr || r.stdout}`);
 }
 
 function extractZip(archive: string, intoDir: string): void {
@@ -157,17 +138,6 @@ function extractZip(archive: string, intoDir: string): void {
         encoding: "utf8",
     });
     if (r.status !== 0) die(`unzip failed: ${r.stderr || r.stdout}`);
-}
-
-interface FetchSpec {
-    readonly name: "surreal" | "bun";
-    readonly url: string;
-    readonly archiveExt: ".tgz" | ".zip";
-    readonly expectedSha: string;
-    /** Returns the extracted binary path inside `workDir`, or null if not found. */
-    readonly locate: (workDir: string) => string | null;
-    /** Substring expected in `--version` output (the pinned version). */
-    readonly versionNeedle: string;
 }
 
 function findFile(dir: string, basename: string): string | null {
@@ -180,53 +150,51 @@ function findFile(dir: string, basename: string): string | null {
     return first ?? null;
 }
 
-async function fetchOne(
+async function fetchBun(
     arch: Arch,
-    spec: FetchSpec,
     opts: { updateHashes: boolean },
 ): Promise<{ recordedSha: string; version: string }> {
     const outDir = join(BIN_ROOT, arch);
     mkdirSync(outDir, { recursive: true });
-    const finalPath = join(outDir, spec.name);
+    const finalPath = join(outDir, "bun");
+    const expectedSha = ARCHIVE_SHA256[arch].bun;
+    const url = bunUrl(arch);
 
     // Idempotency: skip if present + version matches.
     if (!opts.updateHashes && existsSync(finalPath)) {
         const existing = probeVersion(finalPath);
-        if (existing && existing.includes(spec.versionNeedle)) {
-            log(`${arch}/${spec.name}: present & version OK (${existing}) - skip`);
-            return { recordedSha: spec.expectedSha, version: existing };
+        if (existing && existing.includes(BUN_VERSION)) {
+            log(`${arch}/bun: present & version OK (${existing}) - skip`);
+            return { recordedSha: expectedSha, version: existing };
         }
-        log(`${arch}/${spec.name}: present but version mismatch/unreadable - refetch`);
+        log(`${arch}/bun: present but version mismatch/unreadable - refetch`);
     }
 
-    const work = join(tmpdir(), `ax-fetch-${spec.name}-${arch}-${Date.now()}`);
+    const work = join(tmpdir(), `ax-fetch-bun-${arch}-${Date.now()}`);
     mkdirSync(work, { recursive: true });
-    const archive = join(work, `dl${spec.archiveExt}`);
+    const archive = join(work, "dl.zip");
     try {
-        await download(spec.url, archive);
+        await download(url, archive);
 
         const got = sha256(archive);
         if (opts.updateHashes) {
-            log(`${arch}/${spec.name}: archive SHA256 = ${got}`);
-        } else if (spec.expectedSha) {
-            if (got !== spec.expectedSha) {
+            log(`${arch}/bun: archive SHA256 = ${got}`);
+        } else if (expectedSha) {
+            if (got !== expectedSha) {
                 die(
-                    `${arch}/${spec.name}: SHA256 mismatch\n  expected ${spec.expectedSha}\n  got      ${got}\n  url ${spec.url}`,
+                    `${arch}/bun: SHA256 mismatch\n  expected ${expectedSha}\n  got      ${got}\n  url ${url}`,
                 );
             }
-            log(`${arch}/${spec.name}: SHA256 verified`);
+            log(`${arch}/bun: SHA256 verified`);
         } else {
-            log(`${arch}/${spec.name}: no recorded SHA256 (got ${got}) - skipping archive checksum`);
+            log(`${arch}/bun: no recorded SHA256 (got ${got}) - skipping archive checksum`);
         }
 
-        if (spec.archiveExt === ".tgz") extractTgz(archive, work);
-        else extractZip(archive, work);
+        extractZip(archive, work);
 
-        const located = spec.locate(work);
+        const located = findFile(work, "bun");
         if (!located) {
-            return die(
-                `${arch}/${spec.name}: extracted binary not found in archive`,
-            );
+            return die(`${arch}/bun: extracted binary not found in archive`);
         }
 
         // Move into place.
@@ -236,17 +204,15 @@ async function fetchOne(
 
         const version = probeVersion(finalPath);
         if (!version) {
+            return die(`${arch}/bun: binary failed to run --version after install`);
+        }
+        if (!version.includes(BUN_VERSION)) {
             return die(
-                `${arch}/${spec.name}: binary failed to run --version after install`,
+                `${arch}/bun: --version (${version}) does not contain pinned version ${BUN_VERSION}`,
             );
         }
-        if (!version.includes(spec.versionNeedle)) {
-            return die(
-                `${arch}/${spec.name}: --version (${version}) does not contain pinned version ${spec.versionNeedle}`,
-            );
-        }
-        log(`${arch}/${spec.name}: installed -> ${finalPath}`);
-        log(`${arch}/${spec.name}: --version -> ${version}`);
+        log(`${arch}/bun: installed -> ${finalPath}`);
+        log(`${arch}/bun: --version -> ${version}`);
         return { recordedSha: got, version };
     } finally {
         rmSync(work, { recursive: true, force: true });
@@ -258,38 +224,20 @@ async function main() {
     const updateHashes = argv.includes("--update-hashes");
     const archs = parseArchArgs(argv);
 
-    log(`pinned: surreal v${BINARY_VERSIONS.surreal}, bun v${BINARY_VERSIONS.bun}`);
+    log(`pinned: bun v${BUN_VERSION}`);
     log(`arch(es): ${archs.join(", ")}${updateHashes ? " (update-hashes)" : ""}`);
 
-    const computed: Record<string, { surreal?: string; bun?: string }> = {};
+    const computed: Record<string, string | undefined> = {};
 
     for (const arch of archs) {
-        const surrealSpec: FetchSpec = {
-            name: "surreal",
-            url: surrealUrl(arch),
-            archiveExt: ".tgz",
-            expectedSha: ARCHIVE_SHA256[arch].surreal,
-            locate: (work) => findFile(work, "surreal"),
-            versionNeedle: BINARY_VERSIONS.surreal,
-        };
-        const bunSpec: FetchSpec = {
-            name: "bun",
-            url: bunUrl(arch),
-            archiveExt: ".zip",
-            expectedSha: ARCHIVE_SHA256[arch].bun,
-            locate: (work) => findFile(work, "bun"),
-            versionNeedle: BINARY_VERSIONS.bun,
-        };
-
-        const s = await fetchOne(arch, surrealSpec, { updateHashes });
-        const b = await fetchOne(arch, bunSpec, { updateHashes });
-        computed[arch] = { surreal: s.recordedSha, bun: b.recordedSha };
+        const b = await fetchBun(arch, { updateHashes });
+        computed[arch] = b.recordedSha;
     }
 
     if (updateHashes) {
         log("recorded SHA256 values (paste into ARCHIVE_SHA256):");
-        for (const [arch, v] of Object.entries(computed)) {
-            log(`  ${arch}: surreal=${v.surreal} bun=${v.bun}`);
+        for (const [arch, sha] of Object.entries(computed)) {
+            log(`  ${arch}: bun=${sha}`);
         }
     }
 

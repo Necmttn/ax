@@ -334,7 +334,7 @@ export function DashboardPreview() {
             Mission Control for your&nbsp;agents.
           </h2>
           <p>
-            Run <code>ax serve</code> and the whole HUD lights up &mdash; archetype
+            Run <code>ax studio</code> and the whole HUD lights up &mdash; archetype
             sigil, live activity, streaks, token spend by model. The wrapped
             highlights pop out as ax finds them.
           </p>
@@ -483,7 +483,7 @@ export function DashboardPreview() {
         </div>
 
         <p className="demo-caption">
-          Run <code>ax serve</code> to see yours &mdash; Mission Control, the
+          Run <code>ax studio</code> to see yours &mdash; Mission Control, the
           Improve deck, Agent Wrapped, sessions and skill triage.
         </p>
       </section>

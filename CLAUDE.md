@@ -4,7 +4,7 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## What this is
 
-`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 6 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), oh-my-pi/omp (`~/.omp/agent/sessions/`, a Pi fork sharing Pi's JSONL format - one parameterized parser, distinct `omp` identity; `AX_OMP_DIR` override), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, `$XDG_CONFIG_HOME/opencode/{skill,skills}/`, project `.claude/skills` + `.opencode/{skill,skills}`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
+`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 6 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), oh-my-pi/omp (`~/.omp/agent/sessions/`, a Pi fork sharing Pi's JSONL format - one parameterized parser, distinct `omp` identity; `AX_OMP_DIR` override), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, `$XDG_CONFIG_HOME/opencode/{skill,skills}/`, project `.claude/skills` + `.opencode/{skill,skills}`, plugin caches) into an embedded DuckDB store. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
 ## Attribution on shareable artifacts
 
@@ -34,7 +34,21 @@ per issue. See CONTRIBUTING.md.
 
 - **Runtime**: bun ≥ 1.3
 - **Language**: TypeScript (strict, `module: preserve`, `moduleResolution: bundler`)
-- **DB**: SurrealDB 3.0+ on `127.0.0.1:8521`, ns=`ax`, db=`main`
+- **Storage**: TWO stores, and which one a thing belongs in is the first
+  question to ask about any write:
+  - **DuckDB cache** - an embedded, single-file, REBUILDABLE snapshot of
+    everything derivable from transcripts, git, and skills on disk. DDL:
+    `packages/schema/src/schema.duckdb.sql`. Reads go through the `CacheRead`
+    seam against a PUBLISHED snapshot; writes go through `withCacheWrite` under
+    `withIngestLock` against the live file (`packages/lib/src/duckdb/seam.ts`).
+  - **SQLite judgment sidecar** - DECISIONS, which a cache rebuild must never
+    drop: proposals, verdicts, experiments, session labels. DDL:
+    `packages/schema/src/schema.sidecar.sql`, service `Judgment`
+    (`@ax/lib/sqlite`).
+  - **NO DAEMON IS REQUIRED.** There is no database server to install, start,
+    or connect to. `ax studio` binds a port only while a browser client is
+    attached and exits afterward; `ax otlpd` is the one LaunchAgent that
+    remains, and only because an OTLP exporter needs a durable endpoint.
 - **Effect**: `effect@beta` (4.0.0-beta.x) for ingest pipelines + service layer (v0.1)
 - **TUI**: `@opentui/react` + react@19.2 - skills browser (`apps/axctl/src/tui/`) + ingest progress (`apps/axctl/src/cli/progress-tui.tsx`)
 
@@ -50,22 +64,35 @@ apps/
 ├── axctl/                 # the CLI (npm package "axctl")
 │   ├── bin/axctl          # shell shim → src/cli/index.ts
 │   └── src/
-│       ├── lib/  (NOTE: moved to @ax/lib) cli/ ingest/ dashboard/ hooks/
+│       ├── cli/ ingest/ dashboard/ hooks/ otel/ mcp/
 │       ├── improve/ classifiers/ queries/ context/ project/ tui/ ...
-│       └── ...            # the whole former /src tree
-└── site/                  # landing site (@ax/site, TanStack Start SPA → CF Pages)
+│       └── ...            # (the former src/lib/ moved to @ax/lib)
+├── studio/                # @ax/studio - the web studio SPA (served by `ax studio`)
+├── studio-desktop/        # the Electron wrapper (owns its own long-lived backend)
+├── site/                  # landing site (@ax/site, TanStack Start SPA → CF Pages)
+└── community-worker/      # CF Worker that compiles the community leaderboard
 packages/
-├── lib/                   # @ax/lib - db client, paths, errors, layers, shared/, live-traces/
-├── schema/                # @ax/schema - schema.surql (DDL) + derived types
+├── lib/                   # @ax/lib - duckdb/ sqlite/ paths, errors, layers, shared/, live-traces/
+├── schema/                # @ax/schema - the DDL + derived types (see below)
+├── hooks-sdk/             # @ax/hooks-sdk - author agent hooks once, run on Claude + Codex
+├── recap-deck/ foresight/ onboarding-prompt/ community-compile/
 └── ax-classifier-*/       # @ax-classifier/* + python classifier experiments
-scripts/                   # repo-wide orchestration (db lifecycle, checks, prototypes)
+scripts/                   # repo-wide orchestration (build, check:* gates, duckdb, prototypes)
 skill/                     # SKILL.md for the installable Claude Code skill
 .references/               # gitignored - clone of Effect source for AI lookup
 turbo.json  tsconfig.base.json  package.json (root = workspace orchestrator)
 ```
 
-Internal imports resolve by package name: `@ax/lib/db`, `@ax/lib/shared/surql`,
-`@ax/schema/schema.surql` (with `{ type: "text" }`), `@ax-classifier/...`.
+Internal imports resolve by package name: `@ax/lib/duckdb`, `@ax/lib/sqlite`,
+`@ax/schema/duckdb-tables`, `@ax/schema/schema.duckdb.sql` (with
+`{ type: "text" }`), `@ax-classifier/...`.
+
+`@ax/schema` carries THREE DDL files, and only two are live:
+`schema.duckdb.sql` (the cache) and `schema.sidecar.sql` (the judgment
+sidecar). `schema.surql` is the retired SurrealDB DDL, kept on purpose as
+migration-fidelity proof - the v2 port is checked against it
+(`duckdb-parity.test.ts`). Nothing applies it. Do not add to it, and do not
+delete it.
 
 **Build/test:** `bun run build` → `dist/axctl`; `bunx turbo run build` does CLI
 + site. CI gates: `bun test` (repo-wide) + `bun run typecheck`. Site's own
@@ -89,62 +116,140 @@ Effect v4 source (`effect-smol`) is shallow-cloned to `.references/effect-smol`
 for API/usage/type lookup on beta APIs. `bun refs:setup` populates it after a
 fresh clone.
 
+## The storage seam - read this before adding any query
+
+Which store, and which side of the seam, is the FIRST question about any new read
+or write. Getting it wrong does not error; it returns a wrong answer.
+
+- **Reads** take `CacheRead` (`cacheRows` / `cacheFirst` / `read.raw`) against the
+  PUBLISHED snapshot. A read must never open the live file.
+- **Writes** take `withCacheWrite` under `withIngestLock`, against the live file,
+  and publish at the end of the run. Ingest stages read their own run's writes
+  through the WRITE service, not `CacheRead` - the snapshot does not have them yet.
+- **Decisions** (proposal, verdict, experiment, session_label) go to the SQLite
+  sidecar via `Judgment`, never to the cache. A cache rebuild must not lose them.
+- A command declares what it needs in its `RuntimeManifest`
+  (`apps/axctl/src/cli/commands/manifest.ts`): `"cache" | "ingest" | "none"`.
+  There is no `"db"`.
+- Cross-store joins happen in JS: the cache and the sidecar are different engines
+  and cannot be joined in SQL. Fetch the small side, build a Set/Map, filter.
+
 ## Schema rules of thumb
 
-- SurrealDB v3 SCHEMAFULL - top-level fields explicit
-- Nested objects → JSON-encoded as `string` (no `flexible<object>` in v3)
-- Datetime fields require JS `Date` objects via the SDK (not ISO strings)
-- Skill names with `:` (plugin-namespaced) → encoded as `__` in record IDs (see `packages/lib/src/skill-id.ts`)
+- A new table must be declared in the right DDL AND registered in its manifest
+  (`packages/schema/src/duckdb-tables.ts` or `sidecar-tables.ts`, plus
+  `SCHEMA_TABLES` in `apps/axctl/src/queries/insights.ts`). `session_label`
+  shipped unregistered for a while precisely because nothing forced it.
+- Nested objects → JSON-encoded as a `VARCHAR` column, decoded at the read seam.
+- `CURRENT_TIMESTAMP` is a TIMESTAMPTZ, and the DuckDB build ax ships carries NO
+  ICU, so date arithmetic MUST cast it: `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)`.
+  Uncast, the statement does not bind at all. Guarded by
+  `bun run check:timestamp-cast`.
+- `write.raw` / `transaction.raw` apply NO column decoder, so a BIGINT arrives as
+  a JS **bigint**: `typeof x === "number"` reads false and silently stores null,
+  and `JSON.stringify` throws. Cast integer columns in the PROJECTION
+  (`CAST(col AS DOUBLE) AS col`) so the next caller cannot forget. Guarded by
+  `bun run check:raw-numeric-cast`.
+- Skill names with `:` (plugin-namespaced) → encoded as `__` in row ids (see `packages/lib/src/skill-id.ts`)
 
 ## Reactivity
 
-- LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
-- LaunchAgent serve daemon (`com.necmttn.ax-serve`, installed by `axctl install`) auto-starts `ax serve` on login (RunAtLoad + KeepAlive-on-crash), so the dashboard API + OTLP receiver (port 1738) are always up without a manual `ax serve`. serve binds `127.0.0.1` by default (`AX_SERVE_HOST=0.0.0.0` to expose on the LAN); it self-heals if `com.necmttn.ax-db` starts after it. Symmetric across install/status/enable/disable/uninstall with the other agents.
+- **`ax otlpd` is the ONLY LaunchAgent** `axctl install` writes
+  (`com.necmttn.ax-otlpd`). `ax-db`, `ax-watch`, `ax-derive-daily`,
+  `ax-quota-refresh` and `ax-serve` are all gone: an embedded DuckDB file needs
+  no daemon to hold it open, and the studio runs only while a client is
+  attached. If you are about to add a background agent, the burden of proof is
+  on you - the whole point of v2 is that a fresh install starts nothing.
+- Ingest is on demand (`ax ingest --since=1`) **plus a read-driven freshness
+  drive** - and "nothing is always-on" is NOT the same claim as "nothing ingests
+  in the background". `cli/index.ts` wraps EVERY command in
+  `withIngestStalenessPreflight`, and `maybeSpawnBackgroundIngest`
+  (`queries/ingest-staleness.ts`) forks a DETACHED, output-silenced
+  `ax ingest --since=1 --progress=off` when the graph is past
+  `AX_STALE_INGEST_HOURS` and the debounce in
+  `~/.local/share/ax/freshness-drive-state.json` has elapsed. Reading is what
+  keeps the cache fresh now that the watcher LaunchAgent is gone. It is
+  fail-open and never awaited; `AX_NO_AUTO_INGEST=1` / `AX_AUTO_INGEST=off`
+  disables it.
+  - **Consequence for anything you measure or test**: a plain read can start a
+    writer. A publish landing mid-session will change what the next read returns,
+    and two ingests racing is a real state, not a hypothetical - so pin
+    `AX_DUCKDB_SNAPSHOT` (and `AX_NO_AUTO_INGEST=1`) in any test or benchmark
+    that must see a stable store, and do not conclude "the data vanished" from
+    two reads taken minutes apart.
+- Do NOT add a Stop hook to drive ingest - Stop fires per turn and blocks the
+  agent until ingest returns. The freshness drive exists so you do not need one.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
-### Studio served by the daemon (same-origin)
+### The studio is ephemeral (`ax studio`)
 
-`ax serve` serves the studio SPA at its own root (`http://127.0.0.1:1738/`), so
-the dashboard fetches `/api/*` same-origin - no mixed-content / Private Network
-Access handshake (the bug that made the hosted `https://ax.necmttn.com/studio/`
-fail to reach a loopback daemon for many users). The studio **daemon** build
-target (`base:/`, `mock:false`, `apps/studio/dist`) is the served bundle:
-`serveStudioAsset` (`apps/axctl/src/dashboard/studio-assets.ts`) reads it off
-disk when running from source, and from assets **embedded in the compiled
-binary** otherwise. The binary embed is codegen: `scripts/build-axctl.ts` calls
-`scripts/gen-studio-embed.ts` `writeManifest()` (builds studio + rewrites
-`studio-embed.gen.ts` with `{ type: "file" }` imports so `bun build --compile`
-bakes the bytes in), compiles, then `writeStub()` restores the committed empty
-stub so the manifest never lands in git. Unknown non-asset routes fall back to
-`index.html` (SPA routing); a missing `/assets/*` is a 404; the daemon landing
-page shows only when no studio is bundled at all. The hosted
-`ax.necmttn.com/studio/` stays a **mock-fixtures demo** (no live daemon); the
-CLI banner points only at the local URL via `serveStudioUrl` (`banner.ts`).
+`ax studio` opens the local web studio over the PUBLISHED snapshot. It binds a
+port only while a browser client is attached and exits on its own afterward -
+there is no always-on daemon, no pidfile, and no `status`/`stop` verb
+(`dashboard/serve-instance.ts` and `serve-control.ts` are deleted). It serves the
+SPA at its own root so the dashboard fetches `/api/*` same-origin, which is what
+made a loopback daemon reachable at all (the hosted
+`https://ax.necmttn.com/studio/` could not reach one, and stays a mock-fixtures
+demo).
 
-**Session deeplinks (#563)** - the stable Studio session route is
-`http://localhost:<port>/sessions/<bare-session-id>` (`studioSessionUrl` in
-`apps/axctl/src/nav/next-links.ts` is the single source of the shape; agents
-must NOT reconstruct it from frontend route code). Session-oriented outputs
-carry it as a `NavLink` `url` transport (the third transport beside `call`/`cmd`,
-group `navigate`): `ax sessions show` (top-level), `ax sessions here|around|near`
-+ `ax recall` (per row/hit), and the matching MCP tools (`session_show`,
-`sessions_around`, `recall`). Port + liveness come from `resolveStudioTarget`
-(`serve-instance.ts`) - it reads the serve pidfile + signal-0s the pid (NO
-network probe, so common queries pay no round-trip); when no daemon is up it
-emits the default-port URL and the link copy nudges `ax serve`. Works for normal
-and subagent sessions (the route renders both).
+The served bundle is the studio **daemon** build target (`base:/`, `mock:false`,
+`apps/studio/dist`). `serveStudioAsset`
+(`apps/axctl/src/dashboard/studio-assets.ts`) reads it off disk when running from
+source, and from assets **embedded in the compiled binary** otherwise. The embed
+is codegen: `scripts/build-axctl.ts` calls `scripts/gen-studio-embed.ts`
+`writeManifest()` (builds studio + rewrites `studio-embed.gen.ts` with
+`{ type: "file" }` imports so `bun build --compile` bakes the bytes in),
+compiles, then `writeStub()` restores the committed empty stub so the manifest
+never lands in git. Unknown non-asset routes fall back to `index.html` (SPA
+routing); a missing `/assets/*` is a 404.
 
-### Live ingest in the dashboard
+**Session deeplinks (#563)** - the stable route is
+`http://localhost:<port>/sessions/<bare-session-id>`. `studioSessionUrl`
+(`apps/axctl/src/nav/next-links.ts`) is the single source of that shape; agents
+must NOT reconstruct it from frontend route code. Session-oriented outputs carry
+it as a `NavLink` `url` transport (the third transport beside `call`/`cmd`, group
+`navigate`): `ax sessions show`, `ax sessions here|around|near`, `ax recall`, and
+the matching MCP tools.
 
-- `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.
-- CLI `ax ingest` is unchanged (never passes a `runId`). Progress animates on a TTY by default; non-TTY is silent unless forced with `AX_PROGRESS=on` (or `--progress=plain|pipeline`). `AX_PROGRESS=off` silences. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
-- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar. `/api/version` advertises this as `live_ingest: false`; the studio Live tab then falls back to polling the count tiles every 5s (`apps/studio/src/poll-fallback.ts`) instead of a dead stream.
-- **Daemon self-awareness**: `ax serve` writes a pidfile (`~/.local/share/ax/serve.json`, `AX_DATA_DIR` override) and pre-flight-probes its port - re-running it against a live daemon prints the dashboard URLs (exit 0), a foreign listener gets a clean lsof/`--port` hint (no stack trace). `ax serve status` / `ax serve stop` resolve the instance via pidfile → `/api/version` probe → lsof, so they also find pre-pidfile daemons; `stop` only ever kills the pid actually LISTENing on the port. Logic: `apps/axctl/src/dashboard/serve-instance.ts` + `serve-control.ts`.
+`resolveStudioTarget` (`apps/axctl/src/cli/banner.ts`) supplies the port. Since
+nothing is always-on, it CANNOT answer "is it live" - it always names the
+default port with `live: false`, deliberately, because its callers are
+latency-sensitive and no network probe is allowed there. `probeStudioPort` does
+a real check, but only at `ax studio` startup, where a human is already waiting
+on a server boot.
 
-### OTLP receiver (ax serve)
+### Ingest progress rendering
 
-`ax serve` accepts harness OTLP/JSON telemetry on the daemon port (1738):
+`ax ingest` picks a renderer in `runCli` (`apps/axctl/src/cli/index.ts`), and the
+default is SILENT when nobody is watching:
+
+- `--debug` → raw trace JSON
+- `AX_PROGRESS=off` → silent
+- `--progress=plain` → plain per-stage stderr lines, any terminal
+- interactive TTY (BOTH stdout and stderr) → the OpenTUI split-footer board
+- forced but non-TTY (`AX_PROGRESS=on|pipeline|plain`, or
+  `AXCTL_PROGRESS_FORCE_PIPELINE=1`) → plain lines
+- non-TTY, not forced → silent, so piped and CI output stays clean
+
+### OTLP receiver (`ax otlpd`, and also `ax studio`)
+
+TWO processes accept harness OTLP/JSON, and the difference matters when you point
+an exporter somewhere:
+
+- **`ax otlpd`** is the durable endpoint and the ONE surviving LaunchAgent
+  (`com.necmttn.ax-otlpd` -> `apps/axctl/src/otel/spool-server.ts`). It is
+  database-free: it appends raw bodies to a spool directory, and a later
+  `ax ingest` drains the spool into the `otel_*` tables. This is what
+  `ax install` configures the harnesses to target.
+- **`ax studio`** mounts the same three routes (`OtelGroupLive` in
+  `dashboard/contract/otel.ts`) and appends to the same spool, so telemetry sent
+  while the studio happens to be open is not lost. It is on-demand, so it is NOT
+  an exporter target. `/api/version`'s `otlp_receiver` is DERIVED from the
+  capability list rather than hardcoded, after a stretch where it answered
+  `false` while `POST /v1/logs` on that very port returned 200.
+
+Both accept:
 `POST /v1/metrics` (Claude Code usage metrics) + `POST /v1/traces` (span
 sources) + `POST /v1/logs` (Codex log events → `otel_log_event` table). NOTE:
 Codex emits OTLP *logs* (events: conversation_starts, user_prompt, token usage),
@@ -156,28 +261,28 @@ land as typed columns. Bodies decode via Effect `Schema` (curated OTLP/JSON
 subset, `apps/axctl/src/otel/`), normalize per-harness (`service.name` ->
 harness label), and land in `otel_metric_point` / `otel_span` / `otel_log_event`.
 A correlation pass at ingest finish draws `session -> telemetry_of -> otel_*`
-edges by matching `session.id` (OTLP arrives before the transcript, so the
+edges by matching session ids (OTLP arrives before the transcript, so the
 ingest run owns linking; idempotent, best-effort via `Effect.ignore`).
-**Session-grain + incremental** (`correlate.ts`): one edge per top-level session
-that has telemetry (the edge means "this session has telemetry"; no data query
-reads it - enrichment joins `session_id` directly). Only telemetry observed in the
-last 2 days is scanned, via the `observed_at` index (a range scan over recent
-rows, ~30ms - NOT a full GROUP BY over the whole ~1.5M-row `otel_log_event`, which
-cost ~8s every ingest), then filtered to existing+unlinked sessions in JS. otel
-`session_id` is a bare uuid, `session.id` is `session:⟨uuid⟩`, so matching is
-uuid-to-uuid in JS (the older `type::record("session:"+id)` form mis-parsed
-hyphenated uuids as arithmetic -> zero edges, #610). All otel index builds are
-`CONCURRENTLY` (a plain `DEFINE INDEX` locks the table while building, wedging the
-daemon when `ax install` re-applies the schema onto an already-large otel table).
-OTLP cost
-is stored separately from file-parsed cost (no double-count). The receiver is
-fail-open (always 2xx so exporters never retry-storm) and JSON-only (ax owns the
-harness config, so it forces `http/json` - no protobuf decode, works in the
-compiled binary). `ax install` writes the harness telemetry config
+**Session-grain + incremental** (`apps/axctl/src/otel/correlate.ts`): one edge
+per top-level session that has telemetry (the edge means "this session has
+telemetry"; no data query reads it - enrichment joins `session_id` directly).
+Only telemetry observed in the last 2 days is scanned, windowed on `observed_at`
+(a range scan over recent rows - NOT a full GROUP BY over the whole ~1.5M-row
+`otel_log_event`, which cost ~8s every ingest), then filtered to
+existing+unlinked sessions in JS. Both sides are bare uuids now, normalized
+through `bareUuid` (#610 was the SurrealDB-era `type::record("session:"+id)`
+form mis-parsing hyphenated uuids as arithmetic -> zero edges; the trap is gone
+with the engine, but keep the normalization - a harness can still hand you a
+prefixed or wrapped id). Note the window predicate spells the clock
+`CAST(CURRENT_TIMESTAMP AS TIMESTAMP)`: uncast, it does not bind at all in an
+ICU-less build. OTLP cost is stored separately from file-parsed cost (no
+double-count). Both receivers are fail-open (always 2xx so exporters never
+retry-storm) and JSON-only (ax owns the harness config, so it forces
+`http/json` - no protobuf decode, works in the compiled binary). `ax install`
+writes the harness telemetry config
 (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1738`,
-`http/json`; Codex `[otel]` block), idempotent + ax-marked. `/api/version`
-advertises `otlp_receiver: true`. Provider name: `otel`. Spec:
-docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
+`http/json`; Codex `[otel]` block), idempotent + ax-marked. Provider name:
+`otel`. Spec: docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 
 `ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
 (previously write-only - data landed in `otel_*` and only enriched insights, with
@@ -200,8 +305,9 @@ from transcript parsing, so capturing bodies would only duplicate + re-leak them
 A metadata-only overlay on the normalized graph that answers, for a run:
 objective, durable task state, tool-backed observations, verifier results, and
 what was lost at compaction/resume boundaries - and distinguishes a model CLAIM
-from tool-BACKED evidence. Two SCHEMAFULL tables (`run_evidence_event`,
-`run_evidence_ref`); the shared contract + deterministic builders live in
+from tool-BACKED evidence. Two DuckDB cache tables (`run_evidence_event`,
+`run_evidence_ref`) - cache, not sidecar, because every row is REBUILDABLE from
+transcripts; the shared contract + deterministic builders live in
 `@ax/lib/shared/run-evidence` (closed-set enums `kind`/`backing`/`ref_kind`/
 `privacy_level`; rows REBUILDABLE - key = session+source_table+source_id, so
 re-derive overwrites). Refs default to `ref_only` (no raw payloads); `backing`
@@ -266,7 +372,7 @@ That second row is the one usage views can see: `ax skills weighted` excludes
 skills with `dir_path = "(synthetic)"`, which is why an OpenCode-only user read
 "(no skill invocations found)" despite steady skill use. Catalog rows are
 written create-if-missing (`skillUpsert: "if_missing"` ->
-`INSERT ... ON DUPLICATE KEY UPDATE name = name`); a plain MERGE would stamp a
+`INSERT ... ON CONFLICT DO NOTHING`); a plain `write.put` (INSERT OR REPLACE) would stamp a
 real skill with `dir_path = "(opencode)"` and hide it from those same views.
 
 ### Role registry
@@ -421,8 +527,9 @@ A retro's prose is NOT triageable - only rows in `proposal` reach
 2. **A reviewer files them explicitly**: `ax retro emit --from-file` accepts
    `proposals: [<ax improve propose payload>]` (same `ProposeInputSchema`,
    decoded strictly - a malformed entry fails the emit rather than dropping a
-   finding), writes each through `runPropose`, and RELATEs
-   `proposal->cites_evidence->retro` so triage can trace it back to the review.
+   finding), writes each through `runPropose`, and writes a
+   `cites_evidence` edge row (`proposal -> retro`) so triage can trace it back
+   to the review.
    Emit then runs the derivation inline for that session, and when `failed`/
    `next` carry findings with nothing filed it says the loop is open.
 
@@ -443,10 +550,19 @@ task file, then run `axctl improve lint` to reconcile.
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context. Run from source (no
-native deps, so the compiled binary should work too - untested in v0). Mutating
+`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context.
+Works from source AND from the compiled binary - DuckDB is a native dep, but
+`libduckdb` is embedded at build time, so a `tools/list` handshake against
+`dist/axctl mcp` returns all 23. Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.
+
+Each tool declares which stores it opens, via
+`McpRuntimeKind = "cache" | "judgment" | "cache-judgment" | "full"`
+(`apps/axctl/src/mcp/runtime.ts`) - the MCP-side sibling of a command's
+`RuntimeManifest`. Declare the narrowest kind that works: the pool builds only
+what the roster asks for, so an over-broad `"full"` opens the sidecar for a
+reader that never touches a decision.
 Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
 
 ## Hooks SDK
@@ -484,18 +600,20 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   bundles. Standalone bundle ~0.9 MB (one, vs ~1.5 MB across four), embedded +
   scaffolded like the per-guard bundles. Runtime is live (`bun dispatch.ts`);
   `ax hooks install --all` now registers the single dispatcher (see below).
-- **Daemon fast-path** `POST /hooks/eval` (`ax serve`, `routes/hooks.ts`,
-  capability `hooks_eval`): warm-evaluates the dispatcher via `dispatchEvent`,
+- **Warm fast-path** `POST /hooks/eval` (`routes/hooks.ts`, capability
+  `hooks_eval`), served by `ax studio` while it happens to be up:
+  warm-evaluates the dispatcher via `dispatchEvent`,
   skipping the cold `bun` spawn + bundle parse. DB-free (only GitEnvLive),
   fail-open (unreadable body / any error -> allow). **Env-forwarding:** a
-  daemon-evaluated guard sees the DAEMON's `process.env`, not the agent's, so
+  server-evaluated guard sees the SERVER's `process.env`, not the agent's, so
   the payload carries an `_ax_env` allowlist (decode -> `event.env`) and guards
   read `readEnv(event, NAME) = event.env?.[NAME] ?? process.env[NAME]` for
   bypass flags (`ALLOW_MAIN_WRITE`/`ALLOW_BRANCH_CHECKOUT`/
   `ALLOW_DIRTY_MAIN_MUTATION`) + `AX_SPEND_MODE` - additive, so the spawned path
   is unchanged.
 - **Daemon shim** (`ax hooks install --all --daemon`, OPT-IN; default stays the
-  direct dispatcher): an EFFECT-FREE bun shim (`@ax/hooks-sdk/shim-core`
+  direct dispatcher - and note the default is the right choice now that nothing
+  is always-on, so the shim's fallback path is the COMMON path): an EFFECT-FREE bun shim (`@ax/hooks-sdk/shim-core`
   `runShim`, scaffolded `dispatch-shim.{ts,js}` via `SHIM_NAME`) that forwards
   `_ax_env` and POSTs to `/hooks/eval` (fast path, no effect parse), and on a
   daemon-down/timeout/non-2xx LAZY-imports the sibling dispatch bundle
@@ -504,8 +622,8 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   (`dispatcherFamilyCommands` + `keepCommand` in `planLegacyRemoval`) so a
   dispatch<->shim switch never double-fires. Pure bits (`withForwardedEnv`,
   `planLegacyRemoval`) unit-tested; the full round-trip is **live-verified**
-  against a source-booted `ax serve` (daemon up -> warm verdict + forwarded
-  bypass honored; daemon killed -> fallback still blocks).
+  against a source-booted server (up -> warm verdict + forwarded bypass
+  honored; killed -> fallback still blocks).
 - `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks install --all [--providers=claude,codex] [--dir=~/.ax/hooks]` -
@@ -515,8 +633,9 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   whose command is `bun <dir>/<guard>.{ts,js}`; user-authored hooks are never
   touched). Pure planning (`planDispatcherInstall` / `planLegacyRemoval` in
   `dispatch-install.ts`) is unit-tested; `installDispatcher` has an in-process
-  integration test (real temp config, stub DB - `readAllHooks(withEvidence:false)`
-  never touches SurrealClient). `ax install`'s tail nudges `ax hooks init &&
+  integration test (real temp config, no store at all -
+  `readAllHooks(withEvidence:false)` opens neither the cache nor the sidecar).
+  `ax install`'s tail nudges `ax hooks init &&
   ax hooks install --all`. Release binary needs NO repo checkout (#573).
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)

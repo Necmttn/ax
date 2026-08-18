@@ -9,13 +9,19 @@
 // daemon target and rewrites studio-embed.gen.ts with `{ type: "file" }` imports
 // so `bun build --compile` embeds the assets (the binary has no source tree to
 // read apps/studio/dist from). writeStub() restores the committed empty stub
-// afterwards so the manifest never lands in git.
+// afterwards so the manifest never lands in git. The custom DuckDB dylib
+// (gen-duckdb-embed.ts) and the hooks bundles (gen-hooks-embed.ts) follow the
+// identical manifest -> compile -> stub pattern.
 import { spawnSync } from "node:child_process";
 import { writeManifest, writeStub } from "./gen-studio-embed.ts";
 import {
     writeManifest as writeHooksManifest,
     writeStub as writeHooksStub,
 } from "./gen-hooks-embed.ts";
+import {
+    writeManifestReusingBuild as writeDuckDbManifest,
+    writeStub as writeDuckDbStub,
+} from "./gen-duckdb-embed.ts";
 
 const entry = process.argv[2] ?? "apps/axctl/src/cli/index.ts";
 const outfile = process.argv[3] ?? "dist/axctl";
@@ -36,6 +42,7 @@ let status = 1;
 try {
     writeManifest();
     writeHooksManifest();
+    writeDuckDbManifest();
     const result = spawnSync(
         "bun",
         [
@@ -55,5 +62,6 @@ try {
     // the working tree never carries the generated manifests.
     writeStub();
     writeHooksStub();
+    writeDuckDbStub();
 }
 process.exit(status);

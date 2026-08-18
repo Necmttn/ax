@@ -16,13 +16,13 @@
  */
 import { Effect, FileSystem, Option, Path } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
+import type { CacheRead } from "@ax/lib/duckdb/seam";
 import { ProcessService } from "@ax/lib/process";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { locateTranscript, type Harness } from "@ax/lib/transcript-locator";
 import { runIngest } from "../ingest/run.ts";
-import { withIngestLock } from "../ingest/ingest-lock.ts";
+import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry } from "../ingest/stage/registry.ts";
 
 /** A transcript found on disk for a session that isn't in the graph. */
@@ -35,10 +35,6 @@ export type ShareIngestOutcome =
     | { readonly kind: "ingested" }
     | { readonly kind: "busy"; readonly pid: number; readonly command: string }
     | { readonly kind: "failed"; readonly message: string };
-
-/** Mirrors cli/commands/ingest.ts: extra grace beyond the hard ingest timeout
- *  before a held lock is deemed stale and stolen. */
-const INGEST_LOCK_STALE_GRACE_MS = 60_000;
 
 /**
  * --since window for the targeted ingest: just wide enough to include the
@@ -58,7 +54,7 @@ export const locateShareTranscript = (
 ): Effect.Effect<
     ShareTranscriptHit | null,
     never,
-    SurrealClient | FileSystem.FileSystem | Path.Path
+    CacheRead | FileSystem.FileSystem | Path.Path
 > =>
     locateTranscript(toBareSessionId(sessionId)).pipe(
         Effect.map((found): ShareTranscriptHit | null => ({
@@ -80,7 +76,10 @@ export const ingestShareTranscript = (
 ): Effect.Effect<
     ShareIngestOutcome,
     never,
-    SurrealClient | AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem | Path.Path
+    // `runIngest` writes DuckDB through the seam. A database client was once
+    // declared in this Requires union and never yielded, which was enough on
+    // its own to make `ax share --recover` open a connection it never used.
+    AxConfig | ProcessService | StageRegistry | TraceSink | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
@@ -120,9 +119,7 @@ export const ingestShareTranscript = (
 
         const outcome = yield* withIngestLock(
             {
-                lockPath: path.join(cfg.paths.dataDir, "ingest.lock"),
-                command: "share-ingest",
-                staleMs: timeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS,
+                ...ingestLockOptions(path, cfg.paths.dataDir, "share-ingest", timeoutSeconds),
                 timeoutSeconds,
                 onBusy: (holder) =>
                     Effect.succeed<ShareIngestOutcome>({

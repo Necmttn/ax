@@ -12,9 +12,9 @@ what skills, in what order, produced it? This skill resolves an anchor
 skill arcs in plain text. Eats its own dogfood: it is itself a framing
 skill.
 
-Assumes `ax` (axctl) is on PATH and the local SurrealDB is running.
-If `ax sessions here` fails with a connection error, tell the user
-`scripts/db-start.sh` and stop.
+Assumes `ax` (axctl) is on PATH. If `ax sessions here` fails, tell the user
+to check `docs/development.md#setup` (DuckDB dylib setup - no daemon
+required) and stop.
 
 ## When to fire
 

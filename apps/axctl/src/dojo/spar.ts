@@ -2,18 +2,21 @@
  * ax dojo spar - replay benchmark.
  *
  * Pure cores (scoreSpar, renderSparBrief/parseSparBrief, renderSparReport) are
- * fully unit-tested. The Effect glue (captureBaseline, findVariantSession,
- * fetchSessionMetrics) composes existing query functions and is tested with a
- * fake SurrealClient + a live spar-plan smoke.
+ * fully unit-tested. `fetchSessionMetrics` and `findVariantSession` read
+ * entirely off the DuckDB `CacheRead` snapshot and are tested with a real-
+ * decode fake (`@ax/lib/testing/cache`); `captureBaseline` reads the snapshot
+ * transitively through `listSessionsNear` and is covered only by the live
+ * spar-plan smoke.
  *
  * Spec: docs/superpowers/specs/2026-06-13-dojo-spar-design.md
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect, Option, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { fetchSessionCostMap } from "../metrics/cost-estimate.ts";
@@ -287,11 +290,16 @@ export const renderSparReport = (score: SparScore, brief: SparBrief): string => 
 // Effect glue: metrics, baseline capture, variant lookup
 // ---------------------------------------------------------------------------
 
-interface TurnWallRow {
-    readonly turn_count: number | null;
-    readonly s: string | null;
-    readonly e: string | null;
-}
+/**
+ * The focused turn/wall lookup, entirely against the DuckDB snapshot:
+ * `count(*)` decodes as BIGINT (never `Schema.Number` - see
+ * `@ax/lib/duckdb/columns`), and `started_at`/`ended_at` decode as `Date`.
+ */
+const TurnWallRow = Schema.Struct({
+    turn_count: NumberFromBigIntColumn,
+    started_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
+});
 
 /**
  * Resolve one session's spar metrics: cost (from the shared cost map), repair
@@ -311,21 +319,21 @@ interface TurnWallRow {
 export const fetchSessionMetrics = (
     sessionId: string,
     sinceForChurn: Date,
-): Effect.Effect<SparMetrics, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<SparMetrics, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
+        const read = yield* CacheRead;
         const cleanId = cleanSessionId(sessionId);
 
-        const costMap = yield* fetchSessionCostMap([sessionId]);
+        const costMap = yield* fetchSessionCostMap(read, [sessionId]);
         const costUsd = costMap.get(cleanId)?.estimatedCostUsd ?? null;
 
         // landed: did this session produce a commit? Read straight off the
         // produced edge (gate-immune), keyed by clean id.
-        const landedLoc = yield* fetchLandedLocBySession([sessionId]);
+        const landedLoc = yield* fetchLandedLocBySession(read, [sessionId]);
         const landed = landedLoc.bySession.has(cleanId);
 
         const CHURN_SCAN_LIMIT = 1000;
-        const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: CHURN_SCAN_LIMIT });
+        const churn = yield* fetchSessionChurnSummary(read, { since: sinceForChurn, limit: CHURN_SCAN_LIMIT });
         const churnRow = churn.hotSessions.find((r) => r.session === cleanId);
         // A miss with a saturated scan means the session fell off the top-N by
         // churn, NOT that it was clean - recording 0 would understate the
@@ -338,25 +346,25 @@ export const fetchSessionMetrics = (
         const repairLines = churnRow?.repairLinesAdded ?? 0;
         const episodes = churnRow?.episodes ?? 0;
 
-        // turns + wall: count() over the turn_session_seq index + the session's
-        // own start/end timestamps (mirrors enrichSessions' indexed lookup).
-        const lit = recordLiteral("session", cleanId);
-        // `FROM ONLY <lit>` returns the bare object (not an array of rows), so
-        // the query result is `[ {turn_count, s, e} ]` - read rows[0] directly.
-        // (Indexing rows[0][0] would step INTO the object and yield undefined,
-        // which previously left turns/wall always null.)
-        const rows = yield* db.query<[TurnWallRow | null]>(
+        // turns + wall: an indexed count over turn(session, seq) plus the
+        // session's own start/end timestamps (mirrors enrichSessions' indexed
+        // lookup). `read.first` returns `none` when the session id itself has
+        // no row - the correlated subquery still returns 0 (never null) for a
+        // session with zero turns, so `turns` is null ONLY on a missing session.
+        const rowOpt = yield* read.first(
+            TurnWallRow,
             `SELECT
-                (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
-                type::string(started_at) AS s,
-                type::string(ended_at) AS e
-             FROM ONLY ${lit};`,
+                (SELECT count(*) FROM turn WHERE session = ?) AS turn_count,
+                started_at,
+                ended_at
+             FROM session WHERE id = ?`,
+            [cleanId, cleanId],
         );
-        const row = rows?.[0] ?? null;
-        const turns = row?.turn_count != null ? Number(row.turn_count) || 0 : null;
-        const startMs = row?.s ? Date.parse(row.s) : NaN;
-        const endMs = row?.e ? Date.parse(row.e) : NaN;
-        const wallMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : null;
+        const row = Option.getOrNull(rowOpt);
+        const turns = row?.turn_count ?? null;
+        const wallMs = row?.started_at != null && row?.ended_at != null
+            ? row.ended_at.getTime() - row.started_at.getTime()
+            : null;
 
         return { costUsd, turns, wallMs, repairLines, episodes, landed };
     });
@@ -383,8 +391,8 @@ export const captureBaseline = (
     nowIso: string,
 ): Effect.Effect<
     SparBrief,
-    DbError | ProcessError | SparCaptureError,
-    SurrealClient | AxConfig | ProcessService
+    DbError | CacheReadError | ProcessError | SparCaptureError,
+    CacheRead | AxConfig | ProcessService
 > =>
     Effect.gen(function* () {
         const proc = yield* ProcessService;
@@ -414,7 +422,7 @@ export const captureBaseline = (
                 ? parentRes.stdout.trim()
                 : sha;
 
-        const sessions = yield* listSessionsNear({ from, to, repositoryKey });
+        const sessions = yield* listSessionsNear({ from, to, repositoryId: repositoryKey });
         if (sessions.length === 0) {
             return yield* Effect.fail(
                 new SparCaptureError(`no sessions found in the commit window for ${sha}`),
@@ -462,42 +470,28 @@ export const captureBaseline = (
     });
 
 /**
- * Stamp a variant session's `labels` field with `"spar"` so behavioral
+ * Stamp a durable `session_label` judgment with `"spar"` so behavioral
  * analytics (`ax skills weighted`, `ax thinking`) can exclude it.
  *
- * Merge-union: reads the current labels JSON, adds `"spar"` if absent, and
- * writes back. Idempotent: re-stamping an already-tagged session is a no-op.
- * No-op when the session id cannot be resolved (silently returns).
- *
- * The `labels` field is `option<string>` containing a JSON-encoded string[]
- * (schema rule of thumb for SurrealDB v3: nested arrays → JSON string).
+ * The stable natural key makes repeat writes idempotent.
  */
 export const stampSparSession = (
     sessionId: string,
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, JudgmentError, Judgment> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-
-        // Read current labels (may be NONE / null / a JSON-encoded string[]).
-        const readRows = yield* db.query<[Array<{ labels: string | null }>]>(
-            `SELECT labels FROM ${recordLiteral("session", cleanSessionId(sessionId))};`,
-        );
-        const existing = readRows?.[0]?.[0]?.labels ?? null;
-        let current: string[];
-        try {
-            current = existing != null ? (JSON.parse(existing) as string[]) : [];
-            if (!Array.isArray(current)) current = [];
-        } catch {
-            current = [];
-        }
-
-        if (current.includes("spar")) return; // idempotent
-
-        const merged = [...current, "spar"];
-        yield* db.query(
-            `UPDATE ${recordLiteral("session", cleanSessionId(sessionId))} SET labels = ${surrealString(JSON.stringify(merged))};`,
-        );
+        const judgment = yield* Judgment;
+        const clean = cleanSessionId(sessionId);
+        yield* judgment.put("session_label", {
+            id: stableId("session_label", [clean, "spar"]),
+            session_id: clean,
+            label: "spar",
+            source: "spar-score",
+            created_at: new Date(),
+        });
     });
+
+/** `session.id` is a bare VARCHAR in DuckDB (no `session:` record prefix). */
+const VariantSessionRow = Schema.Struct({ id: Schema.String });
 
 /**
  * Find the most recent variant session run in `cwd` at/after `sinceMs` (the
@@ -507,18 +501,13 @@ export const stampSparSession = (
 export const findVariantSession = (
     cwd: string,
     sinceMs: number,
-): Effect.Effect<string | null, DbError, SurrealClient> =>
+): Effect.Effect<string | null, CacheReadError, CacheRead> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        // `started_at` must stay in the projection: SurrealDB v3 resolves the
-        // ORDER BY idiom against the SELECT shape, so ordering by a field that
-        // was projected away ("AS id" only) fails to parse.
-        const rows = yield* db.query<[Array<{ id: string }>]>(
-            `SELECT type::string(id) AS id, started_at FROM session`
-            + ` WHERE cwd = ${surrealString(cwd)}`
-            + ` AND started_at >= ${surrealDate(new Date(sinceMs))}`
-            + ` ORDER BY started_at DESC LIMIT 1;`,
+        const read = yield* CacheRead;
+        const rowOpt = yield* read.first(
+            VariantSessionRow,
+            `SELECT id FROM session WHERE cwd = ? AND started_at >= ? ORDER BY started_at DESC LIMIT 1`,
+            [cwd, new Date(sinceMs)],
         );
-        const id = rows?.[0]?.[0]?.id;
-        return id ? String(id) : null;
+        return Option.match(rowOpt, { onNone: () => null, onSome: (r) => r.id });
     });

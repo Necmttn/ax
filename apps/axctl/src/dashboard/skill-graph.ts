@@ -1,31 +1,75 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { skillGraphEdgesQuery } from "../queries/skill-graph.ts";
+import { Effect, Schema } from "effect";
+import { CacheRead } from "@ax/lib/duckdb/seam";
+import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
+import { cacheRows } from "@ax/lib/duckdb/query";
 import type {
     SkillGraphEdge,
     SkillGraphNode,
     SkillGraphPayload,
 } from "@ax/lib/shared/dashboard-types";
-import { runQuery } from "@ax/lib/shared/graph-query";
 
 export interface SkillGraphParams {
     readonly minCount?: number;
     readonly limit?: number;
 }
 
+// The `GET /api/skill-graph` DuckDB query, consumed via `fetchSkillGraph` by
+// `dashboard/contract/insights.ts`. `skill_paired.last_seen` is NOT NULL (the
+// derive-signals writer always stamps a real Date, falling back to "now"
+// rather than an epoch sentinel), so the column is selected directly with no
+// null guard needed.
+const SKILL_GRAPH_EDGES_SQL = `
+    SELECT
+        s_in.name AS source,
+        s_out.name AS target,
+        sp.count AS count,
+        sp.last_seen AS last_seen
+    FROM skill_paired sp
+    JOIN skill s_in ON s_in.id = sp.in_id
+    JOIN skill s_out ON s_out.id = sp.out_id
+    WHERE sp.count >= ?
+      AND s_in.name IS NOT NULL
+      AND s_out.name IS NOT NULL
+    ORDER BY sp.count DESC
+    LIMIT ?
+`;
+
+const SkillGraphEdgeDbRow = Schema.Struct({
+    source: Schema.String,
+    target: Schema.String,
+    count: NumberFromBigIntColumn,
+    last_seen: TimestampColumn,
+});
+
 export const fetchSkillGraph = (
     params: SkillGraphParams = {},
-): Effect.Effect<SkillGraphPayload, DbError, SurrealClient> =>
+): Effect.Effect<SkillGraphPayload, never, CacheRead> =>
     Effect.gen(function* () {
-        const minCount = Math.max(1, Math.floor(params.minCount ?? 50));
+        // No hardcoded noise floor: default to 1 (no filtering) and let
+        // `ORDER BY count DESC` + `limit` do the real work of surfacing the
+        // strongest edges first. A fixed floor like the former 50 has no
+        // relationship to the actual count distribution and can hide nearly
+        // all of it - measured on this graph, 50 kept 4/34 edges while every
+        // edge is already ordered strongest-first and capped by `limit`.
+        // `minCount` stays as an opt-in refinement for a caller who wants to
+        // prune the long tail themselves (#832).
+        const minCount = Math.max(1, Math.floor(params.minCount ?? 1));
         const limit = Math.max(10, Math.min(2000, Math.floor(params.limit ?? 400)));
 
-        const mapped = yield* runQuery(skillGraphEdgesQuery, { minCount, limit });
-
-        const edges: SkillGraphEdge[] = mapped.filter(
-            (e): e is SkillGraphEdge => e !== null,
+        const rows = yield* cacheRows(
+            SkillGraphEdgeDbRow,
+            { sql: SKILL_GRAPH_EDGES_SQL, params: [minCount, limit] },
+            "skill-graph.edges",
         );
+
+        const edges: SkillGraphEdge[] = rows
+            .filter((row) => row.source !== row.target)
+            .map((row) => ({
+                source: row.source,
+                target: row.target,
+                count: row.count,
+                last_seen: row.last_seen.toISOString(),
+            }));
 
         // Degree-sum doubles as the node weight (how connected a skill is).
         const degree = new Map<string, number>();
@@ -53,7 +97,7 @@ export const fetchSkillGraph = (
             }));
 
         return {
-            min_count: minCount,
+            minCount,
             limit,
             node_count: nodes.length,
             edge_count: edges.length,
