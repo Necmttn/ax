@@ -15,6 +15,7 @@ Releases are managed by Release Please and GitHub Release artifacts.
 4. Merge the Release Please PR.
 5. Confirm the release workflow uploads:
    - `axctl-darwin-arm64.tar.gz`
+   - `axctl-darwin-x64.tar.gz`
    - `axctl-linux-x64.tar.gz`
    - `checksums.txt`
 6. Verify install/update from the published release:
