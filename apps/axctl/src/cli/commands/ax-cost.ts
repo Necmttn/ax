@@ -520,8 +520,10 @@ const cmdCostAttribution = (input: {
         render("skill (native)", result.skills);
         render("agent (native)", result.agents);
 
-        const turnShare = cov.totalTurns > 0 ? cov.attributedTurns / cov.totalTurns : 0;
-        const costShare = cov.totalCostUsd > 0 ? cov.attributedCostUsd / cov.totalCostUsd : 0;
+        // `pct` renders a 0-100 value (n.toFixed(1) + "%"), not a 0-1 fraction
+        // (#881: 64,153/166,677 printed as "0.4%").
+        const turnShare = cov.totalTurns > 0 ? (100 * cov.attributedTurns) / cov.totalTurns : 0;
+        const costShare = cov.totalCostUsd > 0 ? (100 * cov.attributedCostUsd) / cov.totalCostUsd : 0;
         console.log(
             `coverage: ${integer(cov.attributedTurns)}/${integer(cov.totalTurns)} claude usage rows ` +
                 `(${pct(turnShare)}) carry native attribution - ${usd(cov.attributedCostUsd)} of ${usd(cov.totalCostUsd)} (${pct(costShare)})`,
