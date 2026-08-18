@@ -210,6 +210,23 @@ gated on the operator.
 - Ship gate: beats the regex baseline (JUDGMENT_GUARD_RE first) on held-out
   labels, else the regex stays. Regexes become features, never deleted first.
 
+**Prototype run 2026-08-19 (#895): GATE PASSED at matched recall.**
+360 LLM-labeled decision-population turns (labeler agreement kappa 0.818),
+12 cheap features (tool composition, text stats, regex own+prev AS
+features), hand-rolled L2 logistic. The regex is a guard, so the deciding
+comparison is at the guard's operating point: threshold lowered until
+held-out judgment-recall >= the regex's, then compare precision. Over 20
+random 70/30 splits the learned model's precision beats the regex by
+**+15.0 points mean (sd 7.0), positive in 20/20 splits**, while also
+carrying +4.9 points extra recall - i.e. same-or-better safety with about
+a third fewer routable turns wrongly held on the frontier. At the default
+0.5 threshold the model under-flags (recall 0.42 vs 0.71) - the landed
+threshold must be pinned from matched-recall fold data, NOT 0.5. Receipts +
+caveats (LLM labels, regex-stratified sample, n=360):
+scripts/prototypes/judgment-learn/README.md. Landed slice (follow-up):
+grow labels via dojo, k-fold, weights-as-table + SQL-model inference,
+`classifyTurn` consumes the score with the regex as floor fallback.
+
 ## Sequencing + effort (rough)
 
 0: #837 ~0.5d · golden corpus ~1d · #869 ~0.5d
