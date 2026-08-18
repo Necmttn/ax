@@ -12,7 +12,7 @@ transcripts or code.
 ## Install
 
 ```bash
-curl -fsSL ax.necmttn.com/install | sh
+curl -fsSL ax.necmttn.com/install | bash
 PATH="$HOME/.local/bin:$PATH"
 ```
 

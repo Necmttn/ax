@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 // receipt) and graph-not-vector. Ends with an install CTA + /routing + /features.
 // Never links the ADR index.
 
-const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
+const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | bash";
 
 export function ActWhy() {
   return (
