@@ -51,6 +51,8 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { Context, Effect, FileSystem, Layer, Option, Schema, Semaphore } from "effect";
 import { chargeStageSelfTime } from "./self-time.ts";
+import { schemaCommentStatements } from "./schema-comments.ts";
+import { stableDigest } from "../ids.ts";
 import { ingestLockHeldHere } from "../ingest-lock.ts";
 import {
     openDuckDbService,
@@ -610,7 +612,45 @@ export const withCacheWrite = <A, E, R>(
                 Effect.gen(function* () {
                     yield* pinUtc(conn);
                     yield* assertUtcClock(conn, options.livePath);
-                    if (options.schemaSql !== null) yield* conn.exec(options.schemaSql);
+                    if (options.schemaSql !== null) {
+                        yield* conn.exec(options.schemaSql);
+                        // Self-documenting catalog (#869): mirror the DDL's own
+                        // `--` prose into COMMENT ON statements so agents can
+                        // introspect meaning via duckdb_columns() instead of
+                        // trusting docs that drift. Idempotent like the DDL.
+                        const comments = schemaCommentStatements(options.schemaSql);
+                        if (comments.length > 0) {
+                            const commentsHash = stableDigest(comments);
+                            // The seam owns its bookkeeping table (also declared
+                            // in schema.duckdb.sql for the record): callers pass
+                            // arbitrary DDL (tests, partial schemas) and the
+                            // gate must work against all of them.
+                            yield* conn.exec(
+                                "CREATE TABLE IF NOT EXISTS schema_comment_state (" +
+                                    "id VARCHAR PRIMARY KEY, comments_hash VARCHAR NOT NULL, " +
+                                    "applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+                            );
+                            const stored = (yield* conn.query(
+                                "SELECT comments_hash FROM schema_comment_state WHERE id = 'comments'",
+                            )).rows[0]?.comments_hash;
+                            if (stored !== commentsHash) {
+                                yield* conn.exec(comments);
+                                yield* conn.query(
+                                    "INSERT OR REPLACE INTO schema_comment_state (id, comments_hash, applied_at) VALUES ('comments', ?, CURRENT_TIMESTAMP)",
+                                    [commentsHash],
+                                );
+                                // CHECKPOINT immediately: COMMENT ON records left
+                                // in the WAL poison crash recovery in this DuckDB
+                                // build (replay fails with "GetDefaultDatabase
+                                // with no default database set", leaving the live
+                                // db unopenable). Folding them into the main file
+                                // at once means a later crash's WAL never
+                                // contains one - and the hash gate above keeps
+                                // every routine open comment-free entirely.
+                                yield* conn.exec("CHECKPOINT");
+                            }
+                        }
+                    }
 
                     const write = writerOver(conn, options.livePath, target);
                     // Reported on EVERY exit path (`ensuring`), not just a
