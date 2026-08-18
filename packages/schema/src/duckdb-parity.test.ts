@@ -204,6 +204,9 @@ const V2_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     // Native harness attribution + cache forensics (#867) - fields Claude Code
     // started writing ~2026-05, after the Surreal schema froze.
     turn_token_usage: ["attribution_skill", "attribution_agent", "cache_miss_reason_type", "api_error_status"],
+    // Check family stamped at outcomes-write time (#888) so the run-evidence
+    // SQL model never duplicates the TS token-position classifier.
+    command_outcome: ["check_family"],
 };
 
 const POLYMORPHIC_EDGE_EXTRA_COLUMNS: Readonly<Record<string, readonly string[]>> = {

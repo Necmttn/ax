@@ -323,8 +323,17 @@ transcripts; the shared contract + deterministic builders live in
 re-derive overwrites). Refs default to `ref_only` (no raw payloads); `backing`
 is verifier-DERIVED from the source, never a producer trust label - no promotion.
 
-The `run-evidence` ingest derive-stage (`apps/axctl/src/ingest/derive-run-evidence.ts`,
-incremental by the since-window, idempotent UPSERTs) normalizes EIGHT structural
+The `run-evidence` ingest derive-stage (incremental by the since-window,
+idempotent UPSERTs) is a **SQL MODEL pair** since #888
+(`apps/axctl/src/ingest/models/run-evidence-{event,ref}.sql`, run by
+`models/runner.ts` - header contract `-- model:`/`-- inputs:`/`-- rebuild:`,
+window via `SET VARIABLE since_days`): the whole derivation executes inside
+DuckDB, verification comes from the STAMPED `command_outcome.check_family`
+column (written by the outcomes stage; the TS classifier in check-family.ts is
+the single source - never re-implement it in SQL), and a version-marked cutover
+wipes + fully re-derives when the model SQL changes. The TS builders in
+`derive-run-evidence.ts` remain one release behind `AX_RUN_EVIDENCE_IMPL=ts`
+with row-for-row parity pinned. It normalizes EIGHT structural
 sources (`RUN_EVIDENCE_DERIVED_KINDS`): `tool_call`->tool_observation/tool_backed,
 `command_outcome`->verification/verifier_backed (ONLY genuine checks via
 `checkFamilyFromCommand` - not every success), `compaction`->boundary/derived (+

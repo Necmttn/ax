@@ -114,13 +114,46 @@ a follow-up, not blockers.
 - Model runner: `models/*.sql`, `-- inputs:` headers, topo-run inside DuckDB,
   registered as stages in the EXISTING StageRegistry (ledger, progress,
   budget unchanged).
-- Port order by measured self_ms: turn-content-blocks (302.2s) →
-  run-evidence (99.6s) → outcomes (53.6s) = 455s of 628s. Then opportunistic.
+- ~~Port order by measured self_ms: turn-content-blocks (302.2s) →
+  run-evidence (99.6s) → outcomes (53.6s) = 455s of 628s.~~ **Retracted in
+  place (#888), twice over.** (1) turn-content-blocks is a markdown PARSER
+  (content-blocks/parse-markdown.ts) - SQL cannot host it; its self time is
+  statement volume, and its fix is spooled writes, not a port. (2) The self_ms
+  numbers themselves mislead under concurrency: self_ms wraps each call's WALL
+  time, and on the napi engine's shared serialized connection that includes
+  queue-wait behind other stages - measured directly, run-evidence's windowed
+  derive costs ~0.5-0.9s against an idle connection while the ledger charged
+  it 73.6s. The inference failed because self_ms was read as compute when it
+  is an upper bound (its own doc says so). Port order becomes
+  **run-evidence → outcomes** (genuinely relational), and port decisions are
+  justified by SERIALIZED measurements, full-rebuild cost, and statement-count
+  reduction on the shared connection - not ledger self_ms.
 - Contract per port: old TS stage kept behind a flag one release; shadow-run
   both on the real store; row-for-row diff clean; then delete TS.
 - A model without a watermark predicate must declare `full_rebuild` visibly.
 - Trio rides here: #868 cache-bust lens ships as a model (corroborate vs raw
   cache-token deltas; proposal minting per open question below).
+
+**run-evidence DONE (#888).** Model runner v1
+(`apps/axctl/src/ingest/models/runner.ts`: header contract `-- model:` /
+`-- inputs:` / `-- rebuild:`, window via `SET VARIABLE since_days`, executed
+through the ordinary write seam) + `run-evidence-event.sql` /
+`run-evidence-ref.sql` replace the 12-read → JS-map → putMany round trip:
+lineage as `WITH RECURSIVE`, objective as a window function, kind/backing as
+CASE branches, dropUndefined attrs as `json_merge_patch` chains rooted at
+`'{}'` (a `json_object` base KEEPS null keys - found by the parity test).
+`command_outcome.check_family` is stamped at outcomes-write time (TS
+classifier stays the single source; one-time backfill rejoins tool_call for
+command_text) so SQL never re-implements token-position classification.
+Cutover is version-marked (sentinel watermark): wipe + full re-derive swaps
+the id scheme to md5-of-natural-key (Bun.hash is not computable in SQL;
+rebuildable-cache freedom). TS path stays one release behind
+`AX_RUN_EVIDENCE_IMPL=ts`; parity pinned row-for-row on the natural key.
+Receipts on the real 6.8GB store: full derivation 123.0s (TS) → 12.0s
+(model, backfill included) = 10.3x; windowed 1-day runs are sub-second on
+BOTH paths post-napi (the old 73.6s ledger reading was queue-wait, see the
+retraction above); the text-first check_family fix surfaced ~6.9k historical
+verifications norm-only classification missed (#471).
 
 ### Phase 4 — events as the contract
 
