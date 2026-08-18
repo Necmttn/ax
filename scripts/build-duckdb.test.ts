@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { gatedTest } from "@ax/lib/testing/gated-test";
 import { spawnSync } from "node:child_process";
 import {
     accessSync,
@@ -12,6 +13,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const binTest = gatedTest({
+    reason: "AX_DUCKDB_BIN is not set (no built duckdb binary to exercise)",
+    when: !process.env.AX_DUCKDB_BIN,
+});
+const dylibTest = gatedTest({
+    reason: "AX_DUCKDB_DYLIB is not set (no built libduckdb to exercise)",
+    when: !process.env.AX_DUCKDB_DYLIB,
+});
 
 const repoRoot = join(import.meta.dir, "..");
 
@@ -133,7 +143,7 @@ chmod +x "$2/build/release/duckdb"
     // needs to name a SPECIFIC just-built shell to smoke, not "find any
     // duckdb", so it reads the env var directly rather than through the
     // auto-preferring duckdbBinPath() resolver.
-    test.skipIf(!process.env.AX_DUCKDB_BIN)(
+    binTest(
         "the built shell completes the real air-gap FTS and JSON smoke test",
         () => {
             const result = spawnSync(
@@ -149,7 +159,7 @@ chmod +x "$2/build/release/duckdb"
         },
     );
 
-    test.skipIf(!process.env.AX_DUCKDB_DYLIB)(
+    dylibTest(
         "the emitted dynamic library completes the real air-gap FTS and JSON smoke test",
         () => {
             // Mirror build-duckdb.sh's smoke_duckdb_dylib: run against a
