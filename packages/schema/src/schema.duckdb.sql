@@ -149,6 +149,10 @@
 -- The manifest of every table below is packages/schema/src/duckdb-tables.ts.
 -- Statements are idempotent (IF NOT EXISTS) so applying the file twice is a no-op.
 
+-- Installed-skill catalog: one row per SKILL.md discovered in the harness skill
+-- dirs (defaultSkillDirs in @ax/lib/paths). Uninstalls tombstone via deleted_at
+-- (never deleted); dir_path '(synthetic)' marks provider-declared tool rows
+-- that are not on-disk skills and are excluded from usage views.
 CREATE TABLE IF NOT EXISTS skill (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -205,6 +209,10 @@ CREATE TABLE IF NOT EXISTS agent_def (
 CREATE UNIQUE INDEX IF NOT EXISTS agent_def_name_uq ON agent_def(name);
 CREATE INDEX IF NOT EXISTS agent_def_scope ON agent_def(scope);
 
+-- Normalized session, one per conversation across all harnesses (top-level AND
+-- subagent). id is the provider-native session id VERBATIM, not a hash - see
+-- the ROW IDS carve-out in the file header; OTLP correlation and Studio
+-- deeplinks join on it.
 CREATE TABLE IF NOT EXISTS session (
     id VARCHAR PRIMARY KEY,
     project VARCHAR,
@@ -273,6 +281,9 @@ CREATE INDEX IF NOT EXISTS used_sidecar_artifact_in ON used_sidecar_artifact(in_
 CREATE INDEX IF NOT EXISTS used_sidecar_artifact_out ON used_sidecar_artifact(out_id);
 CREATE INDEX IF NOT EXISTS used_sidecar_artifact_session_action ON used_sidecar_artifact(session, action);
 
+-- Provider-events layer: one row per harness/provider identity
+-- (AgentProviderName: claude, codex, pi, omp, opencode, cursor, plus derived
+-- sources).
 CREATE TABLE IF NOT EXISTS agent_provider (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -284,6 +295,10 @@ CREATE TABLE IF NOT EXISTS agent_provider (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_provider_name_uq ON agent_provider(name);
 
+-- Model pricing + context catalog for cost estimation: per-million-token USD
+-- rates, the above-200k context tier, and the fast-tier multiplier.
+-- pricing_source records where the rate came from (built-in catalog vs
+-- upstream).
 CREATE TABLE IF NOT EXISTS agent_model (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -306,6 +321,9 @@ CREATE TABLE IF NOT EXISTS agent_model (
 CREATE UNIQUE INDEX IF NOT EXISTS agent_model_name_uq ON agent_model(name);
 CREATE INDEX IF NOT EXISTS agent_model_provider ON agent_model(provider);
 
+-- Provider-events layer: the harness's own session identity as recorded in its
+-- store, dual-written beside the normalized `session` row it links via
+-- ax_session.
 CREATE TABLE IF NOT EXISTS agent_session (
     id VARCHAR PRIMARY KEY,
     provider VARCHAR NOT NULL,  -- ref -> agent_provider
@@ -327,6 +345,9 @@ CREATE TABLE IF NOT EXISTS agent_session (
 CREATE UNIQUE INDEX IF NOT EXISTS agent_session_provider_id ON agent_session(provider, provider_session_id);
 CREATE INDEX IF NOT EXISTS agent_session_ax_session ON agent_session(ax_session);
 
+-- Provider-events layer: one row per raw transcript/store event in seq order,
+-- before normalization into turn/tool_call. `turn` and `tool_call` rows point
+-- back here via agent_event.
 CREATE TABLE IF NOT EXISTS agent_event (
     id VARCHAR PRIMARY KEY,
     agent_session VARCHAR NOT NULL,  -- ref -> agent_session
@@ -347,6 +368,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_event_session_seq ON agent_event(agent_s
 CREATE INDEX IF NOT EXISTS agent_event_provider_id ON agent_event(provider, provider_event_id);
 CREATE INDEX IF NOT EXISTS agent_event_session_ts ON agent_event(agent_session, ts);
 
+-- Normalized conversation unit across harnesses. TRAP: Codex turns are PER-
+-- EVENT (tool_call/function_call_output/reasoning rows each get a turn, ~10x
+-- inflation), so cross-provider counts must filter role IN
+-- ('user','assistant').
 CREATE TABLE IF NOT EXISTS turn (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session; was: REFERENCE ON DELETE CASCADE
@@ -367,6 +392,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS turn_session_seq ON turn(session, seq);
 CREATE INDEX IF NOT EXISTS turn_ts ON turn(ts);
 CREATE INDEX IF NOT EXISTS turn_agent_event ON turn(agent_event);
 
+-- File identity referenced by evidence edges (read_file, searched_file,
+-- mentioned_file, touched). identity_scope + repository/checkout/workspace
+-- bound which tree the path is meaningful in.
 CREATE TABLE IF NOT EXISTS file (
     id VARCHAR PRIMARY KEY,
     repo VARCHAR,
@@ -383,6 +411,7 @@ CREATE INDEX IF NOT EXISTS file_path ON file(path);
 CREATE INDEX IF NOT EXISTS file_repository_path ON file(repository, path);
 CREATE INDEX IF NOT EXISTS file_workspace_path ON file(workspace, path);
 
+-- Code-symbol identity, the target of mentioned_symbol edges.
 CREATE TABLE IF NOT EXISTS symbol (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -391,6 +420,7 @@ CREATE TABLE IF NOT EXISTS symbol (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS symbol_name_uq ON symbol(name);
 
+-- Normalized error-text identity, the target of mentioned_error edges.
 CREATE TABLE IF NOT EXISTS error_signature (
     id VARCHAR PRIMARY KEY,
     text VARCHAR NOT NULL,
@@ -399,6 +429,9 @@ CREATE TABLE IF NOT EXISTS error_signature (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS error_signature_norm_uq ON error_signature(normalized);
 
+-- One git commit per (repo, sha), from the git ingest stage. `reverted` is
+-- three-state: true / false / NULL 'not known' (see the column note) -
+-- durability metrics count only reverted = true.
 CREATE TABLE IF NOT EXISTS "commit" (
     id VARCHAR PRIMARY KEY,
     sha VARCHAR NOT NULL,
@@ -418,6 +451,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS commit_sha_uq ON "commit"(repo, sha);
 CREATE INDEX IF NOT EXISTS commit_repository_ts ON "commit"(repository, ts);
 CREATE INDEX IF NOT EXISTS commit_reverted ON "commit"(reverted);
 
+-- Git repository identity (remote_url + root_path), from the git ingest stage.
 CREATE TABLE IF NOT EXISTS repository (
     id VARCHAR PRIMARY KEY,
     name VARCHAR,
@@ -431,6 +465,9 @@ CREATE TABLE IF NOT EXISTS repository (
 CREATE INDEX IF NOT EXISTS repository_remote ON repository(remote_url);
 CREATE INDEX IF NOT EXISTS repository_initial_commit ON repository(initial_commit);
 
+-- A git working tree of a repository (branch, head_sha, worktree_name). TRAP:
+-- `dirty` is written always-false by the git ingest - it is not a live
+-- dirtiness signal.
 CREATE TABLE IF NOT EXISTS checkout (
     id VARCHAR PRIMARY KEY,
     repository VARCHAR NOT NULL,  -- ref -> repository
@@ -444,6 +481,8 @@ CREATE TABLE IF NOT EXISTS checkout (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS checkout_path_uq ON checkout(repository, path);
 
+-- A named working root under a checkout; groups sessions and file evidence by
+-- where the agent actually ran.
 CREATE TABLE IF NOT EXISTS workspace (
     id VARCHAR PRIMARY KEY,
     repository VARCHAR,  -- ref -> repository
@@ -454,6 +493,8 @@ CREATE TABLE IF NOT EXISTS workspace (
     updated_at TIMESTAMP
 );
 
+-- Tool identity per provider (Read, Bash, exec_command, ...). Includes
+-- synthetic rows for provider-declared tools with no on-disk artifact.
 CREATE TABLE IF NOT EXISTS tool (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -466,6 +507,9 @@ CREATE TABLE IF NOT EXISTS tool (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tool_identity_uq ON tool(provider, name, identity);
 
+-- One tool invocation: input/output JSON, timing, error state, and for shell
+-- tools the normalized command fields (command_text raw, command_norm
+-- collapsed, command_tool the binary). The densest evidence table in the graph.
 CREATE TABLE IF NOT EXISTS tool_call (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -522,6 +566,8 @@ CREATE INDEX IF NOT EXISTS has_content_in ON has_content(in_id);
 CREATE INDEX IF NOT EXISTS has_content_out ON has_content(out_id);
 CREATE INDEX IF NOT EXISTS has_content_session ON has_content(session);
 
+-- A harness plan/todo artifact (plan-mode plans, TodoWrite lists) for a
+-- session.
 CREATE TABLE IF NOT EXISTS plan (
     id VARCHAR PRIMARY KEY,
     session VARCHAR,  -- ref -> session
@@ -536,6 +582,8 @@ CREATE TABLE IF NOT EXISTS plan (
 CREATE INDEX IF NOT EXISTS plan_session ON plan(session);
 CREATE INDEX IF NOT EXISTS plan_source_session ON plan(source, session);
 
+-- One item of a `plan`, tracked across snapshots via external_id +
+-- first/last_seen.
 CREATE TABLE IF NOT EXISTS plan_item (
     id VARCHAR PRIMARY KEY,
     plan VARCHAR NOT NULL,  -- ref -> plan
@@ -552,6 +600,8 @@ CREATE TABLE IF NOT EXISTS plan_item (
 );
 CREATE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item(plan, seq);
 
+-- Generic artifact identity (files, gists, URLs, reports) referenced by the
+-- *_artifact evidence edges.
 CREATE TABLE IF NOT EXISTS artifact (
     id VARCHAR PRIMARY KEY,
     kind VARCHAR NOT NULL,
@@ -565,6 +615,9 @@ CREATE TABLE IF NOT EXISTS artifact (
 );
 CREATE INDEX IF NOT EXISTS artifact_hash ON artifact(content_hash);
 
+-- Parsed-content layer: one row per parsed source artifact (turn text, skill
+-- body, plan, ...), fingerprinted (parse_fingerprint, blockset_hash) so re-
+-- parses are skippable.
 CREATE TABLE IF NOT EXISTS content_document (
     id VARCHAR PRIMARY KEY,
     source_kind VARCHAR NOT NULL,
@@ -599,6 +652,8 @@ CREATE INDEX IF NOT EXISTS content_document_parse ON content_document(parse_fing
 -- and scans every turn document (~600ms/session); the composite makes it ~0.3ms.
 CREATE INDEX IF NOT EXISTS content_document_session ON content_document(session, source_kind);
 
+-- Parsed-content layer: one section/paragraph/code block of a content_document,
+-- in seq order with offsets back into the source text.
 CREATE TABLE IF NOT EXISTS content_block (
     id VARCHAR PRIMARY KEY,
     document VARCHAR NOT NULL,  -- ref -> content_document; was: REFERENCE ON DELETE CASCADE
@@ -624,6 +679,8 @@ CREATE TABLE IF NOT EXISTS content_block (
 CREATE UNIQUE INDEX IF NOT EXISTS content_block_document_seq ON content_block(document, seq);
 CREATE INDEX IF NOT EXISTS content_block_kind ON content_block(kind, ts);
 CREATE INDEX IF NOT EXISTS content_block_hash ON content_block(document, block_hash);
+-- Parsed-content layer: one extracted value (path, command, url, id, ...)
+-- inside a content_block, with offsets and a normalized form.
 CREATE TABLE IF NOT EXISTS content_atom (
     id VARCHAR PRIMARY KEY,
     block VARCHAR NOT NULL,  -- ref -> content_block; was: REFERENCE ON DELETE CASCADE
@@ -650,6 +707,8 @@ CREATE INDEX IF NOT EXISTS content_atom_source_kind_value ON content_atom(source
 CREATE INDEX IF NOT EXISTS content_atom_session_kind ON content_atom(session, kind);
 CREATE INDEX IF NOT EXISTS content_atom_workspace_kind_value ON content_atom(workspace, kind, normalized);
 
+-- Content-layer edge: a content_block mentions a file. Confidence-scored;
+-- document/block denormalized for deref-free reads.
 CREATE TABLE IF NOT EXISTS mentions_file (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -665,6 +724,7 @@ CREATE INDEX IF NOT EXISTS mentions_file_in ON mentions_file(in_id);
 CREATE INDEX IF NOT EXISTS mentions_file_out ON mentions_file(out_id);
 CREATE INDEX IF NOT EXISTS mentions_file_document ON mentions_file(document);
 
+-- Content-layer edge: a content_block mentions a commit.
 CREATE TABLE IF NOT EXISTS mentions_commit (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -679,6 +739,7 @@ CREATE TABLE IF NOT EXISTS mentions_commit (
 CREATE INDEX IF NOT EXISTS mentions_commit_in ON mentions_commit(in_id);
 CREATE INDEX IF NOT EXISTS mentions_commit_out ON mentions_commit(out_id);
 
+-- Content-layer edge: a content_block mentions an artifact.
 CREATE TABLE IF NOT EXISTS mentions_artifact (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -692,6 +753,8 @@ CREATE TABLE IF NOT EXISTS mentions_artifact (
 CREATE INDEX IF NOT EXISTS mentions_artifact_in ON mentions_artifact(in_id);
 CREATE INDEX IF NOT EXISTS mentions_artifact_out ON mentions_artifact(out_id);
 
+-- Point-in-time state of a plan captured from one tool call - the task_state
+-- source for the run-evidence ledger (#578).
 CREATE TABLE IF NOT EXISTS plan_snapshot (
     id VARCHAR PRIMARY KEY,
     plan VARCHAR,  -- ref -> plan
@@ -707,6 +770,9 @@ CREATE TABLE IF NOT EXISTS plan_snapshot (
 CREATE INDEX IF NOT EXISTS plan_snapshot_plan_ts ON plan_snapshot(plan, ts);
 CREATE INDEX IF NOT EXISTS plan_snapshot_agent_event ON plan_snapshot(agent_event);
 
+-- A context-compaction boundary in a session: trigger, summary text, what was
+-- kept. Feeds run-evidence boundary events and 'what was lost at compaction'
+-- queries.
 CREATE TABLE IF NOT EXISTS compaction (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -727,6 +793,8 @@ CREATE TABLE IF NOT EXISTS compaction (
 CREATE INDEX IF NOT EXISTS compaction_session_ts ON compaction(session, ts);
 CREATE INDEX IF NOT EXISTS compaction_agent_event ON compaction(agent_event);
 
+-- Free-form derived insight rows keyed by (subject_type, subject_id, kind) -
+-- the storage behind several `ax insights` views.
 CREATE TABLE IF NOT EXISTS insight (
     id VARCHAR PRIMARY KEY,
     subject_type VARCHAR NOT NULL,
@@ -739,6 +807,8 @@ CREATE TABLE IF NOT EXISTS insight (
 );
 CREATE INDEX IF NOT EXISTS insight_subject ON insight(subject_type, subject_id);
 
+-- Derived per-turn/session friction signal (kind-coded: correction, failed
+-- tool, retry, ...). Input to retro derivation and `ax insights friction`.
 CREATE TABLE IF NOT EXISTS friction_event (
     id VARCHAR PRIMARY KEY,
     session VARCHAR,  -- ref -> session
@@ -752,6 +822,8 @@ CREATE TABLE IF NOT EXISTS friction_event (
 );
 CREATE INDEX IF NOT EXISTS friction_session_kind ON friction_event(session, kind);
 
+-- Per-turn speech-act / sentiment classification (act, polarity, confidence),
+-- method-coded so heuristic and model outputs coexist.
 CREATE TABLE IF NOT EXISTS turn_analysis (
     id VARCHAR PRIMARY KEY,
     turn VARCHAR NOT NULL,  -- ref -> turn; was: REFERENCE ON DELETE CASCADE
@@ -771,6 +843,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS turn_analysis_turn ON turn_analysis(turn);
 CREATE INDEX IF NOT EXISTS turn_analysis_session_act ON turn_analysis(session, act);
 CREATE INDEX IF NOT EXISTS turn_analysis_polarity_ts ON turn_analysis(polarity, ts);
 
+-- Classified user reaction: links a user_turn to the assistant_turn it reacts
+-- to, with reaction_type, polarity and durability. Drives correction analytics.
 CREATE TABLE IF NOT EXISTS reaction_event (
     id VARCHAR PRIMARY KEY,
     user_turn VARCHAR NOT NULL,  -- ref -> turn; was: REFERENCE ON DELETE CASCADE
@@ -793,6 +867,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS reaction_event_user_turn ON reaction_event(use
 CREATE INDEX IF NOT EXISTS reaction_event_session_ts ON reaction_event(session, ts);
 CREATE INDEX IF NOT EXISTS reaction_event_theme ON reaction_event(reaction_type, target, durability);
 
+-- Registered classifier (key + version + kind) - the catalog side of the
+-- classifier runs/results tables.
 CREATE TABLE IF NOT EXISTS classifier_definition (
     id VARCHAR PRIMARY KEY,
     classifier_key VARCHAR NOT NULL,
@@ -806,6 +882,7 @@ CREATE TABLE IF NOT EXISTS classifier_definition (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_definition_key_version ON classifier_definition(classifier_key, version);
 
+-- One execution of a set of classifiers over a window.
 CREATE TABLE IF NOT EXISTS classifier_run (
     id VARCHAR PRIMARY KEY,
     started_at TIMESTAMP NOT NULL,
@@ -818,6 +895,8 @@ CREATE TABLE IF NOT EXISTS classifier_run (
 );
 CREATE INDEX IF NOT EXISTS classifier_run_started ON classifier_run(started_at);
 
+-- One classifier output for one subject (turn/session/...), label + target +
+-- confidence, keyed to its definition and run.
 CREATE TABLE IF NOT EXISTS classifier_result (
     id VARCHAR PRIMARY KEY,
     classifier_definition VARCHAR NOT NULL,  -- ref -> classifier_definition; was: REFERENCE ON DELETE CASCADE
@@ -843,6 +922,8 @@ CREATE INDEX IF NOT EXISTS classifier_result_classifier ON classifier_result(cla
 CREATE INDEX IF NOT EXISTS classifier_result_turn ON classifier_result(turn);
 CREATE INDEX IF NOT EXISTS classifier_result_theme ON classifier_result(classifier_key, label, target, durability);
 
+-- Classifier-emitted graph overlay: nodes mined from transcripts (label-mining
+-- experiments), separate from the main normalized graph.
 CREATE TABLE IF NOT EXISTS classifier_graph_node (
     id VARCHAR PRIMARY KEY,
     graph_id VARCHAR NOT NULL,
@@ -855,6 +936,7 @@ CREATE TABLE IF NOT EXISTS classifier_graph_node (
 CREATE UNIQUE INDEX IF NOT EXISTS classifier_graph_node_graph_id ON classifier_graph_node(graph_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_node_kind ON classifier_graph_node(kind);
 
+-- Classifier-emitted graph overlay: edges between classifier_graph_node rows.
 CREATE TABLE IF NOT EXISTS classifier_graph_edge (
     id VARCHAR PRIMARY KEY,
     graph_id VARCHAR NOT NULL,
@@ -871,6 +953,8 @@ CREATE INDEX IF NOT EXISTS classifier_graph_edge_kind ON classifier_graph_edge(k
 CREATE INDEX IF NOT EXISTS classifier_graph_edge_from ON classifier_graph_edge(from_id);
 CREATE INDEX IF NOT EXISTS classifier_graph_edge_to ON classifier_graph_edge(to_id);
 
+-- Classifier-emitted graph overlay: subject-predicate-object facts with
+-- evidence edge refs.
 CREATE TABLE IF NOT EXISTS classifier_graph_fact (
     id VARCHAR PRIMARY KEY,
     graph_id VARCHAR NOT NULL,
@@ -913,6 +997,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS transcript_label_vector_candidate ON transcrip
 CREATE INDEX IF NOT EXISTS transcript_label_vector_graph_fact ON transcript_label_vector(graph_fact_id);
 CREATE INDEX IF NOT EXISTS transcript_label_vector_model ON transcript_label_vector(embedding_model);
 
+-- Canonical deduplicated signal label (kind + canonical_text) mined across
+-- sessions; turns link to it via the expresses edge.
 CREATE TABLE IF NOT EXISTS semantic_signal (
     id VARCHAR PRIMARY KEY,
     kind VARCHAR NOT NULL,
@@ -927,6 +1013,8 @@ CREATE TABLE IF NOT EXISTS semantic_signal (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS semantic_signal_kind_label ON semantic_signal(kind, label);
 
+-- Machine-emitted diagnostic occurrence per turn/session (kind + status + text)
+-- - failed checks, tool errors and similar, input to retro `failed` shapes.
 CREATE TABLE IF NOT EXISTS diagnostic_event (
     id VARCHAR PRIMARY KEY,
     session VARCHAR,  -- ref -> session
@@ -941,6 +1029,8 @@ CREATE TABLE IF NOT EXISTS diagnostic_event (
 );
 CREATE INDEX IF NOT EXISTS diagnostic_session_kind ON diagnostic_event(session, kind);
 
+-- A tracked guidance document identity (slug + title) - the versioned-guidance
+-- side of the improve loop.
 CREATE TABLE IF NOT EXISTS guidance (
     id VARCHAR PRIMARY KEY,
     slug VARCHAR NOT NULL,
@@ -953,6 +1043,8 @@ CREATE TABLE IF NOT EXISTS guidance (
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_slug_uq ON guidance(slug);
 CREATE INDEX IF NOT EXISTS guidance_status ON guidance(status);
 
+-- One version of a guidance document: full text plus scope/risk/evidence and
+-- before/after metrics for evaluating the change.
 CREATE TABLE IF NOT EXISTS guidance_version (
     id VARCHAR PRIMARY KEY,
     guidance VARCHAR NOT NULL,  -- ref -> guidance
@@ -970,6 +1062,8 @@ CREATE TABLE IF NOT EXISTS guidance_version (
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_version_uq ON guidance_version(guidance, version);
 CREATE INDEX IF NOT EXISTS guidance_version_status ON guidance_version(status, created_at);
 
+-- A guidance/config file discovered on disk (CLAUDE.md, settings, hooks config,
+-- ...), with provider + scope + git tracking state.
 CREATE TABLE IF NOT EXISTS guidance_source (
     id VARCHAR PRIMARY KEY,
     path VARCHAR NOT NULL,
@@ -984,6 +1078,8 @@ CREATE TABLE IF NOT EXISTS guidance_source (
 CREATE UNIQUE INDEX IF NOT EXISTS guidance_source_path_uq ON guidance_source(path);
 CREATE INDEX IF NOT EXISTS guidance_source_scope ON guidance_source(scope, provider);
 
+-- One observed content revision of a guidance_source: hash chain
+-- (content_hash/prev_hash), byte delta, and what evidence backed the change.
 CREATE TABLE IF NOT EXISTS guidance_revision (
     id VARCHAR PRIMARY KEY,
     source VARCHAR,  -- ref -> guidance_source
@@ -1039,6 +1135,8 @@ CREATE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_confi
 CREATE INDEX IF NOT EXISTS guidance_config_artifact_authority ON guidance_config_artifact(provider, authority_hash);
 CREATE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact(parse_status);
 
+-- Technology/stack label registry (name + aliases) used to tag sessions and
+-- skills.
 CREATE TABLE IF NOT EXISTS stack (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -1049,6 +1147,10 @@ CREATE TABLE IF NOT EXISTS stack (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS stack_name_uq ON stack(name);
 
+-- Classified outcome of a shell tool_call: command_norm + check family
+-- (test/build/lint/typecheck/...) + pass/fail. Only genuine checks count as
+-- verification (checkFamilyFromCommand) - the input for churn episodes and run-
+-- evidence verification events.
 CREATE TABLE IF NOT EXISTS command_outcome (
     id VARCHAR PRIMARY KEY,
     tool_call VARCHAR,  -- ref -> tool_call
@@ -1065,6 +1167,9 @@ CREATE TABLE IF NOT EXISTS command_outcome (
 CREATE INDEX IF NOT EXISTS command_outcome_kind_ts ON command_outcome(kind, ts);
 CREATE INDEX IF NOT EXISTS command_outcome_session ON command_outcome(session, ts);
 
+-- Per-user n-gram statistics over user turns with outcome-adjacency counts
+-- (near_correction, near_failed_tool, ...) - the base rates behind
+-- directive_ngram lift.
 CREATE TABLE IF NOT EXISTS user_message_ngram (
     id VARCHAR PRIMARY KEY,
     ngram VARCHAR NOT NULL,
@@ -1081,6 +1186,8 @@ CREATE TABLE IF NOT EXISTS user_message_ngram (
 CREATE INDEX IF NOT EXISTS user_message_ngram_n_count ON user_message_ngram(n, count);
 CREATE INDEX IF NOT EXISTS user_message_ngram_text ON user_message_ngram(ngram);
 
+-- Named time window (starts_at/ends_at + evidence) used to segment analytics by
+-- workflow era - e.g. before/after adopting a tool.
 CREATE TABLE IF NOT EXISTS workflow_epoch (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -1092,6 +1199,9 @@ CREATE TABLE IF NOT EXISTS workflow_epoch (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS workflow_epoch_name ON workflow_epoch(name);
 
+-- Session-grain token + cost rollup from transcript usage records: per-
+-- component tokens and estimated USD (input/output/cache) with pricing_source.
+-- Kept SEPARATE from OTLP-sourced cost (no double-count).
 CREATE TABLE IF NOT EXISTS session_token_usage (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -1122,6 +1232,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS session_token_usage_session ON session_token_u
 CREATE INDEX IF NOT EXISTS session_token_usage_epoch ON session_token_usage(workflow_epoch, source, ts);
 CREATE INDEX IF NOT EXISTS session_token_usage_model ON session_token_usage(model_ref, ts);
 
+-- Turn-grain token + cost rows (the per-model legs behind dispatch model-drop
+-- detection). usage_source/usage_quality say where the numbers came from and
+-- how trustworthy they are.
 CREATE TABLE IF NOT EXISTS turn_token_usage (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -1152,6 +1265,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS turn_token_usage_turn ON turn_token_usage(turn
 CREATE INDEX IF NOT EXISTS turn_token_usage_session_seq ON turn_token_usage(session, seq);
 CREATE INDEX IF NOT EXISTS turn_token_usage_model ON turn_token_usage(model_ref, ts);
 
+-- Per-session behavioral counters: corrections, interruptions, subagent
+-- dispatches, cache ratios, context pressure. The 'how did it feel' companion
+-- to session_metrics.
 CREATE TABLE IF NOT EXISTS session_health (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -1182,6 +1298,9 @@ CREATE TABLE IF NOT EXISTS session_health (
 CREATE UNIQUE INDEX IF NOT EXISTS session_health_session ON session_health(session);
 CREATE INDEX IF NOT EXISTS session_health_epoch ON session_health(workflow_epoch, source, ts);
 
+-- Per-session outcome metrics: durability_ratio, produced vs reverted commits,
+-- time_to_land_ms, delegation_ratio. The 'what landed' companion to
+-- session_health.
 CREATE TABLE IF NOT EXISTS session_metrics (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -1215,6 +1334,8 @@ CREATE TABLE IF NOT EXISTS fragility_cascade (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS fragility_cascade_pair ON fragility_cascade(origin, downstream);
 
+-- Kind classification per commit (feature/fix/revert/chore, confidence-scored)
+-- from the git derive.
 CREATE TABLE IF NOT EXISTS commit_classification (
     id VARCHAR PRIMARY KEY,
     commit VARCHAR NOT NULL,  -- ref -> commit
@@ -1229,6 +1350,8 @@ CREATE TABLE IF NOT EXISTS commit_classification (
 CREATE UNIQUE INDEX IF NOT EXISTS commit_classification_commit ON commit_classification(commit);
 CREATE INDEX IF NOT EXISTS commit_classification_kind_ts ON commit_classification(kind, ts);
 
+-- Git branch rows per repository with head + upstream tracking (first/last_seen
+-- window).
 CREATE TABLE IF NOT EXISTS branch (
     id VARCHAR PRIMARY KEY,
     repository VARCHAR NOT NULL,  -- ref -> repository
@@ -1241,6 +1364,8 @@ CREATE TABLE IF NOT EXISTS branch (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS branch_repo_name ON branch(repository, name);
 
+-- Pull-request metadata per repository (provider = github/...), including merge
+-- identity (merge_sha) and size counters.
 CREATE TABLE IF NOT EXISTS pull_request (
     id VARCHAR PRIMARY KEY,
     repository VARCHAR NOT NULL,  -- ref -> repository
@@ -1268,6 +1393,8 @@ CREATE TABLE IF NOT EXISTS pull_request (
 CREATE UNIQUE INDEX IF NOT EXISTS pull_request_repo_number ON pull_request(repository, number);
 CREATE INDEX IF NOT EXISTS pull_request_state ON pull_request(repository, state, updated_at);
 
+-- One review action on a pull request (reviewer + state + severity),
+-- reviewer_kind separates humans from bots/agents.
 CREATE TABLE IF NOT EXISTS review_event (
     id VARCHAR PRIMARY KEY,
     pull_request VARCHAR NOT NULL,  -- ref -> pull_request
@@ -1285,6 +1412,7 @@ CREATE TABLE IF NOT EXISTS review_event (
 CREATE INDEX IF NOT EXISTS review_event_pr_ts ON review_event(pull_request, ts);
 CREATE INDEX IF NOT EXISTS review_event_severity ON review_event(repository, severity, ts);
 
+-- CI check run on a PR/commit (name, status, conclusion, timing).
 CREATE TABLE IF NOT EXISTS check_run (
     id VARCHAR PRIMARY KEY,
     pull_request VARCHAR,  -- ref -> pull_request
@@ -1302,6 +1430,9 @@ CREATE TABLE IF NOT EXISTS check_run (
 CREATE INDEX IF NOT EXISTS check_run_pr ON check_run(pull_request, status, conclusion);
 CREATE INDEX IF NOT EXISTS check_run_commit ON check_run(commit, status, conclusion);
 
+-- Session-grain delivery rollup: did the work land (status + promotion_path),
+-- through which PR, at what review pain. Derived; confidence + evidence say how
+-- sure.
 CREATE TABLE IF NOT EXISTS delivery_outcome (
     id VARCHAR PRIMARY KEY,
     session VARCHAR,  -- ref -> session
@@ -1325,6 +1456,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS delivery_session ON delivery_outcome(session);
 CREATE INDEX IF NOT EXISTS delivery_pr ON delivery_outcome(pull_request);
 CREATE INDEX IF NOT EXISTS delivery_status ON delivery_outcome(repository, status, updated_at);
 
+-- Single-row cache of the dashboard workflow payload (opaque JSON, source-
+-- labelled) - a read-side cache, not evidence.
 CREATE TABLE IF NOT EXISTS workflow_snapshot (
     id VARCHAR PRIMARY KEY,
     generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1333,6 +1466,9 @@ CREATE TABLE IF NOT EXISTS workflow_snapshot (
 );
 CREATE INDEX IF NOT EXISTS workflow_snapshot_generated ON workflow_snapshot(generated_at);
 
+-- Session phase segmentation (explore/implement/verify/...): one row per
+-- contiguous phase with duration and activity counters. Powers hands-free-time
+-- and DEPTH analytics.
 CREATE TABLE IF NOT EXISTS phase_span (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -1355,6 +1491,8 @@ CREATE TABLE IF NOT EXISTS phase_span (
 );
 CREATE INDEX IF NOT EXISTS phase_span_session_phase ON phase_span(session, phase);
 
+-- Mined candidate for a skill that does not exist yet: trigger pattern +
+-- suspected gap + proposed behavior, with a status lifecycle.
 CREATE TABLE IF NOT EXISTS skill_candidate (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -1370,6 +1508,20 @@ CREATE TABLE IF NOT EXISTS skill_candidate (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS skill_candidate_name ON skill_candidate(name);
 CREATE INDEX IF NOT EXISTS skill_candidate_status ON skill_candidate(status, created_at);
+-- Bookkeeping for the self-documenting catalog (#869): single row ('comments')
+-- recording the hash of the COMMENT ON script last applied, so routine opens
+-- skip re-applying it. The skip matters for crash safety, not just speed:
+-- COMMENT records sitting in an uncheckpointed WAL poison crash recovery in
+-- this DuckDB build (replay fails, live db unopenable), so the apply path
+-- CHECKPOINTs immediately and this row keeps every later open comment-free.
+CREATE TABLE IF NOT EXISTS schema_comment_state (
+    id VARCHAR PRIMARY KEY,  -- always 'comments'
+    comments_hash VARCHAR NOT NULL,  -- stableDigest of the emitted COMMENT ON script
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Ingest ledger: one row per `ax ingest` run (status, since window, progress
+-- heartbeat, final metrics).
 CREATE TABLE IF NOT EXISTS ingest_run (
     id VARCHAR PRIMARY KEY,
     command VARCHAR NOT NULL,
@@ -1384,6 +1536,9 @@ CREATE TABLE IF NOT EXISTS ingest_run (
 );
 CREATE INDEX IF NOT EXISTS ingest_run_status_started ON ingest_run(status, started_at);
 
+-- Ingest ledger: one row per pipeline stage per run. TRAP: `source` is the
+-- stage KEY (claude, signals, git, ...) and `stage` is the phase label
+-- (ingest/derive/...) - id shape run__source__stage.
 CREATE TABLE IF NOT EXISTS ingest_stage (
     id VARCHAR PRIMARY KEY,
     run VARCHAR NOT NULL,  -- ref -> ingest_run
@@ -1394,7 +1549,7 @@ CREATE TABLE IF NOT EXISTS ingest_stage (
     ended_at TIMESTAMP,
     counts VARCHAR,  -- JSON
     error_text VARCHAR,
-    self_ms BIGINT  -- this stage's OWN DuckDB time; see the ALTER below
+    self_ms BIGINT  -- ms spent inside this stage's OWN DuckDB calls (#865); wall clock minus other stages' turns. Budget-enforced for derives (#837)
 );
 -- `ended_at - started_at` is WALL CLOCK, and with 4 stages running at once that
 -- is mostly other stages' work: every DuckDB call is a synchronous bun:ffi call
@@ -1407,6 +1562,8 @@ CREATE TABLE IF NOT EXISTS ingest_stage (
 ALTER TABLE ingest_stage ADD COLUMN IF NOT EXISTS self_ms BIGINT;
 CREATE INDEX IF NOT EXISTS ingest_stage_run ON ingest_stage(run, started_at);
 
+-- Ingest ledger: leveled log events per stage (info/warn/error) with counts
+-- payloads.
 CREATE TABLE IF NOT EXISTS ingest_event (
     id VARCHAR PRIMARY KEY,
     run VARCHAR NOT NULL,  -- ref -> ingest_run
@@ -1421,6 +1578,8 @@ CREATE TABLE IF NOT EXISTS ingest_event (
 CREATE INDEX IF NOT EXISTS ingest_event_run_ts ON ingest_event(run, ts);
 CREATE INDEX IF NOT EXISTS ingest_event_source_ts ON ingest_event(source, ts);
 
+-- Recorded query health samples (name + sql + duration + row_count) written by
+-- the insights health harness.
 CREATE TABLE IF NOT EXISTS query_sample (
     id VARCHAR PRIMARY KEY,
     name VARCHAR,
@@ -1432,6 +1591,8 @@ CREATE TABLE IF NOT EXISTS query_sample (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Graph integrity check results (kind + status + offending count/rows) - the
+-- read side of cache-integrity checks.
 CREATE TABLE IF NOT EXISTS graph_health_check (
     id VARCHAR PRIMARY KEY,
     kind VARCHAR NOT NULL,
@@ -1529,6 +1690,7 @@ CREATE INDEX IF NOT EXISTS edited_in_out_tool ON edited(in_id, out_id, tool);
 -- table; results are precomputed into fragility_cascade (issue #171).
 CREATE INDEX IF NOT EXISTS edited_out ON edited(out_id);
 
+-- Evidence edge: a turn's text mentioned a file (confidence + excerpt).
 CREATE TABLE IF NOT EXISTS mentioned_file (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1542,6 +1704,7 @@ CREATE INDEX IF NOT EXISTS mentioned_file_in ON mentioned_file(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_file_out ON mentioned_file(out_id);
 CREATE INDEX IF NOT EXISTS mentioned_file_in_out_source ON mentioned_file(in_id, out_id, source);
 
+-- Evidence edge: a turn's text mentioned a code symbol.
 CREATE TABLE IF NOT EXISTS mentioned_symbol (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1554,6 +1717,7 @@ CREATE TABLE IF NOT EXISTS mentioned_symbol (
 CREATE INDEX IF NOT EXISTS mentioned_symbol_in ON mentioned_symbol(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_symbol_out ON mentioned_symbol(out_id);
 
+-- Evidence edge: a turn's text mentioned an error signature.
 CREATE TABLE IF NOT EXISTS mentioned_error (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1566,6 +1730,8 @@ CREATE TABLE IF NOT EXISTS mentioned_error (
 CREATE INDEX IF NOT EXISTS mentioned_error_in ON mentioned_error(in_id);
 CREATE INDEX IF NOT EXISTS mentioned_error_out ON mentioned_error(out_id);
 
+-- Evidence edge: a Read-class tool call actually opened a file (path_seen as
+-- the tool saw it). Tool-backed, unlike the mentioned_* text edges.
 CREATE TABLE IF NOT EXISTS read_file (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> tool_call
@@ -1579,6 +1745,8 @@ CREATE TABLE IF NOT EXISTS read_file (
 CREATE INDEX IF NOT EXISTS read_file_in ON read_file(in_id);
 CREATE INDEX IF NOT EXISTS read_file_out ON read_file(out_id);
 
+-- Evidence edge: a search-class tool call (Grep/Glob) touched a file. Tool-
+-- backed.
 CREATE TABLE IF NOT EXISTS searched_file (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> tool_call
@@ -1604,6 +1772,8 @@ CREATE TABLE IF NOT EXISTS corrected_by (
 CREATE INDEX IF NOT EXISTS corrected_by_in ON corrected_by(in_id);
 CREATE INDEX IF NOT EXISTS corrected_by_out ON corrected_by(out_id);
 
+-- Edge: a turn expresses a semantic_signal (via turn_analysis, confidence +
+-- method).
 CREATE TABLE IF NOT EXISTS expresses (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1618,6 +1788,8 @@ CREATE INDEX IF NOT EXISTS expresses_in ON expresses(in_id);
 CREATE INDEX IF NOT EXISTS expresses_out ON expresses(out_id);
 CREATE INDEX IF NOT EXISTS expresses_session_ts ON expresses(session, ts);
 
+-- Edge: a user turn reacts to an assistant turn (polarity + act) - the edge
+-- form of reaction_event.
 CREATE TABLE IF NOT EXISTS reacts_to (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1633,6 +1805,8 @@ CREATE INDEX IF NOT EXISTS reacts_to_in ON reacts_to(in_id);
 CREATE INDEX IF NOT EXISTS reacts_to_out ON reacts_to(out_id);
 CREATE INDEX IF NOT EXISTS reacts_to_session_ts ON reacts_to(session, ts);
 
+-- Edge: a subject carries a classifier label (classifier_key + label +
+-- confidence).
 CREATE TABLE IF NOT EXISTS has_classification (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> turn
@@ -1646,6 +1820,8 @@ CREATE TABLE IF NOT EXISTS has_classification (
 CREATE INDEX IF NOT EXISTS has_classification_in ON has_classification(in_id);
 CREATE INDEX IF NOT EXISTS has_classification_out ON has_classification(out_id);
 CREATE INDEX IF NOT EXISTS has_classification_theme ON has_classification(classifier_key, label, target);
+-- Edge: a session produced a commit (git attribution by author time +
+-- checkout).
 CREATE TABLE IF NOT EXISTS produced (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> session
@@ -1662,6 +1838,8 @@ CREATE INDEX IF NOT EXISTS produced_repository_checkout_ts ON produced(repositor
 CREATE INDEX IF NOT EXISTS produced_in ON produced(in_id);
 CREATE INDEX IF NOT EXISTS produced_out ON produced(out_id);
 
+-- Edge: a commit touched a file, with diff stats (additions/deletions, renames
+-- via old_path/new_path).
 CREATE TABLE IF NOT EXISTS touched (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> commit
@@ -1681,6 +1859,9 @@ CREATE INDEX IF NOT EXISTS touched_repository_ts ON touched(repository, ts);
 CREATE INDEX IF NOT EXISTS touched_checkout_ts ON touched(checkout, ts);
 CREATE INDEX IF NOT EXISTS touched_in_checkout ON touched(in_id, checkout);
 
+-- Edge: a commit was later repaired by another commit (file-overlap heuristic:
+-- overlap_files/days_between/confidence). The repair signal behind churn and
+-- durability metrics.
 CREATE TABLE IF NOT EXISTS later_fixed_by (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> commit
@@ -1696,6 +1877,7 @@ CREATE TABLE IF NOT EXISTS later_fixed_by (
 CREATE INDEX IF NOT EXISTS later_fixed_by_in ON later_fixed_by(in_id);
 CREATE INDEX IF NOT EXISTS later_fixed_by_out ON later_fixed_by(out_id);
 
+-- Edge: a commit pattern suggests a skill_candidate (git closure derive).
 CREATE TABLE IF NOT EXISTS suggests_skill (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> commit
@@ -1708,6 +1890,7 @@ CREATE TABLE IF NOT EXISTS suggests_skill (
 CREATE INDEX IF NOT EXISTS suggests_skill_in ON suggests_skill(in_id);
 CREATE INDEX IF NOT EXISTS suggests_skill_out ON suggests_skill(out_id);
 
+-- Edge: a session ran in a checkout.
 CREATE TABLE IF NOT EXISTS has_checkout (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> repository
@@ -1739,6 +1922,9 @@ CREATE INDEX IF NOT EXISTS concerns_in ON concerns(in_id);
 CREATE INDEX IF NOT EXISTS concerns_out ON concerns(out_id);
 CREATE INDEX IF NOT EXISTS concerns_in_out_kind ON concerns(in_id, out_id, kind);
 
+-- Untyped generic evidence edge (Surreal RELATION with no FROM/TO): endpoints
+-- vary, so in_table/out_table record them - see POLYMORPHIC EDGES in the file
+-- header.
 CREATE TABLE IF NOT EXISTS resulted_in (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -1752,6 +1938,8 @@ CREATE TABLE IF NOT EXISTS resulted_in (
 CREATE INDEX IF NOT EXISTS resulted_in_in ON resulted_in(in_id);
 CREATE INDEX IF NOT EXISTS resulted_in_out ON resulted_in(out_id);
 
+-- Untyped generic evidence edge: something produced an artifact;
+-- in_table/out_table record the endpoints.
 CREATE TABLE IF NOT EXISTS produced_artifact (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -1765,6 +1953,8 @@ CREATE TABLE IF NOT EXISTS produced_artifact (
 CREATE INDEX IF NOT EXISTS produced_artifact_in ON produced_artifact(in_id);
 CREATE INDEX IF NOT EXISTS produced_artifact_out ON produced_artifact(out_id);
 
+-- Untyped generic evidence edge: something owns/references an artifact;
+-- in_table/out_table record the endpoints.
 CREATE TABLE IF NOT EXISTS has_artifact (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -1778,6 +1968,8 @@ CREATE TABLE IF NOT EXISTS has_artifact (
 CREATE INDEX IF NOT EXISTS has_artifact_in ON has_artifact(in_id);
 CREATE INDEX IF NOT EXISTS has_artifact_out ON has_artifact(out_id);
 
+-- Untyped generic provenance edge: a row was derived from another;
+-- in_table/out_table record the endpoints.
 CREATE TABLE IF NOT EXISTS derived_from (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,
@@ -1857,6 +2049,8 @@ CREATE TABLE IF NOT EXISTS advice (
 );
 CREATE INDEX IF NOT EXISTS advice_ts ON advice(ts);
 
+-- Provider-events edge: parent agent_event -> child agent_event (kind-coded),
+-- preserving the provider's own event tree.
 CREATE TABLE IF NOT EXISTS agent_event_child (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> agent_event
@@ -1869,6 +2063,8 @@ CREATE TABLE IF NOT EXISTS agent_event_child (
 CREATE INDEX IF NOT EXISTS agent_event_child_in ON agent_event_child(in_id);
 CREATE INDEX IF NOT EXISTS agent_event_child_out ON agent_event_child(out_id);
 
+-- Edge: a session used a model, with the token/cost rollup denormalized from
+-- session_token_usage.
 CREATE TABLE IF NOT EXISTS used_model (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> session
@@ -1883,6 +2079,7 @@ CREATE TABLE IF NOT EXISTS used_model (
 CREATE INDEX IF NOT EXISTS used_model_in ON used_model(in_id);
 CREATE INDEX IF NOT EXISTS used_model_out ON used_model(out_id);
 
+-- Provider-events edge: an agent_session used a model.
 CREATE TABLE IF NOT EXISTS agent_used_model (
     id VARCHAR PRIMARY KEY,
     in_id VARCHAR NOT NULL,  -- ref -> agent_session
@@ -1927,6 +2124,10 @@ CREATE INDEX IF NOT EXISTS harness_hook_event_by_session ON harness_hook_event(s
 CREATE INDEX IF NOT EXISTS harness_hook_event_by_name ON harness_hook_event(hook_name);
 CREATE INDEX IF NOT EXISTS harness_hook_event_by_tool ON harness_hook_event(tool_call);
 
+-- One observed hook fire (#743): parsed from a hook_success attachment OR from
+-- blocked-call tool_result text (source in harness_hook_event). TRAP: a hook
+-- that passes SILENTLY is written NOWHERE - empty tables are not evidence hooks
+-- never ran.
 CREATE TABLE IF NOT EXISTS hook_command_invocation (
     id VARCHAR PRIMARY KEY,
     hook_event VARCHAR NOT NULL,  -- ref -> harness_hook_event
@@ -1993,6 +2194,8 @@ CREATE TABLE IF NOT EXISTS feedback_case_type (
 CREATE UNIQUE INDEX IF NOT EXISTS feedback_case_type_name ON feedback_case_type(name);
 CREATE INDEX IF NOT EXISTS feedback_case_type_status ON feedback_case_type(status);
 
+-- Deterministic feedback-case backtest verdicts (`ax hooks cases`): per
+-- case_type and target, pass/fail with the evidence window.
 CREATE TABLE IF NOT EXISTS feedback_case_result (
     id VARCHAR PRIMARY KEY,
     case_type VARCHAR NOT NULL,  -- ref -> feedback_case_type
@@ -2227,6 +2430,9 @@ CREATE TABLE IF NOT EXISTS otel_metric_point (
 CREATE INDEX IF NOT EXISTS otel_metric_session ON otel_metric_point(session_id);
 CREATE INDEX IF NOT EXISTS otel_metric_observed ON otel_metric_point(observed_at);
 
+-- OTLP receiver: span rows (content-stripped on purpose - bodies would
+-- duplicate turn/tool_call text). session_id is the BARE uuid, session.id
+-- equals it verbatim - join uuid-to-uuid.
 CREATE TABLE IF NOT EXISTS otel_span (
     id VARCHAR PRIMARY KEY,
     harness VARCHAR NOT NULL,
@@ -2244,6 +2450,9 @@ CREATE TABLE IF NOT EXISTS otel_span (
 CREATE INDEX IF NOT EXISTS otel_span_session ON otel_span(session_id);
 CREATE INDEX IF NOT EXISTS otel_span_observed ON otel_span(observed_at);
 
+-- OTLP receiver: log events (Codex emits logs, not spans) with typed token
+-- columns. Curated allowlist drops transport noise. Per-event token sums
+-- double-count - use session_token_usage for cost.
 CREATE TABLE IF NOT EXISTS otel_log_event (
     id VARCHAR PRIMARY KEY,
     harness VARCHAR NOT NULL,
@@ -2263,6 +2472,8 @@ CREATE TABLE IF NOT EXISTS otel_log_event (
 CREATE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event(session_id);
 CREATE INDEX IF NOT EXISTS otel_log_event_observed ON otel_log_event(observed_at);
 
+-- Normalized harness tool telemetry (decision/success/error_type per tool use),
+-- joined from OTLP + transcript sources.
 CREATE TABLE IF NOT EXISTS harness_tool_event (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -2285,6 +2496,8 @@ CREATE TABLE IF NOT EXISTS harness_tool_event (
 CREATE INDEX IF NOT EXISTS harness_tool_event_session ON harness_tool_event(session);
 CREATE INDEX IF NOT EXISTS harness_tool_event_kind ON harness_tool_event(event_kind);
 
+-- Per-session harness runtime context: surface, entrypoint, model provider,
+-- sandbox/approval policy, MCP servers, app version.
 CREATE TABLE IF NOT EXISTS harness_run_context (
     id VARCHAR PRIMARY KEY,
     session VARCHAR NOT NULL,  -- ref -> session
@@ -2409,6 +2622,8 @@ CREATE INDEX IF NOT EXISTS run_evidence_event_kind ON run_evidence_event(session
 CREATE INDEX IF NOT EXISTS run_evidence_event_source ON run_evidence_event(source_table, source_id);
 CREATE INDEX IF NOT EXISTS run_evidence_event_observed ON run_evidence_event(observed_at);
 
+-- Run-evidence ledger (#578): file/uri refs backing evidence events. Paths and
+-- uris are HASHED (privacy_level defaults ref_only - no raw payloads).
 CREATE TABLE IF NOT EXISTS run_evidence_ref (
     id VARCHAR PRIMARY KEY,
     "event" VARCHAR NOT NULL,  -- ref -> run_evidence_event
