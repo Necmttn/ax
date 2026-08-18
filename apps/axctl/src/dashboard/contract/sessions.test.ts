@@ -114,6 +114,21 @@ describe("sessions handlers - missing required query param", () => {
         // id is required in the contract schema - HttpApi should reject with 400
         expect(res.status).toBe(400);
     });
+
+    test("a validation 400 carries a body naming the request and the contract surfaces", async () => {
+        // `HttpApiSchemaError` documents itself as responding with an EMPTY 400.
+        // Zero bytes reads as a broken server, and the primary consumer of this
+        // API is an agent that has to self-correct from the response alone
+        // (#855).
+        const { handler } = make();
+        const res = await handler(get("/api/session-orchestration"));
+        expect(res.status).toBe(400);
+        const body = await res.json() as Record<string, unknown>;
+        expect(body.error).toBe("bad_request");
+        expect(body.message).toContain("GET /api/session-orchestration");
+        expect(body.docs).toBe("http://127.0.0.1:1738/docs");
+        expect(body.openapi).toBe("http://127.0.0.1:1738/openapi.json");
+    });
 });
 
 describe("sessions handlers - basic responses", () => {

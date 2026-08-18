@@ -43,7 +43,15 @@ export async function handleDashboardRequest(
     }
     const routed = await dispatch(routeTable, req, url, runner, serve);
     if (routed !== null) return routed;
-    if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
+    // 404, not the legacy 200. A 200 body saying `not_found` is read as success
+    // by every HTTP client, cache, retry policy and uptime check, and it makes a
+    // caller's typo indistinguishable from a route that answers with an error.
+    // One reader spent part of a day treating an unregistered path as "a
+    // specially retired endpoint that answers with a plausible error body" and
+    // filed it as such (#855).
+    if (url.pathname.startsWith("/api/")) {
+        return jsonResponse({ error: "not_found", path: url.pathname }, 404);
+    }
     if (req.method === "GET") {
         // Studio is served by this process itself, same-origin, so the SPA fetches
         // /api/* from the same host:port with no mixed-content / Private Network
