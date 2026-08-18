@@ -96,7 +96,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AX_DATA_DIR: /tmp/ax-ci
-      AX_DB_URL: ws://127.0.0.1:8521
       # One knob, two resolvers: `resolveTestDylib`
       # (packages/lib/src/testing/duckdb-dylib.ts) and `duckdbBinPath`
       # (scripts/bench/duckdb-bin.ts) both prefer this dir over anything else,
@@ -150,60 +149,26 @@ jobs:
           chmod +x dist/duckdb/duckdb
           bun scripts/smoke-duckdb-dylib.ts dist/duckdb/libduckdb.so
 
-      - name: Start SurrealDB 3.1.0
-        run: |
-          set -euo pipefail
-          surreal_dir="$RUNNER_TEMP/surrealdb"
-          mkdir -p "$surreal_dir"
-          curl -sSL https://github.com/surrealdb/surrealdb/releases/download/v3.1.0/surreal-v3.1.0.linux-amd64.tgz |
-            tar -xz -C "$surreal_dir"
-          surreal_bin="$surreal_dir/surreal"
-          test "$("$surreal_bin" version | awk '{print $1}')" = "3.1.0"
-          echo "$surreal_dir" >> "$GITHUB_PATH"
-
-          mkdir -p \
-            "$AX_DATA_DIR/buckets/transcripts" \
-            "$AX_DATA_DIR/buckets/codex_artifacts"
-          SURREAL_BUCKET_FOLDER_ALLOWLIST="$AX_DATA_DIR/buckets" \
-            nohup "$surreal_bin" start \
-              --user root \
-              --pass root \
-              --bind 127.0.0.1:8521 \
-              --allow-experimental=files \
-              memory \
-              >"$RUNNER_TEMP/surreal.log" 2>&1 &
-          surreal_pid=$!
-
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8521/health >/dev/null; then
-              exit 0
-            fi
-            if ! kill -0 "$surreal_pid" 2>/dev/null; then
-              cat "$RUNNER_TEMP/surreal.log"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          cat "$RUNNER_TEMP/surreal.log"
-          exit 1
-
-      - name: Apply SurrealDB schema
-        run: bun run db:schema
-
       - run: bash -n install.sh
 
       - run: bun test
 
-      - name: Run live-DB e2e suites
+      # `bun test <path>` treats its arguments as FILTERS and exits 0 when none
+      # match, so a deleted suite here reported success while running nothing -
+      # two of the four listed files no longer existed. Assert first.
+      - name: Run e2e suites
         env:
           AX_E2E_DB: "1"
         run: |
-          bun test \
-            apps/axctl/src/hooks/sdk-cli.e2e.test.ts \
-            apps/axctl/src/dashboard/sessions-query.e2e.test.ts \
-            apps/axctl/src/ingest/codex-reingest.e2e.test.ts \
-            apps/axctl/src/ingest/proposal-origin-migration.e2e.test.ts
+          set -euo pipefail
+          suites=(
+            apps/axctl/src/hooks/sdk-cli.e2e.test.ts
+            apps/axctl/src/ingest/codex-reingest.e2e.test.ts
+          )
+          for suite in "${suites[@]}"; do
+            test -f "$suite" || { echo "::error::e2e suite $suite is listed here but does not exist"; exit 1; }
+          done
+          bun test "${suites[@]}"
 
       - run: bun run typecheck
 
