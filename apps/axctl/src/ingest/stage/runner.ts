@@ -1,8 +1,12 @@
-import { Deferred, Effect, Fiber, Option, Semaphore } from "effect";
+import { Cause, Deferred, Effect, Fiber, Option, Semaphore } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { nonNegativeNumberEnv } from "@ax/lib/shared/env-number";
 import type { FileFailureSnapshot } from "../file-isolation.ts";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import {
+    CurrentStageSelfTimeBudget,
+    StageSelfTimeBudgetExceeded,
+} from "@ax/lib/duckdb/self-time";
 import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
 import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
@@ -35,15 +39,34 @@ export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number =
     return nonNegativeNumberEnv(env.AX_INGEST_HEARTBEAT_SECONDS, 30);
 };
 
-/** Hard per-stage cap applied to `derive`-tagged stages ONLY. Derives reshape
- *  already-ingested rows and should finish fast; one that runs past this cap is
- *  stuck (a hung query, #671) and is failed OPEN - a warning plus empty stats -
- *  so the rest of the pipeline still completes and exits. Heavy ingest/provider
+/** Per-stage SELF-TIME budget applied to `derive`-tagged stages ONLY: how many
+ *  seconds a derive may spend inside its OWN DuckDB calls. Enforced
+ *  cooperatively at the seam (`chargeStageSelfTime`): once the accumulator
+ *  crosses the budget, the NEXT call is refused and the stage fails OPEN with a
+ *  `timeout` row, so the rest of the pipeline still completes.
+ *
+ *  Self time, not wall clock, because every DuckDB call is a synchronous
+ *  `bun:ffi` call blocking the one JS thread: under PIPELINE_CONCURRENCY=4 a
+ *  stage's wall clock is mostly OTHER stages' calls, and a wall cap killed a
+ *  stage whose own cost was 2.1s on every concurrent run while a genuinely
+ *  heavy one could not be preempted at all (#837, #841). Heavy ingest/provider
  *  stages (claude, codex, git) are deliberately exempt: a full backfill
  *  legitimately runs for many minutes. Env override `AX_STAGE_TIMEOUT_SECONDS`;
  *  0 disables. Exported for tests. */
 export const deriveStageTimeoutSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
     return nonNegativeNumberEnv(env.AX_STAGE_TIMEOUT_SECONDS, 300);
+};
+
+/** Wall-clock HUNG detector for `derive`-tagged stages - the demoted remainder
+ *  of the old wall-clock watchdog. It cannot preempt a synchronous FFI call
+ *  (the event loop is blocked while one runs) and it no longer measures cost -
+ *  that is the self-time budget's job. What it still catches: a derive that is
+ *  idle or stuck somewhere that DOES yield (an awaited promise, a lock, a bug
+ *  outside the FFI), which self time by definition never charges. Generous by
+ *  default for that reason. Env override `AX_STAGE_HUNG_SECONDS`; 0 disables
+ *  the static part (a run deadline still applies). Exported for tests. */
+export const deriveStageHungSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
+    return nonNegativeNumberEnv(env.AX_STAGE_HUNG_SECONDS, 1800);
 };
 
 /** Annotate the active stage span with the numeric fields of its result stats
@@ -193,7 +216,8 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
         // Stages currently executing (permit acquired, run not yet resolved). The
         // heartbeat reads this so a hang is attributable to a specific stage (#671).
         const inFlight = new Set<string>();
-        const stageTimeoutMs = deriveStageTimeoutSeconds() * 1000;
+        const selfBudgetMs = deriveStageTimeoutSeconds() * 1000;
+        const hungCapMs = deriveStageHungSeconds() * 1000;
         const deadlineMs = opts.deadlineMs ?? null;
         const reserveMs = opts.reserveMs ?? deriveReserveMs();
 
@@ -214,14 +238,19 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                         "ingest.stage.tags": s.meta.tags.join(","),
                     }),
                 );
-                // Watchdog: cap `derive` stages so one stuck or backlogged derive
-                // can't wedge the run OR push the pass past its deadline (#671,
-                // #697). Fails OPEN - a warning plus sentinel stats - because
-                // downstream deps only await this Deferred (they never read its
-                // value; they re-query the DB), and the totals roll-up skips
-                // `durationMs` + non-numeric fields, so an empty BaseStageStats is
-                // safe. Heavy provider stages (claude, codex, git) are exempt: a
-                // full backfill legitimately runs for many minutes.
+                // Guards on `derive` stages, all failing OPEN - a warning plus
+                // sentinel stats - because downstream deps only await this
+                // Deferred (they never read its value; they re-query the DB),
+                // and the totals roll-up skips `durationMs` + non-numeric
+                // fields, so an empty BaseStageStats is safe. Heavy provider
+                // stages (claude, codex, git) are exempt. Three layers:
+                //  1. skip: no wall budget left before the run deadline (#697)
+                //  2. self-time budget: the stage's own DuckDB time, enforced
+                //     at the seam between calls - the authoritative cost cap
+                //     (#837); wall clock could neither measure cost under
+                //     concurrency nor preempt a synchronous FFI call
+                //  3. hung detector: generous wall-clock race for a derive
+                //     stuck somewhere that yields (self time never sees those)
                 // Suspended so `Date.now()` is read at stage START (post-deps,
                 // post-permit) - reading it at build time would hand every stage
                 // the budget the FIRST one had.
@@ -229,12 +258,11 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                     ? body
                     : Effect.suspend(() => {
                         const budget = deriveStageBudget({
-                            staticCapMs: stageTimeoutMs,
+                            staticCapMs: hungCapMs,
                             deadlineMs,
                             nowMs: Date.now(),
                             reserveMs,
                         });
-                        if (budget._tag === "uncapped") return body;
                         if (budget._tag === "skip") {
                             const reason = `skipped - ${budget.reason}`;
                             return Effect.logWarning(
@@ -256,15 +284,64 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                                 } as unknown as S),
                             );
                         }
+                        // Self-time budget. `provideService` scopes the budget
+                        // to the stage BODY only: the catch handler below and
+                        // the settle writes (`wrapStage` exempts its own
+                        // finalizer) run outside it, so the bookkeeping that
+                        // reports the refusal is never itself refused.
+                        const selfCapSeconds = Math.round(selfBudgetMs / 1000);
+                        const selfGuarded = selfBudgetMs <= 0 ? body : Effect
+                            .provideService(body, CurrentStageSelfTimeBudget, selfBudgetMs)
+                            .pipe(
+                                Effect.catchCause((cause) => {
+                                    const exceeded = cause.reasons
+                                        .filter(Cause.isDieReason)
+                                        .map((reason) => reason.defect)
+                                        .find((defect): defect is StageSelfTimeBudgetExceeded =>
+                                            defect instanceof StageSelfTimeBudgetExceeded
+                                        );
+                                    if (exceeded === undefined) return Effect.failCause(cause);
+                                    const spentSeconds = Math.round(exceeded.selfMs / 1000);
+                                    return Effect.logWarning(
+                                        `ingest: derive stage '${s.meta.key}' spent ${spentSeconds}s in its own ` +
+                                            `database calls against a ${selfCapSeconds}s budget - stopping it ` +
+                                            `(failed open; work already written is kept) so the run can finish. ` +
+                                            `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
+                                    ).pipe(
+                                        // Overwrite the `error` row the stage's
+                                        // own finalizer just wrote (the refusal
+                                        // surfaces as a defect) with the precise
+                                        // budget that fired. `self_ms` survives
+                                        // the overwrite via COALESCE in the
+                                        // finish SQL.
+                                        Effect.andThen(
+                                            opts.recordStageOutcome?.(s.meta.key, {
+                                                status: "timeout",
+                                                errorText:
+                                                    `timed out - spent ${spentSeconds}s in its own database calls ` +
+                                                    `against the ${selfCapSeconds}s self-time budget over ` +
+                                                    `${exceeded.calls} calls (raise or disable with ` +
+                                                    `AX_STAGE_TIMEOUT_SECONDS); work already written is kept and ` +
+                                                    `the run continued without this stage`,
+                                            }) ?? Effect.void,
+                                        ),
+                                        Effect.as({
+                                            durationMs: exceeded.selfMs,
+                                            summary: "self-time budget exceeded",
+                                        } as unknown as S),
+                                    );
+                                }),
+                            );
+                        if (budget._tag === "uncapped") return selfGuarded;
                         const capSeconds = Math.round(budget.capMs / 1000);
-                        return body.pipe(
+                        return selfGuarded.pipe(
                             Effect.timeoutOrElse({
                                 duration: budget.capMs,
                                 orElse: () =>
                                     Effect.logWarning(
-                                        `ingest: derive stage '${s.meta.key}' exceeded ${capSeconds}s - ` +
-                                            `skipping it (failed open) so the run can finish. ` +
-                                            `Raise/disable with AX_STAGE_TIMEOUT_SECONDS.`,
+                                        `ingest: derive stage '${s.meta.key}' still running after ${capSeconds}s ` +
+                                            `of wall clock (hung detector) - skipping it (failed open) so the ` +
+                                            `run can finish. Raise/disable with AX_STAGE_HUNG_SECONDS.`,
                                     ).pipe(
                                         // Overwrite the `interrupted` row the
                                         // stage's own finalizer just wrote with
@@ -276,14 +353,14 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                                             opts.recordStageOutcome?.(s.meta.key, {
                                                 status: "timeout",
                                                 errorText:
-                                                    `timed out - exceeded the ${capSeconds}s derive watchdog cap ` +
-                                                    `(raise or disable with AX_STAGE_TIMEOUT_SECONDS); ` +
+                                                    `hung - still running after the ${capSeconds}s wall-clock hung ` +
+                                                    `detector (raise or disable with AX_STAGE_HUNG_SECONDS); ` +
                                                     `the run continued without this stage`,
                                             }) ?? Effect.void,
                                         ),
                                         Effect.as({
                                             durationMs: budget.capMs,
-                                            summary: "timed out (watchdog)",
+                                            summary: "timed out (hung detector)",
                                         } as unknown as S),
                                     ),
                             }),

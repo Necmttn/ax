@@ -211,7 +211,12 @@ export const writeIngestStageFinish = (
 ): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
         yield* write.exec(
-            "UPDATE ingest_stage SET status = ?, ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ?, self_ms = ? WHERE id = ?",
+            // COALESCE: a runner-side overwrite (`timeout`/`skipped`, #840/#837)
+            // carries no selfMs, and it must not null out the value the stage's
+            // own finalizer just recorded - self_ms IS the evidence for why a
+            // self-time budget fired. Nothing legitimately resets self_ms to
+            // null once written.
+            "UPDATE ingest_stage SET status = ?, ended_at = CURRENT_TIMESTAMP, counts = ?, error_text = ?, self_ms = COALESCE(?, self_ms) WHERE id = ?",
             [
                 input.status,
                 jsonParam(input.counts ?? {}),

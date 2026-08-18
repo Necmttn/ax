@@ -8,7 +8,12 @@ import {
 } from "@ax/lib/live-traces/Sink";
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { LiveTrace } from "@ax/lib/live-traces/index";
-import { annotateStageProgress, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, pipelineConcurrency, runPipeline as runPipelineWithWrite, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
+import { annotateStageProgress, deriveStageHungSeconds, deriveStageTimeoutSeconds, heartbeatSeconds, PIPELINE_CONCURRENCY, pipelineConcurrency, runPipeline as runPipelineWithWrite, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
+import {
+    chargeStageSelfTime,
+    CurrentStageSelfTime,
+    makeStageSelfTime,
+} from "@ax/lib/duckdb/self-time";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 
@@ -386,6 +391,15 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
         expect(heartbeatSeconds({ AX_INGEST_HEARTBEAT_SECONDS: "abc" })).toBe(30);
     });
 
+    it("deriveStageHungSeconds: default 1800, honors override, rejects negative/NaN", () => {
+        expect(deriveStageHungSeconds({})).toBe(1800);
+        expect(deriveStageHungSeconds({ AX_STAGE_HUNG_SECONDS: "120" })).toBe(120);
+        expect(deriveStageHungSeconds({ AX_STAGE_HUNG_SECONDS: "0" })).toBe(0);
+        expect(deriveStageHungSeconds({ AX_STAGE_HUNG_SECONDS: "" })).toBe(1800);
+        expect(deriveStageHungSeconds({ AX_STAGE_HUNG_SECONDS: "-1" })).toBe(1800);
+        expect(deriveStageHungSeconds({ AX_STAGE_HUNG_SECONDS: "nope" })).toBe(1800);
+    });
+
     it("deriveStageTimeoutSeconds: default 300, honors override, rejects negative/NaN", () => {
         expect(deriveStageTimeoutSeconds({})).toBe(300);
         expect(deriveStageTimeoutSeconds({ AX_STAGE_TIMEOUT_SECONDS: "120" })).toBe(120);
@@ -397,7 +411,7 @@ describe("heartbeatSeconds / deriveStageTimeoutSeconds", () => {
     });
 });
 
-describe("derive-stage watchdog (#671)", () => {
+describe("derive-stage hung detector (#671, demoted by #837)", () => {
     // Set/restore env vars around an async body (runPipeline reads them at call time).
     const withEnv = async (vars: Record<string, string>, fn: () => Promise<void>): Promise<void> => {
         const saved: Record<string, string | undefined> = {};
@@ -418,7 +432,7 @@ describe("derive-stage watchdog (#671)", () => {
     const ctx = () => IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
 
     it("fails a hung derive stage OPEN so the run finishes and downstream still runs", async () => {
-        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+        await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const ran: string[] = [];
             const hang: StageDef = {
                 meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
@@ -439,16 +453,16 @@ describe("derive-stage watchdog (#671)", () => {
             expect(ran).toEqual(["after"]);
             const summaries = results.map((r) => r.summary).sort();
             expect(summaries).toContain("after");
-            expect(summaries).toContain("timed out (watchdog)");
+            expect(summaries).toContain("timed out (hung detector)");
         });
     });
 
     it("reports the capped stage as `timeout`, naming the cap that fired (#840)", async () => {
         // Without this, the stage's own finalizer can only say "interrupted" -
         // it cannot know a watchdog cap was the reason. The precise status is
-        // the difference between "raise AX_STAGE_TIMEOUT_SECONDS" and "debug a
+        // the difference between "raise AX_STAGE_HUNG_SECONDS" and "debug a
         // stage that was working fine".
-        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+        await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const rec = outcomeRecorder();
             const hang: StageDef = {
                 meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
@@ -460,12 +474,12 @@ describe("derive-stage watchdog (#671)", () => {
             expect(rec.seen).toHaveLength(1);
             expect(rec.seen[0]!.key).toBe("hang");
             expect(rec.seen[0]!.status).toBe("timeout");
-            expect(rec.seen[0]!.errorText).toContain("AX_STAGE_TIMEOUT_SECONDS");
+            expect(rec.seen[0]!.errorText).toContain("AX_STAGE_HUNG_SECONDS");
         });
     });
 
     it("reports nothing when no stage is capped", async () => {
-        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+        await withEnv({ AX_STAGE_HUNG_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const rec = outcomeRecorder();
             const fine: StageDef = {
                 meta: StageMeta.make({ key: "fine", deps: [], tags: ["derive"] }),
@@ -479,7 +493,7 @@ describe("derive-stage watchdog (#671)", () => {
     });
 
     it("still completes when no recorder is supplied (the hook is optional)", async () => {
-        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+        await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const hang: StageDef = {
                 meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
                 run: () => Effect.never,
@@ -487,12 +501,12 @@ describe("derive-stage watchdog (#671)", () => {
             const results = await Effect.runPromise(
                 runPipeline([hang], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
             );
-            expect(results[0]!.summary).toBe("timed out (watchdog)");
+            expect(results[0]!.summary).toBe("timed out (hung detector)");
         });
     });
 
     it("does NOT watchdog a non-derive (ingest) stage that runs past the cap", async () => {
-        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+        await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const slowIngest: StageDef = {
                 meta: StageMeta.make({ key: "slow", deps: [], tags: ["ingest"] }),
                 run: () =>
@@ -504,6 +518,137 @@ describe("derive-stage watchdog (#671)", () => {
                 runPipeline([slowIngest], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
             );
             expect(results[0]!.summary).toBe("real");
+        });
+    });
+});
+
+describe("derive self-time budget (#837)", () => {
+    const withEnv = async (vars: Record<string, string>, fn: () => Promise<void>): Promise<void> => {
+        const saved: Record<string, string | undefined> = {};
+        for (const k of Object.keys(vars)) {
+            saved[k] = process.env[k];
+            process.env[k] = vars[k];
+        }
+        try {
+            await fn();
+        } finally {
+            for (const k of Object.keys(vars)) {
+                if (saved[k] === undefined) delete process.env[k];
+                else process.env[k] = saved[k];
+            }
+        }
+    };
+
+    const ctx = () => IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+
+    /** What a synchronous DuckDB call looks like to the event loop. */
+    const busy = (ms: number) =>
+        Effect.sync(() => {
+            const until = performance.now() + ms;
+            while (performance.now() < until) { /* spin */ }
+        });
+
+    /** A stage body issuing `calls` charged calls of `ms` each, with its own
+     *  accumulator - exactly the shape `wrapStage` provides in production
+     *  (accumulator INSIDE the stage, budget provided by the runner OUTSIDE). */
+    const chargingStage = (
+        key: string,
+        tags: ReadonlyArray<"ingest" | "derive">,
+        callsMs: ReadonlyArray<number>,
+    ): StageDef => ({
+        meta: StageMeta.make({ key, deps: [], tags }),
+        run: () =>
+            Effect.provideService(
+                Effect.forEach(callsMs, (ms) => chargeStageSelfTime(busy(ms))).pipe(
+                    Effect.as(BaseStageStats.make({ durationMs: 0, summary: `${key} ok` })),
+                ),
+                CurrentStageSelfTime,
+                makeStageSelfTime(),
+            ),
+    });
+
+    it("stops a derive whose OWN database time exceeds the budget, fails OPEN, downstream runs", async () => {
+        // 30ms budget; first charged call spends ~40ms (charged AFTER it
+        // returns - a synchronous call cannot be preempted), so the SECOND
+        // call is refused. Wall clock never enters into it.
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.03", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const rec = outcomeRecorder();
+            const ran: string[] = [];
+            const after: StageDef = {
+                meta: StageMeta.make({ key: "after", deps: ["greedy"], tags: ["derive"] }),
+                run: () =>
+                    Effect.sync(() => {
+                        ran.push("after");
+                        return BaseStageStats.make({ durationMs: 0, summary: "after" });
+                    }),
+            };
+            const results = await Effect.runPromise(
+                runPipeline([chargingStage("greedy", ["derive"], [40, 5]), after], ctx(), {
+                    recordStageOutcome: rec.recordStageOutcome,
+                }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(ran).toEqual(["after"]);
+            const summaries = results.map((r) => r.summary);
+            expect(summaries).toContain("self-time budget exceeded");
+            expect(rec.seen).toHaveLength(1);
+            expect(rec.seen[0]!.key).toBe("greedy");
+            expect(rec.seen[0]!.status).toBe("timeout");
+            expect(rec.seen[0]!.errorText).toContain("self-time");
+            expect(rec.seen[0]!.errorText).toContain("AX_STAGE_TIMEOUT_SECONDS");
+        });
+    });
+
+    it("a derive under its self-time budget is untouched", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const rec = outcomeRecorder();
+            const results = await Effect.runPromise(
+                runPipeline([chargingStage("light", ["derive"], [2, 2])], ctx(), {
+                    recordStageOutcome: rec.recordStageOutcome,
+                }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(results[0]!.summary).toBe("light ok");
+            expect(rec.seen).toEqual([]);
+        });
+    });
+
+    it("an ingest-tagged stage is exempt even when it spends heavily", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0.03", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const results = await Effect.runPromise(
+                runPipeline([chargingStage("provider", ["ingest"], [40, 5])], ctx()) as Effect.Effect<
+                    ReadonlyArray<BaseStageStats>,
+                    never,
+                    never
+                >,
+            );
+            expect(results[0]!.summary).toBe("provider ok");
+        });
+    });
+
+    it("AX_STAGE_TIMEOUT_SECONDS=0 disables the budget", async () => {
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "0", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const results = await Effect.runPromise(
+                runPipeline([chargingStage("unbounded", ["derive"], [40, 5])], ctx()) as Effect.Effect<
+                    ReadonlyArray<BaseStageStats>,
+                    never,
+                    never
+                >,
+            );
+            expect(results[0]!.summary).toBe("unbounded ok");
+        });
+    });
+
+    it("a non-budget defect from a derive stage still propagates", async () => {
+        // The catch handler must ONLY absorb the budget refusal - any other
+        // defect keeps crashing the pipeline as before.
+        await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
+            const boom: StageDef = {
+                meta: StageMeta.make({ key: "boom", deps: [], tags: ["derive"] }),
+                run: () => Effect.die(new Error("unrelated defect")),
+            };
+            const exit = await Effect.runPromiseExit(
+                runPipeline([boom], ctx()) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+            expect(exit._tag).toBe("Failure");
         });
     });
 });
@@ -575,7 +720,7 @@ describe("runPipeline derive budget (#697)", () => {
             }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
         );
 
-        // Bounded by the deadline (150ms), NOT by AX_STAGE_TIMEOUT_SECONDS (300s).
+        // Bounded by the deadline (150ms), NOT by AX_STAGE_HUNG_SECONDS (1800s).
         // Either summary proves the DEADLINE (not the 300s static cap) bounded
         // the stage: "timed out" if the budget read still saw time left when
         // the stage started, "skipped" if CI scheduling slop pushed pipeline

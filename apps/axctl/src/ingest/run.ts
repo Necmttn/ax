@@ -17,7 +17,11 @@ import {
     writeIngestStageFinish,
     writeIngestStageStart,
 } from "./telemetry.ts";
-import { CurrentStageSelfTime, makeStageSelfTime } from "@ax/lib/duckdb/self-time";
+import {
+    CurrentStageSelfTime,
+    CurrentStageSelfTimeBudget,
+    makeStageSelfTime,
+} from "@ax/lib/duckdb/self-time";
 import { runPipeline } from "./stage/runner.ts";
 import { selectByKeys, selectByTag } from "./stage/select.ts";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
@@ -256,7 +260,17 @@ const wrapStage = (
                         CurrentStageSelfTime,
                         selfTime,
                     ),
-                    (exit) => settleStage(write, ledgerKey, eventName, exit, selfTime.ms),
+                    // Settle writes go through the SAME charged seam as the
+                    // stage's own calls, so a stage stopped for exhausting its
+                    // self-time budget (#837) must not have its ledger write
+                    // refused by the very budget it exhausted: clear the budget
+                    // for the finalizer.
+                    (exit) =>
+                        Effect.provideService(
+                            settleStage(write, ledgerKey, eventName, exit, selfTime.ms),
+                            CurrentStageSelfTimeBudget,
+                            null,
+                        ),
                 );
             }),
     };
