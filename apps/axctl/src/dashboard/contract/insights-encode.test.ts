@@ -39,7 +39,7 @@ describe("insights-extra payload encode", () => {
 
     test("SkillGraphPayload", async () => {
         const back = await roundtrip(SkillGraphPayload, {
-            min_count: 1, limit: 50, node_count: 1, edge_count: 1, max_edge_count: 1,
+            minCount: 1, limit: 50, node_count: 1, edge_count: 1, max_edge_count: 1,
             nodes: [{ name: "tdd", weight: 3, last_seen: null }],
             edges: [{ source: "tdd", target: "debugging", count: 2, last_seen: null }],
         }) as { edges: Array<{ count: number }> };
