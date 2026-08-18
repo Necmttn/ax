@@ -32,7 +32,7 @@ verdicts. The next session reads what worked.
 ## 60 seconds in
 
 ```bash
-curl -fsSL ax.necmttn.com/install | sh
+curl -fsSL ax.necmttn.com/install | bash
 PATH="$HOME/.local/bin:$PATH" ax setup   # agent skills + first ingest + doctor
 ```
 
@@ -56,7 +56,7 @@ A note from Neco (ax's founder): ax is early and I'm hungry for feedback - every
 
 CONTRIBUTE-BACK (do this whenever a trigger below fires; never publish anything without showing it to me first and getting an explicit yes): Triggers - a step fails; a fact you report looks wrong or surprising to me; you spot a clear bug or improvement in ax itself. When one fires: ask me 2-3 sharp questions to pin down what I expected, which command/hook/agent is involved, and how often - enough for a repro. Then draft a GitHub issue for github.com/Necmttn/ax, show me the full draft, and on my yes file it via `gh` (the ax-repo skill). If a session is the evidence, run `ax share --dry-run` first, show me the redacted gist, and only publish with `ax share` on my yes - then link it in the issue.
 
-1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
+1. INSTALL - run `curl -fsSL ax.necmttn.com/install | bash` to install the ax CLI. Reference: https://ax.necmttn.com/docs
 
 2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. If it fails or lands zero data after finishing, that's a CONTRIBUTE-BACK trigger. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use.
 

@@ -1,4 +1,43 @@
 #!/usr/bin/env bash
+# --- POSIX preamble: everything above the `set` line must parse under dash. ---
+#
+# The documented command is `curl ... | bash`, but `| sh` is what people have in
+# their scrollback and in older copies of the README. On Debian and Ubuntu
+# `/bin/sh` is dash, which rejects `set -o pipefail` on the very next line and
+# aborts before the banner ever prints (#797). macOS hides this: its `/bin/sh`
+# is bash in POSIX mode and accepts pipefail.
+#
+# dash reads a piped script incrementally, so an early `exec`/`exit` here is
+# reached before it ever parses the `[[ ]]` and `local` below - verified against
+# /bin/dash with the body intact. Re-exec under bash when we can; otherwise say
+# exactly what to run instead of failing on a shell builtin.
+if [ -z "${BASH_VERSION:-}" ]; then
+  # Running as `sh install.sh`: the script is a real file, so just re-run it.
+  # `$0` is the SHELL BINARY when the script arrives on stdin (`/bin/dash` is
+  # itself a readable file), so a bare `-f` test would `exec bash /bin/dash`.
+  # Read the first line instead and require a shebang - a shell binary starts
+  # with its object-format magic, never `#!`.
+  _ax_head=""
+  if [ -f "$0" ]; then
+    IFS= read -r _ax_head < "$0" 2>/dev/null || _ax_head=""
+  fi
+  case "$_ax_head" in
+    "#!"*) exec bash "$0" "$@" ;;
+  esac
+  # Piped on stdin: the text is already half-consumed and cannot be handed to
+  # bash, so fetch it again. Only the shell changes; the same URL is used.
+  _ax_url="${AXCTL_INSTALL_URL:-https://ax.necmttn.com/install}"
+  if command -v bash >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    # pipefail matters here: without it a failed fetch pipes nothing into bash
+    # and the installer "succeeds" with exit 0 having installed nothing.
+    exec bash -c 'set -o pipefail; curl -fsSL "$1" | bash -s -- "${@:2}"' _ "$_ax_url" "$@"
+  fi
+  echo "ax installer: this script needs bash, and this shell is not bash." >&2
+  echo "Run:  curl -fsSL ${_ax_url} | bash" >&2
+  exit 1
+fi
+# --- end POSIX preamble ---
+
 set -euo pipefail
 
 REPO="${AXCTL_REPO:-Necmttn/ax}"
