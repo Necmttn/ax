@@ -57,6 +57,9 @@ const EXCLUDED_FILES: readonly string[] = [
     "scripts/check-raw-numeric-cast.ts",
     // This guard's own tests: the banned shape IS the fixture there.
     "scripts/check-raw-numeric-cast.test.ts",
+    // The spool's bigint round-trip test asserts the RAW bigint survives the
+    // NDJSON path exactly - a CAST would defeat the assertion.
+    "packages/lib/src/duckdb/spool.test.ts",
 ];
 
 /**

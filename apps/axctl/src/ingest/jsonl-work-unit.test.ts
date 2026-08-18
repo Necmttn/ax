@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { parseDuckdbColumnDefs } from "@ax/schema/duckdb-ddl";
+import type { CacheWriteError } from "@ax/lib/duckdb/seam";
+import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import { DbError } from "@ax/lib/errors";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import {
     INGEST_RUN_HEARTBEAT_EVERY_FILES,
+    INGEST_SPOOL_TABLES,
     runJsonlProviderFiles,
     shouldHeartbeatIngestRun,
 } from "./jsonl-work-unit.ts";
@@ -94,6 +98,91 @@ describe("runJsonlProviderFiles on real DuckDB", () => {
         ));
         expect(forced).toMatchObject({ files: 1, skippedUnchanged: 0 });
         expect(processed).toEqual(["a.jsonl", "a.jsonl"]);
+    });
+});
+
+describe("spool mode", () => {
+    test("INGEST_SPOOL_TABLES: every member is in the DDL; the survey's exclusions are not members", () => {
+        for (const table of INGEST_SPOOL_TABLES) {
+            expect(parseDuckdbColumnDefs(table).length).toBeGreaterThan(0);
+        }
+        // The #886 read-back survey verdicts. Adding one of these to the spool
+        // set silently breaks a same-run read-back or a keyed-DELETE ordering;
+        // see the INGEST_SPOOL_TABLES doc for which one.
+        for (const excluded of ["session", "skill", "skill_revision", "plan", "plan_item", "ingest_file_state"]) {
+            expect(INGEST_SPOOL_TABLES).not.toContain(excluded);
+        }
+    });
+
+    dtest("rows land and watermarks are DEFERRED to the flush; a failed file never marks", async () => {
+        const dir = tempDir("ax-jsonl-spool-");
+        let rowsAfter = -1;
+        let marksAfter = -1;
+        let markPaths: string[] = [];
+        await runWithPlatform(publishCacheFixture(dir, dylibPath, (write) =>
+            Effect.gen(function* () {
+                const spool = makeTableSpool({ tables: ["tool"], dir: `${dir}/spool` });
+                const spooled = withTableSpool(write, spool);
+                const result = yield* runJsonlProviderFiles(spooled, {
+                    candidates: [candidate("a.jsonl", 10), candidate("bad.jsonl", 20), candidate("b.jsonl", 30)],
+                    sourceKind: "codex_session",
+                    forceEnv: "AX_REDERIVE_TEST",
+                    source: "codex",
+                    spool,
+                    processFile: (item): Effect.Effect<boolean, DbError | CacheWriteError> =>
+                        item.path === "bad.jsonl"
+                            ? Effect.fail(new DbError({ operation: "query", message: "boom" }))
+                            : spooled.put("tool", { id: `tool:${item.path}`, name: item.path }).pipe(Effect.as(true)),
+                });
+                expect(result.files).toBe(2);
+                // The loop is over, so the final flush ran: rows AND marks
+                // are visible together.
+                const rows = yield* write.rows(
+                    Schema.Struct({ count: Schema.Number }),
+                    "SELECT count(*)::INTEGER AS count FROM tool",
+                );
+                rowsAfter = rows[0]!.count;
+                const marks = yield* write.rows(
+                    Schema.Struct({ path: Schema.String }),
+                    "SELECT path FROM ingest_file_state ORDER BY path",
+                );
+                marksAfter = marks.length;
+                markPaths = marks.map((m) => m.path);
+            }),
+        ));
+        expect(rowsAfter).toBe(2);
+        expect(marksAfter).toBe(2);
+        expect(markPaths).toEqual(["a.jsonl", "b.jsonl"]);
+    });
+
+    dtest("a second run skips the files the deferred marks covered", async () => {
+        const dir = tempDir("ax-jsonl-spool-skip-");
+        let second: unknown;
+        await runWithPlatform(publishCacheFixture(dir, dylibPath, (write) =>
+            Effect.gen(function* () {
+                const run = (processed: string[]) =>
+                    Effect.gen(function* () {
+                        const spool = makeTableSpool({ tables: ["tool"], dir: `${dir}/spool` });
+                        const spooled = withTableSpool(write, spool);
+                        return yield* runJsonlProviderFiles(spooled, {
+                            candidates: [candidate("a.jsonl", 10), candidate("b.jsonl", 20)],
+                            sourceKind: "codex_session",
+                            forceEnv: "AX_REDERIVE_TEST",
+                            source: "codex",
+                            spool,
+                            processFile: (item) =>
+                                spooled
+                                    .put("tool", { id: `tool:${item.path}`, name: item.path })
+                                    .pipe(Effect.as(true), Effect.tap(() => Effect.sync(() => processed.push(item.path)))),
+                        });
+                    });
+                yield* run([]);
+                const processedSecond: string[] = [];
+                second = yield* run(processedSecond);
+                expect(processedSecond).toEqual([]);
+            }),
+        ));
+        expect(second).toMatchObject({ files: 0, skippedUnchanged: 2 });
     });
 });
 
