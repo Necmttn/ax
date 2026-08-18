@@ -27,6 +27,9 @@ export interface AxConfigShape {
     };
     readonly knobs: {
         readonly claudeConcurrency: number;
+        /** cap (bytes) on a claude transcript ax snapshots into the
+         *  `transcripts` bucket; 0 disables the snapshot entirely */
+        readonly claudeRawMaxBytes: number;
         readonly codexConcurrency: number;
         readonly codexProgressEvery: number;
         readonly codexFlushEvery: number;
@@ -43,6 +46,7 @@ const HOME = homedir();
 
 const DEFAULTS = {
     claudeConcurrency: 4,
+    claudeRawMaxBytes: 5 * 1024 * 1024,
     codexConcurrency: 1,
     codexProgressEvery: 10,
     codexFlushEvery: 500,
@@ -162,6 +166,10 @@ const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem>
                 codexFlushEvery: yield* positiveInt(
                     "AX_CODEX_FLUSH_EVERY",
                     DEFAULTS.codexFlushEvery,
+                ),
+                claudeRawMaxBytes: yield* nonNegativeInt(
+                    "AX_CLAUDE_RAW_MAX_BYTES",
+                    DEFAULTS.claudeRawMaxBytes,
                 ),
                 codexRawMaxBytes: yield* nonNegativeInt(
                     "AX_CODEX_RAW_MAX_BYTES",

@@ -6,6 +6,7 @@ import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName } from "@ax/lib/skill-id";
 import { skillRowId } from "@ax/lib/stable-id";
+import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -1324,8 +1325,28 @@ const upsertSessions = (write: CacheWriteService, sessions: Session[]) =>
  * Snapshot the original transcript jsonl into the `transcripts` bucket and
  * return the file pointer string to persist on `session.raw_file`. Failures
  * are logged but do not abort ingest - the bucket is best-effort cold storage.
+ *
+ * Falls back to the SOURCE PATH when the snapshot is skipped (oversized, or
+ * disabled with `AX_CLAUDE_RAW_MAX_BYTES=0`) or fails, so `raw_file` still
+ * locates the transcript for as long as the harness keeps it. That fallback is
+ * why blob GC checks the reference set's SHAPE and not just its size: a store
+ * where every snapshot was skipped holds paths, not pointers, and must not read
+ * as "nothing is referenced" (see @ax/lib/blob-gc).
  */
-const snapshotTranscript = (_sessionId: string, filePath: string) => Effect.succeed(filePath);
+const snapshotTranscript = (
+    sessionId: string,
+    filePath: string,
+    bucketsDir: string,
+    maxBytes: number,
+    sizeBytes: number,
+) =>
+    putBlobFromFile(
+        bucketsDir,
+        "transcripts",
+        blobName(sessionId, ".jsonl"),
+        filePath,
+        { maxBytes, sizeBytes },
+    ).pipe(Effect.map((pointer) => pointer ?? filePath));
 
 // Claude turn rows are NEVER agent_event-linked (the transcript
 // extractor keys provider events by tool/turn uuid, not by turn seq), so the
@@ -1493,6 +1514,13 @@ export const toClaudeNormalizedBatch = (
         project: extracted.session.project,
         model: extracted.session.model,
         sourcePath: extracted.sourcePath,
+        // The normalized session write derives `raw_file` as
+        // `rawFile ?? sourcePath`, and it runs AFTER the `upsertSessions` call
+        // that carries the blob pointer. Omitting `rawFile` here therefore
+        // OVERWROTE every snapshot pointer with the source path, leaving the
+        // blobs on disk with nothing referencing them - which is exactly the
+        // reference-set shape that made blob GC delete the whole store (#854).
+        rawFile: extracted.session.raw_file,
         raw: {
             source: "claude_transcript",
             rawFile: extracted.session.raw_file,
@@ -1709,6 +1737,8 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         let hookCommandInvocationCount = 0;
         let malformedLineCount = 0;
         const concurrency = cfg.knobs.claudeConcurrency;
+        const rawMaxBytes = cfg.knobs.claudeRawMaxBytes;
+        const bucketsDir = path.join(cfg.paths.dataDir, "buckets");
         const recordCount = () =>
             turnCount +
             invCount +
@@ -1835,6 +1865,9 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 const pointer = yield* snapshotTranscript(
                     extracted.session.id,
                     candidate.path,
+                    bucketsDir,
+                    rawMaxBytes,
+                    candidate.sizeBytes,
                 );
                 extracted.session.raw_file = pointer;
                 yield* upsertSessions(write, [extracted.session]);
