@@ -76,7 +76,38 @@ replay tests.
   (inference ban — proto bug). PK dedup replaces per-writer idempotency care.
 - Trio rides here: #867 attribution fields (parser touch + 4 columns +
   `--reparse=claude`), done WITH the batch-writer touch to avoid re-touching.
+  ~~done WITH the batch-writer touch~~ **Retracted in place**: #867 landed
+  FIRST (#878 + reparse backfill), decoupled, because the attribution data was
+  wanted before the writer work started. The "avoid re-touching" premise cost
+  nothing - the spool wraps the write seam, not the parser, so the two changes
+  never touched the same lines.
 - Gate: cold backfill wall time; expectation parse-bound (~minutes, not 85).
+
+**DONE (#886).** `makeTableSpool` + `withTableSpool`
+(`packages/lib/src/duckdb/spool.ts`): rows for 15 high-volume tables buffer in
+memory (grouped by (table, sorted-column-signature), deduped by id last-wins)
+and land as one `INSERT ... SELECT ... FROM read_ndjson(file, columns={from
+the committed DDL}) ON CONFLICT ("id") DO UPDATE` per group per flush.
+NOT `INSERT OR REPLACE` as this section originally said - the shorthand fails
+on this schema's secondary UNIQUE indexes (retracted in place; the seam's
+`insertStatement` already knew this). The three JSONL provider stages
+(claude/codex/pi+omp) shadow their write service with the decorator; the
+shared work-unit owns the flush cadence (25k pending rows + stage end) and
+DEFERS watermarks past the flush that lands their rows, so the durable
+contract (mark only after rows landed) is unchanged at window granularity.
+The table set is the #886 read-back survey's verdict, pinned by test:
+`session`/`skill`/`plan_item` stay direct (same-run read-backs / keyed
+DELETE); `agent_event`/`agent_event_child` spool because their per-session
+DELETE is guarded to fire before the session's first append. Receipts: 7-day
+claude window into a fresh store 42.5s → 15.9s wall (2.7x, and the unchanged
+skills/commands+derive stages dilute the write-path speedup); row-count parity
+across 19 tables against a direct-write baseline (only the actively-growing
+live session file differed, by single digits, on both sides' bench runs);
+bigint 2^53+1 exact round-trip, ISO-Z→TIMESTAMP ms-precision in the ICU-less
+build, narrow-signature no-NULL-overwrite, and delete-pass-through ordering
+all pinned in `spool.test.ts`. OpenCode/Cursor (SQLite-store providers, no
+work-unit) and the git/otel writers stay on the direct path - candidates for
+a follow-up, not blockers.
 
 ### Phase 3 — derives → SQL models, one at a time
 

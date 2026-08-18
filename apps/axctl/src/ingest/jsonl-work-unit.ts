@@ -25,13 +25,62 @@
 
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
-import { fileWatermark } from "@ax/lib/duckdb/watermark";
+import { fileWatermark, WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import type { TableSpool } from "@ax/lib/duckdb/spool";
+import type { DuckDbParam } from "@ax/lib/duckdb/types";
 import { type FileFailureCollector, type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 import type { JsonlFileCandidate } from "./walk-jsonl.ts";
 
 /** One cheap heartbeat per this many successfully committed provider files. */
 export const INGEST_RUN_HEARTBEAT_EVERY_FILES = 25;
+
+/**
+ * The tables a JSONL provider stage routes through the NDJSON spool (#886).
+ *
+ * Membership is NOT a volume judgment alone - it is the read-back survey's
+ * verdict (issue #886): a table may spool ONLY if no provider stage reads it
+ * back in the same run, because a spooled row is invisible to SQL until flush.
+ * The survey pinned three exclusions and one ordering rule:
+ *
+ *  - `session` stays DIRECT: git ingest reads `session.checkout` it wrote
+ *    lines earlier, and the subagents stage backfills rows it wrote same-run.
+ *  - `skill` stays DIRECT: `relateToolCallSkill` probes `skillExists` before
+ *    minting a ghost row, and the catalog reads in the provider stages must
+ *    see the `skills`/`commands` stages' rows.
+ *  - `plan_item` stays DIRECT: its writer DELETEs by (plan, external_id/seq)
+ *    immediately before inserting - keys OTHER than id, so the pass-through
+ *    DELETE could race rows already sitting in a buffer.
+ *  - `agent_event`/`agent_event_child` spool ONLY because their per-session
+ *    DELETE fires once per session per run, BEFORE the first row for that
+ *    session is appended (see spool.ts "DELETE ORDERING").
+ *
+ * Cross-STAGE reads (claude-sidecars reads `tool_call`; derive stages read
+ * everything) are safe because every buffered row flushes before the stage
+ * returns.
+ */
+export const INGEST_SPOOL_TABLES: ReadonlyArray<string> = [
+    "turn",
+    "tool_call",
+    "turn_token_usage",
+    "session_token_usage",
+    "agent_provider",
+    "agent_session",
+    "agent_event",
+    "agent_event_child",
+    "harness_hook_event",
+    "hook_command_invocation",
+    "invoked",
+    "concerns",
+    "tool",
+    "file",
+    "compaction",
+];
+
+/** Flush once this many rows sit in the spool. Bounds memory (a `turn` row
+ *  carries full text, so 25k rows is on the order of tens of MB) while keeping
+ *  each `read_ndjson` load big enough to amortize. */
+export const SPOOL_FLUSH_PENDING_ROWS = 25_000;
 
 /** Pure throttle decision, exported so the cadence cannot regress silently. */
 export const shouldHeartbeatIngestRun = (completedFiles: number): boolean =>
@@ -61,6 +110,14 @@ export interface RunJsonlProviderFilesOptions<E, R, C extends JsonlFileCandidate
     readonly deadlineMs?: number;
     /** Per-file concurrency. Defaults to 1 (sequential) to match the providers. */
     readonly concurrency?: number | "unbounded";
+    /**
+     * The stage's NDJSON spool, when its writes route through `withTableSpool`.
+     * The work-unit then owns the flush cadence AND defers every watermark to
+     * the flush that lands its rows: marks are snapshotted BEFORE the spool
+     * drains, then written only after the drained rows are in the table, so a
+     * crash between the two re-processes those files instead of skipping them.
+     */
+    readonly spool?: TableSpool;
     /**
      * Parse + write ONE file. Mutate provider-owned counters here, and read the
      * live `loop` accessor for any progress emits. Return `true` on success
@@ -103,6 +160,35 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
             },
         };
 
+        // Spool mode: watermarks are DEFERRED - collected here and written only
+        // after the flush that lands their files' rows. Snapshot order inside
+        // `flushCycle` is what keeps the invariant: marks are spliced FIRST,
+        // then the spool drains. A mark enqueued before the splice covers a
+        // file whose appends all happened before it completed, so every row it
+        // covers is in the drained buffers; rows appended by files still in
+        // flight stay buffered, and their marks are not in this snapshot.
+        const pendingMarks: Array<Record<string, DuckDbParam>> = [];
+        let flushing = false;
+        const flushCycle = (spool: TableSpool): Effect.Effect<void, CacheWriteError> =>
+            Effect.gen(function* () {
+                // Under file-concurrency two fibers can cross the threshold
+                // together; the loser skips - the next threshold crossing or
+                // the final flush picks its rows up.
+                if (flushing) return;
+                flushing = true;
+                yield* Effect.gen(function* () {
+                    const marks = pendingMarks.splice(0);
+                    yield* spool.flush(write);
+                    if (marks.length > 0) yield* write.putMany(WATERMARK_TABLE, marks);
+                }).pipe(
+                    Effect.ensuring(
+                        Effect.sync(() => {
+                            flushing = false;
+                        }),
+                    ),
+                );
+            });
+
         yield* Effect.forEach(
             opts.candidates,
             (candidate, index) =>
@@ -124,8 +210,14 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                             if (!committed) return;
                             files += 1;
                             const completedFiles = files;
-                            // Commit ONLY after writes succeed.
-                            yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes);
+                            // Commit ONLY after writes succeed. With a spool,
+                            // "succeed" includes the flush, so the mark is
+                            // deferred to the flush cycle instead.
+                            if (opts.spool !== undefined) {
+                                pendingMarks.push(wm.row(candidate.path, candidate.mtimeMs, candidate.sizeBytes));
+                            } else {
+                                yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes);
+                            }
                             if (opts.runId !== undefined && shouldHeartbeatIngestRun(completedFiles)) {
                                 // Courtesy signal only: a transient heartbeat
                                 // failure must never fail or roll back ingest.
@@ -137,9 +229,31 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                         }),
                     );
                     activeFiles -= 1;
+                    // Cadence check OUTSIDE the isolate: a flush failure means
+                    // the write path itself is broken, and that fails the
+                    // stage instead of masquerading as one bad file.
+                    if (opts.spool !== undefined && opts.spool.pendingRows() >= SPOOL_FLUSH_PENDING_ROWS) {
+                        yield* flushCycle(opts.spool);
+                    }
                 }),
             { concurrency: opts.concurrency ?? 1, discard: true },
         );
+
+        // Final flush: every buffered row and every deferred mark lands before
+        // the loop reports. All fibers are done, so `flushing` cannot be held.
+        if (opts.spool !== undefined) {
+            yield* flushCycle(opts.spool);
+            // Spooled values bypass the seam's bound-param NUL scrub, so its
+            // end-of-run warning cannot see them; surface the spool's own count
+            // here with the same rationale (silent sanitising is the failure
+            // class the seam refuses).
+            const totals = opts.spool.totals();
+            if (totals.nulValues > 0) {
+                yield* Effect.logWarning(
+                    `ax cache: spool stripped NUL bytes (U+0000) from ${totals.nulValues} text value(s) for ${opts.source} - a DuckDB VARCHAR cannot carry U+0000; the rest of each value was stored intact.`,
+                );
+            }
+        }
 
         yield* failures.report;
         return { files, skippedUnchanged, failures };

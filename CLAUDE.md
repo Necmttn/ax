@@ -126,6 +126,16 @@ or write. Getting it wrong does not error; it returns a wrong answer.
 - **Writes** take `withCacheWrite` under `withIngestLock`, against the live file,
   and publish at the end of the run. Ingest stages read their own run's writes
   through the WRITE service, not `CacheRead` - the snapshot does not have them yet.
+- **High-volume JSONL-provider writes spool** (#886): the claude/codex/pi/omp
+  stages wrap their write service in `withTableSpool` (`@ax/lib/duckdb/spool`),
+  which buffers 15 hot tables in memory and lands them as one
+  `read_ndjson(...) ON CONFLICT ("id") DO UPDATE` load per (table,
+  column-signature) per flush; the shared jsonl work-unit flushes at 25k pending
+  rows + stage end and DEFERS watermarks past the flush. Consequence: a spooled
+  row is invisible to SQL until the flush, so a table any stage reads back
+  same-run MUST stay direct - the allowlist + per-table rationale live on
+  `INGEST_SPOOL_TABLES` (`apps/axctl/src/ingest/jsonl-work-unit.ts`), pinned by
+  test. `session`, `skill`, and `plan_item` are the load-bearing exclusions.
 - **Decisions** (proposal, verdict, experiment, session_label) go to the SQLite
   sidecar via `Judgment`, never to the cache. A cache rebuild must not lose them.
 - A command declares what it needs in its `RuntimeManifest`

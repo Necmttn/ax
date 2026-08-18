@@ -3,6 +3,7 @@ import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import type { DbError } from "@ax/lib/errors";
 import {
     type ToolCallSkillRelationWrite,
@@ -35,7 +36,7 @@ import {
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
@@ -751,9 +752,14 @@ interface PiIngestOpts {
  * force-rederive env. See {@link ingestPi} / {@link ingestOmp}.
  */
 const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.ingest`)(
-    function* (write: CacheWriteService, opts: Partial<PiIngestOpts> = {}) {
+    function* (directWrite: CacheWriteService, opts: Partial<PiIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
+        // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool; the
+        // shadowed `write` routes every write in this stage through it.
+        const spoolDir = yield* fs.makeTempDirectory({ prefix: `ax-spool-${desc.provider}-` }).pipe(Effect.orDie);
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const write = withTableSpool(directWrite, spool);
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* walkJsonlFilesLenient(cfg.paths[desc.dirKey], cutoff);
         let fileCount = 0;
@@ -771,6 +777,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
         // completed files, like claude/codex.
         const result = yield* runJsonlProviderFiles(write, {
             candidates: files,
+            spool,
             sourceKind: desc.sourceKind,
             forceEnv: desc.forceEnv,
             source: desc.provider,
@@ -807,6 +814,11 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
                 return true;
             }),
         });
+
+        // Safety net for any future post-loop write; the work-unit already
+        // flushed everything the loop buffered. Then drop the scratch dir.
+        yield* spool.flush(write);
+        yield* fs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
 
         return {
             files: fileCount,

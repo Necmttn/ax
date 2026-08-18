@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import type { DbError } from "@ax/lib/errors";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
@@ -66,7 +67,7 @@ import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { estimateCost, isSyntheticModel, normalizeModelName } from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
-import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
     extractClaudeCompaction,
     type CompactionWrite,
@@ -1726,10 +1727,19 @@ export interface TranscriptStats {
 }
 
 export const ingestTranscripts = Effect.fn("transcripts.ingest")(
-    function* (write: CacheWriteService, opts: Partial<IngestOpts> = {}) {
+    function* (directWrite: CacheWriteService, opts: Partial<IngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
+        // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool and
+        // land as one read_ndjson load per (table, signature) per flush.
+        // Everything else - session, skill, watermarks, reads, the per-session
+        // agent_event DELETE - passes through to the direct path. The shadowed
+        // `write` below routes EVERY write in this stage through the decorator;
+        // the work-unit owns the flush cadence and defers watermarks past it.
+        const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-claude-" }).pipe(Effect.orDie);
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const write = withTableSpool(directWrite, spool);
         const transcriptsDir = cfg.paths.transcriptsDir;
         const cutoff = opts.sinceDays
             ? Date.now() - opts.sinceDays * 86400 * 1000
@@ -1855,6 +1865,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             sourceKind: "claude_transcript",
             forceEnv: "AX_REDERIVE_CLAUDE",
             source: "claude",
+            spool,
             ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
             ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
@@ -1978,6 +1989,11 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 attributes: { "file.path": candidate.path, "file.size": candidate.sizeBytes },
             })),
         });
+        // Safety net for any FUTURE write added after the loop: the work-unit
+        // already flushed everything the loop buffered. Then drop the scratch
+        // dir (flushed files are already unlinked; this catches strays).
+        yield* spool.flush(write);
+        yield* fs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             records: recordCount(),

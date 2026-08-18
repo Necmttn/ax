@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import type { DbError } from "@ax/lib/errors";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
@@ -55,7 +56,7 @@ import { estimateCost } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
-import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { canonicalCwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
@@ -1433,9 +1434,17 @@ export interface CodexStats {
 }
 
 export const ingestCodex = Effect.fn("codex.ingest")(
-    function* (write: CacheWriteService, opts: Partial<CodexIngestOpts> = {}) {
+    function* (directWrite: CacheWriteService, opts: Partial<CodexIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const path = yield* Path.Path;
+        const spoolFs = yield* FileSystem.FileSystem;
+        // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool; the
+        // shadowed `write` routes every write in this stage through it. The
+        // per-session agent_event DELETE stays a pass-through exec and fires
+        // before that session's first append, so delete-before-insert holds.
+        const spoolDir = yield* spoolFs.makeTempDirectory({ prefix: "ax-spool-codex-" }).pipe(Effect.orDie);
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const write = withTableSpool(directWrite, spool);
         // Shared across all files this stage run: the agent_event ghost-index
         // rebuild fires at most once, memoized so file concurrency awaits one
         // in-flight rebuild + a failed rebuild is observable (#680).
@@ -1506,6 +1515,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             sourceKind: "codex_session",
             forceEnv: "AX_REDERIVE_CODEX",
             source: "codex",
+            spool,
             ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
             ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
@@ -1764,6 +1774,10 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // a manual `bun scripts/repair-agent-event-index.ts` followed by a clean
         // ingest that never re-triggers the heal). Skip the clear only when a
         // file exhausted the ladder THIS run - that just-written marker stays.
+        // Safety net for any future post-loop write; the work-unit already
+        // flushed everything the loop buffered. Then drop the scratch dir.
+        yield* spool.flush(write);
+        yield* spoolFs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),
