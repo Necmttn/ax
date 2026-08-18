@@ -1,9 +1,33 @@
 import { Schema } from "effect";
 
+/**
+ * An OTLP/JSON int64 field, which arrives as EITHER a JSON string or a JSON
+ * number.
+ *
+ * The proto3 JSON mapping says an int64 is *emitted* as a string, and every
+ * field below was originally typed `Schema.String` on that basis. But the
+ * mapping also requires a parser to ACCEPT both forms, and real exporters use
+ * that latitude: measured against a live Claude Code 2.1.233 export, every
+ * `/v1/logs` body carries at least one attribute whose `intValue` is a bare
+ * number (`"intValue": 83729`). Typed string-only, the decode failed, the
+ * receiver counted the body `malformed`, and `otel_log_event` stayed at ZERO
+ * while metrics from the same process landed fine - a whole signal silently
+ * dropped, on a receiver that is deliberately fail-open and therefore never
+ * complained.
+ *
+ * Consumers already coerce with `Number(...)`, so widening the type is the whole
+ * fix. Precision: a JSON number cannot hold a nanosecond timestamp past 2^53
+ * exactly, which is precisely why the spec prefers strings - so a number arm is
+ * accepted but never manufactured, and {@link nanoToDate} truncates rather than
+ * throwing on one.
+ */
+export const OtlpInt64 = Schema.Union([Schema.String, Schema.Number]);
+export type OtlpInt64 = Schema.Schema.Type<typeof OtlpInt64>;
+
 /** OTLP/JSON AnyValue (only the scalar variants we read). */
 export const AnyValue = Schema.Struct({
     stringValue: Schema.optional(Schema.String),
-    intValue: Schema.optional(Schema.String),    // proto3 JSON: int64 as string
+    intValue: Schema.optional(OtlpInt64),        // string OR number - see OtlpInt64
     doubleValue: Schema.optional(Schema.Number),
     boolValue: Schema.optional(Schema.Boolean),
 });
@@ -36,8 +60,8 @@ const Resource = Schema.Struct({ attributes: Schema.optional(Schema.Array(KeyVal
 
 const NumberDataPoint = Schema.Struct({
     asDouble: Schema.optional(Schema.Number),
-    asInt: Schema.optional(Schema.String),       // proto3 JSON int64 as string
-    timeUnixNano: Schema.optional(Schema.String),
+    asInt: Schema.optional(OtlpInt64),           // string OR number - see OtlpInt64
+    timeUnixNano: Schema.optional(OtlpInt64),
     attributes: Schema.optional(Schema.Array(KeyValue)),
 });
 
@@ -63,8 +87,8 @@ const Span = Schema.Struct({
     traceId: Schema.String,
     spanId: Schema.String,
     parentSpanId: Schema.optional(Schema.String),
-    startTimeUnixNano: Schema.String,
-    endTimeUnixNano: Schema.String,
+    startTimeUnixNano: OtlpInt64,
+    endTimeUnixNano: OtlpInt64,
     attributes: Schema.optional(Schema.Array(KeyValue)),
 });
 
@@ -79,8 +103,8 @@ export const TracePayload = Schema.Struct({
 export type TracePayload = Schema.Schema.Type<typeof TracePayload>;
 
 const LogRecord = Schema.Struct({
-    timeUnixNano: Schema.optional(Schema.String),
-    observedTimeUnixNano: Schema.optional(Schema.String),
+    timeUnixNano: Schema.optional(OtlpInt64),
+    observedTimeUnixNano: Schema.optional(OtlpInt64),
     attributes: Schema.optional(Schema.Array(KeyValue)),
     body: Schema.optional(Schema.Unknown),
 });
@@ -95,6 +119,21 @@ export const LogsPayload = Schema.Struct({
 });
 export type LogsPayload = Schema.Schema.Type<typeof LogsPayload>;
 
-/** nano-string -> JS Date. */
-export const nanoToDate = (nano: string | undefined): Date =>
-    new Date(Number(BigInt(nano ?? "0") / 1_000_000n));
+/**
+ * OTLP unix-nano -> JS Date, from either JSON form.
+ *
+ * `BigInt()` throws a SyntaxError on a non-integral number, and an exporter that
+ * sends nanos as a number can hand us one, so the number arm is floored before
+ * conversion rather than trusted. A bad value yields the epoch, matching the
+ * previous `?? "0"` behaviour - this converter is on a fail-open receive path
+ * and must not throw.
+ */
+export const nanoToDate = (nano: OtlpInt64 | undefined): Date => {
+    if (nano === undefined) return new Date(0);
+    try {
+        const asBigInt = typeof nano === "number" ? BigInt(Math.floor(nano)) : BigInt(nano);
+        return new Date(Number(asBigInt / 1_000_000n));
+    } catch {
+        return new Date(0);
+    }
+};
