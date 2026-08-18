@@ -81,7 +81,7 @@ describe("putBlobFromFile", () => {
             };
         }));
 
-        expect(result.pointer).toBe("transcripts:/abc.jsonl");
+        expect(result.pointer as string | null).toBe("transcripts:/abc.jsonl");
         expect(isBlobPointer(result.pointer ?? "")).toBe(true);
         expect(result.content).toBe("line-1\nline-2\n");
         expect(result.partial).toBe(false);

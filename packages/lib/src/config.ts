@@ -61,6 +61,24 @@ const DEFAULTS = {
  *  route) but must mirror the `AX_INGEST_TIMEOUT_SECONDS` knob's default. */
 export const DEFAULT_INGEST_TIMEOUT_SECONDS = DEFAULTS.ingestTimeoutSeconds;
 
+/** The data dir's DEFAULT shape. `snapshotConfig` uses this as the
+ *  `AX_DATA_DIR` fallback, and `resolveDataDirFromEnv` mirrors it for code
+ *  paths that run without AxConfig - one shape, two readers. */
+export const defaultDataDir = (home: string = HOME): string =>
+    posixPath.join(home, ".local", "share", "ax");
+
+/** `AX_DATA_DIR` else the default, read straight off `process.env` - for code
+ *  paths that run without AxConfig (e.g. the transcript locator resolving a
+ *  blob pointer against `<dataDir>/buckets`). Mirrors `snapshotConfig`'s
+ *  resolution; only a custom `ConfigProvider` (test-only) could diverge, and
+ *  those tests pass an explicit dir instead. */
+export const resolveDataDirFromEnv = (): string => {
+    const fromEnv = process.env.AX_DATA_DIR;
+    if (fromEnv !== undefined) return fromEnv;
+    const home = process.env.HOME;
+    return defaultDataDir(home !== undefined ? home : HOME);
+};
+
 /** Legacy-faithful int knob parsing, byte-identical to the old hand-rolled
  *  env readers: `Number.parseInt(raw, 10)` prefix-parses (`" 5"` -> 5,
  *  `"5abc"` -> 5, `"5.5"` -> 5, `"1e2"` -> 1); a missing var, empty string,
@@ -105,10 +123,7 @@ const stringOr = (name: string, fallback: string): Config.Config<string> =>
 const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> =
     Effect.gen(function* () {
         const home = yield* stringOr("HOME", HOME);
-        const dataDir = yield* stringOr(
-            "AX_DATA_DIR",
-            posixPath.join(home, ".local", "share", "ax"),
-        );
+        const dataDir = yield* stringOr("AX_DATA_DIR", defaultDataDir(home));
         return {
             paths: {
                 home,

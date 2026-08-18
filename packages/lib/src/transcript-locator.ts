@@ -2,15 +2,19 @@
  * TranscriptLocator - given a session id, find its on-disk JSONL transcript
  * and identify the harness (claude vs codex) that produced it.
  *
- * Strategy is CACHE-first, disk-fallback:
+ * Strategy is CACHE-first, disk-fallback, snapshot-last:
  *   1. Read the persisted `raw_file` column off the session row. Synthetic
  *      session ids (e.g. `claude-subagent-<agentId>`) don't match the
  *      filename patterns the disk search scans for, so the hint is the only
  *      way to locate their jsonl.
- *   2. If the hint exists on disk, use it (harness derived from path).
+ *   2. If the hint is a source PATH and exists on disk, use it (harness
+ *      derived from path).
  *   3. Otherwise fall back to filesystem search under `~/.claude/projects/`
  *      then `~/.codex/sessions/`.
- *   4. If nothing matches, throw `TranscriptNotFoundError`.
+ *   4. If the hint is a blob POINTER (see blob-pointer.ts), resolve it
+ *      against `<dataDir>/buckets` - the ingest-time cold-storage snapshot,
+ *      checked LAST because the live source can have grown since.
+ *   5. If nothing matches, throw `TranscriptNotFoundError`.
  *
  * Used by `src/dashboard/session-inspect.ts` and intended as the single
  * source of truth for "where does this session's transcript live?" so future
@@ -21,6 +25,9 @@
 import { homedir } from "node:os";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "./shared/path.ts";
+import { blobPointerBucket, blobPointerPath, isBlobPointer } from "./blob-pointer.ts";
+import { resolveDataDirFromEnv } from "./config.ts";
 import { CacheRead } from "./duckdb/seam.ts";
 import { toBareSessionId } from "./shared/session-id.ts";
 
@@ -157,18 +164,43 @@ const resolveRawFileFromCache = (
         }),
     ));
 
-/** Disk-only resolution: try the hint, then claude search, then codex search.
- *  No stored-data dep, so it can be exercised without any read seam. */
+/** Where blob pointers resolve: `<dataDir>/buckets`, from `AX_DATA_DIR` else
+ *  the default - the same tree the ingest snapshot writer targets. */
+const defaultBucketsDir = (): string => posixPath.join(resolveDataDirFromEnv(), "buckets");
+
+/** Which harness's parser reads a SNAPSHOT blob. The bucket is the producer's
+ *  identity (transcripts.ts writes `transcripts`, codex.ts writes
+ *  `codex_artifacts`), so it answers what `harnessFromPath` answers for live
+ *  files - a bucket path never contains `/.codex/sessions/`. */
+const harnessFromBucket = (bucket: string): Harness =>
+    bucket === "codex_artifacts" ? "codex" : "claude";
+
+/** Disk-only resolution: try the hint, then claude search, then codex search,
+ *  then the cold-storage snapshot. No stored-data dep, so it can be exercised
+ *  without any read seam.
+ *
+ *  The `raw_file` hint legitimately holds TWO shapes (see blob-pointer.ts),
+ *  and they slot in at different priorities:
+ *   - an absolute SOURCE PATH (claude subagents; codex when the snapshot was
+ *     skipped) is the live file - it wins outright when it exists;
+ *   - a blob POINTER names the ingest-time snapshot - COLD storage, checked
+ *     LAST, because the live source (found by path hint or search) can have
+ *     grown since the snapshot was taken. Before #891 a pointer hint was
+ *     probed with `fs.exists(<pointer>)` - a silent no-op - so snapshots were
+ *     never read back and a harness-pruned transcript reported "not found"
+ *     while its full copy sat in the bucket. */
 const findOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
+    bucketsDir: string,
 ): Effect.Effect<FoundTranscript, TranscriptNotFoundError, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        // Hinted path wins when it actually exists on disk - this is how
-        // synthetic session ids (e.g. claude-subagent-<agentId>) resolve to
-        // their real jsonl, since the hint was persisted at ingest time.
-        if (rawFileHint) {
+        const pointerHint = rawFileHint !== null && isBlobPointer(rawFileHint) ? rawFileHint : null;
+        // Hinted source path wins when it actually exists on disk - this is
+        // how synthetic session ids (e.g. claude-subagent-<agentId>) resolve
+        // to their real jsonl, since the hint was persisted at ingest time.
+        if (rawFileHint && pointerHint === null) {
             // OLD: stat(rawFileHint) in try/catch → fall through to search. A
             // probe where any failure means "hint stale, keep searching" -
             // orAbsent.
@@ -181,6 +213,16 @@ const findOnDisk = (
         if (claude) return claude;
         const codex = yield* findCodexJsonl(sessionId);
         if (codex) return codex;
+        if (pointerHint !== null) {
+            const blobPath = blobPointerPath(bucketsDir, pointerHint);
+            const blobExists = yield* fs.exists(blobPath).pipe(orAbsent(false));
+            if (blobExists) {
+                return {
+                    path: blobPath,
+                    harness: harnessFromBucket(blobPointerBucket(pointerHint)),
+                } satisfies FoundTranscript;
+            }
+        }
         return yield* Effect.fail(new TranscriptNotFoundError(sessionId));
     });
 
@@ -198,13 +240,15 @@ export const locateTranscript = (
 > =>
     Effect.gen(function* () {
         const hint = yield* resolveRawFileFromCache(sessionId);
-        return yield* findOnDisk(sessionId, hint);
+        return yield* findOnDisk(sessionId, hint, defaultBucketsDir());
     });
 
 /** Disk-only variant exposed for tests that don't want to spin up a fake
- *  read seam just to exercise the hint + search logic. */
+ *  read seam just to exercise the hint + search logic. `bucketsDir` overrides
+ *  where a pointer hint resolves (default: `<dataDir>/buckets`). */
 export const locateTranscriptOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
+    bucketsDir: string = defaultBucketsDir(),
 ): Effect.Effect<FoundTranscript, TranscriptNotFoundError, FileSystem.FileSystem | Path.Path> =>
-    findOnDisk(sessionId, rawFileHint);
+    findOnDisk(sessionId, rawFileHint, bucketsDir);

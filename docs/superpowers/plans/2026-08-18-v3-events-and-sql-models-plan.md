@@ -176,7 +176,18 @@ ships as its own slice on top of the ledger.
 
 - Freeze `ev_*` tables as the normalized layer; segment export/import =
   remote/sandbox accumulation (parked idea lands free).
-- BlobPointer branded type (pointer-vs-path compile error).
+- BlobPointer branded type (pointer-vs-path compile error). **DONE (#891).**
+  `BlobPointer` is a branded string in `blob-pointer.ts` (`filePointer` mints,
+  `isBlobPointer` narrows, `blobPointerPath` is the one sanctioned pointer →
+  path conversion). Shipping the brand surfaced the bug it exists to prevent,
+  already live: `transcript-locator` probed a pointer hint with
+  `fs.exists(<pointer>)` - a silent no-op - so cold-storage snapshots were
+  NEVER read back and a harness-pruned transcript reported "not found" while
+  its full copy sat in the bucket. The locator now resolves pointer hints
+  against `<dataDir>/buckets` as the LAST fallback (live source and disk
+  search still win - the snapshot is frozen at ingest time), harness derived
+  from the bucket (`codex_artifacts` → codex). Verified on the real store:
+  live-source-wins and pruned-source-resolves both exercised.
 - Watermark keyed by content hash, not absolute path (merge-safe).
 
 ### Phase 5 — learning layer (gated prototype)

@@ -137,6 +137,52 @@ describe("locateTranscriptOnDisk", () => {
         const stale = join(tmpdir(), `definitely-missing-${bogus}.jsonl`);
         await expect(onDisk(bogus, stale)).rejects.toThrow(/session transcript not found/);
     });
+
+    // #891: a POINTER hint resolves through the buckets dir - the cold-storage
+    // snapshot becomes a real fallback instead of a silent fs.exists no-op.
+    test("a transcripts:/ pointer hint resolves to the bucket snapshot (claude harness)", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-locator-blob-"));
+        tmpRoots.push(dir);
+        const bogus = `ax-test-blob-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const bucketsDir = join(dir, "buckets");
+        await mkdir(join(bucketsDir, "transcripts"), { recursive: true });
+        const blob = join(bucketsDir, "transcripts", `${bogus}.jsonl`);
+        await writeFile(blob, "");
+        const found = await Effect.runPromise(
+            locateTranscriptOnDisk(bogus, `transcripts:/${bogus}.jsonl`, bucketsDir).pipe(
+                Effect.provide(FsLayer),
+            ),
+        );
+        expect(found.path).toBe(blob);
+        expect(found.harness).toBe("claude");
+    });
+
+    test("a codex_artifacts:/ pointer hint resolves with the codex harness", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-locator-blob-cx-"));
+        tmpRoots.push(dir);
+        const bogus = `ax-test-blobcx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const bucketsDir = join(dir, "buckets");
+        await mkdir(join(bucketsDir, "codex_artifacts"), { recursive: true });
+        const blob = join(bucketsDir, "codex_artifacts", `${bogus}.jsonl`);
+        await writeFile(blob, "");
+        const found = await Effect.runPromise(
+            locateTranscriptOnDisk(bogus, `codex_artifacts:/${bogus}.jsonl`, bucketsDir).pipe(
+                Effect.provide(FsLayer),
+            ),
+        );
+        expect(found.path).toBe(blob);
+        expect(found.harness).toBe("codex");
+    });
+
+    test("a pointer hint whose blob is gone still errors when nothing else matches", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-locator-blob-miss-"));
+        tmpRoots.push(dir);
+        const bogus = `ax-test-blobmiss-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const eff = locateTranscriptOnDisk(bogus, `transcripts:/${bogus}.jsonl`, join(dir, "buckets")).pipe(
+            Effect.provide(FsLayer),
+        );
+        await expect(Effect.runPromise(eff)).rejects.toThrow(/session transcript not found/);
+    });
 });
 
 describe("locateTranscript (with the cache hint)", () => {
