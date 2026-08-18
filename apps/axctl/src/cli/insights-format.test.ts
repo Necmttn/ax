@@ -2,6 +2,33 @@ import { describe, expect, test } from "bun:test";
 import { formatInsightRows } from "./insights-format.ts";
 
 describe("formatInsightRows", () => {
+    // The DuckDB read seam decodes a TIMESTAMP to a JS Date, not an ISO string.
+    // The old formatter sliced the Date's string form to 19 chars and then
+    // replaced "T" with a space, which ate the T of "Tue" - every `ax insights`
+    // row rendered `ue Aug 18 2026 02:` on a real store.
+    test("renders a Date timestamp as UTC, not a mangled Date.toString()", () => {
+        const out = formatInsightRows("friction", [
+            { kind: "tool_error", ts: new Date("2026-08-18T02:36:34.830Z"), text: "boom", project: "ax" },
+        ]);
+        expect(out).toContain("2026-08-18 02:36:34");
+        expect(out).not.toContain("ue Aug");
+        expect(out).not.toContain("GMT");
+    });
+
+    test("still renders an ISO string timestamp the same way", () => {
+        const out = formatInsightRows("friction", [
+            { kind: "tool_error", ts: "2026-08-18T02:36:34.830Z", text: "boom", project: "ax" },
+        ]);
+        expect(out).toContain("2026-08-18 02:36:34");
+    });
+
+    test("an invalid Date renders empty rather than \"Invalid Date\"", () => {
+        const out = formatInsightRows("friction", [
+            { kind: "tool_error", ts: new Date("nonsense"), text: "boom", project: "ax" },
+        ]);
+        expect(out).not.toContain("Invalid");
+    });
+
     test("renders reactions as compact user-to-assistant pairs", () => {
         const output = formatInsightRows("reactions", [
             {

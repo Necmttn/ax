@@ -7,10 +7,31 @@ type InsightRow = Record<string, unknown>;
 const numberOf = (value: unknown): number | null =>
     typeof value === "number" && Number.isFinite(value) ? value : null;
 
+/**
+ * `2026-08-18 02:36:34`, from either a Date or an ISO string.
+ *
+ * This used to be a bare `text.slice(0, 19).replace("T", " ")`, which was
+ * correct only while timestamps arrived as ISO strings. The DuckDB read seam
+ * decodes a TIMESTAMP column to a JS `Date`, whose string form is
+ * `Tue Aug 18 2026 02:36:34 GMT+0300 (...)`. Sliced to 19 that becomes
+ * `Tue Aug 18 2026 02:` - and then `.replace("T", " ")` ate the T of "Tue",
+ * so every `ax insights` row rendered `ue Aug 18 2026 02:`. Thirteen call
+ * sites in this file, all of them wrong the same way.
+ *
+ * UTC, matching every other ax surface. The positional swap replaces ISO's
+ * date/time separator by INDEX rather than by search, so a value that happens
+ * to carry an earlier "T" cannot be corrupted the same way twice.
+ */
 const compactDate = (value: unknown): string => {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? "" : isoToCompact(value.toISOString());
+    }
     const text = textOf(value);
-    return text.length >= 19 ? text.slice(0, 19).replace("T", " ") : text;
+    if (text.length < 19) return text;
+    return text[10] === "T" ? isoToCompact(text) : text.slice(0, 19);
 };
+
+const isoToCompact = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
 
 const truncate = (value: unknown, max = 180): string => truncateText(value, max);
 
