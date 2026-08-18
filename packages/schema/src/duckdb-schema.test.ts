@@ -34,8 +34,16 @@ describe("coverage of the Surreal schema", () => {
     });
 
     test("the DDL adds no table the Surreal schema never had", () => {
+        // schema.surql is frozen migration-fidelity proof; tables born AFTER the
+        // v2 cutover are enumerated here instead of edited into it. Anything not
+        // on this list must have a Surreal counterpart.
+        const bornAfterSurreal = new Set([
+            "schema_comment_state", // #869 COMMENT ON bookkeeping
+        ]);
         const surrealSet = new Set(surrealTables.map((t) => t.table));
-        expect(duckTables.filter((t) => !surrealSet.has(t))).toEqual([]);
+        expect(duckTables.filter((t) => !surrealSet.has(t) && !bornAfterSurreal.has(t))).toEqual([]);
+        // ...and the allowlist cannot rot: every entry must still exist in the DDL.
+        expect([...bornAfterSurreal].filter((t) => !duckTableSet.has(t))).toEqual([]);
     });
 
     test("table names are unique", () => {

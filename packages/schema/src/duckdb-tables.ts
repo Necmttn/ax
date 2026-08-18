@@ -107,6 +107,7 @@ const TABLE_METADATA: Readonly<Record<string, Omit<DuckdbTableSpec, "table">>> =
     workflow_snapshot: { kind: "node", stage: "active", note: "Precomputed dashboard workflow payload used by /api/workflow." },
     phase_span: { kind: "node", stage: "staged", note: "Session workflow phase spans and phase-level counters." },
     skill_candidate: { kind: "node", stage: "active", note: "Evidence-backed candidate skills or guardrails." },
+    schema_comment_state: { kind: "node", stage: "active", note: "Self-documenting catalog bookkeeping (#869): hash of the last-applied COMMENT ON script, so routine opens skip re-applying (WAL crash-safety)." },
     ingest_run: { kind: "node", stage: "active", note: "Top-level ingest execution telemetry." },
     ingest_stage: { kind: "node", stage: "active", note: "Per-stage ingest execution telemetry." },
     ingest_event: { kind: "node", stage: "active", note: "Append-like ingest progress events." },
