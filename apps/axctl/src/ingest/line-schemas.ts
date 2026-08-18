@@ -45,6 +45,12 @@ export const ClaudeTranscriptLine = Schema.Struct({
     uuid: lenient(Schema.String),
     model: lenient(Schema.String),
     isCompactSummary: lenient(Schema.Boolean),
+    // Native attribution (#867, present since ~2026-05): the harness stamps
+    // the skill/agent a billing event belongs to on the ENTRY, camelCase.
+    attributionSkill: lenient(Schema.String),
+    attributionAgent: lenient(Schema.String),
+    // Never observed locally yet (cct consumes it); probed tolerantly.
+    api_error_status: Schema.optionalKey(Schema.Unknown),
     message: lenient(Schema.Struct({
         model: lenient(Schema.String),
         isCompactSummary: lenient(Schema.Boolean),
@@ -54,6 +60,12 @@ export const ClaudeTranscriptLine = Schema.Struct({
             output_tokens: lenientFiniteNumber,
             cache_creation_input_tokens: lenientFiniteNumber,
             cache_read_input_tokens: lenientFiniteNumber,
+        })),
+        // Cache forensics (#867): `cache_miss_reason` is an OBJECT
+        // (`{"type": ...}`), not a flat string - extract `.type` downstream.
+        diagnostics: lenient(Schema.Struct({
+            cache_miss_reason: Schema.optionalKey(Schema.Unknown),
+            api_error_status: Schema.optionalKey(Schema.Unknown),
         })),
     })),
 });

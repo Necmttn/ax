@@ -188,6 +188,14 @@ function asContentBlocks(input: unknown): Record<string, unknown>[] {
     return Array.isArray(input) ? input.filter(isRecord) : [];
 }
 
+/** `api_error_status` (#867) has never been observed locally, so its type is
+ *  unpinned upstream - accept a string or a finite number, store as text. */
+function scalarToString(value: unknown): string | null {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    return null;
+}
+
 function messageKind(role: string, content: unknown, textExcerpt: string | null): string {
     const blocks = asContentBlocks(content);
     if (blocks.length > 0 && blocks.every((block) => stringField(block, "type") === "tool_result")) {
@@ -295,6 +303,12 @@ interface ClaudeTurnTokenUsage {
     cacheReadInputTokens: number;
     freshInputTokens: number;
     estimatedTokens: number;
+    /** Native harness attribution (#867), null before the ~2026-05 cutover. */
+    attributionSkill: string | null;
+    attributionAgent: string | null;
+    /** `message.diagnostics.cache_miss_reason.type` - the reason is an object. */
+    cacheMissReasonType: string | null;
+    apiErrorStatus: string | null;
 }
 
 interface FileExtract {
@@ -1024,6 +1038,14 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 usageCompletion += completion;
                 usageCacheCreation += cacheCreation;
                 usageCacheRead += cacheRead;
+                // Native attribution + cache forensics (#867). The harness
+                // stamps `attributionSkill`/`attributionAgent` on the entry
+                // (camelCase); `cache_miss_reason` is an OBJECT under
+                // `message.diagnostics` - only its `.type` is kept. All null
+                // before the ~2026-05 harness cutover, so readers need
+                // non-null denominators.
+                const diagnostics = message?.diagnostics ?? null;
+                const cacheMissReason = diagnostics?.cache_miss_reason;
                 // Per-turn usage drives the inspector's per-turn cost rail.
                 turnTokenUsages.push({
                     seq,
@@ -1035,6 +1057,12 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                     cacheReadInputTokens: cacheRead,
                     freshInputTokens: freshInput,
                     estimatedTokens: freshInput + cacheCreation + cacheRead + completion,
+                    attributionSkill: entry.attributionSkill ?? null,
+                    attributionAgent: entry.attributionAgent ?? null,
+                    cacheMissReasonType: isRecord(cacheMissReason)
+                        ? stringField(cacheMissReason, "type")
+                        : null,
+                    apiErrorStatus: scalarToString(entry.api_error_status ?? diagnostics?.api_error_status),
                 });
             }
             const messageContent = message?.content;
@@ -1640,6 +1668,10 @@ const writeClaudeTokenUsageRows = (
             pricing_source: cost.pricingSource,
             usage_source: "claude_transcript.message_usage",
             usage_quality: "provider_turn",
+            attribution_skill: turnUsage.attributionSkill,
+            attribution_agent: turnUsage.attributionAgent,
+            cache_miss_reason_type: turnUsage.cacheMissReasonType,
+            api_error_status: turnUsage.apiErrorStatus,
             raw: null,
             ts: tsParam(turnUsage.ts),
         });

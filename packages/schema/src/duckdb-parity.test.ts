@@ -201,6 +201,9 @@ const V2_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     // Stage self-time: the Surreal-era ledger only had wall clock, and wall
     // clock is what #865 showed to be unusable at PIPELINE_CONCURRENCY > 1.
     ingest_stage: ["self_ms"],
+    // Native harness attribution + cache forensics (#867) - fields Claude Code
+    // started writing ~2026-05, after the Surreal schema froze.
+    turn_token_usage: ["attribution_skill", "attribution_agent", "cache_miss_reason_type", "api_error_status"],
 };
 
 const POLYMORPHIC_EDGE_EXTRA_COLUMNS: Readonly<Record<string, readonly string[]>> = {

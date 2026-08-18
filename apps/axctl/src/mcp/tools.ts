@@ -76,6 +76,7 @@ import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../qu
 import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollup.ts";
 import { fetchRunEvidence } from "../queries/run-evidence.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
+import { fetchAttributionCost } from "../queries/attribution-cost.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchAdviceLedger } from "../queries/advice-ledger.ts";
@@ -734,6 +735,35 @@ const costImagesTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const costAttributionTool: AxMcpTool = defineMcpTool({
+    name: "cost_attribution",
+    runtime: "cache",
+    description:
+        "Cost by NATIVE harness attribution (#867): Claude Code stamps attributionSkill/attributionAgent on each billing event; this rolls up cost/tokens/turns per skill and per agent, plus cache_miss_reason and api_error_status mixes and a coverage line (share of claude usage rows carrying attribution - null before ~2026-05 and until a --reparse=claude backfill). Ground truth to cross-check against invoked-edge skill attribution; divergence is itself a signal.",
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max rows per rollup (default 20)."),
+    },
+    run: async (args, rt) => {
+        const sinceDays = args.days ?? COST_DEFAULT_WINDOW_DAYS;
+        const limit = args.limit ?? 20;
+        return await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchAttributionCost(read, { sinceDays, limit });
+        }));
+    },
+});
+
 const otelTool: AxMcpTool = defineMcpTool({
     name: "otel",
     runtime: "full",
@@ -955,6 +985,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costModelsTool,
     costSplitTool,
     costImagesTool,
+    costAttributionTool,
     costRoutabilityTool,
     otelTool,
     runsEvidenceTool,
