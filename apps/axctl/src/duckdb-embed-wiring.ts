@@ -24,18 +24,31 @@
  * `bun run` behaviour.
  */
 import { CacheReadLayer } from "@ax/lib/duckdb/seam";
-import { DUCKDB_DYLIB } from "./duckdb-embed.gen.ts";
+import { DUCKDB_DYLIB, DUCKDB_NODE_BINDING } from "./duckdb-embed.gen.ts";
 
 /**
- * `{ assetPath: DUCKDB_DYLIB }` when the embed produced one, `{}` otherwise -
+ * `{ assetPath: DUCKDB_DYLIB, nodeBindingAssetPath: DUCKDB_NODE_BINDING }`
+ * when the embed produced them, `{}` otherwise -
  * `exactOptionalPropertyTypes` treats an explicit `assetPath: undefined` as a
  * different (rejected) shape than an omitted key, so every call site that
  * threads `DUCKDB_DYLIB` into a `DuckDbLiveOptions`-shaped object spreads this
  * instead of assigning the constant directly. Mirrors the identical
  * `options?.assetPath === undefined ? {} : { assetPath: ... }` guard already
- * used inside `@ax/lib/duckdb/seam`.
+ * used inside `@ax/lib/duckdb/seam`. `DUCKDB_NODE_BINDING` (#880) is the napi
+ * driver's `duckdb.node` addon, staged next to the dylib by
+ * `@ax/lib/duckdb`'s binding loader in a compiled binary.
  */
-export const duckdbAssetPathOption = (): { readonly assetPath: string } | Record<never, never> =>
-    DUCKDB_DYLIB === undefined ? {} : { assetPath: DUCKDB_DYLIB };
+export const duckdbAssetPathOption = (): Record<never, never> | {
+    readonly assetPath: string;
+    readonly nodeBindingAssetPath?: string;
+} =>
+    DUCKDB_DYLIB === undefined
+        ? {}
+        : {
+              assetPath: DUCKDB_DYLIB,
+              ...(DUCKDB_NODE_BINDING === undefined
+                  ? {}
+                  : { nodeBindingAssetPath: DUCKDB_NODE_BINDING }),
+          };
 
 export const CacheReadLive = CacheReadLayer({ ...duckdbAssetPathOption() });

@@ -38,25 +38,60 @@ function gitDescribe(): string {
 
 const describe = gitDescribe();
 
+/**
+ * #880: the napi DuckDB driver. In a compiled binary `require.cache` cannot
+ * intercept the BUNDLED module graph, so `@duckdb/node-bindings` (which would
+ * otherwise drag in every platform's `duckdb.node` and load the OFFICIAL
+ * libduckdb) is replaced with a shim that reads the staged addon off the
+ * global `@ax/lib/duckdb`'s binding loader sets BEFORE importing
+ * `@duckdb/node-api`. A Proxy, so property access is lazy - evaluation order
+ * of the bundled graph cannot matter. The global's name is imported from the
+ * loader so the two sides can never drift.
+ */
+import type { BunPlugin } from "bun";
+import { AX_NAPI_BINDING_GLOBAL } from "../packages/lib/src/duckdb/binding.ts";
+
+const bindingsShimPlugin: BunPlugin = {
+    name: "ax-duckdb-bindings-shim",
+    setup(build) {
+        build.onResolve({ filter: /^@duckdb\/node-bindings$/ }, (args) => ({
+            path: args.path,
+            namespace: "ax-duckdb-bindings-shim",
+        }));
+        build.onLoad({ filter: /.*/, namespace: "ax-duckdb-bindings-shim" }, () => ({
+            loader: "js",
+            contents: `
+module.exports = new Proxy({}, {
+    get(_target, prop) {
+        const binding = globalThis[${JSON.stringify(AX_NAPI_BINDING_GLOBAL)}];
+        if (binding === undefined) {
+            throw new Error(
+                "@duckdb/node-bindings shim: the staged duckdb.node has not been loaded yet - " +
+                "@ax/lib/duckdb's binding loader must run before @duckdb/node-api is used",
+            );
+        }
+        return binding[prop];
+    },
+});
+`,
+        }));
+    },
+};
+
 let status = 1;
 try {
     writeManifest();
     writeHooksManifest();
     writeDuckDbManifest();
-    const result = spawnSync(
-        "bun",
-        [
-            "build",
-            "--compile",
-            "--define",
-            `AX_BUILD_GIT="${describe}"`,
-            "--outfile",
-            outfile,
-            entry,
-        ],
-        { stdio: "inherit" },
-    );
-    status = result.status ?? 1;
+    const result = await Bun.build({
+        entrypoints: [entry],
+        compile: { outfile },
+        define: { AX_BUILD_GIT: JSON.stringify(describe) },
+        plugins: [bindingsShimPlugin],
+        throw: false,
+    });
+    for (const log of result.logs) console.error(String(log));
+    status = result.success ? 0 : 1;
 } finally {
     // Always restore the committed empty stubs - even on a failed compile - so
     // the working tree never carries the generated manifests.

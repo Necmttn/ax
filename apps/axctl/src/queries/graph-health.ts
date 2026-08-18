@@ -12,8 +12,8 @@
  *   row_count   how many rows share that subject (1 for the "missing" scans)
  *   ids         the offending row ids, as a JSON array in a VARCHAR
  *
- * `ids` is VARCHAR-encoded JSON rather than a native LIST because the bun:ffi
- * client cannot decode a LIST column (see the ARRAYS note in
+ * `ids` is VARCHAR-encoded JSON rather than a native LIST because the DuckDB
+ * client does not decode a LIST column (see the ARRAYS note in
  * schema.duckdb.sql); `to_json(array_agg(...))` is what every other ported
  * query in this repo uses for the same reason.
  *

@@ -195,8 +195,8 @@ export type IngestStageOutcome =
  *
  * `self_ms` is the stage's OWN database time, and it is not a nicety: with the
  * pipeline running 4 stages at once, `ended_at - started_at` is mostly other
- * stages' work, because every DuckDB call is a synchronous `bun:ffi` call that
- * blocks the one JS thread. Measured on a real store, `claude-config` read
+ * stages' work, because calls on the shared write connection are serialized.
+ * Measured on a real store, `claude-config` read
  * 0.4s serially against 380.2s concurrently (#841, #865). `null` means the
  * caller had no accumulator - a runner-side settle for a stage that never ran.
  */

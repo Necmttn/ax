@@ -12,6 +12,8 @@
       "packages/*"
     ],
     "catalog": {
+      "@duckdb/node-api": "1.5.5-r.4",
+      "@duckdb/node-bindings": "1.5.5-r.4",
       "@effect/language-service": "^0.85.1",
       "@effect/platform-bun": "4.0.0-beta.78",
       "@effect/platform-node": "4.0.0-beta.78",

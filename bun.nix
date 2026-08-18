@@ -343,6 +343,46 @@
     url = "https://registry.npmjs.org/@develar/schema-utils/-/schema-utils-2.6.5.tgz";
     hash = "sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==";
   };
+  "@duckdb/node-api@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-api/-/node-api-1.5.5-r.4.tgz";
+    hash = "sha512-8v0CZNo7aM6GQCNUHERGTrZWIfss8xKzZPF3ACNhPdMMrt7UjkNI5nRQ9FTFO7Yx8ghxYxVpdotmBBMQ5vXUOA==";
+  };
+  "@duckdb/node-bindings-darwin-arm64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-darwin-arm64/-/node-bindings-darwin-arm64-1.5.5-r.4.tgz";
+    hash = "sha512-4OdO3pkoJzAZDnZ2iyehi67XL4+WqHPCGYWbyAsYyhGJS+WscGrAnFhMhHudMM2XF8pIEM2tuOKMmwWnTNN2wQ==";
+  };
+  "@duckdb/node-bindings-darwin-x64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-darwin-x64/-/node-bindings-darwin-x64-1.5.5-r.4.tgz";
+    hash = "sha512-WHg3E+TupdujG31LGujMMcmtPIdW6rqRHeihlKgJR8EMetHycoYkwYxRud0niitJvS+uV0du/6pdemzs3HG9GQ==";
+  };
+  "@duckdb/node-bindings-linux-arm64-musl@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-linux-arm64-musl/-/node-bindings-linux-arm64-musl-1.5.5-r.4.tgz";
+    hash = "sha512-Tswnf+/XWpOcFJNUUu1fkFIX/su4tMcnNz0ZV0Nru3/CkJKIMwBh+VL4SM9YV4zPK90GC4Lm8gzafjc1qDmfyQ==";
+  };
+  "@duckdb/node-bindings-linux-arm64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-linux-arm64/-/node-bindings-linux-arm64-1.5.5-r.4.tgz";
+    hash = "sha512-VIeHMpYAKpGiWZ4QYsOhODAHDEcXcn089aKty0MFsMEKaEfRJWixKwnwXy/ba2/wwFmnPiSFhKNqygj2BrQbqw==";
+  };
+  "@duckdb/node-bindings-linux-x64-musl@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-linux-x64-musl/-/node-bindings-linux-x64-musl-1.5.5-r.4.tgz";
+    hash = "sha512-h0ixrgGHtHh+C/Fu1eAL9hX4iCf8yuyJN6Y24Gh8axXXP8UuSh0rQRAQUQTYarQ8pm2qSG/67ZYjyYYydD+J/w==";
+  };
+  "@duckdb/node-bindings-linux-x64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-linux-x64/-/node-bindings-linux-x64-1.5.5-r.4.tgz";
+    hash = "sha512-EY+CL/4h8MQZd9MxTBq+98m3U9osmvHBwhE9b5fMWQGt2I6p1j8fvX0SXiwy9KBfQIbjVUOf5XvGdXncI54KSg==";
+  };
+  "@duckdb/node-bindings-win32-arm64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-win32-arm64/-/node-bindings-win32-arm64-1.5.5-r.4.tgz";
+    hash = "sha512-uorAnySIMwWkRDuUhM1yTDxWIislnX8mndhFIw6r4VKhVW61HEOOMX5oAgkSQFII4RNWpC5PCcUAEhSATgNvVQ==";
+  };
+  "@duckdb/node-bindings-win32-x64@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings-win32-x64/-/node-bindings-win32-x64-1.5.5-r.4.tgz";
+    hash = "sha512-X9XGcWQ10P3mvUIaMXXk2bi94Cow7b/ziTPMKxJ0U8U3wQPxsLzEUP7D7C/KrBWINl5am2k+5SkDVyA/THUgPg==";
+  };
+  "@duckdb/node-bindings@1.5.5-r.4" = fetchurl {
+    url = "https://registry.npmjs.org/@duckdb/node-bindings/-/node-bindings-1.5.5-r.4.tgz";
+    hash = "sha512-n+4hEfjp4vny3BuWn5p1Gh5CzHaPRxoI8TzTytxL1GMlIKKrXcg/o6sSAjrsROUXGAM4WQCiWPLKnPsjJJSggg==";
+  };
   "@durable-streams/client@0.2.6" = fetchurl {
     url = "https://registry.npmjs.org/@durable-streams/client/-/client-0.2.6.tgz";
     hash = "sha512-uHKKbWpsKLhFMeGjG0PgM6LXE3oEIi7FHKlJZkmYGxcqd4Yjjd/QEvnQnDzteRP4Av1uJVM8qjTL7kfKsgeS/w==";

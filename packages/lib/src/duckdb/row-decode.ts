@@ -1,12 +1,17 @@
 /**
- * Pure decode rules for the row-major `duckdb_value_*` accessors.
+ * Pure decode rules: the CLOSED SET of column types this client answers for,
+ * and how a raw cell value becomes the JS value callers see.
  *
- * `bun:ffi` cannot pass structs by value, which rules out `duckdb_fetch_chunk`
- * (it takes the 48-byte `duckdb_result` by value), so every cell is read
- * through a pointer-based `duckdb_value_*` accessor. This module holds the two
- * decisions that follow from that - WHICH accessor a column type needs, and how
- * the raw accessor result becomes a JS value - so both are testable without a
- * database.
+ * The set was originally forced by the `bun:ffi` client's row-major
+ * `duckdb_value_*` accessors (`bun:ffi` could not pass structs by value, so
+ * BLOB/LIST/STRUCT/... had no accessor at all). The napi driver (#880) COULD
+ * render more types - the set stays closed anyway, as a compatibility
+ * contract: every caller, and the DDL itself (JSON-in-VARCHAR for arrays and
+ * nested objects), was written against exactly these types, and widening the
+ * set silently would change what existing queries decode to. This module
+ * holds the two decisions - which types are IN (`accessorFor`/
+ * `unsupportedColumns`), and how a raw value coerces (`coerceValue`) - so
+ * both are testable without a database.
  */
 import { DuckDbTypeId, type DuckDbColumn, type DuckDbValue } from "./types.ts";
 

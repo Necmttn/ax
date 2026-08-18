@@ -4,16 +4,20 @@ import { Context, Data, Effect } from "effect";
  * How much of a stage's wall clock was its OWN database work.
  *
  * `ingest_stage` records wall clock, and with `PIPELINE_CONCURRENCY = 4` that
- * is not a stage's cost. Every DuckDB call goes through SYNCHRONOUS `bun:ffi`,
- * so it blocks the single JS thread while it runs; a stage's start-to-end gap
- * therefore includes every other stage's turn. Measured over three warm passes
+ * is not a stage's cost: a stage's start-to-end gap includes every other
+ * stage's turn on the shared write connection. Measured over three warm passes
  * on one real store, the stage rows summed to 1.00x of wall clock when the
  * pipeline was serialized and 2.99x-3.75x when it was not, and `claude-config`
  * read 0.4s serially against 380.2s concurrently (#841, #865).
  *
- * Attribution is EXACT rather than sampled, and for the same reason the problem
- * exists: the FFI is synchronous, so exactly one call is ever in flight, and the
- * fiber that awaits it is the fiber that issued it.
+ * Attribution is per-call WALL TIME (start-to-settle of each database call).
+ * Under the original synchronous `bun:ffi` client this was exact by
+ * construction - one call ever in flight, thread blocked. The napi driver
+ * (#880) keeps calls on one connection serialized, so a call's wall time
+ * still measures its own execution PLUS any time it queued behind another
+ * stage's call on the same connection; self_ms therefore stays honest at
+ * serial concurrency and reads as an upper bound when stages share a
+ * connection concurrently.
  */
 export interface StageSelfTime {
     /** Milliseconds spent inside this stage's own DuckDB calls. */
@@ -43,9 +47,9 @@ export const CurrentStageSelfTime: Context.Reference<StageSelfTime | null> = Con
  * reads, tests). Provided by the ingest runner around derive-tagged stage
  * bodies ONLY.
  *
- * This exists because a wall-clock cap measures the wrong quantity here: every
- * DuckDB call is a synchronous `bun:ffi` call that blocks the one JS thread,
- * so under PIPELINE_CONCURRENCY=4 a stage's wall clock is mostly OTHER stages'
+ * This exists because a wall-clock cap measures the wrong quantity here:
+ * calls on the shared write connection are serialized, so under
+ * PIPELINE_CONCURRENCY=4 a stage's wall clock is mostly OTHER stages'
  * calls. Measured on a real store, a stage whose own cost was 2.1s tripped a
  * 300s wall cap on every concurrent run and had its output discarded (#837).
  * Self time is the stage's actual cost, so it is what the cap must bind.
@@ -63,10 +67,12 @@ export const CurrentStageSelfTimeBudget: Context.Reference<number | null> = Cont
  * the ingest runner catches it (by `instanceof`, out of `cause.reasons`) and
  * converts it to a fail-open `timeout` stage outcome.
  *
- * Enforcement is cooperative and happens BETWEEN calls: a synchronous FFI call
- * already in flight cannot be preempted (the event loop is blocked - the exact
- * reason the wall-clock watchdog could not do this job, #837), so one long
- * call may overshoot the budget and it is the NEXT call that is refused.
+ * Enforcement is cooperative and happens BETWEEN calls: one long call may
+ * overshoot the budget and it is the NEXT call that is refused. (Under the
+ * original synchronous FFI client an in-flight call could not be preempted at
+ * all - the event loop was blocked, #837. The napi driver (#880) makes an
+ * in-flight statement interruptible via fiber interruption; the budget check
+ * itself deliberately stays between-calls, unchanged.)
  */
 export class StageSelfTimeBudgetExceeded extends Data.TaggedError("StageSelfTimeBudgetExceeded")<{
     readonly selfMs: number;
@@ -95,8 +101,8 @@ export const chargeStageSelfTime = <A, E, R>(
         const budgetMs = fiber.getRef(CurrentStageSelfTimeBudget);
         if (budgetMs !== null && acc.ms >= budgetMs) {
             // Refuse the call outright: the stage has spent its budget, and
-            // issuing one more synchronous FFI call would block the thread for
-            // an unbounded further stretch. Work already persisted stays
+            // one more statement would hold the shared connection for an
+            // unbounded further stretch. Work already persisted stays
             // persisted (ingest is incremental); the runner converts this
             // defect into a `timeout` row so the refusal is visible (#837).
             return Effect.die(

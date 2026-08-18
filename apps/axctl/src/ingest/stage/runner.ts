@@ -19,10 +19,11 @@ export const PIPELINE_CONCURRENCY = 4;
 /**
  * Effective stage concurrency, with an `AX_PIPELINE_CONCURRENCY` override.
  *
- * Every DuckDB call is a SYNCHRONOUS `bun:ffi` call, so it blocks the whole
- * event loop while it runs - no other fiber makes progress. With several stages
- * interleaved, a stage's measured wall time therefore includes time the thread
- * spent inside OTHER stages' calls, and per-stage seconds stop being a cost
+ * DuckDB calls on the shared write connection are SERIALIZED (one statement in
+ * flight per connection - the napi driver keeps the FFI client's semantics,
+ * #880). With several stages interleaved, a stage's measured wall time
+ * therefore includes time the connection spent inside OTHER stages' calls,
+ * and per-stage seconds stop being a cost
  * measure. Setting this to 1 serializes the pipeline so each stage's wall time
  * IS its own cost, which is how the #841 warm-vs-cold table can be read
  * honestly. 0 or an unparseable value keeps the default.
@@ -45,8 +46,8 @@ export const heartbeatSeconds = (env: NodeJS.ProcessEnv = process.env): number =
  *  crosses the budget, the NEXT call is refused and the stage fails OPEN with a
  *  `timeout` row, so the rest of the pipeline still completes.
  *
- *  Self time, not wall clock, because every DuckDB call is a synchronous
- *  `bun:ffi` call blocking the one JS thread: under PIPELINE_CONCURRENCY=4 a
+ *  Self time, not wall clock, because calls on the shared write connection
+ *  are serialized: under PIPELINE_CONCURRENCY=4 a
  *  stage's wall clock is mostly OTHER stages' calls, and a wall cap killed a
  *  stage whose own cost was 2.1s on every concurrent run while a genuinely
  *  heavy one could not be preempted at all (#837, #841). Heavy ingest/provider
@@ -58,11 +59,10 @@ export const deriveStageTimeoutSeconds = (env: NodeJS.ProcessEnv = process.env):
 };
 
 /** Wall-clock HUNG detector for `derive`-tagged stages - the demoted remainder
- *  of the old wall-clock watchdog. It cannot preempt a synchronous FFI call
- *  (the event loop is blocked while one runs) and it no longer measures cost -
+ *  of the old wall-clock watchdog. It does not measure cost -
  *  that is the self-time budget's job. What it still catches: a derive that is
- *  idle or stuck somewhere that DOES yield (an awaited promise, a lock, a bug
- *  outside the FFI), which self time by definition never charges. Generous by
+ *  idle or stuck somewhere self time never charges (an awaited promise, a
+ *  lock, a bug outside the database calls). Generous by
  *  default for that reason. Env override `AX_STAGE_HUNG_SECONDS`; 0 disables
  *  the static part (a run deadline still applies). Exported for tests. */
 export const deriveStageHungSeconds = (env: NodeJS.ProcessEnv = process.env): number => {
@@ -247,8 +247,8 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                 //  1. skip: no wall budget left before the run deadline (#697)
                 //  2. self-time budget: the stage's own DuckDB time, enforced
                 //     at the seam between calls - the authoritative cost cap
-                //     (#837); wall clock could neither measure cost under
-                //     concurrency nor preempt a synchronous FFI call
+                //     (#837); wall clock cannot measure cost under
+                //     concurrency (calls serialize on the shared connection)
                 //  3. hung detector: generous wall-clock race for a derive
                 //     stuck somewhere that yields (self time never sees those)
                 // Suspended so `Date.now()` is read at stage START (post-deps,
