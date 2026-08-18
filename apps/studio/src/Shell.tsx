@@ -93,7 +93,7 @@ function ShareChrome({ children }: { children: ReactNode }) {
                 <p className="share-footer-copy">
                     Trace your own agent sessions - every turn, tool call, and dollar, on your machine.
                 </p>
-                <code className="share-footer-install">curl -fsSL https://ax.necmttn.com/install | sh</code>
+                <code className="share-footer-install">curl -fsSL https://ax.necmttn.com/install | bash</code>
                 <a
                     className="share-footer-link"
                     href="https://ax.necmttn.com"
