@@ -120,7 +120,23 @@ replay tests.
    ≥ $5/week and ≤3 open cache-lens proposals at once. Minted cards carry
    provenance: origin, corroboration delta, coverage window, confidence.
    Recorded on #868.
-2. Phase 1: is the napi client embeddable in the compiled binary? (spike)
+2. Phase 1: is the napi client embeddable in the compiled binary?
+   **ANSWERED 2026-08-19 — yes, spike passed on all three counts.**
+   (a) `bun build --compile` embeds the napi `.node` addon NATIVELY (extracts
+   to a temp file and dlopens it - no codegen needed for the addon itself);
+   the only failure mode is its dependent `libduckdb.dylib`, and dlopen
+   searches the extraction dir for it, so embedding the dylib as a
+   `{ type: "file" }` asset and extracting it there BEFORE the import fixes
+   it - the same extract-to-disk pattern as the existing FFI dylib embed.
+   (b) The bundler needs the non-darwin `@duckdb/node-bindings-*` platform
+   packages stubbed via an `onResolve` plugin (only the host platform's
+   package is installed).
+   (c) Decisive extra: the `.node` runs against AX'S OWN static-FTS ICU-less
+   libduckdb v1.5.5 (46 MB) - verified with `PRAGMA create_fts_index` +
+   `match_bm25` returning correct scores, no network - so the swap keeps the
+   exact engine build ax ships today instead of the napi package's 117 MB
+   dylib. Full swap under the unchanged CacheRead/withCacheWrite seam is GO;
+   the dual-driver fallback is not needed.
 3. Phase 4 content-hash watermark: migration cost over 4.7k existing rows —
    re-hash all on first run, or lazy per-touch?
 4. Live progress granularity: when a derive runs inside one SQL statement,
