@@ -1258,9 +1258,22 @@ CREATE TABLE IF NOT EXISTS turn_token_usage (
     pricing_source VARCHAR,
     usage_source VARCHAR NOT NULL,
     usage_quality VARCHAR NOT NULL,
+    -- Native harness attribution + cache forensics (#867), Claude only, null
+    -- before the ~2026-05 harness cutover AND on every other provider - reads
+    -- need FILTER (WHERE col IS NOT NULL) denominators.
+    attribution_skill VARCHAR,  -- raw transcript field is camelCase attributionSkill
+    attribution_agent VARCHAR,
+    cache_miss_reason_type VARCHAR,  -- message.diagnostics.cache_miss_reason is an OBJECT; this is its .type
+    api_error_status VARCHAR,  -- unobserved locally so far; stored as text, numeric upstream shapes stringified
     raw VARCHAR,
     ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Self-heal replays the DDL but CREATE TABLE IF NOT EXISTS never adds columns
+-- to an existing table (#865/#866) - each new column needs its own ALTER.
+ALTER TABLE turn_token_usage ADD COLUMN IF NOT EXISTS attribution_skill VARCHAR;
+ALTER TABLE turn_token_usage ADD COLUMN IF NOT EXISTS attribution_agent VARCHAR;
+ALTER TABLE turn_token_usage ADD COLUMN IF NOT EXISTS cache_miss_reason_type VARCHAR;
+ALTER TABLE turn_token_usage ADD COLUMN IF NOT EXISTS api_error_status VARCHAR;
 CREATE UNIQUE INDEX IF NOT EXISTS turn_token_usage_turn ON turn_token_usage(turn);
 CREATE INDEX IF NOT EXISTS turn_token_usage_session_seq ON turn_token_usage(session, seq);
 CREATE INDEX IF NOT EXISTS turn_token_usage_model ON turn_token_usage(model_ref, ts);

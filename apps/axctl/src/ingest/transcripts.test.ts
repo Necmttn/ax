@@ -1633,6 +1633,68 @@ describe("claude token usage", () => {
         expect(extracted?.turnTokenUsages[1]?.model).toBe("claude-opus-4-8");
     });
 
+    test("reads native attribution + cache forensics per usage row (#867)", () => {
+        const usage = {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        const lines = [
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a1",
+                timestamp: "2026-06-01T10:00:01.000Z",
+                // The harness stamps attribution on the ENTRY, camelCase.
+                attributionSkill: "artifact-design",
+                api_error_status: 529,
+                message: {
+                    role: "assistant",
+                    model: "claude-opus-4-8",
+                    content: "ok",
+                    usage,
+                    // cache_miss_reason is an OBJECT - only .type is kept.
+                    diagnostics: { cache_miss_reason: { type: "previous_message_not_found" } },
+                },
+            }),
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a2",
+                timestamp: "2026-06-01T10:00:02.000Z",
+                attributionAgent: "design-curator",
+                message: { role: "assistant", model: "claude-opus-4-8", content: "done", usage },
+            }),
+            // Pre-cutover shape: no attribution anywhere -> all null.
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a3",
+                timestamp: "2026-06-01T10:00:03.000Z",
+                message: { role: "assistant", model: "claude-opus-4-8", content: "old", usage },
+            }),
+        ];
+        const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-attr");
+        const rows = extracted!.turnTokenUsages;
+        expect(rows).toHaveLength(3);
+        expect(rows[0]).toMatchObject({
+            attributionSkill: "artifact-design",
+            attributionAgent: null,
+            cacheMissReasonType: "previous_message_not_found",
+            apiErrorStatus: "529",
+        });
+        expect(rows[1]).toMatchObject({
+            attributionSkill: null,
+            attributionAgent: "design-curator",
+            cacheMissReasonType: null,
+            apiErrorStatus: null,
+        });
+        expect(rows[2]).toMatchObject({
+            attributionSkill: null,
+            attributionAgent: null,
+            cacheMissReasonType: null,
+            apiErrorStatus: null,
+        });
+    });
+
     test("prices the session via the built-in catalog", () => {
         const extracted = __testExtractClaudeJsonlLines(
             usageLines("claude-opus-4-8"),

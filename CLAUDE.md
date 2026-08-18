@@ -385,6 +385,7 @@ real skill with `dir_path = "(opencode)"` and hide it from those same views.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. Subagent origin = any `*-subagent` source (`claude-subagent` + `codex-subagent`). MCP: `cost_models`, `cost_split`.
 `ax cost routability [--days=N] [--min-run=1] [--json]` - main-thread routability lens: of main-agent spend, how much sat in routable class-runs (gather, mechanical-impl/niche-research) vs genuine judgment, with est savings repriced one tier down. **Claude AND Codex** are classified + repriced SEPARATELY (output is split per-provider with a combined total): Claude routables drop to haiku/sonnet, Codex to gpt-5-nano/gpt-5-mini (same-vendor; cross-provider repricing is nonsense). Codex subagent cost is excluded from codex-main via the `codex-subagent` source (see #553). Deterministic - turn-level classification from tool composition + `JUDGMENT_GUARD_RE` text guard (the `thinking_tokens` signal is dead - 0 on ~97% of turns - so it's dropped; `--min-run` groups consecutive same-class turns, default 1). Codex tools don't map 1:1 to Claude's Read/Edit/Write - `codexToolClass` disambiguates the overloaded `exec_command` via `command_norm` (read-like rg/cat/git diff vs write/build sed/git add/bun test; ambiguous norms like bare `sed` stay on main, conservative). Codex turns are PER-EVENT so cost is fragmented across `tool_call`/`function_call_output`/`reasoning`/`assistant` rows; `buildSpans` role-kinds them (work/boundary/carry/skip) and folds tool-output cost onto the action that produced it. Other providers (opencode/cursor/pi) are not yet classified and contribute $0. MCP: `cost_routability`. Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md.
+`ax cost attribution [--days=N] [--limit=N] [--json]` - cost by NATIVE harness attribution (#867). Claude Code (since ~2026-05) stamps `attributionSkill`/`attributionAgent` on each billing event plus `diagnostics.cache_miss_reason` (an OBJECT - `.type` is stored) and `api_error_status` (unobserved locally; stored as text). The parser lands them as 4 nullable columns on `turn_token_usage` (claude sources only; null on other providers and on pre-cutover history until `ax ingest --reparse=claude` backfills). Rollups per skill + per agent (cost/tokens/turns/sessions), cache-miss + api-error mixes, and a coverage line so a mostly-null window reads as "data not there yet", not "cheap". Ground truth vs the `invoked`-edge inference - divergence is a signal. Query: `apps/axctl/src/queries/attribution-cost.ts`. MCP: `cost_attribution`.
 `ax cost images [--days=N] [--limit=N] [--json]` - image-read context lens: per-session bytes of image tool outputs (`content_type:binary` via the `has_content` edge), split main-thread vs subagent. Surfaces screenshots that persist in the main context window and re-bill across every later turn - the cue to route visual judgment to a subagent (the `ln`/efficient-dispatch "isolate heavy context" pattern). Deref-free over `has_content` + `spawned` (`apps/axctl/src/queries/image-context.ts`); est tokens is a bytes/4 proxy (image vision billing differs).
 
 ### Telemetry-enriched insights
@@ -546,14 +547,14 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 23 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 24 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
-`cost_routability`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context.
+`cost_routability`, `cost_attribution`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context.
 Works from source AND from the compiled binary - DuckDB is a native dep, but
 `libduckdb` is embedded at build time, so a `tools/list` handshake against
-`dist/axctl mcp` returns all 23. Mutating
+`dist/axctl mcp` returns all 24. Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.
 

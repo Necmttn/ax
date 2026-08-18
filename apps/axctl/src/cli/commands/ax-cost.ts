@@ -20,6 +20,7 @@ import {
 } from "../../queries/cost-analytics.ts";
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import { fetchImageContext } from "../../queries/image-context.ts";
+import { fetchAttributionCost, type AttributionRow } from "../../queries/attribution-cost.ts";
 import {
     buildCostModelsNext,
     buildCostSplitNext,
@@ -468,12 +469,104 @@ const costImagesCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax cost attribution [--days=N] [--limit=N] [--json]
+// ---------------------------------------------------------------------------
+
+const cmdCostAttribution = (input: {
+    readonly sinceDays: number;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        const read = yield* CacheRead;
+        const result = yield* fetchAttributionCost(read, { sinceDays: input.sinceDays, limit: input.limit });
+
+        if (input.json) {
+            console.log(prettyPrint(result));
+            return;
+        }
+
+        const cov = result.coverage;
+        if (cov.attributedTurns === 0) {
+            console.log("(no natively-attributed usage rows in the requested window)");
+            console.log(
+                "Claude Code writes attributionSkill/attributionAgent since ~2026-05; " +
+                    "pre-existing sessions read null until `ax ingest --reparse=claude` backfills them.",
+            );
+            return;
+        }
+
+        type Row = { name: string; turns: string; sessions: string; tokens: string; cost: string };
+        const render = (kind: string, rows: ReadonlyArray<AttributionRow>): void => {
+            if (rows.length === 0) return;
+            const rendered: Row[] = rows.map((r) => ({
+                name: r.name.slice(0, 40),
+                turns: integer(r.turns),
+                sessions: integer(r.sessions),
+                tokens: integer(r.tokens),
+                cost: usd(r.costUsd),
+            }));
+            const cols: Column<Row>[] = [
+                { header: kind, get: (r) => r.name, min: 24 },
+                { header: "turns", get: (r) => r.turns, align: "right", min: 6 },
+                { header: "sessions", get: (r) => r.sessions, align: "right", min: 8 },
+                { header: "tokens", get: (r) => r.tokens, align: "right", min: 12 },
+                { header: "cost", get: (r) => r.cost, align: "right", min: 9 },
+            ];
+            console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+            console.log();
+        };
+
+        render("skill (native)", result.skills);
+        render("agent (native)", result.agents);
+
+        const turnShare = cov.totalTurns > 0 ? cov.attributedTurns / cov.totalTurns : 0;
+        const costShare = cov.totalCostUsd > 0 ? cov.attributedCostUsd / cov.totalCostUsd : 0;
+        console.log(
+            `coverage: ${integer(cov.attributedTurns)}/${integer(cov.totalTurns)} claude usage rows ` +
+                `(${pct(turnShare)}) carry native attribution - ${usd(cov.attributedCostUsd)} of ${usd(cov.totalCostUsd)} (${pct(costShare)})`,
+        );
+        if (result.cacheMissReasons.length > 0) {
+            const mix = result.cacheMissReasons.map((r) => `${r.reason}×${integer(r.turns)}`).join(", ");
+            console.log(`cache misses: ${mix}`);
+        }
+        if (result.apiErrors.length > 0) {
+            const mix = result.apiErrors.map((r) => `${r.status}×${integer(r.turns)}`).join(", ");
+            console.log(`api errors: ${mix}`);
+        }
+        console.log(`\n(${input.sinceDays} days; native = harness-stamped, cross-check vs invoked-edge inference)`);
+    });
+
+const costAttributionCommand = Command.make(
+    "attribution",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
+        limit: positiveLimit(20),
+        json: jsonFlag,
+    },
+    ({ days, limit, json }) => {
+        if (!Number.isInteger(days) || days <= 0) {
+            fail(`ax cost attribution: --days must be a positive integer (got "${days}")`);
+        }
+        if (!Number.isInteger(limit) || limit <= 0) {
+            fail(`ax cost attribution: --limit must be a positive integer (got "${limit}")`);
+        }
+        return cmdCostAttribution({ sinceDays: days, limit, json });
+    },
+).pipe(
+    Command.withDescription(
+        "Cost by NATIVE harness attribution (attributionSkill/attributionAgent per billing event, #867) " +
+        "with cache-miss + api-error mix. --days=N (default 14)  --limit=N (default 20)  --json",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax cost (group command)
 // ---------------------------------------------------------------------------
 
 export const costCommand = Command.make("cost").pipe(
     Command.withDescription(
-        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split, image context cost",
+        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split, image context cost, native attribution",
     ),
     Command.withSubcommands([
         costModelsCommand,
@@ -481,6 +574,7 @@ export const costCommand = Command.make("cost").pipe(
         costSplitCommand,
         costRoutabilityCommand,
         costImagesCommand,
+        costAttributionCommand,
     ]),
 );
 

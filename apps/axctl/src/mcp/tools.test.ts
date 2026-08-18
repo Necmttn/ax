@@ -25,6 +25,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     cost_models: ["days"],
     cost_split: ["days"],
     cost_images: ["days", "limit"],
+    cost_attribution: ["days", "limit"],
     cost_routability: ["days", "min_run"],
     otel: ["days"],
     runs_evidence: ["sessionId"],
