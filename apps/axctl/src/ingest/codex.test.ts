@@ -91,6 +91,52 @@ describe("Codex transcript extraction", () => {
         expect(compacted.outputExcerpt).toBe("hello");
     });
 
+    test("a forked/subagent rollout keeps its OWN id, not the fork source's (#796)", () => {
+        // Codex writes TWO adjacent session_meta records for a forked or
+        // subagent thread: the file's own first, then the fork source's as a
+        // header. Taking the second gave the file the ancestor's identity, so
+        // the file's session was never written and its turns collided with the
+        // ancestor's own file on turnRecordKey(session, seq).
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-14T15:28:13.994Z",
+                payload: {
+                    id: "child-thread",
+                    forked_from_id: "parent-thread",
+                    thread_source: "subagent",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-14T15:28:13.905Z",
+                    source: { subagent: { thread_spawn: { parent_thread_id: "parent-thread" } } },
+                },
+            }),
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-14T15:28:13.996Z",
+                payload: {
+                    id: "parent-thread",
+                    thread_source: "user",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-14T14:34:35.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-14T15:28:20.000Z",
+                payload: { type: "message", role: "user", content: [{ type: "input_text", text: "go" }] },
+            }),
+        ]);
+
+        expect(extracted?.session.id).toBe("child-thread");
+        expect(extracted?.session.thread_source).toBe("subagent");
+        // Lineage survives even though the top-level field is absent here -
+        // it is read from the nested thread_spawn / forked_from_id fallbacks.
+        expect(extracted?.session.parent_thread_id).toBe("parent-thread");
+        // `every` on an empty array is vacuously true, so pin the count first.
+        expect(extracted?.turns.length).toBeGreaterThan(0);
+        expect(extracted?.turns.every((turn) => turn.session === "child-thread")).toBe(true);
+    });
+
     test("extracts turn_context model and token_count usage rollup", () => {
         const extracted = __testExtractCodexJsonlLines([
             JSON.stringify({
