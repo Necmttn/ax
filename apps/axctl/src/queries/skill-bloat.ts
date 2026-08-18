@@ -111,5 +111,11 @@ export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
     );
 
     deduped.sort((a, b) => b.estTokens - a.estTokens);
-    return deduped.slice(0, input.limit).map(({ contentHash: _ch, ...row }) => row);
+    // `total` is the count BEFORE the limit. The renderer used to report
+    // `rows.length`, so `--limit=4` announced "4 skills over budget" on a
+    // machine with 40 - a page size printed as a fact about the user's setup.
+    return {
+        total: deduped.length,
+        rows: deduped.slice(0, input.limit).map(({ contentHash: _ch, ...row }) => row),
+    };
 });

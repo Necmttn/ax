@@ -308,10 +308,10 @@ const cmdSkillsBloat = (input: SkillsBloatInput) =>
     Effect.gen(function* () {
         const budgetTokens = requirePositiveInt("skills bloat", "budget", input.budgetTokens);
         const limit = requirePositiveInt("skills bloat", "limit", input.limit);
-        const rows = yield* fetchSkillBloat({ budgetTokens, limit });
+        const { rows, total } = yield* fetchSkillBloat({ budgetTokens, limit });
 
         if (input.json) {
-            console.log(prettyPrint({ budgetTokens, skills: rows }));
+            console.log(prettyPrint({ budgetTokens, total, skills: rows }));
             return;
         }
         if (rows.length === 0) {
@@ -327,9 +327,13 @@ const cmdSkillsBloat = (input: SkillsBloatInput) =>
                 `${fmtCount(r.bytes)} B  used=${fmtCount(r.invocations)}`,
             );
         }
+        // Say what was withheld. Reporting the page size as the total made
+        // `--limit` silently change a number the user reads as a fact.
+        const shown = rows.length < total ? ` (showing top ${fmtCount(rows.length)})` : "";
         console.log(
-            `\n${rows.length} skill${rows.length === 1 ? "" : "s"} over the ` +
-            `${fmtCount(budgetTokens)}-token budget. Trim toward high-signal; length is not effort.`,
+            `\n${fmtCount(total)} skill${total === 1 ? "" : "s"} over the ` +
+            `${fmtCount(budgetTokens)}-token budget${shown}. ` +
+            `Trim toward high-signal; length is not effort.`,
         );
     });
 
