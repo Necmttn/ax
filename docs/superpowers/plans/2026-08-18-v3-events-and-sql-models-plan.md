@@ -190,6 +190,17 @@ ships as its own slice on top of the ledger.
   live-source-wins and pruned-source-resolves both exercised.
 - Watermark keyed by content hash, not absolute path (merge-safe).
 
+**Phase 4 remainder SPEC'D (#893), awaiting operator sign-off.**
+docs/superpowers/specs/2026-08-19-v3-phase4-events-contract-design.md covers
+the freeze (a `layer` classification + `TableWrite` declarations, because the
+ingest/derive TAGS turned out not to be the layer authority - the subagents
+"derive" stage is a parser writing `session` rows, `spawned` has dual
+writers, and several derives UPDATE event tables), segment export/import
+(session-scoped, enrichment stripped, catalogs excluded, column-intersection
+loader), and the two-tier SHA-256 watermark. One adversarial review round
+(1 blocker + 9 major findings) is incorporated; implementation is 3 slices,
+gated on the operator.
+
 ### Phase 5 — learning layer (gated prototype)
 
 - Harvest free labels (landed/reverted/repair episodes/sidecar verdicts) →
@@ -245,6 +256,18 @@ ships as its own slice on top of the ledger.
    the dual-driver fallback is not needed.
 3. Phase 4 content-hash watermark: migration cost over 4.7k existing rows —
    re-hash all on first run, or lazy per-touch?
+   **MEASURED 2026-08-19 (recommendation attached, operator confirms):**
+   hashing the full local corpus (4,743 jsonl files, 5.63 GB) costs 3.6s
+   with `Bun.hash` and **5.9s with SHA-256** - the hash the design actually
+   uses, because a stored cross-machine hash on version-unstable `Bun.hash`
+   would silently invalidate on every bun upgrade (the same reasoning
+   stable-id.ts already records). Recommendation: **eager** one-time
+   version-marked backfill; lazy per-touch is permanent branching to save a
+   one-time ~6s. Full design in
+   docs/superpowers/specs/2026-08-19-v3-phase4-events-contract-design.md
+   (#893). Note the plan bullet's "merge-safe" promise is met only by that
+   spec's slice 3 (hash-indexed lookup + segment handshake) - the watermark
+   slice alone delivers local resync/mtime-churn resilience.
 4. Live progress granularity: when a derive runs inside one SQL statement,
    per-stage progress events collapse to start/end — acceptable, or does the
    Studio Live tab need statement-level progress?
