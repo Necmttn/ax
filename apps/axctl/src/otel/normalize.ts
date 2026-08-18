@@ -1,4 +1,4 @@
-import { attrMap, nanoToDate, type MetricsPayload, type TracePayload, type LogsPayload } from "./otlp-schema.ts";
+import { attrMap, nanoToDate, type MetricsPayload, type OtlpInt64, type TracePayload, type LogsPayload } from "./otlp-schema.ts";
 import type { OtelMetricPointRow, OtelSpanRow, OtelLogEventRow } from "./rows.ts";
 import { walkResources } from "./signal.ts";
 
@@ -100,8 +100,8 @@ const num = (v: string | number | boolean | null | undefined): number | null =>
 
 const eventTime = (
     a: Map<string, string | number | boolean | null>,
-    observedNano: string | undefined,
-    nano: string | undefined,
+    observedNano: OtlpInt64 | undefined,
+    nano: OtlpInt64 | undefined,
 ): Date => {
     const ts = a.get("event.timestamp");
     if (typeof ts === "string") { const d = new Date(ts); if (!Number.isNaN(d.getTime())) return d; }

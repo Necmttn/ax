@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
-import { AnyValue, LogsPayload, MetricsPayload, TracePayload, attrValueToScalar } from "./otlp-schema.ts";
+import { AnyValue, LogsPayload, MetricsPayload, TracePayload, attrValueToScalar, nanoToDate } from "./otlp-schema.ts";
+import { normalizeLogs } from "./normalize.ts";
 
 describe("otlp envelope schemas", () => {
     test("decodes an AnyValue stringValue", () => {
@@ -11,6 +12,52 @@ describe("otlp envelope schemas", () => {
     test("decodes intValue as string and yields number", () => {
         const v = Schema.decodeUnknownSync(AnyValue)({ intValue: "42" });
         expect(attrValueToScalar(v)).toBe(42);
+    });
+
+    // The whole `otel_log_event` signal was silently zero because of this one
+    // arm. proto3 JSON EMITS an int64 as a string, so every int64 field here was
+    // typed string-only - but the mapping also requires a parser to ACCEPT a
+    // number, and a live Claude Code 2.1.233 export sends bare numbers. Decode
+    // failed, the fail-open receiver counted the body `malformed`, and metrics
+    // from the same process landed fine, so nothing looked broken.
+    test("decodes intValue sent as a JSON number, the form Claude Code actually emits", () => {
+        const v = Schema.decodeUnknownSync(AnyValue)({ intValue: 83729 });
+        expect(attrValueToScalar(v)).toBe(83729);
+    });
+
+    test("nanoToDate accepts both JSON forms, and never throws on a bad one", () => {
+        const asString = nanoToDate("1718409600000000000");
+        expect(nanoToDate(1718409600000000000).getTime()).toBe(asString.getTime());
+        // BigInt() throws a SyntaxError on a non-integral number. This converter
+        // sits on a fail-open receive path, so it must floor rather than throw.
+        expect(nanoToDate(1718409600000000000.5).getTime()).toBe(asString.getTime());
+        expect(nanoToDate(undefined).getTime()).toBe(0);
+        expect(nanoToDate("not-a-number").getTime()).toBe(0);
+    });
+
+    test("a log record whose attribute intValue is a number decodes and normalizes", () => {
+        const payload = {
+            resourceLogs: [{
+                resource: { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] },
+                scopeLogs: [{
+                    logRecords: [{
+                        timeUnixNano: "1718409600000000000",
+                        observedTimeUnixNano: "1718409600000000000",
+                        body: { stringValue: "tool_decision" },
+                        attributes: [
+                            { key: "session.id", value: { stringValue: "sess-1" } },
+                            { key: "event.name", value: { stringValue: "tool_decision" } },
+                            { key: "input_token_count", value: { intValue: 83729 } },
+                        ],
+                    }],
+                }],
+            }],
+        };
+        const decoded = Schema.decodeUnknownSync(LogsPayload)(payload);
+        const rows = normalizeLogs(decoded);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.event_name).toBe("claude_code.tool_decision");
+        expect(rows[0]!.input_tokens).toBe(83729);
     });
 
     test("decodes a minimal metrics payload", () => {
