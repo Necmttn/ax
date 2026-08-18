@@ -17,6 +17,7 @@ import {
     writeIngestStageFinish,
     writeIngestStageStart,
 } from "./telemetry.ts";
+import { CurrentStageSelfTime, makeStageSelfTime } from "@ax/lib/duckdb/self-time";
 import { runPipeline } from "./stage/runner.ts";
 import { selectByKeys, selectByTag } from "./stage/select.ts";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
@@ -188,11 +189,14 @@ export const settleStage = (
     ledgerKey: { readonly runId: string; readonly source: string; readonly stage: string },
     eventName: { readonly source: string; readonly stage: string },
     exit: Exit.Exit<BaseStageStats, IngestStageError>,
+    /** The stage's own database time, from the accumulator `wrapStage` provided.
+     *  Omitted by callers that have none (tests crafting an `Exit` directly). */
+    selfMs?: number | null,
 ): Effect.Effect<void, CacheWriteError> => {
     if (Exit.isSuccess(exit)) {
         const counts = numericCounts(exit.value);
         return Effect.gen(function* () {
-            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts });
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts, selfMs });
             yield* writeIngestEvent(write, {
                 ...ledgerKey,
                 level: "info",
@@ -206,7 +210,7 @@ export const settleStage = (
     const cause = exit.cause;
     const settle = (status: "error" | "interrupted", message: string) =>
         Effect.gen(function* () {
-            yield* writeIngestStageFinish(write, { ...ledgerKey, status, errorText: message });
+            yield* writeIngestStageFinish(write, { ...ledgerKey, status, errorText: message, selfMs });
             yield* writeIngestEvent(write, {
                 ...ledgerKey,
                 level: "error",
@@ -241,8 +245,18 @@ const wrapStage = (
         run: (ctx: IngestContext, write: CacheWriteService) =>
             Effect.gen(function* () {
                 yield* writeIngestStageStart(write, ledgerKey);
-                return yield* Effect.onExit(stageDef.run(ctx, write), (exit) =>
-                    settleStage(write, ledgerKey, eventName, exit),
+                // One accumulator per stage, provided as a `Context.Reference`
+                // so the stage's internal fan-out (claude parses 8 files at a
+                // time) charges to the same total. Read on the exit path, after
+                // the body has finished adding to it.
+                const selfTime = makeStageSelfTime();
+                return yield* Effect.onExit(
+                    Effect.provideService(
+                        stageDef.run(ctx, write),
+                        CurrentStageSelfTime,
+                        selfTime,
+                    ),
+                    (exit) => settleStage(write, ledgerKey, eventName, exit, selfTime.ms),
                 );
             }),
     };

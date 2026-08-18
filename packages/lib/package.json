@@ -15,6 +15,7 @@
     "./duckdb": "./src/duckdb/index.ts",
     "./sqlite": "./src/sqlite/index.ts",
     "./duckdb/internal": "./src/duckdb/internal.ts",
+    "./duckdb/self-time": "./src/duckdb/self-time.ts",
     "./testing/duckdb-dylib": "./src/testing/duckdb-dylib.ts",
     "./testing/gated-test": "./src/testing/gated-test.ts",
     "./testing/cache": "./src/testing/cache.ts",
