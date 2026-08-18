@@ -1159,8 +1159,19 @@ CREATE TABLE IF NOT EXISTS command_outcome (
     text VARCHAR,
     labels VARCHAR,  -- JSON-encoded
     metrics VARCHAR,  -- JSON-encoded
-    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Check family (test|typecheck|lint|eslint|oxlint|build|check) stamped at
+    -- WRITE time by the outcomes stage via `checkFamilyFromCommand` - the TS
+    -- classifier stays the single source of truth, and the run-evidence SQL
+    -- model consumes this column instead of duplicating token-position logic
+    -- in SQL (#888). NULL = not a check. Stamped text-first (command_text,
+    -- falling back to command_norm), which classifies MORE rows than the old
+    -- norm-only read (#471 taxonomy fix).
+    check_family VARCHAR
 );
+-- The ALTER is what reaches an EXISTING database (self-heal replay pattern,
+-- see ingest_stage.self_ms above).
+ALTER TABLE command_outcome ADD COLUMN IF NOT EXISTS check_family VARCHAR;
 CREATE INDEX IF NOT EXISTS command_outcome_kind_ts ON command_outcome(kind, ts);
 CREATE INDEX IF NOT EXISTS command_outcome_session ON command_outcome(session, ts);
 

@@ -46,6 +46,10 @@ interface CommandOutcome {
     readonly sessionKey: string | null;
     readonly commandNorm: string | null;
     readonly commandTool: string | null;
+    /** Check family stamped at write time (single source: check-family.ts);
+     *  text-first so a collapsed command_norm cannot hide a check (#471). The
+     *  run-evidence SQL model consumes this column (#888). */
+    readonly checkFamily: string | null;
     readonly kind: CommandOutcomeKind;
     readonly status: string;
     readonly text: string | null;
@@ -106,12 +110,14 @@ export function deriveCommandOutcomes(rows: readonly ToolCallOutcomeRow[]): Comm
         const toolCallKey = recordKeyPart(row.id, "tool_call") ?? (typeof row.id === "string" ? row.id : null);
         const sessionKey = recordKeyPart(row.session, "session") ?? (typeof row.session === "string" ? row.session : null);
         const kind = classifyCommandOutcome(row);
+        const checkFamily = checkFamilyFromCommand(row.command_text) ?? checkFamilyFromCommand(row.command_norm);
         return {
             key: commandOutcomeKey(row, index),
             toolCallKey,
             sessionKey,
             commandNorm: row.command_norm ?? null,
             commandTool: row.name ?? null,
+            checkFamily,
             kind,
             status: kind === "success" ? "ok" : "error",
             text: row.error_text ?? row.output_excerpt ?? row.command_text ?? null,
@@ -191,7 +197,8 @@ export function deriveUserMessageNgrams(rows: readonly UserTurnRow[], sizes: rea
 
 const commandOutcomeRow = (outcome: CommandOutcome) => cacheRow({
     id: outcome.key, tool_call: outcome.toolCallKey, session: outcome.sessionKey,
-    command_norm: outcome.commandNorm, command_tool: outcome.commandTool, kind: outcome.kind,
+    command_norm: outcome.commandNorm, command_tool: outcome.commandTool,
+    check_family: outcome.checkFamily, kind: outcome.kind,
     status: outcome.status, text: outcome.text, labels: jsonParam(outcome.labels),
     metrics: jsonParam(outcome.metrics), ts: tsParam(outcome.ts),
 });

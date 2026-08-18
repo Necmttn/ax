@@ -30,7 +30,7 @@ import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "@ax/lib/ids";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
-import { checkFamilyFromCommand } from "./check-family.ts";
+import { checkFamilyFromCommand, isCheckFamily } from "./check-family.ts";
 import {
     runEvidenceEventRecordKey,
     runEvidenceRefRecordKey,
@@ -38,6 +38,7 @@ import {
     type RunEvidenceKind,
     type RunEvidenceRefWrite,
 } from "@ax/lib/shared/run-evidence";
+import { runRunEvidenceModels } from "./models/run-evidence-models.ts";
 import {
     BaseStageStats,
     IngestContext,
@@ -79,6 +80,9 @@ interface CommandOutcomeRow {
     readonly kind?: string | null;
     readonly status?: string | null;
     readonly commandNorm?: string | null;
+    /** Stamped at outcomes-write time (#888); rows from before the stamp are
+     *  NULL and fall back to the old norm-only classification below. */
+    readonly checkFamily?: string | null;
 }
 
 interface CompactionRow {
@@ -233,7 +237,9 @@ const toVerification = (row: CommandOutcomeRow, provider: string): RunEvidenceEv
     // `Read`/`ls` succeeding would become verifier_backed evidence, violating the
     // no-promotion rule. A `verification` is ONLY a genuine check (test / build /
     // lint / typecheck), identified by the command's check family (#578 review).
-    const family = checkFamilyFromCommand(row.commandNorm ?? null);
+    // The stamped column (text-first, #888) is authoritative; the norm-only
+    // fallback keeps pre-stamp history classified as before.
+    const family = isCheckFamily(row.checkFamily) ? row.checkFamily : checkFamilyFromCommand(row.commandNorm ?? null);
     if (family === null) return null;
     return {
         sessionId: row.session,
@@ -518,7 +524,8 @@ const toolCallSql = (since: number | undefined): string =>
      FROM tool_call WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 export const commandOutcomeSql = (since: number | undefined): string =>
-    `SELECT id, session, tool_call AS toolCall, CAST(ts AS VARCHAR) AS ts, kind, status, command_norm AS commandNorm
+    `SELECT id, session, tool_call AS toolCall, CAST(ts AS VARCHAR) AS ts, kind, status, command_norm AS commandNorm,
+            check_family AS checkFamily
      FROM command_outcome WHERE session IS NOT NULL ${sinceAnd(since)}`;
 
 // `tokens_before` is BIGINT and this stage reads through `write.raw`, which
@@ -680,6 +687,12 @@ export class RunEvidenceStats extends BaseStageStats.extend<RunEvidenceStats>("R
  * Run-evidence stage - normalizes structural graph rows into the
  * `run_evidence_event` ledger (#578). Incremental by the ingest since-window;
  * idempotent UPSERTs keyed by (session, source_table, source_id). Tags: derive.
+ *
+ * Default implementation is the SQL MODEL pair (#888, v3 Phase 3) - the whole
+ * derivation runs inside DuckDB, no rows cross the JS boundary. The TS
+ * builders above stay as the shadow implementation behind
+ * `AX_RUN_EVIDENCE_IMPL=ts` for one release (parity pinned by
+ * models/run-evidence-parity.test.ts); after that release they are deleted.
  */
 export const runEvidenceStage: StageDef<RunEvidenceStats, never, CacheWriteError> = {
     meta: StageMeta.make({
@@ -690,10 +703,21 @@ export const runEvidenceStage: StageDef<RunEvidenceStats, never, CacheWriteError
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveRunEvidence(write, sinceDaysFromCtx(ctx));
+            if (process.env.AX_RUN_EVIDENCE_IMPL === "ts") {
+                const result = yield* deriveRunEvidence(write, sinceDaysFromCtx(ctx));
+                return RunEvidenceStats.make({
+                    durationMs: Date.now() - t0,
+                    summary: `derived ${result.written} run-evidence events, ${result.refsWritten} refs (ts shadow)`,
+                    written: result.written,
+                    refsWritten: result.refsWritten,
+                });
+            }
+            const result = yield* runRunEvidenceModels(write, sinceDaysFromCtx(ctx));
             return RunEvidenceStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.written} run-evidence events, ${result.refsWritten} refs`,
+                summary: `derived ${result.written} run-evidence events, ${result.refsWritten} refs (sql model${
+                    result.rebuilt ? `, version cutover: rebuilt + ${result.backfilled} check_family backfilled` : ""
+                })`,
                 written: result.written,
                 refsWritten: result.refsWritten,
             });
