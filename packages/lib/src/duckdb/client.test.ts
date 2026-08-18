@@ -2,7 +2,7 @@ import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { Effect, Fiber, FileSystem, Schema } from "effect";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { loadNodeApiOver } from "./binding.ts";
 import { DuckDb, DuckDbLayer, DuckDbLiveWith, decodeCell } from "./client.ts";
@@ -725,6 +725,24 @@ describe("binding one-engine-per-process", () => {
                     expect(failure._tag).toBe("DuckDbDylibError");
                     expect(failure.message).toContain("already loaded");
                 }
+            }).pipe(Effect.provide(BunFileSystem.layer)),
+        ),
+    );
+
+    // #884: a RELATIVE spelling of the loaded engine is the same engine, not a
+    // conflict - and, on the first load, must never become the staged
+    // symlink's target verbatim (a stage-dir-relative target dangles, which is
+    // exactly how main CI's linux smoke broke). Canonicalization covers both.
+    dtest(
+        "a relative spelling of the same dylib resolves to the loaded engine",
+        withDuckDb(() =>
+            Effect.gen(function* () {
+                const fs = yield* FileSystem.FileSystem;
+                const absolute = process.env.AX_DUCKDB_DYLIB!;
+                const rel = relative(process.cwd(), absolute);
+                expect(rel.startsWith("/")).toBe(false);
+                const api = yield* loadNodeApiOver(fs, { dylibPath: rel });
+                expect(typeof api.DuckDBInstance.create).toBe("function");
             }).pipe(Effect.provide(BunFileSystem.layer)),
         ),
     );
