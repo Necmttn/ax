@@ -152,6 +152,74 @@ describe("gcFileBuckets", () => {
         }).pipe(Effect.provide(layer))));
     });
 
+    dtest("skips when the reference set is non-empty but holds no pointers", async () => {
+        // The case the size check cannot see, and the one that actually fired.
+        // `session.raw_file` is contracted to hold `<bucket>:/<name>`, but the
+        // v2 codex parser writes the absolute SOURCE path. The set is then large
+        // and entirely unmatchable, so every blob reads as unreferenced.
+        // Measured on a real machine: 4,393 such rows, 2,727 blobs deleted,
+        // 1.9 GB gone in one global ingest.
+        const referenced = await referencedFrom(
+            [
+                "/Users/someone/.codex/sessions/2026/08/17/rollout.jsonl",
+                "/Users/someone/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+            ],
+            "ax-blobgc-badshape-",
+        );
+        const layer = PlatformLayer;
+
+        await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* fs.makeTempDirectoryScoped();
+            const transcripts = path.join(root, "transcripts");
+            yield* fs.makeDirectory(transcripts);
+            yield* fs.writeFileString(path.join(transcripts, "live.jsonl"), "keep me");
+
+            const result = yield* gcFileBuckets(root, {
+                isGlobalIngest: true,
+                referenced,
+                minAgeMs: 0,
+            });
+
+            expect(result.skipped).toBe(true);
+            expect(result.removed).toBe(0);
+            expect(result.skipReason).toMatch(/not one is a blob pointer/);
+            expect(yield* fs.exists(path.join(transcripts, "live.jsonl"))).toBe(true);
+        }).pipe(Effect.provide(layer))));
+    });
+
+    dtest("one well-formed pointer is enough to let GC run", async () => {
+        // The guard asks "is this producer writing pointers at all", not "is
+        // every row a pointer" - a mixed set must not disable GC entirely.
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl"), "/Users/someone/.codex/raw.jsonl"],
+            "ax-blobgc-mixed-",
+        );
+        const layer = PlatformLayer;
+
+        await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* fs.makeTempDirectoryScoped();
+            const transcripts = path.join(root, "transcripts");
+            yield* fs.makeDirectory(transcripts);
+            yield* fs.writeFileString(path.join(transcripts, "keep.jsonl"), "referenced");
+            yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "unreferenced");
+
+            const result = yield* gcFileBuckets(root, {
+                isGlobalIngest: true,
+                referenced,
+                minAgeMs: 0,
+            });
+
+            expect(result.skipped).toBe(false);
+            expect(result.removed).toBe(1);
+            expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
+            expect(yield* fs.exists(path.join(transcripts, "orphan.jsonl"))).toBe(false);
+        }).pipe(Effect.provide(layer))));
+    });
+
     dtest("spares an unreferenced blob younger than the age guard", async () => {
         const referenced = await referencedFrom(
             [filePointer("transcripts", "keep.jsonl")],

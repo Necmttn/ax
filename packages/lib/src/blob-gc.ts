@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
-import { filePointer } from "./blob-pointer.ts";
+import { filePointer, isBlobPointer } from "./blob-pointer.ts";
 import { cacheRows } from "./duckdb/query.ts";
 import type { CacheRead } from "./duckdb/seam.ts";
 import { orAbsent, skipNotFound } from "./shared/fs-error.ts";
@@ -113,6 +113,29 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
         return skip(
             "the session reference set is empty (0 rows with raw_file); refusing to run blob GC " +
                 "against an empty reference set, which would delete every blob",
+        );
+    }
+
+    // A NON-EMPTY set of the WRONG SHAPE is the same hazard, and it is the one
+    // that actually fired. `session.raw_file` is contracted to hold a
+    // `<bucket>:/<name>` pointer (see blob-pointer.ts), but a parser can write
+    // the absolute SOURCE path instead - the v2 codex parser does exactly that
+    // (`const rawPointer = filePath`), under a comment still claiming it
+    // snapshots into the bucket. The set then has thousands of entries, none of
+    // which can ever match `filePointer(bucket, entry)`, so every blob on disk
+    // reads as unreferenced and the size check above waves it through.
+    //
+    // Measured, on a real machine: 4,393 rows in the reference set, 0 of them
+    // pointers, and one global ingest deleted 2,727 blobs - the whole 1.9 GB
+    // bucket store. Requiring at least one well-formed pointer turns "the
+    // reference set is structurally wrong" from a silent mass delete into a
+    // skip with a reason, which is what the empty-set guard was always for.
+    if (!Array.from(referenced).some(isBlobPointer)) {
+        return skip(
+            `the session reference set holds ${referenced.size} value(s) but not one is a ` +
+                "blob pointer (`<bucket>:/<name>`) - every blob would read as unreferenced. " +
+                "Refusing to run blob GC against a reference set of the wrong shape; the " +
+                "producer of session.raw_file is writing something else (see blob-pointer.ts)",
         );
     }
 
