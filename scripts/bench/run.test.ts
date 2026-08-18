@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { gatedTest } from "@ax/lib/testing/gated-test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -96,8 +97,12 @@ describe("bench runner skip", () => {
 
 describe("bench runner suite", () => {
     const duckdb = resolveDuckdbBin();
+    const duckdbTest = gatedTest({
+        reason: "no duckdb binary resolvable (set AX_DUCKDB_BIN or put duckdb on PATH)",
+        when: !duckdb,
+    });
 
-    test.skipIf(!duckdb)("prints the metric table and exits 0 against the mini fixture", () => {
+    duckdbTest("prints the metric table and exits 0 against the mini fixture", () => {
         if (!duckdb) return;
         const fixture = mkdtempSync(join(tmpdir(), "ax-bench-mini-"));
         temps.push(fixture);
@@ -117,7 +122,7 @@ describe("bench runner suite", () => {
         expect(r.exitCode).toBe(0);
     }, 120_000);
 
-    test.skipIf(!duckdb)("exits non-zero when a target is tightened past the measured value", () => {
+    duckdbTest("exits non-zero when a target is tightened past the measured value", () => {
         if (!duckdb) return;
         const fixture = mkdtempSync(join(tmpdir(), "ax-bench-tight-"));
         temps.push(fixture);
@@ -132,7 +137,7 @@ describe("bench runner suite", () => {
         expect(r.out).toContain("BM25 top-20");
     }, 120_000);
 
-    test.skipIf(!duckdb)("rejects a fixture where every table is empty instead of silently passing", () => {
+    duckdbTest("rejects a fixture where every table is empty instead of silently passing", () => {
         if (!duckdb) return;
         const fixture = makeEmptyFixture();
         temps.push(fixture);

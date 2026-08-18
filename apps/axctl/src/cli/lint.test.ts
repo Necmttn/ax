@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { gatedTest } from "@ax/lib/testing/gated-test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,8 @@ describe("axctl improve lint", () => {
     // repo's opt-in for that class of test; it no longer implies a running
     // server, because none exists to run.
     const e2eEnabled = process.env.AX_E2E_DB === "1";
-    test.skipIf(!e2eEnabled)("clean run on an empty dir exits 0", () => {
+    const e2eTest = gatedTest({ reason: "AX_E2E_DB=1 is not set", when: !e2eEnabled });
+    e2eTest("clean run on an empty dir exits 0", () => {
         const root = mkdtempSync(join(tmpdir(), "ax-cli-lint-"));
         writeFileSync(join(root, "CLAUDE.md"), "no markers");
         // cwd-independent: `src/cli/index.ts` resolves only from apps/axctl, and
