@@ -212,7 +212,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         handler: async (request) => {
             const active = current;
             try {
-                return await active.handler(request);
+                return await withBodyOnValidationFailure(await active.handler(request), request);
             } catch (err) {
                 if (current === active) {
                     current = build();
@@ -224,3 +224,38 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
         dispose: () => current.dispose(),
     };
 }
+
+/**
+ * Give a request-validation failure a body.
+ *
+ * `HttpApiSchemaError` - what a params/headers/query/payload decode failure is
+ * wrapped in - documents itself as responding "as an empty `400 Bad Request`".
+ * Zero bytes is indistinguishable from a broken server, and the primary
+ * consumer of this API is an agent that has to self-correct from the response
+ * alone. One reader lost most of a day to it, reporting a healthy route as dead
+ * because their own probe omitted a required parameter (#855).
+ *
+ * The error's `kind` and `cause` are not reachable from out here, so this does
+ * not name the offending field; it names the request and points at the two
+ * surfaces this same daemon serves that DO describe the contract. A 400 that
+ * already carries a body is passed through untouched, so a handler that
+ * explains itself keeps its own words.
+ */
+const withBodyOnValidationFailure = async (
+    response: Response,
+    request: Request,
+): Promise<Response> => {
+    if (response.status !== 400) return response;
+    // The empty respondable carries NO headers at all - not even
+    // `content-length: 0` - so emptiness has to be read off the body itself.
+    // Cloning a 400 is cheap, and a 400 that already carries a body returns
+    // here untouched.
+    if ((await response.clone().text()) !== "") return response;
+    const url = new URL(request.url);
+    return jsonResponse({
+        error: "bad_request",
+        message: `${request.method} ${url.pathname} failed request validation - a parameter, header, or body did not match the endpoint's schema.`,
+        docs: `${url.origin}/docs`,
+        openapi: `${url.origin}/openapi.json`,
+    }, 400);
+};

@@ -214,34 +214,34 @@ describe("dashboard live routes", () => {
         expect(text).toContain("db down");
     });
 
-    test("POST /api/image falls through to legacy API not_found", async () => {
+    test("POST /api/image falls through to the legacy API 404", async () => {
         const { handleDashboardRequest } = await import("../../server.ts");
         const res = await handleDashboardRequest(
             new Request("http://127.0.0.1:1738/api/image", { method: "POST" }),
         );
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ error: "not_found" });
+        expect(res.status).toBe(404);
+        await expect(res.json()).resolves.toEqual({ error: "not_found", path: "/api/image" });
     });
 
-    test("GET /api/ingest falls through to legacy API not_found", async () => {
+    test("GET /api/ingest falls through to the legacy API 404", async () => {
         const { handleDashboardRequest } = await import("../../server.ts");
         const res = await handleDashboardRequest(
             new Request("http://127.0.0.1:1738/api/ingest"),
         );
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ error: "not_found" });
+        expect(res.status).toBe(404);
+        await expect(res.json()).resolves.toEqual({ error: "not_found", path: "/api/ingest" });
     });
 
     test("POST /api/ingest without a booted server falls through to not_found", async () => {
         // The in-browser ingest trigger was retired in studio ephemeral
         // (wave 3) - it is neither a contract route nor a legacy table row
         // anymore, so any request to it (booted server or not) answers the
-        // /api/* not_found quirk.
+        // /api/* 404.
         const { handleDashboardRequest } = await import("../../server.ts");
         const res = await handleDashboardRequest(
             new Request("http://127.0.0.1:1738/api/ingest", { method: "POST", body: "{}" }),
         );
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ error: "not_found" });
+        expect(res.status).toBe(404);
+        await expect(res.json()).resolves.toEqual({ error: "not_found", path: "/api/ingest" });
     });
 });
