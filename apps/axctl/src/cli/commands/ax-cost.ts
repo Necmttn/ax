@@ -21,6 +21,7 @@ import {
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import { fetchImageContext } from "../../queries/image-context.ts";
 import { fetchAttributionCost, type AttributionRow } from "../../queries/attribution-cost.ts";
+import { fetchCacheBustCost, type CacheBustOffenderRow } from "../../queries/cache-bust.ts";
 import {
     buildCostModelsNext,
     buildCostSplitNext,
@@ -563,12 +564,137 @@ const costAttributionCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax cost cache [--days=N] [--limit=N] [--json]
+// ---------------------------------------------------------------------------
+
+const weekly = (costUsd: number, days: number): number => (costUsd * 7) / days;
+
+const cmdCostCache = (input: {
+    readonly sinceDays: number;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        const read = yield* CacheRead;
+        const result = yield* fetchCacheBustCost(read, { sinceDays: input.sinceDays, limit: input.limit });
+
+        if (input.json) {
+            console.log(prettyPrint(result));
+            return;
+        }
+
+        if (result.coverage.bustTurns === 0) {
+            console.log("(no cache-bust events in the requested window)");
+            console.log(
+                "Claude Code stamps cache_miss_reason since ~2026-05; pre-existing sessions read null " +
+                    "until `ax ingest --reparse=claude` backfills them, and the ledger populates at ingest.",
+            );
+            return;
+        }
+
+        type ReasonRow = { reason: string; busts: string; sessions: string; tokens: string; cost: string };
+        const reasonRows: ReasonRow[] = result.reasons.map((r) => ({
+            reason: r.reason,
+            busts: integer(r.busts),
+            sessions: integer(r.sessions),
+            tokens: integer(r.tokens),
+            cost: usd(r.costUsd),
+        }));
+        const reasonCols: Column<ReasonRow>[] = [
+            { header: "cause", get: (r) => r.reason, min: 26 },
+            { header: "busts", get: (r) => r.busts, align: "right", min: 6 },
+            { header: "sessions", get: (r) => r.sessions, align: "right", min: 8 },
+            { header: "tokens", get: (r) => r.tokens, align: "right", min: 12 },
+            { header: "cost", get: (r) => r.cost, align: "right", min: 9 },
+        ];
+        console.log(renderTable({ columns: reasonCols, rows: reasonRows, gap: " " }));
+        console.log();
+
+        type OffRow = { name: string; busts: string; sessions: string; cost: string };
+        const renderOffenders = (kind: string, rows: ReadonlyArray<CacheBustOffenderRow>): void => {
+            if (rows.length === 0) return;
+            const rendered: OffRow[] = rows.map((r) => ({
+                name: r.name.slice(0, 40),
+                busts: integer(r.busts),
+                sessions: integer(r.sessions),
+                cost: usd(r.costUsd),
+            }));
+            const cols: Column<OffRow>[] = [
+                { header: kind, get: (r) => r.name, min: 26 },
+                { header: "busts", get: (r) => r.busts, align: "right", min: 6 },
+                { header: "sessions", get: (r) => r.sessions, align: "right", min: 8 },
+                { header: "cost", get: (r) => r.cost, align: "right", min: 9 },
+            ];
+            console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+            console.log();
+        };
+        renderOffenders("offender (skill, native)", result.skills);
+        renderOffenders("offender (agent, native)", result.agents);
+
+        const cov = result.coverage;
+        // `pct` renders a 0-100 value, not a 0-1 fraction (#881).
+        const turnShare = cov.totalTurns > 0 ? (100 * cov.bustTurns) / cov.totalTurns : 0;
+        const costShare =
+            cov.totalCacheCreationUsd > 0 ? (100 * cov.bustCostUsd) / cov.totalCacheCreationUsd : 0;
+        console.log(
+            `coverage: ${integer(cov.bustTurns)}/${integer(cov.totalTurns)} claude usage rows ` +
+                `(${pct(turnShare)}) carry a cache-miss reason - ${usd(cov.bustCostUsd)} of ` +
+                `${usd(cov.totalCacheCreationUsd)} cache-creation spend (${pct(costShare)})`,
+        );
+
+        const corr = result.corroboration;
+        if (corr.comparableBusts > 0 && corr.costUsd > 0) {
+            const deviation = (100 * Math.abs(corr.corroboratedUsd - corr.costUsd)) / corr.costUsd;
+            const verdict = deviation <= 25 ? "agrees within" : "DIVERGES by";
+            console.log(
+                `corroboration: flat-rate recompute ${verdict} ${pct(deviation)} over ` +
+                    `${integer(corr.comparableBusts)} priced busts (±25% is the proposal guard)`,
+            );
+        }
+
+        const trims: string[] = [];
+        const topSkill = result.skills[0];
+        if (topSkill) trims.push(`top offender "${topSkill.name}" ≈ ${usd(weekly(topSkill.costUsd, input.sinceDays))}/week`);
+        const topReason = result.reasons[0];
+        if (topReason) trims.push(`top cause "${topReason.reason}" ≈ ${usd(weekly(topReason.costUsd, input.sinceDays))}/week`);
+        if (trims.length > 0) console.log(`trimming: ${trims.join("; ")}`);
+
+        console.log(
+            `\n(${input.sinceDays} days; a bust = a billing event whose prompt cache missed; ` +
+                "cost = the cache-creation tokens that re-established it on that turn)",
+        );
+    });
+
+const costCacheCommand = Command.make(
+    "cache",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
+        limit: positiveLimit(20),
+        json: jsonFlag,
+    },
+    ({ days, limit, json }) => {
+        if (!Number.isInteger(days) || days <= 0) {
+            fail(`ax cost cache: --days must be a positive integer (got "${days}")`);
+        }
+        if (!Number.isInteger(limit) || limit <= 0) {
+            fail(`ax cost cache: --limit must be a positive integer (got "${limit}")`);
+        }
+        return cmdCostCache({ sinceDays: days, limit, json });
+    },
+).pipe(
+    Command.withDescription(
+        "Cache-bust cost attribution (#868): bust events by cause, $ per cause, top offenders by native " +
+        "attribution, and a trimming estimate. --days=N (default 14)  --limit=N (default 20)  --json",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax cost (group command)
 // ---------------------------------------------------------------------------
 
 export const costCommand = Command.make("cost").pipe(
     Command.withDescription(
-        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split, image context cost, native attribution",
+        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split, image context cost, native attribution, cache busts",
     ),
     Command.withSubcommands([
         costModelsCommand,
@@ -577,6 +703,7 @@ export const costCommand = Command.make("cost").pipe(
         costRoutabilityCommand,
         costImagesCommand,
         costAttributionCommand,
+        costCacheCommand,
     ]),
 );
 

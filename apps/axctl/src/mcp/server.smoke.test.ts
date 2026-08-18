@@ -38,6 +38,7 @@ const EXPECTED_TOOLS = [
     "cost_split",
     "cost_images",
     "cost_attribution",
+    "cost_cache",
     "cost_routability",
     "otel",
     "runs_evidence",

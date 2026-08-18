@@ -42,6 +42,7 @@ import { contentTypesStage } from "../derive-content-types.ts";
 import { directiveNgramsStage } from "../derive-directive-ngrams.ts";
 import { adviceStage } from "../../advice/advice-stage.ts";
 import { runEvidenceStage } from "../derive-run-evidence.ts";
+import { cacheBustStage } from "../derive-cache-bust.ts";
 
 export type { StageDef } from "./types.ts";
 
@@ -84,7 +85,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, ompStage, opencodeStage, cursorStage, otelSpoolStage, hookFireSpoolStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage, runEvidenceStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, claudeConfigStage, pricingStage, claudeStage, codexStage, piStage, ompStage, opencodeStage, cursorStage, otelSpoolStage, hookFireSpoolStage, subagentsStage, claudeSidecarsStage, invokedPositionsStage, spawnedStage, loadedSkillsStage, gitStage, githubPrStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage, digestStage, usageStage, contentTypesStage, directiveNgramsStage, adviceStage, runEvidenceStage, cacheBustStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

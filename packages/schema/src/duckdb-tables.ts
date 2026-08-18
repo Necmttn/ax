@@ -163,6 +163,7 @@ const TABLE_METADATA: Readonly<Record<string, Omit<DuckdbTableSpec, "table">>> =
     telemetry_of: { kind: "edge", stage: "active", note: "Edge: session -> otel telemetry row (drawn at ingest)." },
     run_evidence_event: { kind: "node", stage: "active", note: "Run evidence ledger (#578): normalized claim/observation/verification/boundary events over the graph; backing distinguishes model claim vs tool-backed." },
     run_evidence_ref: { kind: "node", stage: "active", note: "Run evidence ledger (#578): structural refs/hashes off an evidence event; privacy_level keeps payloads out by default." },
+    cache_bust_event: { kind: "node", stage: "active", note: "Cache-bust ledger (#868): one row per usage row carrying a cache_miss_reason, priced (ingest cost + independent flat-rate corroboration); derived by the cache-bust SQL model, id == turn_token_usage.id." },
 };
 
 /** Builds the manifest from `DUCKDB_TABLE_NAMES` (the parsed DDL) joined

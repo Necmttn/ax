@@ -16,12 +16,15 @@ import {
     RUN_EVIDENCE_REF_MODEL,
     runEvidenceModelVersion,
 } from "./run-evidence-models.ts";
+import { CACHE_BUST_EVENT_MODEL, CACHE_BUST_MODELS, cacheBustModelVersion } from "./cache-bust-models.ts";
 
 const TABLES = new Set(parseDuckdbTables());
 
+const ALL_MODELS = [...RUN_EVIDENCE_MODELS, ...CACHE_BUST_MODELS];
+
 describe("model header contract", () => {
     test("every registered model declares model/inputs/rebuild and targets a real table", () => {
-        for (const model of RUN_EVIDENCE_MODELS) {
+        for (const model of ALL_MODELS) {
             const header = parseModelHeader(model.sql);
             expect(header.model).toBe(model.name);
             expect(TABLES.has(header.model)).toBe(true);
@@ -38,7 +41,7 @@ describe("model header contract", () => {
     });
 
     test("an incremental model actually reads the since_days variable", () => {
-        for (const model of RUN_EVIDENCE_MODELS) {
+        for (const model of ALL_MODELS) {
             if (parseModelHeader(model.sql).rebuild === "incremental") {
                 expect(model.sql).toContain("getvariable('since_days')");
             }
@@ -50,7 +53,7 @@ describe("model header contract", () => {
     });
 
     test("the ICU-less clock spelling is used wherever the models read the clock", () => {
-        for (const model of RUN_EVIDENCE_MODELS) {
+        for (const model of ALL_MODELS) {
             for (const match of model.sql.matchAll(/CURRENT_TIMESTAMP/g)) {
                 const before = model.sql.slice(Math.max(0, match.index - 6), match.index);
                 expect(before).toContain("CAST(");
@@ -82,6 +85,19 @@ describe("drift pins", () => {
         expect(v).toHaveLength(16);
         // Stable across calls (it seeds the cutover marker).
         expect(runEvidenceModelVersion()).toBe(v);
+        const cb = cacheBustModelVersion();
+        expect(cb).toHaveLength(16);
+        expect(cacheBustModelVersion()).toBe(cb);
+    });
+
+    test("the cache-bust model corroborates with the flat rate, never the ingest pricer's tiers", () => {
+        // The corroboration column exists to be INDEPENDENT of ingest pricing
+        // (plan Q1's ±25% guard). Reintroducing the tiered/fast-multiplier
+        // machinery here would make the guard compare a number with itself.
+        expect(CACHE_BUST_EVENT_MODEL.sql).toContain("cache_creation_per_million_usd");
+        expect(CACHE_BUST_EVENT_MODEL.sql).not.toMatch(/above_200k|fast_multiplier/);
+        // The direct price stays the ingest pricer's number.
+        expect(CACHE_BUST_EVENT_MODEL.sql).toContain("estimated_cache_creation_cost_usd");
     });
 
     test("the policy-decision effect list matches the TS query's", () => {
