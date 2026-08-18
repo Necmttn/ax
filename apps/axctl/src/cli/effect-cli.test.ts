@@ -239,6 +239,7 @@ describe("effect cli", () => {
         // All stages in the registry with the "derive" tag:
         expect([...keys].sort()).toEqual([
             "advice",
+            "cache-bust",
             "classifier-results",
             "closure",
             "content-types",

@@ -39,6 +39,7 @@ describe("coverage of the Surreal schema", () => {
         // on this list must have a Surreal counterpart.
         const bornAfterSurreal = new Set([
             "schema_comment_state", // #869 COMMENT ON bookkeeping
+            "cache_bust_event", // #868 cache-bust ledger (SQL model)
         ]);
         const surrealSet = new Set(surrealTables.map((t) => t.table));
         expect(duckTables.filter((t) => !surrealSet.has(t) && !bornAfterSurreal.has(t))).toEqual([]);

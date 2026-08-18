@@ -184,6 +184,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "run_evidence_event", stage: "active", note: "Run evidence ledger (#578): normalized claim/observation/verification/boundary events over the graph; backing distinguishes model claim vs tool-backed." },
     { table: "run_evidence_ref", stage: "active", note: "Run evidence ledger (#578): structural refs/hashes off an evidence event; privacy_level keeps payloads out by default." },
     { table: "schema_comment_state", stage: "active", note: "Self-documenting catalog bookkeeping (#869): hash of the last-applied COMMENT ON script, so routine opens skip re-applying (WAL crash-safety)." },
+    { table: "cache_bust_event", stage: "active", note: "Cache-bust ledger (#868): one row per usage row carrying a cache_miss_reason, priced (ingest cost + independent flat-rate corroboration); derived by the cache-bust SQL model, id == turn_token_usage.id." },
 ] as const;
 
 export function isInsightView(value: string): value is InsightView {

@@ -77,6 +77,7 @@ import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollu
 import { fetchRunEvidence } from "../queries/run-evidence.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchAttributionCost } from "../queries/attribution-cost.ts";
+import { fetchCacheBustCost } from "../queries/cache-bust.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchAdviceLedger } from "../queries/advice-ledger.ts";
@@ -764,6 +765,35 @@ const costAttributionTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const costCacheTool: AxMcpTool = defineMcpTool({
+    name: "cost_cache",
+    runtime: "cache",
+    description:
+        "Cache-bust cost attribution (#868): which billing events missed the prompt cache, grouped by cache_miss_reason with the cache-creation cost of re-establishing it, top offenders by native skill/agent attribution, a coverage line (share of claude usage rows carrying a reason - null before ~2026-05 and until a --reparse=claude backfill), and a corroboration block (ingest price vs independent flat-rate recompute). Use to find what re-injects context and what trimming it would save.",
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max offender rows per rollup (default 20)."),
+    },
+    run: async (args, rt) => {
+        const sinceDays = args.days ?? COST_DEFAULT_WINDOW_DAYS;
+        const limit = args.limit ?? 20;
+        return await rt.runPromise(Effect.gen(function* () {
+            const read = yield* CacheRead;
+            return yield* fetchCacheBustCost(read, { sinceDays, limit });
+        }));
+    },
+});
+
 const otelTool: AxMcpTool = defineMcpTool({
     name: "otel",
     runtime: "full",
@@ -986,6 +1016,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costSplitTool,
     costImagesTool,
     costAttributionTool,
+    costCacheTool,
     costRoutabilityTool,
     otelTool,
     runsEvidenceTool,

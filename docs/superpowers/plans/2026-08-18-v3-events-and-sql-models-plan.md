@@ -155,6 +155,23 @@ BOTH paths post-napi (the old 73.6s ledger reading was queue-wait, see the
 retraction above); the text-first check_family fix surfaced ~6.9k historical
 verifications norm-only classification missed (#471).
 
+**#868 cache-bust lens DONE (rides the runner).** New `cache_bust_event`
+table derived by `models/cache-bust-event.sql` (stage key `cache-bust`,
+incremental, id == `turn_token_usage.id`, version-marked cutover): one row
+per usage row carrying a `cache_miss_reason_type`, priced twice - the ingest
+pricer's `estimated_cache_creation_cost_usd` passed through, plus an
+INDEPENDENT flat-rate recompute off `agent_model.cache_creation_per_million_usd`
+(no 200k tier, no fast multiplier) so the Q1 corroboration guard never
+compares the pricer with itself. Read surface `ax cost cache` + MCP
+`cost_cache`: busts by cause, offenders by native skill/agent attribution,
+claude-only coverage, corroboration verdict, trimming ~$/week. Real-store
+receipts (90d): 3,047 busts / $3,170.68 of $7,528.82 cache-creation spend;
+top causes previous_message_not_found $1,376 and messages_changed $1,146;
+flat-rate recompute agrees within 0.0% (every bust priced on the flat path).
+Proposal minting (auto-mint per Q1's three guards) is deliberately NOT in
+this slice - it needs the recurrence window and materiality plumbing and
+ships as its own slice on top of the ledger.
+
 ### Phase 4 — events as the contract
 
 - Freeze `ev_*` tables as the normalized layer; segment export/import =

@@ -330,6 +330,7 @@ The 17 tools, each mirroring the matching CLI command:
 - **cost_split** - cost matrix split by origin x model (`ax cost split`).
 - **cost_routability** - main-thread routable-spend lens with est savings (`ax cost routability`).
 - **cost_attribution** - cost by native harness attribution: per-skill/per-agent rollup with cache-miss + api-error mix (`ax cost attribution`).
+- **cost_cache** - cache-bust cost attribution: busts by cause with cache re-establishment cost, top offenders by native attribution, corroborated pricing (`ax cost cache`).
 - **otel** - OTLP receiver health: signal freshness, session coverage, cost cross-check (`ax otel`).
 - **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
 - **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
