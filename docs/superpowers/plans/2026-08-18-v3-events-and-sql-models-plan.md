@@ -110,8 +110,16 @@ replay tests.
 
 ## Unresolved questions
 
-1. #868 proposals: auto-mint into `ax improve`, or human-gated behind review?
-   (asked, unanswered)
+1. #868 proposals: **ANSWERED 2026-08-18 — auto-mint.** Mint is not apply
+   (accept keeps the human gate), so the lens mints at ingest like retro
+   clusters and churn hotspots, behind three guards: (a) corroboration — the
+   lens dollar figure must agree within ±25% with an independent recompute
+   from raw `cache_creation_input_tokens` deltas, else report-only with a
+   loud flag (fails closed if the undocumented fields break upstream);
+   (b) recurrence — same offender across ≥2 ingest windows; (c) materiality
+   ≥ $5/week and ≤3 open cache-lens proposals at once. Minted cards carry
+   provenance: origin, corroboration delta, coverage window, confidence.
+   Recorded on #868.
 2. Phase 1: is the napi client embeddable in the compiled binary? (spike)
 3. Phase 4 content-hash watermark: migration cost over 4.7k existing rows —
    re-hash all on first run, or lazy per-touch?
