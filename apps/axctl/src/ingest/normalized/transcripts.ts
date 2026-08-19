@@ -149,19 +149,22 @@ export const upsertNormalizedSessions = (
     write: CacheWriteService,
     sessions: readonly NormalizedSessionWrite[],
 ): Effect.Effect<void, CacheWriteError> =>
+    // Columns this writer does not own are OMITTED, not nulled: `putMany`
+    // compiles to `ON CONFLICT ("id") DO UPDATE SET <every supplied column>`,
+    // so a hardcoded null here overwrote what its owner just wrote (#898 -
+    // `reasoning_effort` from the claude effort stamp, nulled every run;
+    // `repository`/`checkout` from the git stage, wiped by a
+    // `--stages=claude` reparse until git re-ran).
     write.putMany("session", sessions.map((session) => cacheRow({
         id: session.id,
         project: session.project ?? null,
         cwd: session.cwd ?? null,
         model: session.model ?? null,
-        reasoning_effort: null,
         source: session.provider,
         started_at: tsParam(session.startedAt),
         ended_at: tsParam(session.endedAt),
         raw_file: session.rawFile ?? session.sourcePath ?? null,
         labels: jsonParam(session.labels),
-        repository: null,
-        checkout: null,
         workspace: null,
     })));
 
