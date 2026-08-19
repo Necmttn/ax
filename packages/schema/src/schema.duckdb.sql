@@ -2698,6 +2698,32 @@ CREATE TABLE IF NOT EXISTS run_evidence_ref (
 );
 CREATE INDEX IF NOT EXISTS run_evidence_ref_event ON run_evidence_ref("event");
 CREATE INDEX IF NOT EXISTS run_evidence_ref_session ON run_evidence_ref(session, ts);
+
+-- Learned judgment classifier (#911, Phase 5 landed slice, follow-up to the
+-- #895 prototype: GATE PASSED at matched recall). One row per (model_id,
+-- feature) weight; threshold and version are DENORMALIZED onto every row of
+-- the same model_id rather than a second table - a 13-row artifact (12
+-- features + bias) does not earn a join. `id` is `<model_id>__<feature>`
+-- (the same `__`-join-of-parts id shape as ingest_stage's
+-- `run__source__stage`) - every table in this schema is keyed by a single
+-- `id VARCHAR PRIMARY KEY` (enforced by duckdb-schema.test.ts's "every table
+-- declares id VARCHAR PRIMARY KEY first"; no table gets a composite PK), so
+-- the (model_id, feature) identity is folded into that one column rather
+-- than declared as a real composite key. Seeded idempotently at ingest from
+-- the committed constants module (apps/axctl/src/queries/judgment-weights.ts,
+-- JUDGMENT_MODEL_SEED); classifyTurn's DEFAULT path never reads this table -
+-- it only lights up behind AX_JUDGMENT_MODEL=learned. Bookkeeping layer: the
+-- store's own model-serving state, not data derived from transcripts.
+CREATE TABLE IF NOT EXISTS classifier_weights (
+    id VARCHAR PRIMARY KEY,
+    model_id VARCHAR NOT NULL,
+    feature VARCHAR NOT NULL,
+    weight DOUBLE NOT NULL,
+    threshold DOUBLE NOT NULL,
+    version VARCHAR NOT NULL,
+    trained_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS classifier_weights_model_id ON classifier_weights(model_id);
 CREATE INDEX IF NOT EXISTS run_evidence_ref_target ON run_evidence_ref(target_table, target_id);
 
 -- ---------------------------------------------------------------------------

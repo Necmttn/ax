@@ -29,6 +29,7 @@ import { BaseStageStats, IngestContext, type StageDef } from "./stage/types.ts";
 import { reapStaleIngestRuns } from "./reap-runs.ts";
 import { correlateOrphanOtel } from "../otel/correlate.ts";
 import { retainRecentOtel, type OtelRetentionResult } from "../otel/retention.ts";
+import { seedClassifierWeights } from "./seed-classifier-weights.ts";
 
 export interface StageEventName {
     readonly source: string;
@@ -489,6 +490,10 @@ export const runIngest = (
                 Effect.succeed({ error: errorText(error) })),
         );
         yield* buildFtsIndexes(write);
+        // Idempotent, version-gated seed - not a stage (nothing here is
+        // derived from transcripts); best-effort like FTS, a failure here
+        // must not fail the whole run (regex judgment path stays the floor).
+        yield* seedClassifierWeights(write).pipe(Effect.ignore);
         return {
             runId,
             selectedStages: selectedStages.map((s) => s.meta.key),
