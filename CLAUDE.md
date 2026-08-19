@@ -376,6 +376,27 @@ objective + repo headline lines, counts by kind + by backing (model_claim shown
 even at 0), ref counts, latest-N timeline, Studio deeplink. MCP: `runs_evidence`.
 Only `claim` (too noisy) + `artifact_ref` remain deferred. Spec/threads on #578.
 
+### Segments (#902)
+
+`ax segment export --sessions=<ids>|--since=Nd --out=<dir>` / `ax segment
+import <dir> [--yes]` move session-scoped EVENT rows between ax stores as a
+plain NDJSON directory. The table list + enrichment strip live in
+`apps/axctl/src/segment/contract.ts` and ARE the `cli:segment-import` entry in
+`NON_STAGE_WRITERS` (imported, cannot drift). Export runs COPY TO on the
+READ_ONLY snapshot, manifest written LAST; explicit `--sessions` expand to
+spawned descendants; enrichment columns (`ENRICHMENT_COLUMNS`) are EXCLUDED
+from the projection - not nulled - so import's column-intersection upsert
+(manifest cols ∩ local DDL, `read_ndjson(columns=...)` + `ON CONFLICT DO
+UPDATE` over exactly that set; NOT the spool) can never clobber local
+enrichment. Import also writes `__imported__/<kind>/<sha>` watermark marks
+(`importedMarkPath` + `FileWatermark.knownContentSha` - the jsonl work-unit
+refresh-skips a NEW path whose bytes carry a known sha), then triggers the
+contract-driven re-derive (stages whose declared writes are all
+derive/enrich/bookkeep) over `--since=ceil(now - min(started_at))` through the
+exported `cmdIngest`. Catalogs never ride (dangling edges knit later by stable
+ids); cost columns ride as priced by the exporter (manifest note). A segment
+carries raw turn text - LOCAL artifact, never published, no attribution plug.
+
 ## Workflow extraction commands
 
 ### Scoped ingest

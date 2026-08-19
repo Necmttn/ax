@@ -191,6 +191,31 @@ uuid or a `session:`-prefixed id; `--json` carries the same data plus a `{next}`
 Studio deeplink. Also exposed as the `runs_evidence` MCP tool. Only `claim` (too
 noisy) and `artifact_ref` remain not-yet-derived.
 
+## Segments (move sessions between stores)
+
+`ax segment export --sessions=<id,id,...>|--since=Nd --out=<dir>` writes
+session-scoped EVENT rows (transcript-derived tables only - never derived,
+bookkeeping, or catalog tables) to a plain directory: one `<table>.ndjson` per
+table plus a `manifest.json` written LAST (a manifest-less directory is an
+aborted export). Explicit `--sessions` ids are expanded to their spawned
+subagent descendants. Machine-local enrichment columns (`session.project`,
+`turn.intent_kind`, the `invoked` position backfill, sidecar-derived session
+costs) are excluded from the projection, so an import can never clobber the
+target's own enrichment. The segment contains raw turn text and tool I/O - it
+is a LOCAL artifact you move yourself; do not publish it.
+
+`ax segment import <dir> [--yes]` loads a segment under the ingest lock:
+validates the manifest and per-file sha256, loads each table with a
+column-intersection loader (manifest columns ∩ local DDL columns, upserting
+only that set), writes `__imported__/<kind>/<sha>` content-hash watermark
+marks so the target's next ingest refresh-skips the original transcript files
+instead of reparsing them, then re-derives over a wide since-window (the
+contract-driven derive set: every stage whose declared writes are all
+derive/enrich/bookkeep). A `ddl_hash` mismatch (the segment was exported by an
+ax with a different schema) requires `--yes`; unknown columns are dropped and
+missing ones load as NULL. Cost columns ride as priced by the exporting
+machine (accepted divergence, noted in the manifest).
+
 ## Digest (push-value)
 
 `ax digest [--json] [--refresh]` renders your local digest board - the ranked

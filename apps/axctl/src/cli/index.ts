@@ -22,6 +22,7 @@ import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./c
 import { costCommand, axCostRuntime } from "./commands/ax-cost.ts";
 import { otelCommand, axOtelRuntime } from "./commands/ax-otel.ts";
 import { runsCommand, axRunsRuntime } from "./commands/runs.ts";
+import { segmentCommand, segmentRuntime } from "./commands/segment.ts";
 import { memoryCommand, axMemoryRuntime } from "./commands/ax-memory.ts";
 import { quotaCommand, quotaRuntime } from "./commands/quota.ts";
 import { dojoCommand, dojoRuntime } from "./commands/dojo.ts";
@@ -97,6 +98,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...axCostRuntime,
     ...axOtelRuntime,
     ...axRunsRuntime,
+    ...segmentRuntime,
     ...axMemoryRuntime,
     ...quotaRuntime,
     ...dojoRuntime,
@@ -149,6 +151,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     costCommand,
     otelCommand,
     runsCommand,
+    segmentCommand,
     memoryCommand,
     quotaCommand,
     dojoCommand,

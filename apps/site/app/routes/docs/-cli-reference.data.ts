@@ -193,6 +193,29 @@ run evidence: session 9f3c…  [53 events]
         ],
       },
       {
+        name: "segment",
+        sub: ["export", "import"],
+        job: "Move session-scoped event rows between ax stores as a plain NDJSON directory - export on one machine, import on another.",
+        signature: "ax segment export --sessions=<ids>|--since=Nd --out=<dir>",
+        flags: [
+          { flag: "--sessions=<ids>", desc: "explicit session ids (spawned subagent descendants included)" },
+          { flag: "--since=Nd", desc: "or: every session started in the last N days" },
+          { flag: "--out=<dir>", desc: "target directory (one <table>.ndjson per table + manifest.json)" },
+          { flag: "--yes", desc: "import only: accept a segment exported under a different schema (ddl_hash mismatch)" },
+        ],
+        receipt: `$ ax segment export --sessions=9f3c… --out=./seg
+exported 2 session(s) to ./seg
+  session: 2 row(s)
+  turn: 214 row(s)
+  tool_call: 96 row(s)
+  source file hashes: 2`,
+        detail: [
+          "Event tables only: derived tables re-derive on the importing machine, catalogs never ride, and machine-local enrichment columns are stripped so an import cannot clobber local enrichment.",
+          "Import validates per-file sha256, upserts with a column-intersection loader, writes content-hash watermark marks (the next ingest skips the original transcript files), then re-derives over a wide window.",
+          "A segment contains raw turn text and tool I/O - it is a local artifact you move yourself; do not publish it.",
+        ],
+      },
+      {
         name: "memory",
         sub: ["ops"],
         job: "Claude memory-file activity: writes/edits the agent made to its ~/.claude/.../memory/*.md files.",

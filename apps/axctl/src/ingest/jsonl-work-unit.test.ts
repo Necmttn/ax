@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { hashFileSha256 } from "@ax/lib/duckdb/watermark";
+import { hashFileSha256, importedMarkPath, WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
 import { parseDuckdbColumnDefs } from "@ax/schema/duckdb-ddl";
 import type { CacheWriteError } from "@ax/lib/duckdb/seam";
 import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
@@ -303,5 +303,45 @@ describe("content-hash tier (#900) on real files", () => {
         expect(runs[2]).toEqual([]);
         const expected = await Effect.runPromise(hashFileSha256(filePath));
         expect(storedSha as string | null).toBe(expected);
+    });
+
+    dtest("an __imported__ sentinel mark makes a NEW path with those bytes refresh-skip; force still parses", async () => {
+        const dir = tempDir("ax-jsonl-content3-");
+        const filePath = `${dir}/imported.jsonl`;
+        await Bun.write(filePath, `{"seg":"row"}\n`);
+        const stat = await statOf(filePath);
+        const sha = (await Effect.runPromise(hashFileSha256(filePath))) as string;
+
+        const first: string[] = [];
+        const forced: string[] = [];
+        let firstResult: unknown;
+        let forcedResult: unknown;
+        let newPathSha: string | null = null;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-jsonl-content3-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                // What `ax segment import` will write: a sentinel mark keyed by
+                // content, attesting the bytes are already in the store.
+                yield* write.put(WATERMARK_TABLE, watermarkRow("codex_session", importedMarkPath("codex_session", sha), { sha }));
+                firstResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(filePath, stat.mtimeMs, stat.sizeBytes)], first),
+                    contentHash: true,
+                });
+                newPathSha = (yield* write.rows(Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+                    "SELECT sha FROM ingest_file_state WHERE path = ?", [filePath]))[0]!.sha;
+                // A forced run must ignore the handshake and parse for real.
+                process.env["AX_REDERIVE_TEST"] = "1";
+                forcedResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(filePath, stat.mtimeMs, stat.sizeBytes)], forced),
+                    contentHash: true,
+                }).pipe(Effect.ensuring(Effect.sync(() => { delete process.env["AX_REDERIVE_TEST"]; })));
+            }),
+        ));
+        // Never parsed: the sentinel's sha vouched for the bytes.
+        expect(firstResult).toMatchObject({ files: 0, skippedUnchanged: 0, refreshedUnchanged: 1 });
+        expect(first).toEqual([]);
+        // And the NEW path got its own full mark, so the next run fast-skips.
+        expect(newPathSha as string | null).toBe(sha);
+        expect(forcedResult).toMatchObject({ files: 1, refreshedUnchanged: 0 });
+        expect(forced).toEqual([filePath]);
     });
 });

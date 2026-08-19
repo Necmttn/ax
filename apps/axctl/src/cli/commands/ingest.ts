@@ -320,7 +320,10 @@ const runMaintenanceHalf = <A, E, R>(
 // --since/--reset parsing). Until runIngest grows a typed options contract,
 // the ingest handlers stay on string args; the Command handlers below build
 // them from typed flags exactly as before.
-const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
+// Exported for `ax segment import` (#902): after loading a segment it triggers
+// the wide-window re-derive through this exact path, so the lock, deadline,
+// verdicts, and maintenance summary behave like any other ingest.
+export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
     Effect.gen(function* () {
         const commandName = opts.command ?? "ingest";
         const cfg = yield* AxConfig;
