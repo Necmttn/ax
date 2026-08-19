@@ -138,12 +138,28 @@ export const hashFileSha256 = (path: string): Effect.Effect<string | null> =>
         }
     });
 
+/** Sentinel path for a mark imported via `ax segment import` (#902): the
+ *  original path is another machine's, so the mark is keyed by content. The
+ *  hash-indexed lookup ({@link FileWatermark.knownContentSha}) is what makes
+ *  it useful - a file with those bytes landing at ANY local path skips its
+ *  first parse. Embeds the kind for the same UNIQUE(path) reason as
+ *  {@link contentHashSentinelPath}. */
+export const importedMarkPath = (sourceKind: string, sha: string): string => `__imported__/${sourceKind}/${sha}`;
+
+const isSentinelMarkPath = (path: string): boolean =>
+    path.startsWith("__content_hash_backfill__/") || path.startsWith("__imported__/");
+
 export interface FileWatermark {
     /** true => the on-disk (mtime,size) matches the stored mark => skip. */
     unchanged(path: string, mtimeMs: number, size: number): boolean;
     /** The stored content hash for the durable tier, or null when the mark
      *  has none (legacy row, hash failure, or `contentHash` off). */
     storedSha(path: string): string | null;
+    /** true => bytes with this hash were already fully ingested under this
+     *  source kind - by a parse on this machine (any path) or by a segment
+     *  import (#902, `importedMarkPath` marks). The caller may then mark the
+     *  new path and skip the parse. Always false under forceEnv. */
+    knownContentSha(sha: string): boolean;
     /** Write the mark. Call only AFTER the file's own writes succeed. */
     commit(path: string, mtimeMs: number, size: number, sha?: string | null): Effect.Effect<void, CacheWriteError>;
     /** The same row {@link commit} would write, for a stage that batches its
@@ -262,8 +278,16 @@ export const fileWatermark = (
             }
         }
 
+        // Content-hash index across ALL of this kind's marks (#902): real file
+        // marks AND `__imported__/` sentinel marks, whose sha attests the
+        // bytes were ingested elsewhere. The backfill-version sentinel is
+        // excluded (its sha is a version tag, not a content hash). Empty under
+        // force, so a forced run reparses everything.
+        const knownShas = new Set<string>();
         if (!forced) {
             for (const row of rows) {
+                if (row.sha !== null && !row.path.startsWith("__content_hash_backfill__/")) knownShas.add(row.sha);
+                if (isSentinelMarkPath(row.path)) continue;
                 if (row.mtime_ms === null || row.size === null) continue;
                 marks.set(row.path, { mtimeMs: row.mtime_ms, size: row.size, sha: row.sha });
             }
@@ -278,6 +302,7 @@ export const fileWatermark = (
                 return mark !== undefined && mark.mtimeMs === mtimeMs && mark.size === size;
             },
             storedSha: (path) => marks.get(path)?.sha ?? null,
+            knownContentSha: (sha) => knownShas.has(sha),
             commit: (path, mtimeMs, size, sha) => write.put(WATERMARK_TABLE, row(path, mtimeMs, size, sha)),
             row,
         } satisfies FileWatermark;

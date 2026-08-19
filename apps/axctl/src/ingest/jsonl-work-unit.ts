@@ -229,7 +229,14 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                     if (opts.contentHash === true) {
                         contentSha = yield* hashFileSha256(candidate.path);
                         const stored = wm.storedSha(candidate.path);
-                        if (contentSha !== null && stored !== null && contentSha === stored) {
+                        const known =
+                            contentSha !== null &&
+                            (stored === contentSha ||
+                                // Same bytes under a NEW path (#902): moved file,
+                                // resynced dir, or a `segment import` sentinel
+                                // attesting the content was loaded already.
+                                (stored === null && wm.knownContentSha(contentSha)));
+                        if (known) {
                             refreshedUnchanged += 1;
                             // Direct commit even in spool mode: a refresh has
                             // no spooled rows to wait for.
