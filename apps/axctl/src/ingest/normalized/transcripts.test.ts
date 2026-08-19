@@ -68,3 +68,31 @@ describe("normalized transcript persistence on real DuckDB", () => {
         expect(row).toEqual({ id: "catalog-id", scope: "user", content_hash: "real" });
     });
 });
+
+describe("normalized session upsert does not clobber columns it does not own (#898)", () => {
+    dtest("reasoning_effort / repository / checkout survive a re-upsert of the same session", async () => {
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-normalized-own-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                // What the effort stamp + git enrichment wrote before the batch.
+                yield* write.put("session", {
+                    id: "session-e", source: "claude", started_at: at,
+                    reasoning_effort: "high", repository: "repo:x", checkout: "checkout:y",
+                });
+                yield* writeNormalizedTranscriptBatch(write, {
+                    ...emptyBatch(),
+                    providers: [{ name: "claude", displayName: "Claude Code" }],
+                    sessions: [{ id: "session-e", provider: "claude", startedAt: at }],
+                });
+                row = (yield* write.rows(Schema.Struct({
+                    reasoning_effort: Schema.NullOr(Schema.String),
+                    repository: Schema.NullOr(Schema.String),
+                    checkout: Schema.NullOr(Schema.String),
+                }), "SELECT reasoning_effort, repository, checkout FROM session WHERE id = 'session-e'"))[0];
+            }),
+        ));
+        expect(row).toMatchObject({
+            reasoning_effort: "high", repository: "repo:x", checkout: "checkout:y",
+        });
+    });
+});
