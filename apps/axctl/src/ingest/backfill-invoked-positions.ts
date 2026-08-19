@@ -11,28 +11,36 @@
  * @outputs `invoked.turn_index`, `invoked.total_turns`, `invoked.is_first`
  * @order 80
  *
- * Algorithm (incremental-safe):
+ * Algorithm (set-based; #910 - a cold backfill touches ~90k rows, and the
+ * original one-`UPDATE`-per-row loop burned the stage's 300s self-time budget
+ * and got budget-stopped fail-open):
  *
- * 1. Identify affected (session, skill) pairs - those with ANY row where at
- *    least one position field is NONE. Even if only one new row was appended,
- *    we must recompute the full group to avoid marking a non-first invocation
- *    as is_first=true.
+ * 1. `DESIRED_POSITIONS_SQL` computes the desired `turn_index`/`total_turns`/
+ *    `is_first` for every row belonging to an affected (session, out_id) pair
+ *    - a pair is affected when ANY row in it still carries a NULL position
+ *      field (matched via a correlated `EXISTS`, so recomputing an
+ *      incrementally-appended group never flips an existing `is_first`
+ *      wrongly). `turn_index` keeps the RELATE-time value when present,
+ *      falling back to the joined turn's `seq`; `total_turns` is always the
+ *      CURRENT per-session turn count; `is_first` is a `row_number() OVER
+ *      (PARTITION BY session, out_id ORDER BY seq, id) = 1` - the `id`
+ *      tie-break is a deliberate determinism improvement over the old loop's
+ *      fetch-order tie-break (which had none for same-seq rows).
  *
- * 2. For each affected pair, fetch ALL invoked rows in that group.
+ * 2. Stats are read FIRST via a `SELECT count(*)` / `count(DISTINCT session)`
+ *    over that desired set, filtered to rows where at least one field is
+ *    `IS DISTINCT FROM` its current value - this is what `backfilled` and
+ *    `sessions` report, and is computed BEFORE the write so the stats and the
+ *    update agree on exactly the same predicate.
  *
- * 3. Compute desired state:
- *    - turn_index: keep existing value if NOT NONE (RELATE-time snapshot);
- *      fall back to in.seq only when currently NONE.
- *    - total_turns: always recompute from current session turn count (sessions
- *      grow as new transcripts are appended).
- *    - is_first: always recompute - the row with the smallest seq in the group.
- *
- * 4. Emit UPDATE only when at least one field differs from the current value.
- *    Idempotent: a second run with no new data produces 0 updates.
+ * 3. One `UPDATE invoked ... FROM (<same query>) d WHERE invoked.id = d.id
+ *    AND (<same IS DISTINCT FROM predicate>)` applies the change. The
+ *    predicate is load-bearing: a second no-op run touches 0 rows (behavior-
+ *    digest tests hash table contents, so an UPDATE that rewrites unchanged
+ *    values would flip a digest even though nothing changed).
  */
 
-import { Effect, Schema } from "effect";
-import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
+import { Effect, Option, Schema } from "effect";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -42,15 +50,51 @@ export interface BackfillInvokedPositionsStats {
     sessions: number;
 }
 
-const PositionRow = Schema.Struct({
-    id: Schema.String,
-    session: Schema.String,
-    skill: Schema.String,
-    seq: NumberFromBigIntColumn,
-    turn_index: Schema.NullOr(NumberFromBigIntColumn),
-    total_turns: Schema.NullOr(NumberFromBigIntColumn),
-    is_first: Schema.NullOr(Schema.Boolean),
-    desired_total_turns: NumberFromBigIntColumn,
+/**
+ * Desired turn_index/total_turns/is_first for every row of every (session,
+ * out_id) pair that has at least one row with a NULL position field, alongside
+ * that row's CURRENT values so callers can filter to what actually changes.
+ * A plain SELECT (no CTE) so it can be embedded both wrapped in an aggregate
+ * (stats) and as the `FROM` source of an `UPDATE ... FROM` (write).
+ */
+const DESIRED_POSITIONS_SQL = `
+    SELECT
+        i.id AS id,
+        i.session AS session,
+        i.turn_index AS current_turn_index,
+        i.total_turns AS current_total_turns,
+        i.is_first AS current_is_first,
+        COALESCE(i.turn_index, t.seq) AS turn_index,
+        tc.n AS total_turns,
+        row_number() OVER (
+            PARTITION BY i.session, i.out_id ORDER BY t.seq, i.id
+        ) = 1 AS is_first
+    FROM invoked i
+    JOIN turn t ON t.id = i.in_id
+    JOIN (SELECT session, count(*) AS n FROM turn GROUP BY session) tc
+        ON tc.session = i.session
+    WHERE EXISTS (
+        SELECT 1 FROM invoked i2
+        WHERE i2.session = i.session
+          AND i2.out_id = i.out_id
+          AND (i2.turn_index IS NULL OR i2.total_turns IS NULL OR i2.is_first IS NULL)
+    )
+`;
+
+/** Rows of {@link DESIRED_POSITIONS_SQL} (aliased `alias`) whose desired value
+ *  differs from its current one - the set both the stats query and the UPDATE
+ *  agree on. Column names are qualified by `alias` because the UPDATE's `FROM`
+ *  puts both `invoked` and the desired-set alias in scope at once, and
+ *  `turn_index`/`total_turns`/`is_first` exist on both. */
+const changedPredicate = (alias: string) => `
+    ${alias}.current_turn_index IS DISTINCT FROM ${alias}.turn_index
+    OR ${alias}.current_total_turns IS DISTINCT FROM ${alias}.total_turns
+    OR ${alias}.current_is_first IS DISTINCT FROM ${alias}.is_first
+`;
+
+const StatsRow = Schema.Struct({
+    backfilled: Schema.Number,
+    sessions: Schema.Number,
 });
 
 export const backfillInvokedPositions = (write: CacheWriteService): Effect.Effect<
@@ -58,43 +102,26 @@ export const backfillInvokedPositions = (write: CacheWriteService): Effect.Effec
     CacheWriteError
 > =>
     Effect.gen(function* () {
-        const rows = yield* write.rows(PositionRow, `
-            WITH affected AS (
-                SELECT DISTINCT session, out_id
-                FROM invoked
-                WHERE turn_index IS NULL OR total_turns IS NULL OR is_first IS NULL
-            ), turn_counts AS (
-                SELECT session, count(*) AS n FROM turn GROUP BY session
-            )
-            SELECT i.id, i.session, i.out_id AS skill, t.seq, i.turn_index,
-                   i.total_turns, i.is_first, tc.n AS desired_total_turns
-            FROM invoked i
-            JOIN affected a ON a.session = i.session AND a.out_id = i.out_id
-            JOIN turn t ON t.id = i.in_id
-            JOIN turn_counts tc ON tc.session = i.session
-            ORDER BY i.session, i.out_id, t.seq
+        const stats = yield* write.first(StatsRow, `
+            SELECT
+                CAST(count(*) AS DOUBLE) AS backfilled,
+                CAST(count(DISTINCT session) AS DOUBLE) AS sessions
+            FROM (${DESIRED_POSITIONS_SQL}) x
+            WHERE ${changedPredicate("x")}
         `);
-        const seenSessions = new Set<string>();
-        let backfilled = 0;
-        let previousPair = "";
-        for (const row of rows) {
-            seenSessions.add(row.session);
-            const pair = `${row.session}\u0000${row.skill}`;
-            const desiredIsFirst = pair !== previousPair;
-            previousPair = pair;
-            const desiredTurnIndex = row.turn_index ?? row.seq;
-            if (
-                row.turn_index !== null &&
-                row.total_turns === row.desired_total_turns &&
-                row.is_first === desiredIsFirst
-            ) continue;
-            yield* write.exec(
-                "UPDATE invoked SET turn_index = ?, total_turns = ?, is_first = ? WHERE id = ?",
-                [desiredTurnIndex, row.desired_total_turns, desiredIsFirst, row.id],
-            );
-            backfilled += 1;
+        const { backfilled, sessions } = Option.getOrElse(
+            stats,
+            () => ({ backfilled: 0, sessions: 0 }),
+        );
+        if (backfilled > 0) {
+            yield* write.exec(`
+                UPDATE invoked
+                SET turn_index = d.turn_index, total_turns = d.total_turns, is_first = d.is_first
+                FROM (${DESIRED_POSITIONS_SQL}) d
+                WHERE invoked.id = d.id AND (${changedPredicate("d")})
+            `);
         }
-        return { backfilled, sessions: seenSessions.size };
+        return { backfilled, sessions };
     });
 
 // ---------------------------------------------------------------------------
