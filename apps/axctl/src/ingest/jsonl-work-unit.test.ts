@@ -225,9 +225,11 @@ describe("content-hash tier (#900) on real files", () => {
         const filePath = `${dir}/one.jsonl`;
         await Bun.write(filePath, `{"kind":"row"}\n`);
         const statA = await statOf(filePath);
-        // Rewrite the SAME bytes so mtime moves while content does not.
-        await Bun.write(filePath, `{"kind":"row"}\n`);
-        const statB = await statOf(filePath);
+        // A touch moves the stats while the bytes stay the same. Model it by
+        // MOVING THE CANDIDATE STATS, not by rewriting the file: back-to-back
+        // writes can land inside one timer tick (they did on Linux CI), and
+        // identical stats make the FAST tier skip before the durable tier runs.
+        const statB = { mtimeMs: statA.mtimeMs + 7, sizeBytes: statA.sizeBytes };
 
         const first: string[] = [];
         const second: string[] = [];
@@ -274,9 +276,13 @@ describe("content-hash tier (#900) on real files", () => {
                     contentHash: true,
                 });
                 // Change the CONTENT between runs, so run 2 hashes new bytes.
+                // Candidate mtime is bumped past run 1's mark by hand: the
+                // rewrite can land inside run 1's timer tick (same size, same
+                // mtime), and then the fast tier would skip run 2 entirely.
                 const statB = yield* Effect.promise(async () => {
                     await Bun.write(filePath, `{"v":2}\n`);
-                    return statOf(filePath);
+                    const stat = await statOf(filePath);
+                    return { mtimeMs: Math.max(stat.mtimeMs, statA.mtimeMs + 7), sizeBytes: stat.sizeBytes };
                 });
                 for (const index of [1, 2]) {
                     results[index] = yield* runJsonlProviderFiles(write, {
