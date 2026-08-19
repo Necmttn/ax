@@ -17,6 +17,7 @@
  * tagged derive but IS a parser; `usage`/`advice` are external-ledger
  * loaders; `git` is tagged ingest but draws derived `produced` edges).
  */
+import { SEGMENT_TABLES } from "../../segment/contract.ts";
 import type { TableWrite } from "./types.ts";
 
 const w = (table: string, mode: TableWrite["mode"]): TableWrite => ({ table, mode });
@@ -188,6 +189,18 @@ export const NON_STAGE_WRITERS: readonly {
             w("classifier_graph_fact", "derive"),
             w("transcript_label_vector", "derive"),
             w("cites_evidence", "derive"),
+        ],
+    },
+    {
+        // `ax segment import` (#902): loads session-scoped EVENT rows from a
+        // segment directory (column-intersection loader over the contract's
+        // table list) and writes the `__imported__/<kind>/<sha>` watermark
+        // handshake marks. The write set IS the segment contract, imported so
+        // the two cannot drift.
+        writer: "cli:segment-import",
+        writes: [
+            ...SEGMENT_TABLES.map((spec) => w(spec.table, "parse")),
+            w("ingest_file_state", "bookkeep"),
         ],
     },
     {
