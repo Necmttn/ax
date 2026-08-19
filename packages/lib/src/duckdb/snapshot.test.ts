@@ -352,60 +352,74 @@ describe("publishSnapshot options.from (RULING R14)", () => {
                 const live = join(dir, "live.duckdb");
                 const snap = join(dir, "snapshot.duckdb");
 
-                const rw = yield* db.open(live);
-                yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
-                for (let i = 0; i < 3000; i++) {
-                    yield* rw.exec(`INSERT INTO t VALUES (${i}, '${"x".repeat(2000)}')`);
+                // #908: this case specifically exercises the LOGICAL copy
+                // path's ATTACH/DETACH robustness under a mid-`COPY FROM
+                // DATABASE` OOM failure - a filesystem clonefile never touches
+                // DuckDB's `memory_limit`, so the clone fast path would just
+                // succeed here and the whole scenario below would be moot.
+                // Forcing the logical path is what keeps this test exercising
+                // what its name says it exercises.
+                const previousClone = process.env.AX_SNAPSHOT_CLONE;
+                process.env.AX_SNAPSHOT_CLONE = "off";
+                try {
+                    const rw = yield* db.open(live);
+                    yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
+                    for (let i = 0; i < 3000; i++) {
+                        yield* rw.exec(`INSERT INTO t VALUES (${i}, '${"x".repeat(2000)}')`);
+                    }
+                    // Flush normally at full memory, THEN clamp memory_limit so
+                    // the COPY step itself (not CHECKPOINT, which has nothing
+                    // left to flush) runs out of memory - a real, non-fatal
+                    // DuckDB error ("Out of Memory Error: failed to pin block"),
+                    // not the FATAL "database has been invalidated" error a low
+                    // memory_limit produces during an actual checkpoint. This
+                    // leaves `rw` perfectly usable afterward, matching the
+                    // documented hazard exactly: the connection looks fine, only
+                    // `publishSnapshot` through it is broken.
+                    yield* rw.exec("CHECKPOINT");
+                    yield* rw.exec("PRAGMA memory_limit='2MB'");
+
+                    // THE ASSERTION THAT MATTERS: `publishSnapshot` ATTACHes a
+                    // randomly-aliased database on `rw` and must DETACH it again
+                    // on every path, including a mid-copy failure - a leaked
+                    // attachment does NOT collide with any later publish (the
+                    // alias is a fresh `crypto.randomUUID()` per call, so "a
+                    // later publish through the same connection still succeeds"
+                    // proves nothing: it passes even with
+                    // `Effect.ensuring(detach)` deleted entirely). The direct
+                    // check is the attachment count on `rw` itself, via
+                    // `duckdb_databases()`, taken immediately before and after
+                    // the failed publish.
+                    const attachmentCount = () =>
+                        Effect.gen(function* () {
+                            const result = yield* rw.query("SELECT count(*) AS n FROM duckdb_databases()");
+                            return result.rows[0]!.n as bigint;
+                        });
+
+                    const attachmentsBefore = yield* attachmentCount();
+
+                    const first = yield* Effect.result(db.publishSnapshot(live, snap, { from: rw }));
+                    expect(first._tag).toBe("Failure");
+
+                    const attachmentsAfter = yield* attachmentCount();
+                    expect(attachmentsAfter).toBe(attachmentsBefore);
+
+                    // restore normal memory and confirm the connection is
+                    // otherwise completely healthy - the failure was ordinary,
+                    // not fatal.
+                    yield* rw.exec("PRAGMA memory_limit='4GB'");
+                    expect((yield* rw.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(3000n);
+
+                    // A subsequent publish through the same connection still
+                    // succeeds too, kept as a secondary end-to-end check.
+                    const second = yield* Effect.result(db.publishSnapshot(live, snap, { from: rw }));
+                    expect(second._tag).toBe("Success");
+
+                    yield* rw.close;
+                } finally {
+                    if (previousClone === undefined) delete process.env.AX_SNAPSHOT_CLONE;
+                    else process.env.AX_SNAPSHOT_CLONE = previousClone;
                 }
-                // Flush normally at full memory, THEN clamp memory_limit so
-                // the COPY step itself (not CHECKPOINT, which has nothing
-                // left to flush) runs out of memory - a real, non-fatal
-                // DuckDB error ("Out of Memory Error: failed to pin block"),
-                // not the FATAL "database has been invalidated" error a low
-                // memory_limit produces during an actual checkpoint. This
-                // leaves `rw` perfectly usable afterward, matching the
-                // documented hazard exactly: the connection looks fine, only
-                // `publishSnapshot` through it is broken.
-                yield* rw.exec("CHECKPOINT");
-                yield* rw.exec("PRAGMA memory_limit='2MB'");
-
-                // THE ASSERTION THAT MATTERS: `publishSnapshot` ATTACHes a
-                // randomly-aliased database on `rw` and must DETACH it again
-                // on every path, including a mid-copy failure - a leaked
-                // attachment does NOT collide with any later publish (the
-                // alias is a fresh `crypto.randomUUID()` per call, so "a
-                // later publish through the same connection still succeeds"
-                // proves nothing: it passes even with
-                // `Effect.ensuring(detach)` deleted entirely). The direct
-                // check is the attachment count on `rw` itself, via
-                // `duckdb_databases()`, taken immediately before and after
-                // the failed publish.
-                const attachmentCount = () =>
-                    Effect.gen(function* () {
-                        const result = yield* rw.query("SELECT count(*) AS n FROM duckdb_databases()");
-                        return result.rows[0]!.n as bigint;
-                    });
-
-                const attachmentsBefore = yield* attachmentCount();
-
-                const first = yield* Effect.result(db.publishSnapshot(live, snap, { from: rw }));
-                expect(first._tag).toBe("Failure");
-
-                const attachmentsAfter = yield* attachmentCount();
-                expect(attachmentsAfter).toBe(attachmentsBefore);
-
-                // restore normal memory and confirm the connection is
-                // otherwise completely healthy - the failure was ordinary,
-                // not fatal.
-                yield* rw.exec("PRAGMA memory_limit='4GB'");
-                expect((yield* rw.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(3000n);
-
-                // A subsequent publish through the same connection still
-                // succeeds too, kept as a secondary end-to-end check.
-                const second = yield* Effect.result(db.publishSnapshot(live, snap, { from: rw }));
-                expect(second._tag).toBe("Success");
-
-                yield* rw.close;
             }),
         ),
         // bun's default 5000ms is a LOCAL number. This case does real DuckDB
@@ -416,5 +430,149 @@ describe("publishSnapshot options.from (RULING R14)", () => {
         // the same case passes locally every time. 30s is generous enough that
         // a failure here means the connection really did stay wedged.
         30_000,
+    );
+});
+
+// #908: the clone fast path. `workDir()` places `live.duckdb` and the
+// staged temp file in the SAME directory (a plain `os.tmpdir()` subdirectory
+// under the repo's root APFS volume in this dev/CI environment), which is
+// exactly what `cloneFile` needs - clonefile only works within one
+// filesystem. These cases run with the default (clone-enabled) settings, so
+// on this machine they exercise the clone path; the WAL-tripwire and
+// torn-copy-tripwire GUARD FUNCTIONS themselves (hard to force through a real
+// checkpoint race) are unit-tested directly in `clone-file.test.ts`
+// (`walIsQuiescent`, `statsEqual`) rather than synthesized here. Per the
+// brief, `publishSnapshot`'s public signature stays `Effect<void, ...>` (no
+// added discriminator), so these assert OBSERVABLE BEHAVIOR - data parity and
+// the reader-holds-old-inode property - not which internal path ran.
+describe("publishSnapshot clone-based fast path (#908)", () => {
+    dtest(
+        "publishes identical data through the clone fast path (options.from)",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
+                yield* rw.exec("INSERT INTO t VALUES (1, 'first')");
+                yield* rw.exec("INSERT INTO t VALUES (2, 'second')");
+
+                yield* db.publishSnapshot(live, snap, { from: rw });
+
+                expect(existsSync(snap)).toBe(true);
+                expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+
+                const reader = yield* db.openSnapshot(snap);
+                expect(reader.readOnly).toBe(true);
+                expect((yield* reader.query("SELECT id, note FROM t ORDER BY id")).rows).toEqual([
+                    { id: 1, note: "first" },
+                    { id: 2, note: "second" },
+                ]);
+                yield* reader.close;
+                yield* rw.close;
+            }),
+        ),
+    );
+
+    dtest(
+        "publishes identical data through the clone fast path (no options.from)",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
+                yield* rw.exec("INSERT INTO t VALUES (1, 'only')");
+                yield* rw.close;
+
+                yield* db.publishSnapshot(live, snap);
+
+                const reader = yield* db.openSnapshot(snap);
+                expect((yield* reader.query("SELECT note FROM t")).rows).toEqual([{ note: "only" }]);
+                yield* reader.close;
+            }),
+        ),
+    );
+
+    // Pins the SAME reader-isolation property `snapshot.test.ts` already
+    // covers for the logical path, under the clone path this time: a reader
+    // that opened the OLD snapshot before a republish must keep seeing the
+    // OLD data uninterrupted, because the clone lands at a temp sibling and
+    // only the atomic rename swaps it in - identical guarantee, different
+    // mechanism for producing the temp file.
+    dtest(
+        "a reader holding the OLD snapshot keeps reading while a new one is cloned into place",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
+                yield* rw.exec("INSERT INTO t VALUES (1, 'v1')");
+                yield* db.publishSnapshot(live, snap, { from: rw });
+
+                const reader = yield* db.openSnapshot(snap);
+                const inodeBefore = statSync(snap).ino;
+                expect((yield* reader.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(1n);
+
+                yield* rw.exec("INSERT INTO t VALUES (2, 'v2')");
+                yield* db.publishSnapshot(live, snap, { from: rw });
+
+                // a NEW inode is now published ...
+                expect(statSync(snap).ino).not.toBe(inodeBefore);
+                // ... while the reader holding the OLD handle is unaffected.
+                expect((yield* reader.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(1n);
+                yield* reader.close;
+
+                const fresh = yield* db.openSnapshot(snap);
+                expect((yield* fresh.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(2n);
+                yield* fresh.close;
+                yield* rw.close;
+            }),
+        ),
+    );
+
+    // AX_SNAPSHOT_CLONE=off is the escape hatch: it must force the logical
+    // path unconditionally, and a publish under it must still succeed with
+    // full data parity - the minimal observable assertion the brief calls
+    // for, since forcing a CLONE failure to prove "off" skipped a working
+    // clone isn't reliably constructible here.
+    dtest(
+        "AX_SNAPSHOT_CLONE=off forces the logical path and still publishes correctly",
+        withDuckDb((db) =>
+            Effect.gen(function* () {
+                const dir = workDir();
+                const live = join(dir, "live.duckdb");
+                const snap = join(dir, "snapshot.duckdb");
+
+                const rw = yield* db.open(live);
+                yield* rw.exec("CREATE TABLE t (id INTEGER, note VARCHAR)");
+                yield* rw.exec("INSERT INTO t VALUES (1, 'off-path')");
+                yield* rw.exec("INSERT INTO t VALUES (2, 'still-works')");
+
+                const previous = process.env.AX_SNAPSHOT_CLONE;
+                process.env.AX_SNAPSHOT_CLONE = "off";
+                try {
+                    yield* db.publishSnapshot(live, snap, { from: rw });
+                } finally {
+                    if (previous === undefined) delete process.env.AX_SNAPSHOT_CLONE;
+                    else process.env.AX_SNAPSHOT_CLONE = previous;
+                }
+
+                expect(existsSync(snap)).toBe(true);
+                expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+
+                const reader = yield* db.openSnapshot(snap);
+                expect((yield* reader.query("SELECT count(*) AS n FROM t")).rows[0]!.n).toBe(2n);
+                yield* reader.close;
+                yield* rw.close;
+            }),
+        ),
     );
 });

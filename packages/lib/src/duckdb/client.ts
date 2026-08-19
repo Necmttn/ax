@@ -43,6 +43,7 @@ import { posixPath } from "../shared/path.ts";
 import { stageAndRename } from "../staged-rename.ts";
 import { loadNodeApiOver, type DuckDbNodeApi } from "./binding.ts";
 import { canonicalPath } from "./canonical-path.ts";
+import { cloneFile, statSnapshot, statsEqual, walIsQuiescent } from "./clone-file.ts";
 import { resolveDylibPath } from "./dylib.ts";
 import {
     DuckDbDecodeError,
@@ -575,17 +576,39 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
         Effect.acquireRelease(open(path, options), (conn) => conn.close);
 
     /**
-     * Copy `livePath`'s current contents to `targetPath` via DuckDB's own
-     * `COPY FROM DATABASE ... TO` (which snapshots the live catalog, not
-     * merely the file bytes), landing the copy at a TEMP PATH THAT IS A
-     * SIBLING OF `targetPath` and only then `fs.rename`-ing it into place.
-     * Same directory -> same filesystem -> the rename is atomic (never
-     * `EXDEV`), which is the entire point: a reader that already has
-     * `targetPath` open keeps reading the OLD inode uninterrupted for as long
-     * as it holds that handle, even while this swaps in a new one.
+     * Copy `livePath`'s current contents to `targetPath`, landing the copy
+     * at a TEMP PATH THAT IS A SIBLING OF `targetPath` and only then
+     * `fs.rename`-ing it into place. Same directory -> same filesystem ->
+     * the rename is atomic (never `EXDEV`), which is the entire point: a
+     * reader that already has `targetPath` open keeps reading the OLD inode
+     * uninterrupted for as long as it holds that handle, even while this
+     * swaps in a new one.
      *
-     * The writer connection doing the copy is closed BEFORE the rename
-     * (inside the `Effect.ensuring` guarding the copy - or, with
+     * TWO ways to produce that temp file, tried in this order (#908):
+     *
+     *  1. THE CLONE FAST PATH (`attemptClone` below): after a `CHECKPOINT`,
+     *     clone `livePath` onto the temp path via APFS `clonefile`
+     *     (copy-on-write - near-instant regardless of catalog size,
+     *     `clone-file.ts`). Taken ONLY when every guard in `attemptClone`
+     *     holds; any failure - the env escape hatch, a checkpoint failure, a
+     *     non-empty post-checkpoint WAL, a stat mismatch across the clone
+     *     (torn-copy tripwire), a failed clonefile syscall (non-APFS,
+     *     `EXDEV`, `ENOTSUP`, ...), or a failed sanity-open of the staged
+     *     clone - falls back to path 2 silently (logged at debug), never
+     *     surfacing as a `publishSnapshot` failure by itself.
+     *  2. THE LOGICAL PATH (`copyThrough`, unchanged): DuckDB's own
+     *     `CHECKPOINT` / `ATTACH` / `COPY FROM DATABASE ... TO` / `DETACH`,
+     *     which snapshots the live catalog logically rather than cloning
+     *     file bytes - slower (a full logical copy of the whole catalog) but
+     *     has no filesystem-support requirement, so it is the correctness
+     *     baseline every clone attempt falls back to.
+     *
+     * Both land the SAME temp path inside ONE `stageAndRename` call, so
+     * there is still exactly one atomic rename per publish regardless of
+     * which path produced the file.
+     *
+     * The writer connection doing the (logical) copy is closed BEFORE the
+     * rename (inside the `Effect.ensuring` guarding the copy - or, with
      * `options.from`, simply never closed at all, see below), so the temp
      * file never has an open writer at the moment it becomes the published
      * snapshot. The whole operation is wrapped in an outer `Effect.ensuring`
@@ -686,6 +709,154 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
             );
         };
 
+        /** `AX_SNAPSHOT_CLONE=off` forces the logical path unconditionally -
+         *  read fresh on every call (not memoized), so a test or a runtime
+         *  toggle takes effect on the very next publish. */
+        const cloneDisabledByEnv = (): boolean =>
+            (process.env.AX_SNAPSHOT_CLONE ?? "").trim().toLowerCase() === "off";
+
+        /** Best-effort: only ever called on a path where `cloneFile` already
+         *  wrote something to `tmp` and a LATER guard rejected it, so the
+         *  fallback about to run (`copyThrough` on the SAME `tmp`) doesn't
+         *  `ATTACH` onto a stale, half-trusted clone. Never fails - a removal
+         *  failure here just surfaces naturally as the fallback's own ATTACH
+         *  error against a non-empty path, which is a legible failure either
+         *  way. This is NOT the tmp-cleanup `stageAndRename`'s finalizer
+         *  already owns (that still runs unconditionally on every exit); it
+         *  exists only so the same `tmp` path can be reused a second time
+         *  within THIS one `stage` call. */
+        const clearPartialClone = (tmp: string): Effect.Effect<void> =>
+            fs.remove(tmp, { force: true, recursive: true }).pipe(
+                Effect.catch((err) =>
+                    Effect.logWarning(
+                        `ax duckdb: could not clear the partially-cloned temp file at ${tmp} before falling back to the logical copy: ${err.message}`,
+                    ),
+                ),
+            );
+
+        /**
+         * The #908 clone fast path. Never fails: every guard below reports a
+         * rejection as `{ mode: "copy", reason }` instead of an error, so the
+         * caller can fall back to `copyThrough` on the exact same `tmp`
+         * within the SAME `stageAndRename` call - one atomic rename either
+         * way. Only ever returns `{ mode: "clone" }` once the staged file at
+         * `tmp` has been checkpoint-consistent, byte-cloned without a torn
+         * read, and has itself opened read-only and answered a sanity query.
+         *
+         * Safety protocol (all four must hold):
+         *  (a) `CHECKPOINT` succeeds on the connection that actually owns the
+         *      live database - the writer's own `options.from` when given
+         *      (RULING R14: a second handle on `livePath` cannot be trusted
+         *      to see that writer's commits), else a dedicated open -> checkpoint
+         *      -> CLOSE (closing the writer before cloning is trivially safe -
+         *      nothing has `livePath` open in this process afterward).
+         *  (b) `<livePath>.wal` is absent or 0 bytes immediately after the
+         *      checkpoint - a non-empty WAL means the checkpoint left
+         *      committed data outside the base file the clone is about to
+         *      copy.
+         *  (c) `stat(livePath)` taken immediately before and immediately
+         *      after the clone syscall reports the identical size + mtime -
+         *      the torn-copy tripwire: something else wrote to `livePath`
+         *      while the clone ran, so its contents can no longer be trusted.
+         *  (d) the staged clone at `tmp` opens read-only and answers
+         *      `SELECT count(*) AS n FROM duckdb_tables()` with a positive
+         *      count, closed again before this returns.
+         */
+        const attemptClone = (
+            tmp: string,
+        ): Effect.Effect<{ readonly mode: "clone" } | { readonly mode: "copy"; readonly reason: string }> =>
+            Effect.gen(function* () {
+                if (cloneDisabledByEnv()) {
+                    return { mode: "copy", reason: "AX_SNAPSHOT_CLONE=off" } as const;
+                }
+
+                // (a) CHECKPOINT on the connection that owns the live database.
+                const checkpoint = yield* Effect.result(
+                    options?.from
+                        ? options.from.exec("CHECKPOINT").pipe(Effect.asVoid)
+                        : Effect.acquireUseRelease(
+                              open(livePath, { readOnly: false }),
+                              (conn) => conn.exec("CHECKPOINT").pipe(Effect.asVoid),
+                              (conn) => conn.close,
+                          ),
+                );
+                if (checkpoint._tag === "Failure") {
+                    return {
+                        mode: "copy",
+                        reason: `checkpoint before clone failed: ${checkpoint.failure.message}`,
+                    } as const;
+                }
+
+                // (b) post-checkpoint WAL tripwire.
+                const walQuiescent = yield* walIsQuiescent(fs, livePath);
+                if (!walQuiescent) {
+                    return { mode: "copy", reason: "WAL is non-empty after checkpoint" } as const;
+                }
+
+                // (c) torn-copy tripwire, half one: stat before the clone.
+                const before = yield* Effect.result(statSnapshot(fs, livePath));
+                if (before._tag === "Failure") {
+                    return {
+                        mode: "copy",
+                        reason: `pre-clone stat of the live database failed: ${before.failure.message}`,
+                    } as const;
+                }
+
+                const clone = yield* cloneFile(livePath, tmp);
+                if (!clone.cloneable) {
+                    return { mode: "copy", reason: clone.reason ?? "clonefile syscall failed" } as const;
+                }
+
+                // (c) torn-copy tripwire, half two: stat after the clone.
+                const after = yield* Effect.result(statSnapshot(fs, livePath));
+                if (after._tag === "Failure") {
+                    yield* clearPartialClone(tmp);
+                    return {
+                        mode: "copy",
+                        reason: `post-clone stat of the live database failed: ${after.failure.message}`,
+                    } as const;
+                }
+                if (!statsEqual(before.success, after.success)) {
+                    yield* clearPartialClone(tmp);
+                    return {
+                        mode: "copy",
+                        reason: "torn-copy tripwire: the live database's size/mtime changed during the clone",
+                    } as const;
+                }
+
+                // (d) the staged clone must open read-only and answer a
+                // sanity query before it is trusted as the publish.
+                const verified = yield* Effect.result(
+                    Effect.acquireUseRelease(
+                        open(tmp, { readOnly: true }),
+                        (conn) =>
+                            conn.query("SELECT count(*) AS n FROM duckdb_tables()").pipe(
+                                Effect.map((result) => {
+                                    const n = result.rows[0]?.n;
+                                    return typeof n === "bigint" && n > 0n;
+                                }),
+                            ),
+                        (conn) => conn.close,
+                    ),
+                );
+                if (verified._tag === "Failure") {
+                    yield* clearPartialClone(tmp);
+                    return {
+                        mode: "copy",
+                        reason: `sanity check on the staged clone failed: ${verified.failure.message}`,
+                    } as const;
+                }
+                if (!verified.success) {
+                    yield* clearPartialClone(tmp);
+                    return {
+                        mode: "copy",
+                        reason: "sanity check on the staged clone found no tables",
+                    } as const;
+                }
+
+                return { mode: "clone" } as const;
+            });
+
         const attempt = Effect.gen(function* () {
             // Cross-review P1-6 + P2-4, both checked BEFORE anything is
             // created or opened, and both compared on the CANONICAL path so
@@ -737,32 +908,49 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
                 });
             }
 
+            // Finding 6 (final fix round, pre-#908): `open` then `copyThrough`
+            // used to be two separate `yield*`s, so an interrupt landing
+            // BETWEEN them leaked the write handle on the live database for
+            // the life of the process - `conn.close` was never reached
+            // because `Effect.ensuring` was only attached to the SECOND
+            // yield. `acquireUseRelease` makes acquire+use+release one atomic
+            // unit: acquisition is uninterruptible, and release is guaranteed
+            // to run once acquisition succeeds, however `use` ends - success,
+            // typed failure, defect, or interruption. This closes the writer
+            // BEFORE the rename, on every path, because the whole `stage`
+            // step completes before `stageAndRename` renames.
+            const logicalCopy = (tmp: string) =>
+                options?.from
+                    ? // Caller-owned connection - copy through it directly
+                      // (RULING R14) and never close it, we don't own its
+                      // lifecycle.
+                      copyThrough(options.from, tmp)
+                    : Effect.acquireUseRelease(
+                          open(livePath, { readOnly: false }),
+                          (conn) => copyThrough(conn, tmp),
+                          (conn) => conn.close,
+                      );
+
             yield* stageAndRename<SnapshotPublishError | DuckDbOpenError>(targetPath, {
+                // #908: try the clone fast path first; `attemptClone` never
+                // fails, so a rejection just falls through to the SAME
+                // logical path this stage function ran unconditionally
+                // before - one `stageAndRename` call, one atomic rename,
+                // either way.
                 stage: (tmp) =>
-                    options?.from
-                        ? // Caller-owned connection - copy through it directly
-                          // (RULING R14) and never close it, we don't own its
-                          // lifecycle.
-                          copyThrough(options.from, tmp)
-                        : // Finding 6 (final fix round): `open` then
-                          // `copyThrough` used to be two separate `yield*`s, so
-                          // an interrupt landing BETWEEN them leaked the write
-                          // handle on the live database for the life of the
-                          // process - `conn.close` was never reached because
-                          // `Effect.ensuring` was only attached to the SECOND
-                          // yield. `acquireUseRelease` makes acquire+use+release
-                          // one atomic unit: acquisition is uninterruptible, and
-                          // release is guaranteed to run once acquisition
-                          // succeeds, however `use` ends - success, typed
-                          // failure, defect, or interruption. This closes the
-                          // writer BEFORE the rename, on every path, because the
-                          // whole `stage` step completes before `stageAndRename`
-                          // renames.
-                          Effect.acquireUseRelease(
-                              open(livePath, { readOnly: false }),
-                              (conn) => copyThrough(conn, tmp),
-                              (conn) => conn.close,
-                          ),
+                    Effect.gen(function* () {
+                        const cloned = yield* attemptClone(tmp);
+                        if (cloned.mode === "clone") {
+                            yield* Effect.logDebug(
+                                `ax duckdb: publishSnapshot(${targetPath}) took the clone fast path (APFS clonefile)`,
+                            );
+                            return;
+                        }
+                        yield* Effect.logDebug(
+                            `ax duckdb: publishSnapshot(${targetPath}) took the logical copy path: ${cloned.reason}`,
+                        );
+                        yield* logicalCopy(tmp);
+                    }),
                 onFsError: (step, err) =>
                     new SnapshotPublishError({
                         snapshotPath: targetPath,
