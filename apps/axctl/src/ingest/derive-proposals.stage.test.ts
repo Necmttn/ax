@@ -6,11 +6,11 @@ describe("proposalsStage", () => {
     it("declares the canonical key/deps/tags", () => {
         expect(Schema.decodeUnknownSync(ProposalsKey)("proposals")).toBe("proposals");
         expect(proposalsStage.meta.key).toBe("proposals");
-        expect(proposalsStage.meta.deps).toEqual(["closure"]);
+        expect(proposalsStage.meta.deps).toEqual(["closure", "cache-bust"]);
         expect(proposalsStage.meta.tags).toEqual(["derive"]);
     });
 
-    it("ProposalsStats schema includes routing, image-context, directive, and workflow fields", () => {
+    it("ProposalsStats schema includes routing, image-context, directive, workflow, and cache-lens fields", () => {
         const stats = ProposalsStats.make({
             durationMs: 100,
             summary: "test",
@@ -20,6 +20,7 @@ describe("proposalsStage", () => {
             imageContextProposals: 1,
             directiveProposals: 3,
             workflowProposals: 4,
+            cacheLensProposals: 5,
         });
         expect(stats.routingProposals).toBe(1);
         expect(stats.imageContextProposals).toBe(1);
@@ -27,5 +28,6 @@ describe("proposalsStage", () => {
         expect(stats.workflowProposals).toBe(4);
         expect(stats.skillProposals).toBe(2);
         expect(stats.guidanceProposals).toBe(1);
+        expect(stats.cacheLensProposals).toBe(5);
     });
 });

@@ -11,6 +11,17 @@
  *
  * Corroboration sums the ledger's two independent prices over the rows where
  * both exist - the read-side half of plan Q1's ±25% agreement guard.
+ *
+ * `fetchCacheLensCandidates` (slice B, #868) is the MINTING-side sibling of
+ * `fetchCacheBustCost`: same ledger, but a per-offender rollup shaped for the
+ * `derive-proposals` ingest stage's guard pipeline (corroboration/recurrence/
+ * materiality) instead of the CLI's reasons+coverage view. Two flat queries
+ * (offender rollup, offender x reason mix) joined in JS by "kind:name" - same
+ * "no derefs, no graph traversal in aggregates" discipline as
+ * dispatch-analytics.ts. Typed `CacheReadService` (not `CacheWriteService`) so
+ * it can run against either the live write-path service (the stage's actual
+ * caller, mid-ingest - the published snapshot doesn't have this run's writes
+ * yet) or a plain read - `CacheWriteService extends CacheReadService`.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
@@ -190,5 +201,124 @@ export const fetchCacheBustCost = Effect.fn("queries.fetchCacheBustCost")(
             },
         };
         return result;
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Minting-side offender rollup (slice B, #868)
+// ---------------------------------------------------------------------------
+
+/** One offender (a skill or an agent, native-attributed) over the window. */
+export interface CacheLensCandidateRow {
+    readonly kind: "skill" | "agent";
+    /** attribution_skill / attribution_agent exactly as the harness stamped it. */
+    readonly name: string;
+    readonly busts: number;
+    readonly sessions: number;
+    /** Distinct UTC calendar days carrying a bust - the recurrence proxy. */
+    readonly distinctDays: number;
+    /** sum(bust_cost_usd) over ALL this offender's busts. */
+    readonly bustCostUsd: number;
+    /** busts where BOTH prices exist - the corroboration-comparable subset. */
+    readonly comparableBusts: number;
+    readonly comparableBustCostUsd: number;
+    readonly comparableCorroboratedCostUsd: number;
+    /** reason -> count, unsorted (evaluateCacheLensCandidate picks the dominant one). */
+    readonly reasonCounts: ReadonlyArray<{ readonly reason: string; readonly count: number }>;
+}
+
+const OffenderRollupRow = Schema.Struct({
+    kind: Schema.Union([Schema.Literal("skill"), Schema.Literal("agent")]),
+    name: Schema.String,
+    busts: NumberFromBigIntColumn,
+    sessions: NumberFromBigIntColumn,
+    distinct_days: NumberFromBigIntColumn,
+    bust_cost_usd: Schema.Number,
+    comparable_busts: NumberFromBigIntColumn,
+    comparable_bust_cost_usd: Schema.Number,
+    comparable_corroborated_cost_usd: Schema.Number,
+});
+
+const OffenderReasonRow = Schema.Struct({
+    kind: Schema.Union([Schema.Literal("skill"), Schema.Literal("agent")]),
+    name: Schema.String,
+    reason: Schema.String,
+    n: NumberFromBigIntColumn,
+});
+
+// Union the two attribution columns into one (kind, name) shape rather than
+// two separate queries per column - `kind` distinguishes them downstream, and
+// the union keeps the guard/derive pipeline column-count-agnostic (a THIRD
+// native attribution dimension would be one more UNION branch, not a new
+// consumer-side code path).
+const OFFENDER_ROLLUP_SQL = `
+    WITH busts AS (
+        SELECT 'skill' AS kind, attribution_skill AS name, bust_cost_usd, corroborated_cost_usd, session, ts
+        FROM cache_bust_event WHERE attribution_skill IS NOT NULL AND ts > ?
+        UNION ALL
+        SELECT 'agent' AS kind, attribution_agent AS name, bust_cost_usd, corroborated_cost_usd, session, ts
+        FROM cache_bust_event WHERE attribution_agent IS NOT NULL AND ts > ?
+    )
+    SELECT kind, name,
+           count(*) AS busts,
+           count(DISTINCT session) AS sessions,
+           count(DISTINCT CAST(ts AS DATE)) AS distinct_days,
+           CAST(coalesce(sum(bust_cost_usd), 0) AS DOUBLE) AS bust_cost_usd,
+           count(*) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL) AS comparable_busts,
+           CAST(coalesce(sum(bust_cost_usd) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL), 0) AS DOUBLE) AS comparable_bust_cost_usd,
+           CAST(coalesce(sum(corroborated_cost_usd) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL), 0) AS DOUBLE) AS comparable_corroborated_cost_usd
+    FROM busts
+    GROUP BY kind, name`;
+
+const OFFENDER_REASON_SQL = `
+    WITH busts AS (
+        SELECT 'skill' AS kind, attribution_skill AS name, reason
+        FROM cache_bust_event WHERE attribution_skill IS NOT NULL AND ts > ?
+        UNION ALL
+        SELECT 'agent' AS kind, attribution_agent AS name, reason
+        FROM cache_bust_event WHERE attribution_agent IS NOT NULL AND ts > ?
+    )
+    SELECT kind, name, reason, count(*) AS n
+    FROM busts
+    GROUP BY kind, name, reason`;
+
+const offenderKey = (kind: string, name: string): string => `${kind}:${name}`;
+
+/**
+ * Per-offender (skill/agent) cache-bust rollup over the window, for the
+ * derive-proposals mint pipeline. `read` is whatever `CacheReadService` the
+ * caller has open - mid-ingest callers pass their `CacheWriteService` (this
+ * run's live writes, including the cache-bust stage that ran just before);
+ * an out-of-ingest caller could pass a plain `CacheRead` against the
+ * published snapshot.
+ */
+export const fetchCacheLensCandidates = Effect.fn("queries.fetchCacheLensCandidates")(
+    function* (read: CacheReadService, input: { readonly sinceDays: number }) {
+        const cutoff = new Date(Date.now() - sqlWindowDays(input.sinceDays) * 86_400_000);
+        const [rollups, reasons] = yield* Effect.all([
+            read.rows(OffenderRollupRow, OFFENDER_ROLLUP_SQL, [cutoff, cutoff]),
+            read.rows(OffenderReasonRow, OFFENDER_REASON_SQL, [cutoff, cutoff]),
+        ], { concurrency: 2 });
+
+        const reasonsByKey = new Map<string, Array<{ reason: string; count: number }>>();
+        for (const r of reasons) {
+            const key = offenderKey(r.kind, r.name);
+            const list = reasonsByKey.get(key) ?? [];
+            list.push({ reason: r.reason, count: r.n });
+            reasonsByKey.set(key, list);
+        }
+
+        return rollups.map((row): CacheLensCandidateRow => ({
+            kind: row.kind,
+            name: row.name,
+            busts: row.busts,
+            sessions: row.sessions,
+            distinctDays: row.distinct_days,
+            bustCostUsd: row.bust_cost_usd,
+            comparableBusts: row.comparable_busts,
+            comparableBustCostUsd: row.comparable_bust_cost_usd,
+            comparableCorroboratedCostUsd: row.comparable_corroborated_cost_usd,
+            reasonCounts: reasonsByKey.get(offenderKey(row.kind, row.name)) ?? [],
+        }));
     },
 );
