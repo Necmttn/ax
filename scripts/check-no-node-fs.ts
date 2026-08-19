@@ -56,6 +56,13 @@ const EXCLUDED_FILES: readonly string[] = [
     // Porting it to FileSystem would force every downstream test file that
     // needs a dylib path to build a platform layer just to call it.
     "packages/lib/src/testing/duckdb-dylib.ts",
+    // #908 clone-based snapshot publish: `copyFileSync(src, dst,
+    // COPYFILE_FICLONE_FORCE)` is the APFS clonefile primitive, and
+    // `FileSystem` exposes no clone flag at all - there is no Effect-native
+    // equivalent to port to. Every call is wrapped in `Effect.try` and a
+    // failure never escapes untyped; see the file's own header for why FORCE
+    // (not the softer, silently-degrading `COPYFILE_FICLONE`) is load-bearing.
+    "packages/lib/src/duckdb/clone-file.ts",
 ];
 
 const BANNED_SPECIFIERS = [
