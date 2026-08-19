@@ -80,6 +80,9 @@ export interface SpoolTotals {
     readonly statements: number;
     /** Text values that carried a U+0000 and were scrubbed. */
     readonly nulValues: number;
+    /** Text values with an unpaired UTF-16 surrogate, made well-formed
+     *  (lone half -> U+FFFD). See {@link encodeValue} for why. */
+    readonly illFormedValues: number;
 }
 
 export interface SpoolFlushOutcome {
@@ -120,6 +123,7 @@ const encodeValue = (
     column: string,
     value: DuckDbParam,
     onNul: () => void,
+    onIllFormed: () => void,
 ): string | number | boolean | null => {
     if (value === null || value === undefined) return null;
     if (typeof value === "boolean" || typeof value === "number") return value;
@@ -135,11 +139,23 @@ const encodeValue = (
         return value.toString();
     }
     if (value instanceof Date) return value.toISOString();
-    if (value.includes("\u0000")) {
-        onNul();
-        return value.replaceAll("\u0000", "");
+    let text = value;
+    if (!text.isWellFormed()) {
+        // An unpaired UTF-16 surrogate (a truncated emoji half in a transcript,
+        // #906). JSON.stringify would serialize it as a lone `\ud???` escape -
+        // legal ECMA-404 text, but DuckDB's read_ndjson enforces strict UTF-8
+        // and rejects the WHOLE file ("no low surrogate"), failing the stage.
+        // The bind path tolerates the same value, so a fresh-store cold
+        // backfill was the only run that hit it. Scrub to U+FFFD, counted -
+        // silent sanitising is the failure class the seam refuses.
+        onIllFormed();
+        text = text.toWellFormed();
     }
-    return value;
+    if (text.includes("\u0000")) {
+        onNul();
+        return text.replaceAll("\u0000", "");
+    }
+    return text;
 };
 
 interface SpoolBuffer {
@@ -188,6 +204,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
     let totalRows = 0;
     let totalStatements = 0;
     let nulValues = 0;
+    let illFormedValues = 0;
     let flushSeq = 0;
 
     const append: TableSpool["append"] = (table, rows) => {
@@ -254,6 +271,8 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
             for (const column of buffer.columns) {
                 out[column] = encodeValue(table, column, row[column], () => {
                     nulValues += 1;
+                }, () => {
+                    illFormedValues += 1;
                 });
             }
             buffer.lines.set(id, JSON.stringify(out));
@@ -332,7 +351,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
             return n;
         },
         flush,
-        totals: () => ({ rows: totalRows, statements: totalStatements, nulValues }),
+        totals: () => ({ rows: totalRows, statements: totalStatements, nulValues, illFormedValues }),
     };
 };
 

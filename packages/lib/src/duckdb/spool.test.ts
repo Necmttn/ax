@@ -205,6 +205,23 @@ describe("makeTableSpool", () => {
         );
     });
 
+    dtest("repairs an unpaired UTF-16 surrogate instead of failing the whole load (#906)", async () => {
+        const dir = tempDir("spool-surrogate");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                // A truncated emoji: a lone high surrogate. JSON.stringify
+                // emits it as a bare \ud83d escape, which read_ndjson rejects
+                // as "no low surrogate" - killing the batch on a cold backfill.
+                spool.append("tool", [{ id: "tool:surrogate", name: "cut\uD83Dend", provider: "codex" }]);
+                yield* spool.flush(write);
+                expect(spool.totals().illFormedValues).toBe(1);
+                const got = yield* write.raw("SELECT name FROM tool WHERE id = 'tool:surrogate'");
+                // The lone half became U+FFFD; the rest of the value is intact.
+                expect(got.rows[0]!["name"]).toBe("cut�end");
+            }),
+        );
+    });
+
     dtest("flush unlinks its spool files", async () => {
         const dir = tempDir("spool-unlink");
         await asIngestRun(dir, (write, spool, spoolDir) =>
