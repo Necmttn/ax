@@ -2699,3 +2699,32 @@ CREATE TABLE IF NOT EXISTS run_evidence_ref (
 CREATE INDEX IF NOT EXISTS run_evidence_ref_event ON run_evidence_ref("event");
 CREATE INDEX IF NOT EXISTS run_evidence_ref_session ON run_evidence_ref(session, ts);
 CREATE INDEX IF NOT EXISTS run_evidence_ref_target ON run_evidence_ref(target_table, target_id);
+
+-- ---------------------------------------------------------------------------
+-- fts_index_state: skip-unchanged bookkeeping for the FTS rebuild (#909)
+-- ---------------------------------------------------------------------------
+-- `buildFtsIndexes` (packages/lib/src/duckdb/fts.ts) reran `PRAGMA
+-- create_fts_index(..., overwrite=1)` over every FTS_TARGETS table on EVERY
+-- ingest + reconcile write, even when nothing indexed had changed - a large
+-- share of the warm-run tail at 1M+ turns. This table stores, per target
+-- table, a cheap content digest computed entirely in SQL:
+--   'v1:' || count(*) || ':' || bit_xor(hash(id, COALESCE(text_col, '')))
+-- ('v1:' is the digest FORMULA version - bump it to force one rebuild across
+-- the fleet). When the stored digest still matches AND the `fts_main_<table>`
+-- schema still exists, the rebuild is skipped entirely; otherwise the index is
+-- rebuilt and the digest row is replaced. A digest match with a MISSING fts
+-- schema still rebuilds (fresh store, or a store where fts_index_state was
+-- imported/restored without the actual index materializing).
+--
+-- `id` (not `table_name`) to keep the repo-wide "every table's PK is `id`"
+-- convention this schema otherwise holds without exception (see
+-- duckdb-schema.test.ts's "every table declares id VARCHAR PRIMARY KEY
+-- first"); the value IS the target table name (e.g. 'turn', 'commit') - the
+-- natural key for this row IS its identity here, same as
+-- schema_comment_state's singleton 'comments' row.
+CREATE TABLE IF NOT EXISTS fts_index_state (
+    -- the target table name, e.g. 'turn' | 'commit'
+    id VARCHAR PRIMARY KEY,
+    digest VARCHAR NOT NULL,
+    built_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

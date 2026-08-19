@@ -7,7 +7,7 @@ import { DUCKDB_TABLE_NAMES, parseDuckdbColumnDefs, parseDuckdbTables } from "./
 // diff, not a silent shared mutation. It is 138 minus the fourteen judgment
 // tables that now live in schema.sidecar.sql; the FULL 138 is still compared
 // against the Surreal schema, across both engines, in duckdb-parity.test.ts.
-const EXPECTED_DUCKDB_TABLES = 126; // +schema_comment_state (#869), +cache_bust_event (#868)
+const EXPECTED_DUCKDB_TABLES = 127; // +schema_comment_state (#869), +cache_bust_event (#868), +fts_index_state (#909)
 
 describe("parse-duckdb-schema", () => {
     test("parseDuckdbTables finds every table in the committed DDL", () => {
