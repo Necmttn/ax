@@ -108,6 +108,9 @@ export const NON_STAGE_WRITERS: readonly {
             w("ingest_run", "bookkeep"),
             w("ingest_stage", "bookkeep"),
             w("ingest_event", "bookkeep"),
+            // buildFtsIndexes runs at the ingest tail (ingest/run.ts) - skip-unchanged
+            // bookkeeping for the FTS rebuild (#909).
+            w("fts_index_state", "bookkeep"),
             w("telemetry_of", "derive"),
             w("otel_metric_point", "parse"),
             w("otel_span", "parse"),
@@ -126,13 +129,20 @@ export const NON_STAGE_WRITERS: readonly {
     {
         // cli/commands/ingest.ts maintenance verbs: blob-GC afterWork,
         // onTimeout stamp, `ax ingest reap`, telemetryStage for the
-        // derive-signals/insights verbs.
+        // derive-signals/insights verbs. `ax ingest reap` runs through
+        // `withConfigWrite`, which taps `buildFtsIndexes` after every call (#909).
         writer: "cli:ingest-maintenance",
-        writes: [w("ingest_run", "bookkeep"), w("ingest_stage", "bookkeep"), w("ingest_event", "bookkeep")],
+        writes: [
+            w("ingest_run", "bookkeep"),
+            w("ingest_stage", "bookkeep"),
+            w("ingest_event", "bookkeep"),
+            w("fts_index_state", "bookkeep"),
+        ],
     },
     {
         // `ax ingest --dry-run` calibrates its ETA by running the claude and
         // codex parsers over a capped file set - REAL writes (ingest/dry-run.ts).
+        // Routed through `withConfigWrite`, which taps `buildFtsIndexes` (#909).
         writer: "cli:ingest-dry-run",
         writes: [
             ...NORMALIZED_BATCH_WRITES,
@@ -141,11 +151,13 @@ export const NON_STAGE_WRITERS: readonly {
             w("harness_hook_event", "parse"),
             w("hook_command_invocation", "parse"),
             ...JSONL_WORK_UNIT_WRITES,
+            w("fts_index_state", "bookkeep"),
         ],
     },
     {
         // `ax sessions here|around|near` transcript auto-backfill
-        // (cli/commands/sessions.ts -> ingestTranscripts).
+        // (cli/commands/sessions.ts -> ingestTranscripts). Routed through
+        // `withConfigWrite`, which taps `buildFtsIndexes` (#909).
         writer: "cli:sessions-backfill",
         writes: [
             ...NORMALIZED_BATCH_WRITES,
@@ -154,34 +166,47 @@ export const NON_STAGE_WRITERS: readonly {
             w("harness_hook_event", "parse"),
             w("hook_command_invocation", "parse"),
             ...JSONL_WORK_UNIT_WRITES,
+            w("fts_index_state", "bookkeep"),
         ],
     },
     {
         // `ax derive-intents` (CLI-only, no stage): stamps turn.intent_kind.
+        // Routed through `withConfigWrite`, which taps `buildFtsIndexes` (#909).
         writer: "cli:derive-intents",
-        writes: [w("turn", "enrich")],
+        writes: [w("turn", "enrich"), w("fts_index_state", "bookkeep")],
     },
     {
         // `ax ingest --insights-only` (ingest/claude-insights.ts): imports
         // Claude usage-data facets; placeholder session rows for linkage.
+        // Routed through `withConfigWrite`, which taps `buildFtsIndexes` (#909).
         writer: "cli:ingest-insights",
-        writes: [w("session", "parse"), w("insight", "parse"), w("concerns", "parse"), w("friction_event", "parse")],
+        writes: [
+            w("session", "parse"),
+            w("insight", "parse"),
+            w("concerns", "parse"),
+            w("friction_event", "parse"),
+            w("fts_index_state", "bookkeep"),
+        ],
     },
     {
         // `ax wrapped publish` (dashboard/wrapped-cards.ts): replace-all of
-        // the agent-authored recap cards.
+        // the agent-authored recap cards. Routed through `withConfigWrite`,
+        // which taps `buildFtsIndexes` (#909).
         writer: "cli:wrapped-publish",
-        writes: [w("wrapped_card", "parse")],
+        writes: [w("wrapped_card", "parse"), w("fts_index_state", "bookkeep")],
     },
     {
         // `ax skills reconcile|rm` / `ax agents reconcile|rm` catalog
-        // lifecycle (config-core/reconcile.ts three-pass tombstone).
+        // lifecycle (config-core/reconcile.ts three-pass tombstone). Runs
+        // through `withConfigWrite` in the SAME module that defines it, which
+        // taps `buildFtsIndexes` after every call (#909).
         writer: "cli:catalog-reconcile",
-        writes: [w("skill", "parse"), w("agent_def", "parse")],
+        writes: [w("skill", "parse"), w("agent_def", "parse"), w("fts_index_state", "bookkeep")],
     },
     {
         // Classifier CLI writers: workflow-candidates apply, label-mining
-        // projectReviewed --apply, package-service execution plans.
+        // projectReviewed --apply, package-service execution plans. Routed
+        // through `withConfigWrite`, which taps `buildFtsIndexes` (#909).
         writer: "cli:classifiers",
         writes: [
             w("classifier_graph_node", "derive"),
@@ -189,6 +214,7 @@ export const NON_STAGE_WRITERS: readonly {
             w("classifier_graph_fact", "derive"),
             w("transcript_label_vector", "derive"),
             w("cites_evidence", "derive"),
+            w("fts_index_state", "bookkeep"),
         ],
     },
     {
@@ -196,11 +222,13 @@ export const NON_STAGE_WRITERS: readonly {
         // segment directory (column-intersection loader over the contract's
         // table list) and writes the `__imported__/<kind>/<sha>` watermark
         // handshake marks. The write set IS the segment contract, imported so
-        // the two cannot drift.
+        // the two cannot drift. Routed through `withConfigWrite`, which taps
+        // `buildFtsIndexes` (#909).
         writer: "cli:segment-import",
         writes: [
             ...SEGMENT_TABLES.map((spec) => w(spec.table, "parse")),
             w("ingest_file_state", "bookkeep"),
+            w("fts_index_state", "bookkeep"),
         ],
     },
     {

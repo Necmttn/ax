@@ -189,6 +189,7 @@ const TABLE_METADATA: Readonly<Record<string, Omit<DuckdbTableSpec, "table">>> =
     run_evidence_event: { kind: "node", stage: "active", layer: "derived", note: "Run evidence ledger (#578): normalized claim/observation/verification/boundary events over the graph; backing distinguishes model claim vs tool-backed." },
     run_evidence_ref: { kind: "node", stage: "active", layer: "derived", note: "Run evidence ledger (#578): structural refs/hashes off an evidence event; privacy_level keeps payloads out by default." },
     cache_bust_event: { kind: "node", stage: "active", layer: "derived", note: "Cache-bust ledger (#868): one row per usage row carrying a cache_miss_reason, priced (ingest cost + independent flat-rate corroboration); derived by the cache-bust SQL model, id == turn_token_usage.id." },
+    fts_index_state: { kind: "node", stage: "active", layer: "bookkeeping", note: "Skip-unchanged bookkeeping for the FTS rebuild (#909): per-target content digest, so buildFtsIndexes only reruns PRAGMA create_fts_index when the indexed table actually changed." },
 };
 
 /**

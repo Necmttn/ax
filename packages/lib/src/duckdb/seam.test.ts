@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { encodeLockPayload, withIngestLock } from "../ingest-lock.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { TimestampColumn } from "./columns.ts";
-import { buildFtsIndexes, matchBm25Sql, type FtsTarget } from "./fts.ts";
+import { buildFtsIndexes, ftsSchemaName, matchBm25Sql, type FtsTarget } from "./fts.ts";
 import { NUL } from "./nul-strip.ts";
 import {
     CacheRead,
@@ -47,6 +47,19 @@ CREATE TABLE IF NOT EXISTS turn (
     id VARCHAR PRIMARY KEY,
     text_excerpt VARCHAR,
     ts TIMESTAMP NOT NULL
+);
+CREATE TABLE IF NOT EXISTS "commit" (
+    id VARCHAR PRIMARY KEY,
+    message VARCHAR,
+    ts TIMESTAMP NOT NULL
+);
+-- Mirrors schema.duckdb.sql's fts_index_state (#909): skip-unchanged
+-- bookkeeping buildFtsIndexes reads/writes on every call, regardless of
+-- which targets are in scope for a given test.
+CREATE TABLE IF NOT EXISTS fts_index_state (
+    id VARCHAR PRIMARY KEY,
+    digest VARCHAR NOT NULL,
+    built_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS note (
     id VARCHAR PRIMARY KEY,
@@ -853,6 +866,171 @@ describe("FTS", () => {
             // No hits, no error, and the table is still there.
             expect(outcome._tag).toBe("completed");
             expect(outcome._tag === "completed" ? outcome.value : null).toEqual([]);
+        });
+    });
+});
+
+describe("FTS: skip-unchanged rebuild (#909)", () => {
+    const TURN_FTS: FtsTarget = { table: "turn", idColumn: "id", textColumn: "text_excerpt" };
+    const COMMIT_FTS: FtsTarget = { table: "commit", idColumn: "id", textColumn: "message" };
+    const TARGETS = [TURN_FTS, COMMIT_FTS];
+    const ts = new Date("2026-08-15T10:00:00.000Z");
+
+    const hitIds = (write: CacheWriteService, target: FtsTarget, term: string) =>
+        write.rows(
+            Schema.Struct({ id: Schema.String }),
+            `SELECT t.id AS id FROM "${target.table}" t WHERE ${matchBm25Sql(target, "t")} IS NOT NULL ORDER BY t.id`,
+            [term],
+        );
+
+    dtest("first build on a fresh store rebuilds every target and search works", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-skip-fresh-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("turn", { id: "t1", text_excerpt: "the seam owns semantics", ts });
+                        yield* write.put("commit", { id: "c1", message: "fix semantics bug", ts });
+                        const outcomes = yield* buildFtsIndexes(write, TARGETS);
+                        const digestRows = yield* write.rows(
+                            Schema.Struct({ id: Schema.String }),
+                            "SELECT id FROM fts_index_state ORDER BY id",
+                        );
+                        const turnHits = yield* hitIds(write, TURN_FTS, "semantics");
+                        const commitHits = yield* hitIds(write, COMMIT_FTS, "semantics");
+                        return { outcomes, digestRows, turnHits, commitHits };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.outcomes).toEqual([
+                { table: "turn", rebuilt: true },
+                { table: "commit", rebuilt: true },
+            ]);
+            expect(value?.digestRows.map((r) => r.id)).toEqual(["commit", "turn"]);
+            expect(value?.turnHits.map((r) => r.id)).toEqual(["t1"]);
+            expect(value?.commitHits.map((r) => r.id)).toEqual(["c1"]);
+        });
+    });
+
+    dtest("a second call with no data change skips every target and search still works", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-skip-warm-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("turn", { id: "t1", text_excerpt: "the seam owns semantics", ts });
+                        yield* write.put("commit", { id: "c1", message: "fix semantics bug", ts });
+                        yield* buildFtsIndexes(write, TARGETS);
+                        const outcomes = yield* buildFtsIndexes(write, TARGETS);
+                        const turnHits = yield* hitIds(write, TURN_FTS, "semantics");
+                        return { outcomes, turnHits };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.outcomes).toEqual([
+                { table: "turn", rebuilt: false },
+                { table: "commit", rebuilt: false },
+            ]);
+            expect(value?.turnHits.map((r) => r.id)).toEqual(["t1"]);
+        });
+    });
+
+    dtest("a new row in turn only rebuilds turn - commit stays skipped, new row is findable", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-skip-newrow-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("turn", { id: "t1", text_excerpt: "the seam owns semantics", ts });
+                        yield* write.put("commit", { id: "c1", message: "fix semantics bug", ts });
+                        yield* buildFtsIndexes(write, TARGETS);
+
+                        yield* write.put("turn", { id: "t2", text_excerpt: "a brand new discussion", ts });
+                        const outcomes = yield* buildFtsIndexes(write, TARGETS);
+                        const newRowHits = yield* hitIds(write, TURN_FTS, "brand");
+                        return { outcomes, newRowHits };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.outcomes).toEqual([
+                { table: "turn", rebuilt: true },
+                { table: "commit", rebuilt: false },
+            ]);
+            expect(value?.newRowHits.map((r) => r.id)).toEqual(["t2"]);
+        });
+    });
+
+    dtest("updating an existing row's text moves the digest and rebuilds", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-skip-update-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("turn", { id: "t1", text_excerpt: "the original wording", ts });
+                        yield* buildFtsIndexes(write, [TURN_FTS]);
+
+                        // Same row count, same id - only the text changed. A count-only
+                        // digest would miss this; bit_xor(hash(id, text)) must not.
+                        yield* write.exec("UPDATE turn SET text_excerpt = ? WHERE id = ?", [
+                            "a completely rewritten sentence",
+                            "t1",
+                        ]);
+                        const outcomes = yield* buildFtsIndexes(write, [TURN_FTS]);
+                        const oldHits = yield* hitIds(write, TURN_FTS, "original");
+                        const newHits = yield* hitIds(write, TURN_FTS, "rewritten");
+                        return { outcomes, oldHits, newHits };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.outcomes).toEqual([{ table: "turn", rebuilt: true }]);
+            expect(value?.oldHits).toEqual([]);
+            expect(value?.newHits.map((r) => r.id)).toEqual(["t1"]);
+        });
+    });
+
+    dtest("a matching digest with a missing fts schema still rebuilds", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-skip-missing-schema-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("turn", { id: "t1", text_excerpt: "the seam owns semantics", ts });
+                        yield* buildFtsIndexes(write, [TURN_FTS]);
+
+                        // The digest row still matches, but the materialized fts_main_turn
+                        // schema is gone - a rebuild must happen regardless (fresh store /
+                        // imported bookkeeping case), never trust the digest row alone.
+                        yield* write.exec("LOAD fts");
+                        yield* write.exec(`DROP SCHEMA IF EXISTS ${ftsSchemaName(TURN_FTS)} CASCADE`);
+
+                        const outcomes = yield* buildFtsIndexes(write, [TURN_FTS]);
+                        const hits = yield* hitIds(write, TURN_FTS, "semantics");
+                        return { outcomes, hits };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.outcomes).toEqual([{ table: "turn", rebuilt: true }]);
+            expect(value?.hits.map((r) => r.id)).toEqual(["t1"]);
         });
     });
 });
