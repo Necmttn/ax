@@ -20,6 +20,7 @@ import { JUDGMENT_GUARD_RE } from "./routing-tune.ts";
 import { MODEL_ALIASES, reprice } from "./reprice.ts";
 import type { RepriceUsage, ModelPricing } from "./reprice.ts";
 import { builtInPricingCatalog, inferModelProvider } from "../ingest/model-pricing.ts";
+import { JUDGMENT_FEATURE_NAMES, JUDGMENT_MODEL_SEED } from "./judgment-weights.ts";
 
 export type WorkClass =
     | "gather"
@@ -87,6 +88,26 @@ export interface TurnFacts {
     intentKind: string | null;
     text: string | null;
     usage: RepriceUsage | null;
+    /**
+     * The text of the assistant prose that opened the CURRENT message (#911
+     * learned path only) - `buildSpans` threads this through from the same
+     * sticky-prose tracking it already does for `judgmentSticky`; it is the
+     * `regexPrev` feature's input. Left undefined on the default (regex) path,
+     * which never reads it - populating it costs nothing there either way
+     * since `classifyTurn` only consults it when `learned` is passed.
+     */
+    prevAssistantText?: string | null;
+}
+
+/**
+ * A learned judgment model's weights + operating threshold, as loaded from
+ * `classifier_weights` (see judgment-weights.ts / `AX_JUDGMENT_MODEL=learned`).
+ * Passed explicitly rather than read from env inside `classifyTurn` so the
+ * function stays pure and its default path is trivially provably unchanged.
+ */
+export interface LearnedJudgmentModel {
+    readonly threshold: number;
+    readonly weights: Readonly<Record<string, number>>;
 }
 
 type ToolKind = "read" | "edit" | "research";
@@ -163,6 +184,56 @@ function toolKind(name: string, commandNorm: string | null): ToolKind | null {
 }
 
 /**
+ * The learned judgment classifier's feature vector (#911, Phase 5 landed
+ * slice). MUST mirror `featurize()` in
+ * scripts/prototypes/judgment-learn/train.ts exactly - same 12 features,
+ * same caps (8 for tool counts, 5 for question marks/code fences), same
+ * `log1p(len)/10` text-length scaling - because the weights in
+ * judgment-weights.ts were fit against that exact shape. `regexOwn`/
+ * `regexPrev` are the regex baseline surviving as FEATURES, per the v3 plan
+ * ("regexes become features, never deleted first").
+ */
+function judgmentFeatures(
+    text: string,
+    prevAssistantText: string | null | undefined,
+    editCount: number,
+    readCount: number,
+    researchCount: number,
+    otherToolCount: number,
+    hasTools: boolean,
+): Readonly<Record<string, number>> {
+    const questionMarks = (text.match(/\?/g) ?? []).length;
+    const codeFences = (text.match(/```/g) ?? []).length;
+    const toolTotal = editCount + readCount + researchCount;
+    return {
+        bias: 1,
+        editCount: Math.min(editCount, 8),
+        readCount: Math.min(readCount, 8),
+        researchCount: Math.min(researchCount, 8),
+        otherToolCount: Math.min(otherToolCount, 8),
+        logTextLen: Math.log1p(text.length) / 10,
+        regexOwn: JUDGMENT_GUARD_RE.test(text) ? 1 : 0,
+        regexPrev: prevAssistantText ? (JUDGMENT_GUARD_RE.test(prevAssistantText) ? 1 : 0) : 0,
+        questionMarks: Math.min(questionMarks, 5),
+        codeFences: Math.min(codeFences, 5),
+        hasTools: hasTools ? 1 : 0,
+        editShare: toolTotal > 0 ? editCount / toolTotal : 0,
+    };
+}
+
+const judgmentSigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
+
+/** `sigmoid(w . x)` over the learned model's weights (missing weight = 0). */
+function learnedJudgmentScore(
+    features: Readonly<Record<string, number>>,
+    weights: Readonly<Record<string, number>>,
+): number {
+    let z = 0;
+    for (const [name, value] of Object.entries(features)) z += value * (weights[name] ?? 0);
+    return judgmentSigmoid(z);
+}
+
+/**
  * Assign one work-class to a main-agent turn. Judgment-first precedence so
  * review/design/interactive can never be classed routable. `adjacentToUser`
  * is computed by buildSpans (turn neighbours a user turn).
@@ -170,25 +241,38 @@ function toolKind(name: string, commandNorm: string | null): ToolKind | null {
  * Turn-level tool composition only - the `thinking_tokens` signal was dropped
  * after calibration showed it is 0 on 96.6% of main assistant turns (mixed
  * turns report 0 = lower bound; transcripts strip thinking text), so no
- * threshold separated design work from routine edits. Judgment is now caught
- * solely via JUDGMENT_GUARD_RE on the turn text plus the interactive guards.
+ * threshold separated design work from routine edits. Judgment is caught via
+ * JUDGMENT_GUARD_RE on the turn text plus the interactive guards - OR, when
+ * `learned` is supplied (#911, `AX_JUDGMENT_MODEL=learned`), via the learned
+ * classifier's sigmoid(w.x) >= threshold. `learned` absent -> this function's
+ * behavior is BYTE-IDENTICAL to before #911 (pinned by
+ * routability.classify-default.test.ts); the interactive guards and the
+ * tool-composition fallthrough below are untouched by either path.
  */
-export function classifyTurn(t: TurnFacts, adjacentToUser: boolean): WorkClass {
+export function classifyTurn(t: TurnFacts, adjacentToUser: boolean, learned?: LearnedJudgmentModel): WorkClass {
     if (adjacentToUser) return "interactive";
     if (t.intentKind && INTERACTIVE_INTENTS.has(t.intentKind)) return "interactive";
 
     const calls: ReadonlyArray<ToolCallFact> =
         t.toolCalls ?? t.toolNames.map((name) => ({ name, commandNorm: null }));
 
-    let editCount = 0, readCount = 0, researchCount = 0;
+    let editCount = 0, readCount = 0, researchCount = 0, otherToolCount = 0;
     for (const c of calls) {
         const kind = toolKind(c.name, c.commandNorm);
         if (kind === "edit") editCount++;
         else if (kind === "read") readCount++;
         else if (kind === "research") researchCount++;
+        else otherToolCount++;
     }
 
-    if (t.text && JUDGMENT_GUARD_RE.test(t.text)) return "design-decision";
+    if (learned) {
+        const features = judgmentFeatures(
+            t.text ?? "", t.prevAssistantText, editCount, readCount, researchCount, otherToolCount, calls.length > 0,
+        );
+        if (learnedJudgmentScore(features, learned.weights) >= learned.threshold) return "design-decision";
+    } else {
+        if (t.text && JUDGMENT_GUARD_RE.test(t.text)) return "design-decision";
+    }
 
     if (editCount > 0 && editCount >= readCount && editCount >= researchCount) return "mechanical-impl";
     if (researchCount > 0) return "niche-research";
@@ -276,6 +360,7 @@ export function buildSpans(
   turns: ReadonlyArray<TurnFacts>,
   minRun: number,
   roleKind: (role: string) => RoleKind = claudeRoleKind,
+  learned?: LearnedJudgmentModel,
 ): Span[] {
   const spans: Span[] = [];
   let cur: { cls: WorkClass; turnCount: number; usage: RepriceUsage } | null = null;
@@ -289,6 +374,13 @@ export function buildSpans(
   // message) re-evaluates it; a user boundary clears it. Conservative: it only
   // demotes (never promotes), so the routability estimate can only tighten.
   let judgmentSticky = false;
+  // The prose text that opened the CURRENT message, carried across its
+  // tool-only turns exactly like judgmentSticky above - this IS the
+  // `regexPrev` feature's input for the learned path (#911). Captured BEFORE
+  // each turn updates it, so a prose turn itself sees the PRIOR message's
+  // prose (never its own text) as "previous". Unused (never allocated into a
+  // TurnFacts) when `learned` is absent.
+  let prevProseText: string | null = null;
 
   const flush = () => {
     if (!cur) return;
@@ -300,7 +392,7 @@ export function buildSpans(
   for (const t of turns) {
     const kind = roleKind(t.role);
     if (kind === "skip") continue;
-    if (kind === "boundary") { flush(); adjacentToBoundary = true; judgmentSticky = false; continue; }
+    if (kind === "boundary") { flush(); adjacentToBoundary = true; judgmentSticky = false; prevProseText = null; continue; }
     if (kind === "carry") {
       // Tool-output cost belongs to the action that produced it (open span).
       if (cur) cur.usage = addUsage(cur.usage, t.usage);
@@ -312,8 +404,13 @@ export function buildSpans(
     // the judgment carry from that text. Tool-only turns (empty text) keep the
     // value set by the prose turn that opened their message.
     const turnText = t.text?.trim() ?? "";
-    if (turnText.length > 0) judgmentSticky = JUDGMENT_GUARD_RE.test(turnText);
-    let cls = classifyTurn(t, adjacentToBoundary);
+    const prevAssistantText = prevProseText;
+    if (turnText.length > 0) {
+      judgmentSticky = JUDGMENT_GUARD_RE.test(turnText);
+      prevProseText = turnText;
+    }
+    const factsForClassify: TurnFacts = learned ? { ...t, prevAssistantText } : t;
+    let cls = classifyTurn(factsForClassify, adjacentToBoundary, learned);
     adjacentToBoundary = false;
     // Hold judgment-adjacent edits off the routable path: fold them into the
     // design-decision (non-routable) class so they group with the reasoning
@@ -550,6 +647,70 @@ function providerOfSource(source: string): RoutabilityProvider | null {
     return null;
 }
 
+// ---------------------------------------------------------------------------
+// Learned judgment model loading (#911, Phase 5 landed slice)
+// ---------------------------------------------------------------------------
+
+const CLASSIFIER_WEIGHTS_SQL = `
+SELECT feature, weight, threshold
+FROM classifier_weights
+WHERE model_id = ?;
+`;
+
+const ClassifierWeightRow = Schema.Struct({
+    feature: Schema.String,
+    weight: Schema.Number,
+    threshold: Schema.Number,
+});
+
+/**
+ * Load the learned judgment model from `classifier_weights` when
+ * `AX_JUDGMENT_MODEL=learned` (anything else - unset, empty, other value -
+ * takes the regex path UNTOUCHED, and this function does not even issue a
+ * query: `env-unset wiring never reads classifier_weights` is pinned by
+ * routability.classify-default.test.ts). Rows missing (table not yet
+ * seeded) or malformed (not every declared feature present) fall back to the
+ * regex floor with a single logged warning - never a crash, never a silent
+ * wrong answer.
+ */
+export const loadLearnedJudgmentModel = Effect.fn("queries.loadLearnedJudgmentModel")(
+    function* () {
+        if (process.env.AX_JUDGMENT_MODEL !== "learned") return undefined;
+
+        // cacheRows already fails OPEN to [] on a query error (logs + degrades),
+        // so a missing table (not yet seeded) and a genuine query error both
+        // land in the same "no rows" branch below - one warning, one fallback.
+        const rows = yield* cacheRows(
+            ClassifierWeightRow,
+            { sql: CLASSIFIER_WEIGHTS_SQL, params: [JUDGMENT_MODEL_SEED.modelId] },
+            "routability learned judgment weights",
+        );
+
+        if (rows.length === 0) {
+            yield* Effect.logWarning(
+                `AX_JUDGMENT_MODEL=learned but classifier_weights has no rows for model_id=${JUDGMENT_MODEL_SEED.modelId} - falling back to the regex judgment guard. Run \`ax ingest\` to seed it.`,
+            );
+            return undefined;
+        }
+
+        const weights: Record<string, number> = {};
+        let threshold: number | undefined;
+        for (const row of rows) {
+            weights[row.feature] = row.weight;
+            threshold = row.threshold;
+        }
+        const missing = JUDGMENT_FEATURE_NAMES.filter((name) => !(name in weights));
+        if (missing.length > 0 || threshold === undefined) {
+            yield* Effect.logWarning(
+                `AX_JUDGMENT_MODEL=learned but classifier_weights rows for model_id=${JUDGMENT_MODEL_SEED.modelId} are malformed (missing features: ${missing.join(", ") || "none"}) - falling back to the regex judgment guard.`,
+            );
+            return undefined;
+        }
+
+        return { threshold, weights } satisfies LearnedJudgmentModel;
+    },
+);
+
 /**
  * Pull main-agent turns (Claude + Codex) from the DuckDB cache, group into class-run
  * spans per (provider, session), classify + reprice each provider separately,
@@ -573,6 +734,11 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             cacheRows(TurnUsageRow, { sql: TURN_USAGE_SQL, params: [days] }, "routability turn usage"),
             cacheRows(AgentModelRow, { sql: AGENT_MODELS_SQL, params: [] }, "routability agent models"),
         ], { concurrency: 4 });
+
+        // Env-gated (#911): `loadLearnedJudgmentModel` returns `undefined` WITHOUT
+        // issuing any query unless AX_JUDGMENT_MODEL=learned, so the default path
+        // never touches classifier_weights.
+        const learned = yield* loadLearnedJudgmentModel();
 
         // ---- tool calls: turn_id → ToolCallFact[] (carries command_norm) ---
         const toolsByTurn = new Map<string, ToolCallFact[]>();
@@ -696,7 +862,7 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             const spans: Span[] = [];
             for (const turns of bySession.values()) {
                 turns.sort((a, b) => a.seq - b.seq); // DB orders by (session, seq); defensive
-                for (const s of buildSpans(turns, input.minRun, roleKind)) spans.push(s);
+                for (const s of buildSpans(turns, input.minRun, roleKind, learned)) spans.push(s);
             }
             const res = aggregateRoutability(spans, pricingCatalog, input, provider);
             if (res.mainSpendUsd > 0 || res.rows.length > 0) providerResults.push(res);

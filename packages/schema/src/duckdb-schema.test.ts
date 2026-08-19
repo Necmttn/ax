@@ -41,6 +41,7 @@ describe("coverage of the Surreal schema", () => {
             "schema_comment_state", // #869 COMMENT ON bookkeeping
             "cache_bust_event", // #868 cache-bust ledger (SQL model)
             "fts_index_state", // #909 skip-unchanged bookkeeping for the FTS rebuild
+            "classifier_weights", // #911 learned judgment classifier weights (Phase 5 landed slice)
         ]);
         const surrealSet = new Set(surrealTables.map((t) => t.table));
         expect(duckTables.filter((t) => !surrealSet.has(t) && !bornAfterSurreal.has(t))).toEqual([]);

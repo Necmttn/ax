@@ -127,6 +127,14 @@ export const NON_STAGE_WRITERS: readonly {
         ],
     },
     {
+        // run.ts tail (#911): idempotent, version-gated seed of the learned
+        // judgment classifier's weights from the committed constants
+        // (judgment-weights.ts) - not a stage, nothing here is derived from
+        // transcripts. Same seam pattern as FTS index rebuild.
+        writer: "ingest-run:seed-classifier-weights",
+        writes: [w("classifier_weights", "bookkeep")],
+    },
+    {
         // cli/commands/ingest.ts maintenance verbs: blob-GC afterWork,
         // onTimeout stamp, `ax ingest reap`, telemetryStage for the
         // derive-signals/insights verbs. `ax ingest reap` runs through

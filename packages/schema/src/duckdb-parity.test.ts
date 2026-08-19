@@ -31,7 +31,7 @@ import { SIDECAR_JUDGMENT_TABLES } from "./sidecar-tables.ts";
 // silently shrink to comparing zero (or a handful of) tables/columns.
 const EXPECTED_TABLES_COMPARED = 138;
 /** Of those, how many the DuckDB cache still defines (138 - 14 judgment tables). */
-const EXPECTED_DUCKDB_TABLES = 127; // +schema_comment_state (#869), +cache_bust_event (#868), +fts_index_state (#909)
+const EXPECTED_DUCKDB_TABLES = 128; // +schema_comment_state (#869), +cache_bust_event (#868), +fts_index_state (#909), +classifier_weights (#911)
 // A7 (agent_event.raw prune): schema.surql's `agent_event.raw` field was
 // removed (ax never wrote it - buildAgentEventStatement already omitted it
 // from the CONTENT it upserts). schema.duckdb.sql's `agent_event.raw` column

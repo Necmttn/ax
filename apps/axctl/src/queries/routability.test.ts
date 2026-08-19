@@ -338,3 +338,96 @@ describe("aggregateRoutability provider tiers + combineRoutability", () => {
     expect(all.providers).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #911 Phase 5 landed slice: learned judgment classifier (AX_JUDGMENT_MODEL=learned)
+// ---------------------------------------------------------------------------
+
+describe("classifyTurn default path is byte-identical with `learned` omitted", () => {
+  // A broad fixture matrix over every WorkClass + edge case the regex path
+  // produces today, called with NO third argument - pins today's expected
+  // values so a future change to the learned branch cannot silently alter
+  // the default. (routability.test.ts's earlier describes already exercise
+  // this implicitly by never passing `learned`; this block makes the
+  // guarantee explicit and self-contained.)
+  const cases: [string, TurnFacts, boolean, ReturnType<typeof classifyTurn>][] = [
+    ["read-only tools -> gather", { ...base, toolNames: ["Read", "Grep"] }, false, "gather"],
+    ["research tools -> niche-research", { ...base, toolNames: ["WebFetch", "WebSearch"] }, false, "niche-research"],
+    ["edit-dominant -> mechanical-impl", { ...base, toolNames: ["Edit", "Bash"] }, false, "mechanical-impl"],
+    ["no tools, no text -> interactive", { ...base }, false, "interactive"],
+    ["judgment text wins over read tools -> design-decision", { ...base, text: "Review the design of this module", toolNames: ["Read"] }, false, "design-decision"],
+    ["adjacent to user -> interactive", { ...base, toolNames: ["Read"] }, true, "interactive"],
+    ["correction intent -> interactive", { ...base, intentKind: "correction", toolNames: ["Edit"] }, false, "interactive"],
+    ["empty tool list, judgment text -> design-decision", { ...base, text: "audit the security model" }, false, "design-decision"],
+    ["non-judgment prose, no tools -> interactive", { ...base, text: "looks good, thanks" }, false, "interactive"],
+  ];
+  for (const [name, facts, adjacent, expected] of cases) {
+    it(name, () => {
+      expect(classifyTurn(facts, adjacent)).toBe(expected);
+    });
+  }
+});
+
+describe("classifyTurn learned path (AX_JUDGMENT_MODEL=learned)", () => {
+  it("a regex-flagged turn UNDER threshold is NOT design-decision", () => {
+    // Text matches JUDGMENT_GUARD_RE ("review"), but the learned model's
+    // weights ignore regexOwn and gate on otherToolCount, which is 0 here -
+    // demonstrating the learned branch fully REPLACES the regex decision
+    // rather than OR-ing with it.
+    const learned = { threshold: 0.5, weights: { bias: -10, otherToolCount: 5 } };
+    const t: TurnFacts = { ...base, text: "Review the design of this module", toolNames: ["Read"] };
+    expect(classifyTurn(t, false, learned)).not.toBe("design-decision");
+    // Same facts, no `learned` -> regex path still flags it (unchanged default).
+    expect(classifyTurn(t, false)).toBe("design-decision");
+  });
+
+  it("a turn OVER threshold without any regex hit IS design-decision", () => {
+    const learned = { threshold: 0.5, weights: { bias: -10, otherToolCount: 5 } };
+    const t: TurnFacts = { ...base, text: "run the build", toolNames: ["some_mcp_tool", "some_mcp_tool", "some_mcp_tool"] };
+    expect(classifyTurn(t, false)).not.toBe("design-decision"); // regex path: no match
+    expect(classifyTurn(t, false, learned)).toBe("design-decision"); // learned path: otherToolCount=3 crosses threshold
+  });
+
+  it("regexPrev feature reads TurnFacts.prevAssistantText, not the turn's own text", () => {
+    const learned = { threshold: 0.5, weights: { bias: -10, regexPrev: 20 } };
+    const judgmentPrev: TurnFacts = { ...base, prevAssistantText: "let's review the tradeoffs here" };
+    expect(classifyTurn(judgmentPrev, false, learned)).toBe("design-decision");
+    const plainPrev: TurnFacts = { ...base, prevAssistantText: "run the build" };
+    expect(classifyTurn(plainPrev, false, learned)).not.toBe("design-decision");
+    const noPrev: TurnFacts = { ...base };
+    expect(classifyTurn(noPrev, false, learned)).not.toBe("design-decision");
+  });
+
+  it("interactive guards and tool-composition fallthrough are unaffected by `learned`", () => {
+    const learned = { threshold: 0.99, weights: {} }; // score always ~0.5 sigmoid(0), never >= 0.99
+    expect(classifyTurn({ ...base, toolNames: ["Read"] }, true, learned)).toBe("interactive");
+    expect(classifyTurn({ ...base, intentKind: "correction", toolNames: ["Edit"] }, false, learned)).toBe("interactive");
+    expect(classifyTurn({ ...base, toolNames: ["Edit", "Bash"] }, false, learned)).toBe("mechanical-impl");
+    expect(classifyTurn({ ...base, toolNames: ["WebFetch"] }, false, learned)).toBe("niche-research");
+  });
+});
+
+describe("buildSpans + learned model", () => {
+  it("a non-judgment-text, tool-heavy run classifies differently learned-vs-default", () => {
+    // No prose anywhere in this fixture, so the always-on regex sticky demotion
+    // never engages - isolates the learned model's non-regex features
+    // (otherToolCount) as the thing that changes the outcome.
+    const heavy = (seq: number) => turn(seq, "assistant", ["some_mcp_tool", "some_mcp_tool", "some_mcp_tool"]);
+    const turns = [turn(1, "user", []), heavy(2), heavy(3), heavy(4)];
+
+    const defaultSpans = buildSpans(turns, 1);
+    expect(defaultSpans.some((s) => s.cls === "design-decision")).toBe(false); // no tool self-classifies as edit/read/research -> interactive
+
+    const learned = { threshold: 0.5, weights: { bias: -10, otherToolCount: 5 } };
+    const learnedSpans = buildSpans(turns, 1, undefined, learned);
+    expect(learnedSpans.some((s) => s.cls === "design-decision")).toBe(true);
+  });
+
+  it("without `learned`, buildSpans is unaffected (identity default path)", () => {
+    const turns = [turn(1, "user", []), turn(2, "assistant", [], { text: "review the plan" }), turn(3, "assistant", ["Edit"])];
+    // No throw, no behavior change - buildSpans without `learned` takes the
+    // untouched default branch (sticky-only demotion, as pinned above).
+    const spans = buildSpans(turns, 1);
+    expect(spans.some((s) => s.cls === "design-decision")).toBe(true);
+  });
+});
