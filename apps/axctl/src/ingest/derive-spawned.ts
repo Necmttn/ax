@@ -180,7 +180,9 @@ export class SpawnedStats extends BaseStageStats.extend<SpawnedStats>("SpawnedSt
 }) {}
 
 export const spawnedStage: StageDef<SpawnedStats, never, CacheWriteError> = {
-    meta: StageMeta.make({ key: "spawned", deps: ["claude", "codex"], tags: ["derive"] }),
+    // derive-mode write into the event table `spawned` - an enumerated
+    // exception (WRITE_MODE_EXCEPTIONS): the subagents parser also writes it.
+    meta: StageMeta.make({ key: "spawned", deps: ["claude", "codex"], tags: ["derive"], writes: [{ table: "spawned", mode: "derive" }] }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

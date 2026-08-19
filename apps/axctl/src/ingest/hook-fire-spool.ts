@@ -113,7 +113,7 @@ export const hookFireSpoolStage: StageDef<
     FileSystem.FileSystem | Path.Path,
     CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "hook-fire-spool", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "hook-fire-spool", deps: [], tags: ["ingest"], writes: [{ table: "hook_fire", mode: "parse" }] }),
     run: Effect.fn(function* (_ctx: IngestContext, write: CacheWriteService) {
         const started = Date.now();
         const outcome = yield* drainHookFireSpool(write).pipe(

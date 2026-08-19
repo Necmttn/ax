@@ -464,7 +464,35 @@ export class SubagentsStats extends BaseStageStats.extend<SubagentsStats>("Subag
 }) {}
 
 export const subagentsStage: StageDef<SubagentsStats, AxConfig | FileSystem.FileSystem | Path.Path, CacheWriteError> = {
-    meta: StageMeta.make({ key: "subagents", deps: ["claude", "codex"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "subagents",
+        // Tagged derive for pipeline placement, but this stage IS A PARSER:
+        // it walks agent-*.jsonl subagent files with a fileWatermark and
+        // writes event rows (#893 - the flagship tags-are-not-the-layer case).
+        deps: ["claude", "codex"],
+        tags: ["derive"],
+        writes: [
+            { table: "session", mode: "parse" },
+            { table: "session", mode: "enrich" }, // parent repo/checkout/cwd backfill
+            { table: "spawned", mode: "parse" },
+            { table: "session_token_usage", mode: "parse" },
+            { table: "turn_token_usage", mode: "parse" },
+            { table: "turn", mode: "parse" },
+            { table: "tool", mode: "parse" },
+            { table: "tool_call", mode: "parse" },
+            { table: "file", mode: "parse" },
+            { table: "edited", mode: "parse" },
+            { table: "read_file", mode: "parse" },
+            { table: "searched_file", mode: "parse" },
+            { table: "skill", mode: "parse" },
+            { table: "invoked", mode: "parse" },
+            { table: "concerns", mode: "parse" },
+            { table: "plan", mode: "parse" },
+            { table: "plan_snapshot", mode: "parse" },
+            { table: "plan_item", mode: "parse" },
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

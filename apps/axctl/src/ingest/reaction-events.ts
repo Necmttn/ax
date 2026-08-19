@@ -303,7 +303,7 @@ export class ReactionEventsStageStats extends BaseStageStats.extend<ReactionEven
 }) {}
 
 export const reactionEventsStage: StageDef<ReactionEventsStageStats, never, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "reaction-events", deps: ["turn-analysis"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "reaction-events", deps: ["turn-analysis"], tags: ["derive"], writes: [{ table: "reaction_event", mode: "derive" }] }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

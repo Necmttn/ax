@@ -202,6 +202,10 @@ export const contentTypesStage: StageDef<ContentTypeStats, never, CacheWriteErro
         key: "content-types",
         deps: ["claude", "codex", "pi", "omp", "cursor"],
         tags: ["derive"],
+        writes: [
+            { table: "content_type", mode: "derive" },
+            { table: "has_content", mode: "derive" },
+        ],
     }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {

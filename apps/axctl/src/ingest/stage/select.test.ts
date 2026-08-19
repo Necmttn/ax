@@ -5,7 +5,7 @@ import { selectByKeys, selectByTag } from "./select.ts";
 import { BaseStageStats, StageMeta, type StageDef } from "./types.ts";
 
 const stage = (key: string, tags: string[], deps: string[] = []): StageDef => ({
-    meta: StageMeta.make({ key, deps, tags: tags as never }),
+    meta: StageMeta.make({ key, deps, tags: tags as never, writes: [] }),
     run: () => Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: key })),
 });
 

@@ -583,7 +583,17 @@ export class TurnAnalysisStageStats extends BaseStageStats.extend<TurnAnalysisSt
 }) {}
 
 export const turnAnalysisStage: StageDef<TurnAnalysisStageStats, never, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "turn-analysis", deps: ["outcomes"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "turn-analysis",
+        deps: ["outcomes"],
+        tags: ["derive"],
+        writes: [
+            { table: "turn_analysis", mode: "derive" },
+            { table: "semantic_signal", mode: "derive" },
+            { table: "expresses", mode: "derive" },
+            { table: "reacts_to", mode: "derive" },
+        ],
+    }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

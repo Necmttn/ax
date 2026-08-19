@@ -154,7 +154,7 @@ export const agentDefStage: StageDef<
     FileSystem.FileSystem | Path.Path | AgentSourceRegistry,
     DbError | CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "agent-def", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "agent-def", deps: [], tags: ["ingest"], writes: [{ table: "agent_def", mode: "parse" }] }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

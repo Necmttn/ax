@@ -172,6 +172,7 @@ export const loadedSkillsStage: StageDef<LoadedSkillsStats, never, CacheWriteErr
         key: "loaded-skills",
         deps: ["skills", "agent-def", "spawned"],
         tags: ["derive"],
+        writes: [{ table: "loaded", mode: "derive" }],
     }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {

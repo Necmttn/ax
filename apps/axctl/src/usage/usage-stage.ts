@@ -44,7 +44,10 @@ export class UsageStats extends BaseStageStats.extend<UsageStats>("UsageStats")(
 }) {}
 
 export const usageStage: StageDef<UsageStats, never, CacheWriteError> = {
-  meta: StageMeta.make({ key: "usage", deps: [], tags: ["derive"] }),
+  // Tagged derive for pipeline placement, but it is an external-ledger
+  // LOADER (parse): it drains + truncates the usage log, so these cache rows
+  // are the only durable copy (#893).
+  meta: StageMeta.make({ key: "usage", deps: [], tags: ["derive"], writes: [{ table: "ax_invocation", mode: "parse" }] }),
   run: (_ctx: IngestContext, write) =>
     Effect.gen(function* () {
       const t0 = Date.now();

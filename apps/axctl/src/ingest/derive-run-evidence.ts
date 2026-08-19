@@ -699,6 +699,12 @@ export const runEvidenceStage: StageDef<RunEvidenceStats, never, CacheWriteError
         key: "run-evidence",
         deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "outcomes", "git", "spawned"],
         tags: ["derive"],
+        writes: [
+            { table: "run_evidence_event", mode: "derive" },
+            { table: "run_evidence_ref", mode: "derive" },
+            { table: "command_outcome", mode: "derive" }, // check_family cutover backfill
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
     }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {

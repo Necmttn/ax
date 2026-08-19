@@ -366,7 +366,18 @@ export class ClosureStageStats extends BaseStageStats.extend<ClosureStageStats>(
 }) {}
 
 export const closureStage: StageDef<ClosureStageStats, never, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "closure", deps: ["signals"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "closure",
+        deps: ["signals"],
+        tags: ["derive"],
+        writes: [
+            { table: "commit_classification", mode: "derive" },
+            { table: "later_fixed_by", mode: "derive" },
+            { table: "skill_candidate", mode: "derive" },
+            { table: "suggests_skill", mode: "derive" },
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

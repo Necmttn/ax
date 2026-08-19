@@ -25,8 +25,10 @@ describe("StageMeta", () => {
             key: "signals",
             deps: ["claude", "codex"],
             tags: ["derive"],
+            writes: [{ table: "corrected_by", mode: "derive" }],
         });
         expect(decoded.key).toBe("signals");
+        expect(decoded.writes[0]?.mode).toBe("derive");
     });
 });
 

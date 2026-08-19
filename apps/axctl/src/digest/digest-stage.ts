@@ -20,7 +20,8 @@ export class DigestStats extends BaseStageStats.extend<DigestStats>("DigestStats
  *  full/read-only disk on the digest write logs a warning and yields a zero-item
  *  stats row, never failing the surrounding ingest run. */
 export const digestStage: StageDef<DigestStats, Judgment, CacheWriteError> = {
-  meta: StageMeta.make({ key: "digest", deps: ["proposals", "derive-metrics"], tags: ["derive"] }),
+  // Writes no cache table: the digest lands in ~/.ax/digest.json.
+  meta: StageMeta.make({ key: "digest", deps: ["proposals", "derive-metrics"], tags: ["derive"], writes: [] }),
   run: (_ctx: IngestContext, write: CacheWriteService) =>
     Effect.gen(function* () {
       const t0 = Date.now();

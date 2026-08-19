@@ -17,6 +17,7 @@ import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts"
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     extractOpenCodeCompaction,
@@ -1273,7 +1274,7 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
 }) {}
 
 export const opencodeStage: StageDef<OpenCodeStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"], writes: NORMALIZED_BATCH_WRITES }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

@@ -319,7 +319,20 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
 }) {}
 
 export const signalsStage: StageDef<SignalsStats, never, CacheWriteError> = {
-    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "subagents", "spawned", "git"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "signals",
+        deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "subagents", "spawned", "git"],
+        tags: ["derive"],
+        writes: [
+            { table: "corrected_by", mode: "derive" },
+            { table: "proposed", mode: "derive" },
+            { table: "skill_paired", mode: "derive" },
+            { table: "recovered_by", mode: "derive" },
+            { table: "friction_event", mode: "derive" },
+            { table: "diagnostic_event", mode: "derive" },
+            { table: "invoked", mode: "enrich" }, // was_corrected stamping
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

@@ -277,7 +277,7 @@ export class OutcomesStageStats extends BaseStageStats.extend<OutcomesStageStats
 }) {}
 
 export const outcomesStage: StageDef<OutcomesStageStats, never, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "outcomes", deps: ["signals"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "outcomes", deps: ["signals"], tags: ["derive"], writes: [{ table: "command_outcome", mode: "derive" }, { table: "user_message_ngram", mode: "derive" }] }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

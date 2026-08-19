@@ -17,6 +17,7 @@ import { agentEventRecordKey, type AgentEventWrite, type AgentProviderName } fro
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { JSONL_WORK_UNIT_WRITES, NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     booleanField,
@@ -857,7 +858,16 @@ const makePiLikeStage = (
     desc: PiLikeProvider,
     ingest: ReturnType<typeof makePiLikeIngest>,
 ): StageDef<PiStageStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> => ({
-    meta: StageMeta.make({ key: desc.provider, deps: ["skills", "commands"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: desc.provider,
+        deps: ["skills", "commands"],
+        tags: ["ingest"],
+        writes: [
+            ...NORMALIZED_BATCH_WRITES,
+            { table: "session_token_usage", mode: "parse" },
+            ...JSONL_WORK_UNIT_WRITES,
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

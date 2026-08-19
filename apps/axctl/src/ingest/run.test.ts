@@ -15,7 +15,7 @@ import { runIngest, stageEventName, withIngestRunFinish } from "./run.ts";
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ingest run", { requireFts: true });
 
 const stage = (key: string, deps: string[] = [], delay = 0): StageDef => ({
-    meta: StageMeta.make({ key, deps, tags: [key === "outcomes" ? "derive" : "ingest"] }),
+    meta: StageMeta.make({ key, deps, tags: [key === "outcomes" ? "derive" : "ingest"], writes: [] }),
     run: () => Effect.succeed({
         ...BaseStageStats.make({ durationMs: 1, summary: `${key} done` }),
         sessions: key === "skills" ? 3 : 0,

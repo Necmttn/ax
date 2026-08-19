@@ -9,6 +9,7 @@ import { resolveSkillName } from "@ax/lib/skill-id";
 import { skillRowId } from "@ax/lib/stable-id";
 import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { JSONL_WORK_UNIT_WRITES, NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -2048,7 +2049,19 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
 }) {}
 
 export const claudeStage: StageDef<ClaudeStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
-    meta: StageMeta.make({ key: "claude", deps: ["skills", "commands"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "claude",
+        deps: ["skills", "commands"],
+        tags: ["ingest"],
+        writes: [
+            ...NORMALIZED_BATCH_WRITES,
+            { table: "session_token_usage", mode: "parse" },
+            { table: "turn_token_usage", mode: "parse" },
+            { table: "harness_hook_event", mode: "parse" },
+            { table: "hook_command_invocation", mode: "parse" },
+            ...JSONL_WORK_UNIT_WRITES,
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

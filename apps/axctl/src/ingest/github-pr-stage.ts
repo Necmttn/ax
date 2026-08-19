@@ -249,7 +249,18 @@ export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
  * Tags: ingest
  */
 export const githubPrStage: StageDef<GithubPrStageStats, never, CacheWriteError> = {
-    meta: StageMeta.make({ key: "github-pr", deps: ["git"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "github-pr",
+        deps: ["git"],
+        tags: ["ingest"],
+        writes: [
+            { table: "pull_request", mode: "parse" },
+            { table: "review_event", mode: "parse" },
+            { table: "check_run", mode: "parse" },
+            { table: "delivery_outcome", mode: "parse" },
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

@@ -187,6 +187,11 @@ export const turnContentBlocksStage: StageDef<TurnContentBlocksStageStats, never
         key: "turn-content-blocks",
         deps: ["claude", "codex", "pi", "omp", "opencode", "cursor"],
         tags: ["derive"],
+        writes: [
+            { table: "content_document", mode: "derive" },
+            { table: "content_block", mode: "derive" },
+            { table: "content_atom", mode: "derive" },
+        ],
     }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
