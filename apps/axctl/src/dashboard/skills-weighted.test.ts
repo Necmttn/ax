@@ -18,6 +18,15 @@ import { fetchSkillsWeighted, type SkillsWeightedParams } from "./skills-weighte
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills-weighted", { requireFts: true });
 
+// Each case publishes a fresh DuckDB fixture (real writes + a full FTS index
+// rebuild over turn/commit) then runs the query - ~200-250ms/test on an idle
+// box, measured here, but bun's 5000ms default has flaked once under CI load
+// (#919, main 2026-08-19). Per-test timeout (NOT setDefaultTimeout, which is
+// process-wide under `bun test` and would silently raise every later-loaded
+// file's default too); raised rather than trimming genuinely-needed per-test
+// fixture isolation.
+const wtest = (name: string, fn: () => Promise<void>) => dtest(name, fn, 20_000);
+
 interface RoleRow { readonly skill_id: string; readonly role_name: string; readonly effective_weight: number }
 
 const runWeighted = (
@@ -59,7 +68,7 @@ const INVOKED = (id: string, out_id: string, session: string, ts: Date) => ({
 });
 
 describe("fetchSkillsWeighted", () => {
-    dtest("ranks rows by score DESC, summing multi-role weights (floor 1.0)", async () => {
+    wtest("ranks rows by score DESC, summing multi-role weights (floor 1.0)", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-rank-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -90,7 +99,7 @@ describe("fetchSkillsWeighted", () => {
         expect(result.rows[2]).toMatchObject({ skill_name: "worktree-read-strategy", score: 62, weight: 1.0, roles: [] });
     });
 
-    dtest("respects the limit param", async () => {
+    wtest("respects the limit param", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-limit-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -112,7 +121,7 @@ describe("fetchSkillsWeighted", () => {
         expect(result.rows.length).toBe(2);
     });
 
-    dtest("excludes tombstoned skills from the ranking", async () => {
+    wtest("excludes tombstoned skills from the ranking", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-tombstone-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -132,7 +141,7 @@ describe("fetchSkillsWeighted", () => {
         expect(result.rows.map((r) => r.skill_name)).toEqual(["live"]);
     });
 
-    dtest("excludes synthetic provider tools by default; includeTools=true keeps and ranks them", async () => {
+    wtest("excludes synthetic provider tools by default; includeTools=true keeps and ranks them", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-synth-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -155,7 +164,7 @@ describe("fetchSkillsWeighted", () => {
         expect(included.rows[0]!.skill_name).toBe("codex:exec_command");
     });
 
-    dtest("doctor: no advice below threshold, advice above threshold, synthetic tools excluded unless includeTools", async () => {
+    wtest("doctor: no advice below threshold, advice above threshold, synthetic tools excluded unless includeTools", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-doctor-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -186,7 +195,7 @@ describe("fetchSkillsWeighted", () => {
         expect(withTools.doctor.unclassified_count).toBe(8);
     });
 
-    dtest("handles an empty graph gracefully", async () => {
+    wtest("handles an empty graph gracefully", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skw-empty-"), dylibPath, () => Effect.void));
 
         const result = await runWeighted(fixture.snapshotPath);
@@ -195,7 +204,7 @@ describe("fetchSkillsWeighted", () => {
         expect(result.doctor.advice).toBeNull();
     });
 
-    dtest("windowDays limits the invocation aggregate to recent rows", async () => {
+    wtest("windowDays limits the invocation aggregate to recent rows", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-window-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -215,7 +224,7 @@ describe("fetchSkillsWeighted", () => {
         expect(unwindowed.rows[0]!.invocations).toBe(2);
     });
 
-    dtest("excludes spar-variant sessions from the invocation aggregate", async () => {
+    wtest("excludes spar-variant sessions from the invocation aggregate", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-spar-"), dylibPath, (w) =>
                 Effect.gen(function* () {
@@ -256,7 +265,7 @@ describe("recovery latency (lens E)", () => {
             ]);
         });
 
-    dtest("computes median_recovery_ms across recovery sessions; null for skills with no recovery edges", async () => {
+    wtest("computes median_recovery_ms across recovery sessions; null for skills with no recovery edges", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-skw-recovery-"), dylibPath, withRecovery));
 
         const result = await runWeighted(fixture.snapshotPath);
@@ -268,7 +277,7 @@ describe("recovery latency (lens E)", () => {
         expect(caveman.median_recovery_ms).toBeNull();
     });
 
-    dtest("sessions with no telemetry data do not contribute to the median", async () => {
+    wtest("sessions with no telemetry data do not contribute to the median", async () => {
         const fixture = await runWithPlatform(
             publishCacheFixture(tempDir("ax-skw-recovery-partial-"), dylibPath, (w) =>
                 Effect.gen(function* () {
