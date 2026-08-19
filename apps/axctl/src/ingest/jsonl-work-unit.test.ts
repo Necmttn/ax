@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { hashFileSha256 } from "@ax/lib/duckdb/watermark";
 import { parseDuckdbColumnDefs } from "@ax/schema/duckdb-ddl";
 import type { CacheWriteError } from "@ax/lib/duckdb/seam";
 import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
@@ -210,5 +211,91 @@ describe("JSONL provider heartbeat", () => {
             }),
         ));
         expect(progressAt).toBeInstanceOf(Date);
+    });
+});
+
+describe("content-hash tier (#900) on real files", () => {
+    const statOf = async (path: string) => {
+        const stat = await Bun.file(path).stat();
+        return { mtimeMs: stat.mtimeMs, sizeBytes: stat.size };
+    };
+
+    dtest("a touched-but-identical file refreshes its mark and skips the parse", async () => {
+        const dir = tempDir("ax-jsonl-content-");
+        const filePath = `${dir}/one.jsonl`;
+        await Bun.write(filePath, `{"kind":"row"}\n`);
+        const statA = await statOf(filePath);
+        // Rewrite the SAME bytes so mtime moves while content does not.
+        await Bun.write(filePath, `{"kind":"row"}\n`);
+        const statB = await statOf(filePath);
+
+        const first: string[] = [];
+        const second: string[] = [];
+        let firstResult: unknown;
+        let secondResult: unknown;
+        let storedSha: string | null = null;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-jsonl-content-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                firstResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(filePath, statA.mtimeMs, statA.sizeBytes)], first),
+                    contentHash: true,
+                });
+                secondResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(filePath, statB.mtimeMs, statB.sizeBytes)], second),
+                    contentHash: true,
+                });
+                storedSha = (yield* write.rows(Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+                    "SELECT sha FROM ingest_file_state WHERE path = ?", [filePath]))[0]!.sha;
+            }),
+        ));
+        expect(firstResult).toMatchObject({ files: 1, skippedUnchanged: 0, refreshedUnchanged: 0 });
+        // The refresh: no parse (processFile never ran), the mark advanced.
+        expect(secondResult).toMatchObject({ files: 0, skippedUnchanged: 0, refreshedUnchanged: 1 });
+        expect(first).toEqual([filePath]);
+        expect(second).toEqual([]);
+        // Verify by transformation: the stored sha IS the file's SHA-256.
+        const expected = await Effect.runPromise(hashFileSha256(filePath));
+        expect(storedSha as string | null).toBe(expected);
+    });
+
+    dtest("changed content parses and stamps the fresh sha; third run fast-skips", async () => {
+        const dir = tempDir("ax-jsonl-content2-");
+        const filePath = `${dir}/two.jsonl`;
+        await Bun.write(filePath, `{"v":1}\n`);
+        const statA = await statOf(filePath);
+
+        const runs: string[][] = [[], [], []];
+        const results: unknown[] = [];
+        let storedSha: string | null = null;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-jsonl-content2-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                results[0] = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(filePath, statA.mtimeMs, statA.sizeBytes)], runs[0]!),
+                    contentHash: true,
+                });
+                // Change the CONTENT between runs, so run 2 hashes new bytes.
+                const statB = yield* Effect.promise(async () => {
+                    await Bun.write(filePath, `{"v":2}\n`);
+                    return statOf(filePath);
+                });
+                for (const index of [1, 2]) {
+                    results[index] = yield* runJsonlProviderFiles(write, {
+                        ...options([candidate(filePath, statB.mtimeMs, statB.sizeBytes)], runs[index]!),
+                        contentHash: true,
+                    });
+                }
+                storedSha = (yield* write.rows(Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+                    "SELECT sha FROM ingest_file_state WHERE path = ?", [filePath]))[0]!.sha;
+            }),
+        ));
+        expect(results[0]).toMatchObject({ files: 1, refreshedUnchanged: 0 });
+        // Genuinely changed: parsed, not refreshed.
+        expect(results[1]).toMatchObject({ files: 1, skippedUnchanged: 0, refreshedUnchanged: 0 });
+        // Unchanged stats: the FAST tier skips - no read, no hash.
+        expect(results[2]).toMatchObject({ files: 0, skippedUnchanged: 1, refreshedUnchanged: 0 });
+        expect(runs[1]).toEqual([filePath]);
+        expect(runs[2]).toEqual([]);
+        const expected = await Effect.runPromise(hashFileSha256(filePath));
+        expect(storedSha as string | null).toBe(expected);
     });
 });

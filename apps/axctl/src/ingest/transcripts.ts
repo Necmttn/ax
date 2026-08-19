@@ -1866,6 +1866,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             sourceKind: "claude_transcript",
             forceEnv: "AX_REDERIVE_CLAUDE",
             source: "claude",
+            contentHash: true,
             spool,
             ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),

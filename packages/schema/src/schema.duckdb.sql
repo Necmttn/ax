@@ -2445,12 +2445,17 @@ CREATE TABLE IF NOT EXISTS ingest_file_state (
     source_kind VARCHAR NOT NULL,       -- e.g. "claude_transcript" | "git_repo"
     mtime_ms DOUBLE,
     size DOUBLE,
-    sha VARCHAR,  -- git HEAD watermark
+    sha VARCHAR,  -- git HEAD watermark; for file-form marks (#900) a SHA-256 of the parsed bytes (durable content tier)
     since_days DOUBLE,  -- git history window walked
     ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state(path);
 CREATE INDEX IF NOT EXISTS ingest_file_state_source ON ingest_file_state(source_kind);
+-- #900 (Phase 4 piece 3): content-addressed mark lookup. Unused by the
+-- two-tier skip itself (that reads per-kind rows into a Map); it exists for
+-- the slice-3 hash-indexed handshake - recognizing a file that lands at a NEW
+-- path (segment import, resync) by its content hash before parsing it.
+CREATE INDEX IF NOT EXISTS ingest_file_state_kind_sha ON ingest_file_state(source_kind, sha);
 
 -- ---------------------------------------------------------------------------
 -- OTLP telemetry tables (2026-06-15)

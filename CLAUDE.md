@@ -136,6 +136,19 @@ or write. Getting it wrong does not error; it returns a wrong answer.
   same-run MUST stay direct - the allowlist + per-table rationale live on
   `INGEST_SPOOL_TABLES` (`apps/axctl/src/ingest/jsonl-work-unit.ts`), pinned by
   test. `session`, `skill`, and `plan_item` are the load-bearing exclusions.
+- **The ingest watermark is two-tier** (#900): file-form marks store
+  `(mtime_ms, size)` PLUS a SHA-256 of the parsed bytes in
+  `ingest_file_state.sha`. Fast tier: stats match -> skip with no read.
+  Durable tier (claude/codex/pi/omp; NOT the append-only otel spool): stats
+  moved -> hash the bytes; identical hash (mtime churn, resync, touch) ->
+  refresh the mark, SKIP the parse - the jsonl work-unit's third outcome
+  beside processed/skipped. SHA-256 and never `stableDigest`/`Bun.hash` (a
+  bun upgrade would invalidate every mark). A one-time per-kind eager
+  backfill (sentinel `__content_hash_backfill__/<kind>`, version
+  `CONTENT_HASH_VERSION`) hashed the existing corpus; it compares stats at
+  WHOLE-ms grain because the walkers store `Date.getTime()` while
+  `Bun.file().stat()` carries fractional ms. Module:
+  `packages/lib/src/duckdb/watermark.ts`.
 - **Decisions** (proposal, verdict, experiment, session_label) go to the SQLite
   sidecar via `Judgment`, never to the cache. A cache rebuild must not lose them.
 - A command declares what it needs in its `RuntimeManifest`
