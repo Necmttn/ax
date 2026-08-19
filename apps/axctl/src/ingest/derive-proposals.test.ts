@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildCacheLensProposalWrites,
     buildGuidanceProposalWrites,
     buildImageContextProposalWrites,
     buildRoutingProposalWrites,
     buildSkillProposalWrites,
+    CACHE_LENS_PROPOSAL_CAP,
+    cacheLensConfidence,
     dedupeSig,
+    deriveCacheLensProposalRows,
     deriveDirectiveProposalRows,
     deriveGuidanceProposalRows,
     deriveImageContextProposalRow,
     deriveRoutingProposalRow,
     deriveSkillProposalRows,
     deriveWorkflowProposalRows,
+    evaluateCacheLensCandidate,
     IMAGE_CONTEXT_THRESHOLD_MB,
     normalizeTitle,
     parseMetrics,
@@ -18,6 +23,7 @@ import {
 } from "./derive-proposals.ts";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import type { ImageContextResult } from "../queries/image-context.ts";
+import type { CacheLensCandidateRow } from "../queries/cache-bust.ts";
 
 describe("derive-proposals helpers", () => {
     test("normalizeTitle lowercases + collapses whitespace", () => {
@@ -452,5 +458,229 @@ describe("deriveWorkflowProposalRows", () => {
         ]);
         expect(rows[0]!.frequency).toBe(7);
         expect(rows[1]!.frequency).toBe(3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Cache-lens proposal tests (slice B, #868)
+// ---------------------------------------------------------------------------
+
+const makeCacheLensCandidate = (
+    o: Partial<CacheLensCandidateRow> = {},
+): CacheLensCandidateRow => ({
+    kind: "skill",
+    name: "design-curator",
+    busts: 20,
+    sessions: 8,
+    distinctDays: 5,
+    bustCostUsd: 10, // 14d window -> $5/wk exactly at the threshold by default below
+    comparableBusts: 20,
+    comparableBustCostUsd: 10,
+    comparableCorroboratedCostUsd: 10, // 0% delta
+    reasonCounts: [{ reason: "tool_result_too_large", count: 15 }, { reason: "system_prompt_changed", count: 5 }],
+    ...o,
+});
+
+describe("cacheLensConfidence", () => {
+    test("<=10% delta is high, <=25% is medium, else low", () => {
+        expect(cacheLensConfidence(0)).toBe("high");
+        expect(cacheLensConfidence(0.10)).toBe("high");
+        expect(cacheLensConfidence(0.11)).toBe("medium");
+        expect(cacheLensConfidence(0.25)).toBe("medium");
+        expect(cacheLensConfidence(0.26)).toBe("low");
+    });
+});
+
+describe("evaluateCacheLensCandidate", () => {
+    test("(a) passes all guards: mints with weekly cost + corroboration + dominant reason", () => {
+        // 14d window, $10 total bust cost -> $5.00/wk, exactly at materiality.
+        const candidate = makeCacheLensCandidate();
+        const evaluation = evaluateCacheLensCandidate(candidate, 14);
+        expect(evaluation).not.toBeNull();
+        expect(evaluation!.weeklyCostUsd).toBeCloseTo(5, 5);
+        expect(evaluation!.corroborationDeltaPct).toBe(0);
+        expect(evaluation!.confidence).toBe("high");
+        expect(evaluation!.dominantReason).toBe("tool_result_too_large");
+        expect(evaluation!.dominantReasonPct).toBeCloseTo(0.75, 5);
+    });
+
+    test("(b) corroboration outside ±25% does not mint", () => {
+        // comparable bust cost $10 vs corroborated $7 -> delta = 3/7 = ~42.9%
+        const candidate = makeCacheLensCandidate({
+            comparableBustCostUsd: 10,
+            comparableCorroboratedCostUsd: 7,
+        });
+        expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
+    });
+
+    test("corroboration exactly at ±25% still mints (boundary is inclusive)", () => {
+        // delta = 2.5 / 10 = 25%
+        const candidate = makeCacheLensCandidate({
+            comparableBustCostUsd: 12.5,
+            comparableCorroboratedCostUsd: 10,
+            bustCostUsd: 12.5,
+        });
+        const evaluation = evaluateCacheLensCandidate(candidate, 14);
+        expect(evaluation).not.toBeNull();
+        expect(evaluation!.corroborationDeltaPct).toBeCloseTo(0.25, 5);
+        expect(evaluation!.confidence).toBe("medium");
+    });
+
+    test("zero comparable busts never mints, regardless of other fields", () => {
+        const candidate = makeCacheLensCandidate({ comparableBusts: 0, comparableBustCostUsd: 0, comparableCorroboratedCostUsd: 0 });
+        expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
+    });
+
+    test("(c) single-day recurrence does not mint", () => {
+        const candidate = makeCacheLensCandidate({ distinctDays: 1 });
+        expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
+    });
+
+    test("(d) below $5/wk materiality does not mint", () => {
+        // $10 total over a 90d window -> $0.78/wk, well under $5.
+        const candidate = makeCacheLensCandidate({ distinctDays: 3, bustCostUsd: 10 });
+        expect(evaluateCacheLensCandidate(candidate, 90)).toBeNull();
+    });
+
+    test("dominant reason picks the highest count and computes its share", () => {
+        const candidate = makeCacheLensCandidate({
+            reasonCounts: [
+                { reason: "a", count: 1 },
+                { reason: "b", count: 9 },
+            ],
+        });
+        const evaluation = evaluateCacheLensCandidate(candidate, 14)!;
+        expect(evaluation.dominantReason).toBe("b");
+        expect(evaluation.dominantReasonPct).toBeCloseTo(0.9, 5);
+    });
+});
+
+describe("deriveCacheLensProposalRows", () => {
+    test("(a) mints exactly one proposal with title/hypothesis/baseline provenance", () => {
+        const { rows, skipped } = deriveCacheLensProposalRows([makeCacheLensCandidate()], {
+            sinceDays: 14,
+            cap: CACHE_LENS_PROPOSAL_CAP,
+            existingOpenSigs: new Set(),
+        });
+        expect(skipped).toBe(0);
+        expect(rows).toHaveLength(1);
+        const row = rows[0]!;
+        expect(row.title).toBe("Trim cache-busting skill design-curator");
+        expect(row.section).toBe("cache-lens");
+        expect(row.fileTarget).toBe("CLAUDE.md");
+        expect(row.confidence).toBe("high");
+        expect(row.frequency).toBe(20); // busts
+        expect(row.sig.startsWith("guidance__")).toBe(true);
+        expect(row.hypothesis).toContain("design-curator");
+        expect(row.hypothesis).toContain("$5.00/wk");
+        expect(row.baseline).toMatchObject({
+            origin: "cache-lens",
+            offenderKind: "skill",
+            offenderName: "design-curator",
+            windowDays: 14,
+            busts: 20,
+            sessions: 8,
+            confidence: "high",
+        });
+        expect(row.baseline.weeklyCostUsd).toBeCloseTo(5, 5);
+        expect(row.baseline.corroborationDeltaPct).toBe(0);
+        expect(row.baseline.reasonMix).toEqual(makeCacheLensCandidate().reasonCounts);
+    });
+
+    test("dedupe_sig is stable across independent derivations of the same offender", () => {
+        const a = deriveCacheLensProposalRows([makeCacheLensCandidate()], {
+            sinceDays: 14, cap: CACHE_LENS_PROPOSAL_CAP, existingOpenSigs: new Set(),
+        }).rows[0]!;
+        const b = deriveCacheLensProposalRows([makeCacheLensCandidate({ busts: 99, bustCostUsd: 40 })], {
+            sinceDays: 14, cap: CACHE_LENS_PROPOSAL_CAP, existingOpenSigs: new Set(),
+        }).rows[0]!;
+        expect(a.sig).toBe(b.sig);
+        expect(a.proposalKey).toBe(b.proposalKey);
+    });
+
+    test("(b)/(c)/(d) a candidate failing any guard is skipped, not minted", () => {
+        const badCorroboration = makeCacheLensCandidate({ name: "bad-corr", comparableCorroboratedCostUsd: 1 });
+        const badRecurrence = makeCacheLensCandidate({ name: "bad-days", distinctDays: 1 });
+        const badMateriality = makeCacheLensCandidate({ name: "bad-cost", bustCostUsd: 0.5 });
+        const { rows, skipped } = deriveCacheLensProposalRows(
+            [badCorroboration, badRecurrence, badMateriality],
+            { sinceDays: 14, cap: CACHE_LENS_PROPOSAL_CAP, existingOpenSigs: new Set() },
+        );
+        expect(rows).toHaveLength(0);
+        expect(skipped).toBe(3);
+    });
+
+    test("(e) cap: 3 already-open cache-lens proposals -> a 4th (new) candidate is skipped", () => {
+        const { rows, skipped } = deriveCacheLensProposalRows(
+            [makeCacheLensCandidate({ name: "fourth-offender" })],
+            {
+                sinceDays: 14,
+                cap: 3,
+                existingOpenSigs: new Set(["guidance__existing1", "guidance__existing2", "guidance__existing3"]),
+            },
+        );
+        expect(rows).toHaveLength(0);
+        expect(skipped).toBe(1);
+    });
+
+    test("a candidate matching an ALREADY-OPEN sig refreshes for free (doesn't consume cap)", () => {
+        const candidate = makeCacheLensCandidate();
+        const { sig } = deriveCacheLensProposalRows([candidate], {
+            sinceDays: 14, cap: CACHE_LENS_PROPOSAL_CAP, existingOpenSigs: new Set(),
+        }).rows[0]!;
+        // Cap is full (3 open), but ONE of those open sigs IS this candidate's sig -
+        // its refresh must still happen even though capacityForNew is 0.
+        const { rows, skipped } = deriveCacheLensProposalRows([candidate], {
+            sinceDays: 14,
+            cap: 3,
+            existingOpenSigs: new Set(["guidance__other1", "guidance__other2", sig]),
+        });
+        expect(rows).toHaveLength(1);
+        expect(skipped).toBe(0);
+        expect(rows[0]!.sig).toBe(sig);
+    });
+
+    test("highest weekly-cost candidates mint first when several compete for remaining capacity", () => {
+        // Both clear every guard ($5/wk and $25/wk, both >= the $5 materiality
+        // floor, both 0%-delta corroboration) - the cap alone decides.
+        const cheap = makeCacheLensCandidate({ name: "cheap", bustCostUsd: 10 }); // $5.00/wk
+        const expensive = makeCacheLensCandidate({ name: "expensive", bustCostUsd: 50 }); // $25.00/wk
+        const { rows, skipped } = deriveCacheLensProposalRows([cheap, expensive], {
+            sinceDays: 14,
+            cap: 1,
+            existingOpenSigs: new Set(),
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.title).toContain("expensive");
+        expect(skipped).toBe(1);
+    });
+});
+
+describe("buildCacheLensProposalWrites", () => {
+    const baseRow = deriveCacheLensProposalRows([makeCacheLensCandidate()], {
+        sinceDays: 14, cap: CACHE_LENS_PROPOSAL_CAP, existingOpenSigs: new Set(),
+    }).rows[0]!;
+
+    test("new sig: CREATE proposal form='guidance' + guidance_proposal payload section='cache-lens'", () => {
+        const writes = buildCacheLensProposalWrites([baseRow], new Set());
+        expect(writes.map((w) => w.table)).toEqual(["proposal", "guidance_proposal"]);
+        expect(writes[0]!.row).toMatchObject({ form: "guidance", status: "open", dedupe_sig: baseRow.sig });
+        expect(writes[0]!.row.baseline).toBe(JSON.stringify(baseRow.baseline));
+        expect(writes[1]!.row).toMatchObject({ file_target: "CLAUDE.md", section: "cache-lens" });
+    });
+
+    test("(f) existing sig: UPDATE mutable fields only - no baseline/status touch, no duplicate row shape", () => {
+        const writes = buildCacheLensProposalWrites([baseRow], new Set([baseRow.sig]));
+        expect(writes[0]!.row).toMatchObject({ frequency: baseRow.frequency, confidence: baseRow.confidence });
+        expect(writes[0]!.row).not.toHaveProperty("status");
+        expect(writes[0]!.row).not.toHaveProperty("baseline");
+        expect(writes[0]!.row).not.toHaveProperty("created_at");
+        // Re-deriving the SAME candidate twice produces the SAME dedupe_sig / proposalKey,
+        // so the write-loop's `existingBySig` UPSERT (shared machinery, derive-proposals.ts)
+        // targets the same row rather than inserting a duplicate - and, per that same loop,
+        // a REJECTED existing row's `status`/`baseline` are preserved verbatim (never
+        // resurrected to 'open'), which this UPDATE row deliberately omits both fields for.
+        const again = buildCacheLensProposalWrites([baseRow], new Set([baseRow.sig]));
+        expect(again[0]!.row.dedupe_sig).toBe(writes[0]!.row.dedupe_sig);
     });
 });

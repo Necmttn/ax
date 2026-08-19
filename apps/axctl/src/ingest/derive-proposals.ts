@@ -20,6 +20,12 @@
  * touch `baseline` or `status`. This honors the plan's "frozen at
  * created_at, not accept-time" decision so the verdict layer (C6) can
  * compute friction_delta against a stable reference point.
+ *
+ * Families that have landed since C1: guidance (Phase C11, harness-derived
+ * guardrails), hook (routing), subagent (image-context), guidance/directives,
+ * guidance/workflows, and guidance/cache-lens (#868 slice B - auto-minted
+ * cache-busting offenders, gated on corroboration/recurrence/materiality/cap;
+ * see the "Cache-lens proposals" section below).
  */
 
 import { Effect, FileSystem, Path, Schema } from "effect";
@@ -33,6 +39,7 @@ import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
+import { fetchCacheLensCandidates, type CacheLensCandidateRow } from "../queries/cache-bust.ts";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
 import { fetchWorkflowArcs, type ArcCandidate } from "../queries/workflow-sequences.ts";
 
@@ -43,6 +50,7 @@ export interface DeriveProposalsStats {
     readonly imageContextProposals: number;
     readonly directiveProposals: number;
     readonly workflowProposals: number;
+    readonly cacheLensProposals: number;
     readonly skipped: number;
 }
 
@@ -435,6 +443,206 @@ export const buildImageContextProposalWrites = (
     existingSigs: ReadonlySet<string> = new Set(),
 ): ProposalWrite[] => [proposalWrite(row, "subagent", { frequency: row.frequency }, existingSigs.has(row.sig))];
 
+// ---------------------------------------------------------------------------
+// Cache-lens proposals (form='guidance', section='cache-lens') - slice B of
+// #868: auto-mint top cache-busting offenders (native attribution_skill /
+// attribution_agent from cache_bust_event) as guidance-form proposals a human
+// triages via `ax improve list` / `accept`. Mint is NOT apply - no behavior
+// changes from a mint, only a shortlist row.
+//
+// FOUR guards must ALL pass, operator-approved and not to be weakened:
+//   1. Corroboration (±25%) - the ledger's two independent prices (ingest
+//      pricer vs flat-rate recompute) must agree over the offender's
+//      COMPARABLE busts (both prices present). Zero comparable busts never
+//      mints - there is nothing to corroborate against.
+//   2. Recurrence - busts on >= 2 distinct UTC days in the window. Proxy for
+//      ">= 2 ingest windows" - cache_bust_event carries no run id, so a
+//      calendar-day count is the closest signal available.
+//   3. Materiality - normalized weekly cost (bust_cost_usd scaled to a 7-day
+//      rate) >= $5. A one-off $50 bust in a 90-day window is not worth an
+//      operator's triage attention; a steady $6/wk drip is.
+//   4. Cap - at most 3 OPEN cache-lens proposals at a time (existing + newly
+//      minted this run). Highest-weekly-cost candidates mint first; the rest
+//      are skipped (counted in stats), so the shortlist never floods.
+// ---------------------------------------------------------------------------
+
+export const CACHE_LENS_CORROBORATION_TOLERANCE = 0.25;
+export const CACHE_LENS_MIN_RECURRENCE_DAYS = 2;
+export const CACHE_LENS_MATERIALITY_WEEKLY_USD = 5;
+export const CACHE_LENS_PROPOSAL_CAP = 3;
+export const CACHE_LENS_SECTION = "cache-lens";
+
+/** Confidence maps corroboration tightness: the guard already excludes >25%,
+ *  so a candidate that reaches mint is always "high" or "medium" - "low"
+ *  exists only so the mapping is total (defensive, never observed in mint). */
+export const cacheLensConfidence = (deltaPct: number): "high" | "medium" | "low" =>
+    deltaPct <= 0.10 ? "high" : deltaPct <= 0.25 ? "medium" : "low";
+
+export interface CacheLensEvaluation {
+    readonly weeklyCostUsd: number;
+    readonly corroborationDeltaPct: number;
+    readonly confidence: "high" | "medium" | "low";
+    readonly dominantReason: string;
+    readonly dominantReasonPct: number;
+}
+
+/**
+ * Apply the three per-candidate guards (corroboration, recurrence,
+ * materiality - the cap is a cross-candidate concern handled by
+ * {@link deriveCacheLensProposalRows}). Returns `null` when ANY guard fails.
+ */
+export const evaluateCacheLensCandidate = (
+    candidate: CacheLensCandidateRow,
+    sinceDays: number,
+): CacheLensEvaluation | null => {
+    // Guard 1: corroboration. Zero comparable busts (or a zero corroborated
+    // denominator) never mints - there is nothing to agree against.
+    if (candidate.comparableBusts <= 0 || candidate.comparableCorroboratedCostUsd <= 0) return null;
+    const corroborationDeltaPct =
+        Math.abs(candidate.comparableBustCostUsd - candidate.comparableCorroboratedCostUsd) /
+        candidate.comparableCorroboratedCostUsd;
+    if (corroborationDeltaPct > CACHE_LENS_CORROBORATION_TOLERANCE) return null;
+
+    // Guard 2: recurrence.
+    if (candidate.distinctDays < CACHE_LENS_MIN_RECURRENCE_DAYS) return null;
+
+    // Guard 3: materiality.
+    const windowDays = Math.max(1, sinceDays);
+    const weeklyCostUsd = (candidate.bustCostUsd * 7) / windowDays;
+    if (weeklyCostUsd < CACHE_LENS_MATERIALITY_WEEKLY_USD) return null;
+
+    const sortedReasons = [...candidate.reasonCounts].sort((a, b) => b.count - a.count);
+    const dominant = sortedReasons[0];
+    const totalReasonCount = sortedReasons.reduce((sum, r) => sum + r.count, 0);
+    const dominantReasonPct = dominant && totalReasonCount > 0 ? dominant.count / totalReasonCount : 0;
+
+    return {
+        weeklyCostUsd,
+        corroborationDeltaPct,
+        confidence: cacheLensConfidence(corroborationDeltaPct),
+        dominantReason: dominant?.reason ?? "unknown",
+        dominantReasonPct,
+    };
+};
+
+export interface CacheLensProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly fileTarget: string;
+    readonly section: string;
+    readonly suggestedText: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+    /** Full provenance JSON - captured into `proposal.baseline` on first mint. */
+    readonly baseline: Record<string, unknown>;
+}
+
+const cacheLensTitle = (kind: "skill" | "agent", name: string): string =>
+    `Trim cache-busting ${kind} ${name}`;
+
+/**
+ * Guard-evaluate every candidate, then apply the cap: a candidate whose
+ * dedupe_sig already matches an OPEN cache-lens proposal always refreshes
+ * (mutable-field update, not a new mint - it does not consume cap capacity,
+ * or a passing-then-failing-then-passing offender would get stuck unable to
+ * refresh once the cap filled up). Only genuinely NEW candidates draw against
+ * `cap - existingOpenSigs.size`, highest weekly cost first.
+ */
+export const deriveCacheLensProposalRows = (
+    candidates: readonly CacheLensCandidateRow[],
+    opts: {
+        readonly sinceDays: number;
+        readonly cap: number;
+        readonly existingOpenSigs: ReadonlySet<string>;
+    },
+): { readonly rows: CacheLensProposalRow[]; readonly skipped: number } => {
+    let skipped = 0;
+    const scored: Array<{
+        readonly candidate: CacheLensCandidateRow;
+        readonly evaluation: CacheLensEvaluation;
+        readonly title: string;
+        readonly sig: string;
+    }> = [];
+    for (const candidate of candidates) {
+        const evaluation = evaluateCacheLensCandidate(candidate, opts.sinceDays);
+        if (!evaluation) { skipped += 1; continue; }
+        const title = cacheLensTitle(candidate.kind, candidate.name);
+        const sig = dedupeSig("guidance", normalizeTitle(title));
+        scored.push({ candidate, evaluation, title, sig });
+    }
+    // Highest weekly cost first - the cap should protect the biggest offenders.
+    scored.sort((a, b) => b.evaluation.weeklyCostUsd - a.evaluation.weeklyCostUsd);
+
+    const capacityForNew = Math.max(0, opts.cap - opts.existingOpenSigs.size);
+    let mintedNew = 0;
+    const rows: CacheLensProposalRow[] = [];
+    for (const { candidate, evaluation, title, sig } of scored) {
+        const isExisting = opts.existingOpenSigs.has(sig);
+        if (!isExisting) {
+            if (mintedNew >= capacityForNew) { skipped += 1; continue; }
+            mintedNew += 1;
+        }
+        const weeklyStr = evaluation.weeklyCostUsd.toFixed(2);
+        const deltaStr = (evaluation.corroborationDeltaPct * 100).toFixed(1);
+        const dominantPctStr = (evaluation.dominantReasonPct * 100).toFixed(0);
+        rows.push({
+            proposalKey: proposalKeyFor("guidance", title, sig),
+            title,
+            hypothesis:
+                `${candidate.busts} cache busts across ${candidate.sessions} sessions in the last ` +
+                `${opts.sinceDays}d attributed to ${candidate.kind} "${candidate.name}" ` +
+                `(~$${weeklyStr}/wk at the current rate). Corroboration agrees within ${deltaStr}% ` +
+                `(${evaluation.confidence} confidence). Dominant cause: ${evaluation.dominantReason} ` +
+                `(${dominantPctStr}% of busts). Trim context reloads / large tool output for this ` +
+                `${candidate.kind} - see \`ax cost cache\`.`,
+            fileTarget: "CLAUDE.md",
+            section: CACHE_LENS_SECTION,
+            suggestedText:
+                `Trim cache-busting behavior for ${candidate.kind} "${candidate.name}" ` +
+                `(~$${weeklyStr}/wk, dominant cause: ${evaluation.dominantReason}).`,
+            confidence: evaluation.confidence,
+            frequency: candidate.busts,
+            sig,
+            baseline: {
+                origin: "cache-lens",
+                offenderKind: candidate.kind,
+                offenderName: candidate.name,
+                windowDays: opts.sinceDays,
+                busts: candidate.busts,
+                sessions: candidate.sessions,
+                weeklyCostUsd: evaluation.weeklyCostUsd,
+                corroborationDeltaPct: evaluation.corroborationDeltaPct,
+                reasonMix: candidate.reasonCounts,
+                confidence: evaluation.confidence,
+            },
+        });
+    }
+    return { rows, skipped };
+};
+
+/**
+ * Build cache-lens writes. Mirrors buildRoutingProposalWrites /
+ * buildImageContextProposalWrites (self-contained baseline captured on first
+ * sight, mutable fields refreshed on re-derive) plus a `guidance_proposal`
+ * payload row like buildGuidanceProposalWrites - section='cache-lens' is the
+ * discriminator (same pattern as directives' section='directives').
+ */
+export const buildCacheLensProposalWrites = (
+    rows: readonly CacheLensProposalRow[],
+    existingSigs: ReadonlySet<string> = new Set(),
+): ProposalWrite[] => {
+    const writes: ProposalWrite[] = [];
+    for (const row of rows) {
+        writes.push(proposalWrite(row, "guidance", row.baseline, existingSigs.has(row.sig)));
+        writes.push({ store: "judgment", table: "guidance_proposal", row: judgmentRow({ id: row.proposalKey,
+            proposal: row.proposalKey, file_target: row.fileTarget, section: row.section,
+            suggested_text: row.suggestedText }) });
+    }
+    return writes;
+};
+
 export interface DeriveProposalsOpts {
     readonly minFrequency: number;
     readonly sinceDays?: number | undefined;
@@ -702,8 +910,31 @@ WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
             ? buildGuidanceProposalWrites(workflowRows, existingSigs)
             : [];
 
+        // Cache-lens proposals (form='guidance', section='cache-lens'): auto-mint
+        // top cache-busting offenders from the SAME run's cache-bust ledger
+        // ("cache-bust" is a declared dep below, so cache_bust_event is already
+        // populated in the live write service by the time this query runs).
+        // The cap needs to know how many section='cache-lens' proposals are
+        // ALREADY open so a re-derive of an already-minted offender refreshes
+        // for free while a genuinely new offender draws against the remaining
+        // capacity - see deriveCacheLensProposalRows.
+        const existingCacheLensOpen = yield* judgment.rows(
+            Schema.Struct({ dedupe_sig: TextColumn }), `
+SELECT p.dedupe_sig AS dedupe_sig
+FROM proposal p JOIN guidance_proposal g ON g.proposal = p.id
+WHERE p.form = 'guidance' AND g.section = ? AND p.status = 'open'`,
+            [CACHE_LENS_SECTION]);
+        const existingCacheLensOpenSigs = new Set(existingCacheLensOpen.map((r) => r.dedupe_sig));
+        const cacheLensCandidates = yield* fetchCacheLensCandidates(write, { sinceDays });
+        const { rows: cacheLensRows, skipped: cacheLensSkipped } = deriveCacheLensProposalRows(cacheLensCandidates, {
+            sinceDays,
+            cap: CACHE_LENS_PROPOSAL_CAP,
+            existingOpenSigs: existingCacheLensOpenSigs,
+        });
+        const cacheLensWrites = buildCacheLensProposalWrites(cacheLensRows, existingSigs);
+
         const existingBySig = new Map(existingProposals.map((row) => [row.dedupe_sig, row]));
-        const writes = [...skillStmts, ...guidanceWrites, ...routingWrites, ...imageContextWrites, ...directiveWrites, ...workflowWrites];
+        const writes = [...skillStmts, ...guidanceWrites, ...routingWrites, ...imageContextWrites, ...directiveWrites, ...workflowWrites, ...cacheLensWrites];
         for (const item of writes) {
             if (item.store === "cache") {
                 yield* write.put(item.table, item.row);
@@ -730,7 +961,8 @@ WHERE t.role = 'user' AND t.text_excerpt IS NOT NULL AND t.text_excerpt != ''
             imageContextProposals: imageContextRow ? 1 : 0,
             directiveProposals: directiveRows.length,
             workflowProposals: workflowRows.length,
-            skipped: skillSkipped + guidanceSkipped + directiveSkipped + workflowSkipped,
+            cacheLensProposals: cacheLensRows.length,
+            skipped: skillSkipped + guidanceSkipped + directiveSkipped + workflowSkipped + cacheLensSkipped,
         };
     });
 
@@ -746,8 +978,10 @@ export const ProposalsKey = Schema.Literal("proposals");
 export type ProposalsKey = typeof ProposalsKey.Type;
 
 /**
- * Proposals stage - derives Skill + Guidance + Routing + Image-Context + Workflow Proposals from cumulated evidence.
- * Depends on {@link ClosureKey}. Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
+ * Proposals stage - derives Skill + Guidance + Routing + Image-Context +
+ * Workflow + Cache-Lens Proposals from cumulated evidence. Depends on
+ * {@link ClosureKey} + the cache-bust ledger (for cache-lens candidates).
+ * Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
  */
 export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("ProposalsStats")({
     skillProposals: Schema.Number,
@@ -756,6 +990,7 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     imageContextProposals: Schema.Number,
     directiveProposals: Schema.Number,
     workflowProposals: Schema.Number,
+    cacheLensProposals: Schema.Number,
 }) {}
 
 export const proposalsStage: StageDef<
@@ -763,7 +998,13 @@ export const proposalsStage: StageDef<
     Judgment | ProcessService | FileSystem.FileSystem | Path.Path,
     CacheWriteError | CacheReadError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"], writes: [{ table: "cites_evidence", mode: "derive" }] }),
+    meta: StageMeta.make({
+        // "cache-bust" (not just "closure"): cache-lens candidates read
+        // cache_bust_event, populated by the cache-bust stage THIS run - the
+        // published snapshot doesn't have it, so proposals must run after it.
+        key: "proposals", deps: ["closure", "cache-bust"], tags: ["derive"],
+        writes: [{ table: "cites_evidence", mode: "derive" }],
+    }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
@@ -771,13 +1012,14 @@ export const proposalsStage: StageDef<
             const result = yield* deriveProposals(write, { minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals, ${result.workflowProposals} workflow proposals`,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals, ${result.directiveProposals} directive proposals, ${result.workflowProposals} workflow proposals, ${result.cacheLensProposals} cache-lens proposals`,
                 skillProposals: result.skillProposals,
                 guidanceProposals: result.guidanceProposals,
                 routingProposals: result.routingProposals,
                 imageContextProposals: result.imageContextProposals,
                 directiveProposals: result.directiveProposals,
                 workflowProposals: result.workflowProposals,
+                cacheLensProposals: result.cacheLensProposals,
             });
         }),
 };

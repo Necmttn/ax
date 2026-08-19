@@ -18,7 +18,7 @@ import { CacheRead, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { runCacheBustModels, type CacheBustModelStats } from "../ingest/models/cache-bust-models.ts";
-import { fetchCacheBustCost } from "./cache-bust.ts";
+import { fetchCacheBustCost, fetchCacheLensCandidates } from "./cache-bust.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cache bust cost", { requireFts: true });
 
@@ -172,5 +172,66 @@ describe("cache-bust model + fetchCacheBustCost over a published snapshot", () =
             reason: "messages_changed", busts: 2, sessions: 1, tokens: 1_100_000, costUsd: 22,
         });
         expect(quarter.coverage.bustTurns).toBe(3);
+    });
+});
+
+describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", () => {
+    dtest("aggregates busts per skill/agent offender with recurrence + corroboration fields", async () => {
+        const dir = tempDir("cache-lens-candidates");
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("agent_model", {
+                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
+                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
+                    });
+                    yield* write.putMany("turn_token_usage", [
+                        // Same skill, two busts exactly 24h apart -> 2 distinct UTC
+                        // days (the recurrence guard's proxy), both priced twice.
+                        usageRow({
+                            id: "ttu:d1", session: SESSION_A, seq: 1, ts: hoursAgo(2), source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "design-curator", cacheMiss: "messages_changed",
+                        }),
+                        usageRow({
+                            id: "ttu:d2", session: SESSION_B, seq: 1, ts: hoursAgo(26), source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "design-curator", cacheMiss: "messages_changed",
+                        }),
+                        // A single agent-attributed bust, no resolvable rate - excluded
+                        // from the comparable subset (corroboration has nothing to check).
+                        usageRow({
+                            id: "ttu:a1", session: SESSION_A, seq: 2, ts: hoursAgo(1), source: "claude-subagent",
+                            cacheCreationTokens: 200_000n, cacheCreationUsd: 4,
+                            agent: "review-bot", cacheMiss: "previous_message_not_found",
+                        }),
+                    ]);
+                    yield* runCacheBustModels(write, 30);
+                }),
+            ),
+        );
+
+        const layer = readFixture(fixture.snapshotPath, dylibPath);
+        const candidates = await Effect.runPromise(
+            Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* fetchCacheLensCandidates(read, { sinceDays: 7 });
+            }).pipe(Effect.provide(layer)),
+        );
+
+        const skill = candidates.find((c) => c.kind === "skill" && c.name === "design-curator");
+        expect(skill).toMatchObject({
+            kind: "skill", name: "design-curator", busts: 2, sessions: 2, distinctDays: 2,
+            bustCostUsd: 40, comparableBusts: 2, comparableBustCostUsd: 40,
+        });
+        expect(skill?.comparableCorroboratedCostUsd).toBeCloseTo(37.5, 5);
+        expect(skill?.reasonCounts).toEqual([{ reason: "messages_changed", count: 2 }]);
+
+        const agent = candidates.find((c) => c.kind === "agent" && c.name === "review-bot");
+        expect(agent).toMatchObject({
+            kind: "agent", name: "review-bot", busts: 1, sessions: 1, distinctDays: 1,
+            bustCostUsd: 4, comparableBusts: 0, comparableBustCostUsd: 0, comparableCorroboratedCostUsd: 0,
+        });
+        expect(agent?.reasonCounts).toEqual([{ reason: "previous_message_not_found", count: 1 }]);
     });
 });
