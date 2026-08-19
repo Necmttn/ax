@@ -47,7 +47,9 @@ export class AdviceStats extends BaseStageStats.extend<AdviceStats>("AdviceStats
 }) {}
 
 export const adviceStage: StageDef<AdviceStats, never, CacheWriteError> = {
-  meta: StageMeta.make({ key: "advice", deps: [], tags: ["derive"] }),
+  // Tagged derive for pipeline placement, but it is an external-ledger
+  // LOADER (parse) over ~/.ax/hooks/advise-log.jsonl (#893).
+  meta: StageMeta.make({ key: "advice", deps: [], tags: ["derive"], writes: [{ table: "advice", mode: "parse" }] }),
   run: (ctx: IngestContext, write) =>
     Effect.gen(function* () {
       const t0 = Date.now();

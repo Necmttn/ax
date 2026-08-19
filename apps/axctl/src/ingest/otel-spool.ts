@@ -177,7 +177,7 @@ export const otelSpoolStage: StageDef<
     FileSystem.FileSystem | Path.Path,
     DbError | CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"], writes: [{ table: "otel_metric_point", mode: "parse" }, { table: "otel_span", mode: "parse" }, { table: "otel_log_event", mode: "parse" }, { table: "ingest_file_state", mode: "bookkeep" }, { table: "ingest_run", mode: "bookkeep" }] }),
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const result = yield* ingestOtelSpool(write, {

@@ -836,7 +836,7 @@ export class PricingStageStats extends BaseStageStats.extend<PricingStageStats>(
 }) {}
 
 export const pricingStage: StageDef<PricingStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "pricing", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "pricing", deps: [], tags: ["ingest"], writes: [{ table: "agent_model", mode: "parse" }, { table: "ingest_file_state", mode: "bookkeep" }] }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

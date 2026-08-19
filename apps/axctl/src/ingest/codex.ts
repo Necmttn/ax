@@ -7,6 +7,7 @@ import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { JSONL_WORK_UNIT_WRITES, NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -1827,7 +1828,17 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
 }) {}
 
 export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
-    meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "codex",
+        deps: ["skills", "commands"],
+        tags: ["ingest"],
+        writes: [
+            ...NORMALIZED_BATCH_WRITES,
+            { table: "session_token_usage", mode: "parse" },
+            { table: "turn_token_usage", mode: "parse" },
+            ...JSONL_WORK_UNIT_WRITES,
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

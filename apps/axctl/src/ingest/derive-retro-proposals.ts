@@ -741,7 +741,7 @@ export const retroProposalsStage: StageDef<
     Judgment,
     CacheReadError | CacheWriteError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "retro-proposals", deps: ["proposals"], tags: ["derive", "retro"] }),
+    meta: StageMeta.make({ key: "retro-proposals", deps: ["proposals"], tags: ["derive", "retro"], writes: [{ table: "reviewed", mode: "derive" }] }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

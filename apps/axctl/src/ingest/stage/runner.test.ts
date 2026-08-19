@@ -43,7 +43,7 @@ const outcomeRecorder = () => {
 };
 
 const stage = (key: string, deps: string[]): StageDef => ({
-    meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
+    meta: StageMeta.make({ key, deps, tags: ["ingest"], writes: [] }),
     run: () =>
         Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: key })),
 });
@@ -80,7 +80,7 @@ describe("runPipeline", () => {
     it("propagates a stage error outside the legacy database error channel", async () => {
         const cacheFailure = "cache-read-failed" as const;
         const cacheStage: StageDef<BaseStageStats, never, typeof cacheFailure> = {
-            meta: StageMeta.make({ key: "cache", deps: [], tags: ["derive"] }),
+            meta: StageMeta.make({ key: "cache", deps: [], tags: ["derive"], writes: [] }),
             run: () => Effect.fail(cacheFailure),
         };
         const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
@@ -93,7 +93,7 @@ describe("runPipeline", () => {
     it("runs every stage exactly once and respects deps", async () => {
         const order: string[] = [];
         const make = (key: string, deps: string[]): StageDef => ({
-            meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
+            meta: StageMeta.make({ key, deps, tags: ["ingest"], writes: [] }),
             run: () =>
                 Effect.sync(() => {
                     order.push(key);
@@ -152,7 +152,7 @@ describe("runPipeline", () => {
                 deps: string[],
                 gate?: Deferred.Deferred<void, never>,
             ): StageDef => ({
-                meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
+                meta: StageMeta.make({ key, deps, tags: ["ingest"], writes: [] }),
                 run: () =>
                     Effect.gen(function* () {
                         if (gate) yield* Deferred.await(gate);
@@ -236,7 +236,7 @@ describe("annotateStageProgress", () => {
         const ctx = IngestContext.make({ cwd: "/tmp/ax", since: new Date(0), debug: false });
 
         const demo: StageDef = {
-            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"], writes: [] }),
             run: () =>
                 annotateStageProgress({
                     currentFile: 2,
@@ -302,7 +302,7 @@ describe("stageFileFailureAnnotator", () => {
         };
 
         const demo: StageDef = {
-            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"], writes: [] }),
             run: () =>
                 Effect.gen(function* () {
                     const onFileFailures = yield* stageFileFailureAnnotator;
@@ -351,7 +351,7 @@ describe("stageFileFailureAnnotator", () => {
         const ctx = IngestContext.make({ cwd: "/tmp/ax", since: new Date(0), debug: false });
 
         const demo: StageDef = {
-            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"], writes: [] }),
             run: () =>
                 Effect.gen(function* () {
                     const onFileFailures = yield* stageFileFailureAnnotator;
@@ -435,11 +435,11 @@ describe("derive-stage hung detector (#671, demoted by #837)", () => {
         await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const ran: string[] = [];
             const hang: StageDef = {
-                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"], writes: [] }),
                 run: () => Effect.never, // never resolves → watchdog must fire
             };
             const after: StageDef = {
-                meta: StageMeta.make({ key: "after", deps: ["hang"], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "after", deps: ["hang"], tags: ["derive"], writes: [] }),
                 run: () =>
                     Effect.sync(() => {
                         ran.push("after");
@@ -465,7 +465,7 @@ describe("derive-stage hung detector (#671, demoted by #837)", () => {
         await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const rec = outcomeRecorder();
             const hang: StageDef = {
-                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"], writes: [] }),
                 run: () => Effect.never,
             };
             await Effect.runPromise(
@@ -482,7 +482,7 @@ describe("derive-stage hung detector (#671, demoted by #837)", () => {
         await withEnv({ AX_STAGE_HUNG_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const rec = outcomeRecorder();
             const fine: StageDef = {
-                meta: StageMeta.make({ key: "fine", deps: [], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "fine", deps: [], tags: ["derive"], writes: [] }),
                 run: () => Effect.succeed(BaseStageStats.make({ durationMs: 0, summary: "fine" })),
             };
             await Effect.runPromise(
@@ -495,7 +495,7 @@ describe("derive-stage hung detector (#671, demoted by #837)", () => {
     it("still completes when no recorder is supplied (the hook is optional)", async () => {
         await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const hang: StageDef = {
-                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "hang", deps: [], tags: ["derive"], writes: [] }),
                 run: () => Effect.never,
             };
             const results = await Effect.runPromise(
@@ -508,7 +508,7 @@ describe("derive-stage hung detector (#671, demoted by #837)", () => {
     it("does NOT watchdog a non-derive (ingest) stage that runs past the cap", async () => {
         await withEnv({ AX_STAGE_HUNG_SECONDS: "0.05", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const slowIngest: StageDef = {
-                meta: StageMeta.make({ key: "slow", deps: [], tags: ["ingest"] }),
+                meta: StageMeta.make({ key: "slow", deps: [], tags: ["ingest"], writes: [] }),
                 run: () =>
                     Effect.sync(() => BaseStageStats.make({ durationMs: 0, summary: "real" })).pipe(
                         Effect.delay("150 millis"), // 3× the cap, but ingest stages are exempt
@@ -556,7 +556,7 @@ describe("derive self-time budget (#837)", () => {
         tags: ReadonlyArray<"ingest" | "derive">,
         callsMs: ReadonlyArray<number>,
     ): StageDef => ({
-        meta: StageMeta.make({ key, deps: [], tags }),
+        meta: StageMeta.make({ key, deps: [], tags, writes: [] }),
         run: () =>
             Effect.provideService(
                 Effect.forEach(callsMs, (ms) => chargeStageSelfTime(busy(ms))).pipe(
@@ -575,7 +575,7 @@ describe("derive self-time budget (#837)", () => {
             const rec = outcomeRecorder();
             const ran: string[] = [];
             const after: StageDef = {
-                meta: StageMeta.make({ key: "after", deps: ["greedy"], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "after", deps: ["greedy"], tags: ["derive"], writes: [] }),
                 run: () =>
                     Effect.sync(() => {
                         ran.push("after");
@@ -642,7 +642,7 @@ describe("derive self-time budget (#837)", () => {
         // defect keeps crashing the pipeline as before.
         await withEnv({ AX_STAGE_TIMEOUT_SECONDS: "60", AX_INGEST_HEARTBEAT_SECONDS: "0" }, async () => {
             const boom: StageDef = {
-                meta: StageMeta.make({ key: "boom", deps: [], tags: ["derive"] }),
+                meta: StageMeta.make({ key: "boom", deps: [], tags: ["derive"], writes: [] }),
                 run: () => Effect.die(new Error("unrelated defect")),
             };
             const exit = await Effect.runPromiseExit(
@@ -661,7 +661,7 @@ describe("runPipeline derive budget (#697)", () => {
         tags: ReadonlyArray<"ingest" | "derive">,
         run: Effect.Effect<BaseStageStats, never, never>,
     ): StageDef<BaseStageStats, never> => ({
-        meta: StageMeta.make({ key, deps: [], tags }),
+        meta: StageMeta.make({ key, deps: [], tags, writes: [] }),
         run: () => run,
     });
 

@@ -326,7 +326,7 @@ export const commandsStage: StageDef<
     FileSystem.FileSystem | Path.Path,
     CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "commands", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "commands", deps: [], tags: ["ingest"], writes: [{ table: "skill", mode: "parse" }, { table: "skill_revision", mode: "parse" }] }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

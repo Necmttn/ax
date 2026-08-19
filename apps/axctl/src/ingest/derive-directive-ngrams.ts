@@ -71,6 +71,7 @@ export const directiveNgramsStage: StageDef<DirectiveNgramsStats, never, IngestS
         key: "directive-ngrams",
         deps: ["closure"],
         tags: ["derive"],
+        writes: [{ table: "directive_ngram", mode: "derive" }],
     }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {

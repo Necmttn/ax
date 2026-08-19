@@ -9,7 +9,7 @@ import {
 import { BaseStageStats, StageMeta } from "./types.ts";
 
 const fakeStage: StageDef = {
-    meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"], writes: [] }),
     run: (_ctx) =>
         Effect.succeed(
             BaseStageStats.make({ durationMs: 0, summary: "noop" }),

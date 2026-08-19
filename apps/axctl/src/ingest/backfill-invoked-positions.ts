@@ -123,6 +123,7 @@ export const invokedPositionsStage: StageDef<InvokedPositionsStats, never, Cache
         key: "invoked-positions",
         deps: ["claude", "codex", "subagents"],
         tags: ["derive"],
+        writes: [{ table: "invoked", mode: "enrich" }],
     }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {

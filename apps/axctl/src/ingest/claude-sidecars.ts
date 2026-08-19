@@ -1040,7 +1040,18 @@ export const claudeSidecarsStage: StageDef<
     AxConfig | FileSystem.FileSystem | Path.Path,
     CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "claude-sidecars", deps: ["claude", "subagents"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "claude-sidecars",
+        deps: ["claude", "subagents"],
+        tags: ["ingest"],
+        writes: [
+            { table: "claude_sidecar_artifact", mode: "parse" },
+            { table: "used_sidecar_artifact", mode: "parse" },
+            { table: "plan", mode: "parse" },
+            { table: "plan_snapshot", mode: "parse" },
+            { table: "plan_item", mode: "parse" },
+        ],
+    }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

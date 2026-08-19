@@ -150,6 +150,20 @@ or write. Getting it wrong does not error; it returns a wrong answer.
   (`packages/schema/src/duckdb-tables.ts` or `sidecar-tables.ts`, plus
   `SCHEMA_TABLES` in `apps/axctl/src/queries/insights.ts`). `session_label`
   shipped unregistered for a while precisely because nothing forced it.
+- **The event-layer write contract (#893).** Every cache table carries a
+  `layer` (`event` | `derived` | `bookkeeping`) in `TABLE_METADATA`, and every
+  writer declares its writes: stages via `StageMeta.writes`
+  (`{ table, mode: parse|enrich|derive|bookkeep }`), CLI/orchestration writers
+  in `NON_STAGE_WRITERS` (`apps/axctl/src/ingest/stage/table-writes.ts`).
+  Mode-vs-layer legality is pinned by `stage/table-writes.test.ts` (static)
+  and `table-writes.behavior.test.ts` (fixture runs + per-table content
+  digests - UPDATEs change no row count, so digests, not counts). Derived
+  columns living on event rows are enumerated in `ENRICHMENT_COLUMNS`;
+  derive-writes into event tables are enumerated in `WRITE_MODE_EXCEPTIONS`
+  with a rationale. Growing either list is a design decision, not a fix for a
+  red test. The ingest/derive stage TAG is NOT the layer authority - the
+  `subagents` "derive" stage is a parser, `usage`/`advice` are external-ledger
+  loaders, and `git` (tagged ingest) draws derived `produced` edges.
 - Nested objects → JSON-encoded as a `VARCHAR` column, decoded at the read seam.
 - `CURRENT_TIMESTAMP` is a TIMESTAMPTZ, and the DuckDB build ax ships carries NO
   ICU, so date arithmetic MUST cast it: `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)`.

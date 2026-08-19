@@ -240,7 +240,18 @@ export class ClassifierResultsStageStats extends BaseStageStats.extend<Classifie
 }) {}
 
 export const classifierResultsStage: StageDef<ClassifierResultsStageStats, never, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "classifier-results", deps: ["turn-analysis"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "classifier-results",
+        deps: ["turn-analysis"],
+        tags: ["derive"],
+        writes: [
+            { table: "classifier_definition", mode: "derive" },
+            { table: "classifier_run", mode: "derive" },
+            { table: "classifier_result", mode: "derive" },
+            { table: "has_classification", mode: "derive" },
+            { table: "cites_evidence", mode: "derive" },
+        ],
+    }),
     run: (ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

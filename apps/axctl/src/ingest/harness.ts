@@ -88,7 +88,18 @@ export class HarnessStageStats extends BaseStageStats.extend<HarnessStageStats>(
 }) {}
 
 export const harnessStage: StageDef<HarnessStageStats, ProcessService | FileSystem.FileSystem | Path.Path, IngestStageError> = {
-    meta: StageMeta.make({ key: "harness", deps: ["outcomes", "session-health", "closure"], tags: ["derive", "health"] }),
+    meta: StageMeta.make({
+        key: "harness",
+        // Tagged derive/health for pipeline placement, but its writes are
+        // parses: guidance/stack rows restate observed on-disk config (#893).
+        deps: ["outcomes", "session-health", "closure"],
+        tags: ["derive", "health"],
+        writes: [
+            { table: "guidance_source", mode: "parse" },
+            { table: "guidance_revision", mode: "parse" },
+            { table: "stack", mode: "parse" },
+        ],
+    }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

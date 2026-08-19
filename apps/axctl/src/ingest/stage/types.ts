@@ -37,13 +37,46 @@ export const sinceDaysFromCtx = (ctx: IngestContext): number | undefined => {
     return days > 0 ? days : undefined;
 };
 
+/**
+ * How a writer touches one DuckDB cache table (#893 Phase 4 event-layer
+ * freeze). The MODE is the contract, checked against the table's `layer` in
+ * `@ax/schema/duckdb-tables` by `table-writes.test.ts`:
+ *
+ * - `parse`     - event rows written from OUTSIDE-WORLD bytes (transcripts,
+ *                 git, catalogs, spools, external ledgers). Legal only on
+ *                 `event`-layer tables. Covers the parser's own lifecycle
+ *                 UPDATEs/DELETEs on that table (reconcile tombstones,
+ *                 scoped replace) - they restate on-disk reality.
+ * - `enrich`    - UPDATE-ing an ENUMERATED set of derived columns on an
+ *                 event table (`ENRICHMENT_COLUMNS`). The named, permanent
+ *                 exception for derived-data-at-rest in event rows.
+ * - `derive`    - writing a `derived`-layer table from event rows (insert,
+ *                 update, or wipe - wiping derived tables is always safe).
+ *                 Also legal on an EVENT table only when the (writer, table)
+ *                 pair is enumerated in `DERIVED_ROW_WRITES_ON_EVENT_TABLES`.
+ * - `bookkeep`  - the store's own state (`bookkeeping` layer): watermarks,
+ *                 run/stage telemetry, sentinel markers.
+ */
+export const TableWriteMode = Schema.Literals(["parse", "enrich", "derive", "bookkeep"]);
+export type TableWriteMode = typeof TableWriteMode.Type;
+
+export const TableWrite = Schema.Struct({
+    table: Schema.String,
+    mode: TableWriteMode,
+});
+export type TableWrite = typeof TableWrite.Type;
+
 /** Declarative metadata for a stage. The `key` field is narrowed per stage at
  *  construction time; deps/tags reference Schema unions defined in
- *  `./registry.ts` and `./tags.ts`. */
+ *  `./registry.ts` and `./tags.ts`. `writes` declares every cache table the
+ *  stage (including its helpers) touches - the event-layer contract binds
+ *  WRITES, not tags (#893): a stage's ingest/derive TAG says where it runs in
+ *  the pipeline, while each TableWrite mode says what KIND of write it is. */
 export class StageMeta extends Schema.Class<StageMeta>("StageMeta")({
     key: Schema.String, // tightened at the registry level to IngestStageKey
     deps: Schema.Array(Schema.String),
     tags: Schema.Array(IngestStageTag),
+    writes: Schema.Array(TableWrite),
 }) {}
 
 /** A stage = metadata + a typed Effect runner. `R` is the union of Effect

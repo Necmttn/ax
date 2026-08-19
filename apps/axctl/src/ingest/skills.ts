@@ -323,7 +323,7 @@ export const skillsStage: StageDef<
     Judgment | FileSystem.FileSystem | Path.Path,
     CacheWriteError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"], writes: [{ table: "skill", mode: "parse" }, { table: "skill_revision", mode: "parse" }] }),
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();

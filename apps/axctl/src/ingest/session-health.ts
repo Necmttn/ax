@@ -477,7 +477,18 @@ export class SessionHealthStageStats extends BaseStageStats.extend<SessionHealth
 }) {}
 
 export const sessionHealthStage: StageDef<SessionHealthStageStats, never, CacheWriteError> = {
-    meta: StageMeta.make({ key: "session-health", deps: ["signals"], tags: ["derive", "health"] }),
+    meta: StageMeta.make({
+        key: "session-health",
+        deps: ["signals"],
+        tags: ["derive", "health"],
+        writes: [
+            { table: "workflow_epoch", mode: "derive" },
+            { table: "session_health", mode: "derive" },
+            // Estimated usage rows upserted into the event table - an
+            // enumerated exception (WRITE_MODE_EXCEPTIONS).
+            { table: "session_token_usage", mode: "derive" },
+        ],
+    }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

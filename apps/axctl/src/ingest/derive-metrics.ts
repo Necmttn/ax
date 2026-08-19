@@ -220,7 +220,18 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
 }) {}
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, never, IngestStageError> = {
-    meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "session-health", "spawned"], tags: ["derive"] }),
+    meta: StageMeta.make({
+        key: "derive-metrics",
+        deps: ["git", "session-health", "spawned"],
+        tags: ["derive"],
+        writes: [
+            { table: "session_metrics", mode: "derive" },
+            { table: "fragility_cascade", mode: "derive" },
+            { table: "session_token_usage", mode: "enrich" }, // cost backfill
+            { table: "commit", mode: "enrich" }, // reverted stamping
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

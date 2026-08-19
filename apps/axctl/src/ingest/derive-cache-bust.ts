@@ -28,6 +28,10 @@ export const cacheBustStage: StageDef<CacheBustStats, never, CacheWriteError> = 
         key: "cache-bust",
         deps: ["claude", "pricing"],
         tags: ["derive"],
+        writes: [
+            { table: "cache_bust_event", mode: "derive" },
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
     }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {

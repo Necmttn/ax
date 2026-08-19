@@ -763,7 +763,7 @@ export const proposalsStage: StageDef<
     Judgment | ProcessService | FileSystem.FileSystem | Path.Path,
     CacheWriteError | CacheReadError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"], writes: [{ table: "cites_evidence", mode: "derive" }] }),
     run: (ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

@@ -777,7 +777,22 @@ export const gitStage: StageDef<
     FileSystem.FileSystem | Path.Path,
     CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "git", deps: [], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "git",
+        deps: [],
+        tags: ["ingest"],
+        writes: [
+            { table: "repository", mode: "parse" },
+            { table: "checkout", mode: "parse" },
+            { table: "has_checkout", mode: "parse" },
+            { table: "commit", mode: "parse" },
+            { table: "file", mode: "parse" },
+            { table: "touched", mode: "parse" },
+            { table: "produced", mode: "derive" }, // session->commit correlation
+            { table: "session", mode: "enrich" }, // project/repository/checkout
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     // Unnamed Effect.fn: stack-frame boundary only. The stage runner already
     // wraps each run in a LiveTrace.step span named by the stage key, so a
     // named span here would double-wrap.

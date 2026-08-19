@@ -21,6 +21,7 @@ import { type NormalizedTranscriptBatch, writeNormalizedTranscriptBatch } from "
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { identityPart, toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { boundExcerpt, isRecord, parseJsonRecord, stringField } from "./normalized/toolkit.ts";
 import { makeToolCallWrite } from "./normalized/tool-call-write.ts";
@@ -1154,7 +1155,12 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
 }) {}
 
 export const cursorStage: StageDef<CursorStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
+    meta: StageMeta.make({
+        key: "cursor",
+        deps: ["skills", "commands"],
+        tags: ["ingest"],
+        writes: [...NORMALIZED_BATCH_WRITES, { table: "ingest_file_state", mode: "bookkeep" }],
+    }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {

@@ -519,7 +519,7 @@ export const opportunitiesStage: StageDef<
     Judgment | FileSystem.FileSystem,
     CacheWriteError | CacheReadError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"], writes: [{ table: "opportunity", mode: "derive" }] }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();

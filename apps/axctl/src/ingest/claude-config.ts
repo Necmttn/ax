@@ -997,7 +997,7 @@ export const claudeConfigStage: StageDef<
     AxConfig | FileSystem.FileSystem | Path.Path,
     CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "claude-config", deps: ["skills", "commands", "agent-def"], tags: ["ingest"] }),
+    meta: StageMeta.make({ key: "claude-config", deps: ["skills", "commands", "agent-def"], tags: ["ingest"], writes: [{ table: "guidance_config_artifact", mode: "parse" }, { table: "guidance_revision", mode: "parse" }] }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
