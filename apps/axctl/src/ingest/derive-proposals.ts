@@ -925,9 +925,17 @@ FROM proposal p JOIN guidance_proposal g ON g.proposal = p.id
 WHERE p.form = 'guidance' AND g.section = ? AND p.status = 'open'`,
             [CACHE_LENS_SECTION]);
         const existingCacheLensOpenSigs = new Set(existingCacheLensOpen.map((r) => r.dedupe_sig));
-        const cacheLensCandidates = yield* fetchCacheLensCandidates(write, { sinceDays });
+        // Evaluation window FLOORED at 14 days, independent of the ingest
+        // since-window: a warm `--since=1` run would otherwise evaluate a
+        // 1-day window in which the >=2-distinct-days recurrence guard can
+        // never pass (minting dead on exactly the runs that dominate) and the
+        // x7 weekly extrapolation would rest on a single day's sample. The
+        // ledger is cumulative (incremental upserts keyed by ttu.id), so
+        // reading 14d back on a warm run is always valid.
+        const cacheLensWindowDays = Math.max(sinceDays, 14);
+        const cacheLensCandidates = yield* fetchCacheLensCandidates(write, { sinceDays: cacheLensWindowDays });
         const { rows: cacheLensRows, skipped: cacheLensSkipped } = deriveCacheLensProposalRows(cacheLensCandidates, {
-            sinceDays,
+            sinceDays: cacheLensWindowDays,
             cap: CACHE_LENS_PROPOSAL_CAP,
             existingOpenSigs: existingCacheLensOpenSigs,
         });
