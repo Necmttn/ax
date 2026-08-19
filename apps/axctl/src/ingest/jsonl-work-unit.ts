@@ -292,6 +292,11 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
             // here with the same rationale (silent sanitising is the failure
             // class the seam refuses).
             const totals = opts.spool.totals();
+            if (totals.illFormedValues > 0) {
+                yield* Effect.logWarning(
+                    `ax cache: spool repaired ${totals.illFormedValues} text value(s) with an unpaired UTF-16 surrogate for ${opts.source} - DuckDB's read_ndjson rejects lone surrogates, so each was replaced with U+FFFD (#906).`,
+                );
+            }
             if (totals.nulValues > 0) {
                 yield* Effect.logWarning(
                     `ax cache: spool stripped NUL bytes (U+0000) from ${totals.nulValues} text value(s) for ${opts.source} - a DuckDB VARCHAR cannot carry U+0000; the rest of each value was stored intact.`,
