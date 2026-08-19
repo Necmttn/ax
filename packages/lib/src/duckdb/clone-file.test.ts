@@ -34,8 +34,26 @@ const runWithFs = <A>(body: (fs: FileSystem.FileSystem) => Effect.Effect<A, neve
         }).pipe(Effect.provide(BunFileSystem.layer)) as Effect.Effect<A>,
     );
 
+/**
+ * Whether THIS machine's temp filesystem supports a true clone. CI runs on
+ * ext4 (no FICLONE reflink), where `COPYFILE_FICLONE_FORCE` must fail and
+ * `publishSnapshot` takes the logical fallback - that is the DESIGNED
+ * behavior, not a defect, so the byte-for-byte assertion only applies where
+ * a clone is possible. Probed once, with the same primitive under test.
+ */
+const cloneSupported = await (async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ax-clone-probe-"));
+    try {
+        writeFileSync(join(dir, "probe-src"), "probe");
+        const outcome = await Effect.runPromise(cloneFile(join(dir, "probe-src"), join(dir, "probe-dst")));
+        return outcome.cloneable;
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+})();
+
 describe("cloneFile", () => {
-    test("clones a file byte-for-byte via APFS clonefile", async () => {
+    test.if(cloneSupported)("clones a file byte-for-byte via APFS clonefile", async () => {
         await withTempDir(async (dir) => {
             const src = join(dir, "src.bin");
             const dst = join(dir, "dst.bin");
@@ -47,6 +65,19 @@ describe("cloneFile", () => {
             expect(outcome.cloneable).toBe(true);
             expect(existsSync(dst)).toBe(true);
             expect(readFileSync(dst, "utf8")).toBe(content);
+        });
+    });
+
+    test.if(!cloneSupported)("reports non-cloneable (fallback contract) where the filesystem cannot clone", async () => {
+        await withTempDir(async (dir) => {
+            const src = join(dir, "src.bin");
+            const dst = join(dir, "dst.bin");
+            writeFileSync(src, "ax-clone-payload");
+
+            const outcome = await Effect.runPromise(cloneFile(src, dst));
+
+            expect(outcome.cloneable).toBe(false);
+            expect(typeof outcome.reason).toBe("string");
         });
     });
 
