@@ -25,7 +25,7 @@
 
 import { Effect } from "effect";
 import type { DbError } from "@ax/lib/errors";
-import { fileWatermark, WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
+import { fileWatermark, hashFileSha256, WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { TableSpool } from "@ax/lib/duckdb/spool";
 import type { DuckDbParam } from "@ax/lib/duckdb/types";
@@ -111,6 +111,16 @@ export interface RunJsonlProviderFilesOptions<E, R, C extends JsonlFileCandidate
     /** Per-file concurrency. Defaults to 1 (sequential) to match the providers. */
     readonly concurrency?: number | "unbounded";
     /**
+     * Opt into the SHA-256 content tier (#900). When on: the fast (mtime,size)
+     * skip is unchanged; a file whose stats MOVED is hashed before parsing,
+     * and an identical hash (mtime churn, resync, touch) refreshes the mark
+     * and SKIPS the parse - the third outcome beside processed/skipped.
+     * Genuinely-changed files carry their fresh hash into the committed mark.
+     * The transcript providers set it; the append-only otel spool leaves it
+     * off (its files never revert, so hashing them buys nothing).
+     */
+    readonly contentHash?: boolean;
+    /**
      * The stage's NDJSON spool, when its writes route through `withTableSpool`.
      * The work-unit then owns the flush cadence AND defers every watermark to
      * the flush that lands its rows: marks are snapshotted BEFORE the spool
@@ -136,6 +146,9 @@ export interface JsonlWorkUnitResult {
     readonly files: number;
     /** Candidates skipped because their (mtime,size) matched the watermark. */
     readonly skippedUnchanged: number;
+    /** Candidates whose stats moved but whose CONTENT hash matched the stored
+     *  mark (#900): mark refreshed, parse skipped. 0 with `contentHash` off. */
+    readonly refreshedUnchanged: number;
     /** The failure collector (count() / failures) for the provider's stats. */
     readonly failures: FileFailureCollector;
 }
@@ -145,7 +158,11 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
     opts: RunJsonlProviderFilesOptions<E, R, C>,
 ): Effect.Effect<JsonlWorkUnitResult, DbError | CacheWriteError, R> =>
     Effect.gen(function* () {
-        const wm = yield* fileWatermark(write, { sourceKind: opts.sourceKind, forceEnv: opts.forceEnv });
+        const wm = yield* fileWatermark(write, {
+            sourceKind: opts.sourceKind,
+            forceEnv: opts.forceEnv,
+            ...(opts.contentHash === true ? { contentHash: true } : {}),
+        });
         const failures = makeFileFailureCollector({
             source: opts.source,
             ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
@@ -154,6 +171,7 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
         let files = 0;
         let activeFiles = 0;
         let skippedUnchanged = 0;
+        let refreshedUnchanged = 0;
         const loop: JsonlWorkUnitLoop = {
             get activeFiles() {
                 return activeFiles;
@@ -200,6 +218,25 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                         skippedUnchanged += 1;
                         return;
                     }
+                    // Durable tier (#900): stats moved, so hash the bytes
+                    // BEFORE parsing - the hash then describes bytes no newer
+                    // than what the parse reads, so a mid-parse append can
+                    // only cause one redundant reparse, never a skipped one.
+                    // Identical content (mtime churn, resync, touch) refreshes
+                    // the mark and skips the parse: the rows are already in
+                    // the store from the run that stamped this sha.
+                    let contentSha: string | null = null;
+                    if (opts.contentHash === true) {
+                        contentSha = yield* hashFileSha256(candidate.path);
+                        const stored = wm.storedSha(candidate.path);
+                        if (contentSha !== null && stored !== null && contentSha === stored) {
+                            refreshedUnchanged += 1;
+                            // Direct commit even in spool mode: a refresh has
+                            // no spooled rows to wait for.
+                            yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes, contentSha);
+                            return;
+                        }
+                    }
                     activeFiles += 1;
                     yield* failures.isolate(
                         candidate.path,
@@ -214,9 +251,9 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                             // "succeed" includes the flush, so the mark is
                             // deferred to the flush cycle instead.
                             if (opts.spool !== undefined) {
-                                pendingMarks.push(wm.row(candidate.path, candidate.mtimeMs, candidate.sizeBytes));
+                                pendingMarks.push(wm.row(candidate.path, candidate.mtimeMs, candidate.sizeBytes, contentSha));
                             } else {
-                                yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes);
+                                yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes, contentSha);
                             }
                             if (opts.runId !== undefined && shouldHeartbeatIngestRun(completedFiles)) {
                                 // Courtesy signal only: a transient heartbeat
@@ -256,5 +293,5 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
         }
 
         yield* failures.report;
-        return { files, skippedUnchanged, failures };
+        return { files, skippedUnchanged, refreshedUnchanged, failures };
     });

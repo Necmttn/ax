@@ -14,7 +14,10 @@ import { runWithPlatform } from "../testing/cache-fixture.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { withCacheWrite, type CacheWriteService } from "./seam.ts";
 import {
+    CONTENT_HASH_VERSION,
+    contentHashSentinelPath,
     fileWatermark,
+    hashFileSha256,
     watermarkRow,
     watermarkRowId,
     WATERMARK_TABLE,
@@ -280,5 +283,82 @@ describe("fileWatermark", () => {
         );
 
         expect(outcome._tag).toBe("Failure");
+    });
+});
+
+describe("content-hash backfill (#900)", () => {
+    const statOf = async (path: string) => {
+        const stat = await Bun.file(path).stat();
+        return { mtimeMs: stat.mtimeMs, size: stat.size };
+    };
+
+    dtest("hashes only files whose current stats still equal their mark; sentinel arms once", async () => {
+        const dir = tempDir("ax-wm-backfill-");
+        const fileA = `${dir}/a.jsonl`;
+        const fileB = `${dir}/b.jsonl`;
+        const fileC = `${dir}/c.jsonl`;
+        await Bun.write(fileA, "alpha\n");
+        await Bun.write(fileB, "beta\n");
+        await Bun.write(fileC, "gamma\n");
+        const statA = await statOf(fileA);
+        const statB = await statOf(fileB);
+        const statC = await statOf(fileC);
+
+        // Run 1: pre-#900 marks - no content tier, sha stays NULL. Marks are
+        // committed at WHOLE-ms grain, exactly as the walkers do
+        // (`stats.mtime.getTime()`), while `Bun.file().stat()` carries
+        // fractional ms - the backfill must match at the walker's grain (the
+        // strict-compare bug skipped 3,181 of 3,185 codex marks on the real
+        // store).
+        await asIngestRun(dir, (write) =>
+            Effect.gen(function* () {
+                const wm = yield* fileWatermark(write, SOURCE);
+                yield* wm.commit(fileA, Math.floor(statA.mtimeMs), statA.size);
+                yield* wm.commit(fileB, Math.floor(statB.mtimeMs), statB.size);
+                yield* wm.commit(fileC, Math.floor(statC.mtimeMs), statC.size);
+            }),
+        );
+
+        // B's bytes move after its mark; C vanishes. Only A still matches.
+        await Bun.write(fileB, "beta CHANGED\n");
+        await Bun.file(fileC).delete();
+
+        const expectedShaA = await Effect.runPromise(hashFileSha256(fileA));
+
+        // Run 2: the content tier arms and backfills.
+        let stored: readonly { path: string; sha: string | null }[] = [];
+        let storedShaA: string | null = null;
+        await asIngestRun(dir, (write) =>
+            Effect.gen(function* () {
+                const wm = yield* fileWatermark(write, { ...SOURCE, contentHash: true });
+                storedShaA = wm.storedSha(fileA);
+                stored = yield* write.rows(
+                    Schema.Struct({ path: Schema.String, sha: Schema.NullOr(Schema.String) }),
+                    `SELECT path, sha FROM ${WATERMARK_TABLE} ORDER BY path`,
+                );
+            }),
+        );
+        const byPath = new Map(stored.map((row) => [row.path, row.sha]));
+        expect(byPath.get(fileA)).toBe(expectedShaA);
+        expect(storedShaA as string | null).toBe(expectedShaA);
+        expect(byPath.get(fileB)).toBeNull(); // moved since its mark: hash would lie
+        expect(byPath.get(fileC)).toBeNull(); // file gone: cannot fast-skip again anyway
+        expect(byPath.get(contentHashSentinelPath(SOURCE.sourceKind))).toBe(CONTENT_HASH_VERSION);
+
+        // Run 3: sentinel matches - the backfill must NOT run again. Observable:
+        // A's bytes change on disk, but its stored sha stays the run-2 value.
+        await Bun.write(fileA, "alpha CHANGED\n");
+        let shaAfterThird: string | null = null;
+        await asIngestRun(dir, (write) =>
+            Effect.gen(function* () {
+                yield* fileWatermark(write, { ...SOURCE, contentHash: true });
+                shaAfterThird = (yield* write.rows(
+                    Schema.Struct({ sha: Schema.NullOr(Schema.String) }),
+                    `SELECT sha FROM ${WATERMARK_TABLE} WHERE path = ?`,
+                    [fileA],
+                ))[0]!.sha;
+            }),
+        );
+        expect(shaAfterThird as string | null).toBe(expectedShaA);
     });
 });

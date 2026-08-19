@@ -1516,6 +1516,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             sourceKind: "codex_session",
             forceEnv: "AX_REDERIVE_CODEX",
             source: "codex",
+            contentHash: true,
             spool,
             ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),

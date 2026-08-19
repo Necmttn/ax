@@ -782,6 +782,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
             sourceKind: desc.sourceKind,
             forceEnv: desc.forceEnv,
             source: desc.provider,
+            contentHash: true,
             ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
             processFile: (file) => Effect.gen(function* () {
                 // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
