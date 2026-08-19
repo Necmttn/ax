@@ -8,7 +8,7 @@
  * `session NOT IN (...)` spar filter, the `recovered_by JOIN turn` latency
  * pass) all run against a real DuckDB.
  */
-import { describe, expect } from "bun:test";
+import { describe, expect, setDefaultTimeout } from "bun:test";
 import { Effect, Layer } from "effect";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
@@ -17,6 +17,13 @@ import { judgmentTestLayer } from "../testing/judgment-test-layer.ts";
 import { fetchSkillsWeighted, type SkillsWeightedParams } from "./skills-weighted.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("skills-weighted", { requireFts: true });
+
+// Each case publishes a fresh DuckDB fixture (real writes + a full FTS index
+// rebuild over turn/commit) then runs the query - ~200-250ms/test on an idle
+// box, measured here, but bun's 5000ms default has flaked once under CI load
+// (#919, main 2026-08-19). Raise it rather than trim genuinely-needed
+// per-test fixture isolation.
+setDefaultTimeout(20_000);
 
 interface RoleRow { readonly skill_id: string; readonly role_name: string; readonly effective_weight: number }
 
