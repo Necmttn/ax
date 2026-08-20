@@ -428,7 +428,7 @@
   ],
   "sessions": [
     {
-      "cwd": "/Users/user/Projects/quera",
+      "cwd": "/Users/user/Projects/acme",
       "endedAt": "2026-04-07T02:47:32.569Z",
       "id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "labels": {
@@ -440,7 +440,7 @@
         "turns": 11
       },
       "model": null,
-      "project": "/Users/user/Projects/quera",
+      "project": "/Users/user/Projects/acme",
       "provider": "opencode",
       "providerSessionId": "ses_29a346909ffe8ovutvLuBdCuMI",
       "raw": {
@@ -544,7 +544,7 @@
       "commandNorm": "git log",
       "commandText": "git log --since=\"4 days ago\" --pretty=tformat: --numstat | awk '{ add += $1; subs += $2 } END { printf \"Added: %s, Removed: %s, Net: %s\\n\", add, subs, add - subs }'",
       "commandToolName": "git",
-      "cwd": "/Users/user/Projects/quera",
+      "cwd": "/Users/user/Projects/acme",
       "durationMs": 225,
       "errorText": null,
       "hasError": false,
@@ -592,7 +592,7 @@
       "commandNorm": "git log",
       "commandText": "git log --since=\"4 days ago\" --pretty=format:\"%s\" --no-merges",
       "commandToolName": "git",
-      "cwd": "/Users/user/Projects/quera",
+      "cwd": "/Users/user/Projects/acme",
       "durationMs": 21,
       "errorText": null,
       "hasError": false,
@@ -640,7 +640,7 @@
       "commandNorm": "git log",
       "commandText": "git log --since=\"4 days ago\" --pretty=tformat:\"%s\" --no-merges | grep -E \"^docs|^chore:\" | while read commit; do\n  hash=$(git log --since=\"4 days ago\" --pretty=\"%H\" --no-merges | grep -F \"$commit\" | head -1)\ndone\n\n# Better approach - get commits by type and sum their diffs\nfor type in docs chore; do\n  echo \"=== $type ===\"\n  git log --since=\"4 days ago\" --pretty=\"%H\" --no-merges | while read hash; do\n    msg=$(git log -1 --pretty=\"%s\" $hash)\n    if [[ \"$msg\" == \"$type(\"* ]] || [[ \"$msg\" == \"$type:\"* ]]; then\n      git show --pretty=tformat: --numstat $hash | awk '{ add += $1; subs += $2 } END { printf \"Added: %s, Removed: %s\\n\", add, subs }'\n    fi\n  done | awk '/Added:/ { add += $2; subs += $5 } END { printf \"Total - Added: %s, Removed: %s, Net: %s\\n\", add, subs, add-subs }'\ndone",
       "commandToolName": "git",
-      "cwd": "/Users/user/Projects/quera",
+      "cwd": "/Users/user/Projects/acme",
       "durationMs": 4214,
       "errorText": null,
       "hasError": false,

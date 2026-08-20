@@ -38,6 +38,27 @@ const goldenPath = (name: string): string => join(ROOT, "golden", name);
 
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
+/**
+ * Private-project codenames -> neutral stand-ins. A fixture may only name
+ * projects that are public repos; anything else is rewritten here. Both sides
+ * are alphanumeric, so unlike the secret patterns this rewrite can never eat
+ * a JSON escape. Extend the list whenever a harvest pulls in a new private
+ * name - the residual scan does not know project names, so this list is the
+ * only guard.
+ */
+const CODENAMES: ReadonlyArray<readonly [pattern: RegExp, replacement: string]> = [
+    [/quera/gi, "acme"],
+    [/herdr/gi, "muster"],
+    [/ponto/gi, "zephyr"],
+];
+
+/** Carry the match's case shape onto the replacement (HERDR_ENV -> MUSTER_ENV). */
+const matchCase = (source: string, target: string): string => {
+    if (source === source.toUpperCase()) return target.toUpperCase();
+    if (source[0] === source[0]?.toUpperCase()) return `${target[0]?.toUpperCase() ?? ""}${target.slice(1)}`;
+    return target;
+};
+
 export const sanitizeText = (input: string): { text: string; rules: string[] } => {
     const rules = new Set<string>();
     let text = input;
@@ -56,6 +77,13 @@ export const sanitizeText = (input: string): { text: string; rules: string[] } =
     if (EMAIL_PATTERN.test(text)) {
         text = text.replace(EMAIL_PATTERN, "user@example.invalid");
         rules.add("email");
+    }
+    for (const [pattern, replacement] of CODENAMES) {
+        const next = text.replace(pattern, (m) => matchCase(m, replacement));
+        if (next !== text) {
+            text = next;
+            rules.add(`codename:${replacement}`);
+        }
     }
     const redacted = redactShareText(text);
     for (const rule of redacted.rules) rules.add(rule);

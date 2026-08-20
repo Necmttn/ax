@@ -3,7 +3,7 @@
     {
       "id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "parent_id": null,
-      "directory": "/Users/user/Projects/quera",
+      "directory": "/Users/user/Projects/acme",
       "title": "New session - 2026-04-07T02:35:34.518Z",
       "version": "1.3.17",
       "model": null,
@@ -24,7 +24,7 @@
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775529334541,
       "time_updated": 1775529338665,
-      "data": "{\"parentID\":\"msg_d65cb96f90014dvOJaWHfD5beV\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"modelID\":\"anthropic/claude-sonnet-4-6\",\"providerID\":\"cloudflare-ai-gateway\",\"time\":{\"created\":1775529334541,\"completed\":1775529338665},\"error\":{\"name\":\"UnknownError\",\"data\":{\"message\":\"CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_GATEWAY_ID missing. Set with: export CLOUDFLARE_ACCOUNT_ID=<value> && export CLOUDFLARE_GATEWAY_ID=<value>\"}}}"
+      "data": "{\"parentID\":\"msg_d65cb96f90014dvOJaWHfD5beV\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"modelID\":\"anthropic/claude-sonnet-4-6\",\"providerID\":\"cloudflare-ai-gateway\",\"time\":{\"created\":1775529334541,\"completed\":1775529338665},\"error\":{\"name\":\"UnknownError\",\"data\":{\"message\":\"CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_GATEWAY_ID missing. Set with: export CLOUDFLARE_ACCOUNT_ID=<value> && export CLOUDFLARE_GATEWAY_ID=<value>\"}}}"
     },
     {
       "id": "msg_d65cc3a8b001slrxhdyfMa7Irz",
@@ -38,14 +38,14 @@
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775529376405,
       "time_updated": 1775529385575,
-      "data": "{\"parentID\":\"msg_d65cc3a8b001slrxhdyfMa7Irz\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":23750,\"input\":65,\"output\":148,\"reasoning\":0,\"cache\":{\"write\":23027,\"read\":510}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529376405,\"completed\":1775529385574},\"finish\":\"tool-calls\"}"
+      "data": "{\"parentID\":\"msg_d65cc3a8b001slrxhdyfMa7Irz\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":23750,\"input\":65,\"output\":148,\"reasoning\":0,\"cache\":{\"write\":23027,\"read\":510}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529376405,\"completed\":1775529385574},\"finish\":\"tool-calls\"}"
     },
     {
       "id": "msg_d65cc5e68001DqQnQ0ZbYeMjah",
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775529385576,
       "time_updated": 1775529388890,
-      "data": "{\"parentID\":\"msg_d65cc3a8b001slrxhdyfMa7Irz\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":23848,\"input\":93,\"output\":65,\"reasoning\":0,\"cache\":{\"write\":185,\"read\":23505}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529385576,\"completed\":1775529388890},\"finish\":\"stop\"}"
+      "data": "{\"parentID\":\"msg_d65cc3a8b001slrxhdyfMa7Irz\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":23848,\"input\":93,\"output\":65,\"reasoning\":0,\"cache\":{\"write\":185,\"read\":23505}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529385576,\"completed\":1775529388890},\"finish\":\"stop\"}"
     },
     {
       "id": "msg_d65cc9c4f001F3qIiI3s0Md4BN",
@@ -59,14 +59,14 @@
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775529401429,
       "time_updated": 1775529404617,
-      "data": "{\"parentID\":\"msg_d65cc9c4f001F3qIiI3s0Md4BN\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":23880,\"input\":65,\"output\":97,\"reasoning\":0,\"cache\":{\"write\":181,\"read\":23537}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529401429,\"completed\":1775529404617},\"finish\":\"tool-calls\"}"
+      "data": "{\"parentID\":\"msg_d65cc9c4f001F3qIiI3s0Md4BN\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":23880,\"input\":65,\"output\":97,\"reasoning\":0,\"cache\":{\"write\":181,\"read\":23537}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529401429,\"completed\":1775529404617},\"finish\":\"tool-calls\"}"
     },
     {
       "id": "msg_d65cca8ca001ryHpLGaJSzvsXk",
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775529404618,
       "time_updated": 1775529419821,
-      "data": "{\"parentID\":\"msg_d65cc9c4f001F3qIiI3s0Md4BN\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":26191,\"input\":2068,\"output\":303,\"reasoning\":0,\"cache\":{\"write\":102,\"read\":23718}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529404618,\"completed\":1775529419820},\"finish\":\"stop\"}"
+      "data": "{\"parentID\":\"msg_d65cc9c4f001F3qIiI3s0Md4BN\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":26191,\"input\":2068,\"output\":303,\"reasoning\":0,\"cache\":{\"write\":102,\"read\":23718}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775529404618,\"completed\":1775529419820},\"finish\":\"stop\"}"
     },
     {
       "id": "msg_d65d62d7e001ApQYFH6Z64jbgk",
@@ -80,14 +80,14 @@
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775530028425,
       "time_updated": 1775530048348,
-      "data": "{\"parentID\":\"msg_d65d62d7e001ApQYFH6Z64jbgk\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":26486,\"input\":65,\"output\":340,\"reasoning\":0,\"cache\":{\"write\":25571,\"read\":510}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775530028425,\"completed\":1775530048348},\"finish\":\"tool-calls\"}"
+      "data": "{\"parentID\":\"msg_d65d62d7e001ApQYFH6Z64jbgk\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":26486,\"input\":65,\"output\":340,\"reasoning\":0,\"cache\":{\"write\":25571,\"read\":510}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775530028425,\"completed\":1775530048348},\"finish\":\"tool-calls\"}"
     },
     {
       "id": "msg_d65d67b5e001nkrsSiHG74dmYx",
       "session_id": "ses_29a346909ffe8ovutvLuBdCuMI",
       "time_created": 1775530048350,
       "time_updated": 1775530052541,
-      "data": "{\"parentID\":\"msg_d65d62d7e001ApQYFH6Z64jbgk\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/quera\",\"root\":\"/Users/user/Projects/quera\"},\"cost\":0,\"tokens\":{\"total\":26672,\"input\":117,\"output\":129,\"reasoning\":0,\"cache\":{\"write\":603,\"read\":25823}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775530048350,\"completed\":1775530052541},\"finish\":\"stop\"}"
+      "data": "{\"parentID\":\"msg_d65d62d7e001ApQYFH6Z64jbgk\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"high\",\"path\":{\"cwd\":\"/Users/user/Projects/acme\",\"root\":\"/Users/user/Projects/acme\"},\"cost\":0,\"tokens\":{\"total\":26672,\"input\":117,\"output\":129,\"reasoning\":0,\"cache\":{\"write\":603,\"read\":25823}},\"modelID\":\"big-pickle\",\"providerID\":\"opencode\",\"time\":{\"created\":1775530048350,\"completed\":1775530052541},\"finish\":\"stop\"}"
     }
   ],
   "parts": [
