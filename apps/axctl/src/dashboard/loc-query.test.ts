@@ -86,6 +86,9 @@ const TURNS = (w: CacheWriteService) =>
             seq: 1,
             ts: new Date("2026-05-28T00:00:00.000Z"),
             role: "user",
+            // #921: the FTS target indexes full `text`; excerpt derives from
+            // it on real rows, so the fixture carries both.
+            text: "loc rollup investigation",
             text_excerpt: "loc rollup investigation",
         },
         {
@@ -94,6 +97,7 @@ const TURNS = (w: CacheWriteService) =>
             seq: 1,
             ts: new Date("2026-05-27T00:00:00.000Z"),
             role: "user",
+            text: "unrelated change",
             text_excerpt: "unrelated change",
         },
     ]);

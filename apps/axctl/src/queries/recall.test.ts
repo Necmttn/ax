@@ -87,9 +87,12 @@ describe("page and count queries agree about what matches", () => {
         expect(turnCountQuery(ALL_FILTERS).sql.match(/match_bm25/g)).toHaveLength(1);
     });
 
-    test("an unfiltered query binds only the query text (plus pagination)", () => {
-        expect(turnCountQuery(BASE).params).toEqual(["duckdb"]);
-        expect(turnPageQuery(BASE, 0, 50).params).toEqual(["duckdb", 50, 0]);
+    test("an unfiltered query binds the query text four times (3 snippet + 1 score), plus pagination", () => {
+        // #921: the match-centered snippet binds `q` three times (position x2,
+        // substr start) ahead of match_bm25's one - the same subquery serves
+        // page and count, so both carry all four.
+        expect(turnCountQuery(BASE).params).toEqual(["duckdb", "duckdb", "duckdb", "duckdb"]);
+        expect(turnPageQuery(BASE, 0, 50).params).toEqual(["duckdb", "duckdb", "duckdb", "duckdb", 50, 0]);
     });
 
     test("the BM25 score is filtered outside the subquery, not used as a boolean", () => {
