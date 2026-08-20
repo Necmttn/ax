@@ -193,6 +193,25 @@ describe("recall: turn source", () => {
         expect(res.hits.map((h) => h.turn_id)).not.toContain("turn:2");
     });
 
+    dtest("finds a phrase PAST the 500-char excerpt bound, and snippets around the match (#921)", async () => {
+        const filler = "the quick brown fox jumps over the lazy dog again and again. ".repeat(12); // ~744 chars
+        const deep = `${filler}zanzibar quokka festival`;
+        const res = await withRecall("ax-recall-deep-", (w) =>
+            Effect.gen(function* () {
+                yield* CORPUS(w);
+                yield* w.putMany("turn", [{
+                    ...turn("turn:deep", "session:a", 9, deep, "2026-08-12T10:00:00.000Z"),
+                    // Mirror the parser: the stored excerpt is the first 500
+                    // chars, so the phrase lives ONLY in the full text.
+                    text_excerpt: deep.slice(0, 500),
+                }]);
+            }), { q: "zanzibar quokka" });
+
+        expect(res.hits.map((h) => h.turn_id)).toEqual(["turn:deep"]);
+        // The snippet centers on the match instead of showing the head excerpt.
+        expect(res.hits[0]?.snippet).toContain("zanzibar quokka");
+    });
+
     dtest("carries the joined session's project, source and cwd onto each hit", async () => {
         const res = await withRecall("ax-recall-join-", CORPUS, { q: "surreal" });
 

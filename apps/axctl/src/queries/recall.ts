@@ -42,10 +42,14 @@ import {
     type Clause,
 } from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
-import { matchBm25Sql, type FtsTarget } from "@ax/lib/duckdb/fts";
+import { COMMIT_FTS_TARGET, matchBm25Sql, TURN_FTS_TARGET, type FtsTarget } from "@ax/lib/duckdb/fts";
 
-export const TURN_FTS: FtsTarget = { table: "turn", idColumn: "id", textColumn: "text_excerpt" };
-export const COMMIT_FTS: FtsTarget = { table: "commit", idColumn: "id", textColumn: "message" };
+/** Re-exported FROM the fts module (#921) so the reader can never drift from
+ *  the target `buildFtsIndexes` actually indexes. Turn search covers the FULL
+ *  `turn.text` since #921 (was the 500-char `text_excerpt` - a phrase past
+ *  that bound was silently unfindable). */
+export const TURN_FTS: FtsTarget = TURN_FTS_TARGET;
+export const COMMIT_FTS: FtsTarget = COMMIT_FTS_TARGET;
 
 /** How much of a matched turn/commit/skill body a hit carries. */
 export const SNIPPET_MAX = 240;
@@ -98,7 +102,18 @@ const turnMatchesSql = (where: Clause): string => `
         s.cwd AS cwd,
         t.role AS role,
         t.ts AS ts,
-        t.text_excerpt AS text_excerpt,
+        -- #921: the index covers FULL turn text, so a hit can sit past the
+        -- 500-char excerpt. Show a match-centered window from the full text
+        -- when the literal query string is locatable in it; BM25 also matches
+        -- stemmed/multi-term forms position() cannot find, so fall back to
+        -- the stored head excerpt rather than showing nothing.
+        COALESCE(
+            CASE WHEN position(lower(?) IN lower(t.text)) > 0
+                 THEN substr(t.text, CASE WHEN position(lower(?) IN lower(t.text)) > 120
+                                          THEN position(lower(?) IN lower(t.text)) - 120 ELSE 1 END, 360)
+            END,
+            t.text_excerpt
+        ) AS text_excerpt,
         ${matchBm25Sql(TURN_FTS, "t")} AS score
     FROM turn t
     JOIN session s ON s.id = t.session
@@ -113,7 +128,7 @@ export const turnPageQuery = (filters: TurnFilters, offset: number, limit: numbe
               WHERE score IS NOT NULL
               ORDER BY ts DESC
               LIMIT ? OFFSET ?`,
-        params: [filters.q, ...where.params, limit, offset],
+        params: [filters.q, filters.q, filters.q, filters.q, ...where.params, limit, offset],
     };
 };
 
@@ -121,7 +136,10 @@ export const turnCountQuery = (filters: TurnFilters): Clause => {
     const where = turnWhere(filters);
     return {
         sql: `SELECT count(*) AS total FROM (${turnMatchesSql(where)}) matches WHERE score IS NOT NULL`,
-        params: [filters.q, ...where.params],
+        // Same subquery as the page query, so the same FOUR binds of `q`
+        // (3 snippet + 1 match_bm25) - the optimizer prunes the unused
+        // snippet column, but the placeholders still need their params.
+        params: [filters.q, filters.q, filters.q, filters.q, ...where.params],
     };
 };
 

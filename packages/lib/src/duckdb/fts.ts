@@ -7,11 +7,16 @@
  * that can live in schema.duckdb.sql; it is a build step that has to run AFTER
  * the rows land, on every ingest, which is what {@link buildFtsIndexes} is.
  *
- * WHAT IS COVERED, and why so little. `turn.text_excerpt` and `commit.message` -
- * that is the whole set, and it is exactly what `ax recall` searches. The Surreal
- * schema also had an ngram FTS index over skill name/description; issue #758
- * dropped it deliberately, because the skill catalogue is small enough that a
- * plain `ILIKE` scan beats an index that cost more to build than the scan it
+ * WHAT IS COVERED, and why so little. `turn.text` (FULL turn text, #921) and
+ * `commit.message` - that is the whole set, and it is exactly what `ax recall`
+ * searches. Turn coverage was `text_excerpt` (the first 500 chars) until #921:
+ * a phrase past the excerpt bound was silently unfindable, and the measured
+ * cost of indexing full text on the real 1.05M-turn store was small (rebuild
+ * 2.2s -> 6.2s, terms 3.2M -> 19.6M rows, no measurable file growth) - with
+ * the #909 skip, a no-op ingest pays none of it. The Surreal schema also had
+ * an ngram FTS index over skill name/description; issue #758 dropped it
+ * deliberately, because the skill catalogue is small enough that a plain
+ * `ILIKE` scan beats an index that cost more to build than the scan it
  * replaced. Content-block search is not carried over either.
  *
  * `LOAD fts`, never `INSTALL fts`. The dylib ax ships links fts statically
@@ -55,8 +60,11 @@ export interface FtsTarget {
     readonly textColumn: string;
 }
 
-/** The digest formula version - bump to force a one-time rebuild of every target. */
-const FTS_DIGEST_VERSION = "v1";
+/** The digest formula version - bump to force a one-time rebuild of every
+ *  target. v2 = the turn target moved from `text_excerpt` to full `text`
+ *  (#921); the digest would move on its own (it hashes the new column), but
+ *  the explicit bump makes the cutover legible in `fts_index_state`. */
+const FTS_DIGEST_VERSION = "v2";
 
 /**
  * A per-target content digest computed ENTIRELY in SQL as one VARCHAR. Never
@@ -84,14 +92,17 @@ export interface FtsBuildOutcome {
     readonly rebuilt: boolean;
 }
 
+/** Full `turn.text` since #921 (was `text_excerpt` - see the module doc).
+ *  Exported by name so readers (`ax recall`, loc-query) reference the SAME
+ *  target the builder indexes instead of re-declaring it and drifting. */
+export const TURN_FTS_TARGET: FtsTarget = { table: "turn", idColumn: "id", textColumn: "text" };
+export const COMMIT_FTS_TARGET: FtsTarget = { table: "commit", idColumn: "id", textColumn: "message" };
+
 /**
  * The WHOLE covered set. Adding to it is a real decision, not a config tweak:
- * every target costs a full index rebuild on every ingest.
+ * every target costs a full index rebuild on every ingest where its digest moves.
  */
-export const FTS_TARGETS: ReadonlyArray<FtsTarget> = [
-    { table: "turn", idColumn: "id", textColumn: "text_excerpt" },
-    { table: "commit", idColumn: "id", textColumn: "message" },
-];
+export const FTS_TARGETS: ReadonlyArray<FtsTarget> = [TURN_FTS_TARGET, COMMIT_FTS_TARGET];
 
 /** The generated index schema for a target - `fts_main_turn`, `fts_main_commit`. */
 export const ftsSchemaName = (target: FtsTarget): string => `fts_main_${target.table}`;
