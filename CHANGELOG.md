@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.40.0](https://github.com/Necmttn/ax/compare/v0.39.3...v0.40.0) (2026-08-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **duckdb:** swap the bun:ffi client internals for the threaded napi driver ([#880](https://github.com/Necmttn/ax/issues/880)) (#883)
+* **v2:** replace SurrealDB with an embedded DuckDB cache + SQLite judgment sidecar ([#849](https://github.com/Necmttn/ax/issues/849))
+
+### Features
+
+* **duckdb:** swap the bun:ffi client internals for the threaded napi driver ([#880](https://github.com/Necmttn/ax/issues/880)) ([#883](https://github.com/Necmttn/ax/issues/883)) ([d8c83b4](https://github.com/Necmttn/ax/commit/d8c83b4660f19132feb2a465cd5d2ec486ea9074))
+* **improve:** auto-mint cache-lens proposals behind corroboration/recurrence/materiality/cap guards ([#915](https://github.com/Necmttn/ax/issues/915)) ([9267e20](https://github.com/Necmttn/ax/commit/9267e20d966272f1120bbe18539796d9579fdbab))
+* **ingest:** content-hash watermark - SHA-256 two-tier skip + eager backfill ([#900](https://github.com/Necmttn/ax/issues/900)) ([#901](https://github.com/Necmttn/ax/issues/901)) ([ac50f2f](https://github.com/Necmttn/ax/commit/ac50f2f0b7ae930fc6ce0454bbc7dc858e9e66f7))
+* **ingest:** golden transcript corpus - one sanitized real transcript per provider + replay test ([#877](https://github.com/Necmttn/ax/issues/877)) ([1ecf8c4](https://github.com/Necmttn/ax/commit/1ecf8c49f709ce55de1eab9aa6d04caa56725296))
+* **ingest:** read Claude's native attribution fields onto turn_token_usage ([#867](https://github.com/Necmttn/ax/issues/867)) ([#878](https://github.com/Necmttn/ax/issues/878)) ([2bd1f0b](https://github.com/Necmttn/ax/commit/2bd1f0bd7bbbe3b7a1d577d81779dfcfa51caa65))
+* **ingest:** v3 Phase 2 - NDJSON spool + batch writers for JSONL providers ([#886](https://github.com/Necmttn/ax/issues/886)) ([#887](https://github.com/Necmttn/ax/issues/887)) ([0f1adc7](https://github.com/Necmttn/ax/commit/0f1adc7aa1d09ba0f0e77d965d87964f95923151))
+* **ingest:** v3 Phase 3 - SQL model runner v1 + run-evidence as SQL models ([#888](https://github.com/Necmttn/ax/issues/888)) ([#889](https://github.com/Necmttn/ax/issues/889)) ([a10a92d](https://github.com/Necmttn/ax/commit/a10a92db9bd72ea91bb9aa53804431ca50fc5ce4))
+* **insights:** cache-bust cost attribution lens as a SQL model ([#868](https://github.com/Necmttn/ax/issues/868)) ([#890](https://github.com/Necmttn/ax/issues/890)) ([c8914b2](https://github.com/Necmttn/ax/commit/c8914b22bba218f68f433a11a46f5bb3746500be))
+* **lib:** BlobPointer branded type + read cold-storage snapshots back ([#891](https://github.com/Necmttn/ax/issues/891)) ([#892](https://github.com/Necmttn/ax/issues/892)) ([34ea07a](https://github.com/Necmttn/ax/commit/34ea07a736fc7a2d00f7aa989f9777846d859d29))
+* **prototypes:** Phase 5 learning-layer prototype - gate PASSED at matched recall ([#895](https://github.com/Necmttn/ax/issues/895)) ([#896](https://github.com/Necmttn/ax/issues/896)) ([3f9be39](https://github.com/Necmttn/ax/commit/3f9be393c5a9781263aa8a5f7bca3c5689c2ef7e))
+* **recall:** index full turn text, not the 500-char excerpt ([#922](https://github.com/Necmttn/ax/issues/922)) ([3e89ff1](https://github.com/Necmttn/ax/commit/3e89ff1bdef23b40bf0fb453159f94e010ae91b8))
+* **routability:** learned judgment classifier DARK behind AX_JUDGMENT_MODEL=learned ([#916](https://github.com/Necmttn/ax/issues/916)) ([1b4f280](https://github.com/Necmttn/ax/commit/1b4f280b1c57845a44ca24d37cac5a9c861141bc))
+* **schema:** event-layer freeze - layer classification + TableWrite contract + enforcement ([#897](https://github.com/Necmttn/ax/issues/897)) ([#899](https://github.com/Necmttn/ax/issues/899)) ([a656f69](https://github.com/Necmttn/ax/commit/a656f6922454f68e2ea6ec62a479a6b228fbc6a0))
+* **segment:** ax segment export/import - COPY TO export, column-intersection loader, wide-window re-derive ([#902](https://github.com/Necmttn/ax/issues/902)) ([#904](https://github.com/Necmttn/ax/issues/904)) ([405a009](https://github.com/Necmttn/ax/commit/405a0096bcbab4bbdf5bbe38b7e246ee2a28ea54))
+* **v2:** replace SurrealDB with an embedded DuckDB cache + SQLite judgment sidecar ([#849](https://github.com/Necmttn/ax/issues/849)) ([8642afa](https://github.com/Necmttn/ax/commit/8642afa2b90148e67e468c9ddc163ebcfb75e5d1))
+
+
+### Bug Fixes
+
+* **ci:** bench workflow needs bun install - suite imports workspace pkgs ([#874](https://github.com/Necmttn/ax/issues/874)) ([cbb90ca](https://github.com/Necmttn/ax/commit/cbb90ca13721117d0957662b67bad55d964e6ec4))
+* **ci:** exempt golden-corpus harvest/replay from the no-node-fs gate ([#924](https://github.com/Necmttn/ax/issues/924)) ([ca25415](https://github.com/Necmttn/ax/commit/ca25415fa856b11e60457d3442b0381ea6c22685))
+* **cost:** coverage line printed the attribution share 100x too small ([#881](https://github.com/Necmttn/ax/issues/881)) ([#882](https://github.com/Necmttn/ax/issues/882)) ([3821e06](https://github.com/Necmttn/ax/commit/3821e06b0343ce44dc939bac7ad7b5cd9b18c2ce))
+* **duckdb:** canonicalize the engine path before staging the napi symlink ([#884](https://github.com/Necmttn/ax/issues/884)) ([#885](https://github.com/Necmttn/ax/issues/885)) ([deb092d](https://github.com/Necmttn/ax/commit/deb092d558d0a247be9a16cc5c6394399cb8b88a))
+* **ingest:** a forked codex rollout took the fork source's identity ([#796](https://github.com/Necmttn/ax/issues/796)) ([#861](https://github.com/Necmttn/ax/issues/861)) ([abc8438](https://github.com/Necmttn/ax/commit/abc843870e9525b737e6a0ec3418f247d9fcd145))
+* **ingest:** normalized session upsert no longer nulls columns it does not own ([#898](https://github.com/Necmttn/ax/issues/898)) ([#905](https://github.com/Necmttn/ax/issues/905)) ([532a8a3](https://github.com/Necmttn/ax/commit/532a8a3b50936c5b6cd0dd144a914a260780cc7e))
+* **install:** make `curl | sh` work on Debian and Ubuntu ([#797](https://github.com/Necmttn/ax/issues/797)) ([#858](https://github.com/Necmttn/ax/issues/858)) ([8356f6d](https://github.com/Necmttn/ax/commit/8356f6df8d0050c9f52a5af2a68cd3029b984aea))
+* **schema:** register schema_comment_state in the DuckDB table manifest ([#875](https://github.com/Necmttn/ax/issues/875)) ([d1557b9](https://github.com/Necmttn/ax/commit/d1557b9bdd99bb689efca41e6751072aa5eb72c8))
+* **spool:** repair unpaired UTF-16 surrogates instead of failing the whole load ([#906](https://github.com/Necmttn/ax/issues/906)) ([#907](https://github.com/Necmttn/ax/issues/907)) ([589bd6d](https://github.com/Necmttn/ax/commit/589bd6d59fe89dbe7e36754f38597d8c020ee427))
+* **test:** cost-query fixture turns carry full text - the FTS index reads it since [#921](https://github.com/Necmttn/ax/issues/921) ([#923](https://github.com/Necmttn/ax/issues/923)) ([3681970](https://github.com/Necmttn/ax/commit/368197096a8ee056a90a7d6786c512c30f659f82))
+* **test:** gate the byte-for-byte clone assertion on filesystem support ([#918](https://github.com/Necmttn/ax/issues/918)) ([5da7386](https://github.com/Necmttn/ax/commit/5da738649b8a780998f26d010ce95cf358dcc166))
+* **test:** make [#900](https://github.com/Necmttn/ax/issues/900) content-tier tests deterministic - stop trusting rewrite mtime ([#903](https://github.com/Necmttn/ax/issues/903)) ([7ef1b21](https://github.com/Necmttn/ax/commit/7ef1b211865e37642472985deb255e9c0b05c858))
+
+
+### Performance
+
+* **fts:** skip FTS rebuild when indexed tables are unchanged ([#913](https://github.com/Necmttn/ax/issues/913)) ([db927f8](https://github.com/Necmttn/ax/commit/db927f845f2c79ce1c6e04dee013cde24521c6f4)), closes [#909](https://github.com/Necmttn/ax/issues/909)
+* **ingest:** rewrite invoked-positions backfill as set-based SQL ([#912](https://github.com/Necmttn/ax/issues/912)) ([ba3f149](https://github.com/Necmttn/ax/commit/ba3f149bd82c563d3e5d0c5dc9733c16d92ad028)), closes [#910](https://github.com/Necmttn/ax/issues/910)
+* **publish:** clone-based snapshot publish (APFS clonefile) with logical-copy fallback ([#914](https://github.com/Necmttn/ax/issues/914)) ([8a53a3d](https://github.com/Necmttn/ax/commit/8a53a3d063537f1d0e73f74ddef6f1de3c00dbdf)), closes [#908](https://github.com/Necmttn/ax/issues/908)
+
 ## [0.39.3](https://github.com/Necmttn/ax/compare/v0.39.2...v0.39.3) (2026-08-06)
 
 
