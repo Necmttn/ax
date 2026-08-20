@@ -63,6 +63,16 @@ const EXCLUDED_FILES: readonly string[] = [
     // failure never escapes untyped; see the file's own header for why FORCE
     // (not the softer, silently-degrading `COPYFILE_FICLONE`) is load-bearing.
     "packages/lib/src/duckdb/clone-file.ts",
+    // Golden-corpus dev tool (#876): `bun harvest.ts <provider>` pulls +
+    // sanitizes fixtures on a developer machine, outside the axctl Effect
+    // runtime, and is never bundled into the binary. Plain sync node fs/path
+    // is the correct dependency for a run-once codegen script.
+    "apps/axctl/src/ingest/golden-corpus/harvest.ts",
+    // Golden-corpus replay seam (#876): shared by golden-corpus.test.ts and
+    // harvest.ts, materializes sqlite seeds into temp dbs SYNCHRONOUSLY so
+    // `replay(content)` stays a plain function the test can call without a
+    // platform layer - the same trade the duckdb-dylib.ts exemption makes.
+    "apps/axctl/src/ingest/golden-corpus/replay.ts",
 ];
 
 const BANNED_SPECIFIERS = [
