@@ -53,6 +53,8 @@ const TURNS = (w: CacheWriteService) =>
             seq: 1,
             ts: new Date("2026-05-28T00:00:00.000Z"),
             role: "user",
+            // #921: the FTS index reads full `text`; excerpt derives from it on real rows.
+            text: "we discussed provider support for live-traces",
             text_excerpt: "we discussed provider support for live-traces",
         },
         {
@@ -61,6 +63,7 @@ const TURNS = (w: CacheWriteService) =>
             seq: 1,
             ts: new Date("2026-05-27T00:00:00.000Z"),
             role: "user",
+            text: "provider support ticket follow-up",
             text_excerpt: "provider support ticket follow-up",
         },
     ]);
@@ -155,6 +158,7 @@ describe("fetchCostSummary", () => {
                             seq: 1,
                             ts: new Date("2026-05-28T00:00:00.000Z"),
                             role: "user",
+                            text: "livetrace rollout notes",
                             text_excerpt: "livetrace rollout notes",
                         },
                         {
@@ -163,6 +167,7 @@ describe("fetchCostSummary", () => {
                             seq: 1,
                             ts: new Date("2026-05-27T00:00:00.000Z"),
                             role: "user",
+                            text: "unrelated turn about deployment",
                             text_excerpt: "unrelated turn about deployment",
                         },
                     ]);
