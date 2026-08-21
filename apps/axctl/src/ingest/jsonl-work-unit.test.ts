@@ -305,6 +305,39 @@ describe("content-hash tier (#900) on real files", () => {
         expect(storedSha as string | null).toBe(expected);
     });
 
+    dtest("a NEW path with bytes matching an ordinary file mark still parses", async () => {
+        const dir = tempDir("ax-jsonl-content-copy-");
+        const firstPath = `${dir}/session-a.jsonl`;
+        const secondPath = `${dir}/session-b.jsonl`;
+        const bytes = `{"kind":"same-bytes"}\n`;
+        await Bun.write(firstPath, bytes);
+        await Bun.write(secondPath, bytes);
+        const firstStat = await statOf(firstPath);
+        const secondStat = await statOf(secondPath);
+
+        const first: string[] = [];
+        const second: string[] = [];
+        let firstResult: unknown;
+        let secondResult: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-jsonl-content-copy-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                firstResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(firstPath, firstStat.mtimeMs, firstStat.sizeBytes)], first),
+                    contentHash: true,
+                });
+                secondResult = yield* runJsonlProviderFiles(write, {
+                    ...options([candidate(secondPath, secondStat.mtimeMs, secondStat.sizeBytes)], second),
+                    contentHash: true,
+                });
+            }),
+        ));
+
+        expect(firstResult).toMatchObject({ files: 1, refreshedUnchanged: 0 });
+        expect(secondResult).toMatchObject({ files: 1, skippedUnchanged: 0, refreshedUnchanged: 0 });
+        expect(first).toEqual([firstPath]);
+        expect(second).toEqual([secondPath]);
+    });
+
     dtest("an __imported__ sentinel mark makes a NEW path with those bytes refresh-skip; force still parses", async () => {
         const dir = tempDir("ax-jsonl-content3-");
         const filePath = `${dir}/imported.jsonl`;

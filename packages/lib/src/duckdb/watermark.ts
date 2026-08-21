@@ -155,10 +155,10 @@ export interface FileWatermark {
     /** The stored content hash for the durable tier, or null when the mark
      *  has none (legacy row, hash failure, or `contentHash` off). */
     storedSha(path: string): string | null;
-    /** true => bytes with this hash were already fully ingested under this
-     *  source kind - by a parse on this machine (any path) or by a segment
-     *  import (#902, `importedMarkPath` marks). The caller may then mark the
-     *  new path and skip the parse. Always false under forceEnv. */
+    /** true => a segment import sentinel (`importedMarkPath`) attests that
+     *  bytes with this hash were already fully ingested. Ordinary file marks
+     *  do not qualify: provider output may depend on the file path, so equal
+     *  bytes at a new path still need parsing. Always false under forceEnv. */
     knownContentSha(sha: string): boolean;
     /** Write the mark. Call only AFTER the file's own writes succeed. */
     commit(path: string, mtimeMs: number, size: number, sha?: string | null): Effect.Effect<void, CacheWriteError>;
@@ -278,15 +278,16 @@ export const fileWatermark = (
             }
         }
 
-        // Content-hash index across ALL of this kind's marks (#902): real file
-        // marks AND `__imported__/` sentinel marks, whose sha attests the
-        // bytes were ingested elsewhere. The backfill-version sentinel is
-        // excluded (its sha is a version tag, not a content hash). Empty under
-        // force, so a forced run reparses everything.
-        const knownShas = new Set<string>();
+        // Cross-path reuse is reserved for `__imported__/` sentinel marks
+        // (#902), whose sha explicitly attests that the bytes were loaded by
+        // `segment import`. A real file mark only proves that exact path was
+        // processed: provider output can derive identity from its path, so a
+        // byte-identical file at a new path must still parse (#927). Empty
+        // under force, so a forced run reparses everything.
+        const importedShas = new Set<string>();
         if (!forced) {
             for (const row of rows) {
-                if (row.sha !== null && !row.path.startsWith("__content_hash_backfill__/")) knownShas.add(row.sha);
+                if (row.sha !== null && row.path.startsWith("__imported__/")) importedShas.add(row.sha);
                 if (isSentinelMarkPath(row.path)) continue;
                 if (row.mtime_ms === null || row.size === null) continue;
                 marks.set(row.path, { mtimeMs: row.mtime_ms, size: row.size, sha: row.sha });
@@ -302,7 +303,7 @@ export const fileWatermark = (
                 return mark !== undefined && mark.mtimeMs === mtimeMs && mark.size === size;
             },
             storedSha: (path) => marks.get(path)?.sha ?? null,
-            knownContentSha: (sha) => knownShas.has(sha),
+            knownContentSha: (sha) => importedShas.has(sha),
             commit: (path, mtimeMs, size, sha) => write.put(WATERMARK_TABLE, row(path, mtimeMs, size, sha)),
             row,
         } satisfies FileWatermark;
