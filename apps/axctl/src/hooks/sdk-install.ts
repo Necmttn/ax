@@ -170,8 +170,10 @@ export interface InstalledHookKey {
     readonly provider: string;
     readonly scope: string;
     readonly event: string;
+    readonly matcher?: string | null | undefined;
     /** as stored on disk - may carry a trailing ` # ax:<id>` marker. */
     readonly command: string;
+    readonly timeout?: number | undefined;
 }
 
 /** Strip a trailing ` # ax:<id>` ownership marker (providers embed one on
@@ -180,7 +182,7 @@ export const stripAxMarker = (command: string): string =>
     command.replace(/\s*#\s*ax:[a-z0-9_-]+\s*$/, "");
 
 export interface InstallResult extends InstallPlanEntry {
-    /** true when an identical (provider, scope, event, command) hook already exists. */
+    /** true when an identical hook already exists. */
     readonly skipped: boolean;
     /** config file written; undefined when skipped. */
     readonly writtenPath?: string | undefined;
@@ -188,20 +190,37 @@ export interface InstallResult extends InstallPlanEntry {
 
 /**
  * Pure: annotate each plan entry with `skipped: true` when a hook with the
- * same (provider, scope, event, command) already exists. Commands are compared
- * marker-stripped, since providers embed ` # ax:<id>` on write.
+ * same provider, scope, event, matcher, command, and timeout already exists.
+ * Commands are compared marker-stripped, since providers embed an ownership marker.
  */
 export const filterAlreadyInstalled = (
     plan: ReadonlyArray<InstallPlanEntry>,
     existing: ReadonlyArray<InstalledHookKey>,
     scope: HookScope,
 ): Array<InstallPlanEntry & { readonly skipped: boolean }> => {
-    const key = (provider: string, sc: string, event: string, command: string): string =>
-        [provider, sc, event, stripAxMarker(command)].join("\u0000");
-    const seen = new Set(existing.map((e) => key(e.provider, e.scope, e.event, e.command)));
+    const key = (
+        provider: string,
+        sc: string,
+        event: string,
+        matcher: string | null | undefined,
+        command: string,
+        timeout: number | undefined,
+    ): string => [provider, sc, event, matcher ?? "", stripAxMarker(command), timeout ?? ""].join("\u0000");
+    const seen = new Set(
+        existing.map((e) => key(e.provider, e.scope, e.event, e.matcher, e.command, e.timeout)),
+    );
     return plan.map((entry) => ({
         ...entry,
-        skipped: seen.has(key(entry.provider, scope, entry.input.event, entry.input.command)),
+        skipped: seen.has(
+            key(
+                entry.provider,
+                scope,
+                entry.input.event,
+                entry.input.matcher,
+                entry.input.command,
+                entry.input.timeout,
+            ),
+        ),
     }));
 };
 

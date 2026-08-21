@@ -189,7 +189,14 @@ describe("filterAlreadyInstalled", () => {
     test("skips an entry whose (provider, scope, event, command) already exists", () => {
         const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
         const existing = [
-            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts" },
+            {
+                provider: "claude",
+                scope: "global",
+                event: "PreToolUse",
+                matcher: null,
+                command: "bun /abs/g.ts",
+                timeout: 10,
+            },
         ];
         const out = filterAlreadyInstalled(plan, existing, "global");
         expect(out[0]!.skipped).toBe(true);
@@ -198,10 +205,43 @@ describe("filterAlreadyInstalled", () => {
     test("matches even when the existing command carries an ax marker", () => {
         const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
         const existing = [
-            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts # ax:abc12345" },
+            {
+                provider: "claude",
+                scope: "global",
+                event: "PreToolUse",
+                matcher: null,
+                command: "bun /abs/g.ts # ax:abc12345",
+                timeout: 10,
+            },
         ];
         const out = filterAlreadyInstalled(plan, existing, "global");
         expect(out[0]!.skipped).toBe(true);
+    });
+
+    test("does not skip an entry when its matcher or timeout changed", () => {
+        const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
+        const cases = [
+            {
+                provider: "claude",
+                scope: "global",
+                event: "PreToolUse",
+                matcher: "Bash",
+                command: "bun /abs/g.ts",
+                timeout: 10,
+            },
+            {
+                provider: "claude",
+                scope: "global",
+                event: "PreToolUse",
+                matcher: null,
+                command: "bun /abs/g.ts",
+                timeout: 5,
+            },
+        ];
+        for (const existing of cases) {
+            const out = filterAlreadyInstalled(plan, [existing], "global");
+            expect(out[0]!.skipped).toBe(false);
+        }
     });
 
     test("does not skip when provider, event, scope, or command differ", () => {
@@ -224,7 +264,14 @@ describe("filterAlreadyInstalled", () => {
             entry("codex", "PreToolUse", "bun /abs/g.ts"),
         ];
         const existing = [
-            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts # ax:deadbeef" },
+            {
+                provider: "claude",
+                scope: "global",
+                event: "PreToolUse",
+                matcher: null,
+                command: "bun /abs/g.ts # ax:deadbeef",
+                timeout: 10,
+            },
         ];
         const out = filterAlreadyInstalled(plan, existing, "global");
         expect(out[0]!.skipped).toBe(true);
