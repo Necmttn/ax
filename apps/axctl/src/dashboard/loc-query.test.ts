@@ -130,6 +130,65 @@ describe("fetchLocSummary", () => {
         expect(s1).toMatchObject({ edits: 2, linesAdded: 5, linesRemoved: 1, source: "claude" });
     });
 
+    dtest("query limit selects the newest matching session", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-loc-query-limit-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [
+                        { id: "old", source: "codex", started_at: new Date("2026-01-01T00:00:00Z") },
+                        { id: "new", source: "codex", started_at: new Date("2026-08-01T00:00:00Z") },
+                    ]);
+                    yield* w.putMany("turn", [
+                        {
+                            id: "a-old",
+                            session: "old",
+                            seq: 1,
+                            ts: new Date("2026-01-01T00:00:00Z"),
+                            role: "user",
+                            text: "needle",
+                            text_excerpt: "needle",
+                        },
+                        {
+                            id: "z-new",
+                            session: "new",
+                            seq: 1,
+                            ts: new Date("2026-08-01T00:00:00Z"),
+                            role: "user",
+                            text: "needle",
+                            text_excerpt: "needle",
+                        },
+                    ]);
+                    yield* w.putMany("tool_call", [
+                        {
+                            id: "old-edit",
+                            session: "old",
+                            seq: 2,
+                            ts: new Date("2026-01-01T00:01:00Z"),
+                            name: "Write",
+                            input_json: '{"content":"old"}',
+                        },
+                        {
+                            id: "new-edit",
+                            session: "new",
+                            seq: 2,
+                            ts: new Date("2026-08-01T00:01:00Z"),
+                            name: "Write",
+                            input_json: '{"content":"new"}',
+                        },
+                    ]);
+                }),
+            ),
+        );
+
+        const summary = await readThroughFixture(
+            fixture,
+            dylibPath,
+            fetchLocSummary({ kind: "query", terms: ["needle"], limit: 1 }),
+        );
+
+        expect(summary.sessions.map((row) => row.session)).toEqual(["new"]);
+    });
+
     dtest("session selector fetches edit rows for one session directly", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-loc-query-session-"), dylibPath, baseFixture));
 

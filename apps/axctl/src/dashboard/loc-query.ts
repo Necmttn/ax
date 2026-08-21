@@ -242,12 +242,17 @@ export const fetchLocSummary = (
                 ? NO_CLAUSE
                 : {
                       sql: `AND tc.session IN (
-                          SELECT DISTINCT session_id FROM (
-                              SELECT t.session AS session_id, ${matchBm25Sql(TURN_FTS, "t")} AS score
-                              FROM turn t
-                          ) matches
-                          WHERE score IS NOT NULL
-                          LIMIT ?
+                          SELECT session_id FROM (
+                              SELECT DISTINCT session_id, started_at FROM (
+                                  SELECT t.session AS session_id, matched_session.started_at AS started_at,
+                                         ${matchBm25Sql(TURN_FTS, "t")} AS score
+                                  FROM turn t
+                                  JOIN session matched_session ON matched_session.id = t.session
+                              ) matches
+                              WHERE score IS NOT NULL
+                              ORDER BY started_at DESC
+                              LIMIT ?
+                          ) recent_matches
                       )`,
                       params: [terms.join(" "), limit],
                   };

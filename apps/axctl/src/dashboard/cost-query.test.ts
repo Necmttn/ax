@@ -102,6 +102,51 @@ describe("fetchCostSummary", () => {
         });
     });
 
+    dtest("query limit selects the newest matching session", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-cost-query-limit-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [
+                        { id: "old", source: "codex", started_at: new Date("2026-01-01T00:00:00Z") },
+                        { id: "new", source: "codex", started_at: new Date("2026-08-01T00:00:00Z") },
+                    ]);
+                    yield* w.putMany("session_token_usage", [
+                        { id: "old", session: "old", source: "codex", estimated_tokens: 1, transcript_bytes: 1 },
+                        { id: "new", session: "new", source: "codex", estimated_tokens: 1, transcript_bytes: 1 },
+                    ]);
+                    yield* w.putMany("turn", [
+                        {
+                            id: "a-old",
+                            session: "old",
+                            seq: 1,
+                            ts: new Date("2026-01-01T00:00:00Z"),
+                            role: "user",
+                            text: "needle",
+                            text_excerpt: "needle",
+                        },
+                        {
+                            id: "z-new",
+                            session: "new",
+                            seq: 1,
+                            ts: new Date("2026-08-01T00:00:00Z"),
+                            role: "user",
+                            text: "needle",
+                            text_excerpt: "needle",
+                        },
+                    ]);
+                }),
+            ),
+        );
+
+        const summary = await readThroughFixture(
+            fixture,
+            dylibPath,
+            fetchCostSummary({ kind: "query", q: "needle", limit: 1 }),
+        );
+
+        expect(summary.sessions.map((row) => row.session)).toEqual(["new"]);
+    });
+
     dtest("query selector can be constrained by since and project scope", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-cost-query-since-"), dylibPath, baseFixture));
 
