@@ -390,7 +390,8 @@ from the projection - not nulled - so import's column-intersection upsert
 UPDATE` over exactly that set; NOT the spool) can never clobber local
 enrichment. Import also writes `__imported__/<kind>/<sha>` watermark marks
 (`importedMarkPath` + `FileWatermark.knownContentSha` - the jsonl work-unit
-refresh-skips a NEW path whose bytes carry a known sha), then triggers the
+refresh-skips a NEW path whose bytes carry an IMPORTED sha; since #955 only
+`__imported__/` marks feed that set, never ordinary file marks), then triggers the
 contract-driven re-derive (stages whose declared writes are all
 derive/enrich/bookkeep) over `--since=ceil(now - min(started_at))` through the
 exported `cmdIngest`. Catalogs never ride (dangling edges knit later by stable
