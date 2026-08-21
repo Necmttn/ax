@@ -196,7 +196,11 @@ export const fetchOtelRollup = Effect.fn("queries.fetchOtelRollup")(
         // strings on the DuckDB cache - bareUuid still normalises defensively.
         const idRows = yield* cacheRows(
             SessionIdRow,
-            { sql: `SELECT id FROM session WHERE started_at > ${daysAgoExpr};`, params: [days] },
+            {
+                sql: `SELECT id FROM session WHERE started_at > ${daysAgoExpr}`
+                    + ` AND source NOT LIKE '%-subagent';`,
+                params: [days],
+            },
             "otel coverage session window",
         );
         const windowUuids = idRows.map((r) => bareUuid(r.id)).filter((u): u is string => u !== null);

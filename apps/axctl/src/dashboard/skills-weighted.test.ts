@@ -306,4 +306,34 @@ describe("recovery latency (lens E)", () => {
         // median of [1000, 3000] = 2000 (s3-no-telemetry absent -> not counted)
         expect(tdd.median_recovery_ms).toBe(2000);
     });
+
+    wtest("counts each recovery session once when it has multiple recovery edges", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-skw-recovery-dedupe-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("skill", [SKILL({ id: "sk-tdd", name: "superpowers:tdd" })]);
+                    yield* w.putMany("invoked", [INVOKED("i1", "sk-tdd", "session-a", new Date())]);
+                    yield* w.putMany("turn", [
+                        { id: "turn-a1", session: "session-a", seq: 1, ts: new Date(), role: "assistant" },
+                        { id: "turn-a2", session: "session-a", seq: 2, ts: new Date(), role: "assistant" },
+                        { id: "turn-b", session: "session-b", seq: 1, ts: new Date(), role: "assistant" },
+                    ]);
+                    yield* w.putMany("recovered_by", [
+                        { id: "r1", in_id: "turn-a1", out_id: "sk-tdd", ts: new Date() },
+                        { id: "r2", in_id: "turn-a2", out_id: "sk-tdd", ts: new Date() },
+                        { id: "r3", in_id: "turn-b", out_id: "sk-tdd", ts: new Date() },
+                    ]);
+                    yield* w.putMany("otel_log_event", [
+                        { id: "e1", harness: "claude", event_name: "x", session_id: "session-a", duration_ms: 100, observed_at: new Date() },
+                        { id: "e2", harness: "claude", event_name: "x", session_id: "session-b", duration_ms: 1000, observed_at: new Date() },
+                    ]);
+                }),
+            ),
+        );
+
+        const result = await runWeighted(fixture.snapshotPath);
+        const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
+
+        expect(tdd.median_recovery_ms).toBe(550);
+    });
 });
