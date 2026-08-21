@@ -182,31 +182,49 @@ const writeFreshnessState = (next: FreshnessState): Effect.Effect<void, never, F
  *  freshness drive stays off forever. */
 const FRESHNESS_CLAIM_STALE_MS = 10 * 60 * 1000;
 
+const readFreshnessSpawnClaim = (): Effect.Effect<string | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readFileString(freshnessClaimPath()).pipe(orAbsent<string | null>(null));
+    });
+
 /** Atomically claim the right to spawn. `wx` maps to O_EXCL, so only one
- *  process can pass this point. The caller always removes its claim. */
-const tryClaimFreshnessSpawn = (): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+ *  process can pass this point. The returned token identifies this claim. */
+const tryClaimFreshnessSpawn = (): Effect.Effect<string | null, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(dataDir(), { recursive: true }).pipe(orAbsent<void>(undefined));
         const claim = () =>
-            fs
-                .writeFileString(freshnessClaimPath(), `${process.pid}\n`, { flag: "wx" })
-                .pipe(Effect.as(true), orAbsent(false));
+            Effect.suspend(() => {
+                const token = `${process.pid}:${crypto.randomUUID()}\n`;
+                return fs
+                    .writeFileString(freshnessClaimPath(), token, { flag: "wx" })
+                    .pipe(Effect.as<string | null>(token), orAbsent<string | null>(null));
+            });
         const claimed = yield* claim();
-        if (claimed) return true;
+        if (claimed !== null) return claimed;
+        const staleToken = yield* readFreshnessSpawnClaim();
+        if (staleToken === null) return yield* claim();
         const mtimeMs = yield* fs.stat(freshnessClaimPath()).pipe(
             Effect.map((info) => Option.match(info.mtime, { onSome: (d) => d.getTime(), onNone: () => Date.now() })),
             orAbsent(Date.now()),
         );
-        if (Date.now() - mtimeMs < FRESHNESS_CLAIM_STALE_MS) return false;
+        if (Date.now() - mtimeMs < FRESHNESS_CLAIM_STALE_MS) return null;
+        // Another reclaimer can replace the stale file after our stat. Remove
+        // only the exact claim that we classified as stale.
+        const currentToken = yield* readFreshnessSpawnClaim();
+        if (currentToken !== staleToken) return null;
         yield* fs.remove(freshnessClaimPath(), { force: true }).pipe(Effect.ignore);
         return yield* claim();
     });
 
-const releaseFreshnessSpawnClaim: Effect.Effect<void, never, FileSystem.FileSystem> =
+const releaseFreshnessSpawnClaim = (token: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        yield* fs.remove(freshnessClaimPath(), { force: true }).pipe(Effect.ignore);
+        const currentToken = yield* readFreshnessSpawnClaim();
+        if (currentToken === token) {
+            yield* fs.remove(freshnessClaimPath(), { force: true }).pipe(Effect.ignore);
+        }
     });
 
 /**
@@ -239,8 +257,8 @@ export const maybeSpawnBackgroundIngest: Effect.Effect<
         return;
     }
 
-    const claimed = yield* tryClaimFreshnessSpawn();
-    if (!claimed) return;
+    const claimToken = yield* tryClaimFreshnessSpawn();
+    if (claimToken === null) return;
 
     yield* Effect.gen(function* () {
         // Another process can finish between our first state read and this
@@ -259,7 +277,7 @@ export const maybeSpawnBackgroundIngest: Effect.Effect<
         const spawner = yield* BackgroundIngestSpawner;
         yield* spawner.spawn();
         yield* writeFreshnessState({ ...claimedState, lastSpawnAtMs: nowMs });
-    }).pipe(Effect.ensuring(releaseFreshnessSpawnClaim));
+    }).pipe(Effect.ensuring(releaseFreshnessSpawnClaim(claimToken)));
 }).pipe(
     Effect.timeoutOption(PROBE_TIMEOUT_MS),
     // Same "never fails" contract as warnIfIngestStale - a defect (EPIPE, a
