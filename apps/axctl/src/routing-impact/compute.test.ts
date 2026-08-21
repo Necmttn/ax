@@ -50,6 +50,18 @@ describe("buildImpactReport - single block", () => {
         expect(blocks[0]!.fiveHourPpConsumed).toBeNull();
     });
 
+    test("accepts equal reset instants with different ISO formats", () => {
+        const { blocks } = buildImpactReport([
+            block({
+                arm: "off",
+                fiveHourStart: edge(10, "2026-06-19T20:00:00Z"),
+                fiveHourEnd: edge(20, "2026-06-19T20:00:00.000Z"),
+            }),
+        ]);
+        expect(blocks[0]!.windowReset).toBe(false);
+        expect(blocks[0]!.fiveHourPpConsumed).toBe(10);
+    });
+
     test("null quota edges → no window delta, note emitted", () => {
         const { blocks, notes } = buildImpactReport([
             block({ arm: "off", fiveHourStart: null, fiveHourEnd: null }),

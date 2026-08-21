@@ -49,6 +49,9 @@ export const NEXT_PROTOCOL_HINT =
 // Shared link constructors
 // ---------------------------------------------------------------------------
 
+/** Quote one dynamic value as one POSIX shell argument. */
+const shellArg = (value: string): string => `'${value.replaceAll("'", `'\"'\"'`)}'`;
+
 // ---------------------------------------------------------------------------
 // Studio deeplinks
 // ---------------------------------------------------------------------------
@@ -103,7 +106,7 @@ export const sessionShowLink = (
     return {
         description,
         call: { tool: "session_show", arguments: { sessionId: id } },
-        cmd: `ax sessions show ${id}`,
+        cmd: `ax sessions show ${shellArg(id)}`,
         ui: { priority, group: "read" },
     };
 };
@@ -116,7 +119,7 @@ export const skillRolesLink = (
 ): NavLink => ({
     description,
     call: { tool: "skills_roles", arguments: { skill } },
-    cmd: `ax skills roles ${skill}`,
+    cmd: `ax skills roles ${shellArg(skill)}`,
     ui: { priority, group: "read" },
 });
 
@@ -156,7 +159,7 @@ const sessionsAroundLink = (
     return {
         description,
         call: { tool: "sessions_around", arguments: { date, days } },
-        cmd: `ax sessions around ${date} --days=${days}`,
+        cmd: `ax sessions around ${shellArg(date)} --days=${shellArg(String(days))}`,
         ui: { priority, group: "search" },
     };
 };
@@ -224,7 +227,7 @@ export const buildRecallNext = (
     const broaden: NavLink = {
         description: "Broaden the search to all sources (turns, commits, skills)",
         call: { tool: "recall", arguments: { q: r.q, sources: [...ALL_SOURCES] } },
-        cmd: `ax recall ${JSON.stringify(r.q)} --sources=turn,commit,skill`,
+        cmd: `ax recall ${shellArg(r.q)} --sources=turn,commit,skill`,
         ui: { priority: 4, group: "search" },
     };
     const subsetRequested = opts.requestedSources.length < ALL_SOURCES.length;
@@ -305,7 +308,7 @@ export const buildSessionsNext = (
             description: "Aggregate verification churn (edit vs repair LOC, failed checks) for this scope",
             call: { tool: "sessions_churn", arguments: opts.project ? { project: opts.project } : {} },
             cmd: opts.project
-                ? `ax sessions churn --project="${opts.project}"`
+                ? `ax sessions churn --project=${shellArg(opts.project)}`
                 : "ax sessions churn",
             ui: { priority: 5, group: "read" },
         });
@@ -329,7 +332,7 @@ export const buildSessionsNext = (
                     tool: "sessions_around",
                     arguments: { date: opts.date.slice(0, 10), days: opts.days ?? 3 },
                 },
-                cmd: `ax sessions around ${opts.date.slice(0, 10)} --days=${opts.days ?? 3}`,
+                cmd: `ax sessions around ${shellArg(opts.date.slice(0, 10))} --days=${shellArg(String(opts.days ?? 3))}`,
                 ui: { priority: 8, group: "search" },
             });
         }
@@ -445,7 +448,7 @@ export const buildSessionShowNext = (
         top.push({
             description: `Expand all ${p.session.children.length} subagent children inline`,
             call: { tool: "session_show", arguments: { sessionId: id, expandAll: true } },
-            cmd: `ax sessions show ${id} --all`,
+            cmd: `ax sessions show ${shellArg(id)} --all`,
             ui: { priority: 7, group: "read" },
         });
     }
@@ -465,7 +468,7 @@ const skillsByRoleLink = (
 ): NavLink => ({
     description,
     call: { tool: "skills_by_role", arguments: { role } },
-    cmd: `ax skills by-role ${role}`,
+    cmd: `ax skills by-role ${shellArg(role)}`,
     ui: { priority, group: "read" },
 });
 
@@ -534,7 +537,7 @@ export const buildSkillsRolesNext = (
         top.push({
             description: `Unknown skill "${skill}" - search the skill catalog for the right name`,
             call: { tool: "recall", arguments: { q: skill, sources: ["skill"] } },
-            cmd: `ax recall ${JSON.stringify(skill)} --sources=skill`,
+            cmd: `ax recall ${shellArg(skill)} --sources=skill`,
             ui: { priority: 9, group: "search" },
         });
         return top;
@@ -659,12 +662,12 @@ export const buildImproveProposalsNext = (
     top.push({
         description: `Inspect the evidence trail behind the top proposal ("${first.title.slice(0, 60)}")`,
         call: { tool: "improve_show", arguments: { sigOrId: first.sig } },
-        cmd: `ax improve show ${first.sig}`,
+        cmd: `ax improve show ${shellArg(first.sig)}`,
         ui: { priority: 7, group: "read" },
     });
     top.push({
         description: "Accept the top proposal (emits a .ax/tasks brief; CLI-only, mutating)",
-        cmd: `ax improve accept ${first.sig}`,
+        cmd: `ax improve accept ${shellArg(first.sig)}`,
         ui: { priority: 5, group: "act" },
     });
     return sortNavLinks(top);

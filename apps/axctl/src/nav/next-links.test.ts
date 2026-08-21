@@ -15,10 +15,26 @@ import {
     buildSkillsRolesNext,
     buildRolesNext,
     buildImproveProposalsNext,
+    skillRolesLink,
     studioSessionUrl,
     studioSessionLink,
     type StudioDeeplink,
 } from "./next-links.ts";
+
+describe("shell-safe commands (#981)", () => {
+    test("quotes hostile dynamic values as one POSIX shell argument", () => {
+        expect(skillRolesLink("review skill; touch /tmp/pwn").cmd).toBe(
+            "ax skills roles 'review skill; touch /tmp/pwn'",
+        );
+        expect(skillRolesLink("review' skill").cmd).toBe(
+            "ax skills roles 'review'\"'\"' skill'",
+        );
+        const links = buildImproveProposalsNext([{ sig: "x; touch /tmp/pwn", title: "x" }]);
+        expect(links.map((link) => link.cmd)).toContain(
+            "ax improve show 'x; touch /tmp/pwn'",
+        );
+    });
+});
 
 const UUID_A = "019e2531-b552-7b53-a029-c780adbb6560";
 const UUID_B = "019e9999-aaaa-7b53-a029-c780adbb6560";
@@ -96,7 +112,7 @@ describe("buildRecallNext", () => {
         expect(hits[0]?.next).toHaveLength(1);
         expect(hits[0]?.next?.[0]?.call?.tool).toBe("session_show");
         expect(hits[0]?.next?.[0]?.call?.arguments).toEqual({ sessionId: UUID_A });
-        expect(hits[0]?.next?.[0]?.cmd).toBe(`ax sessions show ${UUID_A}`);
+        expect(hits[0]?.next?.[0]?.cmd).toBe(`ax sessions show '${UUID_A}'`);
     });
 
     test("top-level next carries resume cmd for claude hit with cwd", () => {
@@ -187,7 +203,7 @@ describe("buildSessionsNext", () => {
     test("non-empty window suggests the churn rollup", () => {
         const { next } = buildSessionsNext([row({})], { project: "/Users/x/proj" });
         const churn = next.find((l) => l.cmd?.includes("sessions churn"));
-        expect(churn?.cmd).toBe('ax sessions churn --project="/Users/x/proj"');
+        expect(churn?.cmd).toBe("ax sessions churn --project='/Users/x/proj'");
     });
 
     test("non-empty window without project suggests bare churn", () => {
@@ -270,7 +286,7 @@ describe("buildSessionShowNext", () => {
             ),
         );
         const expand = next.find((l) => l.call?.arguments.expandAll === true);
-        expect(expand?.cmd).toBe(`ax sessions show ${UUID_A} --all`);
+        expect(expand?.cmd).toBe(`ax sessions show '${UUID_A}' --all`);
     });
 
     test("no overview → empty next", () => {
@@ -429,7 +445,7 @@ describe("buildSkillsRolesNext", () => {
             "tdd",
         );
         expect(next[0]?.call?.tool).toBe("skills_by_role");
-        expect(next[0]?.cmd).toBe("ax skills by-role verifier");
+        expect(next[0]?.cmd).toBe("ax skills by-role 'verifier'");
     });
 });
 

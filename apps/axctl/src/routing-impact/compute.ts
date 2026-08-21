@@ -85,7 +85,8 @@ const round = (n: number, dp = 2): number => {
 
 /** Did the 5h window roll over between the two edges? */
 const didReset = (start: WindowEdge, end: WindowEdge): boolean =>
-    end.resets_at !== start.resets_at || end.utilization < start.utilization;
+    new Date(end.resets_at).getTime() !== new Date(start.resets_at).getTime() ||
+    end.utilization < start.utilization;
 
 const resolveBlock = (b: BlockInput): BlockResult => {
     const durationMin = round(minutesBetween(b.started_at, b.ended_at), 1);

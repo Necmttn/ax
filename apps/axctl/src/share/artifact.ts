@@ -40,6 +40,10 @@ export interface AxSessionShare {
         readonly skills_used: number;
         readonly failures: number;
     };
+    /** Total eligible transcript turns before the export row cap. */
+    readonly total_turns?: number;
+    /** True when `turns` contains only the capped prefix. */
+    readonly truncated?: boolean;
     readonly token_usage?: SessionTokenUsageDetail | null;
     /** v3+: runtime hook-fire decisions (file-context injections etc.), so the
      *  shared inspector can show + jump to them like the live one. */
@@ -184,6 +188,8 @@ export function isAxSessionShare(value: unknown): value is AxSessionShare {
     if (typeof value.session.source !== "string") return false;
     if (!isRecord(value.stats)) return false;
     if (!hasNumericStats(value.stats)) return false;
+    if (value.total_turns !== undefined && typeof value.total_turns !== "number") return false;
+    if (value.truncated !== undefined && typeof value.truncated !== "boolean") return false;
     if (!Array.isArray(value.timeline)) return false;
     if (!Array.isArray(value.files)) return false;
     if (!isRecord(value.graph)) return false;
@@ -221,6 +227,8 @@ export function minimalShareArtifact(input: {
             skills_used: 0,
             failures: 0,
         },
+        total_turns: 0,
+        truncated: false,
         turns: [],
         timeline: [],
         files: [],

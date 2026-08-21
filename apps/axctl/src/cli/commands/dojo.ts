@@ -51,6 +51,7 @@ import {
     renderSkillSparReport,
     resolveSkillSparTask,
     scoreSkillSpar,
+    verifyAndRestoreSkill,
 } from "../../dojo/skill-spar.ts";
 import { mainRepoRootFromGitCommonDir, resolvePwdCacheRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
@@ -589,6 +590,10 @@ const sparScoreCommand = Command.make(
                     );
                     return yield* exitEffect(1);
                 }
+                yield* verifyAndRestoreSkill(
+                    skillBrief,
+                    posixPath.join(dojoSparDir(), `${id}.skill.orig.md`),
+                );
                 const { mainRepoRoot } = yield* resolveRepo;
                 // sinceForChurn: same derivation as the code-delta path (new Date(brief.createdAt))
                 const sinceForChurn = new Date(skillBrief.createdAt);

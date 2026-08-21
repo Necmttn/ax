@@ -41,5 +41,6 @@ export const isFresh = (
 ): boolean => {
     const fetchedMs = Date.parse(snapshot.fetched_at);
     if (!Number.isFinite(fetchedMs)) return false;
-    return nowMs - fetchedMs < maxAgeSeconds * 1000;
+    const ageMs = nowMs - fetchedMs;
+    return ageMs >= 0 && ageMs < maxAgeSeconds * 1000;
 };

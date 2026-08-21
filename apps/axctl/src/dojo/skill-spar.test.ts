@@ -5,6 +5,7 @@ import { makeTestCacheRead, type TestCacheOptions } from "@ax/lib/testing/cache"
 import type { CacheRead } from "@ax/lib/duckdb/seam";
 import type { Judgment } from "@ax/lib/sqlite";
 import { ProcessServiceTest } from "@ax/lib/process";
+import { BunFileSystem } from "@effect/platform-bun";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import {
     renderSkillSparBrief,
@@ -15,6 +16,7 @@ import {
     renderSkillSparReport,
     type SkillSparBrief,
     type ResolveSkillSparOpts,
+    verifyAndRestoreSkill,
 } from "./skill-spar.ts";
 import type { SparScore, SparMetrics } from "./spar.ts";
 
@@ -171,9 +173,9 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
         expect(rendered).toContain(`cp "/tmp/ax-new-abc.md"`);
         expect(rendered).toContain(`cp "/tmp/ax-orig-abc.md"`);
         // The two cp sources must differ (arm B must NOT run the original skill).
-        const cpLines = rendered.split("\n").filter((l) => l.trimStart().startsWith("cp "));
-        const sources = cpLines.map((l) => l.split('"')[1]);
-        expect(new Set(sources).size).toBeGreaterThan(1);
+        expect(rendered.indexOf(`cp "/tmp/ax-orig-abc.md"`)).toBeLessThan(
+            rendered.indexOf(`cp "/tmp/ax-new-abc.md"`),
+        );
     });
 
     // DEFECT 3: a task body with its own `## ` subheading must round-trip whole.
@@ -223,6 +225,18 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
         expect(guardIdx).toBeLessThan(cpIdx);
     });
 
+    test("Arm B command restores the global skill through an EXIT trap", () => {
+        const rendered = renderSkillSparBrief(BASE_BRIEF, {
+            worktreeBAbs: "/tmp/arm-b",
+            snapshotPathAbs: "/tmp/original.md",
+            editedPathAbs: "/tmp/edited.md",
+        });
+        expect(rendered).toContain(
+            `trap 'cp "/tmp/original.md" "/Users/user/.claude/skills/my-skill/SKILL.md"' EXIT;`,
+        );
+        expect(rendered).toContain(`cd "/tmp/arm-b"; claude`);
+    });
+
     // New: editedPath in guard and cp must be the same path as the save-target note
     test("editedPath in guard/cp matches the path given in the save-to note (consistency)", () => {
         const editedPath = "/Users/user/.ax/dojo/spar/my-skill-abc123-2026-06-16.skill.edited.md";
@@ -255,6 +269,32 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
         const parsed = parseSkillSparBrief(rendered);
         expect(parsed).not.toBeNull();
         expect(parsed!.editedSkill).toBe(brief.editedSkill);
+    });
+});
+
+describe("verifyAndRestoreSkill", () => {
+    test("restores and warns when Arm B leaves the global skill swapped", async () => {
+        const dir = `${process.env.TMPDIR ?? "/tmp"}/ax-spar-restore-${crypto.randomUUID()}`;
+        const skillDir = `${dir}/skill`;
+        const target = `${skillDir}/SKILL.md`;
+        const snapshot = `${dir}/original.md`;
+        await Bun.write(target, "edited", { createPath: true });
+        await Bun.write(snapshot, "original", { createPath: true });
+        const warn = console.warn;
+        const warnings: string[] = [];
+        console.warn = (message?: unknown) => warnings.push(String(message));
+        try {
+            const restored = await Effect.runPromise(
+                verifyAndRestoreSkill({ ...BASE_BRIEF, skillDir }, snapshot).pipe(
+                    Effect.provide(BunFileSystem.layer),
+                ),
+            );
+            expect(restored).toBe(true);
+            expect(await Bun.file(target).text()).toBe("original");
+            expect(warnings[0]).toContain("restored");
+        } finally {
+            console.warn = warn;
+        }
     });
 });
 

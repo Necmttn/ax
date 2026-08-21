@@ -44,6 +44,8 @@ export interface ShareArtifactParts {
     readonly toolCalls: ReadonlyArray<SessionToolCall>;
     readonly tokenUsage?: SessionTokenUsageDetail | null;
     readonly turns: ReadonlyArray<ShareTurn>;
+    readonly totalTurns?: number;
+    readonly truncated?: boolean;
     readonly timeline: ReadonlyArray<ShareEvent>;
     /** Segmented highlight timeline (L2 phases + L1 key events), computed at
      *  export time so the static share viewer can render it without a daemon. */
@@ -198,6 +200,8 @@ export function buildShareArtifactFromParts(
             skills_used: parts.topSkills.length,
             failures,
         },
+        total_turns: parts.totalTurns ?? parts.turns.length,
+        truncated: parts.truncated ?? false,
         token_usage: parts.tokenUsage ?? null,
         ...(parts.sessionTimeline ? { session_timeline: parts.sessionTimeline } : {}),
         ...(parts.hookFires && parts.hookFires.length > 0 ? { hook_fires: parts.hookFires } : {}),
@@ -408,7 +412,7 @@ export const exportSessionShare = (
         if (remaining < 0) return null;
 
         const read = yield* CacheRead;
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, shareTurns, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, harnessHooksRawUnanchored, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, shareTurnsResult, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, harnessHooksRawUnanchored, turnContent] =
             yield* Effect.all([
                 fetchSessionOverview(read, bareId),
                 fetchSessionTopSkills(read, bareId),
@@ -424,6 +428,8 @@ export const exportSessionShare = (
                 fetchSessionShareHarnessHooks(read, bareId),
                 resolveTurnContent(read, bareId),
             ]);
+
+        const shareTurns = shareTurnsResult.turns;
 
         if (overview === null) return null;
 
@@ -486,6 +492,8 @@ export const exportSessionShare = (
             toolCalls: toolCallsRaw,
             tokenUsage,
             turns,
+            totalTurns: shareTurnsResult.totalTurns,
+            truncated: shareTurnsResult.truncated,
             timeline: timelineRaw,
             sessionTimeline,
             files: filesRaw,
