@@ -232,9 +232,12 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                         const known =
                             contentSha !== null &&
                             (stored === contentSha ||
-                                // Same bytes under a NEW path (#902): moved file,
-                                // resynced dir, or a `segment import` sentinel
+                                // Same bytes under a NEW path (#902): a
+                                // `segment import` sentinel (__imported__/...)
                                 // attesting the content was loaded already.
+                                // Since #955 only imported marks feed this set -
+                                // an ordinary moved/resynced file matches by its
+                                // own stored (path, sha) mark instead.
                                 (stored === null && wm.knownContentSha(contentSha)));
                         if (known) {
                             refreshedUnchanged += 1;
