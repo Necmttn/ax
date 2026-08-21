@@ -180,7 +180,7 @@ export const runSegmentExport = (
             source_files: sourceFiles,
             notes: {
                 cost_columns:
-                    "estimated_* cost columns were priced by the exporting machine's catalog; divergence accepted",
+                    "estimated_* cost columns do not ride (enrichment-stripped since #937/#966); the importer's re-derive prices them against the local catalog",
                 enrichment_stripped: true,
             },
         };
