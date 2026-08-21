@@ -202,4 +202,90 @@ describe("fetchSessionInspect graph-backed paging", () => {
             [1, "assistant", "done"],
         ]);
     });
+
+    dtest("returns tool calls for a requested turn after the first 4,000 calls", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-session-inspect-tools-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.put("session", { id: "session-tools", source: "codex" });
+                    yield* w.put("session_health", {
+                        id: "sh-tools",
+                        session: "session-tools",
+                        source: "codex",
+                        turns: 4001,
+                    });
+                    yield* w.put("turn", {
+                        id: "turn-4001",
+                        session: "session-tools",
+                        seq: 4001,
+                        role: "assistant",
+                        ts: new Date("2026-06-09T00:00:01.000Z"),
+                        text: "late tool call",
+                    });
+                    yield* w.putMany("tool_call", Array.from({ length: 4001 }, (_, index) => ({
+                        id: `call-${index + 1}`,
+                        session: "session-tools",
+                        turn: index === 4000 ? "turn-4001" : null,
+                        name: "Read",
+                        ts: new Date("2026-06-09T00:00:01.000Z"),
+                        seq: index + 1,
+                        input_json: JSON.stringify({ file_path: `/tmp/${index + 1}` }),
+                    })));
+                }),
+            ),
+        );
+
+        const payload = await Effect.runPromise(
+            fetchSessionInspect("session-tools", { turnOffset: 4000, turnLimit: 1 }).pipe(
+                Effect.provide(Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), BunFsLayer)),
+            ),
+        );
+
+        expect(payload.turns).toHaveLength(1);
+        expect(payload.turns[0]?.tool_calls?.map((call) => call.name)).toEqual(["Read"]);
+    });
+
+    dtest("reports full-session totals when the response contains one turn", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-session-inspect-totals-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.put("session", { id: "session-totals", source: "codex" });
+                    yield* w.put("session_health", {
+                        id: "sh-totals",
+                        session: "session-totals",
+                        source: "codex",
+                        turns: 2,
+                    });
+                    yield* w.putMany("turn", [
+                        {
+                            id: "totals-turn-1",
+                            session: "session-totals",
+                            seq: 1,
+                            role: "user",
+                            ts: new Date("2026-06-09T00:00:00.000Z"),
+                            text: "12345",
+                        },
+                        {
+                            id: "totals-turn-2",
+                            session: "session-totals",
+                            seq: 2,
+                            role: "assistant",
+                            ts: new Date("2026-06-09T00:00:01.000Z"),
+                            text: "67890",
+                        },
+                    ]);
+                }),
+            ),
+        );
+
+        const payload = await Effect.runPromise(
+            fetchSessionInspect("session-totals", { turnOffset: 0, turnLimit: 1 }).pipe(
+                Effect.provide(Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), BunFsLayer)),
+            ),
+        );
+
+        expect(payload.turns).toHaveLength(1);
+        expect(payload.total_chars).toBe(10);
+        expect(payload.totals_by_kind).toEqual({ user_input: 5, assistant_text: 5 });
+    });
 });
