@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
@@ -255,6 +255,29 @@ describe("maybeSpawnBackgroundIngest (freshness drive)", () => {
                 }).pipe(Effect.provide(layer)),
             );
             expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("reclaims a stale claim left by a dead process", async () => {
+        await withScratchDataDir(async (dir) => {
+            const claimPath = join(dir, "freshness-drive-claim");
+            writeFileSync(claimPath, "99999\n");
+            const old = new Date(Date.now() - 11 * 60 * 1000);
+            utimesSync(claimPath, old, old);
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("a fresh foreign claim still blocks the spawn", async () => {
+        await withScratchDataDir(async (dir) => {
+            writeFileSync(join(dir, "freshness-drive-claim"), "99999\n");
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(0);
         });
     });
 
