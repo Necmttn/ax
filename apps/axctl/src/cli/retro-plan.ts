@@ -29,7 +29,7 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { stableId } from "@ax/lib/stable-id";
 import { fail as sharedFail, parseCsvFlag } from "./commands/shared.ts";
-import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
+import { dedupeSig, migrateProposalDedupeSigs, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
     type InterventionSafetyContract,
     planRetroPlanRegistration,
@@ -214,6 +214,7 @@ export const cmdRetroPlan = (
         const built = buildRetroPlanKeys(parsed);
 
         const judgment = yield* Judgment;
+        yield* migrateProposalDedupeSigs(judgment);
         const hit = yield* findStoredProposal(built.sig);
         if (hit) {
             const existingId = `proposal:${hit.id}`;

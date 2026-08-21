@@ -36,7 +36,7 @@ import { Judgment, TextColumn, TimestampColumn, type JudgmentError, type Sidecar
 import { judgmentRow } from "../improve/judgment-proposals.ts";
 import { listStoredRetros } from "../queries/judgment-retros.ts";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { dedupeSig, normalizeTitle } from "./derive-proposals.ts";
+import { dedupeSig, migrateProposalDedupeSigs, normalizeTitle } from "./derive-proposals.ts";
 
 export interface DeriveRetroProposalsStats {
     readonly toolFailureProposals: number;
@@ -627,6 +627,7 @@ export const deriveRetroProposals = (
 ): Effect.Effect<DeriveRetroProposalsStats, CacheReadError | JudgmentError, Judgment> =>
     Effect.gen(function* () {
         const judgment = yield* Judgment;
+        yield* migrateProposalDedupeSigs(judgment);
         const sinceDays = opts.sinceDays ?? 30;
         const minSessions = opts.minSessions ?? 2;
         const minRetros = opts.minRetros ?? 2;

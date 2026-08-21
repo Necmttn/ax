@@ -1,4 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect, Schema } from "effect";
+import { Judgment, JudgmentLayer } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import {
     buildCacheLensProposalWrites,
     buildGuidanceProposalWrites,
@@ -19,6 +26,7 @@ import {
     IMAGE_CONTEXT_THRESHOLD_MB,
     normalizeTitle,
     parseMetrics,
+    migrateProposalDedupeSigs,
     skillProposalFrequency,
 } from "./derive-proposals.ts";
 import type { HarnessLearningCandidate } from "../project/types.ts";
@@ -37,6 +45,7 @@ describe("derive-proposals helpers", () => {
         expect(a).toBe(b);
         expect(a).not.toBe(c);
         expect(a.startsWith("skill__")).toBe(true);
+        expect(a).toBe("skill__0efefbef285843e6");
     });
 
     test("parseMetrics tolerates string, object, null, undefined", () => {
@@ -52,6 +61,119 @@ describe("derive-proposals helpers", () => {
         expect(skillProposalFrequency({ fix_chain_count: 9 })).toBe(9);
         expect(skillProposalFrequency({ risky_session_count: 1072 })).toBe(0);
         expect(skillProposalFrequency({})).toBe(0);
+    });
+});
+
+describe("proposal dedupe signature migration", () => {
+    const dirs: string[] = [];
+
+    afterEach(() => {
+        for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+
+    test("re-keys old signatures without losing decisions or sidecar links", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-proposal-dedupe-"));
+        dirs.push(dir);
+        const sidecarPath = join(dir, "judgment.sqlite");
+
+        const rows = await Effect.runPromise(Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            const skillTitle = "Schema  Change Guardrail";
+            const guidanceTitle = "Keep decisions durable";
+            const oldSkillSig = `skill__${Bun.hash(`skill:${normalizeTitle(skillTitle)}`).toString(16).slice(0, 16)}`;
+            const oldGuidanceSig = `guidance__${Bun.hash(`guidance:${normalizeTitle(guidanceTitle)}`).toString(16).slice(0, 16)}`;
+            const oldSkillId = `skill__schema_change_guardrail__${oldSkillSig.slice(-12)}`;
+            const oldGuidanceId = stableId("proposal", [oldGuidanceSig]);
+            yield* judgment.put("proposal", {
+                id: oldSkillId,
+                form: "skill",
+                title: skillTitle,
+                hypothesis: "test",
+                dedupe_sig: oldSkillSig,
+                confidence: "high",
+                status: "rejected",
+                reject_reason: "user decision",
+            });
+            yield* judgment.put("skill_proposal", {
+                id: oldSkillId,
+                proposal: oldSkillId,
+                trigger_pattern: "schema edit",
+                suspected_gap: "no guard",
+                proposed_behavior: "add guard",
+            });
+            yield* judgment.put("proposal", {
+                id: oldGuidanceId,
+                form: "guidance",
+                title: guidanceTitle,
+                hypothesis: "test",
+                dedupe_sig: oldGuidanceSig,
+                confidence: "medium",
+                status: "accepted",
+                origin: "agent",
+                baseline: JSON.stringify({ origin: "agent" }),
+            });
+            yield* judgment.put("guidance_proposal", {
+                id: stableId("guidance_proposal", [oldGuidanceId]),
+                proposal: oldGuidanceId,
+                file_target: "CLAUDE.md",
+                suggested_text: "Keep decisions durable.",
+            });
+            yield* judgment.put("experiment", {
+                id: "experiment-old",
+                proposal: oldGuidanceId,
+                status: "task_emitted",
+            });
+
+            yield* migrateProposalDedupeSigs(judgment);
+            yield* migrateProposalDedupeSigs(judgment);
+
+            return yield* judgment.rows(Schema.Struct({
+                id: Schema.String,
+                dedupe_sig: Schema.String,
+                status: Schema.String,
+                reject_reason: Schema.NullOr(Schema.String),
+                payload_id: Schema.NullOr(Schema.String),
+                payload_proposal: Schema.NullOr(Schema.String),
+                experiment_proposal: Schema.NullOr(Schema.String),
+            }), `
+SELECT p.id, p.dedupe_sig, p.status, p.reject_reason,
+       COALESCE(sp.id, gp.id) AS payload_id,
+       COALESCE(sp.proposal, gp.proposal) AS payload_proposal,
+       e.proposal AS experiment_proposal
+FROM proposal p
+LEFT JOIN skill_proposal sp ON sp.proposal = p.id
+LEFT JOIN guidance_proposal gp ON gp.proposal = p.id
+LEFT JOIN experiment e ON e.proposal = p.id
+ORDER BY p.id`);
+        }).pipe(
+            Effect.scoped,
+            Effect.provide(JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL })),
+        ));
+
+        const newSkillSig = dedupeSig("skill", normalizeTitle("Schema  Change Guardrail"));
+        const newGuidanceSig = dedupeSig("guidance", normalizeTitle("Keep decisions durable"));
+        const newSkillId = `skill__schema_change_guardrail__${newSkillSig.slice(-12)}`;
+        const newGuidanceId = stableId("proposal", [newGuidanceSig]);
+        expect(rows).toEqual([
+            {
+                id: newGuidanceId,
+                dedupe_sig: newGuidanceSig,
+                status: "accepted",
+                reject_reason: null,
+                payload_id: stableId("guidance_proposal", [newGuidanceId]),
+                payload_proposal: newGuidanceId,
+                experiment_proposal: newGuidanceId,
+            },
+            {
+                id: newSkillId,
+                dedupe_sig: newSkillSig,
+                status: "rejected",
+                reject_reason: "user decision",
+                payload_id: newSkillId,
+                payload_proposal: newSkillId,
+                experiment_proposal: null,
+            },
+        ].sort((a, b) => a.id.localeCompare(b.id)));
     });
 });
 
