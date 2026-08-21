@@ -237,9 +237,26 @@ export const fetchLocSummary = (
             eqClause("s.repository", selector.repositoryKey),
             selector.since ? sinceClause("s.started_at", selector.since) : NO_CLAUSE,
         ]);
+        const matchedProjectClause: Clause = selector.project
+            ? { sql: "AND (matched_session.project = ? OR matched_session.cwd = ?)", params: [selector.project, selector.project] }
+            : NO_CLAUSE;
+        const matchedScope = andAll([
+            matchedProjectClause,
+            eqClause("matched_session.repository", selector.repositoryKey),
+            selector.since ? sinceClause("matched_session.started_at", selector.since) : NO_CLAUSE,
+        ]);
         const textFilter: Clause =
             terms.length === 0
-                ? NO_CLAUSE
+                ? {
+                      sql: `AND tc.session IN (
+                          SELECT matched_session.id
+                          FROM session matched_session
+                          WHERE TRUE ${matchedScope.sql}
+                          ORDER BY matched_session.started_at DESC
+                          LIMIT ?
+                      )`,
+                      params: [...matchedScope.params, limit],
+                  }
                 : {
                       sql: `AND tc.session IN (
                           SELECT session_id FROM (
@@ -248,13 +265,14 @@ export const fetchLocSummary = (
                                          ${matchBm25Sql(TURN_FTS, "t")} AS score
                                   FROM turn t
                                   JOIN session matched_session ON matched_session.id = t.session
+                                  WHERE TRUE ${matchedScope.sql}
                               ) matches
                               WHERE score IS NOT NULL
                               ORDER BY started_at DESC
                               LIMIT ?
                           ) recent_matches
                       )`,
-                      params: [terms.join(" "), limit],
+                      params: [terms.join(" "), ...matchedScope.params, limit],
                   };
         const rows = yield* fetchEditRows({
             sql: `${where.sql} ${textFilter.sql}`,

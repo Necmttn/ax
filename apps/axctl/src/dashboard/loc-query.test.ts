@@ -189,6 +189,35 @@ describe("fetchLocSummary", () => {
         expect(summary.sessions.map((row) => row.session)).toEqual(["new"]);
     });
 
+    dtest("query scope is applied before the matching session limit (#993)", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-loc-query-scope-limit-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [
+                        { id: "target", source: "codex", project: "/w/ax", started_at: new Date("2026-08-01T00:00:00Z") },
+                        { id: "other", source: "codex", project: "/w/other", started_at: new Date("2026-08-02T00:00:00Z") },
+                    ]);
+                    yield* w.putMany("turn", [
+                        { id: "target-turn", session: "target", seq: 1, ts: new Date("2026-08-01T00:00:00Z"), role: "user", text: "needle", text_excerpt: "needle" },
+                        { id: "other-turn", session: "other", seq: 1, ts: new Date("2026-08-02T00:00:00Z"), role: "user", text: "needle", text_excerpt: "needle" },
+                    ]);
+                    yield* w.putMany("tool_call", [
+                        { id: "target-edit", session: "target", ts: new Date("2026-08-01T00:01:00Z"), name: "Write", input_json: '{"content":"target"}' },
+                        { id: "other-edit", session: "other", ts: new Date("2026-08-02T00:01:00Z"), name: "Write", input_json: '{"content":"other"}' },
+                    ]);
+                }),
+            ),
+        );
+
+        const summary = await readThroughFixture(
+            fixture,
+            dylibPath,
+            fetchLocSummary({ kind: "query", terms: ["needle"], limit: 1, project: "/w/ax" }),
+        );
+
+        expect(summary.sessions.map((row) => row.session)).toEqual(["target"]);
+    });
+
     dtest("session selector fetches edit rows for one session directly", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-loc-query-session-"), dylibPath, baseFixture));
 
@@ -207,6 +236,14 @@ describe("fetchLocSummary", () => {
         expect(summary.totals.sessions).toBe(2);
         expect(summary.totals.edits).toBe(3);
         expect(summary.evidence).toBe("edits across selected sessions");
+    });
+
+    dtest("empty-term query selects only the newest limited sessions (#983)", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-loc-query-noterm-limit-"), dylibPath, baseFixture));
+
+        const summary = await readThroughFixture(fixture, dylibPath, fetchLocSummary({ kind: "query", terms: [], limit: 1 }));
+
+        expect(summary.sessions.map((row) => row.session)).toEqual(["s1"]);
     });
 
     dtest("empty database yields zeroed totals", async () => {

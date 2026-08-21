@@ -160,12 +160,18 @@ describe("dashboard live routes", () => {
         expect(formatSseComment("ping").startsWith(":")).toBe(true);
     });
 
-    test("recentIngestEventsSql reads persisted ingest events off a bound cutoff param", () => {
+    test("recentIngestEventsSql reads persisted ingest events off bound cursor params", () => {
         const sql = recentIngestEventsSql(12);
         expect(sql).toContain("FROM ingest_event");
-        expect(sql).toContain("WHERE ts > ?");
-        expect(sql).toContain("ORDER BY ts ASC");
+        expect(sql).toContain("WHERE (ts, id) > (?, ?)");
+        expect(sql).toContain("ORDER BY ts ASC, id ASC");
         expect(sql).toContain("LIMIT 12");
+    });
+
+    test("recentIngestEventsSql pages with a stable timestamp and id cursor (#980)", () => {
+        const sql = recentIngestEventsSql(12);
+        expect(sql).toContain("WHERE (ts, id) > (?, ?)");
+        expect(sql).toContain("ORDER BY ts ASC, id ASC");
     });
 
     test("POST /api/events matches the raw SSE route", () => {

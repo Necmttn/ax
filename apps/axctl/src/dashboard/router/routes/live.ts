@@ -107,17 +107,16 @@ export function formatSseComment(text: string): string {
 }
 
 /**
- * `?`-parameterized: the caller binds the cutoff as a `Date` param, not a
- * string-interpolated literal - `ingest_event.ts` is a DuckDB TIMESTAMP
- * column.
+ * `?`-parameterized: the caller binds the timestamp and id cursor. The
+ * timestamp is a `Date` param because `ingest_event.ts` is a DuckDB TIMESTAMP.
  */
 export function recentIngestEventsSql(limit = 50): string {
     const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;
     return `
 SELECT id, run, source, stage, level, message, counts, raw, ts
 FROM ingest_event
-WHERE ts > ?
-ORDER BY ts ASC
+WHERE (ts, id) > (?, ?)
+ORDER BY ts ASC, id ASC
 LIMIT ${safeLimit};`.trim();
 }
 
@@ -162,7 +161,8 @@ export async function handleImageRequest(
 /**
  * GET /api/events - the studio Live SSE stream. Emits `ready` once, then for
  * each tick: a `: ping` keep-alive (issue #503) plus any new `ingest_event`
- * rows since the last seen timestamp. `intervalMs` is injectable for tests.
+ * rows since the last seen timestamp and id. `intervalMs` is injectable for
+ * tests.
  */
 export function handleEventsRequest(runner: EffectRunner, intervalMs = 2000): Response {
     let subscriber: ((event: unknown) => void) | null = null;
@@ -173,6 +173,7 @@ export function handleEventsRequest(runner: EffectRunner, intervalMs = 2000): Re
     // concurrent queries against the same `sinceIso` and replay rows.
     let polling = false;
     let sinceIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    let sinceId = "";
 
     const teardown = (): void => {
         if (closed) return;
@@ -218,17 +219,20 @@ export function handleEventsRequest(runner: EffectRunner, intervalMs = 2000): Re
                     try {
                         const result = await runner(Effect.gen(function* () {
                             const read = yield* CacheRead;
-                            return yield* read.raw(recentIngestEventsSql(50), [new Date(sinceIso)]);
+                            return yield* read.raw(recentIngestEventsSql(50), [new Date(sinceIso), sinceId]);
                         }));
                         for (const row of result?.rows ?? []) {
                             if (!safeEnqueue(formatSseEvent("ingest_event", row))) return;
                             const ts = row.ts;
-                            if (typeof ts === "string" || ts instanceof Date) {
-                                // Advance the cursor forward only; ISO-8601 UTC
-                                // strings compare chronologically, so a late
-                                // poll can never rewind it.
+                            const id = row.id;
+                            if ((typeof ts === "string" || ts instanceof Date) && typeof id === "string") {
+                                // Advance the tuple cursor only. ISO-8601 UTC
+                                // strings and event ids have stable ordering.
                                 const next = new Date(ts).toISOString();
-                                if (next > sinceIso) sinceIso = next;
+                                if (next > sinceIso || (next === sinceIso && id > sinceId)) {
+                                    sinceIso = next;
+                                    sinceId = id;
+                                }
                             }
                         }
                     } catch (error) {
