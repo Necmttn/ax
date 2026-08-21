@@ -19,7 +19,7 @@
 import { copyFileSync, constants } from "node:fs";
 import { Effect, FileSystem, Option } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { orAbsent } from "../shared/fs-error.ts";
+import { skipNotFound } from "../shared/fs-error.ts";
 
 /** Outcome of one `cloneFile` attempt. Never throws/fails - a failed clone
  *  (non-APFS filesystem, cross-device `EXDEV`, unsupported `ENOTSUP`, or any
@@ -91,11 +91,12 @@ export const statSnapshot = (
  * the base file alone would silently miss it, so this must hold before the
  * clone is trusted. Never fails: a stat error (including the WAL vanishing
  * between the exists-check and the stat, a benign race with DuckDB's own WAL
- * lifecycle) is treated as "absent" -> quiescent, matching how the rest of
- * this codebase treats an optional-file probe (`orAbsent`).
+ * lifecycle) is treated as "absent" -> quiescent. Every other stat error is
+ * unsafe, so it returns false and makes publish use the logical copy path.
  */
 export const walIsQuiescent = (fs: FileSystem.FileSystem, livePath: string): Effect.Effect<boolean> =>
     fs.stat(`${livePath}.wal`).pipe(
         Effect.map((info) => Number(info.size) === 0),
-        orAbsent(true),
+        skipNotFound(true),
+        Effect.orElseSucceed(() => false),
     );

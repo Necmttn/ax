@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem } from "@effect/platform-bun";
 import { Effect, FileSystem } from "effect";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cloneFile, statsEqual, walIsQuiescent, type FileStatSnapshot } from "./clone-file.ts";
@@ -144,6 +144,18 @@ describe("walIsQuiescent (post-checkpoint WAL tripwire)", () => {
             const live = join(dir, "live.duckdb");
             writeFileSync(live, "stem");
             writeFileSync(`${live}.wal`, "uncommitted-wal-bytes");
+
+            const quiescent = await runWithFs((fs) => walIsQuiescent(fs, live));
+
+            expect(quiescent).toBe(false);
+        });
+    });
+
+    test("NOT quiescent when WAL stat fails for a reason other than NotFound (#950)", async () => {
+        await withTempDir(async (dir) => {
+            const live = join(dir, "live.duckdb");
+            writeFileSync(live, "stem");
+            symlinkSync(`${live}.wal`, `${live}.wal`);
 
             const quiescent = await runWithFs((fs) => walIsQuiescent(fs, live));
 
