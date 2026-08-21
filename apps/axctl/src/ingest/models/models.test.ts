@@ -7,9 +7,10 @@
  * pinned to its source of truth so the two cannot drift silently.
  */
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { parseDuckdbTables } from "@ax/schema/duckdb-ddl";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
-import { parseModelHeader } from "./runner.ts";
+import { parseModelHeader, runSqlModel } from "./runner.ts";
 import {
     RUN_EVIDENCE_EVENT_MODEL,
     RUN_EVIDENCE_MODELS,
@@ -59,6 +60,54 @@ describe("model header contract", () => {
                 expect(before).toContain("CAST(");
             }
         }
+    });
+});
+
+describe("SQL model runner", () => {
+    test("each concurrent model observes the since_days value that its caller set", async () => {
+        let markSecondSet!: () => void;
+        let markFirstSet!: () => void;
+        const firstSet = new Promise<void>((resolve) => {
+            markFirstSet = resolve;
+        });
+        const secondSet = new Promise<void>((resolve) => {
+            markSecondSet = resolve;
+        });
+        let sinceDays = "unset";
+        const observed = new Map<string, string>();
+
+        const write = {
+            exec: (sql: string) =>
+                Effect.promise(async () => {
+                    if (sql === "SET VARIABLE since_days = NULL") {
+                        sinceDays = "NULL";
+                        markFirstSet();
+                        await Promise.race([secondSet, Bun.sleep(20)]);
+                        return 0;
+                    }
+                    if (sql === "SET VARIABLE since_days = 1") {
+                        await firstSet;
+                        sinceDays = "1";
+                        markSecondSet();
+                        return 0;
+                    }
+                    observed.set(sql, sinceDays);
+                    return 0;
+                }),
+        };
+
+        await Effect.runPromise(
+            Effect.all(
+                [
+                    runSqlModel(write as never, { name: "rebuild", sql: "REBUILD_MODEL" }, undefined),
+                    runSqlModel(write as never, { name: "windowed", sql: "WINDOWED_MODEL" }, 1),
+                ],
+                { concurrency: "unbounded" },
+            ),
+        );
+
+        expect(observed.get("REBUILD_MODEL")).toBe("NULL");
+        expect(observed.get("WINDOWED_MODEL")).toBe("1");
     });
 });
 

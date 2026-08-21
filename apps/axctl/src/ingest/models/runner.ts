@@ -21,7 +21,7 @@
  * v1 runs an explicit ordered list per stage; the `inputs` header seeds a
  * future topological runner once there is more than one dependency chain.
  */
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 
 export interface SqlModel {
@@ -36,6 +36,18 @@ export interface ParsedModelHeader {
     readonly inputs: readonly string[];
     readonly rebuild: "incremental" | "full_rebuild";
 }
+
+/** One gate per shared write connection keeps the session variable and its
+ * model statement in one critical section. */
+const modelGates = new WeakMap<CacheWriteService, Semaphore.Semaphore>();
+
+const modelGate = (write: CacheWriteService): Semaphore.Semaphore => {
+    const existing = modelGates.get(write);
+    if (existing !== undefined) return existing;
+    const gate = Semaphore.makeUnsafe(1);
+    modelGates.set(write, gate);
+    return gate;
+};
 
 /** Parse the header contract. Throws on a malformed file - a model that does
  *  not declare its shape must not run. */
@@ -65,14 +77,16 @@ export const runSqlModel = (
     model: SqlModel,
     sinceDays: number | undefined,
 ): Effect.Effect<number, CacheWriteError> =>
-    Effect.gen(function* () {
-        // The variable is session-scoped on the shared write connection, so it
-        // is ALWAYS set (NULL included) - a stale value from a previous stage
-        // must never leak into this run's window.
-        const since =
-            sinceDays !== undefined && Number.isFinite(sinceDays) && sinceDays > 0
-                ? String(Math.trunc(sinceDays))
-                : "NULL";
-        yield* write.exec(`SET VARIABLE since_days = ${since}`);
-        return yield* write.exec(model.sql);
-    });
+    modelGate(write).withPermits(1)(
+        Effect.gen(function* () {
+            // The variable is session-scoped on the shared write connection, so it
+            // is ALWAYS set (NULL included) - a stale value from a previous stage
+            // must never leak into this run's window.
+            const since =
+                sinceDays !== undefined && Number.isFinite(sinceDays) && sinceDays > 0
+                    ? String(Math.trunc(sinceDays))
+                    : "NULL";
+            yield* write.exec(`SET VARIABLE since_days = ${since}`);
+            return yield* write.exec(model.sql);
+        }),
+    );

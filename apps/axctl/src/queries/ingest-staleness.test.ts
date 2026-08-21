@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -268,6 +268,102 @@ describe("maybeSpawnBackgroundIngest (freshness drive)", () => {
             const calls: number[] = [];
             await runDrive(db, calls);
             expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("two-process stale-claim interleave does not remove a replacement claim", async () => {
+        await withScratchDataDir(async (dir) => {
+            const claimPath = join(dir, "freshness-drive-claim");
+            writeFileSync(claimPath, "stale-owner\n");
+            const old = new Date(Date.now() - 11 * 60 * 1000);
+            utimesSync(claimPath, old, old);
+
+            let statCount = 0;
+            let readCount = 0;
+            let removeCount = 0;
+            let replacementCreatedResolve!: () => void;
+            let bothStatsResolve!: () => void;
+            let secondSpawnResolve!: () => void;
+            const replacementCreated = new Promise<void>((resolve) => {
+                replacementCreatedResolve = resolve;
+            });
+            const bothStats = new Promise<void>((resolve) => {
+                bothStatsResolve = resolve;
+            });
+            const secondSpawn = new Promise<void>((resolve) => {
+                secondSpawnResolve = resolve;
+            });
+
+            const interleavingFs = Layer.effect(
+                FileSystem.FileSystem,
+                Effect.gen(function* () {
+                    const fs = yield* FileSystem.FileSystem;
+                    return {
+                        ...fs,
+                        readFileString: (path: string, encoding?: string) => {
+                            if (path !== claimPath) return fs.readFileString(path, encoding);
+                            readCount += 1;
+                            if (readCount !== 4) return fs.readFileString(path, encoding);
+                            return Effect.promise(() => replacementCreated).pipe(
+                                Effect.andThen(fs.readFileString(path, encoding)),
+                            );
+                        },
+                        stat: (path: string) => {
+                            if (path !== claimPath) return fs.stat(path);
+                            return Effect.gen(function* () {
+                                const info = yield* fs.stat(path);
+                                statCount += 1;
+                                if (statCount === 2) bothStatsResolve();
+                                yield* Effect.promise(() => bothStats);
+                                return info;
+                            });
+                        },
+                        remove: (
+                            path: string,
+                            options?: Parameters<FileSystem.FileSystem["remove"]>[1],
+                        ) => {
+                            if (path !== claimPath) return fs.remove(path, options);
+                            removeCount += 1;
+                            if (removeCount !== 2) return fs.remove(path, options);
+                            return Effect.promise(() => replacementCreated).pipe(
+                                Effect.andThen(fs.remove(path, options)),
+                            );
+                        },
+                        writeFileString: (
+                            path: string,
+                            data: string,
+                            options?: Parameters<FileSystem.FileSystem["writeFileString"]>[2],
+                        ) =>
+                            fs.writeFileString(path, data, options).pipe(
+                                Effect.tap(() =>
+                                    path === claimPath && options?.flag === "wx"
+                                        ? Effect.sync(replacementCreatedResolve)
+                                        : Effect.void,
+                                ),
+                            ),
+                    };
+                }),
+            ).pipe(Layer.provide(BunFileSystem.layer));
+
+            let spawnCount = 0;
+            const spawner = Layer.succeed(BackgroundIngestSpawner, {
+                spawn: () =>
+                    Effect.promise(async () => {
+                        spawnCount += 1;
+                        if (spawnCount === 2) secondSpawnResolve();
+                        else await Promise.race([secondSpawn, Bun.sleep(20)]);
+                    }),
+            });
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const layer = Layer.mergeAll(db, spawner, interleavingFs, BunPath.layer);
+
+            await Effect.runPromise(
+                Effect.all([maybeSpawnBackgroundIngest, maybeSpawnBackgroundIngest], {
+                    concurrency: "unbounded",
+                }).pipe(Effect.provide(layer)),
+            );
+
+            expect(spawnCount).toBe(1);
         });
     });
 
