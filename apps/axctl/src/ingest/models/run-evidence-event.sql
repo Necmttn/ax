@@ -52,6 +52,12 @@ lineage AS (
     SELECT child, any_value(parent) AS parent, arg_max(root, depth) AS root
     FROM walk GROUP BY child
 ),
+affected_objective_sessions AS (
+    SELECT DISTINCT t.session
+    FROM turn t, params p
+    WHERE t.session IS NOT NULL AND t.role = 'user' AND t.message_kind = 'task'
+      AND (p.cutoff IS NULL OR t.ts > p.cutoff)
+),
 src AS (
     -- tool_call -> tool_observation (tool_backed). The NULL link columns are
     -- CAST here because UNION type inference reads the FIRST branch: a bare
@@ -127,7 +133,8 @@ src AS (
     WHERE ps.session IS NOT NULL AND (p.cutoff IS NULL OR ps.ts > p.cutoff)
 
     UNION ALL
-    -- earliest `task` user turn per session -> objective (selection, not NLP).
+    -- Earliest `task` user turn per affected session -> objective. Rank ALL
+    -- task turns in each session, including turns before the active window.
     SELECT t.session, t.ts, 'objective', 'derived',
            t.id, NULL, NULL, NULL,
            NULL, NULL, NULL,
@@ -137,9 +144,9 @@ src AS (
         SELECT *, row_number() OVER (
             PARTITION BY session ORDER BY seq NULLS LAST, ts, id
         ) AS rn
-        FROM turn, params p
-        WHERE session IS NOT NULL AND role = 'user' AND message_kind = 'task'
-          AND (p.cutoff IS NULL OR ts > p.cutoff)
+        FROM turn
+        WHERE session IN (SELECT session FROM affected_objective_sessions)
+          AND role = 'user' AND message_kind = 'task'
     ) t
     WHERE t.rn = 1
 

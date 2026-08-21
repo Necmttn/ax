@@ -26,17 +26,28 @@ import { stableDigest } from "@ax/lib/ids";
 import { checkFamilyFromCommand } from "../check-family.ts";
 import { parseModelHeader, runSqlModel, type SqlModel } from "./runner.ts";
 import RUN_EVIDENCE_EVENT_SQL from "./run-evidence-event.sql" with { type: "text" };
+import RUN_EVIDENCE_OBJECTIVE_CLEANUP_SQL from "./run-evidence-objective-cleanup.sql" with { type: "text" };
 import RUN_EVIDENCE_REF_SQL from "./run-evidence-ref.sql" with { type: "text" };
 
+export const RUN_EVIDENCE_OBJECTIVE_CLEANUP_MODEL: SqlModel = {
+    name: "run_evidence_event",
+    sql: RUN_EVIDENCE_OBJECTIVE_CLEANUP_SQL,
+};
 export const RUN_EVIDENCE_EVENT_MODEL: SqlModel = { name: "run_evidence_event", sql: RUN_EVIDENCE_EVENT_SQL };
 export const RUN_EVIDENCE_REF_MODEL: SqlModel = { name: "run_evidence_ref", sql: RUN_EVIDENCE_REF_SQL };
 
-/** Ordered: refs recompute event ids, so events land first. */
-export const RUN_EVIDENCE_MODELS: readonly SqlModel[] = [RUN_EVIDENCE_EVENT_MODEL, RUN_EVIDENCE_REF_MODEL];
+/** Ordered: clear affected objectives, replace events, then recompute refs. */
+export const RUN_EVIDENCE_MODELS: readonly SqlModel[] = [
+    RUN_EVIDENCE_OBJECTIVE_CLEANUP_MODEL,
+    RUN_EVIDENCE_EVENT_MODEL,
+    RUN_EVIDENCE_REF_MODEL,
+];
 
 /** Changes whenever either model's SQL changes -> one full re-derive. */
 export const runEvidenceModelVersion = (): string =>
-    stableDigest(`run-evidence-models-v1${RUN_EVIDENCE_EVENT_SQL}${RUN_EVIDENCE_REF_SQL}`);
+    stableDigest(
+        `run-evidence-models-v1${RUN_EVIDENCE_OBJECTIVE_CLEANUP_SQL}${RUN_EVIDENCE_EVENT_SQL}${RUN_EVIDENCE_REF_SQL}`,
+    );
 
 const MARKER_SOURCE_KIND = "run_evidence_model";
 const MARKER_PATH = "__run_evidence_model__";
@@ -118,6 +129,7 @@ export const runRunEvidenceModels = (
             yield* write.exec("DELETE FROM run_evidence_event");
         }
         const window = rebuild ? undefined : sinceDays;
+        yield* runSqlModel(write, RUN_EVIDENCE_OBJECTIVE_CLEANUP_MODEL, window);
         const written = yield* runSqlModel(write, RUN_EVIDENCE_EVENT_MODEL, window);
         const refsWritten = yield* runSqlModel(write, RUN_EVIDENCE_REF_MODEL, window);
         if (rebuild) {
