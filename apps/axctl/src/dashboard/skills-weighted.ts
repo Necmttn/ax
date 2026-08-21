@@ -291,21 +291,21 @@ export const fetchSkillsWeighted = (
             "skills-weighted.recovery_edges",
         );
 
-        // Build Map<skillId, sessionId[]>
-        const skillToSessions = new Map<string, string[]>();
+        // Build Map<skillId, unique session ids>
+        const skillToSessions = new Map<string, Set<string>>();
         for (const r of recoveryEdges) {
             if (!r.skill || !r.session) continue;
-            const list = skillToSessions.get(r.skill);
-            if (list) {
-                list.push(r.session);
+            const sessions = skillToSessions.get(r.skill);
+            if (sessions) {
+                sessions.add(r.session);
             } else {
-                skillToSessions.set(r.skill, [r.session]);
+                skillToSessions.set(r.skill, new Set([r.session]));
             }
         }
 
         // Collect unique session ids across all recovery skills
         const allRecoverySessions = [...new Set(
-            [...skillToSessions.values()].flat(),
+            [...skillToSessions.values()].flatMap((sessions) => [...sessions]),
         )];
 
         const latencyRows = yield* enrichRowsWithTelemetryLatency(

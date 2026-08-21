@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { Effect } from "effect";
+import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import {
     FLOWING_MS,
     STALE_MS,
@@ -6,6 +9,7 @@ import {
     buildOtelSessionIdsQuery,
     coveragePct,
     formatAge,
+    fetchOtelRollup,
     healthGlyph,
     otelHealth,
 } from "./otel-rollup.ts";
@@ -13,6 +17,7 @@ import { renderOtelRollup } from "../cli/commands/ax-otel.ts";
 import type { OtelRollupResult } from "./otel-rollup.ts";
 
 const NOW = Date.UTC(2026, 5, 25, 0, 0, 0); // 2026-06-25T00:00:00Z
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("otel-rollup", { requireFts: true });
 
 describe("otelHealth", () => {
     it("is none when never observed", () => {
@@ -91,6 +96,26 @@ describe("buildOtelSessionIdsQuery", () => {
             + " WHERE observed_at > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"
             + " AND session_id IS NOT NULL GROUP BY session_id;",
         );
+    });
+});
+
+describe("fetchOtelRollup", () => {
+    dtest("excludes subagent sessions from the coverage window", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-otel-rollup-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [{
+                        id: "019fbf3f-9241-40c3-b699-e1f62e7c5341",
+                        source: "codex-subagent",
+                        started_at: new Date(),
+                    }]);
+                }),
+            ),
+        );
+
+        const result = await readThroughFixture(fixture, dylibPath, fetchOtelRollup({ sinceDays: 14 }));
+
+        expect(result.coverage.window_sessions).toBe(0);
     });
 });
 
