@@ -67,7 +67,7 @@ export const fetchWindowMetrics = (
         const cost = yield* cacheFirst(
             CostRow,
             {
-                sql: "SELECT sum(estimated_cost_usd) AS c FROM session_token_usage WHERE ts > ? AND ts <= ?",
+                sql: "SELECT sum(estimated_cost_usd) AS c FROM turn_token_usage WHERE ts > ? AND ts <= ?",
                 params: window,
             },
             "routing impact cost",
