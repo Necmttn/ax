@@ -2,7 +2,7 @@ import { Cause, Effect, Schema } from "effect";
 import { cacheRow } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
-import { dirname, join } from "node:path";
+import { posixPath } from "@ax/lib/shared/path";
 import { BaseStageStats, type IngestContext, StageMeta } from "../ingest/stage/types.ts";
 import type { StageDef } from "../ingest/stage/registry.ts";
 import { runJsonlProviderFiles } from "../ingest/jsonl-work-unit.ts";
@@ -17,12 +17,12 @@ export const defaultAdviceLogPath = (): string => `${process.env.HOME}/.ax/hooks
 const adviceLogCandidates = (): Effect.Effect<JsonlFileCandidate[]> =>
   Effect.promise(async () => {
     const live = defaultAdviceLogPath();
-    const dir = dirname(live);
+    const dir = posixPath.dirname(live);
     const glob = new Bun.Glob("advise-log*.jsonl");
     const candidates: JsonlFileCandidate[] = [];
     try {
       for await (const name of glob.scan({ cwd: dir, onlyFiles: true })) {
-        const path = join(dir, name);
+        const path = posixPath.join(dir, name);
         try {
           const stat = await Bun.file(path).stat();
           candidates.push({ path, mtimeMs: stat.mtimeMs, sizeBytes: stat.size });
