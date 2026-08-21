@@ -288,4 +288,63 @@ describe("fetchSessionInspect graph-backed paging", () => {
         expect(payload.total_chars).toBe(10);
         expect(payload.totals_by_kind).toEqual({ user_input: 5, assistant_text: 5 });
     });
+
+    dtest("does not tag a later user turn as the subagent task", async () => {
+        const task = "A".repeat(100);
+        const laterUserInput = "B".repeat(120);
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-session-inspect-subagent-page-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.put("session", { id: "child", source: "codex-subagent" });
+                    yield* w.put("session_health", {
+                        id: "child-health",
+                        session: "child",
+                        source: "codex-subagent",
+                        turns: 3,
+                    });
+                    yield* w.put("spawned", {
+                        id: "parent-child",
+                        in_id: "parent",
+                        out_id: "child",
+                    });
+                    yield* w.putMany("turn", [
+                        {
+                            id: "task",
+                            session: "child",
+                            seq: 1,
+                            role: "user",
+                            text: task,
+                            ts: new Date("2026-08-21T00:00:00Z"),
+                        },
+                        {
+                            id: "answer",
+                            session: "child",
+                            seq: 2,
+                            role: "assistant",
+                            text: "ok",
+                            ts: new Date("2026-08-21T00:00:01Z"),
+                        },
+                        {
+                            id: "follow-up",
+                            session: "child",
+                            seq: 3,
+                            role: "user",
+                            text: laterUserInput,
+                            ts: new Date("2026-08-21T00:00:02Z"),
+                        },
+                    ]);
+                }),
+            ),
+        );
+
+        const payload = await Effect.runPromise(
+            fetchSessionInspect("child", { turnOffset: 2, turnLimit: 1 }).pipe(
+                Effect.provide(Layer.mergeAll(readFixture(fixture.snapshotPath, dylibPath), BunFsLayer)),
+            ),
+        );
+
+        expect(payload.turns[0]?.semantic_role).toBe("user_input");
+        expect(payload.totals_by_kind.subagent_task).toBe(task.length);
+        expect(payload.totals_by_kind.user_input).toBe(laterUserInput.length);
+    });
 });
