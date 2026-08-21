@@ -408,6 +408,16 @@ const GraphSessionHealthDbRow = Schema.Struct({
 interface GraphSessionHealthRow {
     readonly turns?: number | null;
 }
+const GraphSessionTotalsDbRow = Schema.Struct({
+    total_chars: Schema.Number,
+    user_input: Schema.Number,
+    assistant_text: Schema.Number,
+});
+interface GraphSessionTotalsRow {
+    readonly total_chars: number;
+    readonly user_input: number;
+    readonly assistant_text: number;
+}
 
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
  *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
@@ -703,13 +713,18 @@ const GraphTurnToolCallDbRow = Schema.Struct({
  *  just without their tool cards (never crashes the inspector). */
 const resolveGraphTurnToolCalls = (
     sessionId: string,
-): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, CacheRead> =>
-    cacheRows(
+    turnOffset: number,
+    turnLimit: number,
+): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, CacheRead> => {
+    if (turnLimit <= 0) return Effect.succeed(new Map<number, ToolCallDto[]>());
+    const minSeq = turnOffset + 1;
+    const maxSeq = turnOffset + turnLimit;
+    return cacheRows(
         GraphTurnToolCallDbRow,
         {
             sql: `SELECT seq, name, command_norm, command_text, input_json, output_excerpt, has_error
-                  FROM tool_call WHERE session = ? AND seq IS NOT NULL ORDER BY seq ASC LIMIT 4000`,
-            params: [sessionId],
+                  FROM tool_call WHERE session = ? AND seq BETWEEN ? AND ? ORDER BY seq ASC`,
+            params: [sessionId, minSeq, maxSeq],
         },
         "session-inspect.graph_turn_tool_calls",
     ).pipe(
@@ -732,6 +747,7 @@ const resolveGraphTurnToolCalls = (
             return bySeq;
         }),
     );
+};
 
 const resolveGraphSessionHealth = (
     sessionId: string,
@@ -740,6 +756,22 @@ const resolveGraphSessionHealth = (
         GraphSessionHealthDbRow,
         { sql: `SELECT turns FROM session_health WHERE session = ? LIMIT 1`, params: [sessionId] },
         "session-inspect.graph_session_health",
+    );
+
+const resolveGraphSessionTotals = (
+    sessionId: string,
+): Effect.Effect<GraphSessionTotalsRow | null, never, CacheRead> =>
+    cacheFirst(
+        GraphSessionTotalsDbRow,
+        {
+            sql: `SELECT
+                    CAST(COALESCE(SUM(length(COALESCE(text, ''))), 0) AS DOUBLE) AS total_chars,
+                    CAST(COALESCE(SUM(CASE WHEN role = 'assistant' THEN 0 ELSE length(COALESCE(text, '')) END), 0) AS DOUBLE) AS user_input,
+                    CAST(COALESCE(SUM(CASE WHEN role = 'assistant' THEN length(COALESCE(text, '')) ELSE 0 END), 0) AS DOUBLE) AS assistant_text
+                  FROM turn WHERE session = ? AND (text IS NOT NULL OR has_tool_use = true)`,
+            params: [sessionId],
+        },
+        "session-inspect.graph_session_totals",
     );
 
 function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
@@ -1045,7 +1077,7 @@ const fetchGraphSessionInspect = (
 ): Effect.Effect<SessionInspectPayload | null, never, CacheRead> =>
     Effect.gen(function* () {
         const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
-        const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent, toolCallsByDbSeq] = yield* Effect.all([
+        const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, sessionTotals, turnContent, toolCallsByDbSeq] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveSessionMeta(bareSessionId),
             resolveChildren(bareSessionId),
@@ -1054,8 +1086,9 @@ const fetchGraphSessionInspect = (
             resolveTurnTokenUsageForWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphTurnWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphSessionHealth(bareSessionId),
+            resolveGraphSessionTotals(bareSessionId),
             resolveTurnContentForSourceRefs(turnSourceRefs),
-            resolveGraphTurnToolCalls(bareSessionId),
+            resolveGraphTurnToolCalls(bareSessionId, turnOffset, turnLimit),
         ], { concurrency: "unbounded" });
 
         // Subagent run metrics, batched over the resolved child ids. Depends on
@@ -1096,13 +1129,29 @@ const fetchGraphSessionInspect = (
             turns.push(dto);
         }
 
-        const totals = { ...pageTotals };
+        const totals: Partial<Record<InspectSpanKind, number>> = sessionTotals
+            ? {
+                user_input: sessionTotals.user_input,
+                assistant_text: sessionTotals.assistant_text,
+            }
+            : { ...pageTotals };
+        if (sessionTotals) {
+            for (const row of graphTurns) {
+                const text = row.text ?? "";
+                const fallbackKind: InspectSpanKind = row.role === "assistant" ? "assistant_text" : "user_input";
+                totals[fallbackKind] = (totals[fallbackKind] ?? 0) - text.length;
+            }
+            for (const [kind, length] of Object.entries(pageTotals) as [InspectSpanKind, number][]) {
+                totals[kind] = (totals[kind] ?? 0) + length;
+            }
+        }
         if (parent.parent_session) applySubagentTaskTagging(turns, totals);
 
         // Graph rows carry no JSONL to match spawn args against, so child meta
         // is always null here (the JSONL fallback path fills it in).
         const children = buildInspectChildren(childrenEdges, childStats, turns, () => null);
-        const totalChars = Object.values(totals).reduce((sum, value) => sum + Number(value ?? 0), 0);
+        const totalChars = sessionTotals?.total_chars ??
+            Object.values(totals).reduce((sum, value) => sum + Number(value ?? 0), 0);
 
         return assembleInspectPayload({
             sessionId: bareSessionId,
