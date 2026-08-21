@@ -13,7 +13,7 @@
  * Fail-open: an unreachable DB prints nothing (the command's own error already
  * says that) and a warning never touches stdout, so `--json` stays machine-clean.
  */
-import { Context, Effect, FileSystem, Layer, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { homedir } from "node:os";
 import { jsonField } from "@ax/lib/decode";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
@@ -133,15 +133,11 @@ export const BackgroundIngestSpawnerLive: Layer.Layer<BackgroundIngestSpawner> =
     {
         spawn: () =>
             Effect.sync(() => {
-                try {
-                    const child = Bun.spawn(
-                        selfInvokeCommand(["ingest", "--since=1", "--progress=off"]),
-                        { stdio: ["ignore", "ignore", "ignore"] },
-                    );
-                    child.unref();
-                } catch {
-                    // best-effort; a spawn failure must not break the caller's command
-                }
+                const child = Bun.spawn(
+                    selfInvokeCommand(["ingest", "--since=1", "--progress=off"]),
+                    { stdio: ["ignore", "ignore", "ignore"] },
+                );
+                child.unref();
             }),
     },
 );
@@ -154,6 +150,7 @@ const freshnessAutoIngestDisabled = (env: NodeJS.ProcessEnv = process.env): bool
 
 const dataDir = (): string => process.env.AX_DATA_DIR ?? posixPath.join(homedir(), ".local", "share", "ax");
 const freshnessStatePath = (): string => posixPath.join(dataDir(), "freshness-drive-state.json");
+const freshnessClaimPath = (): string => posixPath.join(dataDir(), "freshness-drive-claim");
 
 interface FreshnessState {
     readonly lastSpawnAtMs?: number;
@@ -178,6 +175,38 @@ const writeFreshnessState = (next: FreshnessState): Effect.Effect<void, never, F
         yield* fs
             .writeFileString(freshnessStatePath(), `${prettyPrint(next)}\n`)
             .pipe(orAbsent<void>(undefined));
+    });
+
+/** A live claim exists for milliseconds (state read + spawn). A claim file
+ *  older than this survived a hard process death - reclaim it, or the
+ *  freshness drive stays off forever. */
+const FRESHNESS_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+/** Atomically claim the right to spawn. `wx` maps to O_EXCL, so only one
+ *  process can pass this point. The caller always removes its claim. */
+const tryClaimFreshnessSpawn = (): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(dataDir(), { recursive: true }).pipe(orAbsent<void>(undefined));
+        const claim = () =>
+            fs
+                .writeFileString(freshnessClaimPath(), `${process.pid}\n`, { flag: "wx" })
+                .pipe(Effect.as(true), orAbsent(false));
+        const claimed = yield* claim();
+        if (claimed) return true;
+        const mtimeMs = yield* fs.stat(freshnessClaimPath()).pipe(
+            Effect.map((info) => Option.match(info.mtime, { onSome: (d) => d.getTime(), onNone: () => Date.now() })),
+            orAbsent(Date.now()),
+        );
+        if (Date.now() - mtimeMs < FRESHNESS_CLAIM_STALE_MS) return false;
+        yield* fs.remove(freshnessClaimPath(), { force: true }).pipe(Effect.ignore);
+        return yield* claim();
+    });
+
+const releaseFreshnessSpawnClaim: Effect.Effect<void, never, FileSystem.FileSystem> =
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.remove(freshnessClaimPath(), { force: true }).pipe(Effect.ignore);
     });
 
 /**
@@ -210,9 +239,27 @@ export const maybeSpawnBackgroundIngest: Effect.Effect<
         return;
     }
 
-    const spawner = yield* BackgroundIngestSpawner;
-    yield* spawner.spawn();
-    yield* writeFreshnessState({ ...state, lastSpawnAtMs: nowMs });
+    const claimed = yield* tryClaimFreshnessSpawn();
+    if (!claimed) return;
+
+    yield* Effect.gen(function* () {
+        // Another process can finish between our first state read and this
+        // claim. Recheck while the exclusive claim is held.
+        const claimedState = yield* readFreshnessState();
+        if (
+            !shouldSpawnBackgroundIngest({
+                lastSpawnAtMs: claimedState.lastSpawnAtMs ?? null,
+                nowMs,
+                debounceMs: FRESHNESS_SPAWN_DEBOUNCE_MS,
+            })
+        ) {
+            return;
+        }
+
+        const spawner = yield* BackgroundIngestSpawner;
+        yield* spawner.spawn();
+        yield* writeFreshnessState({ ...claimedState, lastSpawnAtMs: nowMs });
+    }).pipe(Effect.ensuring(releaseFreshnessSpawnClaim));
 }).pipe(
     Effect.timeoutOption(PROBE_TIMEOUT_MS),
     // Same "never fails" contract as warnIfIngestStale - a defect (EPIPE, a

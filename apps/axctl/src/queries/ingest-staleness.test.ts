@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
@@ -20,12 +20,20 @@ import {
 const withScratchDataDir = async <A>(fn: (dir: string) => Promise<A>): Promise<A> => {
     const dir = mkdtempSync(join(tmpdir(), "ax-freshness-drive-test-"));
     const original = process.env.AX_DATA_DIR;
+    const originalNoAutoIngest = process.env.AX_NO_AUTO_INGEST;
+    const originalAutoIngest = process.env.AX_AUTO_INGEST;
     process.env.AX_DATA_DIR = dir;
+    delete process.env.AX_NO_AUTO_INGEST;
+    delete process.env.AX_AUTO_INGEST;
     try {
         return await fn(dir);
     } finally {
         if (original === undefined) delete process.env.AX_DATA_DIR;
         else process.env.AX_DATA_DIR = original;
+        if (originalNoAutoIngest === undefined) delete process.env.AX_NO_AUTO_INGEST;
+        else process.env.AX_NO_AUTO_INGEST = originalNoAutoIngest;
+        if (originalAutoIngest === undefined) delete process.env.AX_AUTO_INGEST;
+        else process.env.AX_AUTO_INGEST = originalAutoIngest;
         rmSync(dir, { recursive: true, force: true });
     }
 };
@@ -233,6 +241,61 @@ describe("maybeSpawnBackgroundIngest (freshness drive)", () => {
             await runDrive(db, calls);
             await runDrive(db, calls);
             expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("an atomic claim lets only one parallel stale reader spawn", async () => {
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            const layer = Layer.mergeAll(db, fakeSpawner(calls), PlatformLayer);
+            await Effect.runPromise(
+                Effect.all(Array.from({ length: 20 }, () => maybeSpawnBackgroundIngest), {
+                    concurrency: "unbounded",
+                }).pipe(Effect.provide(layer)),
+            );
+            expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("reclaims a stale claim left by a dead process", async () => {
+        await withScratchDataDir(async (dir) => {
+            const claimPath = join(dir, "freshness-drive-claim");
+            writeFileSync(claimPath, "99999\n");
+            const old = new Date(Date.now() - 11 * 60 * 1000);
+            utimesSync(claimPath, old, old);
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(1);
+        });
+    });
+
+    test("a fresh foreign claim still blocks the spawn", async () => {
+        await withScratchDataDir(async (dir) => {
+            writeFileSync(join(dir, "freshness-drive-claim"), "99999\n");
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            const calls: number[] = [];
+            await runDrive(db, calls);
+            expect(calls).toHaveLength(0);
+        });
+    });
+
+    test("releases the atomic claim when the spawn fails", async () => {
+        await withScratchDataDir(async () => {
+            const db = okRunFrom(new Date(Date.now() - 13 * 86_400_000));
+            let attempts = 0;
+            const spawner = Layer.succeed(BackgroundIngestSpawner, {
+                spawn: () =>
+                    Effect.sync(() => {
+                        attempts += 1;
+                        if (attempts === 1) throw new Error("spawn failed");
+                    }),
+            });
+            const layer = Layer.mergeAll(db, spawner, PlatformLayer);
+            await Effect.runPromise(maybeSpawnBackgroundIngest.pipe(Effect.provide(layer)));
+            await Effect.runPromise(maybeSpawnBackgroundIngest.pipe(Effect.provide(layer)));
+            expect(attempts).toBe(2);
         });
     });
 

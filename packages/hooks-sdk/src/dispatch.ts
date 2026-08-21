@@ -44,8 +44,7 @@ export const dispatchEvent = (
     const verdicts: Verdict[] = [];
     for (const guard of guards) {
       if (!matches(guard, event)) continue;
-      const verdict = yield* guard
-        .run(event)
+      const verdict = yield* Effect.suspend(() => guard.run(event))
         .pipe(Effect.catchDefect(() => Effect.succeed(Verdict.allow)));
       verdicts.push(verdict);
     }

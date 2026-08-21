@@ -76,6 +76,23 @@ describe("dispatchEvent", () => {
     expect(out.stdout).toContain("still here");
   });
 
+  test("a synchronous guard throw fails open without suppressing a later block", async () => {
+    const exploding = defineHook({
+      name: "sync-boom",
+      events: ["PreToolUse"],
+      matcher: { tools: ["Edit"] },
+      run: () => {
+        throw new Error("sync boom");
+      },
+    });
+    const out = await run(claudeEdit, [
+      exploding,
+      fixed("blocker", ["Edit"], Verdict.block("must block")),
+    ]);
+    expect(out.exitCode).toBe(2);
+    expect(out.stderr).toBe("must block");
+  });
+
   test("encodes per harness: codex advise is a no-op exit 0", async () => {
     const codexEdit = JSON.stringify({
       hook_event_name: "PreToolUse",
