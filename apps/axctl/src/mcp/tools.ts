@@ -429,8 +429,6 @@ const rolesTool: AxMcpTool = defineMcpTool({
     },
 });
 
-const RECOMMEND_AGENTS = ["claude", "codex"] as const;
-
 const improveRecommendTool: AxMcpTool = defineMcpTool({
     name: "improve_recommend",
     runtime: "judgment",
@@ -447,10 +445,6 @@ const improveRecommendTool: AxMcpTool = defineMcpTool({
             .array(z.string())
             .optional()
             .describe("Filter to these proposal forms (e.g. skill, hook, rule)."),
-        agent: z
-            .enum(RECOMMEND_AGENTS)
-            .optional()
-            .describe('Filter to a single agent: "claude" or "codex".'),
         sinceDays: z
             .number()
             .int()
@@ -467,7 +461,6 @@ const improveRecommendTool: AxMcpTool = defineMcpTool({
             {
                 ...(args.limit !== undefined ? { limit: args.limit } : {}),
                 ...(args.forms !== undefined ? { forms: args.forms } : {}),
-                ...(args.agent !== undefined ? { agent: args.agent } : {}),
                 ...(args.sinceDays !== undefined ? { sinceDays: args.sinceDays } : {}),
             },
             10,

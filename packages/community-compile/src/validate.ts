@@ -82,6 +82,14 @@ const num = (v: unknown, what: string): number => {
     if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`invalid ${what}`);
     return v;
 };
+const boundedNum = (v: unknown, what: string, max: number): number => {
+    const n = num(v, what);
+    if (n < 0 || n > max) throw new Error(`invalid ${what}`);
+    return n;
+};
+const MAX_TOKENS = 100e9;
+const MAX_SESSIONS = 50_000;
+const MAX_SAFE_GIST_NUMBER = Number.MAX_SAFE_INTEGER;
 const str = (v: unknown, what: string): string => {
     if (typeof v !== "string") throw new Error(`invalid ${what}`);
     return v;
@@ -104,10 +112,12 @@ export function validateProfile(value: unknown): CompiledProfile {
     if (!Array.isArray(rig.skills) || !Array.isArray(rig.hooks)) throw new Error("invalid rig arrays");
 
     const github = str(value.github, "github");
-    const sessions = num(stats.sessions, "sessions");
-    const streak_days = num(stats.streak_days, "streak_days");
-    const total = num(tokens.total, "tokens.total");
-    const cost_usd = stats.cost_usd === undefined ? undefined : num(stats.cost_usd, "cost_usd");
+    const sessions = boundedNum(stats.sessions, "sessions", MAX_SESSIONS);
+    const streak_days = boundedNum(stats.streak_days, "streak_days", MAX_SESSIONS);
+    const total = boundedNum(tokens.total, "tokens.total", MAX_TOKENS);
+    const cost_usd = stats.cost_usd === undefined
+        ? undefined
+        : boundedNum(stats.cost_usd, "cost_usd", MAX_SAFE_GIST_NUMBER);
 
     for (const h of stats.harnesses) str(h, "harness");
     for (const h of rig.hooks) str(h, "hook");
@@ -118,7 +128,11 @@ export function validateProfile(value: unknown): CompiledProfile {
     });
     const skills = rig.skills.map((s) => {
         if (!isRecord(s)) throw new Error("invalid skill row");
-        return { name: str(s.name, "skill.name"), source: str(s.source, "skill.source"), runs: num(s.runs, "skill.runs") };
+        return {
+            name: str(s.name, "skill.name"),
+            source: str(s.source, "skill.source"),
+            runs: boundedNum(s.runs, "skill.runs", MAX_SAFE_GIST_NUMBER),
+        };
     });
 
     return {
@@ -139,12 +153,6 @@ export function patternKey(category: string, name: string): string {
     return `${category.trim()}/${name.trim()}`;
 }
 
-const finitePatternNumber = (v: unknown, what: string): number => {
-    const n = num(v, what);
-    if (n < 0) throw new Error(`invalid ${what}`);
-    return n;
-};
-
 function validatePatternRow(row: unknown): CompiledTastePattern {
     if (!isRecord(row) || !isRecord(row.evidence)) throw new Error("invalid pattern");
     const category = str(row.category, "pattern.category").trim();
@@ -154,13 +162,11 @@ function validatePatternRow(row: unknown): CompiledTastePattern {
     const trend = row.evidence.trend === undefined ? undefined : str(row.evidence.trend, "pattern.evidence.trend");
     if (trend !== undefined && !PATTERN_TREND_SET.has(trend)) throw new Error("invalid pattern.evidence.trend");
     const evidence: CompiledTastePattern["evidence"] = {
-        sessions: finitePatternNumber(row.evidence.sessions, "pattern.evidence.sessions"),
-        confidence: finitePatternNumber(row.evidence.confidence, "pattern.evidence.confidence"),
+        sessions: boundedNum(row.evidence.sessions, "pattern.evidence.sessions", MAX_SESSIONS),
+        confidence: boundedNum(row.evidence.confidence, "pattern.evidence.confidence", 1),
         ...(row.evidence.last_reinforced === undefined ? {} : { last_reinforced: str(row.evidence.last_reinforced, "pattern.evidence.last_reinforced") }),
         ...(trend === undefined ? {} : { trend: trend as PatternTrend }),
     };
-    if (evidence.confidence > 1) throw new Error("invalid pattern.evidence.confidence");
-
     if (category === "stack-choice") {
         const slot = str(row.slot, "pattern.slot").trim();
         if (slot === "") throw new Error("invalid pattern.slot");

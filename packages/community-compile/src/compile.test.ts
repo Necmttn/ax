@@ -108,6 +108,63 @@ describe("compileCommunity", () => {
         expect(out.skillStats["simplify"]).toEqual({ users: 1, runs: 5, source: "superpowers" });
     });
 
+    test("drops hostile numeric fields before they can overflow aggregates", async () => {
+        const hostile = (login: string) => profile(login, {
+            stats: {
+                sessions: -1,
+                streak_days: 1e308,
+                tokens: { total: -1 },
+                cost_usd: 1e308,
+                models: [],
+                harnesses: ["claude"],
+            },
+            rig: {
+                skills: [{ name: "poison", source: "local", runs: 1e308 }],
+                hooks: [],
+            },
+            taste: {
+                patterns: [{
+                    category: "workflow",
+                    name: "poison",
+                    summary: "hostile row",
+                    evidence: { sessions: 1e308, confidence: 1 },
+                }],
+            },
+        });
+        const out = await compileCommunity(users, fetcher({
+            g1: hostile("alice"),
+            g2: hostile("bob"),
+        }), { now: "2026-08-21T00:00:00.000Z" });
+
+        expect(out.dropped).toEqual([
+            { login: "alice", reason: "invalid-profile" },
+            { login: "bob", reason: "invalid-profile" },
+        ]);
+        expect(JSON.stringify(out)).not.toContain("\"value\":null");
+        expect(JSON.stringify(out)).not.toContain("\"runs\":null");
+        expect(JSON.stringify(out)).not.toContain("\"sessions\":null");
+    });
+
+    test("counts each hook, harness, and model once per profile", async () => {
+        const out = await compileCommunity(
+            [{ github: "alice", gist_id: "g1", joined: "2026-06-01" }],
+            fetcher({
+                g1: profile("alice", {
+                    stats: {
+                        models: [{ name: "opus" }, { name: "opus" }],
+                        harnesses: ["claude", "claude"],
+                    },
+                    rig: { hooks: ["guard", "guard"] },
+                }),
+            }),
+            { now: "2026-08-21T00:00:00.000Z" },
+        );
+
+        expect(out.hookStats.guard).toEqual({ users: 1 });
+        expect(out.state.harness_mix.claude).toBe(1);
+        expect(out.state.model_share.opus).toBe(1);
+    });
+
     test("plugin-namespaced skill name does not double its source prefix", async () => {
         // Real shape: source="superpowers", name="superpowers:brainstorming"
         // (rig.ts keeps the plugin id inside the name). Identity is "brainstorming".
@@ -130,14 +187,14 @@ describe("compileCommunity", () => {
         expect(out.dropped).toEqual([{ login: "bob", reason: "invalid-profile" }]);
     });
 
-    test("absurd values excluded from boards", async () => {
+    test("out-of-range values are rejected during profile validation", async () => {
         const out = await compileCommunity(users, fetcher({
             g1: profile("alice", { stats: { tokens: { prompt: 0, completion: 0, total: 200e9 } } }),
             g2: profile("bob"),
         }), { now: "2026-06-12T03:00:00Z" });
 
         expect(out.leaderboard.boards.tokens.map((r) => r.login)).toEqual(["bob"]);
-        expect(out.dropped).toEqual([{ login: "alice", reason: "absurd-values" }]);
+        expect(out.dropped).toEqual([{ login: "alice", reason: "invalid-profile" }]);
     });
 
     test("unreachable gist dropped, compile continues", async () => {

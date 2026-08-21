@@ -91,15 +91,10 @@ describe("normalizeRecommendInput", () => {
         ]);
     });
 
-    test("agent/sinceDays are only present when supplied", () => {
+    test("sinceDays is only present when supplied", () => {
         const bare = normalizeRecommendInput({}, 5);
-        expect("agent" in bare).toBe(false);
         expect("sinceDays" in bare).toBe(false);
-        const full = normalizeRecommendInput(
-            { agent: "codex", sinceDays: 14 },
-            5,
-        );
-        expect(full.agent).toBe("codex");
+        const full = normalizeRecommendInput({ sinceDays: 14 }, 5);
         expect(full.sinceDays).toBe(14);
     });
 });

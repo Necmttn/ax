@@ -141,6 +141,20 @@ function representativeSource(name: string, sources: ReadonlySet<string>): strin
 const sortedRecord = <V>(entries: Array<[string, V]>): Record<string, V> =>
     Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 
+function assertFiniteNumbers(value: unknown, path = "compiled output"): void {
+    if (typeof value === "number") {
+        if (!Number.isFinite(value)) throw new Error(`non-finite ${path}`);
+        return;
+    }
+    if (Array.isArray(value)) {
+        value.forEach((item, index) => assertFiniteNumbers(item, `${path}[${index}]`));
+        return;
+    }
+    if (typeof value === "object" && value !== null) {
+        for (const [key, item] of Object.entries(value)) assertFiniteNumbers(item, `${path}.${key}`);
+    }
+}
+
 interface PatternAggregate {
     readonly category: string;
     readonly name: string;
@@ -244,6 +258,9 @@ export async function compileCommunity(
     const modelUsers = new Map<string, number>();
     for (const { p } of profiles) {
         const seenSkills = new Set<string>();
+        const seenHooks = new Set<string>();
+        const seenHarnesses = new Set<string>();
+        const seenModels = new Set<string>();
         for (const s of p.rig.skills) {
             const id = normalizeSkillName(s.source, s.name);
             const cur = skillAgg.get(id) ?? { users: 0, runs: 0, sources: new Set<string>() };
@@ -256,13 +273,19 @@ export async function compileCommunity(
             skillAgg.set(id, cur);
         }
         for (const h of p.rig.hooks) {
+            if (seenHooks.has(h)) continue;
+            seenHooks.add(h);
             const cur = hookAgg.get(h) ?? { users: 0 };
             hookAgg.set(h, { users: cur.users + 1 });
         }
         for (const h of p.stats.harnesses) {
+            if (seenHarnesses.has(h)) continue;
+            seenHarnesses.add(h);
             harnessMix.set(h, (harnessMix.get(h) ?? 0) + 1);
         }
         for (const m of p.stats.models) {
+            if (seenModels.has(m.name)) continue;
+            seenModels.add(m.name);
             modelUsers.set(m.name, (modelUsers.get(m.name) ?? 0) + 1);
         }
     }
@@ -303,7 +326,7 @@ export async function compileCommunity(
         ]);
     }
 
-    return {
+    const output: CompiledOutput = {
         leaderboard: {
             compiled_at: opts.now,
             window_days: 30,
@@ -338,4 +361,6 @@ export async function compileCommunity(
         },
         dropped,
     };
+    assertFiniteNumbers(output);
+    return output;
 }

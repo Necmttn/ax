@@ -13,7 +13,6 @@ export interface RecommendInput {
     readonly forms?: ReadonlyArray<string>;
     readonly project?: string;
     readonly cwd?: string;
-    readonly agent?: "claude" | "codex";
     readonly sinceDays?: number;
 }
 
@@ -28,14 +27,13 @@ export interface RecommendInput {
 export interface RecommendQueryArgs {
     readonly limit?: number | undefined;
     readonly forms?: ReadonlyArray<string> | undefined;
-    readonly agent?: "claude" | "codex" | undefined;
     readonly sinceDays?: number | undefined;
 }
 
 /**
  * Apply default limit + drop empty optional collections. Transports keep their
  * own limit default (CLI 5, MCP 10) by passing `defaultLimit`; everything else
- * (forms/agent/sinceDays presence rules) is shared semantics.
+ * (forms/sinceDays presence rules) is shared semantics.
  *
  * Note: positivity/integer validation of `limit` and `sinceDays` stays in the
  * transports (CLI `requirePositiveInt` exits 2 with usage wording; MCP zod
@@ -55,7 +53,6 @@ export const normalizeRecommendInput = (
     return {
         limit,
         ...(forms !== undefined ? { forms } : {}),
-        ...(args.agent !== undefined ? { agent: args.agent } : {}),
         ...(args.sinceDays !== undefined ? { sinceDays: args.sinceDays } : {}),
     };
 };
