@@ -45,7 +45,7 @@
  *   4. rebuilds only when the digest moved OR the schema is missing, then
  *      records the new digest. A digest match with a MISSING schema still
  *      rebuilds - the bookkeeping row is not proof the index exists.
- * The digest string is prefixed `v1:` - the formula version. Bumping it forces
+ * The digest string is prefixed with the formula version. Bumping it forces
  * exactly one rebuild fleet-wide the next time this ships, which is the escape
  * hatch if the formula ever needs to change.
  */
@@ -61,10 +61,10 @@ export interface FtsTarget {
 }
 
 /** The digest formula version - bump to force a one-time rebuild of every
- *  target. v2 = the turn target moved from `text_excerpt` to full `text`
- *  (#921); the digest would move on its own (it hashes the new column), but
- *  the explicit bump makes the cutover legible in `fts_index_state`. */
-const FTS_DIGEST_VERSION = "v2";
+ *  target. v3 hashes the id and text as ONE value per row (#948). The prior
+ *  two-argument hash left the aggregate unchanged when text values moved
+ *  between existing ids. */
+const FTS_DIGEST_VERSION = "v3";
 
 /**
  * A per-target content digest computed ENTIRELY in SQL as one VARCHAR. Never
@@ -75,14 +75,15 @@ const FTS_DIGEST_VERSION = "v2";
  * in SQL sidesteps that entirely: this seam only ever sees a string.
  *
  * `bit_xor` is commutative/order-independent, so a row landing via any write
- * path (batch insert, spool flush, single put) produces the same digest -
- * unlike a hash-of-concatenation, which would depend on scan order.
+ * path (batch insert, spool flush, single put) produces the same digest.
+ * Each row hashes one id-delimited-text value, so moving text between ids
+ * changes the row hashes before the aggregate combines them.
  * `COALESCE(bit_xor(...), '0')` covers the empty-table case, where `bit_xor`
  * itself returns NULL.
  */
 export const ftsDigestSql = (target: FtsTarget): string =>
     `SELECT '${FTS_DIGEST_VERSION}:' || count(*)::VARCHAR || ':' || ` +
-    `COALESCE(bit_xor(hash(${target.idColumn}, COALESCE(${target.textColumn}, '')))::VARCHAR, '0') AS digest ` +
+    `COALESCE(bit_xor(hash(${target.idColumn} || chr(31) || COALESCE(${target.textColumn}, '')))::VARCHAR, '0') AS digest ` +
     `FROM "${target.table}"`;
 
 /** Per-target rebuild outcome, returned so a caller (or a test) can observe

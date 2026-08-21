@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { encodeLockPayload, withIngestLock } from "../ingest-lock.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { TimestampColumn } from "./columns.ts";
-import { buildFtsIndexes, ftsSchemaName, matchBm25Sql, type FtsTarget } from "./fts.ts";
+import { buildFtsIndexes, ftsDigestSql, ftsSchemaName, matchBm25Sql, type FtsTarget } from "./fts.ts";
 import { NUL } from "./nul-strip.ts";
 import {
     CacheRead,
@@ -276,6 +276,39 @@ describe("CacheWrite: the semantics the DDL cannot express", () => {
             // 600 rows crosses the 500-row batch boundary.
             expect(value?.count).toBe(600n);
             expect(value?.ragged._tag).toBe("Failure");
+        });
+    });
+
+    dtest("putMany collapses duplicate ids before chunking with last occurrence wins (#949)", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-putmany-duplicate-ids-");
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        const rows = [
+                            { id: "same-chunk", body: "first" },
+                            { id: "same-chunk", body: "second" },
+                            { id: "chunk-boundary", body: "first" },
+                            ...Array.from({ length: 497 }, (_, i) => ({ id: `unique-${i}`, body: `${i}` })),
+                            { id: "chunk-boundary", body: "second" },
+                        ];
+                        yield* write.putMany("note", rows);
+                        const stored = yield* write.rows(
+                            Schema.Struct({ id: Schema.String, body: Schema.String }),
+                            "SELECT id, body FROM note WHERE id IN ('same-chunk', 'chunk-boundary') ORDER BY id",
+                        );
+                        return { stored, collapsed: write.rowsCollapsed() };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.stored).toEqual([
+                { id: "chunk-boundary", body: "second" },
+                { id: "same-chunk", body: "second" },
+            ]);
+            expect(value?.collapsed).toBe(2);
         });
     });
 
@@ -1001,6 +1034,36 @@ describe("FTS: skip-unchanged rebuild (#909)", () => {
             expect(value?.outcomes).toEqual([{ table: "turn", rebuilt: true }]);
             expect(value?.oldHits).toEqual([]);
             expect(value?.newHits.map((r) => r.id)).toEqual(["t1"]);
+        });
+    });
+
+    dtest("swapping text between existing ids moves the digest (#948)", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-digest-swap-");
+
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.putMany("turn", [
+                            { id: "t1", text_excerpt: "alpha content", ts },
+                            { id: "t2", text_excerpt: "beta content", ts },
+                        ]);
+                        const before = yield* write.raw(ftsDigestSql(TURN_FTS));
+                        yield* write.exec(
+                            `UPDATE turn SET text_excerpt = CASE id
+                                WHEN 't1' THEN 'beta content'
+                                WHEN 't2' THEN 'alpha content'
+                                ELSE text_excerpt END`,
+                        );
+                        const after = yield* write.raw(ftsDigestSql(TURN_FTS));
+                        return { before: before.rows[0]?.digest, after: after.rows[0]?.digest };
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const value = outcome._tag === "completed" ? outcome.value : null;
+            expect(value?.after).not.toBe(value?.before);
         });
     });
 

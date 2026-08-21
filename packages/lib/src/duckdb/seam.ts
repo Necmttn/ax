@@ -155,6 +155,9 @@ export interface CacheWriteService extends CacheReadService {
      * read them directly.
      */
     readonly nulStripped: () => NulStripTotals;
+    /** Duplicate-id rows removed from `putMany` inputs. The last occurrence
+     *  for each id is the row that the writer keeps. */
+    readonly rowsCollapsed: () => number;
     /** The live database being written (not the snapshot). */
     readonly livePath: string;
 }
@@ -668,6 +671,7 @@ export const withCacheWrite = <A, E, R>(
                     // know it happened.
                     const value = yield* body(write).pipe(
                         Effect.ensuring(reportNulStripped(write, options.livePath)),
+                        Effect.ensuring(reportRowsCollapsed(write, options.livePath)),
                     );
 
                     // Publish LAST and only on success: a failed ingest must
@@ -800,6 +804,17 @@ const reportNulStripped = (write: CacheWriteService, livePath: string): Effect.E
         );
     });
 
+/** Report duplicate-id rows that `putMany` collapsed before it wrote them. */
+const reportRowsCollapsed = (write: CacheWriteService, livePath: string): Effect.Effect<void> =>
+    Effect.suspend(() => {
+        const rows = write.rowsCollapsed();
+        if (rows === 0) return Effect.void;
+        return Effect.logWarning(
+            `ax cache: collapsed ${rows} duplicate-id row(s) before putMany batching while writing ${livePath}; ` +
+                "the last occurrence for each id was kept.",
+        );
+    });
+
 const toPublishError = (
     err: SnapshotPublishError | DuckDbOpenError,
     target: string,
@@ -837,6 +852,7 @@ const writerOver = (
      */
     let nulValues = 0;
     let nulStatements = 0;
+    let collapsedRows = 0;
     const execScrubbed = (
         sql: string,
         params?: ReadonlyArray<DuckDbParam>,
@@ -947,8 +963,13 @@ const writerOver = (
                 }
             }
 
-            for (let start = 0; start < rows.length; start += PUT_BATCH_ROWS) {
-                const batch = rows.slice(start, start + PUT_BATCH_ROWS);
+            const rowsById = new Map<DuckDbParam, Readonly<Record<string, DuckDbParam>>>();
+            for (const row of rows) rowsById.set(row["id"], row);
+            const deduplicated = [...rowsById.values()];
+            collapsedRows += rows.length - deduplicated.length;
+
+            for (let start = 0; start < deduplicated.length; start += PUT_BATCH_ROWS) {
+                const batch = deduplicated.slice(start, start + PUT_BATCH_ROWS);
                 const sql = yield* insertStatement(table, columns, stamped, batch.length);
                 const params = batch.flatMap((row) => columns.map((column) => row[column]));
                 yield* chargeStageSelfTime(execScrubbed(sql, params));
@@ -958,6 +979,7 @@ const writerOver = (
     const put: CacheWriteService["put"] = (table, row) => putMany(table, [row]);
 
     const nulStripped = (): NulStripTotals => ({ values: nulValues, statements: nulStatements });
+    const rowsCollapsed = (): number => collapsedRows;
 
-    return { ...reader, exec, put, putMany, nulStripped, livePath };
+    return { ...reader, exec, put, putMany, nulStripped, rowsCollapsed, livePath };
 };

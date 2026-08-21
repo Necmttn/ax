@@ -131,7 +131,7 @@ describe("makeTableSpool", () => {
         );
     });
 
-    dtest("same id twice in ONE window dedups last-wins (DuckDB rejects in-statement key dups)", async () => {
+    dtest("same id twice in ONE window dedups last-wins", async () => {
         const dir = tempDir("spool-dedup");
         await asIngestRun(dir, (write, spool) =>
             Effect.gen(function* () {
@@ -218,6 +218,23 @@ describe("makeTableSpool", () => {
                 const got = yield* write.raw("SELECT name FROM tool WHERE id = 'tool:surrogate'");
                 // The lone half became U+FFFD; the rest of the value is intact.
                 expect(got.rows[0]!["name"]).toBe("cut�end");
+            }),
+        );
+    });
+
+    dtest("deduplicates on the encoded id with last occurrence wins (#951)", async () => {
+        const dir = tempDir("spool-encoded-id-dedup");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                spool.append("tool", [
+                    { id: "k\uD800", name: "first", provider: "codex" },
+                    { id: "k\uDC00", name: "second", provider: "codex" },
+                ]);
+                expect(spool.pendingRows()).toBe(1);
+                const outcome = yield* spool.flush(write);
+                expect(outcome.rows).toBe(1);
+                const got = yield* write.raw("SELECT id, name FROM tool");
+                expect(got.rows).toEqual([{ id: "k�", name: "second" }]);
             }),
         );
     });

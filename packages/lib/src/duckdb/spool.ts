@@ -24,9 +24,9 @@
  *    unspecified - same nondeterminism two interleaved putMany calls had.)
  *  - LAST WRITE WINS PER id. Ingest legitimately re-emits the same row many
  *    times per run (`tool` and `file` on every tool call) and relies on upsert
- *    dedup. DuckDB REJECTS a statement whose source carries two rows with the
- *    same conflict key, so each buffer dedups by id at append - the later row
- *    replaces the earlier one, which is exactly what back-to-back upserts did.
+ *    dedup. DuckDB silently keeps one row when a `read_ndjson` source carries
+ *    duplicate conflict keys, so each buffer dedups by ENCODED id at append.
+ *    The later row replaces the earlier one, matching back-to-back upserts.
  *  - THE `id` INVARIANT + explicit conflict target. `INSERT OR REPLACE` is
  *    unusable on this schema (secondary UNIQUE indexes); the conflict target is
  *    `("id")`, the same statement shape as the seam's.
@@ -267,15 +267,29 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
                     message: `spooled row ${i} for ${table} has a non-string id (${typeof id}); every id in this schema is VARCHAR`,
                 });
             }
-            const out: Record<string, unknown> = {};
-            for (const column of buffer.columns) {
-                out[column] = encodeValue(table, column, row[column], () => {
-                    nulValues += 1;
-                }, () => {
-                    illFormedValues += 1;
+            const encodedId = encodeValue(table, "id", id, () => {
+                nulValues += 1;
+            }, () => {
+                illFormedValues += 1;
+            });
+            if (typeof encodedId !== "string") {
+                throw new DuckDbQueryError({
+                    sql: `spool INSERT INTO ${table}`,
+                    message: `spooled row ${i} for ${table} encoded its string id as ${typeof encodedId}`,
                 });
             }
-            buffer.lines.set(id, JSON.stringify(out));
+            const out: Record<string, unknown> = {};
+            for (const column of buffer.columns) {
+                out[column] =
+                    column === "id"
+                        ? encodedId
+                        : encodeValue(table, column, row[column], () => {
+                              nulValues += 1;
+                          }, () => {
+                              illFormedValues += 1;
+                          });
+            }
+            buffer.lines.set(encodedId, JSON.stringify(out));
         }
     };
 
