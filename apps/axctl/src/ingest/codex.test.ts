@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { SkillName } from "@ax/lib/brands";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
@@ -6,6 +7,7 @@ import {
     __testCompactCodexToolCall,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
+    __testWriteCodexTokenUsage,
     codexConcurrency,
     codexFlushEvery,
     codexPayloadMaxBytes,
@@ -13,7 +15,8 @@ import {
     shouldSnapshotCodexRaw,
     toCodexNormalizedBatch,
 } from "./codex.ts";
-import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { builtInPricingCatalog, estimateCost, normalizeModelName } from "./model-pricing.ts";
+import type { ModelPricing } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 
 const normalizedCodexBatch = (
@@ -507,6 +510,131 @@ describe("Codex transcript extraction", () => {
             usageQuality: "provider_turn",
         });
         expect(extracted?.turnTokenUsages[0]?.usageSource).toBe("codex_token_count.last_token_usage");
+    });
+
+    test("writes merged catalog pricing for an upstream-only Codex model", async () => {
+        const model = "gpt-upstream-only";
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-merged-price",
+                    cwd: "/tmp",
+                    model_provider: "openai",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "turn_context",
+                timestamp: "2026-05-09T10:00:00.500Z",
+                payload: { model },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "done" }],
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: { input_tokens: 100_000, output_tokens: 10_000, total_tokens: 110_000 },
+                        last_token_usage: { input_tokens: 100_000, output_tokens: 10_000, total_tokens: 110_000 },
+                    },
+                },
+            }),
+        ]);
+        const catalog = new Map<string, ModelPricing>([[model, {
+            provider: "openai",
+            inputPerMillionUsd: 2,
+            outputPerMillionUsd: 10,
+            cacheCreationPerMillionUsd: 2.5,
+            cacheReadPerMillionUsd: 0.2,
+            fastMultiplier: 1,
+            pricingSource: "litellm",
+        }]]);
+        const written = new Map<string, Record<string, unknown>[]>();
+        const write = {
+            put: (table: string, row: Record<string, unknown>) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), row]);
+            }),
+            putMany: (table: string, rows: Record<string, unknown>[]) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), ...rows]);
+            }),
+        };
+
+        await Effect.runPromise(__testWriteCodexTokenUsage(
+            write as never,
+            extracted!.tokenUsage,
+            extracted!.turnTokenUsages,
+            "codex",
+            catalog,
+        ));
+
+        expect(written.get("turn_token_usage")?.[0]?.estimated_cost_usd as number).toBeCloseTo(0.3, 6);
+        expect(written.get("turn_token_usage")?.[0]?.pricing_source).toBe("litellm");
+    });
+
+    test("prices a mixed-model Codex session from its turn costs", async () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: { id: "codex-mixed-price", cwd: "/tmp", model_provider: "openai" },
+            }),
+            JSON.stringify({ type: "turn_context", payload: { model: "claude-sonnet-4" } }),
+            JSON.stringify({
+                type: "response_item",
+                payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "one" }] },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                payload: { type: "token_count", info: {
+                    total_token_usage: { input_tokens: 2_000_000, output_tokens: 0, total_tokens: 2_000_000 },
+                    last_token_usage: { input_tokens: 2_000_000, output_tokens: 0, total_tokens: 2_000_000 },
+                } },
+            }),
+            JSON.stringify({ type: "turn_context", payload: { model: "claude-fable-5" } }),
+            JSON.stringify({
+                type: "response_item",
+                payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "two" }] },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                payload: { type: "token_count", info: {
+                    total_token_usage: { input_tokens: 2_100_000, output_tokens: 0, total_tokens: 2_100_000 },
+                    last_token_usage: { input_tokens: 100_000, output_tokens: 0, total_tokens: 100_000 },
+                } },
+            }),
+        ]);
+        const written = new Map<string, Record<string, unknown>[]>();
+        const write = {
+            put: (table: string, row: Record<string, unknown>) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), row]);
+            }),
+            putMany: (table: string, rows: Record<string, unknown>[]) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), ...rows]);
+            }),
+        };
+
+        await Effect.runPromise(__testWriteCodexTokenUsage(
+            write as never,
+            extracted!.tokenUsage,
+            extracted!.turnTokenUsages,
+            "codex",
+            builtInPricingCatalog(),
+        ));
+
+        const session = written.get("session_token_usage")?.[0];
+        expect(session?.model).toBe("claude-fable-5");
+        expect(session?.estimated_cost_usd).toBe(7);
     });
 
     // Plan 003 fix round 1: `codexTurnTokenUsageFromPayload`'s `first_total`

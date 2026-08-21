@@ -53,7 +53,7 @@ import {
 import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { isNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
-import { estimateCost } from "./model-pricing.ts";
+import { estimateCost, loadPricingCatalog, sumCostEstimates, type ModelPricing } from "./model-pricing.ts";
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
@@ -351,7 +351,7 @@ function codexTurnTokenUsageFromPayload(
             session: usage.session,
             seq,
             ts: usage.ts,
-            model: usage.model,
+            model: usage.model, // Display attribution only; turn costs own the session price.
             ...metrics,
             usageSource: "codex_token_count.last_token_usage",
             usageQuality: "provider_turn",
@@ -1235,17 +1235,33 @@ const writeCodexTokenUsage = (
     usage: CodexTokenUsage | null,
     turnUsages: readonly CodexTurnTokenUsage[],
     source: "codex" | "codex-subagent",
+    pricingCatalog: ReadonlyMap<string, ModelPricing>,
+    sessionTurnUsages: readonly CodexTurnTokenUsage[] = turnUsages,
 ) => Effect.gen(function* () {
+    const priceTurn = (turnUsage: CodexTurnTokenUsage) => estimateCost({
+        modelKey: turnUsage.model,
+        promptTokens: turnUsage.promptTokens,
+        completionTokens: turnUsage.completionTokens,
+        cacheCreationInputTokens: turnUsage.cacheCreationInputTokens,
+        cacheReadInputTokens: turnUsage.cacheReadInputTokens,
+        estimatedTokens: turnUsage.estimatedTokens,
+        pricingCatalog,
+        ...(isCodexTurnUsageAggregated(turnUsage) ? { aggregated: true } : {}),
+    });
+    const turnCosts = turnUsages.map(priceTurn);
     if (usage !== null) {
-        const cost = estimateCost({
-            modelKey: usage.model,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            cacheCreationInputTokens: null,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            estimatedTokens: usage.estimatedTokens,
-            aggregated: true,
-        });
+        const cost = sessionTurnUsages.length > 0
+            ? sumCostEstimates(sessionTurnUsages.map(priceTurn))
+            : estimateCost({
+                modelKey: usage.model,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                cacheCreationInputTokens: null,
+                cacheReadInputTokens: usage.cacheReadInputTokens,
+                estimatedTokens: usage.estimatedTokens,
+                pricingCatalog,
+                aggregated: true,
+            });
         yield* write.put("session_token_usage", cacheRow({
             id: usage.session,
             session: usage.session,
@@ -1283,16 +1299,8 @@ const writeCodexTokenUsage = (
             ts: tsParam(usage.ts),
         }));
     }
-    yield* write.putMany("turn_token_usage", turnUsages.map((usage) => {
-        const cost = estimateCost({
-            modelKey: usage.model,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            cacheCreationInputTokens: usage.cacheCreationInputTokens,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            estimatedTokens: usage.estimatedTokens,
-            ...(isCodexTurnUsageAggregated(usage) ? { aggregated: true } : {}),
-        });
+    yield* write.putMany("turn_token_usage", turnUsages.map((usage, index) => {
+        const cost = turnCosts[index]!;
         const turn = turnRecordKey(usage.session, usage.seq);
         return cacheRow({
             id: turn,
@@ -1322,6 +1330,8 @@ const writeCodexTokenUsage = (
         });
     }));
 });
+
+export const __testWriteCodexTokenUsage = writeCodexTokenUsage;
 
 export const toCodexNormalizedBatch = (
     batch: MutableCodexExtract,
@@ -1439,6 +1449,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const cfg = yield* AxConfig;
         const path = yield* Path.Path;
         const spoolFs = yield* FileSystem.FileSystem;
+        const pricingCatalog = (yield* loadPricingCatalog(cfg.paths.dataDir)).catalog;
         // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool; the
         // shadowed `write` routes every write in this stage through it. The
         // per-session agent_event DELETE stays a pass-through exec and fires
@@ -1564,6 +1575,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 let fileInvocations = 0;
                 let fileToolCalls = 0;
                 let filePlanSnapshots = 0;
+                const sessionCostUsages = new Map<number, CodexTurnTokenUsage>();
 
                 const emitProgress = (phase: number) =>
                     opts.onProgress
@@ -1635,11 +1647,16 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                             toCodexNormalizedBatch(batch, payloadMaxBytes),
                             { clearExisting },
                         );
+                        for (const turnUsage of batch.turnTokenUsages) {
+                            sessionCostUsages.set(turnUsage.seq, turnUsage);
+                        }
                         yield* writeCodexTokenUsage(
                             write,
                             batch.tokenUsage,
                             batch.turnTokenUsages,
                             codexSourceForThread(batch.session?.thread_source),
+                            pricingCatalog,
+                            [...sessionCostUsages.values()],
                         );
                         turnCount += batch.turns.length;
                         fileTurns += batch.turns.length;
@@ -1831,7 +1848,7 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
 export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
     meta: StageMeta.make({
         key: "codex",
-        deps: ["skills", "commands"],
+        deps: ["skills", "commands", "pricing"],
         tags: ["ingest"],
         writes: [
             ...NORMALIZED_BATCH_WRITES,

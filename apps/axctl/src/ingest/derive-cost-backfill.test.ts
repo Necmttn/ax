@@ -23,6 +23,25 @@ const usage = (id: string, model: string | null, values: Record<string, unknown>
     ...values,
 });
 
+const turnUsage = (id: string, model: string | null, values: Record<string, unknown> = {}) => ({
+    id,
+    session: "s1",
+    turn: id,
+    seq: 1,
+    source: "claude",
+    model,
+    prompt_tokens: 1_000_000,
+    completion_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    estimated_tokens: 1_100_000,
+    estimated_cost_usd: null,
+    pricing_source: null,
+    usage_source: "test",
+    usage_quality: "provider_turn",
+    ...values,
+});
+
 describe("deriveCostBackfill on real DuckDB", () => {
     dtest("prices estimated tokens and preserves the pricing source", async () => {
         let stats: unknown;
@@ -56,6 +75,35 @@ describe("deriveCostBackfill on real DuckDB", () => {
             }),
         ));
         expect(cost).toBe(30);
+    });
+
+    dtest("heals null costs on turn token usage rows", async () => {
+        let stats: unknown;
+        let row: unknown;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-turn-cost-backfill-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.put("turn_token_usage", turnUsage("turn-1", "claude-opus-4-5"));
+                stats = yield* deriveCostBackfill(write);
+                row = (yield* write.rows(Schema.Struct({
+                    cost: Schema.Number,
+                    inputCost: Schema.Number,
+                    outputCost: Schema.Number,
+                    source: Schema.String,
+                }), `SELECT estimated_cost_usd AS cost,
+                    estimated_input_cost_usd AS inputCost,
+                    estimated_output_cost_usd AS outputCost,
+                    pricing_source AS source
+                    FROM turn_token_usage WHERE id = ?`, ["turn-1"]))[0];
+            }),
+        ));
+
+        expect(stats).toEqual({ scanned: 1, backfilled: 1, unpriced: 0 });
+        expect(row).toEqual({
+            cost: 7.5,
+            inputCost: 5,
+            outputCost: 2.5,
+            source: `estimated:${MODEL_PRICING_SOURCE}`,
+        });
     });
 
     dtest("leaves unknown models null and becomes idempotent", async () => {

@@ -168,6 +168,48 @@ describe("model pricing", () => {
         expect(estimateCost({ ...usage, fastTier: true }).totalUsd).toBeCloseTo(12.5, 6);
     });
 
+    it("applies cache creation defaults to built-in pricing", () => {
+        const pricing = builtInPricingCatalog().get("gpt-5-nano");
+
+        expect(pricing?.cacheCreationPerMillionUsd).toBeCloseTo(0.0625, 6);
+        expect(estimateCost({
+            modelKey: "gpt-5-nano",
+            promptTokens: 500_000,
+            completionTokens: 0,
+            cacheCreationInputTokens: 500_000,
+            cacheReadInputTokens: 0,
+            estimatedTokens: 500_000,
+        }).totalUsd).toBeCloseTo(0.03125, 6);
+    });
+
+    it("returns a null total when used tokens have no price", () => {
+        const catalog = new Map([[
+            "partial-price",
+            {
+                provider: "test",
+                inputPerMillionUsd: 1,
+                outputPerMillionUsd: 2,
+                cacheCreationPerMillionUsd: null,
+                cacheReadPerMillionUsd: 0.1,
+                fastMultiplier: 1,
+                pricingSource: "test",
+            },
+        ]]);
+
+        const cost = estimateCost({
+            modelKey: "partial-price",
+            promptTokens: 500_000,
+            completionTokens: 100_000,
+            cacheCreationInputTokens: 500_000,
+            cacheReadInputTokens: 0,
+            estimatedTokens: 600_000,
+            pricingCatalog: catalog,
+        });
+
+        expect(cost.cacheCreationUsd).toBeNull();
+        expect(cost.totalUsd).toBeNull();
+    });
+
     it("prices claude-opus-5 and its dated variants from the built-in catalog", () => {
         const catalog = builtInPricingCatalog();
 
@@ -182,6 +224,22 @@ describe("model pricing", () => {
         }
         // opus-5 must NOT fall through to the opus-4 rule (15/75).
         expect(pricingForModel("claude-opus-5", catalog)?.outputPerMillionUsd).not.toBe(75);
+    });
+
+    it("routes dated and suffixed Opus 4 variants to their specific catalog entries", () => {
+        const catalog = builtInPricingCatalog();
+        const cases = [
+            ["claude-opus-4-5-20251101", "claude-opus-4-5"],
+            ["claude-opus-4-5-thinking", "claude-opus-4-5"],
+            ["claude-opus-4-6-20260201", "claude-opus-4-6"],
+            ["claude-opus-4-7-20260301", "claude-opus-4-7"],
+            ["claude-opus-4-8-20260401", "claude-opus-4-8"],
+            ["claude-opus-4.1-20250401", "claude-opus-4.1"],
+        ] as const;
+
+        for (const [variant, base] of cases) {
+            expect(pricingForModel(variant, catalog)).toEqual(catalog.get(base)!);
+        }
     });
 
     it("routes dated GPT-5.6 tier variants to their own tier, not the gpt-5.5 approximation", () => {

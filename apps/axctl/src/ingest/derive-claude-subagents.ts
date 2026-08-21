@@ -19,6 +19,7 @@ import {
     writeTokenUsageForSubagents,
 } from "./transcripts.ts";
 import { resolveSkillName } from "@ax/lib/skill-id";
+import { loadPricingCatalog } from "./model-pricing.ts";
 
 interface SubagentManifest {
     readonly agentId: string;
@@ -189,6 +190,7 @@ export const deriveClaudeSubagents = (
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
+        const pricingCatalog = (yield* loadPricingCatalog(cfg.paths.dataDir)).catalog;
         if (opts.onProgress) yield* opts.onProgress({ phase: 1 });
         const manifests = yield* discover(cfg.paths.transcriptsDir);
         if (opts.onProgress) {
@@ -343,7 +345,7 @@ export const deriveClaudeSubagents = (
                 }));
                 if (parentRepository !== null) repositoryInherited += 1;
 
-                yield* writeTokenUsageForSubagents(write, extracted);
+                yield* writeTokenUsageForSubagents(write, extracted, pricingCatalog);
                 yield* upsertTurnsForSubagents(write, extracted.turns);
                 yield* writeToolCallStatementsForSubagents(write, extracted.toolCalls);
                 yield* writeToolFileEvidenceForSubagents(write, extracted.toolCalls);

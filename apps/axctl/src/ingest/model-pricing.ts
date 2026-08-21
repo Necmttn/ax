@@ -38,6 +38,24 @@ export interface CostEstimate {
     readonly pricingSource: string | null;
 }
 
+export const sumCostEstimates = (costs: readonly CostEstimate[]): CostEstimate => {
+    const sumComponent = (values: ReadonlyArray<number | null>): number | null => {
+        const known = values.filter((value): value is number => value !== null);
+        return known.length === 0 ? null : known.reduce((sum, value) => sum + value, 0);
+    };
+    const sources = new Set(costs.flatMap((cost) => cost.pricingSource === null ? [] : [cost.pricingSource]));
+    return {
+        inputUsd: sumComponent(costs.map((cost) => cost.inputUsd)),
+        outputUsd: sumComponent(costs.map((cost) => cost.outputUsd)),
+        cacheCreationUsd: sumComponent(costs.map((cost) => cost.cacheCreationUsd)),
+        cacheReadUsd: sumComponent(costs.map((cost) => cost.cacheReadUsd)),
+        totalUsd: costs.some((cost) => cost.totalUsd === null)
+            ? null
+            : costs.reduce((sum, cost) => sum + cost.totalUsd!, 0),
+        pricingSource: sources.size === 1 ? [...sources][0]! : sources.size > 1 ? "mixed" : null,
+    };
+};
+
 export interface AgentModelPricingRow {
     readonly name?: string | null;
     readonly provider?: string | null;
@@ -80,7 +98,7 @@ const withCacheDefaults = (pricing: ModelPricing): ModelPricing => ({
     cacheReadPerMillionUsd: pricing.cacheReadPerMillionUsd ?? (pricing.inputPerMillionUsd === null ? null : pricing.inputPerMillionUsd * 0.1),
 });
 
-export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing>> = {
+const RAW_BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing>> = {
     "gpt-5": {
         provider: "openai",
         inputPerMillionUsd: 1.25,
@@ -353,6 +371,11 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
     },
 };
 
+export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing>> = Object.fromEntries(
+    Object.entries(RAW_BUILTIN_MODEL_PRICING_CATALOG)
+        .map(([modelKey, pricing]) => [modelKey, withCacheDefaults(pricing)]),
+);
+
 /**
  * Claude Code's placeholder `model` on assistant entries it generated WITHOUT an
  * API call. It is not a model: it must never win a session's model attribution
@@ -508,6 +531,11 @@ export function pricingForModel(
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
     if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
     if (modelKey.startsWith("claude-opus-5")) return catalog.get("claude-opus-5") ?? null;
+    if (modelKey.startsWith("claude-opus-4-5")) return catalog.get("claude-opus-4-5") ?? null;
+    if (modelKey.startsWith("claude-opus-4-6")) return catalog.get("claude-opus-4-6") ?? null;
+    if (modelKey.startsWith("claude-opus-4-7")) return catalog.get("claude-opus-4-7") ?? null;
+    if (modelKey.startsWith("claude-opus-4-8")) return catalog.get("claude-opus-4-8") ?? null;
+    if (modelKey.startsWith("claude-opus-4.1")) return catalog.get("claude-opus-4.1") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-5")) return catalog.get("claude-sonnet-5") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
@@ -583,9 +611,15 @@ export function estimateCost(input: {
     const cacheCreationUsd = componentCost(cacheCreationTokens, cacheCreationRate);
     const cacheReadUsd = componentCost(cacheReadTokens, cacheReadRate);
     const tierMultiplier = input.fastTier === true ? pricing.fastMultiplier : 1;
-    const totalUsd = [inputUsd, outputUsd, cacheCreationUsd, cacheReadUsd]
-        .filter((value): value is number => value !== null)
-        .reduce((sum, value) => sum + value, 0) * tierMultiplier;
+    const hasUnpricedTokens = (freshInputTokens > 0 && inputUsd === null)
+        || ((input.completionTokens ?? 0) > 0 && outputUsd === null)
+        || (cacheCreationTokens > 0 && cacheCreationUsd === null)
+        || (cacheReadTokens > 0 && cacheReadUsd === null);
+    const totalUsd = hasUnpricedTokens
+        ? null
+        : [inputUsd, outputUsd, cacheCreationUsd, cacheReadUsd]
+            .filter((value): value is number => value !== null)
+            .reduce((sum, value) => sum + value, 0) * tierMultiplier;
     return {
         inputUsd,
         outputUsd,

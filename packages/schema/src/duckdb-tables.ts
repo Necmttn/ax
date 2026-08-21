@@ -119,7 +119,7 @@ const TABLE_METADATA: Readonly<Record<string, Omit<DuckdbTableSpec, "table">>> =
     user_message_ngram: { kind: "node", stage: "active", layer: "derived", note: "Derived user-language n-grams for preference and correction mining." },
     workflow_epoch: { kind: "node", stage: "active", layer: "derived", note: "Derived workflow eras for before/after comparisons." },
     session_token_usage: { kind: "node", stage: "active", layer: "event", note: "Actual or estimated session token/cache usage. LAYER NOTE (#893): event (actuals parsed from transcripts), with two enumerated derived writers - session-health upserts ESTIMATED rows (WRITE_MODE_EXCEPTIONS) and derive-metrics backfills cost columns (ENRICHMENT_COLUMNS)." },
-    turn_token_usage: { kind: "node", stage: "active", layer: "event", note: "Provider-derived per-turn token/cache usage and priced cost estimates." },
+    turn_token_usage: { kind: "node", stage: "active", layer: "event", note: "Provider-derived per-turn token/cache usage. Derive-metrics can backfill its cost columns through ENRICHMENT_COLUMNS." },
     session_health: { kind: "node", stage: "active", layer: "derived", note: "Derived session-level workflow, context, and interruption health." },
     session_metrics: { kind: "node", stage: "active", layer: "derived", note: "Graph-derived per-session metrics (durability, time-to-land, loc)." },
     fragility_cascade: { kind: "node", stage: "active", layer: "derived", note: "Precomputed cross-session fragility-cascade signal edges (origin session -> downstream fixer)." },
@@ -208,8 +208,9 @@ const TABLE_METADATA: Readonly<Record<string, Omit<DuckdbTableSpec, "table">>> =
  *   stamp (currently nulled by a parser bug, #898).
  * - invoked.turn_index/total_turns/is_first - invoked-positions backfill;
  *   invoked.was_corrected - signals correction stamping.
- * - session_token_usage.estimated_cost_usd/pricing_source - derive-metrics
- *   cost backfill (`WHERE estimated_cost_usd IS NULL`).
+ * - session_token_usage.estimated_cost_usd/pricing_source and
+ *   turn_token_usage cost columns - derive-metrics cost backfill
+ *   (`WHERE estimated_cost_usd IS NULL`).
  * - commit.reverted - derive-metrics revert detection.
  * - turn.intent_kind - `ax derive-intents` (CLI-only writer).
  */
@@ -217,6 +218,14 @@ export const ENRICHMENT_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     session: ["project", "repository", "checkout", "cwd", "reasoning_effort"],
     invoked: ["turn_index", "total_turns", "is_first", "was_corrected"],
     session_token_usage: ["estimated_cost_usd", "pricing_source"],
+    turn_token_usage: [
+        "estimated_input_cost_usd",
+        "estimated_output_cost_usd",
+        "estimated_cache_creation_cost_usd",
+        "estimated_cache_read_cost_usd",
+        "estimated_cost_usd",
+        "pricing_source",
+    ],
     commit: ["reverted"],
     turn: ["intent_kind"],
 };

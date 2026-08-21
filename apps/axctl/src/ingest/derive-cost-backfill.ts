@@ -1,6 +1,6 @@
 /**
- * Derive-time cost backfill for `session_token_usage` rows that were never
- * priced at ingest (review must-fix on #175).
+ * Derive-time cost backfill for session and turn token usage rows that were
+ * never priced at ingest (review must-fix on #175 and #937).
  *
  * The read-time estimator (`metrics/cost-estimate.ts`) fixed only the 3
  * surfaces that call `fillEstimatedCost`; every other reader (dashboard cost
@@ -22,19 +22,20 @@
  *   `estimated:` are also skipped in JS, defensively). Re-pricing after a
  *   catalog change is intentionally NOT done here - delete the stored
  *   `estimated:` costs to force a recompute.
- * - Bounded: one indexed-or-full select over session_token_usage (one row per
- *   session, ~thousands) with a hard row cap; UPDATEs by primary record id in
- *   chunks. No edge derefs (hang safety).
+ * - Bounded: direct selects over both usage tables share one hard row cap.
+ *   UPDATEs use primary record ids. No edge derefs exist on this path.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
+    ESTIMATED_PRICING_PREFIX,
     fillEstimatedCost,
     isEstimatedPricingSource,
     loadPricingCatalogForModels,
 } from "../metrics/cost-estimate.ts";
 import { numOrNull, numOrZero, strOrNull } from "../metrics/util.ts";
+import { estimateCost, normalizeModelName } from "./model-pricing.ts";
 
 export interface CostBackfillStats {
     /** Null-cost rows scanned this run. */
@@ -48,6 +49,7 @@ export interface CostBackfillStats {
 /** Hard cap on rows per run (one row per session - generous headroom; residual
  *  rows heal on the next derive run, which the daemon triggers per ingest). */
 const MAX_ROWS_PER_RUN = 20_000;
+const MIN_TURN_ROWS_PER_RUN = MAX_ROWS_PER_RUN / 2;
 
 const UsageRow = Schema.Struct({
     id: Schema.String,
@@ -69,14 +71,29 @@ export const deriveCostBackfill = (
     write: CacheWriteService,
 ): Effect.Effect<CostBackfillStats, CacheWriteError> =>
     Effect.gen(function* () {
-        const rows = yield* write.rows(
+        const turnRows = yield* write.rows(
             UsageRow,
             `SELECT id, model, prompt_tokens, completion_tokens,`
             + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
             + ` estimated_cost_usd, pricing_source`
-            + ` FROM session_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
-            [MAX_ROWS_PER_RUN],
+            + ` FROM turn_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
+            [MIN_TURN_ROWS_PER_RUN],
         );
+        const sessionLimit = MAX_ROWS_PER_RUN - turnRows.length;
+        const sessionRows = sessionLimit === 0
+            ? []
+            : yield* write.rows(
+                UsageRow,
+                `SELECT id, model, prompt_tokens, completion_tokens,`
+                + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
+                + ` estimated_cost_usd, pricing_source`
+                + ` FROM session_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
+                [sessionLimit],
+            );
+        const rows = [
+            ...sessionRows.map((row) => ({ ...row, table: "session_token_usage" as const })),
+            ...turnRows.map((row) => ({ ...row, table: "turn_token_usage" as const })),
+        ];
         if (rows.length === 0) return { scanned: 0, backfilled: 0, unpriced: 0 };
 
         const catalog = yield* loadPricingCatalogForModels(write, rows.map((r) => strOrNull(r.model)));
@@ -91,7 +108,7 @@ export const deriveCostBackfill = (
             // an already-estimated row (idempotency: catalog drift must not make
             // every derive run rewrite the whole table).
             if (storedCost !== null || isEstimatedPricingSource(storedSource)) continue;
-            const filled = fillEstimatedCost({
+            const usage = {
                 model: strOrNull(row.model),
                 prompt_tokens: numOrNull(row.prompt_tokens),
                 completion_tokens: numOrNull(row.completion_tokens),
@@ -100,7 +117,40 @@ export const deriveCostBackfill = (
                 estimated_tokens: numOrZero(row.estimated_tokens),
                 estimated_cost_usd: null,
                 pricing_source: storedSource,
-            }, catalog);
+            };
+            if (row.table === "turn_token_usage") {
+                const cost = estimateCost({
+                    modelKey: normalizeModelName(usage.model),
+                    promptTokens: usage.prompt_tokens,
+                    completionTokens: usage.completion_tokens,
+                    cacheCreationInputTokens: usage.cache_creation_input_tokens,
+                    cacheReadInputTokens: usage.cache_read_input_tokens,
+                    estimatedTokens: usage.estimated_tokens,
+                    pricingCatalog: catalog,
+                });
+                if (cost.totalUsd === null || cost.pricingSource === null) {
+                    unpriced += 1;
+                    continue;
+                }
+                yield* write.exec(
+                    `UPDATE turn_token_usage SET estimated_input_cost_usd = ?,`
+                        + ` estimated_output_cost_usd = ?, estimated_cache_creation_cost_usd = ?,`
+                        + ` estimated_cache_read_cost_usd = ?, estimated_cost_usd = ?, pricing_source = ?`
+                        + ` WHERE id = ? AND estimated_cost_usd IS NULL`,
+                    [
+                        cost.inputUsd,
+                        cost.outputUsd,
+                        cost.cacheCreationUsd,
+                        cost.cacheReadUsd,
+                        cost.totalUsd,
+                        `${ESTIMATED_PRICING_PREFIX}${cost.pricingSource}`,
+                        row.id,
+                    ],
+                );
+                backfilled += 1;
+                continue;
+            }
+            const filled = fillEstimatedCost(usage, catalog);
             if (!filled.estimated || filled.estimatedCostUsd === null || filled.pricingSource === null) {
                 unpriced += 1;
                 continue;
