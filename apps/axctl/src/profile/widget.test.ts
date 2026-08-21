@@ -85,6 +85,23 @@ describe("replaceProfileWidget", () => {
 
         expect(updated).toBe(`# Necmttn\n\nIntro stays.\n\n${nextBlock}\n`);
     });
+
+    test("refuses nested markers before it can corrupt the README", () => {
+        const readme = [
+            "# profile",
+            PROFILE_WIDGET_START,
+            "old outer content",
+            PROFILE_WIDGET_START,
+            "old inner content",
+            PROFILE_WIDGET_END,
+            "stale outer tail",
+            PROFILE_WIDGET_END,
+        ].join("\n");
+
+        expect(() => replaceProfileWidget(readme, renderProfileWidget(profile))).toThrow(
+            "README must contain exactly one ax START marker and one ax END marker",
+        );
+    });
 });
 
 describe("installOrUpdateProfileWidget", () => {

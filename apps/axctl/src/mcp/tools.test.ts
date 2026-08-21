@@ -16,7 +16,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     skills_by_role: ["limit", "role"],
     skills_roles: ["skill"],
     roles: [],
-    improve_recommend: ["agent", "forms", "limit", "sinceDays"],
+    improve_recommend: ["forms", "limit", "sinceDays"],
     improve_show: ["sigOrId"],
     improve_list: ["form", "limit", "status"],
     session_metrics: ["limit", "project", "sinceDays"],

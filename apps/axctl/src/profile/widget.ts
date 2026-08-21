@@ -115,14 +115,19 @@ export function renderProfileWidget(profile: ProfileV1): string {
     ].join("\n");
 }
 
-const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 export function replaceProfileWidget(readme: string, block: string): string {
-    const existingBlock = new RegExp(
-        `${escapeRegExp(PROFILE_WIDGET_START)}[\\s\\S]*?${escapeRegExp(PROFILE_WIDGET_END)}`,
-    );
-    if (existingBlock.test(readme)) {
-        return readme.replace(existingBlock, block);
+    const startCount = readme.split(PROFILE_WIDGET_START).length - 1;
+    const endCount = readme.split(PROFILE_WIDGET_END).length - 1;
+    if (startCount !== endCount || startCount > 1) {
+        throw new Error("README must contain exactly one ax START marker and one ax END marker, or no ax markers");
+    }
+    if (startCount === 1) {
+        const start = readme.indexOf(PROFILE_WIDGET_START);
+        const end = readme.indexOf(PROFILE_WIDGET_END);
+        if (start > end) {
+            throw new Error("README ax START marker must occur before the ax END marker");
+        }
+        return `${readme.slice(0, start)}${block}${readme.slice(end + PROFILE_WIDGET_END.length)}`;
     }
     if (readme.length === 0) return `${block}\n`;
     const prefix = readme.endsWith("\n") ? readme : `${readme}\n`;

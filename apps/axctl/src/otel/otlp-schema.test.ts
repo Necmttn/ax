@@ -112,4 +112,27 @@ describe("otlp envelope schemas", () => {
         const d = Schema.decodeUnknownSync(LogsPayload)(payload);
         expect(d.resourceLogs[0]?.scopeLogs[0]?.logRecords[0]?.attributes?.[0]?.key).toBe("event.name");
     });
+
+    test("defaults omitted repeated log fields without dropping sibling records", () => {
+        const empty = Schema.decodeUnknownSync(LogsPayload)({});
+        const payload = {
+            resourceLogs: [
+                {},
+                {
+                    resource: {},
+                    scopeLogs: [
+                        {},
+                        { logRecords: [{ observedTimeUnixNano: "1718409600000000000" }] },
+                    ],
+                },
+            ],
+        };
+        const decoded = Schema.decodeUnknownSync(LogsPayload)(payload);
+
+        expect(empty.resourceLogs).toEqual([]);
+        expect(decoded.resourceLogs[0]?.scopeLogs).toEqual([]);
+        expect(decoded.resourceLogs[1]?.resource?.attributes).toEqual([]);
+        expect(decoded.resourceLogs[1]?.scopeLogs[0]?.logRecords).toEqual([]);
+        expect(decoded.resourceLogs[1]?.scopeLogs[1]?.logRecords[0]?.attributes).toEqual([]);
+    });
 });

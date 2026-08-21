@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /**
  * An OTLP/JSON int64 field, which arrives as EITHER a JSON string or a JSON
@@ -39,6 +39,9 @@ export const KeyValue = Schema.Struct({
 });
 export type KeyValue = Schema.Schema.Type<typeof KeyValue>;
 
+const repeated = <S extends Schema.Top>(item: S) =>
+    Schema.Array(item).pipe(Schema.withDecodingDefaultKey(Effect.succeed([])));
+
 /** Collapse an AnyValue to a JS scalar; intValue parses to number. */
 export const attrValueToScalar = (v: AnyValue | undefined): string | number | boolean | null => {
     if (!v) return null;
@@ -56,13 +59,13 @@ export const attrMap = (kvs: readonly KeyValue[] | undefined): Map<string, strin
     return m;
 };
 
-const Resource = Schema.Struct({ attributes: Schema.optional(Schema.Array(KeyValue)) });
+const Resource = Schema.Struct({ attributes: repeated(KeyValue) });
 
 const NumberDataPoint = Schema.Struct({
     asDouble: Schema.optional(Schema.Number),
     asInt: Schema.optional(OtlpInt64),           // string OR number - see OtlpInt64
     timeUnixNano: Schema.optional(OtlpInt64),
-    attributes: Schema.optional(Schema.Array(KeyValue)),
+    attributes: repeated(KeyValue),
 });
 
 const Metric = Schema.Struct({
@@ -89,7 +92,7 @@ const Span = Schema.Struct({
     parentSpanId: Schema.optional(Schema.String),
     startTimeUnixNano: OtlpInt64,
     endTimeUnixNano: OtlpInt64,
-    attributes: Schema.optional(Schema.Array(KeyValue)),
+    attributes: repeated(KeyValue),
 });
 
 export const TracePayload = Schema.Struct({
@@ -105,15 +108,15 @@ export type TracePayload = Schema.Schema.Type<typeof TracePayload>;
 const LogRecord = Schema.Struct({
     timeUnixNano: Schema.optional(OtlpInt64),
     observedTimeUnixNano: Schema.optional(OtlpInt64),
-    attributes: Schema.optional(Schema.Array(KeyValue)),
+    attributes: repeated(KeyValue),
     body: Schema.optional(Schema.Unknown),
 });
 
 export const LogsPayload = Schema.Struct({
-    resourceLogs: Schema.Array(Schema.Struct({
-        resource: Schema.optional(Schema.Struct({ attributes: Schema.optional(Schema.Array(KeyValue)) })),
-        scopeLogs: Schema.Array(Schema.Struct({
-            logRecords: Schema.Array(LogRecord),
+    resourceLogs: repeated(Schema.Struct({
+        resource: Schema.optional(Schema.Struct({ attributes: repeated(KeyValue) })),
+        scopeLogs: repeated(Schema.Struct({
+            logRecords: repeated(LogRecord),
         })),
     })),
 });

@@ -257,7 +257,7 @@ export const deriveWorkflowProposalRows = (
         if (arc.support < minSessions) { skipped += 1; continue; }
         const title = workflowTitle(arc.steps);
         const normTitle = normalizeTitle(title);
-        const sig = dedupeSig("workflow", normTitle);
+        const sig = dedupeSig("guidance", normTitle);
         if (seenSigs.has(sig)) { skipped += 1; continue; }
         seenSigs.add(sig);
 
@@ -679,6 +679,7 @@ interface ProposalDedupeMigrationRow {
     readonly status: string;
     readonly origin: string;
     readonly baseline: string | null;
+    readonly reject_reason: string | null;
 }
 
 const decisionRank = (status: string): number => {
@@ -725,7 +726,9 @@ const migratedProposalId = (row: ProposalDedupeMigrationRow, sig: string): strin
  * A sidecar can already contain logical duplicates if an earlier Bun upgrade
  * changed Bun.hash. The strongest closed decision receives the canonical SHA
  * signature. Other rows receive deterministic legacy suffixes. Thus no decision
- * row or linked row is deleted, while future derivation sees the canonical sig.
+ * row or linked experiment is deleted. Open legacy twins without decisions or
+ * experiments are removed after re-keying, so old workflow duplicates do not
+ * remain in the shortlist. Future derivation sees the canonical signature.
  */
 export const migrateProposalDedupeSigs = (
     judgment: JudgmentService,
@@ -739,7 +742,8 @@ export const migrateProposalDedupeSigs = (
             status: TextColumn,
             origin: TextColumn,
             baseline: Schema.NullOr(TextColumn),
-        }), "SELECT id, form, title, dedupe_sig, status, origin, baseline FROM proposal");
+            reject_reason: Schema.NullOr(TextColumn),
+        }), "SELECT id, form, title, dedupe_sig, status, origin, baseline, reject_reason FROM proposal");
 
         const groups = new Map<string, ProposalDedupeMigrationRow[]>();
         for (const row of rows) {
@@ -767,8 +771,6 @@ export const migrateProposalDedupeSigs = (
             const target = targets.get(row.id)!;
             return target.id !== row.id || target.sig !== row.dedupe_sig;
         });
-        if (changed.length === 0) return;
-
         yield* judgment.transaction((transaction) => Effect.gen(function* () {
             for (const row of changed) {
                 const target = targets.get(row.id)!;
@@ -807,6 +809,28 @@ export const migrateProposalDedupeSigs = (
                 yield* transaction.exec(
                     "UPDATE proposal SET id = ?, dedupe_sig = ? WHERE id = ?",
                     [target.id, target.sig, `__ax_dedupe_migration_tmp_id__${row.id}`],
+                );
+            }
+
+            for (const row of rows) {
+                const target = targets.get(row.id)!;
+                if (!target.sig.includes("__legacy__") || row.status !== "open" || row.reject_reason !== null) {
+                    continue;
+                }
+                const payloadTable = proposalPayloadTable(row.form);
+                if (payloadTable !== null) {
+                    yield* transaction.exec(
+                        `DELETE FROM ${payloadTable}
+                         WHERE proposal = ?
+                           AND NOT EXISTS (SELECT 1 FROM experiment WHERE proposal = ?)`,
+                        [target.id, target.id],
+                    );
+                }
+                yield* transaction.exec(
+                    `DELETE FROM proposal
+                     WHERE id = ? AND status = 'open' AND reject_reason IS NULL
+                       AND NOT EXISTS (SELECT 1 FROM experiment WHERE proposal = ?)`,
+                    [target.id, target.id],
                 );
             }
         }));

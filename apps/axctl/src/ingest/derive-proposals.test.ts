@@ -175,6 +175,65 @@ ORDER BY p.id`);
             },
         ].sort((a, b) => a.id.localeCompare(b.id)));
     });
+
+    test("removes only unprotected open legacy twins", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-proposal-cleanup-"));
+        dirs.push(dir);
+        const sidecarPath = join(dir, "judgment.sqlite");
+
+        const rows = await Effect.runPromise(Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            const title = "Workflow: plan → test → commit";
+            const sig = dedupeSig("guidance", normalizeTitle(title));
+            const proposal = (id: string, dedupe_sig: string, status: string) => ({
+                id,
+                form: "guidance",
+                title,
+                hypothesis: "test",
+                dedupe_sig,
+                confidence: "medium",
+                status,
+            });
+            yield* judgment.put("proposal", proposal("canonical", sig, "open"));
+            yield* judgment.put("proposal", proposal("delete-me", `${sig}__legacy__delete`, "open"));
+            yield* judgment.put("proposal", proposal("keep-decision", `${sig}__legacy__decision`, "rejected"));
+            yield* judgment.put("proposal", proposal("keep-experiment", `${sig}__legacy__experiment`, "open"));
+            yield* judgment.put("guidance_proposal", {
+                id: "delete-payload",
+                proposal: "delete-me",
+                file_target: "CLAUDE.md",
+                section: "workflows",
+                suggested_text: "plan → test → commit",
+            });
+            yield* judgment.put("experiment", {
+                id: "protected-experiment",
+                proposal: "keep-experiment",
+                status: "task_emitted",
+            });
+
+            yield* migrateProposalDedupeSigs(judgment);
+            yield* migrateProposalDedupeSigs(judgment);
+
+            return yield* judgment.rows(Schema.Struct({
+                id: Schema.String,
+                status: Schema.String,
+                experiment_id: Schema.NullOr(Schema.String),
+            }), `
+SELECT p.id, p.status, e.id AS experiment_id
+FROM proposal p
+LEFT JOIN experiment e ON e.proposal = p.id
+ORDER BY p.id`);
+        }).pipe(
+            Effect.scoped,
+            Effect.provide(JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL })),
+        ));
+
+        expect(rows.map((row) => row.id)).not.toContain("delete-me");
+        expect(rows.map((row) => row.id)).not.toContain("canonical");
+        expect(rows).toContainEqual({ id: "keep-decision", status: "rejected", experiment_id: null });
+        expect(rows).toContainEqual({ id: "keep-experiment", status: "open", experiment_id: "protected-experiment" });
+        expect(rows).toHaveLength(2);
+    });
 });
 
 describe("deriveSkillProposalRows", () => {
@@ -535,6 +594,7 @@ describe("deriveWorkflowProposalRows", () => {
         expect(rows[0]!.title).toContain("plan");
         expect(rows[0]!.frequency).toBe(5); // support → frequency
         expect(rows[0]!.section).toBe("workflows"); // discriminator
+        expect(rows[0]!.sig).toBe(dedupeSig("guidance", normalizeTitle(rows[0]!.title)));
         // stable sig: same arc → same sig
         const again = deriveWorkflowProposalRows([{ steps: ["plan", "tdd", "review", "commit"], support: 5 }]);
         expect(again.rows[0]!.sig).toBe(rows[0]!.sig);
