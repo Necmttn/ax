@@ -14,11 +14,12 @@
 //
 // Wire it by pointing the hook command at this file with the real hook as arg:
 //   bun ~/.ax/hooks/advise-tap.ts ~/.ax/hooks/route-dispatch.js
-import { appendFileSync } from "node:fs";
+import { appendFileSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const LOG = join(homedir(), ".ax/hooks/advise-log.jsonl");
+const MAX_LOG_BYTES = 10 * 1024 * 1024;
 const target = process.argv[2];
 if (!target) {
   process.stderr.write("advise-tap: missing target hook path (argv[2])\n");
@@ -47,21 +48,31 @@ try {
   advice = JSON.parse(out)?.hookSpecificOutput?.additionalContext ?? null;
 } catch {}
 
-// One ledger row per fire. `ts` stamped by the OS (hooks may run in cron).
-appendFileSync(
-  LOG,
-  JSON.stringify({
-    ts: new Date().toISOString(),
-    session_id: sessionId,
-    tool: toolName,
-    description: (toolInput as { description?: string })?.description ?? null,
-    injected: advice, // the additionalContext the model received (null = allow)
-    verdict: advice ? "advise" : "allow",
-    raw_stdout: out.trim() || null,
-  }) + "\n",
-);
-
 // Transparent pass-through: the model still gets exactly what the hook emitted.
 if (err) process.stderr.write(err);
 if (out) process.stdout.write(out);
+
+// One ledger row per fire. Recording is best-effort and cannot replace the
+// target hook result.
+try {
+  if (statSync(LOG).size >= MAX_LOG_BYTES) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    renameSync(LOG, join(homedir(), `.ax/hooks/advise-log.${stamp}-${process.pid}.jsonl`));
+  }
+} catch {}
+try {
+  appendFileSync(
+    LOG,
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      session_id: sessionId,
+      tool: toolName,
+      description: (toolInput as { description?: string })?.description ?? null,
+      injected: advice, // the additionalContext the model received (null = allow)
+      verdict: advice ? "advise" : "allow",
+      raw_stdout: out.trim() || null,
+    }) + "\n",
+  );
+} catch {}
+
 process.exit(exitCode === 2 ? 2 : 0);
