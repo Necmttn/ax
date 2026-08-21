@@ -29,6 +29,8 @@ const nnum = Schema.NullOr(NumberFromBigIntColumn);
 const CostModelsAggRow = Schema.Struct({
     model: Schema.NullOr(Schema.String),
     sessions: NumberFromBigIntColumn,
+    priced_rows: Schema.NullOr(NumberFromBigIntColumn),
+    unpriced_rows: Schema.NullOr(NumberFromBigIntColumn),
     prompt_tokens: nnum,
     completion_tokens: nnum,
     cache_read_tokens: nnum,
@@ -40,6 +42,8 @@ const CostSplitAggRow = Schema.Struct({
     source: Schema.String,
     model: Schema.NullOr(Schema.String),
     sessions: NumberFromBigIntColumn,
+    priced_rows: Schema.NullOr(NumberFromBigIntColumn),
+    unpriced_rows: Schema.NullOr(NumberFromBigIntColumn),
     prompt_tokens: nnum,
     completion_tokens: nnum,
     cache_read_tokens: nnum,
@@ -80,25 +84,26 @@ const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
  * row that already carries a stored cost - `derive-cost-backfill.ts`).
  *
  * Resolution order:
- * 1. A stored cost > 0 is real money - never mask it, never recompute it.
+ * 1. A fully priced stored cost > 0 is real money - never mask or recompute it.
  * 2. Zero tokens is a genuine zero-usage row (including the "(unattributed)"
  *    sentinel) - show $0, not UNPRICED.
- * 3. Stored cost === 0 with real tokens and a catalog rate: recompute from
- *    the row's own token split at query time (self-healing without an
- *    ingest re-run).
- * 4. Stored cost === 0 with real tokens and NO catalog rate: genuinely
- *    unpriced - render UNPRICED rather than a silent $0.
+ * 3. A zero-cost or partly priced group with a catalog rate is recomputed from
+ *    its token split at query time.
+ * 4. A zero-cost or partly priced group without a catalog rate is flagged
+ *    UNPRICED. A partial stored sum remains visible.
  */
 const EMPTY_PRICING_CATALOG: ReadonlyMap<string, ModelPricing> = new Map();
 
 /**
- * True when any row carries a stored zero cost with real tokens - the only
- * shape `resolveRowCost` needs a catalog for. Keeps the catalog DB round-trip
- * out of the common all-priced path (and out of every positional-mock caller
- * that never exercises recompute, e.g. buildProfile).
+ * True when any row needs price resolution. This includes zero-cost rows and
+ * groups with incomplete price coverage. Keeps the catalog DB round-trip out
+ * of the common fully priced path.
  */
 interface PriceableTotals {
     readonly cost_usd: number | null;
+    readonly sessions?: number;
+    readonly priced_rows?: number | null;
+    readonly unpriced_rows?: number | null;
     readonly prompt_tokens: number | null;
     readonly completion_tokens: number | null;
     readonly cache_read_tokens: number | null;
@@ -107,7 +112,9 @@ interface PriceableTotals {
 
 const rowsNeedPricing = (rows: ReadonlyArray<PriceableTotals>): boolean =>
     rows.some((row) =>
-        (row.cost_usd ?? 0) === 0
+        ((row.unpriced_rows ?? 0) > 0
+            || (row.priced_rows != null && row.sessions !== undefined && row.priced_rows !== row.sessions)
+            || (row.cost_usd ?? 0) === 0)
         && (row.prompt_tokens ?? 0) + (row.completion_tokens ?? 0)
             + (row.cache_read_tokens ?? 0) + (row.cache_create_tokens ?? 0) > 0,
     );
@@ -120,11 +127,16 @@ function resolveRowCost(
         readonly cacheReadTokens: number;
         readonly cacheCreateTokens: number;
         readonly costUsd: number;
+        readonly rowCount: number;
+        readonly pricedRows: number;
+        readonly unpricedRows: number;
     },
     catalog: ReadonlyMap<string, ModelPricing>,
 ): { readonly cost_usd: number; readonly unpriced: boolean } {
-    if (input.costUsd > 0) {
-        return { cost_usd: input.costUsd, unpriced: false };
+    const storedCost = Number.isFinite(input.costUsd) ? input.costUsd : 0;
+    const incompletePricing = input.unpricedRows > 0 || input.pricedRows !== input.rowCount;
+    if (storedCost > 0 && !incompletePricing) {
+        return { cost_usd: storedCost, unpriced: false };
     }
     const totalTokens = input.promptTokens + input.completionTokens + input.cacheReadTokens + input.cacheCreateTokens;
     if (totalTokens === 0) {
@@ -133,7 +145,7 @@ function resolveRowCost(
     const modelKey = normalizeModelName(input.model);
     const pricing = pricingForModel(modelKey, catalog);
     if (!pricing) {
-        return { cost_usd: 0, unpriced: true };
+        return { cost_usd: storedCost, unpriced: true };
     }
     const estimate = estimateCost({
         modelKey,
@@ -185,6 +197,8 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
             `SELECT
     model,
     count(*) AS sessions,
+    count(estimated_cost_usd) AS priced_rows,
+    count(*) FILTER (WHERE estimated_cost_usd IS NULL) AS unpriced_rows,
     coalesce(sum(prompt_tokens), 0) AS prompt_tokens,
     coalesce(sum(completion_tokens), 0) AS completion_tokens,
     coalesce(sum(cache_read_input_tokens), 0) AS cache_read_tokens,
@@ -220,6 +234,9 @@ ORDER BY cost_usd DESC;`,
                 cacheReadTokens,
                 cacheCreateTokens,
                 costUsd: row.cost_usd ?? 0,
+                rowCount: row.sessions,
+                pricedRows: row.priced_rows ?? row.sessions,
+                unpricedRows: row.unpriced_rows ?? 0,
             }, catalog);
             return {
                 model,
@@ -362,6 +379,8 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
     source,
     model,
     count(*) AS sessions,
+    count(estimated_cost_usd) AS priced_rows,
+    count(*) FILTER (WHERE estimated_cost_usd IS NULL) AS unpriced_rows,
     coalesce(sum(prompt_tokens), 0) AS prompt_tokens,
     coalesce(sum(completion_tokens), 0) AS completion_tokens,
     coalesce(sum(cache_read_input_tokens), 0) AS cache_read_tokens,
@@ -379,6 +398,8 @@ ORDER BY cost_usd DESC;`,
             origin: "main" | "subagent";
             model: string;
             sessions: number;
+            priced_rows: number;
+            unpriced_rows: number;
             prompt_tokens: number;
             completion_tokens: number;
             cache_read_tokens: number;
@@ -397,10 +418,14 @@ ORDER BY cost_usd DESC;`,
             const cacheRead = row.cache_read_tokens ?? 0;
             const cacheCreate = row.cache_create_tokens ?? 0;
             const cost = row.cost_usd ?? 0;
+            const pricedRows = row.priced_rows ?? sessions;
+            const unpricedRows = row.unpriced_rows ?? 0;
 
             const existing = cellMap.get(key);
             if (existing) {
                 existing.sessions += sessions;
+                existing.priced_rows += pricedRows;
+                existing.unpriced_rows += unpricedRows;
                 existing.prompt_tokens += prompt;
                 existing.completion_tokens += completion;
                 existing.cache_read_tokens += cacheRead;
@@ -411,6 +436,8 @@ ORDER BY cost_usd DESC;`,
                     origin,
                     model,
                     sessions,
+                    priced_rows: pricedRows,
+                    unpriced_rows: unpricedRows,
                     prompt_tokens: prompt,
                     completion_tokens: completion,
                     cache_read_tokens: cacheRead,
@@ -437,8 +464,12 @@ ORDER BY cost_usd DESC;`,
                 cacheReadTokens: cell.cache_read_tokens,
                 cacheCreateTokens: cell.cache_create_tokens,
                 costUsd: cell.cost_usd,
+                rowCount: cell.sessions,
+                pricedRows: cell.priced_rows,
+                unpricedRows: cell.unpriced_rows,
             }, catalog);
-            return { ...cell, cost_usd: resolved.cost_usd, unpriced: resolved.unpriced };
+            const { priced_rows: _pricedRows, unpriced_rows: _unpricedRows, ...publicCell } = cell;
+            return { ...publicCell, cost_usd: resolved.cost_usd, unpriced: resolved.unpriced };
         });
 
         const totalCost = priced.reduce((sum, c) => sum + c.cost_usd, 0);

@@ -17,7 +17,7 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("routing impact io",
 
 const at = (iso: string) => new Date(iso);
 
-/** Two sessions' cost and four assistant turns, spread over three days. */
+/** Two session totals, two turn costs, and four turns, spread over three days. */
 const fixture = () =>
     runWithPlatform(
         publishCacheFixture(tempDir("ax-routing-io-"), dylibPath, (w) =>
@@ -33,7 +33,7 @@ const fixture = () =>
                         source: "claude",
                         estimated_tokens: 100n,
                         transcript_bytes: 10n,
-                        estimated_cost_usd: 1.5,
+                        estimated_cost_usd: 100,
                         ts: at("2026-08-01T12:00:00.000Z"),
                     },
                     {
@@ -42,7 +42,7 @@ const fixture = () =>
                         source: "claude",
                         estimated_tokens: 200n,
                         transcript_bytes: 20n,
-                        estimated_cost_usd: 2.25,
+                        estimated_cost_usd: 200,
                         ts: at("2026-08-03T12:00:00.000Z"),
                     },
                 ]);
@@ -51,6 +51,32 @@ const fixture = () =>
                     { id: "t2", session: "s1", seq: 2n, role: "user", ts: at("2026-08-01T12:01:00.000Z") },
                     { id: "t3", session: "s2", seq: 1n, role: "assistant", ts: at("2026-08-03T12:00:00.000Z") },
                     { id: "t4", session: "s2", seq: 2n, role: "assistant", ts: at("2026-08-05T12:00:00.000Z") },
+                ]);
+                yield* w.putMany("turn_token_usage", [
+                    {
+                        id: "tu1",
+                        session: "s1",
+                        turn: "t1",
+                        seq: 1n,
+                        source: "claude",
+                        estimated_tokens: 100n,
+                        estimated_cost_usd: 1.5,
+                        usage_source: "transcript",
+                        usage_quality: "exact",
+                        ts: at("2026-08-01T12:00:00.000Z"),
+                    },
+                    {
+                        id: "tu2",
+                        session: "s2",
+                        turn: "t3",
+                        seq: 1n,
+                        source: "claude",
+                        estimated_tokens: 200n,
+                        estimated_cost_usd: 2.25,
+                        usage_source: "transcript",
+                        usage_quality: "exact",
+                        ts: at("2026-08-03T12:00:00.000Z"),
+                    },
                 ]);
             }),
         ),
@@ -64,7 +90,7 @@ const metricsOver = (snapshotPath: string, startIso: string, endIso: string) =>
     );
 
 describe("fetchWindowMetrics", () => {
-    dtest("sums cost and counts ASSISTANT turns inside the window", async () => {
+    dtest("sums turn-time cost and counts ASSISTANT turns inside the window", async () => {
         const f = await fixture();
         const metrics = await metricsOver(
             f.snapshotPath,

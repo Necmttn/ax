@@ -88,6 +88,8 @@ describe("fetchCostModels", () => {
         const { layer, captured } = makeTestCacheRead({ routes: { "FROM session_token_usage": [] } });
         await runWithCache(layer, fetchCostModels({ sinceDays: 14 }));
         expect(captured[0]).toContain("GROUP BY model");
+        expect(captured[0]).toContain("count(estimated_cost_usd) AS priced_rows");
+        expect(captured[0]).toContain("estimated_cost_usd IS NULL) AS unpriced_rows");
         expect(captured[0]).toContain("ORDER BY cost_usd DESC");
     });
 });
@@ -99,6 +101,44 @@ describe("fetchCostModels", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
+    test("recomputes a partially priced model group instead of trusting its nonzero sum", async () => {
+        const dbRows = [
+            { model: "custom-model-x", sessions: 2, priced_rows: 1, unpriced_rows: 1,
+              prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1 },
+        ];
+        const agentModelRows = [
+            {
+                name: "custom-model-x", provider: "test",
+                input_per_million_usd: 2, output_per_million_usd: 10,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: null,
+                input_above_200k_per_million_usd: null, output_above_200k_per_million_usd: null,
+                cache_creation_above_200k_per_million_usd: null, cache_read_above_200k_per_million_usd: null,
+                fast_multiplier: 1, context_window: null, pricing_source: "litellm",
+            },
+        ];
+        const { layer } = makeTestCacheRead({
+            routes: { "FROM session_token_usage": dbRows, "FROM agent_model": agentModelRows },
+        });
+        const result = await runWithCache(layer, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 2, unpriced: false });
+    });
+
+    test("flags a partially priced model group when no catalog rate exists", async () => {
+        const dbRows = [
+            { model: "unknown-model", sessions: 2, priced_rows: 1, unpriced_rows: 1,
+              prompt_tokens: 1_000_000, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1 },
+        ];
+        const { layer } = makeTestCacheRead({
+            routes: { "FROM session_token_usage": dbRows, "FROM agent_model": [] },
+        });
+        const result = await runWithCache(layer, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 1, unpriced: true });
+    });
+
     test("never masks a real nonzero stored cost, even for a model absent from the built-in catalog", async () => {
         // "db-only-model" is priced ONLY via a DB agent_model refresh (litellm/
         // models.dev), never in BUILTIN_MODEL_PRICING_CATALOG. The old
@@ -355,6 +395,8 @@ describe("fetchCostSplit", () => {
         });
         await runWithCache(layer, fetchCostSplit({ sinceDays: 14 }));
         expect(captured[0]).toContain("GROUP BY source, model");
+        expect(captured[0]).toContain("count(estimated_cost_usd) AS priced_rows");
+        expect(captured[0]).toContain("estimated_cost_usd IS NULL) AS unpriced_rows");
     });
 });
 
@@ -364,6 +406,36 @@ describe("fetchCostSplit", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchCostSplit - #696 unpriced/recompute semantics", () => {
+    test("recomputes a partially priced split cell and updates totals", async () => {
+        const dbRows = [
+            { source: "claude", model: "custom-model-x", sessions: 2,
+              priced_rows: 1, unpriced_rows: 1, prompt_tokens: 1_000_000,
+              completion_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0,
+              cost_usd: 1 },
+        ];
+        const agentModelRows = [
+            {
+                name: "custom-model-x", provider: "test",
+                input_per_million_usd: 2, output_per_million_usd: 10,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: null,
+                input_above_200k_per_million_usd: null, output_above_200k_per_million_usd: null,
+                cache_creation_above_200k_per_million_usd: null, cache_read_above_200k_per_million_usd: null,
+                fast_multiplier: 1, context_window: null, pricing_source: "litellm",
+            },
+        ];
+        const { layer } = makeTestCacheRead({
+            routes: {
+                "FROM session_token_usage": dbRows,
+                "FROM agent_model": agentModelRows,
+                "FROM has_content": [],
+            },
+        });
+        const result = await runWithCache(layer, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 2, unpriced: false });
+        expect(result.totals.cost_usd).toBeCloseTo(2);
+    });
+
     test("never masks a real nonzero stored cost cell absent from the built-in catalog", async () => {
         const dbRows = [
             { source: "codex", model: "db-only-model", sessions: 1,
