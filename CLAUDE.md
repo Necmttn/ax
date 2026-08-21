@@ -394,7 +394,8 @@ refresh-skips a NEW path whose bytes carry a known sha), then triggers the
 contract-driven re-derive (stages whose declared writes are all
 derive/enrich/bookkeep) over `--since=ceil(now - min(started_at))` through the
 exported `cmdIngest`. Catalogs never ride (dangling edges knit later by stable
-ids); cost columns ride as priced by the exporter (manifest note). A segment
+ids); cost columns do NOT ride (enrichment-stripped since #937/#966 - the
+importer's re-derive prices them against the local catalog). A segment
 carries raw turn text - LOCAL artifact, never published, no attribution plug.
 
 ## Workflow extraction commands

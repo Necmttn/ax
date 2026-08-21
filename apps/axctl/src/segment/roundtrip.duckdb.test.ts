@@ -141,8 +141,10 @@ describe("segment export -> import round-trip on the shipped dylib", () => {
             expect((yield* one(Row, "SELECT intent_kind AS v FROM turn WHERE id = 't1'"))?.v).toBeNull();
             expect((yield* one(Row, "SELECT CAST(was_corrected AS VARCHAR) AS v FROM invoked WHERE id = 'iv1'"))?.v).toBe("false");
             expect((yield* one(Row, "SELECT pricing_source AS v FROM session_token_usage WHERE id = 'stu1'"))?.v).toBeNull();
-            // Parse-priced turn cost RIDES.
-            expect((yield* one(Num, "SELECT estimated_cost_usd AS v FROM turn_token_usage WHERE id = 'ttu1'"))?.v).toBe(0.5);
+            // RETRACTED (#937/#966): turn cost no longer rides - it is an
+            // enrichment column now; the importer's re-derive (cost backfill
+            // covers turn rows) prices it against the LOCAL catalog.
+            expect((yield* one(Num, "SELECT estimated_cost_usd AS v FROM turn_token_usage WHERE id = 'ttu1'"))?.v).toBeNull();
             // TIMESTAMP fidelity through COPY TO JSON -> read_ndjson.
             expect((yield* one(Num, "SELECT CAST(epoch_ms(ts) AS DOUBLE) AS v FROM turn WHERE id = 't1'"))?.v).toBe(T0.getTime());
             // The watermark handshake mark, keyed by content.

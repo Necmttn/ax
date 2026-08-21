@@ -41,8 +41,11 @@ describe("segment contract (#902)", () => {
         expect(segmentExportColumns("turn")).not.toContain("intent_kind");
         expect(segmentExportColumns("invoked")).not.toContain("was_corrected");
         expect(segmentExportColumns("session_token_usage")).not.toContain("estimated_cost_usd");
-        // Parse-priced turn costs RIDE (accepted divergence, manifest note).
-        expect(segmentExportColumns("turn_token_usage")).toContain("estimated_cost_usd");
+        // RETRACTED (#937/#966): turn costs used to RIDE as parse-priced event
+        // data. The cost backfill now heals turn_token_usage locally, so its
+        // cost columns are ENRICHMENT_COLUMNS and are stripped like the rest -
+        // the importer's re-derive prices them against the LOCAL catalog.
+        expect(segmentExportColumns("turn_token_usage")).not.toContain("estimated_cost_usd");
     });
 
     test("every predicate scopes on __SCOPE__ and substitutes quoted ids", () => {
