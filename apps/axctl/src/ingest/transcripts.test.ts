@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { SkillName } from "@ax/lib/brands";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     __testExtractClaudeJsonlLines,
+    __testWriteClaudeTokenUsageRows,
     claudeConcurrency,
     transcriptEditFileRecordKey,
 } from "./transcripts.ts";
-import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { builtInPricingCatalog, estimateCost, normalizeModelName } from "./model-pricing.ts";
+import type { ModelPricing } from "./model-pricing.ts";
 
 // Fixture skill names are plain string literals; brand via the schema constructor.
 const sn = (s: string): SkillName => SkillName.make(s);
@@ -1830,6 +1833,105 @@ describe("claude token usage", () => {
         });
         expect(cost.totalUsd).toBe(0.0035);
         expect(first.promptTokens).toBe(1300);
+    });
+
+    test("writes merged catalog pricing for a long-context Claude turn", async () => {
+        const model = "claude-sonnet-4-5-20250929";
+        const extracted = __testExtractClaudeJsonlLines([
+            JSON.stringify({
+                type: "assistant",
+                uuid: "a1",
+                timestamp: "2026-06-01T10:00:01.000Z",
+                sessionId: "cl-merged-price",
+                message: {
+                    role: "assistant",
+                    model,
+                    content: "ok",
+                    usage: {
+                        input_tokens: 300_000,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    },
+                },
+            }),
+        ], "-tmp", "cl-merged-price");
+        const catalog = new Map<string, ModelPricing>([[model, {
+            provider: "anthropic",
+            inputPerMillionUsd: 3,
+            outputPerMillionUsd: 15,
+            cacheCreationPerMillionUsd: 3.75,
+            cacheReadPerMillionUsd: 0.3,
+            inputAbove200kPerMillionUsd: 7.5,
+            outputAbove200kPerMillionUsd: 22.5,
+            cacheCreationAbove200kPerMillionUsd: 9.375,
+            cacheReadAbove200kPerMillionUsd: 0.6,
+            fastMultiplier: 1,
+            pricingSource: "models.dev",
+        }]]);
+        const written = new Map<string, Record<string, unknown>[]>();
+        const write = {
+            put: (table: string, row: Record<string, unknown>) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), row]);
+            }),
+            putMany: (table: string, rows: Record<string, unknown>[]) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), ...rows]);
+            }),
+        };
+
+        await Effect.runPromise(__testWriteClaudeTokenUsageRows(
+            write as never,
+            extracted!,
+            "claude",
+            catalog,
+        ));
+
+        expect(written.get("turn_token_usage")?.[0]?.estimated_cost_usd).toBe(2.25);
+        expect(written.get("turn_token_usage")?.[0]?.pricing_source).toBe("models.dev");
+    });
+
+    test("prices a mixed-model session from its turn costs", async () => {
+        const lines = [
+            ["a1", "claude-sonnet-4", 2_000_000],
+            ["a2", "claude-fable-5", 100_000],
+        ].map(([uuid, model, input], index) => JSON.stringify({
+            type: "assistant",
+            uuid,
+            timestamp: `2026-06-01T10:00:0${index + 1}.000Z`,
+            sessionId: "cl-mixed-price",
+            message: {
+                role: "assistant",
+                model,
+                content: "ok",
+                usage: {
+                    input_tokens: input,
+                    output_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        }));
+        const extracted = __testExtractClaudeJsonlLines(lines, "-tmp", "cl-mixed-price");
+        const written = new Map<string, Record<string, unknown>[]>();
+        const write = {
+            put: (table: string, row: Record<string, unknown>) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), row]);
+            }),
+            putMany: (table: string, rows: Record<string, unknown>[]) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), ...rows]);
+            }),
+        };
+
+        await Effect.runPromise(__testWriteClaudeTokenUsageRows(
+            write as never,
+            extracted!,
+            "claude",
+            builtInPricingCatalog(),
+        ));
+
+        const session = written.get("session_token_usage")?.[0];
+        expect(session?.model).toBe("claude-fable-5");
+        expect(session?.estimated_cost_usd).toBe(7);
     });
 
     test("emits no turn rows when the transcript carries no usage", () => {

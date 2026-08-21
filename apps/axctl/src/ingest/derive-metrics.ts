@@ -228,6 +228,7 @@ export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, never, Ingest
             { table: "session_metrics", mode: "derive" },
             { table: "fragility_cascade", mode: "derive" },
             { table: "session_token_usage", mode: "enrich" }, // cost backfill
+            { table: "turn_token_usage", mode: "enrich" }, // cost backfill
             { table: "commit", mode: "enrich" }, // reverted stamping
             { table: "ingest_file_state", mode: "bookkeep" },
         ],

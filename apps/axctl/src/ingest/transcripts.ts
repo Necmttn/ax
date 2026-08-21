@@ -66,7 +66,15 @@ import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
-import { estimateCost, isSyntheticModel, normalizeModelName } from "./model-pricing.ts";
+import {
+    builtInPricingCatalog,
+    estimateCost,
+    isSyntheticModel,
+    loadPricingCatalog,
+    normalizeModelName,
+    sumCostEstimates,
+    type ModelPricing,
+} from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
@@ -1593,19 +1601,32 @@ const writeClaudeTokenUsageRows = (
     write: CacheWriteService,
     extracted: FileExtract,
     source: "claude" | "claude-subagent",
+    pricingCatalog: ReadonlyMap<string, ModelPricing>,
 ) => Effect.gen(function* () {
     const usage = extracted.tokenUsage;
+    const turnCosts = extracted.turnTokenUsages.map((turnUsage) => estimateCost({
+        modelKey: normalizeModelName(turnUsage.model),
+        promptTokens: turnUsage.promptTokens,
+        completionTokens: turnUsage.completionTokens,
+        cacheCreationInputTokens: turnUsage.cacheCreationInputTokens,
+        cacheReadInputTokens: turnUsage.cacheReadInputTokens,
+        estimatedTokens: turnUsage.estimatedTokens,
+        pricingCatalog,
+    }));
     if (usage !== null) {
         const modelKey = normalizeModelName(usage.model);
-        const cost = estimateCost({
-            modelKey,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            cacheCreationInputTokens: usage.cacheCreationInputTokens,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            estimatedTokens: usage.estimatedTokens,
-            aggregated: true,
-        });
+        const cost = turnCosts.length > 0
+            ? sumCostEstimates(turnCosts)
+            : estimateCost({
+                modelKey,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                cacheCreationInputTokens: usage.cacheCreationInputTokens,
+                cacheReadInputTokens: usage.cacheReadInputTokens,
+                estimatedTokens: usage.estimatedTokens,
+                pricingCatalog,
+                aggregated: true,
+            });
         const burnBuckets = computeBurnBuckets(
             [...extracted.turnTokenUsages].sort((a, b) => a.seq - b.seq).map((t) => t.estimatedTokens),
         );
@@ -1614,7 +1635,7 @@ const writeClaudeTokenUsageRows = (
             session: extracted.session.id,
             source,
             workflow_epoch: null,
-            model: usage.model,
+            model: usage.model, // Display attribution only; turn costs own the session price.
             prompt_tokens: usage.promptTokens,
             completion_tokens: usage.completionTokens,
             cache_creation_input_tokens: usage.cacheCreationInputTokens,
@@ -1636,16 +1657,9 @@ const writeClaudeTokenUsageRows = (
             ts: tsParam(usage.ts),
         }));
     }
-    yield* write.putMany("turn_token_usage", extracted.turnTokenUsages.map((turnUsage) => {
+    yield* write.putMany("turn_token_usage", extracted.turnTokenUsages.map((turnUsage, index) => {
         const modelKey = normalizeModelName(turnUsage.model);
-        const cost = estimateCost({
-            modelKey,
-            promptTokens: turnUsage.promptTokens,
-            completionTokens: turnUsage.completionTokens,
-            cacheCreationInputTokens: turnUsage.cacheCreationInputTokens,
-            cacheReadInputTokens: turnUsage.cacheReadInputTokens,
-            estimatedTokens: turnUsage.estimatedTokens,
-        });
+        const cost = turnCosts[index]!;
         const turn = turnRecordKey(extracted.session.id, turnUsage.seq);
         return cacheRow({
             id: turn,
@@ -1680,8 +1694,13 @@ const writeClaudeTokenUsageRows = (
     }));
 });
 
-const writeClaudeTokenUsage = (write: CacheWriteService, extracted: FileExtract) =>
-    writeClaudeTokenUsageRows(write, extracted, "claude");
+export const __testWriteClaudeTokenUsageRows = writeClaudeTokenUsageRows;
+
+const writeClaudeTokenUsage = (
+    write: CacheWriteService,
+    extracted: FileExtract,
+    pricingCatalog: ReadonlyMap<string, ModelPricing>,
+) => writeClaudeTokenUsageRows(write, extracted, "claude", pricingCatalog);
 
 /**
  * Subagent variant: identical rows, but `source = "claude-subagent"` so
@@ -1689,8 +1708,11 @@ const writeClaudeTokenUsage = (write: CacheWriteService, extracted: FileExtract)
  * dispatched-agent spend. The session-health pass writes the same value from
  * `session.source`; without this the last writer would flip the field.
  */
-export const writeTokenUsageForSubagents = (write: CacheWriteService, extracted: FileExtract) =>
-    writeClaudeTokenUsageRows(write, extracted, "claude-subagent");
+export const writeTokenUsageForSubagents = (
+    write: CacheWriteService,
+    extracted: FileExtract,
+    pricingCatalog: ReadonlyMap<string, ModelPricing> = builtInPricingCatalog(),
+) => writeClaudeTokenUsageRows(write, extracted, "claude-subagent", pricingCatalog);
 
 interface IngestOpts {
     sinceDays: number | undefined;
@@ -1732,6 +1754,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
+        const pricingCatalog = (yield* loadPricingCatalog(cfg.paths.dataDir)).catalog;
         // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool and
         // land as one read_ndjson load per (table, signature) per flush.
         // Everything else - session, skill, watermarks, reads, the per-session
@@ -1917,7 +1940,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 extracted.session.raw_file = pointer;
                 yield* upsertSessions(write, [extracted.session]);
                 sessions += 1;
-                yield* writeClaudeTokenUsage(write, extracted);
+                yield* writeClaudeTokenUsage(write, extracted, pricingCatalog);
                 // Resolve invoked names onto the catalog before writing so the
                 // `invoked` and `concerns` edges land on the real skill row.
                 const resolvedInvocations = extracted.invocations.map((inv) => ({
@@ -2052,7 +2075,7 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
 export const claudeStage: StageDef<ClaudeStats, AxConfig | FileSystem.FileSystem | Path.Path, DbError | CacheWriteError> = {
     meta: StageMeta.make({
         key: "claude",
-        deps: ["skills", "commands"],
+        deps: ["skills", "commands", "pricing"],
         tags: ["ingest"],
         writes: [
             ...NORMALIZED_BATCH_WRITES,

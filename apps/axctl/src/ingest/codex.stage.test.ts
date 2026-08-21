@@ -6,7 +6,7 @@ describe("codexStage", () => {
     it("declares the canonical key/deps/tags", () => {
         expect(Schema.decodeUnknownSync(CodexKey)("codex")).toBe("codex");
         expect(codexStage.meta.key).toBe("codex");
-        expect(codexStage.meta.deps).toEqual(["skills", "commands"]);
+        expect(codexStage.meta.deps).toEqual(["skills", "commands", "pricing"]);
         expect(codexStage.meta.tags).toEqual(["ingest"]);
     });
 });
