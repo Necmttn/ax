@@ -278,10 +278,23 @@ WHERE session = ? AND (message_kind IS NULL OR message_kind NOT IN (${EXCLUDED_M
 ORDER BY seq ASC
 LIMIT 2000`;
 
+const ShareTurnCountRow = Schema.Struct({
+    total_turns: NumberFromBigIntColumn,
+});
+
+const SHARE_TURNS_COUNT_SQL = `
+SELECT COUNT(*) AS total_turns
+FROM turn
+WHERE session = ? AND (message_kind IS NULL OR message_kind NOT IN (${EXCLUDED_MESSAGE_KINDS.map(() => "?").join(", ")}))`;
+
 export const fetchSessionShareTurns = Effect.fn("share.fetchSessionShareTurns")(
     function* (read: CacheReadService, sessionId: string) {
-        const rows = yield* read.rows(ShareTurnRow, SHARE_TURNS_SQL, [sessionId, ...EXCLUDED_MESSAGE_KINDS]);
-        return rows.map((r): ShareTurn => {
+        const params = [sessionId, ...EXCLUDED_MESSAGE_KINDS];
+        const [rows, count] = yield* Effect.all([
+            read.rows(ShareTurnRow, SHARE_TURNS_SQL, params),
+            read.first(ShareTurnCountRow, SHARE_TURNS_COUNT_SQL, params),
+        ]);
+        const turns = rows.map((r): ShareTurn => {
             const text = r.text ?? r.text_excerpt ?? "";
             return {
                 id: r.id,
@@ -296,6 +309,8 @@ export const fetchSessionShareTurns = Effect.fn("share.fetchSessionShareTurns")(
                 has_error: r.has_error,
             };
         });
+        const totalTurns = count._tag === "Some" ? count.value.total_turns : turns.length;
+        return { turns, totalTurns, truncated: totalTurns > turns.length };
     },
 );
 

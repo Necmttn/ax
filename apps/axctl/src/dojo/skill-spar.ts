@@ -159,11 +159,7 @@ export const renderSkillSparBrief = (
         "## Swap commands",
         "",
         "```bash",
-        `# swap-in (activate edited skill for Arm B)`,
-        `test -f ${sh(editedPath)} || { echo "ERROR: edited skill not found at ${editedPath} - write it before swapping (arm B would otherwise run the ORIGINAL skill)"; exit 1; }`,
-        `cp ${sh(editedPath)} ${sh(skillTarget)}`,
-        `# swap-out (restore original after Arm B completes)`,
-        `cp ${sh(snapshotPath)} ${sh(skillTarget)}`,
+        `trap 'cp ${sh(snapshotPath)} ${sh(skillTarget)}' EXIT; test -f ${sh(editedPath)} || { echo "ERROR: edited skill not found at ${editedPath} - write it before swapping (arm B would otherwise run the ORIGINAL skill)"; exit 1; }; cp ${sh(editedPath)} ${sh(skillTarget)}; cd ${sh(worktreeBPath)}; claude`,
         "```",
         "",
         "## Edited skill",
@@ -177,10 +173,8 @@ export const renderSkillSparBrief = (
         `0. Write your edited SKILL.md to \`${editedPath}\` (you can compose it in the "Edited skill" section above, then save it to that path).`,
         `1. Pin both worktrees (see Worktrees above).`,
         `2. **Arm A** - run the task in \`${brief.worktreeA}\` with the original skill (no swap needed).`,
-        `3. **Swap in** - run the swap-in command above (it will fail loudly if the edited file is missing).`,
-        `4. **Arm B** - run the task in \`${brief.worktreeB}\` with the edited skill active.`,
-        `5. **Swap out** - \`cp ${sh(snapshotPath)} ${sh(skillTarget)}\``,
-        `6. Score: \`ax dojo spar-score ${brief.id}\``,
+        `3. **Arm B** - run the single command above. Its EXIT trap restores the original skill on every exit.`,
+        `4. Score: \`ax dojo spar-score ${brief.id}\``,
         "",
         "> **Concurrency caveat**: do not run other Claude sessions while the swap is active - the skill swap is global.",
         "",
@@ -604,6 +598,24 @@ export const scoreSkillSpar = (
         yield* stampSparSession(sessionB).pipe(Effect.catch(() => Effect.void));
 
         return { sessionA, sessionB, a, b, score };
+    });
+
+/** Restore a leaked Arm B swap before spar-score reads any run evidence. */
+export const verifyAndRestoreSkill = (
+    brief: SkillSparBrief,
+    snapshotPath: string,
+) =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const targetPath = `${brief.skillDir}/SKILL.md`;
+        const [live, snapshot] = yield* Effect.all([
+            fs.readFileString(targetPath),
+            fs.readFileString(snapshotPath),
+        ]);
+        if (live === snapshot) return false;
+        yield* fs.writeFileString(targetPath, snapshot);
+        console.warn(`ax dojo spar-score: restored ${targetPath} from ${snapshotPath}`);
+        return true;
     });
 
 // ---------------------------------------------------------------------------

@@ -146,6 +146,23 @@ describe("attachStructuredToolCalls", () => {
 import { minimalShareArtifact } from "./artifact.ts";
 
 describe("buildShareArtifactFromParts", () => {
+    it("carries honest turn truncation metadata", () => {
+        const artifact = buildShareArtifactFromParts({
+            axVersion: "0.2.0",
+            exportedAt: "2026-08-21T00:00:00.000Z",
+            overview: { id: "abc123", project: null, cwd: null, model: null, source: "codex", started_at: null, ended_at: null },
+            topSkills: [],
+            toolCalls: [],
+            turns: [],
+            totalTurns: 2_001,
+            truncated: true,
+            timeline: [],
+            files: [],
+        });
+        expect(artifact.total_turns).toBe(2_001);
+        expect(artifact.truncated).toBe(true);
+    });
+
     it("builds a V1 artifact from session rows", () => {
         const artifact = buildShareArtifactFromParts({
             axVersion: "0.2.0",

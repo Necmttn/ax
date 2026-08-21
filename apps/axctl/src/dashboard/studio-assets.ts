@@ -57,6 +57,13 @@ function fileResponse(filePath: string, urlPath: string): Response {
     });
 }
 
+/** Client routes have no extension. Missing files must never receive HTML. */
+export const shouldServeSpaFallback = (pathname: string): boolean => {
+    if (pathname.startsWith("/assets/")) return false;
+    const segment = pathname.slice(pathname.lastIndexOf("/") + 1);
+    return !segment.includes(".");
+};
+
 /**
  * Resolve a request pathname to a studio asset Response, or null if this build
  * does not bundle studio (and nothing is on disk). Asset misses under /assets/
@@ -72,7 +79,7 @@ export async function serveStudioAsset(pathname: string): Promise<Response | nul
     if (HAS_EMBED) {
         const hit = STUDIO_EMBED[clean];
         if (hit) return fileResponse(hit, clean);
-        if (!clean.startsWith("/assets/")) {
+        if (shouldServeSpaFallback(clean)) {
             const index = STUDIO_EMBED["/index.html"];
             if (index) return fileResponse(index, "/index.html");
         }
@@ -84,7 +91,7 @@ export async function serveStudioAsset(pathname: string): Promise<Response | nul
     // valid path join (and keeps node:path out - repo gate check:no-node-fs).
     const directPath = DISK_ROOT + clean.slice(1);
     if (await Bun.file(directPath).exists()) return fileResponse(directPath, clean);
-    if (!clean.startsWith("/assets/")) {
+    if (shouldServeSpaFallback(clean)) {
         const indexPath = `${DISK_ROOT}index.html`;
         if (await Bun.file(indexPath).exists()) return fileResponse(indexPath, "/index.html");
     }
