@@ -252,4 +252,50 @@ describe("run-evidence SQL model parity vs the TS builders", () => {
         expect(second).toMatchObject({ rebuilt: false });
         expect(countAfter).toBeGreaterThan(0);
     });
+
+    dtest("keeps the original objective when a recent task affects an old session", async () => {
+        let objectives: ReadonlyArray<{ source_id: string; summary: string | null }> = [];
+        await runWithPlatform(publishCacheFixture(tempDir("ax-rev-objective-window-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                const oldTs = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+                const recentTs = new Date(Date.now() - 2 * 3600 * 1000);
+                yield* write.put("session", {
+                    id: "objective-window-session",
+                    source: "claude",
+                    started_at: oldTs,
+                    checkout: null,
+                });
+                yield* write.put("turn", {
+                    id: "t-old",
+                    session: "objective-window-session",
+                    seq: 1,
+                    role: "user",
+                    message_kind: "task",
+                    ts: oldTs,
+                    text_excerpt: "original objective",
+                });
+                yield* runRunEvidenceModels(write, undefined);
+
+                yield* write.put("turn", {
+                    id: "t-new",
+                    session: "objective-window-session",
+                    seq: 2,
+                    role: "user",
+                    message_kind: "task",
+                    ts: recentTs,
+                    text_excerpt: "follow-up task",
+                });
+                yield* runRunEvidenceModels(write, 1);
+                objectives = yield* write.rows(
+                    Schema.Struct({ source_id: Schema.String, summary: Schema.NullOr(Schema.String) }),
+                    `SELECT source_id, summary
+                     FROM run_evidence_event
+                     WHERE session = 'objective-window-session' AND kind = 'objective'
+                     ORDER BY source_id`,
+                );
+            }),
+        ));
+
+        expect(objectives).toEqual([{ source_id: "t-old", summary: "original objective" }]);
+    });
 });

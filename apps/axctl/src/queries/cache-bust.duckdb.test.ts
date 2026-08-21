@@ -13,7 +13,7 @@
  *     same SQL is windowed + idempotent (same row count, no duplicates).
  */
 import { describe, expect } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { CacheRead, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
@@ -109,6 +109,40 @@ const seedFixture = (write: CacheWriteService) =>
     });
 
 describe("cache-bust model + fetchCacheBustCost over a published snapshot", () => {
+    dtest("removes a recent bust when reparse clears its cache miss reason", async () => {
+        let before = -1;
+        let after = -1;
+        await runWithPlatform(
+            publishCacheFixture(tempDir("cache-bust-cleared-reason"), dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("turn_token_usage", usageRow({
+                        id: "ttu:cleared", session: SESSION_A, seq: 1, ts: hoursAgo(2), source: "claude",
+                        cacheCreationTokens: 100_000n, cacheCreationUsd: 2,
+                        cacheMiss: "cold",
+                    }));
+                    yield* runCacheBustModels(write, 1);
+                    const beforeRows = yield* write.rows(
+                        Schema.Struct({ n: Schema.Number }),
+                        "SELECT count(*)::INTEGER AS n FROM cache_bust_event WHERE id = 'ttu:cleared'",
+                    );
+                    before = beforeRows[0]!.n;
+
+                    yield* write.exec(
+                        "UPDATE turn_token_usage SET cache_miss_reason_type = NULL WHERE id = 'ttu:cleared'",
+                    );
+                    yield* runCacheBustModels(write, 1);
+                    const afterRows = yield* write.rows(
+                        Schema.Struct({ n: Schema.Number }),
+                        "SELECT count(*)::INTEGER AS n FROM cache_bust_event WHERE id = 'ttu:cleared'",
+                    );
+                    after = afterRows[0]!.n;
+                }),
+            ),
+        );
+
+        expect({ before, after }).toEqual({ before: 1, after: 0 });
+    });
+
     dtest("derives priced busts and rolls them up with a filtering window", async () => {
         const dir = tempDir("cache-bust-cost");
         let first: CacheBustModelStats | undefined;
