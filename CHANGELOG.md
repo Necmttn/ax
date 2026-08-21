@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.40.2](https://github.com/Necmttn/ax/compare/v0.40.1...v0.40.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **advice:** use posixPath not node:path in advice-stage (check:no-node-fs gate) ([#1012](https://github.com/Necmttn/ax/issues/1012)) ([5f06ce4](https://github.com/Necmttn/ax/commit/5f06ce46f8de96df7bb1a939705d998531710691))
+* **axctl:** harden dojo, quota, nav, and shares ([#976](https://github.com/Necmttn/ax/issues/976) [#977](https://github.com/Necmttn/ax/issues/977) [#978](https://github.com/Necmttn/ax/issues/978) [#981](https://github.com/Necmttn/ax/issues/981) [#982](https://github.com/Necmttn/ax/issues/982) [#985](https://github.com/Necmttn/ax/issues/985)) ([#1007](https://github.com/Necmttn/ax/issues/1007)) ([896cf25](https://github.com/Necmttn/ax/commit/896cf25bb7a3fba896b56440942e9d5d23162b8e))
+* **concurrency:** protect claims and model windows ([#995](https://github.com/Necmttn/ax/issues/995) [#996](https://github.com/Necmttn/ax/issues/996)) ([#1006](https://github.com/Necmttn/ax/issues/1006)) ([588807d](https://github.com/Necmttn/ax/commit/588807d3f983c68129186bfa00bf5ed8e893b580))
+* **core:** harden telemetry and profiles ([#970](https://github.com/Necmttn/ax/issues/970) [#988](https://github.com/Necmttn/ax/issues/988) [#989](https://github.com/Necmttn/ax/issues/989) [#990](https://github.com/Necmttn/ax/issues/990) [#991](https://github.com/Necmttn/ax/issues/991) [#992](https://github.com/Necmttn/ax/issues/992)) ([#1009](https://github.com/Necmttn/ax/issues/1009)) ([f9b9924](https://github.com/Necmttn/ax/commit/f9b9924efedcfd9a76ea638f6c23188e065944fc))
+* **cost:** preserve honest partial pricing ([#997](https://github.com/Necmttn/ax/issues/997) [#998](https://github.com/Necmttn/ax/issues/998) [#999](https://github.com/Necmttn/ax/issues/999) [#1000](https://github.com/Necmttn/ax/issues/1000) [#971](https://github.com/Necmttn/ax/issues/971)) ([#1010](https://github.com/Necmttn/ax/issues/1010)) ([a77af40](https://github.com/Necmttn/ax/commit/a77af40b81284a281a80fc20540a89af7c3cdf5d))
+* **dashboard:** scope selectors before limits ([#980](https://github.com/Necmttn/ax/issues/980) [#983](https://github.com/Necmttn/ax/issues/983) [#984](https://github.com/Necmttn/ax/issues/984) [#993](https://github.com/Necmttn/ax/issues/993)) ([#1005](https://github.com/Necmttn/ax/issues/1005)) ([ca40e4d](https://github.com/Necmttn/ax/commit/ca40e4d50a0714a03ee0ce3f6db6cbccde5ab10e))
+* **hooks:** refresh identity and rotate advice ledger ([#974](https://github.com/Necmttn/ax/issues/974) [#975](https://github.com/Necmttn/ax/issues/975) [#979](https://github.com/Necmttn/ax/issues/979)) ([#1008](https://github.com/Necmttn/ax/issues/1008)) ([7e684e5](https://github.com/Necmttn/ax/commit/7e684e50cf95834b0a1cf6d562a34447b4200a9c))
+* **inspect:** classify full session before paging ([#994](https://github.com/Necmttn/ax/issues/994)) ([#1002](https://github.com/Necmttn/ax/issues/1002)) ([467a0af](https://github.com/Necmttn/ax/commit/467a0afe4ddcafc0b418d4b66821f036fb921d57))
+* **segment:** make imports atomic and rederive null times ([#986](https://github.com/Necmttn/ax/issues/986) [#987](https://github.com/Necmttn/ax/issues/987)) ([#1004](https://github.com/Necmttn/ax/issues/1004)) ([004ca66](https://github.com/Necmttn/ax/commit/004ca66d62ca2a36d6d73e3625f2b6a1732b5b89))
+
 ## [0.40.1](https://github.com/Necmttn/ax/compare/v0.40.0...v0.40.1) (2026-08-21)
 
 
