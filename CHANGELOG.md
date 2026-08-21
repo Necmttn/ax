@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.40.1](https://github.com/Necmttn/ax/compare/v0.40.0...v0.40.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* correct core model pricing ([#966](https://github.com/Necmttn/ax/issues/966)) ([8b92391](https://github.com/Necmttn/ax/commit/8b92391be7b44d4784438d62a6485f8519654a8d)), closes [#936](https://github.com/Necmttn/ax/issues/936) [#937](https://github.com/Necmttn/ax/issues/937) [#938](https://github.com/Necmttn/ax/issues/938) [#941](https://github.com/Necmttn/ax/issues/941)
+* **cost:** correct window and partial pricing reads ([#963](https://github.com/Necmttn/ax/issues/963)) ([d8c629d](https://github.com/Necmttn/ax/commit/d8c629d0bceecb1e6a983e987362c930291a1b18)), closes [#940](https://github.com/Necmttn/ax/issues/940) [#944](https://github.com/Necmttn/ax/issues/944)
+* **dashboard:** rank query matches before limit ([#959](https://github.com/Necmttn/ax/issues/959)) ([3f8c158](https://github.com/Necmttn/ax/commit/3f8c1589b6d676cfe37c3cd29c4572175f97dabb)), closes [#930](https://github.com/Necmttn/ax/issues/930) [#931](https://github.com/Necmttn/ax/issues/931)
+* **ingest:** stabilize proposal dedupe signatures ([#965](https://github.com/Necmttn/ax/issues/965)) ([f849b98](https://github.com/Necmttn/ax/commit/f849b9832e92e8e604b0f632db7c68c26b140961))
+* **inspect:** preserve late page details ([#960](https://github.com/Necmttn/ax/issues/960)) ([1a42924](https://github.com/Necmttn/ax/commit/1a4292465f242b5918c6117a749950a1c6b5accd)), closes [#934](https://github.com/Necmttn/ax/issues/934) [#935](https://github.com/Necmttn/ax/issues/935)
+* **lib:** harden DuckDB storage seams ([#964](https://github.com/Necmttn/ax/issues/964)) ([d20c2ab](https://github.com/Necmttn/ax/commit/d20c2ab3337ab57a9970892b0392ddba6e5fe743)), closes [#948](https://github.com/Necmttn/ax/issues/948) [#949](https://github.com/Necmttn/ax/issues/949) [#950](https://github.com/Necmttn/ax/issues/950) [#951](https://github.com/Necmttn/ax/issues/951)
+* **models:** replace stale derived rows ([#962](https://github.com/Necmttn/ax/issues/962)) ([7e5bdf9](https://github.com/Necmttn/ax/commit/7e5bdf916bdb600ad8b345c7f3dc3164cba2edfc)), closes [#928](https://github.com/Necmttn/ax/issues/928) [#929](https://github.com/Necmttn/ax/issues/929)
+* **queries:** correct session-based rollups ([#957](https://github.com/Necmttn/ax/issues/957)) ([58b6c61](https://github.com/Necmttn/ax/commit/58b6c613f3198796fa594be03d62bbb3a39598b8)), closes [#932](https://github.com/Necmttn/ax/issues/932) [#933](https://github.com/Necmttn/ax/issues/933)
+* **segment:** retract the turn-cost-rides pin after [#966](https://github.com/Necmttn/ax/issues/966) ([#967](https://github.com/Necmttn/ax/issues/967)) ([892501f](https://github.com/Necmttn/ax/commit/892501f96e38e248df3ab197c98565346812402f))
+* sync-throw guard fail-open + atomic freshness spawn claim ([#961](https://github.com/Necmttn/ax/issues/961)) ([e5a1ce9](https://github.com/Necmttn/ax/commit/e5a1ce992c9627bf05e9eb29fc6721129c17e237))
+
 ## [0.40.0](https://github.com/Necmttn/ax/compare/v0.39.3...v0.40.0) (2026-08-20)
 
 
