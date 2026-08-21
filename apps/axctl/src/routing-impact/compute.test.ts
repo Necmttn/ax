@@ -11,6 +11,8 @@ const block = (over: Partial<BlockInput> & { arm: BlockInput["arm"] }): BlockInp
     fiveHourStart: edge(10),
     fiveHourEnd: edge(40),
     tokenCostUsd: 100,
+    pricedRows: 1,
+    totalRows: 1,
     dispatchCount: 10,
     inheritCount: 5,
     turns: 300,
@@ -130,5 +132,16 @@ describe("buildImpactReport - off vs on comparison", () => {
         ]);
         expect(comparison).toBeNull();
         expect(notes.some((n) => n.includes("multiple blocks"))).toBe(true);
+    });
+
+    test("an incomplete token price omits the cost ratio and adds a note", () => {
+        const { blocks, comparison, notes } = buildImpactReport([
+            block({ arm: "off", tokenCostUsd: null, pricedRows: 1, totalRows: 2 }),
+            block({ arm: "on", tokenCostUsd: 40 }),
+        ]);
+
+        expect(blocks[0]!.tokenCostUsd).toBeNull();
+        expect(comparison!.costRatio).toBeNull();
+        expect(notes.some((note) => note.includes("token prices were incomplete"))).toBe(true);
     });
 });

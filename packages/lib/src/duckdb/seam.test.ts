@@ -308,7 +308,36 @@ describe("CacheWrite: the semantics the DDL cannot express", () => {
                 { id: "chunk-boundary", body: "second" },
                 { id: "same-chunk", body: "second" },
             ]);
-            expect(value?.collapsed).toBe(2);
+            expect(value?.collapsed).toEqual(new Map([["note", 2]]));
+        });
+    });
+
+    dtest("counts collapsed duplicate ids by table (#971)", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-putmany-duplicate-tables-");
+            const outcome = await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.putMany("note", [
+                            { id: "n1", body: "first" },
+                            { id: "n1", body: "second" },
+                            { id: "n1", body: "third" },
+                        ]);
+                        yield* write.putMany("keyed", [
+                            { id: "k1", natural_a: "a", natural_b: 1n, body: "first" },
+                            { id: "k1", natural_a: "a", natural_b: 1n, body: "second" },
+                        ]);
+                        return write.rowsCollapsed();
+                    }),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const collapsed = outcome._tag === "completed" ? outcome.value : null;
+            expect(collapsed).toEqual(new Map([
+                ["note", 2],
+                ["keyed", 1],
+            ]));
         });
     });
 

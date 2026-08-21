@@ -36,12 +36,19 @@ export const saveState = async (path: string, state: RoutingImpactState): Promis
 // ---------------------------------------------------------------------------
 
 export interface WindowMetrics {
-    readonly tokenCostUsd: number;
+    /** Null when at least one token row has no price. */
+    readonly tokenCostUsd: number | null;
+    readonly pricedRows: number;
+    readonly totalRows: number;
     /** assistant turns in the window - the work-volume proxy. */
     readonly turns: number;
 }
 
-const CostRow = Schema.Struct({ c: Schema.NullOr(Schema.Number) });
+const CostRow = Schema.Struct({
+    c: Schema.NullOr(Schema.Number),
+    priced_rows: NumberFromBigIntColumn,
+    total_rows: NumberFromBigIntColumn,
+});
 const TurnCountRow = Schema.Struct({ n: NumberFromBigIntColumn });
 
 /**
@@ -67,7 +74,10 @@ export const fetchWindowMetrics = (
         const cost = yield* cacheFirst(
             CostRow,
             {
-                sql: "SELECT sum(estimated_cost_usd) AS c FROM turn_token_usage WHERE ts > ? AND ts <= ?",
+                sql: `SELECT sum(estimated_cost_usd) AS c,
+                    count(estimated_cost_usd) AS priced_rows,
+                    count(*) AS total_rows
+                    FROM turn_token_usage WHERE ts > ? AND ts <= ?`,
                 params: window,
             },
             "routing impact cost",
@@ -81,5 +91,12 @@ export const fetchWindowMetrics = (
             "routing impact turns",
         );
 
-        return { tokenCostUsd: cost?.c ?? 0, turns: turns?.n ?? 0 };
+        const pricedRows = cost?.priced_rows ?? 0;
+        const totalRows = cost?.total_rows ?? 0;
+        return {
+            tokenCostUsd: pricedRows === totalRows ? cost?.c ?? 0 : null,
+            pricedRows,
+            totalRows,
+            turns: turns?.n ?? 0,
+        };
     });

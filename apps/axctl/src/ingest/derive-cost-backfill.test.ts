@@ -106,6 +106,103 @@ describe("deriveCostBackfill on real DuckDB", () => {
         });
     });
 
+    dtest("sums complete turn-model prices for a mixed-model session (#1000)", async () => {
+        let cost: number | null = -1;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-cost-mixed-model-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("agent_model", [
+                    {
+                        id: "cheap", name: "cheap", provider: "test", display_name: "cheap",
+                        input_per_million_usd: 1, output_per_million_usd: 1,
+                        cache_creation_per_million_usd: 1, cache_read_per_million_usd: 1,
+                        fast_multiplier: 1, pricing_source: "test",
+                    },
+                    {
+                        id: "expensive", name: "expensive", provider: "test", display_name: "expensive",
+                        input_per_million_usd: 10, output_per_million_usd: 10,
+                        cache_creation_per_million_usd: 10, cache_read_per_million_usd: 10,
+                        fast_multiplier: 1, pricing_source: "test",
+                    },
+                ]);
+                yield* write.put("session_token_usage", usage("s1", "expensive", {
+                    source: "codex",
+                    prompt_tokens: 2_000_000,
+                    completion_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    estimated_tokens: 2_000_000,
+                    transcript_bytes: 0,
+                }));
+                yield* write.putMany("turn_token_usage", [
+                    turnUsage("turn-cheap", "cheap", {
+                        source: "codex", prompt_tokens: 1_000_000, completion_tokens: 0,
+                        estimated_tokens: 1_000_000,
+                    }),
+                    turnUsage("turn-expensive", "expensive", {
+                        source: "codex", seq: 2, prompt_tokens: 1_000_000,
+                        completion_tokens: 0, estimated_tokens: 1_000_000,
+                    }),
+                ]);
+
+                yield* deriveCostBackfill(write);
+                cost = (yield* write.rows(
+                    Schema.Struct({ cost: Schema.NullOr(Schema.Number) }),
+                    "SELECT estimated_cost_usd AS cost FROM session_token_usage WHERE id = ?",
+                    ["s1"],
+                ))[0]!.cost;
+            }),
+        ));
+
+        expect(cost).toBe(11);
+    });
+
+    dtest("prices only the uncovered remainder and marks incomplete turn coverage (#1000)", async () => {
+        let row: { readonly cost: number | null; readonly source: string | null } | undefined;
+        await runWithPlatform(publishCacheFixture(tempDir("ax-cost-partial-turns-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* write.putMany("agent_model", [
+                    {
+                        id: "cheap", name: "cheap", provider: "test", display_name: "cheap",
+                        input_per_million_usd: 1, output_per_million_usd: 1,
+                        cache_creation_per_million_usd: 1, cache_read_per_million_usd: 1,
+                        fast_multiplier: 1, pricing_source: "test",
+                    },
+                    {
+                        id: "expensive", name: "expensive", provider: "test", display_name: "expensive",
+                        input_per_million_usd: 10, output_per_million_usd: 10,
+                        cache_creation_per_million_usd: 10, cache_read_per_million_usd: 10,
+                        fast_multiplier: 1, pricing_source: "test",
+                    },
+                ]);
+                yield* write.put("session_token_usage", usage("s1", "expensive", {
+                    source: "codex", prompt_tokens: 2_000_000, completion_tokens: 0,
+                    cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
+                    estimated_tokens: 2_000_000, transcript_bytes: 0,
+                }));
+                yield* write.put("turn_token_usage", turnUsage("turn-cheap", "cheap", {
+                    source: "codex", prompt_tokens: 1_000_000, completion_tokens: 0,
+                    estimated_tokens: 1_000_000,
+                }));
+
+                yield* deriveCostBackfill(write);
+                row = (yield* write.rows(
+                    Schema.Struct({
+                        cost: Schema.NullOr(Schema.Number),
+                        source: Schema.NullOr(Schema.String),
+                    }),
+                    "SELECT estimated_cost_usd AS cost, pricing_source AS source"
+                        + " FROM session_token_usage WHERE id = ?",
+                    ["s1"],
+                ))[0];
+            }),
+        ));
+
+        expect(row).toEqual({
+            cost: 11,
+            source: "estimated:turn_sum+session_fallback:incomplete_turn_coverage",
+        });
+    });
+
     dtest("leaves unknown models null and becomes idempotent", async () => {
         let first: unknown;
         let second: unknown;

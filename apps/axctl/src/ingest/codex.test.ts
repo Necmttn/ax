@@ -637,6 +637,66 @@ describe("Codex transcript extraction", () => {
         expect(session?.estimated_cost_usd).toBe(7);
     });
 
+    test("prices session usage that has no turn row (#999)", async () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-08-21T00:00:00.000Z",
+                payload: { id: "codex-pre-turn-price", cwd: "/tmp", model_provider: "openai" },
+            }),
+            JSON.stringify({ type: "turn_context", payload: { model: "test-model" } }),
+            JSON.stringify({
+                type: "event_msg",
+                payload: { type: "token_count", info: {
+                    total_token_usage: { input_tokens: 100, output_tokens: 0, total_tokens: 100 },
+                    last_token_usage: { input_tokens: 100, output_tokens: 0, total_tokens: 100 },
+                } },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                payload: { type: "token_count", info: {
+                    total_token_usage: { input_tokens: 110, output_tokens: 0, total_tokens: 110 },
+                    last_token_usage: { input_tokens: 10, output_tokens: 0, total_tokens: 10 },
+                } },
+            }),
+        ]);
+        const written = new Map<string, Record<string, unknown>[]>();
+        const write = {
+            put: (table: string, row: Record<string, unknown>) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), row]);
+            }),
+            putMany: (table: string, rows: Record<string, unknown>[]) => Effect.sync(() => {
+                written.set(table, [...(written.get(table) ?? []), ...rows]);
+            }),
+        };
+        const catalog = new Map<string, ModelPricing>([["test-model", {
+            provider: "test",
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 1,
+            cacheCreationPerMillionUsd: 1,
+            cacheReadPerMillionUsd: 1,
+            fastMultiplier: 1,
+            pricingSource: "test-catalog",
+        }]]);
+
+        expect(extracted?.tokenUsage?.promptTokens).toBe(110);
+        expect(extracted?.turnTokenUsages.map((row) => row.promptTokens)).toEqual([10]);
+
+        await Effect.runPromise(__testWriteCodexTokenUsage(
+            write as never,
+            extracted!.tokenUsage,
+            extracted!.turnTokenUsages,
+            "codex",
+            catalog,
+        ));
+
+        expect(written.get("session_token_usage")?.[0]?.estimated_cost_usd).toBeCloseTo(0.00011, 12);
+    });
+
     // Plan 003 fix round 1: `codexTurnTokenUsageFromPayload`'s `first_total`
     // outcome (no previous cumulative snapshot to diff against) returns the
     // FULL cumulative total_token_usage.input_tokens unchanged - a sum by

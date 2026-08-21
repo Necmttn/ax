@@ -53,6 +53,7 @@ const MIN_TURN_ROWS_PER_RUN = MAX_ROWS_PER_RUN / 2;
 
 const UsageRow = Schema.Struct({
     id: Schema.String,
+    session: Schema.String,
     model: Schema.NullOr(Schema.String),
     prompt_tokens: Schema.NullOr(NumberFromBigIntColumn),
     completion_tokens: Schema.NullOr(NumberFromBigIntColumn),
@@ -62,6 +63,24 @@ const UsageRow = Schema.Struct({
     estimated_cost_usd: Schema.NullOr(Schema.Number),
     pricing_source: Schema.NullOr(Schema.String),
 });
+
+const TurnCoverageRow = Schema.Struct({
+    session: Schema.String,
+    turn_rows: NumberFromBigIntColumn,
+    priced_rows: NumberFromBigIntColumn,
+    prompt_tokens: NumberFromBigIntColumn,
+    completion_tokens: NumberFromBigIntColumn,
+    cache_creation_input_tokens: NumberFromBigIntColumn,
+    cache_read_input_tokens: NumberFromBigIntColumn,
+    estimated_tokens: NumberFromBigIntColumn,
+    cost_usd: Schema.NullOr(Schema.Number),
+});
+
+type TurnCoverage = typeof TurnCoverageRow.Type;
+
+const COMPLETE_TURN_PRICING_SOURCE = `${ESTIMATED_PRICING_PREFIX}turn_sum:complete_turn_coverage`;
+const INCOMPLETE_TURN_PRICING_SOURCE =
+    `${ESTIMATED_PRICING_PREFIX}turn_sum+session_fallback:incomplete_turn_coverage`;
 
 /**
  * Compute + persist `estimated_cost_usd` for stored token-usage rows that were
@@ -73,7 +92,7 @@ export const deriveCostBackfill = (
     Effect.gen(function* () {
         const turnRows = yield* write.rows(
             UsageRow,
-            `SELECT id, model, prompt_tokens, completion_tokens,`
+            `SELECT id, session, model, prompt_tokens, completion_tokens,`
             + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
             + ` estimated_cost_usd, pricing_source`
             + ` FROM turn_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
@@ -84,29 +103,81 @@ export const deriveCostBackfill = (
             ? []
             : yield* write.rows(
                 UsageRow,
-                `SELECT id, model, prompt_tokens, completion_tokens,`
+                `SELECT id, session, model, prompt_tokens, completion_tokens,`
                 + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
                 + ` estimated_cost_usd, pricing_source`
                 + ` FROM session_token_usage WHERE estimated_cost_usd IS NULL LIMIT ?`,
                 [sessionLimit],
             );
-        const rows = [
-            ...sessionRows.map((row) => ({ ...row, table: "session_token_usage" as const })),
-            ...turnRows.map((row) => ({ ...row, table: "turn_token_usage" as const })),
-        ];
+        const rows = [...sessionRows, ...turnRows];
         if (rows.length === 0) return { scanned: 0, backfilled: 0, unpriced: 0 };
 
         const catalog = yield* loadPricingCatalogForModels(write, rows.map((r) => strOrNull(r.model)));
 
         let backfilled = 0;
         let unpriced = 0;
-        for (const row of rows) {
+        for (const row of turnRows) {
             const storedCost = numOrNull(row.estimated_cost_usd);
             const storedSource = strOrNull(row.pricing_source);
             // Defensive double-guards (selection already excludes both): never
             // touch a row that somehow carries a stored cost, and never re-price
             // an already-estimated row (idempotency: catalog drift must not make
             // every derive run rewrite the whole table).
+            if (storedCost !== null || isEstimatedPricingSource(storedSource)) continue;
+            const cost = estimateCost({
+                modelKey: normalizeModelName(strOrNull(row.model)),
+                promptTokens: numOrNull(row.prompt_tokens),
+                completionTokens: numOrNull(row.completion_tokens),
+                cacheCreationInputTokens: numOrNull(row.cache_creation_input_tokens),
+                cacheReadInputTokens: numOrNull(row.cache_read_input_tokens),
+                estimatedTokens: numOrZero(row.estimated_tokens),
+                pricingCatalog: catalog,
+            });
+            if (cost.totalUsd === null || cost.pricingSource === null) {
+                unpriced += 1;
+                continue;
+            }
+            yield* write.exec(
+                `UPDATE turn_token_usage SET estimated_input_cost_usd = ?,`
+                    + ` estimated_output_cost_usd = ?, estimated_cache_creation_cost_usd = ?,`
+                    + ` estimated_cache_read_cost_usd = ?, estimated_cost_usd = ?, pricing_source = ?`
+                    + ` WHERE id = ? AND estimated_cost_usd IS NULL`,
+                [
+                    cost.inputUsd,
+                    cost.outputUsd,
+                    cost.cacheCreationUsd,
+                    cost.cacheReadUsd,
+                    cost.totalUsd,
+                    `${ESTIMATED_PRICING_PREFIX}${cost.pricingSource}`,
+                    row.id,
+                ],
+            );
+            backfilled += 1;
+        }
+
+        const coverageRows: TurnCoverage[] = [];
+        const coverageBatchSize = 500;
+        for (let start = 0; start < sessionRows.length; start += coverageBatchSize) {
+            const batch = sessionRows.slice(start, start + coverageBatchSize);
+            const placeholders = batch.map(() => "?").join(", ");
+            coverageRows.push(...yield* write.rows(
+                TurnCoverageRow,
+                `SELECT session, count(*) AS turn_rows, count(estimated_cost_usd) AS priced_rows,`
+                    + ` coalesce(sum(prompt_tokens), 0) AS prompt_tokens,`
+                    + ` coalesce(sum(completion_tokens), 0) AS completion_tokens,`
+                    + ` coalesce(sum(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,`
+                    + ` coalesce(sum(cache_read_input_tokens), 0) AS cache_read_input_tokens,`
+                    + ` coalesce(sum(estimated_tokens), 0) AS estimated_tokens,`
+                    + ` sum(estimated_cost_usd) AS cost_usd`
+                    + ` FROM turn_token_usage WHERE session IN (${placeholders}) GROUP BY session`,
+                batch.map((row) => row.session),
+            ));
+        }
+        const coverageBySession = new Map(coverageRows.map((row) => [row.session, row]));
+
+        for (const row of sessionRows) {
+            const storedCost = numOrNull(row.estimated_cost_usd);
+            const storedSource = strOrNull(row.pricing_source);
             if (storedCost !== null || isEstimatedPricingSource(storedSource)) continue;
             const usage = {
                 model: strOrNull(row.model),
@@ -118,34 +189,56 @@ export const deriveCostBackfill = (
                 estimated_cost_usd: null,
                 pricing_source: storedSource,
             };
-            if (row.table === "turn_token_usage") {
-                const cost = estimateCost({
-                    modelKey: normalizeModelName(usage.model),
-                    promptTokens: usage.prompt_tokens,
-                    completionTokens: usage.completion_tokens,
-                    cacheCreationInputTokens: usage.cache_creation_input_tokens,
-                    cacheReadInputTokens: usage.cache_read_input_tokens,
-                    estimatedTokens: usage.estimated_tokens,
-                    pricingCatalog: catalog,
-                });
-                if (cost.totalUsd === null || cost.pricingSource === null) {
+            const coverage = coverageBySession.get(row.session);
+            if (coverage !== undefined) {
+                if (coverage.priced_rows !== coverage.turn_rows || coverage.cost_usd === null) {
                     unpriced += 1;
                     continue;
                 }
+                const totals = [
+                    [usage.prompt_tokens, coverage.prompt_tokens],
+                    [usage.completion_tokens, coverage.completion_tokens],
+                    [usage.cache_creation_input_tokens, coverage.cache_creation_input_tokens],
+                    [usage.cache_read_input_tokens, coverage.cache_read_input_tokens],
+                    [usage.estimated_tokens, coverage.estimated_tokens],
+                ] as const;
+                if (totals.some(([total, covered]) => total !== null && covered > total)) {
+                    unpriced += 1;
+                    continue;
+                }
+                const incomplete = totals.some(([total, covered]) => total !== null && covered < total);
+                let sessionCost = coverage.cost_usd;
+                let pricingSource = COMPLETE_TURN_PRICING_SOURCE;
+                if (incomplete) {
+                    const remainder = estimateCost({
+                        modelKey: normalizeModelName(usage.model),
+                        promptTokens: usage.prompt_tokens === null
+                            ? null
+                            : usage.prompt_tokens - coverage.prompt_tokens,
+                        completionTokens: usage.completion_tokens === null
+                            ? null
+                            : usage.completion_tokens - coverage.completion_tokens,
+                        cacheCreationInputTokens: usage.cache_creation_input_tokens === null
+                            ? null
+                            : usage.cache_creation_input_tokens - coverage.cache_creation_input_tokens,
+                        cacheReadInputTokens: usage.cache_read_input_tokens === null
+                            ? null
+                            : usage.cache_read_input_tokens - coverage.cache_read_input_tokens,
+                        estimatedTokens: Math.max(0, usage.estimated_tokens - coverage.estimated_tokens),
+                        pricingCatalog: catalog,
+                        aggregated: true,
+                    });
+                    if (remainder.totalUsd === null) {
+                        unpriced += 1;
+                        continue;
+                    }
+                    sessionCost += remainder.totalUsd;
+                    pricingSource = INCOMPLETE_TURN_PRICING_SOURCE;
+                }
                 yield* write.exec(
-                    `UPDATE turn_token_usage SET estimated_input_cost_usd = ?,`
-                        + ` estimated_output_cost_usd = ?, estimated_cache_creation_cost_usd = ?,`
-                        + ` estimated_cache_read_cost_usd = ?, estimated_cost_usd = ?, pricing_source = ?`
+                    `UPDATE session_token_usage SET estimated_cost_usd = ?, pricing_source = ?`
                         + ` WHERE id = ? AND estimated_cost_usd IS NULL`,
-                    [
-                        cost.inputUsd,
-                        cost.outputUsd,
-                        cost.cacheCreationUsd,
-                        cost.cacheReadUsd,
-                        cost.totalUsd,
-                        `${ESTIMATED_PRICING_PREFIX}${cost.pricingSource}`,
-                        row.id,
-                    ],
+                    [sessionCost, pricingSource, row.id],
                 );
                 backfilled += 1;
                 continue;

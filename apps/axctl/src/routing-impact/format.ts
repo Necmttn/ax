@@ -11,7 +11,7 @@ const armLabel = (b: BlockResult): string =>
 
 const pp = (n: number | null): string => (n === null ? "  -  " : `${n.toFixed(1)}pp`);
 const pct = (n: number | null): string => (n === null ? " - " : `${n.toFixed(0)}%`);
-const usd = (n: number): string => `$${n.toFixed(2)}`;
+const usd = (n: number | null): string => n === null ? "unknown" : `$${n.toFixed(2)}`;
 
 const blockLine = (b: BlockResult): string => {
     const win = b.windowReset ? "window reset" : pp(b.fiveHourPpConsumed);
