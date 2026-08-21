@@ -28,6 +28,7 @@ const SKILL_GRAPH_EDGES_SQL = `
     JOIN skill s_in ON s_in.id = sp.in_id
     JOIN skill s_out ON s_out.id = sp.out_id
     WHERE sp.count >= ?
+      AND sp.in_id <> sp.out_id
       AND s_in.name IS NOT NULL
       AND s_out.name IS NOT NULL
     ORDER BY sp.count DESC

@@ -53,4 +53,38 @@ describe("fetchSkillGraph (real DuckDB fixture)", () => {
         expect(payload.edge_count).toBe(2);
         expect(payload.node_count).toBe(3);
     });
+
+    dtest("self-edges do not consume the SQL limit (#984)", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-skill-graph-self-limit-"), dylibPath, (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("skill", [
+                        { id: "center", name: "center", scope: "user", dir_path: "/skills/center", content_hash: "center" },
+                        ...Array.from({ length: 10 }, (_, index) => ({
+                            id: `target-${index}`,
+                            name: `target-${index}`,
+                            scope: "user",
+                            dir_path: `/skills/target-${index}`,
+                            content_hash: `target-${index}`,
+                        })),
+                    ]);
+                    yield* w.putMany("skill_paired", [
+                        { id: "self", in_id: "center", out_id: "center", count: 1000, last_seen: now },
+                        ...Array.from({ length: 10 }, (_, index) => ({
+                            id: `pair-${index}`,
+                            in_id: "center",
+                            out_id: `target-${index}`,
+                            count: 100 - index,
+                            last_seen: now,
+                        })),
+                    ]);
+                }),
+            ),
+        );
+
+        const payload = await readThroughFixture(fixture, dylibPath, fetchSkillGraph({ limit: 10 }));
+
+        expect(payload.edges).toHaveLength(10);
+        expect(payload.edges.every((edge) => edge.source !== edge.target)).toBe(true);
+    });
 });
