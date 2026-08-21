@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { Judgment } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
-import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
+import { dedupeSig, migrateProposalDedupeSigs, normalizeTitle } from "../ingest/derive-proposals.ts";
 
 /**
  * `ax improve propose` - the agent write-path into the improve loop.
@@ -171,6 +171,7 @@ export const runPropose = Effect.fn("improve.runPropose")(function* (raw: unknow
     }
     const sig = dedupeSig(input.form, normalizeTitle(input.title));
     const judgment = yield* Judgment;
+    yield* migrateProposalDedupeSigs(judgment);
     const id = proposalKey(sig);
     const frequency = input.frequency ?? 1;
     const now = new Date();

@@ -31,10 +31,10 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { cacheRow, jsonParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
-import { Judgment, TextColumn, TimestampColumn, type JudgmentError, type SidecarParam } from "@ax/lib/sqlite";
+import { Judgment, TextColumn, TimestampColumn, type JudgmentError, type JudgmentService, type SidecarParam } from "@ax/lib/sqlite";
 import { judgmentRow } from "../improve/judgment-proposals.ts";
 import { jsonRecordField } from "@ax/lib/decode";
-import { edgeRowId } from "@ax/lib/stable-id";
+import { edgeRowId, stableId } from "@ax/lib/stable-id";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
@@ -662,8 +662,155 @@ interface SkillCandidateRow {
 export const normalizeTitle = (raw: string): string =>
     raw.toLowerCase().trim().replaceAll(/\s+/g, " ");
 
+const sha256Prefix = (value: string, length = 16): string => {
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(value);
+    return hasher.digest("hex").slice(0, length);
+};
+
 export const dedupeSig = (form: string, normalizedTitle: string): string =>
-    `${form}__${Bun.hash(`${form}:${normalizedTitle}`).toString(16).slice(0, 16)}`;
+    `${form}__${sha256Prefix(`${form}:${normalizedTitle}`)}`;
+
+interface ProposalDedupeMigrationRow {
+    readonly id: string;
+    readonly form: string;
+    readonly title: string;
+    readonly dedupe_sig: string;
+    readonly status: string;
+    readonly origin: string;
+    readonly baseline: string | null;
+}
+
+const decisionRank = (status: string): number => {
+    switch (status) {
+        case "rejected": return 0;
+        case "accepted": return 1;
+        case "superseded": return 2;
+        default: return 3;
+    }
+};
+
+const proposalPayloadTable = (form: string): string | null => {
+    switch (form) {
+        case "skill": return "skill_proposal";
+        case "subagent": return "subagent_proposal";
+        case "hook": return "hook_proposal";
+        case "guidance": return "guidance_proposal";
+        case "automation": return "automation_proposal";
+        default: return null;
+    }
+};
+
+const migratedProposalId = (row: ProposalDedupeMigrationRow, sig: string): string => {
+    const oldSuffix = row.dedupe_sig.slice(-12);
+    if (row.id.endsWith(oldSuffix)) return `${row.id.slice(0, -oldSuffix.length)}${sig.slice(-12)}`;
+    if (row.origin !== "agent") return row.id;
+
+    const baseline = parseMetrics(row.baseline);
+    if (baseline.source === "retro_meta_plan" && typeof baseline.slug === "string") {
+        return stableId("proposal", ["retro_meta", baseline.slug, sig]);
+    }
+    return stableId("proposal", [sig]);
+};
+
+/**
+ * One-time transition from Bun.hash proposal signatures to SHA-256.
+ *
+ * `form` and `title` are the complete signature inputs, so this migration does
+ * not depend on reproducing the Bun version that wrote the old value. Proposal
+ * ids and signature values change together. The same transaction also
+ * changes typed payload ids and all proposal links. It first moves changed ids
+ * to unique temporary values, which makes each update safe under unique indexes.
+ *
+ * A sidecar can already contain logical duplicates if an earlier Bun upgrade
+ * changed Bun.hash. The strongest closed decision receives the canonical SHA
+ * signature. Other rows receive deterministic legacy suffixes. Thus no decision
+ * row or linked row is deleted, while future derivation sees the canonical sig.
+ */
+export const migrateProposalDedupeSigs = (
+    judgment: JudgmentService,
+): Effect.Effect<void, JudgmentError> =>
+    Effect.gen(function* () {
+        const rows = yield* judgment.rows(Schema.Struct({
+            id: TextColumn,
+            form: TextColumn,
+            title: TextColumn,
+            dedupe_sig: TextColumn,
+            status: TextColumn,
+            origin: TextColumn,
+            baseline: Schema.NullOr(TextColumn),
+        }), "SELECT id, form, title, dedupe_sig, status, origin, baseline FROM proposal");
+
+        const groups = new Map<string, ProposalDedupeMigrationRow[]>();
+        for (const row of rows) {
+            const desired = dedupeSig(row.form, normalizeTitle(row.title));
+            const group = groups.get(desired) ?? [];
+            group.push(row);
+            groups.set(desired, group);
+        }
+
+        const targets = new Map<string, { readonly id: string; readonly sig: string }>();
+        for (const [desired, group] of groups) {
+            const ordered = [...group].sort((a, b) =>
+                Number(migratedProposalId(b, desired) === b.id) - Number(migratedProposalId(a, desired) === a.id) ||
+                decisionRank(a.status) - decisionRank(b.status) ||
+                Number(b.dedupe_sig === desired) - Number(a.dedupe_sig === desired) ||
+                a.id.localeCompare(b.id));
+            for (const [index, row] of ordered.entries()) {
+                targets.set(row.id, index === 0
+                    ? { id: migratedProposalId(row, desired), sig: desired }
+                    : { id: row.id, sig: `${desired}__legacy__${sha256Prefix(row.id, 12)}` });
+            }
+        }
+
+        const changed = rows.filter((row) => {
+            const target = targets.get(row.id)!;
+            return target.id !== row.id || target.sig !== row.dedupe_sig;
+        });
+        if (changed.length === 0) return;
+
+        yield* judgment.transaction((transaction) => Effect.gen(function* () {
+            for (const row of changed) {
+                const target = targets.get(row.id)!;
+                if (target.id !== row.id) {
+                    const payloadTable = proposalPayloadTable(row.form);
+                    if (payloadTable !== null) {
+                        yield* transaction.exec(
+                            `UPDATE ${payloadTable} SET id = ? WHERE proposal = ?`,
+                            [`__ax_dedupe_migration_tmp_payload__${row.id}`, row.id],
+                        );
+                    }
+                }
+                yield* transaction.exec(
+                    "UPDATE proposal SET id = ?, dedupe_sig = ? WHERE id = ?",
+                    [`__ax_dedupe_migration_tmp_id__${row.id}`, `__ax_dedupe_migration_tmp_sig__${row.id}`, row.id],
+                );
+            }
+            for (const row of changed) {
+                const target = targets.get(row.id)!;
+                if (target.id !== row.id) {
+                    const payloadTable = proposalPayloadTable(row.form);
+                    if (payloadTable !== null) {
+                        const payloadId = row.origin === "mined"
+                            ? target.id
+                            : stableId(payloadTable, [target.id]);
+                        yield* transaction.exec(
+                            `UPDATE ${payloadTable} SET id = ?, proposal = ? WHERE proposal = ?`,
+                            [payloadId, target.id, row.id],
+                        );
+                    }
+                    yield* transaction.exec(
+                        "UPDATE experiment SET proposal = ? WHERE proposal = ?",
+                        [target.id, row.id],
+                    );
+                }
+                yield* transaction.exec(
+                    "UPDATE proposal SET id = ?, dedupe_sig = ? WHERE id = ?",
+                    [target.id, target.sig, `__ax_dedupe_migration_tmp_id__${row.id}`],
+                );
+            }
+        }));
+    });
 
 export const parseMetrics = (
     raw: Record<string, unknown> | string | null | undefined,
@@ -796,6 +943,7 @@ export const deriveProposals = (
 > =>
     Effect.gen(function* () {
         const judgment = yield* Judgment;
+        yield* migrateProposalDedupeSigs(judgment);
         const [candidates, skills, existingProposals] = yield* Effect.all([
             write.rows(Schema.Struct({
                 id: Schema.String, name: Schema.String, trigger_pattern: Schema.String,
