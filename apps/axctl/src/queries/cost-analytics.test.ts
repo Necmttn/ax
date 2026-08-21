@@ -139,6 +139,31 @@ describe("fetchCostModels - #696 unpriced/recompute semantics", () => {
         expect(result.rows[0]).toMatchObject({ cost_usd: 1, unpriced: true });
     });
 
+    test("keeps a stored partial cost when one catalog component has no rate (#997)", async () => {
+        const dbRows = [
+            { model: "partial-model", sessions: 2, priced_rows: 1, unpriced_rows: 1,
+              prompt_tokens: 0, completion_tokens: 0,
+              cache_read_tokens: 0, cache_create_tokens: 1_000_000, cost_usd: 2 },
+        ];
+        const agentModelRows = [
+            {
+                name: "partial-model", provider: "test",
+                input_per_million_usd: 1, output_per_million_usd: 1,
+                cache_creation_per_million_usd: null, cache_read_per_million_usd: 1,
+                input_above_200k_per_million_usd: null, output_above_200k_per_million_usd: null,
+                cache_creation_above_200k_per_million_usd: null, cache_read_above_200k_per_million_usd: null,
+                fast_multiplier: 1, context_window: null, pricing_source: "test",
+            },
+        ];
+        const { layer } = makeTestCacheRead({
+            routes: { "FROM session_token_usage": dbRows, "FROM agent_model": agentModelRows },
+        });
+
+        const result = await runWithCache(layer, fetchCostModels({ sinceDays: 14 }));
+
+        expect(result.rows[0]).toMatchObject({ cost_usd: 2, unpriced: true });
+    });
+
     test("never masks a real nonzero stored cost, even for a model absent from the built-in catalog", async () => {
         // "db-only-model" is priced ONLY via a DB agent_model refresh (litellm/
         // models.dev), never in BUILTIN_MODEL_PRICING_CATALOG. The old

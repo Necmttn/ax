@@ -77,6 +77,18 @@ const fixture = () =>
                         usage_quality: "exact",
                         ts: at("2026-08-03T12:00:00.000Z"),
                     },
+                    {
+                        id: "tu-unpriced",
+                        session: "s2",
+                        turn: "t4",
+                        seq: 2n,
+                        source: "claude",
+                        estimated_tokens: 50n,
+                        estimated_cost_usd: null,
+                        usage_source: "transcript",
+                        usage_quality: "exact",
+                        ts: at("2026-08-10T12:00:00.000Z"),
+                    },
                 ]);
             }),
         ),
@@ -86,7 +98,12 @@ const metricsOver = (snapshotPath: string, startIso: string, endIso: string) =>
     Effect.runPromise(
         fetchWindowMetrics(startIso, endIso).pipe(
             Effect.provide(readFixture(snapshotPath, dylibPath)),
-        ) as Effect.Effect<{ readonly tokenCostUsd: number; readonly turns: number }>,
+        ) as Effect.Effect<{
+            readonly tokenCostUsd: number | null;
+            readonly pricedRows: number;
+            readonly totalRows: number;
+            readonly turns: number;
+        }>,
     );
 
 describe("fetchWindowMetrics", () => {
@@ -115,7 +132,7 @@ describe("fetchWindowMetrics", () => {
 
         expect(before.turns).toBe(2);
         expect(after.turns).toBe(1);
-        expect(before.tokenCostUsd + after.tokenCostUsd).toBeCloseTo(3.75, 6);
+        expect((before.tokenCostUsd ?? 0) + (after.tokenCostUsd ?? 0)).toBeCloseTo(3.75, 6);
     });
 
     dtest("an empty window is zeroes, not a failure", async () => {
@@ -126,6 +143,17 @@ describe("fetchWindowMetrics", () => {
             "2020-01-02T00:00:00.000Z",
         );
 
-        expect(metrics).toEqual({ tokenCostUsd: 0, turns: 0 });
+        expect(metrics).toEqual({ tokenCostUsd: 0, pricedRows: 0, totalRows: 0, turns: 0 });
+    });
+
+    dtest("marks window cost unknown when any used row is unpriced (#998)", async () => {
+        const f = await fixture();
+        const metrics = await metricsOver(
+            f.snapshotPath,
+            "2026-08-09T00:00:00.000Z",
+            "2026-08-11T00:00:00.000Z",
+        );
+
+        expect(metrics).toMatchObject({ tokenCostUsd: null, pricedRows: 0, totalRows: 1 });
     });
 });

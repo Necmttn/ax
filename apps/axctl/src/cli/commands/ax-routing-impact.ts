@@ -118,7 +118,7 @@ const reportImpactCommand = Command.make(
             const inputs: BlockInput[] = [];
             for (const b of done) {
                 const metrics = yield* fetchWindowMetrics(b.started_at, b.ended_at!).pipe(
-                    Effect.catch(() => Effect.succeed({ tokenCostUsd: 0, turns: 0 })),
+                    Effect.catch(() => Effect.succeed({ tokenCostUsd: 0, pricedRows: 0, totalRows: 0, turns: 0 })),
                 );
                 inputs.push({
                     arm: b.arm,
@@ -128,6 +128,8 @@ const reportImpactCommand = Command.make(
                     fiveHourStart: b.five_hour_start,
                     fiveHourEnd: b.five_hour_end,
                     tokenCostUsd: metrics.tokenCostUsd,
+                    pricedRows: metrics.pricedRows,
+                    totalRows: metrics.totalRows,
                     dispatchCount: 0,
                     inheritCount: 0,
                     turns: metrics.turns,

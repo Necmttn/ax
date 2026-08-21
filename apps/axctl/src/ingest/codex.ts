@@ -1250,18 +1250,59 @@ const writeCodexTokenUsage = (
     });
     const turnCosts = turnUsages.map(priceTurn);
     if (usage !== null) {
-        const cost = sessionTurnUsages.length > 0
-            ? sumCostEstimates(sessionTurnUsages.map(priceTurn))
-            : estimateCost({
+        const sessionFallback = () => estimateCost({
+            modelKey: usage.model,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            pricingCatalog,
+            aggregated: true,
+        });
+        const sessionCost = (): ReturnType<typeof estimateCost> => {
+            if (sessionTurnUsages.length === 0) return sessionFallback();
+
+            const sum = (select: (row: CodexTurnTokenUsage) => number | null): number =>
+                sessionTurnUsages.reduce((total, row) => total + (select(row) ?? 0), 0);
+            const covered = {
+                promptTokens: sum((row) => row.promptTokens),
+                completionTokens: sum((row) => row.completionTokens),
+                cacheReadInputTokens: sum((row) => row.cacheReadInputTokens),
+                estimatedTokens: sum((row) => row.estimatedTokens),
+            };
+            const knownTotals = [
+                [usage.promptTokens, covered.promptTokens],
+                [usage.completionTokens, covered.completionTokens],
+                [usage.cacheReadInputTokens, covered.cacheReadInputTokens],
+                [usage.estimatedTokens, covered.estimatedTokens],
+            ] as const;
+            // A reset or inconsistent provider total cannot produce a safe
+            // remainder. Use the session estimate instead of a negative leg.
+            if (knownTotals.some(([total, part]) => total !== null && part > total)) {
+                return sessionFallback();
+            }
+            const hasUncoveredUsage = knownTotals.some(([total, part]) => total !== null && part < total);
+            const pricedTurns = sessionTurnUsages.map(priceTurn);
+            if (!hasUncoveredUsage) return sumCostEstimates(pricedTurns);
+
+            const uncovered = estimateCost({
                 modelKey: usage.model,
-                promptTokens: usage.promptTokens,
-                completionTokens: usage.completionTokens,
+                promptTokens: usage.promptTokens === null ? null : usage.promptTokens - covered.promptTokens,
+                completionTokens: usage.completionTokens === null
+                    ? null
+                    : usage.completionTokens - covered.completionTokens,
                 cacheCreationInputTokens: null,
-                cacheReadInputTokens: usage.cacheReadInputTokens,
-                estimatedTokens: usage.estimatedTokens,
+                cacheReadInputTokens: usage.cacheReadInputTokens === null
+                    ? null
+                    : usage.cacheReadInputTokens - covered.cacheReadInputTokens,
+                estimatedTokens: Math.max(0, usage.estimatedTokens - covered.estimatedTokens),
                 pricingCatalog,
                 aggregated: true,
             });
+            return sumCostEstimates([...pricedTurns, uncovered]);
+        };
+        const cost = sessionCost();
         yield* write.put("session_token_usage", cacheRow({
             id: usage.session,
             session: usage.session,

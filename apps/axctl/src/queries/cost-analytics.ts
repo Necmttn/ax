@@ -160,7 +160,7 @@ function resolveRowCost(
         aggregated: true,
     });
     return estimate.totalUsd === null
-        ? { cost_usd: 0, unpriced: true }
+        ? { cost_usd: storedCost, unpriced: true }
         : { cost_usd: estimate.totalUsd, unpriced: false };
 }
 

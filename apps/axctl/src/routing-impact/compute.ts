@@ -34,7 +34,9 @@ export interface BlockInput {
     readonly fiveHourStart: WindowEdge | null;
     readonly fiveHourEnd: WindowEdge | null;
     /** Token-equivalent cost summed over the block window (USD). */
-    readonly tokenCostUsd: number;
+    readonly tokenCostUsd: number | null;
+    readonly pricedRows: number;
+    readonly totalRows: number;
     /** Subagent dispatches that started in the block window. */
     readonly dispatchCount: number;
     /** Of those, how many ran on an inherited (unrouted) model. */
@@ -51,7 +53,9 @@ export interface BlockResult {
      *  quota was missing or the window reset mid-block (see windowReset). */
     readonly fiveHourPpConsumed: number | null;
     readonly windowReset: boolean;
-    readonly tokenCostUsd: number;
+    readonly tokenCostUsd: number | null;
+    readonly pricedRows: number;
+    readonly totalRows: number;
     readonly inheritPct: number | null;
     readonly dispatchCount: number;
     readonly turns: number;
@@ -115,7 +119,9 @@ const resolveBlock = (b: BlockInput): BlockResult => {
         durationMin,
         fiveHourPpConsumed,
         windowReset,
-        tokenCostUsd: round(b.tokenCostUsd, 2),
+        tokenCostUsd: b.tokenCostUsd === null ? null : round(b.tokenCostUsd, 2),
+        pricedRows: b.pricedRows,
+        totalRows: b.totalRows,
         inheritPct,
         dispatchCount: b.dispatchCount,
         turns: b.turns,
@@ -136,6 +142,9 @@ export const buildImpactReport = (blocks: ReadonlyArray<BlockInput>): ImpactRepo
     if (results.some((r) => r.fiveHourPpConsumed === null && !r.windowReset)) {
         notes.push("quota was unavailable for a block - window delta omitted for it.");
     }
+    if (results.some((r) => r.tokenCostUsd === null)) {
+        notes.push("token prices were incomplete for a block - token cost omitted for it.");
+    }
 
     // Comparison only when we have exactly one clean off and one clean on block.
     const off = results.filter((r) => r.arm === "off");
@@ -149,7 +158,9 @@ export const buildImpactReport = (blocks: ReadonlyArray<BlockInput>): ImpactRepo
                 o.workPerWindowPp !== null && n.workPerWindowPp !== null && o.workPerWindowPp > 0
                     ? round(n.workPerWindowPp / o.workPerWindowPp, 2)
                     : null,
-            costRatio: n.tokenCostUsd > 0 ? round(o.tokenCostUsd / n.tokenCostUsd, 2) : null,
+            costRatio: o.tokenCostUsd !== null && n.tokenCostUsd !== null && n.tokenCostUsd > 0
+                ? round(o.tokenCostUsd / n.tokenCostUsd, 2)
+                : null,
             inheritPctDrop:
                 o.inheritPct !== null && n.inheritPct !== null
                     ? round(o.inheritPct - n.inheritPct, 1)
