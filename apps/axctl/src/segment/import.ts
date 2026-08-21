@@ -19,7 +19,7 @@
  * `ceil(now - min(started_at))` - there is no session-scoped derive mode, so
  * the window is deliberately WIDE and its cost is the known post-#888 cost.
  */
-import { Data, Effect, Schema } from "effect";
+import { Data, Effect, Exit, Schema } from "effect";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { hashFileSha256, importedMarkPath, WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
@@ -156,63 +156,91 @@ export const runSegmentImport = (
     plan: SegmentImportPlan,
 ): Effect.Effect<SegmentImportResult, SegmentImportError> =>
     Effect.gen(function* () {
-        for (const table of plan.tables) {
-            yield* loadTable(write, table).pipe(
+        const imported = yield* Effect.acquireUseRelease(
+            write.exec("BEGIN TRANSACTION").pipe(
                 Effect.mapError(
-                    (error) => new SegmentImportError({ message: `loading ${table.table}: ${String(error)}` }),
+                    (error) =>
+                        new SegmentImportError({ message: `starting import transaction: ${String(error)}` }),
                 ),
-            );
-        }
+            ),
+            () =>
+                Effect.gen(function* () {
+                    for (const table of plan.tables) {
+                        yield* loadTable(write, table).pipe(
+                            Effect.mapError(
+                                (error) => new SegmentImportError({ message: `loading ${table.table}: ${String(error)}` }),
+                            ),
+                        );
+                    }
 
-        // Watermark handshake: one `__imported__/<kind>/<sha>` mark per source
-        // file. Idempotent (PK is (source_kind, path)-derived).
-        let marksWritten = 0;
-        for (const source of plan.manifest.source_files) {
-            yield* write
-                .put(
-                    WATERMARK_TABLE,
-                    watermarkRow(source.source_kind, importedMarkPath(source.source_kind, source.sha), {
-                        sha: source.sha,
-                        size: source.size,
-                    }),
-                )
-                .pipe(
+                    // Watermark handshake: one `__imported__/<kind>/<sha>` mark per source
+                    // file. Idempotent (PK is (source_kind, path)-derived).
+                    let marksWritten = 0;
+                    for (const source of plan.manifest.source_files) {
+                        yield* write
+                            .put(
+                                WATERMARK_TABLE,
+                                watermarkRow(source.source_kind, importedMarkPath(source.source_kind, source.sha), {
+                                    sha: source.sha,
+                                    size: source.size,
+                                }),
+                            )
+                            .pipe(
+                                Effect.mapError(
+                                    (error) => new SegmentImportError({ message: `writing imported mark: ${String(error)}` }),
+                                ),
+                            );
+                        marksWritten += 1;
+                    }
+
+                    // The wide re-derive window, from the segment's own session file (the
+                    // local table may hold older sessions that would widen it for free).
+                    const OldestRow = Schema.Struct({ oldest: Schema.NullOr(Schema.String) });
+                    const sessionPlan = plan.tables.find((table) => table.table === "session");
+                    let rederiveSinceDays: number | null = null;
+                    if (sessionPlan !== undefined) {
+                        const rows = yield* write
+                            .rows(
+                                OldestRow,
+                                `SELECT CAST(min(started_at) AS VARCHAR) AS oldest
+                                 FROM read_ndjson('${sqlPath(sessionPlan.filePath)}', columns={started_at: 'TIMESTAMP'})`,
+                            )
+                            .pipe(
+                                Effect.mapError(
+                                    (error) => new SegmentImportError({ message: `reading oldest session: ${String(error)}` }),
+                                ),
+                            );
+                        const oldest = rows[0]?.oldest ?? null;
+                        if (oldest === null) {
+                            rederiveSinceDays = Math.max(1, Math.ceil(Date.now() / 86_400_000));
+                        } else {
+                            const ms = Date.now() - new Date(`${oldest.replace(" ", "T")}Z`).getTime();
+                            rederiveSinceDays = Math.max(1, Math.ceil(ms / 86_400_000));
+                        }
+                    }
+
+                    return { marksWritten, rederiveSinceDays };
+                }),
+            (_, exit) => {
+                const succeeded = Exit.isSuccess(exit);
+                const finish = (succeeded ? write.exec("COMMIT") : write.exec("ROLLBACK")).pipe(
+                    Effect.asVoid,
                     Effect.mapError(
-                        (error) => new SegmentImportError({ message: `writing imported mark: ${String(error)}` }),
+                        (error) =>
+                            new SegmentImportError({
+                                message: `${succeeded ? "committing" : "rolling back"} import transaction: ${String(error)}`,
+                            }),
                     ),
                 );
-            marksWritten += 1;
-        }
-
-        // The wide re-derive window, from the segment's own session file (the
-        // local table may hold older sessions that would widen it for free).
-        const OldestRow = Schema.Struct({ oldest: Schema.NullOr(Schema.String) });
-        const sessionPlan = plan.tables.find((table) => table.table === "session");
-        let rederiveSinceDays: number | null = null;
-        if (sessionPlan !== undefined) {
-            const rows = yield* write
-                .rows(
-                    OldestRow,
-                    `SELECT CAST(min(started_at) AS VARCHAR) AS oldest
-                     FROM read_ndjson('${sqlPath(sessionPlan.filePath)}', columns={started_at: 'TIMESTAMP'})`,
-                )
-                .pipe(
-                    Effect.mapError(
-                        (error) => new SegmentImportError({ message: `reading oldest session: ${String(error)}` }),
-                    ),
-                );
-            const oldest = rows[0]?.oldest ?? null;
-            if (oldest !== null) {
-                const ms = Date.now() - new Date(`${oldest.replace(" ", "T")}Z`).getTime();
-                rederiveSinceDays = Math.max(1, Math.ceil(ms / 86_400_000));
-            }
-        }
+                return succeeded ? finish : finish.pipe(Effect.ignore);
+            },
+        );
 
         return {
             sessions: plan.manifest.scope.sessions.length,
             tables: plan.tables,
-            marksWritten,
-            rederiveSinceDays,
+            marksWritten: imported.marksWritten,
+            rederiveSinceDays: imported.rederiveSinceDays,
             rederiveStages: rederiveStageKeys(),
         };
     });

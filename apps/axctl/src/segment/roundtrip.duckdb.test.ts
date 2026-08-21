@@ -13,12 +13,19 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { CacheRead, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { runSegmentExport } from "./export.ts";
 import { planSegmentImport, runSegmentImport, type SegmentImportResult } from "./import.ts";
+import { ddlHash } from "./contract.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("segment round-trip", { requireFts: true });
 
 const T0 = new Date("2026-08-01T10:00:00.000Z");
 const RAW_FILE = "/machines/a/transcripts/seg-s1.jsonl";
 const SOURCE_SHA = "a".repeat(64);
+
+const sha256 = async (path: string): Promise<string> => {
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(await Bun.file(path).arrayBuffer());
+    return hasher.digest("hex");
+};
 
 const seedStoreA = (write: CacheWriteService) =>
     Effect.gen(function* () {
@@ -176,5 +183,106 @@ describe("segment export -> import round-trip on the shipped dylib", () => {
         await Bun.write(`${outDir}/turn.ndjson`, `{"id":"evil"}\n`);
         const tampered = await Effect.runPromise(planSegmentImport(outDir).pipe(Effect.flip));
         expect(String(tampered)).toContain("turn.ndjson does not match");
+    });
+
+    dtest("sessions without a start time use a full-history re-derive window", async () => {
+        const outDir = tempDir("ax-segment-null-time-");
+        const fixtureA = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-segment-null-time-a-"), dylibPath, (write) =>
+                write.put("session", {
+                    id: "null-time-session",
+                    source: "claude",
+                    started_at: null,
+                }),
+            ),
+        );
+        await readThroughFixture(
+            fixtureA,
+            dylibPath,
+            runSegmentExport({ sessions: ["null-time-session"], outDir, axVersion: "0.0.0-test" }),
+        );
+
+        let imported: SegmentImportResult | null = null;
+        await runWithPlatform(
+            publishCacheFixture(tempDir("ax-segment-null-time-b-"), dylibPath, (write) =>
+                Effect.gen(function* () {
+                    const plan = yield* planSegmentImport(outDir);
+                    imported = yield* runSegmentImport(write, plan);
+                }),
+            ),
+        );
+
+        expect(imported).not.toBeNull();
+        expect(imported!.rederiveStages.length).toBeGreaterThan(0);
+        expect(imported!.rederiveSinceDays).not.toBeNull();
+        expect(imported!.rederiveSinceDays).toBeGreaterThan(20_000);
+    });
+
+    dtest("a failed table load rolls back all earlier tables", async () => {
+        const segmentDir = tempDir("ax-segment-rollback-");
+        const sessionFile = `${segmentDir}/session.ndjson`;
+        const turnFile = `${segmentDir}/turn.ndjson`;
+        await Bun.write(
+            sessionFile,
+            `${JSON.stringify({
+                id: "partly-imported",
+                source: "claude",
+                started_at: "2026-08-01T00:00:00.000Z",
+            })}\n`,
+        );
+        await Bun.write(
+            turnFile,
+            `${JSON.stringify({
+                id: "bad-turn",
+                session: "partly-imported",
+                seq: "not-a-bigint",
+                ts: "2026-08-01T00:00:00.000Z",
+                role: "user",
+            })}\n`,
+        );
+        await Bun.write(
+            `${segmentDir}/manifest.json`,
+            `${JSON.stringify({
+                segment_version: 1,
+                created_at: "2026-08-21T00:00:00.000Z",
+                ax_version: "0.0.0-test",
+                ddl_hash: ddlHash(),
+                scope: { kind: "sessions", sessions: ["partly-imported"], since_days: null },
+                tables: [
+                    {
+                        table: "session",
+                        rows: 1,
+                        sha256: await sha256(sessionFile),
+                        columns: ["id", "source", "started_at"],
+                    },
+                    {
+                        table: "turn",
+                        rows: 1,
+                        sha256: await sha256(turnFile),
+                        columns: ["id", "session", "seq", "ts", "role"],
+                    },
+                ],
+                source_files: [],
+                notes: { cost_columns: "test", enrichment_stripped: true },
+            }, null, 2)}\n`,
+        );
+
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-segment-rollback-target-"), dylibPath, (write) =>
+                Effect.gen(function* () {
+                    const plan = yield* planSegmentImport(segmentDir);
+                    const failure = yield* runSegmentImport(write, plan).pipe(Effect.flip);
+                    expect(String(failure)).toContain("loading turn");
+
+                    const Count = Schema.Struct({ n: Schema.Number });
+                    const rows = yield* write.rows(
+                        Count,
+                        "SELECT CAST(count(*) AS DOUBLE) AS n FROM session WHERE id = 'partly-imported'",
+                    );
+                    expect(rows[0]?.n).toBe(0);
+                }),
+            ),
+        );
+        expect(fixture.snapshotPath).toBeTruthy();
     });
 });
