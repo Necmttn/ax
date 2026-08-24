@@ -24,6 +24,15 @@ export const computeBudgetEnvelope = (
 ): BudgetEnvelope => {
     const reserve = opts.reservePct ?? DEFAULT_RESERVE_PCT;
 
+    /**
+     * A derived deadline must never land at or before now (a stale quota
+     * snapshot's resets_at can already be in the past, and the bare-now
+     * fallback was itself already stale). An explicit --until is user
+     * intent and bypasses this - see call sites below.
+     */
+    const clampFuture = (iso: string): string =>
+        Date.parse(iso) > nowMs ? iso : new Date(nowMs + FORCED_FALLBACK_WINDOW_MS).toISOString();
+
     const windows: Array<{ name: BindingWindow; remaining: number; resetsAt: string }> = [];
     if (snapshot?.five_hour) {
         windows.push({
@@ -47,8 +56,7 @@ export const computeBudgetEnvelope = (
             binding_window: null,
             window_remaining_pct: 0,
             reserve_pct: reserve,
-            deadline: opts.untilIso
-                ?? new Date(opts.force === true ? nowMs + FORCED_FALLBACK_WINDOW_MS : nowMs).toISOString(),
+            deadline: opts.untilIso ?? clampFuture(new Date(nowMs).toISOString()),
             source: opts.force === true ? "forced" : "unavailable",
         };
     }
@@ -76,7 +84,7 @@ export const computeBudgetEnvelope = (
         binding_window: binding.name,
         window_remaining_pct: binding.remaining,
         reserve_pct: reserve,
-        deadline: opts.untilIso ?? earliestReset,
+        deadline: opts.untilIso ?? clampFuture(earliestReset),
         source,
     };
 };

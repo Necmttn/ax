@@ -1,6 +1,6 @@
 // apps/axctl/src/dojo/paths.test.ts
 import { describe, expect, test } from "bun:test";
-import { dojoOutboxDir, dojoReportPath, dojoReportsDir, dojoSparBriefPath, dojoSparDir, dojoSparReportPath } from "./paths.ts";
+import { dojoOutboxDir, dojoReportPath, dojoReportsDir, dojoSparBriefPath, dojoSparDir, dojoSparReportPath, dojoSparScorePath } from "./paths.ts";
 
 describe("dojo paths", () => {
     test("derive from an injectable base dir", () => {
@@ -18,6 +18,9 @@ describe("dojo paths", () => {
         );
         expect(dojoSparReportPath("ab12cd34-2026-06-13", "/tmp/axhome/.ax/dojo")).toBe(
             "/tmp/axhome/.ax/dojo/spar/ab12cd34-2026-06-13-report.md",
+        );
+        expect(dojoSparScorePath("ab12cd34-2026-06-13", "/tmp/axhome/.ax/dojo")).toBe(
+            "/tmp/axhome/.ax/dojo/spar/ab12cd34-2026-06-13-score.json",
         );
     });
 

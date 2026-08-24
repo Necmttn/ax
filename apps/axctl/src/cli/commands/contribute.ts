@@ -3,14 +3,17 @@
  * or author one through structured prompts, into community/patterns/ via the
  * same fork+PR rails used by profile registration.
  */
-import { Effect, Schema } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
+import { Effect, FileSystem, Schema } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile } from "../../profile/render.ts";
 import { openPatternContribution, patternFilePath } from "../../profile/pattern-contribution.ts";
 import { PATTERN_CATEGORIES, TastePattern, type PatternCategory, type ProfileV1 } from "../../profile/schema.ts";
 import { slugify } from "../../profile/taste.ts";
 import { GitHubEnvLive } from "../../profile/github-env.ts";
+import { buildCommunityStudy, openStudyContribution, studyFilePath } from "../../profile/study-contribution.ts";
+import { dojoSparBriefPath, dojoSparScorePath } from "../../dojo/paths.ts";
+import { parseSparBrief, parseSparScore } from "../../dojo/spar.ts";
 import { gatherEnv } from "./profile.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, optionValue, parseCsvFlag } from "./shared.ts";
@@ -240,9 +243,63 @@ const contributePatternCommand = Command.make(
     ),
 );
 
+export const isSafeSparId = (id: string): boolean =>
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id) && !id.includes("..");
+
+export const cmdContributeStudy = (input: {
+    readonly id: string;
+    readonly preview: boolean;
+    readonly yes: boolean;
+}) => Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const briefPath = dojoSparBriefPath(input.id);
+    const scorePath = dojoSparScorePath(input.id);
+    const briefBytes = yield* fs.readFileString(briefPath);
+    const scoreBytes = yield* fs.readFileString(scorePath);
+    const brief = parseSparBrief(briefBytes);
+    const score = parseSparScore(scoreBytes);
+    if (brief === null) throw new Error(`invalid spar brief: ${briefPath}`);
+    if (score === null) throw new Error(`invalid spar score: ${scorePath}`);
+
+    const study = buildCommunityStudy({ brief, score, briefBytes, scoreBytes });
+    const path = studyFilePath(study);
+    console.log(prettyPrint(study));
+    console.log(`\nThis self-reported study will be proposed as ${path}.`);
+    console.log("It contains one comparison. It does not prove general efficacy.");
+    if (input.preview) {
+        console.log("Preview only. No PR was opened.");
+        return;
+    }
+    if (!input.yes) {
+        const answer = promptText("Open reviewed PR? [y/N]").toLowerCase();
+        if (answer !== "y" && answer !== "yes") {
+            console.log("Aborted. No PR was opened.");
+            return;
+        }
+    }
+    const result = yield* openStudyContribution({ study });
+    console.log(`study PR: ${result.prUrl}`);
+    console.log(`file:     ${result.path}`);
+}).pipe(Effect.provide(GitHubEnvLive));
+
+const contributeStudyCommand = Command.make(
+    "study",
+    {
+        id: Argument.string("spar-id"),
+        preview: Flag.boolean("preview").pipe(Flag.withDefault(false)),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ id, preview, yes }) => {
+        if (!isSafeSparId(id)) fail(`ax contribute study: invalid spar id "${id}"`);
+        return cmdContributeStudy({ id, preview, yes });
+    },
+).pipe(Command.withDescription(
+    "Preview one content-stripped Dojo spar study. Use --yes to open a reviewed GitHub PR.",
+));
+
 export const contributeCommand = Command.make("contribute").pipe(
     Command.withDescription("Contribute ax community artifacts through fork+PR rails"),
-    Command.withSubcommands([contributePatternCommand]),
+    Command.withSubcommands([contributePatternCommand, contributeStudyCommand]),
 );
 
 export const contributeRuntime: RuntimeManifest = {
@@ -251,6 +308,7 @@ export const contributeRuntime: RuntimeManifest = {
         fallback: "none",
         subcommands: {
             pattern: (args) => args.includes("--fresh") ? "none" : "cache",
+            study: "none",
         },
     },
 };

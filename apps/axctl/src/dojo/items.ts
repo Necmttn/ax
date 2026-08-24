@@ -33,12 +33,12 @@ export const routingBacktestItems = (
         .map((p) => ({
             id: `routing:${p.id}`,
             kind: "routing_backtest",
-            title: `Backtest routing class ${p.pattern} (${p.count} dispatches, $${p.total_cost_usd.toFixed(2)})`,
+            title: `Review routing for judgment class ${p.pattern} - ${p.count} dispatches, $${p.total_cost_usd.toFixed(2)} spend under review`,
             commands: [
                 `ax routing tune --days=${days} --emit-brief`,
                 `ax routing tune --apply=${p.id} --days=${days}`,
             ],
-            success: "class applied to routing table (origin: user) or rejected with rationale",
+            success: "class applied to routing table (origin: user) or rejected with rationale - never auto-applied",
             cost_class: "m",
         }));
 
@@ -63,6 +63,22 @@ export const REPAIR_LINE_HOTSPOT_THRESHOLD = 200;
 const sessionShort = (session: string): string =>
     session.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(-8);
 
+/** First line of `text`, trimmed. Mirrors metrics/session-churn.ts's module-local helper. */
+const singleLine = (text: string): string => text.split(/\r?\n/, 1)[0]?.trim() ?? text;
+
+/** Cut `text` to `max` chars with an ellipsis. Mirrors metrics/session-churn.ts's module-local helper. */
+const truncate = (text: string, max: number): string =>
+    text.length <= max ? text : `${text.slice(0, Math.max(0, max - 3))}...`;
+
+/** Max chars for a taskLabel folded into an item title (matches the churn renderer's own cap). */
+const TASK_LABEL_TITLE_MAX = 48;
+
+/** Short, title-safe rendering of a session's task label; falls back to the session id when absent. */
+const taskLabelForTitle = (r: SessionChurnRow): string =>
+    r.taskLabel === null
+        ? `session ${sessionShort(r.session)}`
+        : truncate(singleLine(r.taskLabel), TASK_LABEL_TITLE_MAX);
+
 export const churnHotspotItems = (rows: readonly SessionChurnRow[]): DojoItem[] =>
     rows
         .filter((r) => r.episodes > r.passedEpisodes || r.repairLinesAdded > REPAIR_LINE_HOTSPOT_THRESHOLD)
@@ -71,7 +87,7 @@ export const churnHotspotItems = (rows: readonly SessionChurnRow[]): DojoItem[] 
         .map((r) => ({
             id: `experiment:${r.session}`,
             kind: "experiment",
-            title: `Worktree experiment: reduce ${r.topCheck} churn (${r.taskLabel})`,
+            title: `Worktree experiment: reduce ${r.topCheck} churn (${taskLabelForTitle(r)})`,
             commands: [
                 `ax sessions show ${r.session}`,
                 `git worktree add .claude/worktrees/dojo-${sessionShort(r.session)} -b dojo/${sessionShort(r.session)}`,

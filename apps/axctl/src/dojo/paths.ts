@@ -19,6 +19,9 @@ export const dojoSparBriefPath = (id: string, base: string = defaultDojoDir()): 
 export const dojoSparReportPath = (id: string, base: string = defaultDojoDir()): string =>
     posixPath.join(dojoSparDir(base), `${id}-report.md`);
 
+export const dojoSparScorePath = (id: string, base: string = defaultDojoDir()): string =>
+    posixPath.join(dojoSparDir(base), `${id}-score.json`);
+
 /** date is YYYY-MM-DD */
 export const dojoReportPath = (date: string, base: string = defaultDojoDir()): string =>
     posixPath.join(dojoReportsDir(base), `${date}.md`);

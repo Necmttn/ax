@@ -1,10 +1,13 @@
-import { Effect, FileSystem, type PlatformError } from "effect";
+import { Effect, FileSystem, Option, type PlatformError } from "effect";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import type { DojoItem } from "./schema.ts";
 
 const FILLED_PRIMARY_ROLE = /^primary_role:[^\S\n]*\S/m;
+
+/** A brief untouched (by mtime) for longer than this many days is stale and drops off the agenda. */
+export const STALE_BRIEF_DAYS = 30;
 
 /** Pure: filename + content -> open agenda item, or null when nothing to do. */
 export const classifyBriefFile = (name: string, content: string): DojoItem | null => {
@@ -58,24 +61,39 @@ export const classifyBriefFile = (name: string, content: string): DojoItem | nul
  * unreadable dir means "no open briefs". Each entry is classified first
  * (`classifyNoFollow`, the house pattern from ingest) and non-files
  * (subdirectories, symlinks) are skipped - readFileString on a directory
- * raises BadResource and would otherwise kill the whole source. The per-file
- * content read uses `skipNotFound(null)` + skip-on-null: a brief that
- * vanished mid-scan is SKIPPED (never classified from an empty string into a
- * spurious unfilled item); any other read fault (permission, IO) re-raises so
- * real data is never silently dropped.
+ * raises BadResource and would otherwise kill the whole source. A `File`
+ * entry is then stat'd (same `skipNotFound(null)` + skip-on-null treatment
+ * as the content read below - a brief that vanished mid-scan is SKIPPED) to
+ * check staleness: a brief whose mtime is older than `STALE_BRIEF_DAYS`
+ * before `nowMs` is dropped so it stops piling up on the agenda forever. A
+ * missing mtime (`Option.None`, platform-dependent) is treated as NOT stale -
+ * never drop a brief just because mtime is unavailable. The per-file content
+ * read uses `skipNotFound(null)` + skip-on-null: a brief that vanished mid-scan
+ * is SKIPPED (never classified from an empty string into a spurious unfilled
+ * item); any other read fault (permission, IO) re-raises so real data is
+ * never silently dropped.
  */
 export const scanTaskDir = (
     taskDir: string,
+    nowMs: number = Date.now(),
 ): Effect.Effect<DojoItem[], PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         if (!(yield* fs.exists(taskDir).pipe(orAbsent(false)))) return [];
         const names = yield* fs.readDirectory(taskDir).pipe(orAbsent([] as string[]));
+        const staleCutoffMs = STALE_BRIEF_DAYS * 24 * 60 * 60 * 1000;
         const items: DojoItem[] = [];
         for (const name of names) {
             const path = posixPath.join(taskDir, name);
             const kind = yield* classifyNoFollow(path);
             if (kind !== "File") continue; // subdir/symlink/etc - not a brief
+            const info = yield* fs.stat(path).pipe(skipNotFound(null));
+            if (info === null) continue; // vanished mid-scan - skip, don't misclassify
+            const isStale = Option.match(info.mtime, {
+                onNone: () => false, // mtime unavailable - never drop on that basis
+                onSome: (mtime) => nowMs - mtime.getTime() > staleCutoffMs,
+            });
+            if (isStale) continue;
             const content = yield* fs.readFileString(path).pipe(skipNotFound(null));
             if (content === null) continue; // vanished mid-scan - skip, don't misclassify
             const item = classifyBriefFile(name, content);
