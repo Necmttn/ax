@@ -4,6 +4,17 @@ import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { isAllowedHost } from "../dashboard/host-guard.ts";
 import { OTLP_SIGNAL_PATHS } from "./signal.ts";
+import { asForwardConfig, type OtelForwardConfig } from "./forward-config.ts";
+import { relayOtlp, makeRelayLogger } from "./forward-relay.ts";
+
+/**
+ * Path to the OTLP forwarding config (#1017). `ax install --otel-forward`
+ * writes it; the receiver reads it once at boot and relays each accepted body
+ * to the user's own collector. Its own dedicated override, sibling of the
+ * spool dir override.
+ */
+export const defaultForwardConfigPath = (): string =>
+    process.env.AX_OTLP_FORWARD_CONFIG ?? `${homedir()}/.ax/otel-forward.json`;
 
 export const OTLP_ACK = { partialSuccess: {} } as const;
 export const OTLP_SPOOL_RETENTION_DAYS = 90;
@@ -106,6 +117,10 @@ export interface StartOtlpSpoolServerOptions {
     readonly hostname?: string;
     readonly port?: number;
     readonly now?: () => Date;
+    /** Override the forwarding config path (#1017); tests point it at a fixture. */
+    readonly forwardConfigPath?: string;
+    /** Injectable fetch for the relay so the forward path is testable. */
+    readonly relayFetch?: typeof fetch;
 }
 
 export interface OtlpSpoolServer {
@@ -132,6 +147,27 @@ export const startOtlpSpoolServer = (
         const now = opts.now ?? (() => new Date());
         yield* fs.makeDirectory(spoolDir, { recursive: true });
         yield* pruneOtlpSpool({ spoolDir, now: now() });
+
+        // OTLP forwarding (#1017): load the opt-in config ONCE at boot. When
+        // enabled, each accepted body is also relayed to the user's own
+        // collector - best-effort, never blocking the 2xx (see forward-relay).
+        const forwardConfigPath = opts.forwardConfigPath ?? defaultForwardConfigPath();
+        const forwardConfig: OtelForwardConfig | null = yield* fs
+            .readFileString(forwardConfigPath)
+            .pipe(
+                Effect.map((raw) => {
+                    try { return asForwardConfig(JSON.parse(raw)); } catch { return null; }
+                }),
+                Effect.orElseSucceed(() => null),
+            );
+        const relayEnabled = forwardConfig?.enabled === true;
+        const relayFetch = opts.relayFetch ?? fetch;
+        const relayLog = makeRelayLogger();
+        if (relayEnabled) {
+            console.log(
+                `otlp-forward: relaying ${forwardConfig!.targets.map((t) => t.signal).join(", ")} to the configured collector`,
+            );
+        }
 
         const runFs = Effect.runPromiseWith(context);
 
@@ -205,6 +241,15 @@ export const startOtlpSpoolServer = (
                     }
                     const body = await request.text().catch(() => "");
                     await append(pathname, body).catch(() => undefined);
+                    // Relay to the user's own collector when forwarding is on.
+                    // Fire-and-forget: NEVER awaited before the 2xx, so a slow or
+                    // down upstream cannot stall the harness's exporter.
+                    if (relayEnabled && forwardConfig) {
+                        void relayOtlp(forwardConfig, pathname, body, {
+                            fetch: relayFetch,
+                            onError: relayLog,
+                        });
+                    }
                     return Response.json(OTLP_ACK);
                 },
             }),

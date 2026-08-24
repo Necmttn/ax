@@ -328,10 +328,21 @@ finds a FOREIGN (non-loopback) prior endpoint before the overwrite; install
 warns, saves the original ONCE to `~/.ax/otel-previous.json`, and the `otel`
 doctor check surfaces the redirect. `ax install --keep-otel` leaves an existing
 foreign config untouched (ax OTLP surfaces stay dark; the user's collector keeps
-receiving). Forwarding (relay Claude -> ax -> the original collector, so ax is
-additive) is the tracked follow-up; the OTel-native alternative is a local
-collector fanning out to both. The Codex path (`applyCodexOtelToml`) was already
-shape-aware - it leaves a deliberately-different exporter kind alone.
+receiving). `ax install --otel-forward` (#1017) makes ax ADDITIVE instead:
+install captures the user's collector (endpoint + auth headers) from the
+pre-rewrite env into `~/.ax/otel-forward.json` (0600), and the `otlpd` receiver
+relays every accepted body onward - Claude -> ax -> the collector. The relay is
+best-effort and fire-and-forget (`apps/axctl/src/otel/forward-relay.ts`): it
+NEVER blocks the 2xx to the harness, so a down upstream cannot stall the
+exporter. The forward set is resolved by `resolveForwardTargets`
+(`forward-config.ts`), which forwards a signal ONLY when ax's rewrite actually
+DIVERTS it (logs always; metrics/traces only with no explicit per-signal
+endpoint) - forwarding a still-direct signal would DOUBLE-SEND. `--keep-otel`
+and `--otel-forward` are mutually exclusive. ax forces `http/json`, so a
+protobuf-only upstream fails the relay (surfaced, not fatal). The OTel-native
+alternative is a local collector fanning out to both. The Codex path
+(`applyCodexOtelToml`) was already shape-aware - it leaves a
+deliberately-different exporter kind alone.
 
 `ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
 (previously write-only - data landed in `otel_*` and only enriched insights, with

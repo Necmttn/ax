@@ -7,6 +7,8 @@ import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
 import { agentEventIndexDoctorCheck, readIndexUnhealthyMarker } from "../ingest/agent-event-index-heal.ts";
 import { applyClaudeOtelEnv, applyCodexOtelToml, detectClaudeOtelReplacements, type OtelEnvReplacement } from "../otel/install-config.ts";
+import { resolveForwardTargets, buildForwardConfig, asForwardConfig, type OtelForwardTarget } from "../otel/forward-config.ts";
+import { defaultForwardConfigPath } from "../otel/spool-server.ts";
 import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
 import { provisionRetroReviewerAgent } from "./managed-agents.ts";
 import {
@@ -337,12 +339,22 @@ export function otelRedirectDoctorCheck(args: {
     readonly backupExists: boolean;
     readonly backupPath: string;
     readonly logsEndpoint: string | null;
+    /** Forwarding signals from `~/.ax/otel-forward.json` (#1017), empty if off. */
+    readonly forwardingSignals?: readonly string[];
 }): DoctorCheck {
+    const forwarding = args.forwardingSignals ?? [];
+    if (forwarding.length > 0) {
+        return {
+            name: "otel",
+            ok: true,
+            detail: `ax receives + FORWARDS ${forwarding.join(", ")} to your own collector (--otel-forward); ax OTLP surfaces stay active`,
+        };
+    }
     if (args.backupExists) {
         return {
             name: "otel",
             ok: true,
-            detail: `ax redirected an existing OTLP destination to its receiver; original saved at ${args.backupPath} - restore to resume your own collector`,
+            detail: `ax redirected an existing OTLP destination to its receiver; original saved at ${args.backupPath} - restore, or re-run with --otel-forward to relay to it`,
         };
     }
     return {
@@ -514,10 +526,19 @@ export function collectDoctorReport(): Effect.Effect<
                 return env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT ?? env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
             } catch { return null; }
         });
+        // OTLP forwarding (#1017): is the relay config present + enabled?
+        const forwardingSignals = yield* Effect.promise(async () => {
+            try {
+                const raw = await Bun.file(defaultForwardConfigPath()).text();
+                const cfg = asForwardConfig(JSON.parse(raw));
+                return cfg?.enabled ? cfg.targets.map((t) => t.signal) : [];
+            } catch { return [] as string[]; }
+        });
         checks.push(otelRedirectDoctorCheck({
             backupExists: otelBackupExists,
             backupPath: otelBackupPath,
             logsEndpoint: claudeLogsEndpoint,
+            forwardingSignals,
         }));
         // agent_event ghost-index health (#680): a cheap fs read of the marker
         // the codex self-heal writes only when an auto-rebuild couldn't clear a
@@ -554,6 +575,13 @@ export function cmdInstall(options: {
      * foreign is configured.
      */
     readonly keepOtel?: boolean;
+    /**
+     * `--otel-forward` (#1017): redirect the harness to ax AND capture the
+     * user's own OTLP collector so `otlpd` relays each body onward - ax becomes
+     * additive, not exclusive. Mutually exclusive with `--keep-otel`. No-op
+     * when nothing foreign is configured.
+     */
+    readonly otelForward?: boolean;
 } = {}): Effect.Effect<
     void,
     Error,
@@ -626,7 +654,9 @@ export function cmdInstall(options: {
             const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
             if (claudeDirExists) {
                 const keepOtel = options.keepOtel ?? false;
-                const replaced = yield* Effect.promise(async () => {
+                const otelForward = options.otelForward ?? false;
+                const { replaced, forwardTargets } = yield* Effect.promise(async () => {
+                    const none = { replaced: [] as OtelEnvReplacement[], forwardTargets: [] as OtelForwardTarget[] };
                     try {
                         let raw = "{}";
                         try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
@@ -639,15 +669,19 @@ export function cmdInstall(options: {
                         if (keepOtel && reps.length > 0) {
                             console.log(`  otel: --keep-otel - left your OTLP config in ${claudeSettings} untouched`);
                             console.log(`        ax OTLP surfaces ('ax otel', telemetry enrichment) stay inactive; run 'ax install' without --keep-otel to redirect.`);
-                            return [] as OtelEnvReplacement[];
+                            return none;
                         }
+                        // --otel-forward: capture the user's collector (endpoint +
+                        // headers) from the PRE-rewrite env so otlpd can relay onward.
+                        const env = (parsed.env ?? {}) as Record<string, string>;
+                        const forwardTargets = otelForward ? resolveForwardTargets(env) : [];
                         const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
                         await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
                         console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
-                        return reps;
+                        return { replaced: reps, forwardTargets };
                     } catch (err) {
                         console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
-                        return [] as OtelEnvReplacement[];
+                        return none;
                     }
                 });
                 if (replaced.length > 0) {
@@ -674,6 +708,22 @@ export function cmdInstall(options: {
                     }
                     console.warn(`        that collector no longer receives these signals.`);
                     console.warn(`        original ${backupExists ? "already saved" : "saved"} at ${backupPath} - restore to re-enable it.`);
+                }
+                // --otel-forward: write the relay config otlpd reads at boot, so
+                // ax becomes ADDITIVE - the harness feeds ax, ax feeds the user's
+                // collector. The config carries the collector's auth headers; it
+                // is 0600 (the secret already sat at rest in settings.json, same
+                // trust level).
+                if (otelForward && forwardTargets.length > 0) {
+                    const forwardPath = defaultForwardConfigPath();
+                    yield* fs.makeDirectory(posixPath.dirname(forwardPath), { recursive: true }).pipe(Effect.ignore);
+                    const cfg = buildForwardConfig(forwardTargets, new Date().toISOString());
+                    yield* fs.writeFileString(forwardPath, JSON.stringify(cfg, null, 2) + "\n").pipe(Effect.ignore);
+                    yield* fs.chmod(forwardPath, 0o600).pipe(Effect.ignore);
+                    console.log(`  otel: --otel-forward - ax will relay ${forwardTargets.map((t) => t.signal).join(", ")} to your collector (${forwardPath})`);
+                    console.log(`        the otlpd receiver applies this on its next start; run 'ax daemon restart' (or re-login) to pick it up now.`);
+                } else if (otelForward) {
+                    console.log(`  otel: --otel-forward - no existing collector found to relay to; ax OTLP set up normally.`);
                 }
             }
 

@@ -151,4 +151,16 @@ describe("otelRedirectDoctorCheck (#1014)", () => {
         expect(check.ok).toBe(true);
         expect(check.detail).toContain("no OTLP");
     });
+
+    test("forwarding (#1017) takes precedence and names the relayed signals", () => {
+        const check = otelRedirectDoctorCheck({
+            backupExists: true, // a backup can coexist; forwarding is the live truth
+            backupPath: "/home/u/.ax/otel-previous.json",
+            logsEndpoint: "http://127.0.0.1:1738/v1/logs",
+            forwardingSignals: ["logs", "metrics"],
+        });
+        expect(check.ok).toBe(true);
+        expect(check.detail).toContain("FORWARDS");
+        expect(check.detail).toContain("logs, metrics");
+    });
 });
