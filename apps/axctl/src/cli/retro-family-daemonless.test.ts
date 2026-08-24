@@ -35,6 +35,16 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("ax retro family (no
 
 const T = (iso: string): Date => new Date(iso);
 
+/**
+ * A timestamp `days` days (plus optional `hours`) before now. Window-scoped
+ * fixtures (e.g. `cmdRetroPending({ since })`) MUST anchor to the current time,
+ * not a fixed ISO date: a fixed date silently falls outside the window once the
+ * calendar passes it, rotting the test (#1041 - 2026-08-15 seeds fell outside
+ * `since: 7` on 2026-08-22).
+ */
+const agoDays = (days: number, hours = 0): Date =>
+    new Date(Date.now() - days * 86_400_000 - hours * 3_600_000);
+
 /** One CacheRead + one fresh Judgment sidecar + the throwing sentinel. */
 const buildLayer = async (
     corpus: (write: CacheWriteService) => Effect.Effect<unknown, unknown, never>,
@@ -105,15 +115,15 @@ describe("ax retro family on the cache + sidecar", () => {
                     source: "claude",
                     project: "ax",
                     cwd: "/w/ax",
-                    started_at: T("2026-08-15T10:00:00.000Z"),
-                    ended_at: T("2026-08-15T11:00:00.000Z"),
+                    started_at: agoDays(2, 1),
+                    ended_at: agoDays(2),
                 },
                 {
                     id: "session-pending-idle",
                     source: "claude",
                     project: "ax",
                     cwd: "/w/ax",
-                    started_at: T("2026-08-15T09:00:00.000Z"),
+                    started_at: agoDays(2),
                     ended_at: null,
                 },
             ]), "ax-retro-pending");
