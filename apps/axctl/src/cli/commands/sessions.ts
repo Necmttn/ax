@@ -111,6 +111,10 @@ function formatSessionsTable(rows: SessionRow[]): string {
         const summary = msg.slice(0, summaryWidth);
         lines.push(`${started} ${source} ${repoShort} ${project} ${turns}  ${summary}`);
     }
+    // A total-count line (like `ax recall`), so the reader does not count rows
+    // by hand (dogfood #1029).
+    lines.push("");
+    lines.push(`${rows.length} session${rows.length === 1 ? "" : "s"}.`);
     return lines.join("\n");
 }
 
