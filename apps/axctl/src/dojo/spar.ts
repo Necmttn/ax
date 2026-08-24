@@ -74,6 +74,22 @@ export interface SparScore {
     readonly verdict: SparVerdict;
 }
 
+const asDeltas = (v: unknown): SparDeltas | null => {
+    if (typeof v !== "object" || v === null) return null;
+    const o = v as Record<string, unknown>;
+    const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+    const nullable = (x: unknown): x is number | null => x === null || finite(x);
+    if (!nullable(o.costUsd) || !nullable(o.turns) || !nullable(o.wallMs)) return null;
+    if (!finite(o.repairLines) || !finite(o.episodes)) return null;
+    return {
+        costUsd: o.costUsd,
+        turns: o.turns,
+        wallMs: o.wallMs,
+        repairLines: o.repairLines,
+        episodes: o.episodes,
+    };
+};
+
 // ---------------------------------------------------------------------------
 // scoreSpar (pure)
 // ---------------------------------------------------------------------------
@@ -209,6 +225,26 @@ const asBaselineMetrics = (v: unknown): SparMetrics | null => {
         episodes: o.episodes,
         landed: o.landed,
     };
+};
+
+/** Decode the durable JSON receipt written by `spar-score`. */
+export const parseSparScore = (content: string): SparScore | null => {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const o = parsed as Record<string, unknown>;
+    const baseline = asBaselineMetrics(o.baseline);
+    const variant = asBaselineMetrics(o.variant);
+    const deltas = asDeltas(o.deltas);
+    if (typeof o.id !== "string" || o.id.length === 0) return null;
+    if (typeof o.variantSession !== "string" || o.variantSession.length === 0) return null;
+    if (o.verdict !== "win" && o.verdict !== "regression" && o.verdict !== "mixed") return null;
+    if (baseline === null || variant === null || deltas === null) return null;
+    return { id: o.id, variantSession: o.variantSession, baseline, variant, deltas, verdict: o.verdict };
 };
 
 export const parseSparBrief = (content: string): SparBrief | null => {
