@@ -13,7 +13,7 @@ HEADINGS = ("USER", "PREVIOUS_ASSISTANT", "RECENT_TOOL_FAILURES")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Rewrite session-section fixture text with structured, non-label projection cues.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/chunks-projected.jsonl")
     parser.add_argument("--mode", choices=["cues", "raw"], default="cues")
     return parser.parse_args()

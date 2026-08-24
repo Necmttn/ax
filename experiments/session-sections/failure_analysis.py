@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fine", default=".ax/experiments/setfit-session-sections-e3.json")
     parser.add_argument("--coarse", default=".ax/experiments/setfit-session-sections-e3-coarse.json")
     parser.add_argument("--robustness", default=None, help="Optional robustness report to analyze instead of fine/coarse eval reports.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/setfit-failure-analysis.json")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()

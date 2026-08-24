@@ -114,7 +114,6 @@
     hash = "sha512-iY8yvjE0y651BixKNPgmv1WrQc+GZ142sb0z4gYnChDDY2YqI4P/jsSopBWrKfAt7LOJAkOXt7rC/hms+WclQQ==";
   };
   "@ax-classifier/direction-event" = copyPathToStore ./packages/ax-classifier-direction-event;
-  "@ax-classifier/session-sections" = copyPathToStore ./packages/ax-classifier-session-sections;
   "@ax-classifier/verification-event" = copyPathToStore ./packages/ax-classifier-verification-event;
   "@ax/community-compile" = copyPathToStore ./packages/community-compile;
   "@ax/community-worker" = copyPathToStore ./apps/community-worker;

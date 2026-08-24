@@ -100,7 +100,7 @@ const die = (msg: string): never => {
  *   - packages/ax-classifier-direction-event     imported by classifiers/registry.ts
  *   - packages/ax-classifier-verification-event   imported by classifiers/registry.ts
  *
- * `packages/ax-classifier-session-sections` is python-only (referenced solely by
+ * `experiments/session-sections` is python-only (referenced solely by
  * string manifest paths, never imported as a module) and is intentionally
  * skipped - it is not needed for `studio`/`ingest`.
  *

@@ -7,6 +7,7 @@
       "dependencies": {
         "@ax/lib": "workspace:*",
         "@ax/schema": "workspace:*",
+        "@effect/platform-bun": "catalog:",
         "@opentui/core": "^0.2.5",
         "@opentui/react": "^0.2.5",
         "@tanstack/react-query": "^5",
@@ -38,7 +39,7 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.39.3",
+      "version": "0.40.1",
       "bin": {
         "axctl": "./bin/axctl",
       },
@@ -175,10 +176,6 @@
     },
     "packages/ax-classifier-direction-event": {
       "name": "@ax-classifier/direction-event",
-      "version": "0.1.0",
-    },
-    "packages/ax-classifier-session-sections": {
-      "name": "@ax-classifier/session-sections",
       "version": "0.1.0",
     },
     "packages/ax-classifier-verification-event": {
@@ -348,8 +345,6 @@
     "@aws/lambda-invoke-store": ["@aws/lambda-invoke-store@0.2.4", "", {}, "sha512-iY8yvjE0y651BixKNPgmv1WrQc+GZ142sb0z4gYnChDDY2YqI4P/jsSopBWrKfAt7LOJAkOXt7rC/hms+WclQQ=="],
 
     "@ax-classifier/direction-event": ["@ax-classifier/direction-event@workspace:packages/ax-classifier-direction-event"],
-
-    "@ax-classifier/session-sections": ["@ax-classifier/session-sections@workspace:packages/ax-classifier-session-sections"],
 
     "@ax-classifier/verification-event": ["@ax-classifier/verification-event@workspace:packages/ax-classifier-verification-event"],
 

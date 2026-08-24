@@ -15,12 +15,11 @@ This is not a memory problem. *Memory* is what you remember.
 bet. The agent stack has compute, tools, and logs. It does not have
 a reflection loop.
 
-`ax` is that loop. Before any session ends - main or sub-agent - `ax`
-asks the agent for a structured retro: what was tried, what worked,
-what failed, what to try next. Each retro becomes an *experiment* in
-a typed local graph. Each experiment gets a verdict the next time
-the same situation appears. Over weeks, the graph carries the signal
-your sessions otherwise dropped on the floor.
+`ax` is that loop. The `/retro` workflow pulls sessions that need review.
+It records what was tried, what worked, what failed, and what to try next.
+Repeated friction becomes a proposal. An accepted proposal becomes an
+experiment. Over weeks, the graph carries the signal your sessions otherwise
+dropped on the floor.
 
 This is verbal self-reflection at the engineering layer. Reflexion
 for software. The closed loop is the product.
@@ -50,10 +49,9 @@ lack the reflection loop.
 
 A real retro loop for AI coding agents needs five things:
 
-1. **Fire at the right time.**
-   The Stop hook on session-end is the only moment the agent has all
-   its context loaded. Five seconds later it's gone. The retro has
-   to be enforced there, not opt-in.
+1. **Review at the right time.**
+   The pull workflow keeps review out of the agent turn. It drains pending
+   sessions when the user starts `/retro`.
 
 2. **Structured by default.**
    Free-text retros don't compound. JSON with four fields - *tried*,
@@ -62,10 +60,8 @@ A real retro loop for AI coding agents needs five things:
    hatch, not the default.
 
 3. **Cover sub-agents.**
-   Main-session retros are nice. Sub-agent retros are the unlock.
-   Sub-agents fan out, finish fast, and die with everything they
-   learned. The hook has to fire for them too, and the retro has
-   to roll up to the parent session.
+   Main-session retros are useful. Sub-agent retros are the unlock.
+   The graph keeps parent and child session links, so review can include both.
 
 4. **Become a proposal.**
    *"That worked, do it more"* isn't useful. *"That worked, here is
@@ -94,10 +90,8 @@ laptop.
 
 The surface is small on purpose:
 
-- `ax install` wires the Stop hook into your Claude Code and Codex
-  configs. One command, one time.
-- `ax retro` is what the hook calls at session-end. The agent emits
-  the JSON. `ax` indexes it.
+- `ax install` configures local ingest and the optional OTLP receiver.
+- `/retro` pulls and reviews pending sessions on demand.
 - `ax improve list` shows the proposal queue derived from accumulated
   retros and friction signals.
 - `ax improve accept | reject` triages it. Acceptance scaffolds the

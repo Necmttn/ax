@@ -37,7 +37,7 @@ from eval import (  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run repeated SetFit train/test splits for robustness checks.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--out", default=".ax/experiments/setfit-robustness-e15.json")
     parser.add_argument("--seeds", default="7,13,42")

@@ -477,10 +477,10 @@ def insert_post_edit_commands(markdown: str) -> str:
         "Post-edit commands:",
         "",
         "```sh",
-        "bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json",
-        "bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-current-preview.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --dry-run --json",
-        "bun run classifiers:blind-review-refresh -- --json",
-        "bun src/cli/index.ts classifiers lifecycle",
+        "python3 experiments/session-sections/blind_review_batch.py --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json",
+        "python3 experiments/session-sections/blind_review_batch.py --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-current-preview.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --dry-run --json",
+        "python3 experiments/session-sections/blind_review_batch_refresh.py --json",
+        "bun apps/axctl/src/cli/index.ts classifiers lifecycle",
         "```",
     ]
     return "\n".join([*lines[:insert_at], *commands, *lines[insert_at:]]).rstrip() + "\n"
@@ -607,10 +607,10 @@ def insert_suggestion_draft_commands(markdown: str) -> str:
         "Suggestion draft post-edit commands:",
         "",
         "```sh",
-        "bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json",
-        "bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json",
-        "bun run classifiers:blind-review-refresh -- --json",
-        "bun src/cli/index.ts classifiers lifecycle",
+        "python3 experiments/session-sections/blind_review_batch.py --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json",
+        "python3 experiments/session-sections/blind_review_batch.py --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json",
+        "python3 experiments/session-sections/blind_review_batch_refresh.py --json",
+        "bun apps/axctl/src/cli/index.ts classifiers lifecycle",
         "```",
     ]
     return "\n".join([*lines[:insert_at], *commands, *lines[insert_at:]]).rstrip() + "\n"

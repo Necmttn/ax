@@ -23,35 +23,25 @@ export interface NavEntry {
     readonly group: NavGroup;
 }
 
-/** Grouped (not flat) because the fixed set grew from 8 to 13 entries - past
- *  ~8 icons a flat rail stops being scannable at a glance. Groups answer
- *  "where do I look for X": overview = state of the world, explore = drill
- *  into a graph/data surface, manage = act on what you found. Order within a
- *  group is deliberate (most-used first), not alphabetical. */
+/** Seven common destinations stay in the rail. Specialized and experimental
+ *  routes use contextual links recorded in NAV_EXCLUSIONS. */
 export const NAV_ENTRIES: readonly NavEntry[] = [
     // overview - state of the world right now
     { g: "◢", to: "/", label: "mission control", exact: true, group: "overview" },
     { g: "≣", to: "/sessions", label: "sessions", group: "overview" },
     { g: "◧", to: "/cost", label: "cost", group: "overview" },
-    { g: "▤", to: "/usage", label: "usage", group: "overview" },
-    { g: "◳", to: "/team", label: "team metrics", group: "overview" },
-
-    // explore - graph / data surfaces you drill into
     { g: "◷", to: "/workflow", label: "workflow", group: "explore" },
     { g: "✦", to: "/skills", label: "skills", group: "explore" },
-    { g: "◈", to: "/skills/graph", label: "skill graph", group: "explore" },
-    { g: "◫", to: "/graph", label: "graph explorer", group: "explore" },
-    { g: "▦", to: "/canvas", label: "canvas", group: "explore" },
     { g: "⚑", to: "/tools", label: "tool failures", group: "explore" },
-
-    // manage - act on what you found
     { g: "⎈", to: "/improve", label: "improve", group: "manage" },
-    { g: "⚙", to: "/lab", label: "lab", group: "manage" },
 ];
 
 export interface NavExclusion {
     readonly to: string;
     readonly reason: string;
+    readonly access: "context" | "deep-link" | "alias";
+    readonly from?: string;
+    readonly capability?: string;
 }
 
 /** Registered, non-parameterized routes deliberately left off the rail.
@@ -62,21 +52,64 @@ export interface NavExclusion {
 export const NAV_EXCLUSIONS: readonly NavExclusion[] = [
     {
         to: "/mc",
+        access: "alias",
         reason:
             "duplicate alias of / - same MissionControl component, and Shell.tsx already treats /mc as an instrument-chrome route alongside /",
     },
     {
         to: "/sessions/compare",
+        access: "context",
+        from: "/sessions",
         reason:
             "static path but only meaningful with a pre-selected ?ids= session set; reached from within /sessions (a compare action on selected rows), not a standalone destination",
     },
     {
+        to: "/usage",
+        access: "context",
+        from: "/",
+        reason: "reached from the Mission Control secondary links",
+    },
+    {
+        to: "/team",
+        access: "context",
+        from: "/",
+        reason: "reached from the Mission Control secondary links",
+    },
+    {
+        to: "/skills/graph",
+        access: "context",
+        from: "/skills",
+        reason: "reached from the Skills page as its graph drilldown",
+    },
+    {
+        to: "/lab",
+        access: "context",
+        from: "/",
+        reason: "experimental surfaces are reached from Mission Control",
+    },
+    {
+        to: "/canvas",
+        access: "context",
+        from: "/lab",
+        reason: "reached from the Lab page as an experimental session view",
+    },
+    {
+        to: "/graph",
+        access: "context",
+        from: "/lab",
+        capability: "graph-explorer",
+        reason: "reached from Lab only when the graph-explorer capability is enabled",
+    },
+    {
         to: "/lab/sigils",
+        access: "context",
+        from: "/lab",
         reason:
             "hidden design-iteration page - source comment on SigilGalleryRoute says explicitly 'no nav tab'; reached only via a link from /lab",
     },
     {
         to: "/narration-demo",
+        access: "deep-link",
         reason:
             "prototype showcase for the Story review surface fixture (sample narration + turns), not a real data view",
     },

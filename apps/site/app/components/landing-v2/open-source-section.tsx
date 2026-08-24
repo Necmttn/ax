@@ -140,11 +140,11 @@ export function OpenSourceSection() {
             </div>
             <div className="oss-line">
               <span className="prompt">$</span>
-              <code>ax daemon start</code>
+              <code>bun run build</code>
             </div>
             <div className="oss-line muted">
               <span></span>
-              <code>ax dashboard &rarr; http://127.0.0.1:1738</code>
+              <code>./dist/axctl studio &rarr; http://127.0.0.1:1738</code>
             </div>
             <div className="oss-line">
               <span className="prompt">$</span>

@@ -34,7 +34,7 @@ STOPWORDS = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure workflow candidate noise against promoted embedding-helper none controls.")
     parser.add_argument("--graph-health", default=".ax/experiments/classifier-graph-health-embedding-helper-current.json")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--workflow-report", action="append", default=[])
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-graph-usefulness-current.json")
     parser.add_argument("--min-token-overlap", type=float, default=0.72)

@@ -1,42 +1,54 @@
 /**
- * Canonical list of visible top-level ax subcommands - used by `ax usage` to
- * compute the "never used" surface.  Keep in sync with the non-hidden entries
- * in `registeredCommands` in cli/index.ts.  Commands hidden via their family
- * RuntimeManifest (hidden: true) are intentionally excluded here; dev-only
- * commands (dogfood, AX_DEV=1) are also excluded.
+ * Public command surfaces.
+ *
+ * `DEFAULT_COMMANDS` is the small command set shown by `ax help`.
+ * The other groups stay callable by exact name and remain part of usage
+ * analytics. Add a command to the default set only when it is a common entry
+ * point. This list does not include internal maintenance commands.
  */
-export const VISIBLE_COMMANDS: readonly string[] = [
-    "ingest",
-    "sessions",
-    "improve",
-    "wrapped",
-    "retro",
-    "recall",
-    "skills",
-    "signals",
-    "roles",
-    "hooks",
-    "studio",
-    "mcp",
-    "tui",
-    "share",
-    "install",
-    "setup",
-    "cost",
-    "otel",
-    "runs",
-    "segment",
-    "memory",
-    "quota",
-    "dojo",
-    "profile",
-    "contribute",
-    "dispatches",
-    "routing",
-    "directives",
-    "thinking",
-    "digest",
-    "team",
-    "usage",
-    "otlpd",
-];
+export const COMMAND_SURFACES = {
+    core: [
+        "install",
+        "setup",
+        "doctor",
+        "ingest",
+        "studio",
+        "sessions",
+        "recall",
+        "skills",
+        "improve",
+        "cost",
+        "profile",
+        "share",
+    ],
+    advanced: [
+        "signals",
+        "hooks",
+        "runs",
+        "segment",
+        "memory",
+        "quota",
+        "dojo",
+        "contribute",
+        "dispatches",
+        "routing",
+        "directives",
+        "thinking",
+        "digest",
+        "team",
+        "usage",
+    ],
+    service: ["mcp", "tui", "otel", "otlpd"],
+    compatibility: ["wrapped", "retro", "roles"],
+} as const satisfies Readonly<Record<string, readonly string[]>>;
+
+export type CommandSurface = keyof typeof COMMAND_SURFACES;
+
+export const DEFAULT_COMMANDS: readonly string[] = COMMAND_SURFACES.core;
+
+/** All public commands used by `ax usage`, including non-default surfaces. */
+export const VISIBLE_COMMANDS: readonly string[] = Object.values(COMMAND_SURFACES).flat();
+
+const defaultCommandSet = new Set<string>(DEFAULT_COMMANDS);
+
+export const isDefaultCommand = (name: string): boolean => defaultCommandSet.has(name);

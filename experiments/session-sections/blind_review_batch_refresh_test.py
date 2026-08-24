@@ -97,7 +97,7 @@ class BlindReviewBatchRefreshTest(unittest.TestCase):
             self.assertIn("Blocking fields: `3`", batch.read_text())
             self.assertIn("Missing fields: Review label: 1, Review notes: 1, Review target: 1", batch.read_text())
             self.assertIn("Post-edit commands:", batch.read_text())
-            self.assertIn("bun run classifiers:blind-review-batch -- --mode=evaluate", batch.read_text())
+            self.assertIn("python3 experiments/session-sections/blind_review_batch.py --mode=evaluate", batch.read_text())
             self.assertIn("Review label guidance:", batch.read_text())
             self.assertIn("Hard-negative status guidance:", batch.read_text())
             self.assertTrue(status.exists())

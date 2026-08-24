@@ -16,12 +16,11 @@ sub-agent rediscovers it from scratch. Your own next session does too.
 repeats, and turns them into small, repo-specific fixes you review and
 apply - one at a time.
 
-Under the hood, it's the loop that closes before the session ends. A Stop hook fires
-at session-end (main or sub-agent), asks the agent for a structured retro
-(*tried · worked · failed · next*), and indexes the result as a typed
-experiment in a local graph. Friction patterns become proposals you
-triage. Accepted proposals become experiments with t+7 / t+30 / t+90
-verdicts. The next session reads what worked.
+Under the hood, the `/retro` workflow pulls unreviewed sessions from the local
+graph when you ask for them. It records a structured retro (*tried · worked ·
+failed · next*) and turns repeated friction into proposals you review. Accepted
+proposals become experiments with verdicts after 3, 10, and 30 sessions. The
+next session reads what worked.
 
 > *What did this sub-agent learn? Which experiments are still open?
 > Which skills earned their keep? What did that branch cost in tokens?*
@@ -98,7 +97,7 @@ install, schema, queries, benchmarks:
 
 ## Every harness, one graph
 
-Five harnesses - Claude Code, Codex, Pi, OpenCode, Cursor - plus installed
+Six harnesses - Claude Code, Codex, Pi, Omp, OpenCode, and Cursor - plus installed
 skills, local git history, and GitHub PRs with their reviews and checks, all
 ingested into one local graph: sessions, turns, tool calls, plans, skills,
 commits, files, friction, compaction, derived signals. Ingest is a staged
@@ -136,7 +135,7 @@ flowchart LR
   db[("the ax graph<br/>session · turn · tool_call · skill · plan<br/>repository · checkout · commit · file<br/>friction · diagnostic · compaction · insight")]
 
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
-  db --> dash["axctl serve<br/>live dashboard + studio"]
+  db --> dash["axctl studio<br/>on-demand dashboard"]
   db --> agent["agent skill + ax mcp<br/>project context · verify · harness"]
 ```
 

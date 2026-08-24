@@ -40,13 +40,14 @@ The project. Lowercase always. The whole thing.
 ### `axctl`
 
 The CLI binary. Use when the technical layer matters. `axctl install`,
-`axctl daemon status`, `axctl ingest`.
+`axctl studio`, `axctl ingest`.
 
 ### ax studio
 
-The live dashboard at `axctl serve`. Use the studio name in prose
+The live dashboard at `axctl studio`. Use the studio name in prose
 ("open ax studio at `127.0.0.1:1738`"), use the command name in
-instructions (`axctl serve --port=1738`).
+instructions (`axctl studio --port=1738`). The service stops after its browser
+client disconnects.
 
 ### ax pilot
 
@@ -81,13 +82,12 @@ underneath, but the abstraction is "the ax-graph".
 
 ### retro
 
-A structured reflection emitted by an agent at session-end. Four
+A structured reflection collected during an on-demand review. Four
 fields by default: **tried** (what the agent attempted), **worked**
 (what landed), **failed** (what didn't), **next** (the experiment to
 run next). Free-form is opt-in via `ax retro --free-form`.
 
-> *Use:* "the Stop hook fires `ax retro`, the agent emits JSON, the
-> graph indexes it."
+> *Use:* "the `/retro` skill pulls sessions that need review."
 > *Don't say:* "session summary" - that's lossy. The retro is a
 > bet on the next session, not a recap.
 
@@ -117,8 +117,8 @@ forever). Triaged via `ax improve list | accept | reject`.
 ### experiment
 
 What an accepted proposal becomes. An experiment has a *form*, an
-*artifact* (the scaffolded skill / hook / etc.), and a checkpoint
-schedule (t+7 / t+30 / t+90). Tracked in the graph; queried via
+*artifact* (the scaffolded skill / hook / etc.), and checkpoints after
+3, 10, and 30 sessions. Tracked in the graph; queried via
 `ax improve verdict`.
 
 ### verdict
@@ -143,8 +143,8 @@ ax-signals.
 
 ### ax-loop
 
-The closed self-improvement cycle: **retro** (agent reflects at
-session-end) → **proposal** (friction pattern surfaces) →
+The closed self-improvement cycle: **retro** (the user reviews a session) →
+**proposal** (friction pattern surfaces) →
 **experiment** (artifact scaffolded, ran) → **verdict** (outcome
 locked) → next session reads what worked. When you say "close the
 loop", you mean one full pass from retro to verdict.
@@ -154,7 +154,7 @@ loop", you mean one full pass from retro to verdict.
 | Term | Meaning |
 |---|---|
 | **ax it** | Triage a skill or session. "I axed those three unused skills." |
-| **retro** | Emit / collect a structured reflection at session-end. Verb and noun: "the agent retros before stop", "I have three pending retros." |
+| **retro** | Review a session and collect a structured reflection. Verb and noun: "review this session", "I have three pending retros." |
 | **propose** | Surface a friction pattern as a candidate skill/hook/guidance. "Six retros propose the same hook this week." |
 | **lock a verdict** | Confirm the outcome of an experiment at checkpoint. "I locked the schema-guardrail verdict as `adopted`." |
 | **ground** | Pre-flight an agent with project context. "Always ground before non-trivial repo work." |

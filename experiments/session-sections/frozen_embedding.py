@@ -31,7 +31,7 @@ from robustness import (  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate frozen embedding classifiers for AX session-section chunks.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--classifier", choices=["logistic", "centroid", "svm"], default="logistic")
     parser.add_argument("--out", default=".ax/experiments/frozen-embedding-e24.json")

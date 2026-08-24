@@ -21,7 +21,7 @@ from eval import macro_f1, map_label
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Sweep confidence calibration for a saved SetFit chunk classifier.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--eval-report", default=".ax/experiments/setfit-session-sections-e3-coarse.json")
     parser.add_argument("--model-dir", default=".ax/experiments/setfit-session-sections-coarse-model")
     parser.add_argument("--out", default=".ax/experiments/setfit-calibration-e14.json")

@@ -23,7 +23,7 @@ LABEL_TO_SECTION = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate AX session-section assembly fixtures.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/sections.json")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/sections.json")
     parser.add_argument("--out", default=".ax/experiments/session-section-assembly-e5.json")
     parser.add_argument("--max-gap", type=int, default=2)
     parser.add_argument("--json", action="store_true")

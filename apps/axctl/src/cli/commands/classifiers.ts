@@ -106,7 +106,7 @@ const classifiersPackageOperationsCommand = Command.make(
         graphHealth: Flag.boolean("graph-health").pipe(Flag.withDefault(false)),
         graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper", "boundary-replay"] as const).pipe(Flag.withDefault("summary")),
         history: Flag.boolean("history").pipe(Flag.withDefault(false)),
-        manifest: Flag.string("manifest").pipe(Flag.withDefault("packages/ax-classifier-session-sections/ax.classifier.json")),
+        manifest: Flag.string("manifest").pipe(Flag.withDefault("experiments/session-sections/ax.classifier.json")),
         operation: Flag.string("operation").pipe(Flag.optional),
         artifact: Flag.string("artifact").pipe(Flag.optional),
         sourceKind: Flag.string("source-kind").pipe(Flag.optional),
@@ -250,7 +250,7 @@ const classifiersGraphCommand = Command.make(
         const valueEqualsText = optionValue(valueEquals);
         const outPath = optionValue(out);
         return runClassifiersPackageOperations({
-            manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+            manifestPath: "experiments/session-sections/ax.classifier.json",
             graphHealth: true,
             graphMode: mode,
             querySuggestionRouting,

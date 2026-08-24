@@ -18,20 +18,72 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import type { StageDef } from "./stage/registry.ts";
 
 // Derivation rules live in ./signals/core.ts (pure, fixture-tested by
-// signals/core.test.ts); this file is stage wiring only: three SELECTs, the
+// signals/core.test.ts); this file is stage wiring only: SELECTs, the
 // per-bundle progress loop, statement building + chunked execution.
 
 /**
- * Fetch every (session → turns) bundle in one round-trip. Each turn carries
- * its outgoing `->invoked->skill.name` array so we can detect "proposed but
- * not invoked" without a second query.
+ * How many sessions' turns one `fetchSessionTurnsForIds` round-trip pulls.
+ *
+ * A single unbounded fetch of ALL turns (with the `->invoked->skill` join
+ * fanned out per turn) materialised the whole ~1M-row set in the Bun VM heap
+ * at once - the derive stage then segfaulted at ~12 GB RSS on a full backfill
+ * (#1021). Chunking by SESSION bounds the JS-side working set to O(batch): a
+ * chunk holds every turn of at most this many sessions, and because
+ * `groupTurnsBySession` only needs a session's turns to be contiguous, every
+ * bundle a chunk yields is complete. The cross-chunk accumulators
+ * (`pairsAccum`, `correctionBatch`, ...) live in `deriveSignals`, so partial
+ * chunks still sum to the same result the single fetch produced.
  */
-const fetchSessionTurns = (
+export const SESSION_BATCH_SIZE = 200;
+
+/** Group an ordered id list into fixed-size chunks. */
+const chunk = <A>(items: ReadonlyArray<A>, size: number): A[][] => {
+    const out: A[][] = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
+};
+
+/** Turn `ts > now - N days`, or "" for a full backfill. Interpolated (not
+ *  bound) to match the rest of the ingest SQL; `Math.trunc` keeps it numeric. */
+const turnSinceClause = (sinceDays: number | undefined, prefix: string): string =>
+    sinceDays && sinceDays > 0
+        ? `${prefix} t.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'`
+        : "";
+
+/**
+ * Every session id that has at least one in-window turn, ordered so the chunks
+ * are stable run to run. This is the cheap first pass: one column, no join
+ * fan-out, so even a 1M-turn store returns a bounded id list.
+ */
+const fetchSessionIds = (
     write: CacheWriteService,
+    sinceDays: number | undefined,
+): Effect.Effect<string[], CacheWriteError> =>
+    Effect.gen(function* () {
+        const sql = `
+SELECT DISTINCT t.session AS session
+FROM turn t JOIN session s ON s.id = t.session
+${turnSinceClause(sinceDays, "WHERE")}
+ORDER BY t.session ASC`;
+        const rows = yield* write.rows(Schema.Struct({ session: Schema.String }), sql);
+        return rows.map((r) => r.session);
+    });
+
+/**
+ * Fetch the (session → turns) bundles for a bounded set of session ids. Each
+ * turn carries its outgoing `->invoked->skill.name` array so we can detect
+ * "proposed but not invoked" without a second query. Same window filter as the
+ * id pass, so a session partially in-window contributes only its in-window
+ * turns - exactly what the old single fetch did.
+ */
+const fetchSessionTurnsForIds = (
+    write: CacheWriteService,
+    sessionIds: ReadonlyArray<string>,
     sinceDays: number | undefined,
 ): Effect.Effect<SessionTurns[], CacheWriteError> =>
     Effect.gen(function* () {
-        const sinceFilter = sinceDays && sinceDays > 0 ? `WHERE t.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
+        if (sessionIds.length === 0) return [];
+        const placeholders = sessionIds.map(() => "?").join(", ");
         const sql = `
 SELECT
     t.id, t.session, t.seq, t.role, t.text_excerpt, t.ts, t.has_error,
@@ -39,7 +91,7 @@ SELECT
     COALESCE(to_json(list(DISTINCT sk.name) FILTER (WHERE sk.name IS NOT NULL))::VARCHAR, '[]') AS invoked_skills
 FROM turn t JOIN session s ON s.id = t.session
 LEFT JOIN invoked i ON i.in_id = t.id LEFT JOIN skill sk ON sk.id = i.out_id
-${sinceFilter}
+WHERE t.session IN (${placeholders}) ${turnSinceClause(sinceDays, "AND")}
 GROUP BY t.id, t.session, t.seq, t.role, t.text_excerpt, t.ts, t.has_error, s.repository, s.checkout, s.cwd
 ORDER BY t.session ASC, t.seq ASC`;
         const rows = yield* write.rows(Schema.Struct({
@@ -47,7 +99,7 @@ ORDER BY t.session ASC, t.seq ASC`;
             text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn, has_error: Schema.Boolean,
             repository: Schema.NullOr(Schema.String), checkout: Schema.NullOr(Schema.String),
             cwd: Schema.NullOr(Schema.String), invoked_skills: Schema.String,
-        }), sql);
+        }), sql, [...sessionIds]);
         const mapped = rows.map((row) => ({
             id: row.id, session: row.session, seq: row.seq, role: row.role,
             text_excerpt: row.text_excerpt ?? undefined, ts: row.ts, has_error: row.has_error,
@@ -123,16 +175,22 @@ export const deriveSignals = Effect.fn("derive.signals")(
         const skillNames = yield* fetchSkillNames(write).pipe(
             Effect.withSpan("signals.fetch-skills"),
         );
-        const bundles = yield* fetchSessionTurns(write, opts.sinceDays).pipe(
-            Effect.tap((b) => Effect.annotateCurrentSpan("signals.sessions", b.length)),
-            Effect.withSpan("signals.fetch-turns"),
+        // Two passes, so the whole turn corpus never sits in the heap at once
+        // (#1021): the cheap id pass bounds what we then pull one chunk at a
+        // time. `totalSessions` is known up front, so progress still reports a
+        // real denominator.
+        const sessionIds = yield* fetchSessionIds(write, opts.sinceDays).pipe(
+            Effect.tap((ids) => Effect.annotateCurrentSpan("signals.sessions", ids.length)),
+            Effect.withSpan("signals.fetch-session-ids"),
         );
-        if (opts.onProgress) yield* opts.onProgress({ sessions: bundles.length });
+        const totalSessions = sessionIds.length;
+        if (opts.onProgress) yield* opts.onProgress({ sessions: totalSessions });
 
         let corrections = 0;
         let proposedSkillEdges = 0;
         let turnCount = 0;
         let recoveries = 0;
+        let sessionsSeen = 0;
 
         const correctionBatch: CorrectionEdge[] = [];
         const proposedBatch: ProposedEdge[] = [];
@@ -144,29 +202,37 @@ export const deriveSignals = Effect.fn("derive.signals")(
         // Mirrors the includeSkillPairs gate in core's deriveSignalsFromEvidence.
         const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
 
-        for (const [index, bundle] of bundles.entries()) {
-            turnCount += bundle.turns.length;
-            const c = deriveCorrections(bundle);
-            const p = deriveProposed(bundle, skillNames);
-            const r = deriveRecovered(bundle);
-            corrections += c.length;
-            proposedSkillEdges += p.length;
-            recoveries += r.length;
-            correctionBatch.push(...c);
-            proposedBatch.push(...p);
-            recoveryBatch.push(...r);
-            if (shouldWriteSkillPairs) deriveSkillPairs(bundle, pairsAccum);
-            if (opts.onProgress && (index < 5 || (index + 1) % 50 === 0)) {
-                yield* opts.onProgress({
-                    currentFile: index + 1,
-                    totalFiles: bundles.length,
-                    sessions: index + 1,
-                    turns: turnCount,
-                    corrections,
-                    proposedSkillEdges,
-                    recoveries,
-                    skillPairs: shouldWriteSkillPairs ? pairsAccum.size : 0,
-                });
+        for (const idChunk of chunk(sessionIds, SESSION_BATCH_SIZE)) {
+            const bundles = yield* fetchSessionTurnsForIds(write, idChunk, opts.sinceDays).pipe(
+                Effect.withSpan("signals.fetch-turns", {
+                    attributes: { "signals.chunk_sessions": idChunk.length },
+                }),
+            );
+            for (const bundle of bundles) {
+                sessionsSeen += 1;
+                turnCount += bundle.turns.length;
+                const c = deriveCorrections(bundle);
+                const p = deriveProposed(bundle, skillNames);
+                const r = deriveRecovered(bundle);
+                corrections += c.length;
+                proposedSkillEdges += p.length;
+                recoveries += r.length;
+                correctionBatch.push(...c);
+                proposedBatch.push(...p);
+                recoveryBatch.push(...r);
+                if (shouldWriteSkillPairs) deriveSkillPairs(bundle, pairsAccum);
+                if (opts.onProgress && (sessionsSeen <= 5 || sessionsSeen % 50 === 0)) {
+                    yield* opts.onProgress({
+                        currentFile: sessionsSeen,
+                        totalFiles: totalSessions,
+                        sessions: sessionsSeen,
+                        turns: turnCount,
+                        corrections,
+                        proposedSkillEdges,
+                        recoveries,
+                        skillPairs: shouldWriteSkillPairs ? pairsAccum.size : 0,
+                    });
+                }
             }
         }
 
@@ -175,7 +241,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
             : [];
         if (opts.onProgress) {
             yield* opts.onProgress({
-                sessions: bundles.length,
+                sessions: totalSessions,
                 turns: turnCount,
                 corrections,
                 proposedSkillEdges,
@@ -193,7 +259,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
         const diagnosticBatch = deriveDiagnosticsFromToolCalls(failedToolCalls);
         if (opts.onProgress) {
             yield* opts.onProgress({
-                sessions: bundles.length,
+                sessions: totalSessions,
                 turns: turnCount,
                 corrections,
                 proposedSkillEdges,
@@ -276,7 +342,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
         );
 
         yield* Effect.logDebug("signals derived", {
-            sessions: bundles.length,
+            sessions: totalSessions,
             turns: turnCount,
             corrections,
             proposedSkillEdges,
@@ -286,7 +352,7 @@ export const deriveSignals = Effect.fn("derive.signals")(
             diagnosticEvents: diagnosticBatch.length,
         });
         return {
-            sessions: bundles.length,
+            sessions: totalSessions,
             turns: turnCount,
             corrections,
             proposedSkillEdges,

@@ -12,6 +12,7 @@ import { entryHidden, entryRuntime, resolveRuntime, type DbConditionalRuntime } 
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { IngestStageError, StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
+import { DEFAULT_COMMANDS } from "./commands/visible-commands.ts";
 
 // widened to the registry's canonical erased-R shape (matches StageRegistryLive's parameter)
 const stages: ReadonlyArray<StageDef<BaseStageStats, unknown, IngestStageError>> = ALL_STAGES;
@@ -112,32 +113,27 @@ describe("effect cli", () => {
         }
     });
 
-    test("registered visibility mirrors the manifest for every command (uniform loop, #248)", () => {
-        // The root command is assembled by a manifest-driven loop; there must
-        // be no per-command withHidden drift between registration and the
-        // family manifests. Holds for every command, both directions.
+    test("registered visibility mirrors manifest hard-hides", () => {
         for (const group of rootCommand.subcommands) {
             for (const command of group.commands) {
                 const entry = RUNTIME_BY_COMMAND[command.name];
                 expect(entry, `command "${command.name}" missing from a family RuntimeManifest`).toBeDefined();
+                const expectedHidden = entryHidden(entry!);
                 expect(
                     command.hidden,
-                    `command "${command.name}": registered hidden=${command.hidden} but its manifest declares hidden=${entryHidden(entry!)}`,
-                ).toBe(entryHidden(entry!));
+                    `command "${command.name}": registered hidden=${command.hidden}, expected ${expectedHidden}`,
+                ).toBe(expectedHidden);
             }
         }
     });
 
-    test("read-only insight surfaces are visible; maintenance verbs stay hidden (#173)", () => {
+    test("core and advanced commands stay available to completion; maintenance verbs stay hidden", () => {
         const byName = new Map(
             rootCommand.subcommands.flatMap((g) => g.commands.map((c) => [c.name, c] as const)),
         );
-        // Visibility policy: hidden = invisible to agents discovering the tool
-        // via --help = never used. Insight surfaces must show in help.
-        for (const name of ["sessions", "recall", "skills", "signals", "roles", "hooks"]) {
+        for (const name of [...DEFAULT_COMMANDS, "signals", "roles", "hooks"]) {
             expect(byName.get(name)?.hidden).toBe(false);
         }
-        // Mutating / maintenance / plumbing verbs stay hidden (but callable).
         for (const name of ["derive-signals", "derive-intents", "insights", "hook", "uninstall"]) {
             expect(byName.get(name)?.hidden).toBe(true);
         }
