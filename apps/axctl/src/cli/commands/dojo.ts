@@ -30,6 +30,7 @@ import {
     dojoSparBriefPath,
     dojoSparDir,
     dojoSparReportPath,
+    dojoSparScorePath,
     localDate,
 } from "../../dojo/paths.ts";
 import { gatherReport, renderReport } from "../../dojo/report.ts";
@@ -659,11 +660,16 @@ const sparScoreCommand = Command.make(
             yield* fs.writeFileString(tmp, renderSparReport(score, brief));
             yield* fs.rename(tmp, path);
 
+            const scorePath = dojoSparScorePath(id);
+            const scoreTmp = `${scorePath}.tmp.${process.pid}`;
+            yield* fs.writeFileString(scoreTmp, `${prettyPrint(score)}\n`);
+            yield* fs.rename(scoreTmp, scorePath);
+
             console.log(json ? prettyPrint(score) : renderSparReport(score, brief));
         }),
 ).pipe(
     Command.withDescription(
-        "Score the agent's variant session against the frozen baseline and write a receipt to ~/.ax/dojo/spar/<id>-report.md. --variant-session=<id> --json",
+        "Score the agent's variant session and write Markdown plus machine-readable JSON receipts. --variant-session=<id> --json",
     ),
 );
 

@@ -7,6 +7,7 @@ import {
     fetchSessionMetrics,
     findVariantSession,
     parseSparBrief,
+    parseSparScore,
     renderSparBrief,
     renderSparReport,
     REPAIR_TOL,
@@ -121,6 +122,18 @@ describe("renderSparReport", () => {
         expect(md).toContain("skill: tdd ON");
         expect(md).toContain("cost");
         expect(md).toContain("WIN");
+    });
+});
+
+describe("parseSparScore", () => {
+    test("accepts a complete machine score", () => {
+        const score = { ...scoreSpar(brief.baseline, baseMetrics({ costUsd: 0.8 })), id: brief.id, variantSession: "variant" };
+        expect(parseSparScore(JSON.stringify(score))).toEqual(score);
+    });
+
+    test("rejects a score with an invalid metric", () => {
+        const score = { ...scoreSpar(brief.baseline, baseMetrics()), id: brief.id, variantSession: "variant" };
+        expect(parseSparScore(JSON.stringify({ ...score, variant: { ...score.variant, turns: "many" } }))).toBeNull();
     });
 });
 

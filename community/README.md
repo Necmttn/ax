@@ -26,6 +26,14 @@ same schema before opening a PR. Pattern PRs are schema-checked by CI but stay
 human-reviewed; filename collisions fail validation so contributors engage the
 existing pattern instead of duplicating it.
 
+## research/studies/
+
+One file records one content-stripped Dojo spar comparison.
+Use `ax contribute study <spar-id>` to inspect the exact public JSON.
+The command requires consent before it opens a reviewed PR.
+These first studies are self-reported pilot data.
+They do not prove general efficacy.
+
 ## Compiled outputs (nightly)
 
 `leaderboard.json`, `skill-stats.json`, `hook-stats.json`,

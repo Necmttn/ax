@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildFreshPattern,
+    isSafeSparId,
     patternChoiceLabel,
     selectProfilePattern,
     type FreshPatternInput,
@@ -83,5 +84,16 @@ describe("buildFreshPattern", () => {
             sessions: 4,
             confidence: 0.8,
         })).toThrow(/summary/);
+    });
+});
+
+describe("study contribution input", () => {
+    test("accepts a file-safe spar id", () => {
+        expect(isSafeSparId("ab12cd34-2026-06-13")).toBe(true);
+    });
+
+    test("rejects path traversal", () => {
+        expect(isSafeSparId("../../secret")).toBe(false);
+        expect(isSafeSparId("a/b")).toBe(false);
     });
 });
