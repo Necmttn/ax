@@ -480,6 +480,22 @@ describe("tool-call derivers", () => {
         expect(events[0]?.metrics).toMatchObject({ exitCode: 2 });
     });
 
+    test("benign search-miss (rg/grep/fd exit 1, no matches) is NOT friction (#1022)", () => {
+        // Codex funnels shell activity through exec_command, so a no-match
+        // search would otherwise dominate the failure views.
+        const rgMiss: ToolCallLike = {
+            ...failedCall, id: "tool_call:session__call_rg",
+            command_norm: "rg needle", exit_code: 1, has_error: true,
+            output_excerpt: "", error_text: "",
+        };
+        expect(deriveFrictionFromToolCalls([rgMiss])).toEqual([]);
+        expect(deriveDiagnosticsFromToolCalls([rgMiss])).toEqual([]);
+        // A search tool that failed for a REAL reason (exit 2 usage error) is
+        // still friction - only exit-1/no-match is benign.
+        const rgUsageError: ToolCallLike = { ...rgMiss, exit_code: 2, error_text: "unknown option" };
+        expect(deriveFrictionFromToolCalls([rgUsageError])).toHaveLength(1);
+    });
+
     test("toolCallStableKey: record id wins; deterministic hashed fallback otherwise", () => {
         expect(toolCallStableKey(failedCall, 0)).toBe("session__call_1");
         const noId: ToolCallLike = { session: "session:abc", call_id: "call_42", has_error: true, ts: "2026-05-09T10:00:00.000Z" };

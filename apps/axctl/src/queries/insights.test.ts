@@ -136,9 +136,13 @@ describe("insights query builders", () => {
     test("toolFailuresSql groups current tool_call error fields", () => {
         const sql = toolFailuresSql(7);
 
-        expect(sql).toContain("FROM tool_call");
-        expect(sql).toContain("WHERE has_error = TRUE");
-        expect(sql).toContain("GROUP BY name, command_norm, command_tool, exit_code");
+        expect(sql).toContain("FROM tool_call tc");
+        expect(sql).toContain("WHERE tc.has_error = TRUE");
+        // Confirmed benign search-misses are excluded via the command_outcome
+        // classification, not counted as failures (#1022).
+        expect(sql).toContain("LEFT JOIN command_outcome co ON co.tool_call = tc.id");
+        expect(sql).toContain("co.kind IS NULL OR co.kind <> 'search_miss'");
+        expect(sql).toContain("GROUP BY tc.name, tc.command_norm, tc.command_tool, tc.exit_code");
         expect(sql).toContain("ORDER BY failure_count DESC");
         expect(sql).toContain("command_norm");
         expect(sql).toContain("command_tool");

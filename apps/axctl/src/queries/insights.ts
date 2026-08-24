@@ -308,16 +308,22 @@ export function toolFailuresSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
 SELECT
-    name,
-    command_norm,
-    command_tool,
-    exit_code,
+    tc.name,
+    tc.command_norm,
+    tc.command_tool,
+    tc.exit_code,
     COUNT(*) AS failure_count,
-    MAX(ts) AS last_seen,
-    COUNT(*) FILTER (WHERE status = 'error') AS status_error_count
-FROM tool_call
-WHERE has_error = TRUE
-GROUP BY name, command_norm, command_tool, exit_code
+    MAX(tc.ts) AS last_seen,
+    COUNT(*) FILTER (WHERE tc.status = 'error') AS status_error_count
+FROM tool_call tc
+-- Exclude confirmed benign search-misses (rg/grep/fd exit 1 = "no matches"),
+-- classified once by the outcomes stage (#1022). One command_outcome row per
+-- tool_call, so this LEFT JOIN never fans out; a call with no outcome row
+-- (co.kind NULL) is kept - we only drop what the classifier confirmed benign.
+LEFT JOIN command_outcome co ON co.tool_call = tc.id
+WHERE tc.has_error = TRUE
+  AND (co.kind IS NULL OR co.kind <> 'search_miss')
+GROUP BY tc.name, tc.command_norm, tc.command_tool, tc.exit_code
 ORDER BY failure_count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }

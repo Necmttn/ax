@@ -19,6 +19,7 @@ import type {
     DerivedSignals, JsonRecord, ProposedEdge, RecoveryEdge, SessionTurns,
     SignalEvidence, SkillPairAccum, ToolCallLike, TurnRow,
 } from "./types.ts";
+import { isBenignSearchMiss } from "../benign-exit.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -164,10 +165,19 @@ const toolEvidenceText = (call: ToolCallLike): string | null =>
     callString(call, "output_excerpt", "outputExcerpt");
 
 const isFailedToolCall = (call: ToolCallLike): boolean => {
-    if (call.has_error === true || call.hasError === true) return true;
-    if ((call.status ?? "").toLowerCase() === "error") return true;
     const exitCode = callNumber(call, "exit_code", "exitCode");
-    return exitCode !== null && exitCode !== 0;
+    const rawError =
+        call.has_error === true || call.hasError === true ||
+        (call.status ?? "").toLowerCase() === "error" ||
+        (exitCode !== null && exitCode !== 0);
+    if (!rawError) return false;
+    // A search that found nothing (`rg`/`grep`/`fd` exit 1) is not friction
+    // (#1022) - Codex funnels all shell activity through one exec tool, so
+    // these benign misses otherwise dominate the failure views.
+    const command = (callString(call, "command_norm", "commandNorm") ?? "").toLowerCase();
+    const evidence = (toolEvidenceText(call) ?? "").toLowerCase();
+    if (isBenignSearchMiss(command, exitCode, evidence)) return false;
+    return true;
 };
 
 const toolCallLabels = (

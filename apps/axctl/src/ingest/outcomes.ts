@@ -5,6 +5,7 @@ import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib
 import { stableId } from "@ax/lib/stable-id";
 import { isoTimestamp, recordKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
 import { checkFamilyFromCommand } from "./check-family.ts";
+import { isBenignSearchMiss } from "./benign-exit.ts";
 
 export type CommandOutcomeKind =
     | "success"
@@ -87,7 +88,7 @@ export function classifyCommandOutcome(row: ToolCallOutcomeRow): CommandOutcomeK
     const text = textFor(row);
     const command = `${row.command_norm ?? ""} ${row.command_text ?? ""}`.toLowerCase();
     if (!hasError) return "success";
-    if (/\b(rg|grep|find|fd)\b/.test(command) && (row.exit_code === 1 || /no matches|not found|0 results/.test(text))) return "search_miss";
+    if (isBenignSearchMiss(command, typeof row.exit_code === "number" ? row.exit_code : null, text)) return "search_miss";
     if (/--exit-code|git diff|git status --porcelain|guardrail|preflight/.test(command)) return "guardrail";
     if (/command not found|enoent|econnrefused|connection refused|auth|permission denied|network|port|daemon|database/.test(text)) return "environment_blocker";
     if (checkFamilyFromCommand(row.command_text) !== null || checkFamilyFromCommand(row.command_norm) !== null) {
