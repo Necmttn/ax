@@ -320,6 +320,18 @@ writes the harness telemetry config
 (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1738`,
 `http/json`; Codex `[otel]` block), idempotent + ax-marked. Provider name:
 `otel`. Spec: docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
+**Co-existence with a user's own collector (#1014).** The Claude env rewrite
+USED to overwrite a pre-existing `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` (e.g. a
+team's Datadog) silently - no report, no doctor line, no backup.
+`detectClaudeOtelReplacements` (`apps/axctl/src/otel/install-config.ts`) now
+finds a FOREIGN (non-loopback) prior endpoint before the overwrite; install
+warns, saves the original ONCE to `~/.ax/otel-previous.json`, and the `otel`
+doctor check surfaces the redirect. `ax install --keep-otel` leaves an existing
+foreign config untouched (ax OTLP surfaces stay dark; the user's collector keeps
+receiving). Forwarding (relay Claude -> ax -> the original collector, so ax is
+additive) is the tracked follow-up; the OTel-native alternative is a local
+collector fanning out to both. The Codex path (`applyCodexOtelToml`) was already
+shape-aware - it leaves a deliberately-different exporter kind alone.
 
 `ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
 (previously write-only - data landed in `otel_*` and only enriched insights, with

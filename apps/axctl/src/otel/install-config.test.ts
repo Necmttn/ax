@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyClaudeOtelEnv, applyClaudeTraceOtelEnv, applyCodexOtelToml } from "./install-config.ts";
+import { applyClaudeOtelEnv, applyClaudeTraceOtelEnv, applyCodexOtelToml, detectClaudeOtelReplacements } from "./install-config.ts";
 
 const ENDPOINT = "http://127.0.0.1:1738";
 
@@ -191,5 +191,64 @@ describe("install-config", () => {
         const again = applyCodexOtelToml(afterCodexRewrite, ENDPOINT);
         parseToml(again);
         expect(again.match(/\[otel\.exporter|exporter = \{/g)?.length).toBe(1);
+    });
+
+    // #1014: ax install used to overwrite a user's OTLP endpoint silently.
+    // detectClaudeOtelReplacements is what makes the takeover visible.
+    describe("detectClaudeOtelReplacements (#1014)", () => {
+        test("reports a foreign logs endpoint + its protocol", () => {
+            const reps = detectClaudeOtelReplacements({
+                env: {
+                    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "https://otlp.datadoghq.com/v1/logs",
+                    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/protobuf",
+                },
+            }, ENDPOINT);
+            const byKey = Object.fromEntries(reps.map((r) => [r.key, r]));
+            expect(byKey.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT.previous).toBe("https://otlp.datadoghq.com/v1/logs");
+            expect(byKey.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT.next).toBe(`${ENDPOINT}/v1/logs`);
+            expect(byKey.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL.previous).toBe("http/protobuf");
+        });
+
+        test("reports the generic endpoint too when it is foreign", () => {
+            const reps = detectClaudeOtelReplacements({
+                env: { OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.corp.internal:4318" },
+            }, ENDPOINT);
+            expect(reps.map((r) => r.key)).toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+        });
+
+        test("empty when nothing was configured before", () => {
+            expect(detectClaudeOtelReplacements({}, ENDPOINT)).toEqual([]);
+            expect(detectClaudeOtelReplacements({ env: {} }, ENDPOINT)).toEqual([]);
+        });
+
+        test("empty when the prior value is already ax (idempotent re-install)", () => {
+            const already = applyClaudeOtelEnv({}, ENDPOINT);
+            expect(detectClaudeOtelReplacements(already, ENDPOINT)).toEqual([]);
+        });
+
+        test("localhost and 127.0.0.1 on any port are treated as ax, not foreign", () => {
+            expect(detectClaudeOtelReplacements({
+                env: { OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://localhost:4318/v1/logs" },
+            }, ENDPOINT)).toEqual([]);
+            expect(detectClaudeOtelReplacements({
+                env: { OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:9999" },
+            }, ENDPOINT)).toEqual([]);
+        });
+
+        test("a lone protocol difference on a loopback endpoint is not a takeover", () => {
+            // No foreign ENDPOINT key → nothing to report, even if a protocol differs.
+            expect(detectClaudeOtelReplacements({
+                env: {
+                    OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:1738",
+                    OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+                },
+            }, ENDPOINT)).toEqual([]);
+        });
+
+        test("ignores blank/whitespace prior values", () => {
+            expect(detectClaudeOtelReplacements({
+                env: { OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "   " },
+            }, ENDPOINT)).toEqual([]);
+        });
     });
 });

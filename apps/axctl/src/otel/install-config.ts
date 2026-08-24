@@ -34,6 +34,67 @@ export const applyClaudeOtelEnv = (
     return { ...settings, env };
 };
 
+/**
+ * One OTLP env key ax overwrote whose PRIOR value pointed at a foreign
+ * (non-ax) collector.
+ */
+export interface OtelEnvReplacement {
+    readonly key: string;
+    readonly previous: string;
+    readonly next: string;
+}
+
+// The destination + protocol env keys `CC_ENV` writes. Switch keys
+// (CLAUDE_CODE_ENABLE_TELEMETRY, OTEL_*_EXPORTER) carry no target, so
+// overwriting them is never a "takeover" worth reporting.
+const OWNED_ENDPOINT_KEYS = [
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+] as const;
+const OWNED_PROTOCOL_KEYS = [
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+] as const;
+
+// ax's receiver is always a loopback host; a prior value on loopback is a
+// stale ax install, not a user's collector - never report it as foreign.
+const AX_LOOPBACK_RE = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i;
+
+const isForeignEndpoint = (value: string | undefined, next: string): boolean =>
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    value !== next &&
+    !AX_LOOPBACK_RE.test(value.trim());
+
+/**
+ * Detect the pre-existing FOREIGN OTLP destinations that {@link applyClaudeOtelEnv}
+ * would silently overwrite (#1014). `applyClaudeOtelEnv` still redirects the
+ * harness at ax's receiver - the caller uses this report to PRESERVE the old
+ * value and TELL the user, instead of a silent takeover.
+ *
+ * Only fires when at least one ENDPOINT key points somewhere non-ax: a lone
+ * protocol flip on a loopback endpoint is a no-op re-install, not a takeover.
+ * Idempotent - re-running install on an ax-configured machine reports nothing.
+ */
+export const detectClaudeOtelReplacements = (
+    settings: ClaudeSettings,
+    endpoint: string,
+): OtelEnvReplacement[] => {
+    const prev = settings.env ?? {};
+    const next = CC_ENV(endpoint);
+    const foreignEndpoints = OWNED_ENDPOINT_KEYS.filter((k) => isForeignEndpoint(prev[k], next[k]));
+    if (foreignEndpoints.length === 0) return [];
+    const foreignProtocols = OWNED_PROTOCOL_KEYS.filter((k) => {
+        const v = prev[k];
+        return typeof v === "string" && v.trim() !== "" && v !== next[k];
+    });
+    return [...foreignEndpoints, ...foreignProtocols].map((k) => ({
+        key: k,
+        previous: prev[k] as string,
+        next: next[k],
+    }));
+};
+
 /** Add Claude trace export env. This is intentionally separate and opt-in. */
 export const applyClaudeTraceOtelEnv = (
     settings: ClaudeSettings,

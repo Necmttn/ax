@@ -6,7 +6,7 @@ import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
 import { agentEventIndexDoctorCheck, readIndexUnhealthyMarker } from "../ingest/agent-event-index-heal.ts";
-import { applyClaudeOtelEnv, applyCodexOtelToml } from "../otel/install-config.ts";
+import { applyClaudeOtelEnv, applyCodexOtelToml, detectClaudeOtelReplacements, type OtelEnvReplacement } from "../otel/install-config.ts";
 import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
 import { provisionRetroReviewerAgent } from "./managed-agents.ts";
 import {
@@ -325,6 +325,36 @@ export function otlpdDoctorCheck(agent: AgentRuntimeStatus): DoctorCheck {
 }
 
 /**
+ * Doctor check that surfaces an OTLP redirect (#1014). Before this, ax rewrote
+ * the harness's OTLP logs endpoint at install and NOTHING - not the install
+ * output, not doctor - said so; a user found it nine days later by diffing
+ * settings.json. The redirect is legitimate (ax needs the harness pointed at
+ * its receiver), so this is informational (ok:true), never a failure - but when
+ * a `~/.ax/otel-previous.json` backup exists it names the takeover and the
+ * restore path. Pure + exported for tests.
+ */
+export function otelRedirectDoctorCheck(args: {
+    readonly backupExists: boolean;
+    readonly backupPath: string;
+    readonly logsEndpoint: string | null;
+}): DoctorCheck {
+    if (args.backupExists) {
+        return {
+            name: "otel",
+            ok: true,
+            detail: `ax redirected an existing OTLP destination to its receiver; original saved at ${args.backupPath} - restore to resume your own collector`,
+        };
+    }
+    return {
+        name: "otel",
+        ok: true,
+        detail: args.logsEndpoint
+            ? `OTLP logs → ${args.logsEndpoint} (no external redirect recorded)`
+            : "no OTLP logs endpoint configured",
+    };
+}
+
+/**
  * Ingest wall-clock budget (seconds). Doctor has no AxConfig layer, so mirror
  * the `AX_INGEST_TIMEOUT_SECONDS` knob with the same lenient
  * parse-or-fallback the config layer uses.
@@ -472,6 +502,23 @@ export function collectDoctorReport(): Effect.Effect<
             ingestRunsCheck,
             otlpdDoctorCheck(otlpdStatus),
         ];
+
+        // OTLP redirect visibility (#1014): read whether install saved a
+        // foreign-endpoint backup, plus the harness's current logs endpoint.
+        const otelBackupPath = posixPath.join(HOME, ".ax", "otel-previous.json");
+        const otelBackupExists = yield* fs.exists(otelBackupPath).pipe(orAbsent(false));
+        const claudeLogsEndpoint = yield* Effect.promise(async () => {
+            try {
+                const raw = await Bun.file(posixPath.join(HOME, ".claude", "settings.json")).text();
+                const env = (JSON.parse(raw) as { env?: Record<string, string> }).env ?? {};
+                return env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT ?? env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
+            } catch { return null; }
+        });
+        checks.push(otelRedirectDoctorCheck({
+            backupExists: otelBackupExists,
+            backupPath: otelBackupPath,
+            logsEndpoint: claudeLogsEndpoint,
+        }));
         // agent_event ghost-index health (#680): a cheap fs read of the marker
         // the codex self-heal writes only when an auto-rebuild couldn't clear a
         // residual duplicate. No query, so it stays fast on a large agent_event.
@@ -497,7 +544,17 @@ export function formatDoctorReport(report: DoctorReport, json = false): string {
     return lines.join("\n");
 }
 
-export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = {}): Effect.Effect<
+export function cmdInstall(options: {
+    readonly telemetry?: TelemetryConsent;
+    /**
+     * `--keep-otel` (#1014): when the harness already points OTLP at a non-ax
+     * collector, leave that config untouched instead of redirecting it to ax's
+     * receiver. ax's OTLP-fed surfaces (`ax otel`, telemetry enrichment) stay
+     * dark, but the user's own collector keeps receiving. No-op when nothing
+     * foreign is configured.
+     */
+    readonly keepOtel?: boolean;
+} = {}): Effect.Effect<
     void,
     Error,
     FileSystem.FileSystem | Path.Path | CacheRead
@@ -568,18 +625,56 @@ export function cmdInstall(options: { readonly telemetry?: TelemetryConsent } = 
             // Claude: only touch if ~/.claude exists (harness is installed).
             const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
             if (claudeDirExists) {
-                yield* Effect.promise(async () => {
+                const keepOtel = options.keepOtel ?? false;
+                const replaced = yield* Effect.promise(async () => {
                     try {
                         let raw = "{}";
                         try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
                         const parsed = JSON.parse(raw) as Record<string, unknown>;
+                        // Detect a pre-existing non-ax OTLP destination BEFORE we
+                        // overwrite it, so the redirect is visible, not silent (#1014).
+                        const reps = detectClaudeOtelReplacements(parsed, OTLP_ENDPOINT);
+                        // --keep-otel: a foreign collector is already configured and
+                        // the user asked us to respect it - leave settings untouched.
+                        if (keepOtel && reps.length > 0) {
+                            console.log(`  otel: --keep-otel - left your OTLP config in ${claudeSettings} untouched`);
+                            console.log(`        ax OTLP surfaces ('ax otel', telemetry enrichment) stay inactive; run 'ax install' without --keep-otel to redirect.`);
+                            return [] as OtelEnvReplacement[];
+                        }
                         const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
                         await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
                         console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
+                        return reps;
                     } catch (err) {
                         console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
+                        return [] as OtelEnvReplacement[];
                     }
                 });
+                if (replaced.length > 0) {
+                    // Persist the original ONCE (never clobber an earlier backup) so
+                    // the user can restore their own collector, and warn loudly.
+                    const axDir = posixPath.join(HOME, ".ax");
+                    const backupPath = posixPath.join(axDir, "otel-previous.json");
+                    const backupExists = yield* fs.exists(backupPath).pipe(orAbsent(false));
+                    if (!backupExists) {
+                        yield* fs.makeDirectory(axDir, { recursive: true }).pipe(Effect.ignore);
+                        const payload = JSON.stringify({
+                            saved_at: new Date().toISOString(),
+                            source: claudeSettings,
+                            note: "ax install redirected these OTLP env keys to its local receiver (http://127.0.0.1:1738). Restore any value below in ~/.claude/settings.json to send that signal to your own collector again.",
+                            replaced: replaced.map((r) => ({ key: r.key, previous: r.previous })),
+                        }, null, 2) + "\n";
+                        yield* fs.writeFileString(backupPath, payload).pipe(Effect.ignore);
+                    }
+                    console.warn(`  otel: ⚠ redirected an existing non-ax OTLP destination in ${claudeSettings}:`);
+                    for (const r of replaced) {
+                        console.warn(`          ${r.key}`);
+                        console.warn(`            was: ${r.previous}`);
+                        console.warn(`            now: ${r.next}`);
+                    }
+                    console.warn(`        that collector no longer receives these signals.`);
+                    console.warn(`        original ${backupExists ? "already saved" : "saved"} at ${backupPath} - restore to re-enable it.`);
+                }
             }
 
             const codexDir = posixPath.join(HOME, ".codex");
