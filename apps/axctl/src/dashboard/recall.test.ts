@@ -184,13 +184,34 @@ const CORPUS = (w: CacheWriteService) =>
     });
 
 describe("recall: turn source", () => {
-    dtest("returns only turns whose text matches, newest first", async () => {
+    dtest("returns only matching turns, ranked by relevance (#1023)", async () => {
         const res = await withRecall("ax-recall-turns-", CORPUS, { q: "duckdb" });
 
-        expect(res.hits.map((h) => h.turn_id)).toEqual(["turn:3", "turn:1", "turn:4"]);
+        // BM25 score DESC, recency as tie-break - NOT pure recency. turn:1's
+        // longer body ("the duckdb seam replaces surreal") scores lower for the
+        // one "duckdb" hit than the shorter turn:3/turn:4, so it ranks last
+        // despite sitting between them in time.
+        expect(res.hits.map((h) => h.turn_id)).toEqual(["turn:3", "turn:4", "turn:1"]);
         expect(res.total_counts.turn).toBe(3);
         // The non-matching turn is genuinely absent, not merely ranked low.
         expect(res.hits.map((h) => h.turn_id)).not.toContain("turn:2");
+    });
+
+    dtest("relevance beats recency: a strong old match outranks a weak new one (#1023)", async () => {
+        const res = await withRecall("ax-recall-relevance-", (w) =>
+            Effect.gen(function* () {
+                yield* w.putMany("session", [session("session:a", { project: "ax" })]);
+                yield* w.putMany("turn", [
+                    // OLD but a strong match: the term dominates a short body.
+                    turn("turn:strong", "session:a", 1, "wombat wombat wombat", "2026-01-01T10:00:00.000Z"),
+                    // NEW but a weak match: the term is buried in a long body.
+                    turn("turn:weak", "session:a", 2,
+                        `wombat ${"lorem ipsum dolor sit amet ".repeat(20)}`, "2026-08-20T10:00:00.000Z"),
+                ]);
+            }), { q: "wombat" });
+
+        // Pure recency would put turn:weak first; relevance ranking must not.
+        expect(res.hits[0]?.turn_id).toBe("turn:strong");
     });
 
     dtest("finds a phrase PAST the 500-char excerpt bound, and snippets around the match (#921)", async () => {
@@ -210,6 +231,21 @@ describe("recall: turn source", () => {
         expect(res.hits.map((h) => h.turn_id)).toEqual(["turn:deep"]);
         // The snippet centers on the match instead of showing the head excerpt.
         expect(res.hits[0]?.snippet).toContain("zanzibar quokka");
+    });
+
+    dtest("a multi-term query matches conjunctively - every term must be present (#1023)", async () => {
+        const res = await withRecall("ax-recall-conjunctive-", (w) =>
+            Effect.gen(function* () {
+                yield* w.putMany("session", [session("session:a", { project: "ax" })]);
+                yield* w.putMany("turn", [
+                    turn("turn:both", "session:a", 1, "the duckdb spool buffers hot tables", "2026-08-10T10:00:00.000Z"),
+                    // Only ONE term - an OR match would wrongly include this.
+                    turn("turn:one", "session:a", 2, "duckdb snapshot publisher notes", "2026-08-11T10:00:00.000Z"),
+                ]);
+            }), { q: "duckdb spool" });
+
+        expect(res.hits.map((h) => h.turn_id)).toEqual(["turn:both"]);
+        expect(res.total_counts.turn).toBe(1);
     });
 
     dtest("carries the joined session's project, source and cwd onto each hit", async () => {
@@ -255,10 +291,11 @@ describe("recall: turn source", () => {
         const first = await run(recall(fixture, { q: "duckdb", offset: 0, limit: 2 }));
         const second = await run(recall(fixture, { q: "duckdb", offset: 2, limit: 2 }));
 
-        expect(first.hits.map((h) => h.turn_id)).toEqual(["turn:3", "turn:1"]);
+        // Relevance order over the full corpus is [turn:3, turn:4, turn:1] (#1023).
+        expect(first.hits.map((h) => h.turn_id)).toEqual(["turn:3", "turn:4"]);
         expect(first.total_counts.turn).toBe(3);
         expect(first.truncated).toBe(true);
-        expect(second.hits.map((h) => h.turn_id)).toEqual(["turn:4"]);
+        expect(second.hits.map((h) => h.turn_id)).toEqual(["turn:1"]);
         expect(second.truncated).toBe(false);
     });
 });
