@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["generate", "sync", "evaluate"], default="generate")
     parser.add_argument("--review", default=".ax/experiments/embedding-helper-review-current.json")
     parser.add_argument("--review-out", default=None, help="Optional path for the synced review JSON; useful with --dry-run.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--batch", default=".ax/experiments/embedding-helper-review-batch-current.md")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-review-batch-current-report.json")
     parser.add_argument("--limit", type=int, default=5)

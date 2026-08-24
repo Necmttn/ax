@@ -35,7 +35,7 @@ describe("classifier package manifest", () => {
     });
 
     test("loads the session-sections local model package manifest", async () => {
-        const manifest = await loadManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await loadManifest("experiments/session-sections/ax.classifier.json");
 
         expect(manifest.schema).toBe(CLASSIFIER_PACKAGE_SCHEMA);
         expect(manifest.key).toBe("session-section-chunks");
@@ -48,27 +48,27 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "blind-review-refresh")?.outputs).toContain(".ax/experiments/blind-workflow-status-current.json");
         expect(manifest.operations?.find((operation) => operation.id === "setfit-train-eval")?.kind).toBe("train");
         expect(manifest.operations?.find((operation) => operation.id === "setfit-fixture-eval")?.kind).toBe("eval");
-        expect(manifest.operations?.find((operation) => operation.id === "hybrid-window-candidate-projection")?.command).toContain("classifiers:hybrid-window-candidate-projection");
+        expect(manifest.operations?.find((operation) => operation.id === "hybrid-window-candidate-projection")?.command).toContain("hybrid_window_candidate_projection.py");
         expect(manifest.operations?.find((operation) => operation.id === "hybrid-window-candidate-apply")?.kind).toBe("publish");
         expect(manifest.operations?.find((operation) => operation.id === "hybrid-window-workflow-candidate-report")?.command).toContain("--source-kind=hybrid_window_classifier_projection");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-source-compare")?.command).toContain("classifiers:workflow-candidate-compare");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-combined-report")?.command).toContain("classifiers:workflow-candidate-combined");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-source-compare")?.command).toContain("workflow_candidate_compare.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-combined-report")?.command).toContain("workflow_candidate_combined.py");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-pack")?.kind).toBe("review");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-review")?.command).toContain("classifiers:workflow-candidate-proposal-review");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-promote-drafts")?.command).toContain("classifiers:workflow-candidate-proposal-promote");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-ready-smoke")?.command).toContain("classifiers:workflow-candidate-proposal-promote-smoke");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-metadata")?.command).toContain("classifiers:fixture-metadata");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-review")?.command).toContain("workflow_candidate_proposal_review.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-promote-drafts")?.command).toContain("workflow_candidate_proposal_promote.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-ready-smoke")?.command).toContain("workflow_candidate_proposal_promote_smoke.py");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-metadata")?.command).toContain("fixture_metadata.py");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-split-audit")?.kind).toBe("eval");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-setfit-robustness")?.command).toContain("classifiers:setfit-robustness");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-failure-analysis")?.command).toContain("classifiers:failure-analysis");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review")?.command).toContain("classifiers:boundary-miss-review");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-setfit-robustness")?.command).toContain("robustness.py");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-failure-analysis")?.command).toContain("failure_analysis.py");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review")?.command).toContain("boundary_miss_review.py");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review-sync")?.command).toContain("--mode=sync");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-projection")?.inputs).toContain("packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-projection")?.inputs).toContain("experiments/session-sections/eval-fixtures/chunks.jsonl");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-apply")?.kind).toBe("publish");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-health")?.command).toContain("--graph-mode=embedding-helper");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-usefulness-transcript-report")?.command).toContain("--examples=10000");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-usefulness-hybrid-report")?.command).toContain("hybrid_window_classifier_projection");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-usefulness")?.command).toContain("classifiers:embedding-helper-graph-usefulness");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-usefulness")?.command).toContain("embedding_helper_graph_usefulness.py");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-guarded")?.command).toContain("--graph-mode=guarded");
         expect(manifest.operations?.find((operation) => operation.id === "classifier-lifecycle-status")?.outputs).toContain(".ax/experiments/classifiers-lifecycle-current.json");
@@ -78,19 +78,19 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-review")?.kind).toBe("review");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-review-sync")?.command).toContain("--mode sync");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-append")?.outputs).toContain(".ax/experiments/chunks-with-workflow-fixtures-current.jsonl");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-metadata")?.command).toContain("classifiers:fixture-metadata");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-metadata")?.command).toContain("fixture_metadata.py");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-split-audit")?.kind).toBe("eval");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-setfit-robustness")?.command).toContain("classifiers:setfit-robustness");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-failure-analysis")?.command).toContain("classifiers:failure-analysis");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-none-safety-pregate")?.command).toContain("classifiers:none-safety-pregate");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-none-safety-window-replay")?.command).toContain("classifiers:none-safety-window-replay");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-robustness")?.command).toContain("classifiers:hybrid-robustness");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-graph-usefulness")?.command).toContain("classifiers:hybrid-graph-usefulness");
-        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-quality-conclusion")?.command).toContain("classifiers:workflow-quality-conclusion");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-setfit-robustness")?.command).toContain("robustness.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-failure-analysis")?.command).toContain("failure_analysis.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-none-safety-pregate")?.command).toContain("none_safety_pregate.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-none-safety-window-replay")?.command).toContain("none_safety_window_replay.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-robustness")?.command).toContain("hybrid_robustness.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-graph-usefulness")?.command).toContain("hybrid_graph_usefulness.py");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-quality-conclusion")?.command).toContain("classifier-workflow-quality-conclusion.ts");
     });
 
     test("lists and resolves classifier package operations", async () => {
-        const manifest = await loadManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await loadManifest("experiments/session-sections/ax.classifier.json");
 
         const operations = listClassifierPackageOperations(manifest);
         const refresh = findClassifierPackageOperation(manifest, "blind-review-refresh");
@@ -130,7 +130,8 @@ describe("classifier package manifest", () => {
         const workflowQualityConclusion = requireClassifierPackageOperation(manifest, "workflow-fixture-quality-conclusion");
 
         expect(operations.map((operation) => operation.id)).toContain("blind-workflow-status");
-        expect(refresh?.command).toBe("bun run classifiers:blind-review-refresh");
+        expect(refresh?.command).toBe("python3 experiments/session-sections/blind_review_batch_refresh.py");
+        expect(operations.every((operation) => !operation.command.includes("bun run classifiers:"))).toBe(true);
         expect(postReview.outputs).toContain(".ax/experiments/blind-post-review-runner-current.json");
         expect(train.outputs).toContain(".ax/experiments/setfit-session-sections-e3-coarse.json");
         expect(hybridWindowProjection.inputs).toContain(".ax/experiments/hybrid-gate-e4.json");
@@ -160,7 +161,7 @@ describe("classifier package manifest", () => {
         expect(batchPromote.outputs).toContain(".ax/experiments/blind-review-batch-current-promotion-report.json");
         expect(workflowReview.outputs).toContain(".ax/experiments/workflow-fixture-review-current-report.json");
         expect(workflowReviewSync.inputs).toContain(".ax/experiments/workflow-fixture-review-current-reviewed.md");
-        expect(workflowAppend.command).toContain("classifiers:fixture-append");
+        expect(workflowAppend.command).toContain("fixture_append.py");
         expect(workflowMetadata.outputs).toContain(".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl");
         expect(workflowSplitAudit.command).toContain("--group-field=pair_group");
         expect(workflowSetFitRobustness.outputs).toContain(".ax/experiments/setfit-robustness-workflow-fixtures-current.json");

@@ -2,7 +2,7 @@
   "name": "axctl",
   "version": "0.40.1",
   "license": "AGPL-3.0-only",
-  "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
+  "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into a local DuckDB cache and keeps durable judgments in SQLite.",
   "type": "module",
   "bin": {
     "axctl": "./bin/axctl"
@@ -14,9 +14,8 @@
   "scripts": {
     "build": "bun ../../scripts/build-axctl.ts src/cli/index.ts dist/axctl",
     "dev": "bun src/cli/index.ts",
-    "serve": "bun src/cli/index.ts serve",
+    "studio": "bun src/cli/index.ts studio",
     "ingest": "bun src/cli/index.ts ingest",
-    "search": "bun src/cli/index.ts search",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dashboard:dev": "bun --filter @ax/studio dev",

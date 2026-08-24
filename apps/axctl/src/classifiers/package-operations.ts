@@ -1995,7 +1995,14 @@ export function discoverClassifierPackageManifestPaths(
                 );
             },
         );
-        return manifestPaths.filter((entry): entry is string => entry !== undefined).sort();
+        const experimentManifest = "experiments/session-sections/ax.classifier.json";
+        const externalPaths = root === "packages" && (yield* fs.exists(experimentManifest).pipe(orAbsent(false)))
+            ? [experimentManifest]
+            : [];
+        return [
+            ...manifestPaths.filter((entry): entry is string => entry !== undefined),
+            ...externalPaths,
+        ].sort();
     });
 }
 
@@ -3713,7 +3720,7 @@ export function loadClassifierLifecycleReviewStatus(
         : [];
     const nextActions = focusedBatch?.suggestion_draft?.eval_decision === "needs_batch_review" && focusedBatch?.draft_promotion?.decision === "needs_human_notes"
         ? [
-            `edit suggestion draft notes in ${focusedBatch.suggestion_draft.path} then run bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=${focusedBatch.suggestion_draft.path} --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json`,
+            `edit suggestion draft notes in ${focusedBatch.suggestion_draft.path} then run python3 experiments/session-sections/blind_review_batch.py --mode=promote-draft --batch=${focusedBatch.suggestion_draft.path} --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json`,
             ...proposalReviewAction,
             ...baseNextActions.filter((action) => action !== "complete focused batch review fields"),
         ]

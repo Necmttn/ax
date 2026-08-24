@@ -178,6 +178,12 @@ jobs:
 
       - run: bun run check:site-cli-reference
 
+      - run: bun run check:current-product-docs
+
+      - run: bun run check:active-command-copy
+
+      - run: bun run check:doc-catalog
+
       - run: bun run check:no-node-fs
 
       - run: bun run check:record-select

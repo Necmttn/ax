@@ -171,7 +171,7 @@ export const lifecycleRuntime: RuntimeManifest = {
     update: { runtime: "none", hidden: true },
     install: "none",
     setup: "none",
-    doctor: { runtime: "cache", hidden: true },
+    doctor: "cache",
     uninstall: { runtime: "none", hidden: true },
     // Retirement stub - hidden so it never appears in help; see daemonCommand.
     daemon: { runtime: "none", hidden: true },

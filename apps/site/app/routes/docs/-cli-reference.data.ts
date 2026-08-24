@@ -51,7 +51,7 @@ export const CLI_GROUPS: readonly CliGroup[] = [
     eyebrow: "$ mine your history",
     title: "Query the graph",
     blurb:
-      "ax watches every coding-agent session across five harnesses and turns it into a local graph. These commands read it back.",
+      "ax reads coding-agent sessions across six harnesses and turns them into a local graph. These commands read it back.",
     commands: [
       {
         name: "ingest",
@@ -683,7 +683,7 @@ pattern PR: https://github.com/Necmttn/ax/pull/999`,
     ],
   },
   {
-    eyebrow: "$ run the daemon",
+    eyebrow: "$ open local tools",
     title: "Dashboard & integration",
     blurb:
       "Serve the live dashboard, expose the graph to your agent over MCP, or open the terminal UI.",
@@ -764,11 +764,11 @@ thanks - starred Necmttn/ax`,
     commands: [
       {
         name: "install",
-        job: "One-shot setup: daemon, watcher, symlink, then runs `ax setup`.",
+        job: "One-shot setup: CLI link, skills, harness telemetry, and the optional OTLP receiver. Then it runs `ax setup`.",
         signature: "ax install",
         flags: [],
         receipt: `$ ax install
-installed daemon + watcher
+installed ax services
 symlinked ax -> ~/.local/share/ax
 running ax setup ...`,
       },

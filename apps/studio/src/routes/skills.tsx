@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type {
     ContextBudgetResult,
@@ -242,6 +243,13 @@ export function SkillsRoute() {
                                 </span>
                             </div>
                         ) : null}
+                        <Link
+                            to="/skills/graph"
+                            className="badge review"
+                            style={{ display: "inline-block", marginTop: 10, textDecoration: "none" }}
+                        >
+                            Skill graph →
+                        </Link>
                     </div>
                     {data ? (
                         <div className="inst-hero ctx-hero">

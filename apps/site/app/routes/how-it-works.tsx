@@ -16,7 +16,7 @@ export const Route = createFileRoute("/how-it-works")({
       {
         name: "description",
         content:
-          "Watch, graph, mine, propose, measure. ax reads your coding-agent history from five harnesses into a typed local graph, mines the mistakes you repeat, and hands them back as small fixes you review one at a time.",
+          "Watch, graph, mine, propose, measure. ax reads your coding-agent history from six harnesses into a typed local graph, mines the mistakes you repeat, and hands them back as small fixes you review one at a time.",
       },
     ],
   }),

@@ -27,7 +27,7 @@ SOURCE_KIND = "embedding_helper_review_projection"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Project embedding helper review artifacts into graph-ready facts.")
     parser.add_argument("--review", default=".ax/experiments/embedding-helper-review-current.json")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-graph-projection-current.json")
     parser.add_argument("--write-plan", default=".ax/experiments/embedding-helper-graph-write-plan-current.json")
     parser.add_argument("--json", action="store_true")

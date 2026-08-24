@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Cause, Effect, Exit, Layer } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
-import { Command } from "effect/unstable/cli";
+import { CliOutput, Command, HelpDoc } from "effect/unstable/cli";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { CacheRead } from "@ax/lib/duckdb/seam";
@@ -73,6 +73,7 @@ import { IngestRuntimeLayer, ingestRuntimeLayerWith, withoutCacheRead } from "..
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
+import { isDefaultCommand } from "./commands/visible-commands.ts";
 
 const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
 
@@ -123,39 +124,38 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...lifecycleRuntime,
 };
 
-// Registration order, not metadata: the first block is the common verbs shown
-// in `axctl --help` - keep it short; it is the human's mental map of the tool
-// (full command reference lives in the README). Whether a command is hidden
-// is NOT decided here: visibility lives next to routing in each family's
-// RuntimeManifest (#248) and is applied by the uniform loop below. Visibility
-// policy itself (#173) is documented on `CommandMeta` in commands/manifest.ts.
+// Registration order does not control the default help surface. The command
+// surface registry in visible-commands.ts supplies that policy. Family
+// manifests can still hard-hide internal maintenance commands.
 const registeredCommands: ReadonlyArray<Command.Command.Any> = [
-    // Common verbs - shown in `axctl --help`.
+    // Core verbs - shown in `axctl --help` in this order.
+    installCommand,
+    setupCommand,
+    doctorCommand,
     ingestCommand,
+    serveCommand,
     sessionsCommand,
-    improveCommand,
-    wrappedCommand,
-    retroCommand,
     recallCommand,
     skillsCommand,
+    improveCommand,
+    costCommand,
+    profileCommand,
+    shareCommand,
+    // Public commands reached by exact name or the full reference.
+    wrappedCommand,
+    retroCommand,
     signalsCommand,
     rolesCommand,
     hooksCommand,
-    serveCommand,
     otlpdCommand,
     mcpCommand,
     tuiCommand,
-    shareCommand,
-    installCommand,
-    setupCommand,
-    costCommand,
     otelCommand,
     runsCommand,
     segmentCommand,
     memoryCommand,
     quotaCommand,
     dojoCommand,
-    profileCommand,
     contributeCommand,
     dispatchesRootCommand,
     routingRootCommand,
@@ -182,7 +182,6 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     timelineCommand,
     versionCommand,
     updateCommand,
-    doctorCommand,
     daemonCommand,
     uninstallCommand,
     starCommand,
@@ -190,20 +189,40 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
 ];
 
 /**
- * Uniform manifest-driven registration (#248): apply each command's
- * manifest-declared visibility at assembly time. A command missing from
- * RUNTIME_BY_COMMAND registers visible - and fails the effect-cli.test.ts
- * exhaustiveness guard, so it can't ship undeclared.
+ * Manifest-hidden commands are internal. Public surface filtering happens in
+ * the help formatter so advanced commands remain in shell completions.
  */
 const withManifestVisibility = (command: Command.Command.Any): Command.Command.Any => {
     const entry = RUNTIME_BY_COMMAND[command.name];
-    return entry !== undefined && entryHidden(entry) ? Command.withHidden(command) : command;
+    const hidden = entry === undefined || entryHidden(entry);
+    return hidden ? Command.withHidden(command) : command;
 };
 
 export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands(registeredCommands.map(withManifestVisibility)),
 );
+
+/** Filter only root help. Parsing, completion, and nested help keep the full
+ * public command tree. */
+export const filterDefaultHelp = (doc: HelpDoc.HelpDoc): HelpDoc.HelpDoc => {
+    if (doc.usage !== "axctl <subcommand> [flags]" || doc.subcommands === undefined) return doc;
+    const subcommands = doc.subcommands.flatMap((group): ReadonlyArray<HelpDoc.SubcommandGroupDoc> => {
+        const commands = group.commands.filter((command) => isDefaultCommand(command.name));
+        if (commands.length === 0) return [];
+        return [{ ...group, commands: [commands[0]!, ...commands.slice(1)] }];
+    });
+    return {
+        ...doc,
+        subcommands,
+    };
+};
+
+const defaultCliFormatter = CliOutput.defaultFormatter();
+const cliFormatter: CliOutput.Formatter = {
+    ...defaultCliFormatter,
+    formatHelpDoc: (doc) => defaultCliFormatter.formatHelpDoc(filterDefaultHelp(doc)),
+};
 
 /**
  * Run the CLI command tree. Returns an Effect typed as needing only
@@ -214,11 +233,9 @@ export const rootCommand = Command.make("axctl").pipe(
  * place the cast lives - callers stay type-safe.
  */
 const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, CacheRead> =>
-    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<
-        void,
-        unknown,
-        CacheRead
-    >;
+    Command.runWith(rootCommand, { version: AX_VERSION })(args).pipe(
+        Effect.provide(CliOutput.layer(cliFormatter)),
+    ) as unknown as Effect.Effect<void, unknown, CacheRead>;
 
 /** CLI invocation that has had every requirement satisfied. */
 type CliProgram = Effect.Effect<void, unknown, never>;

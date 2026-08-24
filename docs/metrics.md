@@ -41,30 +41,31 @@ a metric today is a small, explicit set of edits:
    absent sessions, NONE vs 0 semantics. **Never** stack per-edge derefs over
    large edge sets, and **never** put a graph-traversing `COMPUTED` field on a
    listing surface (both hang - see `weighted-query-per-edge-deref-hang`).
-2. Add a column to the `session_metrics` table in
-   `packages/schema/src/schema.surql` (`option<…>` for nullable; register the
-   table is already done). If you change a field type on an existing table, use
-   `DEFINE FIELD OVERWRITE` and prefer `option<…>` over a bare non-optional type
-   on a populated table (else NONE-coercion crashes ingest).
+2. Add a column to the correct table in
+   `packages/schema/src/schema.duckdb.sql`. Register a new table in
+   `packages/schema/src/duckdb-tables.ts` and `TABLE_METADATA`. Keep durable
+   judgments in `schema.sidecar.sql` instead.
 3. Wire it into `apps/axctl/src/ingest/derive-metrics.ts`: add it to the
    `Effect.all([...])` and into the per-session UPSERT.
 4. Add a field to `SessionMetricsRow` + the SELECT in
    `apps/axctl/src/metrics/session-metrics-query.ts`, and a column in
    `formatSessionMetrics` in `apps/axctl/src/cli/index.ts`.
-5. **Run the live smoke** (below) - mocked unit tests do not catch SurrealQL
-   parse errors, schema-coercion crashes, or record-id key-format mismatches.
-   Every one of those bit wave 1 and was only caught live.
+5. **Run the live smoke** below. Unit tests do not catch every DuckDB binding,
+   schema, and numeric-decoding error.
 
 ## Live smoke (do this for every metric)
 
 ```bash
-bun run db:schema
 AX_PROGRESS=plain bun apps/axctl/src/cli/index.ts ingest \
   --stages=git,github-pr,session-health,closure,derive-metrics
 bun apps/axctl/src/cli/index.ts sessions metrics --project /path/to/repo --limit 10
 ```
-Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
-`SELECT count() AS rows, count(durability_ratio != NONE) AS with_durab FROM session_metrics GROUP ALL;`
+Then open the published snapshot read-only and check the row counts:
+
+```bash
+dist/duckdb/duckdb -readonly ~/.ax/cache/ax-snapshot.duckdb \
+  "SELECT count(*) AS rows, count(durability_ratio) AS with_durab FROM session_metrics;"
+```
 
 ## What ships in wave 2
 

@@ -19,7 +19,7 @@ import {
     writeOperationExecutionReport,
 } from "./package-operations.ts";
 
-const sessionSectionManifest = "packages/ax-classifier-session-sections/ax.classifier.json";
+const sessionSectionManifest = "experiments/session-sections/ax.classifier.json";
 
 // Forced-dependency edit: pendingReviewTaskListReport now requires FileSystem +
 // Path (the @effect/platform migration); provide the REAL Bun-backed layers.
@@ -437,7 +437,7 @@ describe("ClassifierPackageService", () => {
             });
         }));
 
-        expect(operation.command).toBe("bun run classifiers:blind-review-refresh");
+        expect(operation.command).toBe("python3 experiments/session-sections/blind_review_batch_refresh.py");
         expect(operation.outputs).toContain(".ax/experiments/blind-workflow-status-current.json");
     });
 
@@ -533,7 +533,7 @@ describe("ClassifierPackageService", () => {
 
         expect(report.decision).toBe("ready_to_run");
         expect(report.would_execute).toBe(false);
-        expect(report.command).toContain("bun run classifiers:setfit-eval");
+        expect(report.command).toContain("uv run --project experiments/session-sections experiments/session-sections/eval.py");
     });
 
     test("writes dry-run reports through the service layer", async () => {

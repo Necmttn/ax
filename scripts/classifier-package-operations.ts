@@ -1,3 +1,5 @@
+import { BunFileSystem } from "@effect/platform-bun";
+import { Effect } from "effect";
 import {
     loadClassifierPackageManifest,
 } from "../apps/axctl/src/classifiers/package-manifest.ts";
@@ -8,7 +10,7 @@ import {
 } from "../apps/axctl/src/classifiers/package-operations.ts";
 
 function parseArgs(argv: readonly string[]): { manifest: string; operation?: string; out?: string; json: boolean } {
-    let manifest = "packages/ax-classifier-session-sections/ax.classifier.json";
+    let manifest = "experiments/session-sections/ax.classifier.json";
     let operation: string | undefined;
     let out: string | undefined;
     let json = false;
@@ -42,11 +44,12 @@ function printText(report: ClassifierPackageOperationsReport): void {
 if (import.meta.main) {
     try {
         const args = parseArgs(Bun.argv.slice(2));
-        const manifest = loadClassifierPackageManifest(args.manifest);
-        const report = buildOperationsReport(manifest, args.manifest, args.operation);
-        if (args.out) {
-            writeOperationsReport(args.out, report);
-        }
+        const report = await Effect.runPromise(Effect.gen(function* () {
+            const manifest = yield* loadClassifierPackageManifest(args.manifest);
+            const operations = buildOperationsReport(manifest, args.manifest, args.operation);
+            if (args.out) yield* writeOperationsReport(args.out, operations);
+            return operations;
+        }).pipe(Effect.provide(BunFileSystem.layer)));
         if (args.json) {
             console.log(JSON.stringify(report, null, 2));
         } else if (!args.out) {

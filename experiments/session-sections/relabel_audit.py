@@ -11,7 +11,7 @@ from typing import Any
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit SetFit fixed-fold misses for label contract issues before editing fixtures.")
     parser.add_argument("--robustness", default=".ax/experiments/setfit-robustness-e20-fixed-fold-seed7.json")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/setfit-relabel-audit-e21.json")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()

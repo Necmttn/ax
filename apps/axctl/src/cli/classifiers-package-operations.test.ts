@@ -202,7 +202,7 @@ describe("classifiers package-operations format", () => {
         try {
             await Effect.runPromise(
                 runClassifiersPackageOperations({
-                    manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                    manifestPath: "experiments/session-sections/ax.classifier.json",
                     qualityStatus: true,
                     sourceReportPath: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
                     out: ".ax/experiments/classifier-quality-status-workflow-fixtures.json",
@@ -305,7 +305,7 @@ describe("classifiers package-operations format", () => {
 
         await Effect.runPromise(
             runClassifiersPackageOperations({
-                manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                manifestPath: "experiments/session-sections/ax.classifier.json",
                 graphHealth: true,
                 querySuggestionRouting: true,
                 graphMode: "lifecycle",
@@ -382,7 +382,7 @@ describe("classifiers package-operations format", () => {
         try {
             await Effect.runPromise(
                 runClassifiersPackageOperations({
-                    manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                    manifestPath: "experiments/session-sections/ax.classifier.json",
                     boundaryReplaySummary: true,
                     sourceKind: "boundary_replay_deterministic_projection",
                     factKind: "classifier_boundary_replay",
@@ -1500,7 +1500,7 @@ describe("classifiers package-operations format", () => {
                     },
                 },
                 next_actions: [
-                    "edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json",
+                    "edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run python3 experiments/session-sections/blind_review_batch.py --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json",
                     "edit E63 consolidated review workspace",
                 ],
             },
@@ -1791,7 +1791,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("blocking items:");
         expect(output).toContain("- graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
         expect(output).toContain("- 40 blind labels pending");
-        expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
+        expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run python3 experiments/session-sections/blind_review_batch.py --mode=promote-draft");
     });
 
     test("renders classifier lifecycle routing summaries", () => {

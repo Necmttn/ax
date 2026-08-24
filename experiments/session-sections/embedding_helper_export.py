@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export accepted embedding-helper review decisions.")
     parser.add_argument("--review", default=".ax/experiments/embedding-helper-review-current.json")
     parser.add_argument("--status", default=".ax/experiments/embedding-helper-review-status-current.json")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-fixture-append-current.jsonl")
     parser.add_argument("--hints", default=".ax/experiments/embedding-helper-dedupe-hints-current.json")
     parser.add_argument("--report", default=".ax/experiments/embedding-helper-export-current-report.json")
