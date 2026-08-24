@@ -593,7 +593,7 @@ export const deriveCacheLensProposalRows = (
             hypothesis:
                 `${candidate.busts} cache busts across ${candidate.sessions} sessions in the last ` +
                 `${opts.sinceDays}d attributed to ${candidate.kind} "${candidate.name}" ` +
-                `(~$${weeklyStr}/wk at the current rate). Corroboration agrees within ${deltaStr}% ` +
+                `(~$${weeklyStr}/wk at the current rate). The two price estimates differ by ${deltaStr}% ` +
                 `(${evaluation.confidence} confidence). Dominant cause: ${evaluation.dominantReason} ` +
                 `(${dominantPctStr}% of busts). Trim context reloads / large tool output for this ` +
                 `${candidate.kind} - see \`ax cost cache\`.`,
