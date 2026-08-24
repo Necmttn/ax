@@ -112,6 +112,27 @@ const roleNames = (directory: string) =>
         ),
     );
 
+/** Seed a `plays_role` edge into the sidecar, simulating `ax skills tag`. */
+const seedClassified = (directory: string, skillName: string, source: string) =>
+    Effect.runPromise(
+        Effect.gen(function* () {
+            const judgment = yield* Judgment;
+            yield* judgment.exec("INSERT INTO role (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING", [
+                "role:framing",
+                "framing",
+            ]);
+            yield* judgment.exec(
+                "INSERT INTO plays_role (id, in_id, out_id, source, confidence) VALUES (?, ?, ?, ?, 1.0)",
+                [`plays_role:${skillName}:${source}`, skillRowId(skillName), "role:framing", source],
+            );
+        }).pipe(
+            Effect.provide(
+                JudgmentLayer({ sidecarPath: join(directory, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
+            ),
+            Effect.scoped,
+        ),
+    );
+
 describe("parseBrief", () => {
     test("normalizes and deduplicates valid roles", () => {
         const parsed = parseBrief(`---
@@ -176,6 +197,52 @@ describe("cmdSkillsLint", () => {
         expect(await fileExists(join(taskDir, "classify-pending.md"))).toBe(true);
         expect(await fileExists(join(taskDir, "classify-malformed.md"))).toBe(true);
         expect(await fileExists(join(taskDir, "classify-unknown.md"))).toBe(true);
+    });
+
+    test("reconciles a pending brief whose skill was already classified (e.g. by tag) (#1033)", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        const file = join(taskDir, "classify-worktree-read-strategy.md");
+        await mkdir(taskDir, { recursive: true });
+        // A PENDING brief (empty primary_role) - would normally stay "pending".
+        await writeFile(file, `---\nax_classify: worktree-read-strategy\nprimary_role:\n---\n`);
+        // But the skill was already tagged into the sidecar.
+        await seedClassified(directory, "worktree-read-strategy", "user");
+
+        const report = await runLintJson(directory, new Set(["worktree-read-strategy"]));
+
+        expect(report).toMatchObject({ applied: 0, pending: 0, reconciled: 1, errors: 0 });
+        expect(report.briefs[0]).toMatchObject({ action: "reconciled", skill: "worktree-read-strategy" });
+        // The stale brief file is removed, so lint stops reporting it forever.
+        expect(await fileExists(file)).toBe(false);
+    });
+
+    test("dry-run reconciles in the report but leaves the stale brief on disk (#1033)", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        const file = join(taskDir, "classify-worktree-read-strategy.md");
+        await mkdir(taskDir, { recursive: true });
+        await writeFile(file, `---\nax_classify: worktree-read-strategy\nprimary_role:\n---\n`);
+        await seedClassified(directory, "worktree-read-strategy", "user");
+
+        const report = await runLintJson(directory, new Set(["worktree-read-strategy"]), { dryRun: true });
+
+        expect(report).toMatchObject({ reconciled: 1, dryRun: true });
+        expect(await fileExists(file)).toBe(true);
+    });
+
+    test("leaves a pending brief pending when its skill is NOT yet classified (#1033)", async () => {
+        const directory = await tempDirectory();
+        const taskDir = join(directory, "tasks");
+        const file = join(taskDir, "classify-worktree-read-strategy.md");
+        await mkdir(taskDir, { recursive: true });
+        await writeFile(file, `---\nax_classify: worktree-read-strategy\nprimary_role:\n---\n`);
+        // No seed - the skill has no plays_role edge.
+
+        const report = await runLintJson(directory, new Set(["worktree-read-strategy"]));
+
+        expect(report).toMatchObject({ pending: 1, reconciled: 0 });
+        expect(await fileExists(file)).toBe(true);
     });
 
     test("dry-run checks identity but does not write or remove", async () => {
