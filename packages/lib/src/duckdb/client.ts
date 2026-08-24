@@ -167,6 +167,14 @@ const sqlExcerpt = (sql: string): string =>
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** DuckDB `memory_limit` for the WRITE connection (#1021). A percentage adapts
+ *  to the host so the cap holds on a 8 GB laptop and a 64 GB server alike;
+ *  `AX_DUCKDB_MEMORY_LIMIT` overrides it (e.g. "4GB", or "0" / "" to disable via
+ *  DuckDB's own "no limit" spelling). Default leaves headroom for the Bun VM
+ *  heap the derive stages fill. */
+const DUCKDB_WRITE_MEMORY_LIMIT: string =
+    process.env.AX_DUCKDB_MEMORY_LIMIT?.trim() || "70%";
+
 /**
  * The inclusive bounds of DuckDB's `BIGINT` / C `int64_t`, which is the only
  * integer width this client binds a `bigint` as.
@@ -554,6 +562,25 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
                     );
                     try {
                         const connection = await instance.connect();
+                        // Cap `memory_limit` on the WRITE path (#1021): a full
+                        // backfill runs a big GROUP BY / FTS build inside DuckDB
+                        // AT THE SAME TIME as the derive stages hold rows in the
+                        // Bun VM heap. Left uncapped DuckDB claims ~80% of RAM by
+                        // default and starves the JS heap; capping it leaves that
+                        // headroom so the process spills to disk instead of the
+                        // OOM that segfaulted the derive stage. Applied as a
+                        // runtime SET (the percentage form is rejected by the
+                        // create-time config map on this build) and BEST-EFFORT:
+                        // an old build that does not know the setting must not
+                        // fail connection open. Read paths stay uncapped - they
+                        // are latency-sensitive and never run the derive.
+                        if (!readOnly && DUCKDB_WRITE_MEMORY_LIMIT.length > 0) {
+                            try {
+                                await connection.run(`SET memory_limit='${DUCKDB_WRITE_MEMORY_LIMIT}'`);
+                            } catch {
+                                /* setting unknown/invalid on this build - run uncapped */
+                            }
+                        }
                         return { instance, connection };
                     } catch (err) {
                         try {
