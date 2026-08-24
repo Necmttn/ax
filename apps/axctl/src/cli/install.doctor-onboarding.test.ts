@@ -94,13 +94,43 @@ describe("doctor's fixed non-onboarding check set", () => {
         const report = await runDoctorReport(
             cacheLayer({
                 ingestRunsRows: [
-                    { id: "r1", command: "ingest", started_at: stuckStartedAt, last_progress_at: null },
+                    { id: "r1", command: "ingest", status: "running", started_at: stuckStartedAt, last_progress_at: null, ended_at: null },
                 ],
             }),
         );
         const check = report.checks.find((c) => c.name === "ingest-runs");
         expect(check?.ok).toBe(false);
         expect(check?.detail).toContain("stuck");
+    });
+
+    test("'ingest-runs' flags a crashed-then-reaped last run distinctly from a stuck one (#1035)", async () => {
+        // No stranded "running" row - the crash was already reaped to "partial".
+        // The old check read this as "ok"; it must now report a crashed last run.
+        const endedAt = new Date(Date.now() - 3 * 3_600_000);
+        const report = await runDoctorReport(
+            cacheLayer({
+                ingestRunsRows: [
+                    { id: "r9", command: "ingest", status: "partial", started_at: endedAt, last_progress_at: endedAt, ended_at: endedAt },
+                ],
+            }),
+        );
+        const check = report.checks.find((c) => c.name === "ingest-runs");
+        expect(check?.ok).toBe(false);
+        expect(check?.detail).toContain("did not finish");
+        expect(check?.detail).not.toContain("stuck"); // distinct wording from the stranded case
+    });
+
+    test("'ingest-runs' passes when the last run finished ok (defers staleness to 'cache')", async () => {
+        const okAt = new Date(Date.now() - 3_600_000);
+        const report = await runDoctorReport(
+            cacheLayer({
+                ingestRunsRows: [
+                    { id: "r10", command: "ingest", status: "ok", started_at: okAt, last_progress_at: okAt, ended_at: okAt },
+                ],
+            }),
+        );
+        const check = report.checks.find((c) => c.name === "ingest-runs");
+        expect(check?.ok).toBe(true);
     });
 
     test("'otlpd' is always ok=true - consent-gated telemetry is never a doctor failure", async () => {

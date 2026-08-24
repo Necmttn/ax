@@ -418,18 +418,39 @@ export function staleRunningIngestRuns(
     return rows.filter((row) => isStrandedRun(row, nowMs, staleAfterMs));
 }
 
-const StaleIngestRunRow = Schema.Struct({
+const IngestRunDoctorRow = Schema.Struct({
     id: Schema.String,
     command: Schema.String,
+    status: Schema.String,
     started_at: TimestampColumn,
     last_progress_at: Schema.NullOr(TimestampColumn),
+    ended_at: Schema.NullOr(TimestampColumn),
 });
+
+/** Milliseconds since a decoded (Date) or raw (string) timestamp, else null. */
+function ageMsSince(value: unknown, nowMs: number): number | null {
+    const ms = value instanceof Date ? value.getTime() : (typeof value === "string" ? Date.parse(value) : NaN);
+    return Number.isFinite(ms) ? nowMs - ms : null;
+}
+
+/** "3h" / "5d" - coarse age for a doctor line. */
+function describeAge(ageMs: number): string {
+    const hours = Math.floor(ageMs / 3_600_000);
+    return hours >= 72 ? `${Math.floor(hours / 24)}d` : `${Math.max(hours, 0)}h`;
+}
 
 /**
  * "ingest-runs" doctor check, read straight off the published DuckDB
  * snapshot. ALWAYS returns a check (never omits it): a report that silently
  * drops a check on cache-unavailable is exactly the "stops evaluating and
  * prints nothing" failure mode doctor exists to avoid.
+ *
+ * Three-way verdict (#1035): a run STRANDED at "running" right now reads
+ * differently from one that already CRASHED and was reaped to "partial"/"error"
+ * (visible only after the sweep), which in turn reads differently from a merely
+ * STALE graph (deferred to the "cache" age check). The old check saw only
+ * currently-"running" rows, so once a crash was reaped it silently read "ok"
+ * and a run of failed ingests looked identical to "nobody ingested lately".
  */
 function collectIngestRunsDoctorCheck(
     staleAfterMs: number,
@@ -437,20 +458,45 @@ function collectIngestRunsDoctorCheck(
 ): Effect.Effect<DoctorCheck, never, CacheRead> {
     return Effect.gen(function* () {
         const cache = yield* CacheRead;
+        // ONE widened query (the fixture feeds this check exactly one canned
+        // row-set): newest runs of every status. Running rows drive the
+        // stranded check; the newest terminal row drives the crashed check.
+        // No date arithmetic, so no ICU cast is needed.
         const rows = yield* cache.rows(
-            StaleIngestRunRow,
-            "SELECT id, command, started_at, last_progress_at FROM ingest_run WHERE status = 'running';",
+            IngestRunDoctorRow,
+            "SELECT id, command, status, started_at, last_progress_at, ended_at " +
+                "FROM ingest_run ORDER BY started_at DESC LIMIT 50;",
         );
-        const stale = staleRunningIngestRuns(rows, Date.now(), staleAfterMs);
-        const ids = stale.slice(0, 3).map((row) => String(row.id ?? "?")).join(", ");
-        return {
-            name: "ingest-runs",
-            ok: stale.length === 0,
-            detail: stale.length === 0
-                ? `no ingest_run rows stuck in status "running"`
-                : `${stale.length} ingest_run row(s) stuck in status "running" past the ` +
+        const nowMs = Date.now();
+        const running = rows.filter((row) => row.status === "running");
+        const stale = staleRunningIngestRuns(running, nowMs, staleAfterMs);
+        if (stale.length > 0) {
+            const ids = stale.slice(0, 3).map((row) => String(row.id ?? "?")).join(", ");
+            return {
+                name: "ingest-runs",
+                ok: false,
+                detail: `${stale.length} ingest_run row(s) stuck in status "running" past the ` +
                     `${ingestTimeoutSeconds}s ingest timeout (${ids}); the run crashed or was killed ` +
                     `without finalizing - the next 'ax ingest' auto-sweeps them, or run 'ax ingest reap' now`,
+            };
+        }
+        // Rows arrive newest-first; the first terminal row is the last run's outcome.
+        const lastTerminal = rows.find((row) => row.status !== "running");
+        if (lastTerminal && (lastTerminal.status === "partial" || lastTerminal.status === "error")) {
+            const ageMs = ageMsSince(lastTerminal.ended_at ?? lastTerminal.started_at, nowMs);
+            const ago = ageMs === null ? "" : ` ${describeAge(ageMs)} ago`;
+            return {
+                name: "ingest-runs",
+                ok: false,
+                detail: `the last ingest run did not finish (status "${lastTerminal.status}"${ago}) - it ` +
+                    `crashed or was killed and was reaped; run 'ax ingest' to rebuild (see ingest_run.metrics ` +
+                    `/ ingest_stage.error_text for the cause)`,
+            };
+        }
+        return {
+            name: "ingest-runs",
+            ok: true,
+            detail: `no ingest_run rows stuck in status "running"`,
         };
     }).pipe(
         Effect.catch(() =>
