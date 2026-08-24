@@ -29,6 +29,15 @@ describe("formatInsightRows", () => {
         expect(out).not.toContain("Invalid");
     });
 
+    test("friction OTLP cost is labelled session-level, not per-error (#1027)", () => {
+        const out = formatInsightRows("friction", [
+            { kind: "tool_error", ts: "2026-08-18T02:36:34.830Z", text: "boom", project: "ax", otlp_cost_usd: 25.05 },
+        ]);
+        // `sess$=`, never a bare `cost$=` that reads as this error's cost.
+        expect(out).toContain("sess$=$25.050");
+        expect(out).not.toContain("cost$=");
+    });
+
     test("renders reactions as compact user-to-assistant pairs", () => {
         const output = formatInsightRows("reactions", [
             {

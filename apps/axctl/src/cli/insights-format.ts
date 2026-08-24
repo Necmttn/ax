@@ -230,10 +230,14 @@ function formatFrictionRows(rows: readonly InsightRow[]): string {
     if (rows.length === 0) return "No friction events found.";
     const hasCost = rows.some((r) => r.otlp_cost_usd != null);
     return rows.map((row, index) => {
+        // `sess$=` not `cost$=`: this is the whole SESSION's OTLP cost, not the
+        // cost of this one friction event, so two errors in the same session
+        // report the same figure and two in different sessions differ wildly
+        // (#1027). The label says which.
         const costStr = hasCost
             ? (row.otlp_cost_usd != null
-                ? `  cost$=${("$" + (row.otlp_cost_usd as number).toFixed(3))}`
-                : "  cost$=-")
+                ? `  sess$=${("$" + (row.otlp_cost_usd as number).toFixed(3))}`
+                : "  sess$=-")
             : "";
         return [
             `${index + 1}. ${textOf(row.kind)}${costStr}  ${compactDate(row.ts)}`,

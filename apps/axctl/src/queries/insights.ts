@@ -328,6 +328,26 @@ ORDER BY failure_count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+/**
+ * The all-time denominators for `ax insights tools`: total tool calls and how
+ * many of them are genuine failures (same benign-search-miss exclusion as
+ * {@link toolFailuresSql}). Lets the view show a share, so a raw failure count
+ * reads as a rate, not an absolute number (#1027).
+ */
+export function toolFailureTotalsSql(): string {
+    return `
+SELECT
+    COUNT(*) AS total_calls,
+    COUNT(*) FILTER (WHERE tc.has_error = TRUE AND (co.kind IS NULL OR co.kind <> 'search_miss')) AS failing_calls
+FROM tool_call tc
+LEFT JOIN command_outcome co ON co.tool_call = tc.id;`.trim();
+}
+
+/** Total friction events, the denominator for `ax insights friction` (#1027). */
+export function frictionTotalSql(): string {
+    return "SELECT COUNT(*) AS total FROM friction_event;";
+}
+
 export function sessionEvidenceSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
