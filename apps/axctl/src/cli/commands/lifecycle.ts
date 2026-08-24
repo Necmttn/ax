@@ -50,13 +50,14 @@ export const updateCommand = Command.make(
 export const installCommand = Command.make("install", {
     telemetry: Flag.boolean("telemetry").pipe(Flag.withDefault(false)),
     noTelemetry: Flag.boolean("no-telemetry").pipe(Flag.withDefault(false)),
-}, ({ telemetry, noTelemetry }) => {
+    keepOtel: Flag.boolean("keep-otel").pipe(Flag.withDefault(false)),
+}, ({ telemetry, noTelemetry, keepOtel }) => {
     // Pure flag validation BEFORE any Effect/install work. fail() calls
     // process.exit(2) synchronously with a clean one-line message - no
     // thrown plain Error, no stack trace (matches ingest.ts/quota.ts/dojo.ts).
     const conflict = telemetryConsentConflict(telemetry, noTelemetry);
     if (conflict !== null) fail(conflict);
-    return cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry) });
+    return cmdInstall({ telemetry: resolveTelemetryConsent(telemetry, noTelemetry), keepOtel });
 }).pipe(Command.withDescription("One-shot setup: symlink, optional OTLP receiver (then runs `ax setup`)"));
 
 export const setupCommand = Command.make(

@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { cacheReadResults } from "../testing/cache-read.ts";
-import { collectDoctorReport, formatDoctorReport } from "./install.ts";
+import { collectDoctorReport, formatDoctorReport, otelRedirectDoctorCheck } from "./install.ts";
 
 // `collectDoctorReport` is an Effect requiring FileSystem + Path + CacheRead.
 // Run it against the REAL Bun-backed platform layers, exactly as the
@@ -63,6 +63,7 @@ describe("doctor's fixed non-onboarding check set", () => {
             "cache",
             "ingest-runs",
             "otlpd",
+            "otel",
             "agent-event-index",
         ]);
     });
@@ -106,5 +107,48 @@ describe("doctor's fixed non-onboarding check set", () => {
         const report = await runDoctorReport();
         const check = report.checks.find((c) => c.name === "otlpd");
         expect(check?.ok).toBe(true);
+    });
+
+    test("'otel' is always ok=true and present - a legitimate redirect is not a failure", async () => {
+        const report = await runDoctorReport();
+        const check = report.checks.find((c) => c.name === "otel");
+        expect(check).toBeDefined();
+        expect(check?.ok).toBe(true);
+    });
+});
+
+describe("otelRedirectDoctorCheck (#1014)", () => {
+    test("names the backup + restore path when a redirect was recorded", () => {
+        const check = otelRedirectDoctorCheck({
+            backupExists: true,
+            backupPath: "/home/u/.ax/otel-previous.json",
+            logsEndpoint: "http://127.0.0.1:1738/v1/logs",
+        });
+        expect(check.name).toBe("otel");
+        expect(check.ok).toBe(true);
+        expect(check.detail).toContain("redirected");
+        expect(check.detail).toContain("/home/u/.ax/otel-previous.json");
+        expect(check.detail).toContain("restore");
+    });
+
+    test("reports the current endpoint with no redirect when no backup exists", () => {
+        const check = otelRedirectDoctorCheck({
+            backupExists: false,
+            backupPath: "/home/u/.ax/otel-previous.json",
+            logsEndpoint: "http://127.0.0.1:1738/v1/logs",
+        });
+        expect(check.ok).toBe(true);
+        expect(check.detail).toContain("http://127.0.0.1:1738/v1/logs");
+        expect(check.detail).toContain("no external redirect");
+    });
+
+    test("says so when no OTLP endpoint is configured at all", () => {
+        const check = otelRedirectDoctorCheck({
+            backupExists: false,
+            backupPath: "/home/u/.ax/otel-previous.json",
+            logsEndpoint: null,
+        });
+        expect(check.ok).toBe(true);
+        expect(check.detail).toContain("no OTLP");
     });
 });
