@@ -187,6 +187,9 @@ const cmdDispatches = (input: {
                     .join(", ");
                 console.log(`top classes: ${classLine}`);
             }
+            // Disjoint-pool cross-reference: this is subagent-dispatch spend;
+            // main-agent spend is a separate, non-overlapping pool (#1031).
+            console.log("\nthis is subagent-dispatch spend; `ax cost routability` covers main-agent spend (a separate pool).");
             return;
         }
 

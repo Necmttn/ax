@@ -314,7 +314,10 @@ const usdFmt = (n: number) => `$${n.toFixed(2)}`;
 /** One provider's summary line + per-class table. */
 function renderRoutabilityProvider(r: RoutabilityResult, label: string): string[] {
     const out: string[] = [];
-    out.push(`[${label}] main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}`);
+    // Inline the reason a provider shows 0% - otherwise a Codex row reading
+    // "0% / $0" looks broken rather than "not classified yet" (#1031).
+    const zeroReason = r.routablePct === 0 && r.mainSpendUsd > 0 ? "   (no routing classes matched yet)" : "";
+    out.push(`[${label}] main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}${zeroReason}`);
     out.push("class            runs   turns   main_cost    tier         repriced    est_savings");
     for (const row of r.rows) {
         if (row.verdict === "stays") {
@@ -343,7 +346,8 @@ function renderRoutability(r: RoutabilityResult): string {
     out.push("truth. judgment-text turns stay on frontier, and edits riding behind a judgment");
     out.push("prose turn in the same message are carried with it. claude + codex main-agent.");
     out.push("codex exec_command is split read/write via command_norm; ambiguous norms stay on main.");
-    out.push("next: ax dispatches --candidates   # the subagent-side leak");
+    out.push("this is MAIN-agent spend; `ax dispatches --candidates` is the subagent-dispatch pool -");
+    out.push("a separate, non-overlapping set of spend, so the two savings figures are not double-counted.");
     return out.join("\n");
 }
 
@@ -645,10 +649,12 @@ const cmdCostCache = (input: {
         const corr = result.corroboration;
         if (corr.comparableBusts > 0 && corr.costUsd > 0) {
             const deviation = (100 * Math.abs(corr.corroboratedUsd - corr.costUsd)) / corr.costUsd;
-            const verdict = deviation <= 25 ? "agrees within" : "DIVERGES by";
+            // "differs by 0.0%" reads as identical; "agrees within 0.0%" read as
+            // 0% agreement (#1031). Phrase it as the difference, not the agreement.
+            const verdict = deviation <= 25 ? "differs by" : "DIVERGES by";
             console.log(
-                `corroboration: flat-rate recompute ${verdict} ${pct(deviation)} over ` +
-                    `${integer(corr.comparableBusts)} priced busts (±25% is the proposal guard)`,
+                `corroboration: flat-rate recompute ${verdict} ${pct(deviation)} from the ingest price over ` +
+                    `${integer(corr.comparableBusts)} priced busts (<=25% is the proposal guard)`,
             );
         }
 
