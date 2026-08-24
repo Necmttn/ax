@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildPerSession, isHarnessToolSkill, mineArcs } from "./workflow-sequences.ts";
+import { buildPerSession, isGenericToolArc, isHarnessToolSkill, mineArcs } from "./workflow-sequences.ts";
 
 test("buildPerSession orders a session's skills by turn_index", () => {
   const rows = [
@@ -82,6 +82,27 @@ test("buildPerSession + isHarnessToolSkill filter: harness-tool rows excluded fr
   const filtered = rawRows.filter((r) => !isHarnessToolSkill(r.skill));
   const perSession = buildPerSession(filtered);
   expect(perSession.get("s1")).toEqual(["plan", "tdd"]);
+});
+
+// ---------------------------------------------------------------------------
+// isGenericToolArc
+// ---------------------------------------------------------------------------
+
+test("isGenericToolArc: an arc of only generic tool primitives is generic", () => {
+  expect(isGenericToolArc(["pi:bash", "pi:read", "pi:edit"])).toBe(true);
+  expect(isGenericToolArc(["pi:bash", "pi:edit", "pi:read"])).toBe(true); // reordered permutation
+  expect(isGenericToolArc(["cursor-tool:read", "cursor-tool:write"])).toBe(true);
+  expect(isGenericToolArc(["Bash", "Read", "Edit"])).toBe(true); // unprefixed, mixed case
+});
+
+test("isGenericToolArc: an arc naming any real skill survives", () => {
+  expect(isGenericToolArc(["recall", "read", "edit", "test"])).toBe(false);
+  expect(isGenericToolArc(["pi:bash", "superpowers:brainstorming", "pi:edit"])).toBe(false);
+  expect(isGenericToolArc(["plan", "tdd", "commit"])).toBe(false);
+});
+
+test("isGenericToolArc: an empty arc is not generic", () => {
+  expect(isGenericToolArc([])).toBe(false);
 });
 
 test("mineArcs truncates sessions longer than MAX_SESSION_SKILLS without hanging", () => {
