@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { deriveInsights } from "./insights.ts";
+import { deriveInsights, formatLongestSession, MAX_SESSION_MINUTES } from "./insights.ts";
 import type { DailyActivityRow, SessionDurationRow } from "./queries.ts";
 
 const s = (startIso: string, endIso: string): SessionDurationRow => ({
@@ -272,5 +272,20 @@ describe("deriveInsights", () => {
         });
         expect(r!.hours_total).toBeCloseTo(1.0, 1);
         expect(r!.max_parallel_sessions).toBe(1);
+    });
+});
+
+describe("formatLongestSession", () => {
+    test("renders a sub-clamp duration as measured minutes", () => {
+        expect(formatLongestSession(120)).toBe("120min");
+        expect(formatLongestSession(0)).toBe("0min");
+        expect(formatLongestSession(MAX_SESSION_MINUTES - 1)).toBe(`${MAX_SESSION_MINUTES - 1}min`);
+    });
+
+    test("renders the 24h clamp honestly as '24h+' rather than a bare 1440min (#1034)", () => {
+        expect(MAX_SESSION_MINUTES).toBe(1440);
+        expect(formatLongestSession(MAX_SESSION_MINUTES)).toBe("24h+");
+        // A wedged/resumed session saturates at the clamp - still shown as a cap.
+        expect(formatLongestSession(99_999)).toBe("24h+");
     });
 });

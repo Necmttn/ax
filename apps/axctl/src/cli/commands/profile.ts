@@ -9,6 +9,7 @@ import { Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
+import { formatLongestSession } from "../../profile/insights.ts";
 import { fetchSkillInvocations, fetchSkillScopes } from "../../profile/queries.ts";
 import { deriveRig } from "../../profile/rig.ts";
 import type { ProfileV1 } from "../../profile/schema.ts";
@@ -216,7 +217,7 @@ export function formatProfile(p: ProfileV1): string {
         lines.push("");
         lines.push("insights:");
         lines.push(
-            `  ${ins.hours_total.toFixed(1)}h total  ·  longest: ${integer(ins.longest_session_minutes)}min  ·  landed clean: ${deepPct}%`,
+            `  ${ins.hours_total.toFixed(1)}h total  ·  longest: ${formatLongestSession(ins.longest_session_minutes)}  ·  landed clean: ${deepPct}%`,
         );
         lines.push(
             `  peak hour: ${String(ins.peak_hour_utc).padStart(2, "0")}:00 UTC  ·  max parallel: ${ins.max_parallel_sessions}  ·  spawned: ${integer(ins.subagents_spawned)}  ·  commits: ${integer(ins.commits)}`,

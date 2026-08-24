@@ -9,6 +9,18 @@ import type { DailyActivityRow, SessionDurationRow, TopToolRow, WrappedCounts } 
 
 const MAX_SESSION_MS = 24 * 60 * 60 * 1000; // 24h cap per session
 
+/** The 24h clamp expressed in minutes (=1440); `longest_session_minutes` saturates here. */
+export const MAX_SESSION_MINUTES = MAX_SESSION_MS / 60_000;
+
+/**
+ * Render `longest_session_minutes` honestly. The value is CLAMPED at 24h to
+ * kill wedged-session bad data (a resumed-days-later session inflates
+ * `ended_at - started_at`), so a bare "1440min" reads as a measured duration
+ * when it is really the cap. Show "24h+" at/over the clamp instead.
+ */
+export const formatLongestSession = (minutes: number): string =>
+    minutes >= MAX_SESSION_MINUTES ? "24h+" : `${Math.round(minutes)}min`;
+
 export interface InsightsInput {
     readonly durations: ReadonlyArray<SessionDurationRow>;
     readonly peakHour: number | null;
