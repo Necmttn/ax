@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.41.0](https://github.com/Necmttn/ax/compare/v0.40.2...v0.41.0) (2026-08-24)
+
+
+### Features
+
+* **otel:** forward received OTLP to the user's own collector ([#1017](https://github.com/Necmttn/ax/issues/1017)) ([#1018](https://github.com/Necmttn/ax/issues/1018)) ([39ec80c](https://github.com/Necmttn/ax/commit/39ec80c462dc02e84065b2d319ac143f4c13b7b9))
+
+
+### Bug Fixes
+
+* **cost:** cross-ref routability&lt;-&gt;dispatches pools, inline Codex 0% reason, clearer corroboration wording ([#1032](https://github.com/Necmttn/ax/issues/1032)) ([0dcd9db](https://github.com/Necmttn/ax/commit/0dcd9db3b80592ae69b1d2329f6bbba01f130f65))
+* **doctor:** distinguish a crashed-then-reaped ingest run from a merely stale graph ([#1035](https://github.com/Necmttn/ax/issues/1035)) ([#1038](https://github.com/Necmttn/ax/issues/1038)) ([e09ee6c](https://github.com/Necmttn/ax/commit/e09ee6cbab4e552cf1367f6429a9c1d768c14753))
+* **ingest:** chunk derive-signals turn fetch by session to stop full-backfill OOM ([#1021](https://github.com/Necmttn/ax/issues/1021)) ([#1024](https://github.com/Necmttn/ax/issues/1024)) ([8063b4f](https://github.com/Necmttn/ax/commit/8063b4f20bc8c03da0be74ef91fa296a88ddb2c5))
+* **insights:** add denominators + cap hint; relabel friction session-cost column ([#1028](https://github.com/Necmttn/ax/issues/1028)) ([d65efe8](https://github.com/Necmttn/ax/commit/d65efe89c9441a535ffc449cf478efd1b7718369))
+* **insights:** stop counting benign search-miss (rg/grep/fd exit 1) as tool errors ([#1022](https://github.com/Necmttn/ax/issues/1022)) ([#1025](https://github.com/Necmttn/ax/issues/1025)) ([a6be56e](https://github.com/Necmttn/ax/commit/a6be56e7675640df7f1efc1e4e4c74c22f5a05f6))
+* **install:** stop silently replacing an existing OTLP endpoint ([#1014](https://github.com/Necmttn/ax/issues/1014)) ([#1015](https://github.com/Necmttn/ax/issues/1015)) ([8930580](https://github.com/Necmttn/ax/commit/893058096c9a7f421c1fa2de6e8ff154519ec294))
+* **profile:** render the clamped longest session as "24h+", not a bare 1440min ([#1034](https://github.com/Necmttn/ax/issues/1034)) ([#1040](https://github.com/Necmttn/ax/issues/1040)) ([c05431d](https://github.com/Necmttn/ax/commit/c05431dbddb5f2a47e0ff932fa19b1d7deeae800))
+* **recall:** rank turns by relevance, match multi-term queries conjunctively ([#1023](https://github.com/Necmttn/ax/issues/1023)) ([#1026](https://github.com/Necmttn/ax/issues/1026)) ([135b5f6](https://github.com/Necmttn/ax/commit/135b5f6679b2e67d17f92ea30b197896a32a3040))
+* **sessions:** add count line; use first task turn as summary, not injected context ([#1030](https://github.com/Necmttn/ax/issues/1030)) ([20e2651](https://github.com/Necmttn/ax/commit/20e2651c8a7f676419be1eb4fa83336fb675f467))
+* **skills:** reconcile a pending classify brief whose skill was already tagged ([#1033](https://github.com/Necmttn/ax/issues/1033)) ([#1039](https://github.com/Necmttn/ax/issues/1039)) ([4b7a6d1](https://github.com/Necmttn/ax/commit/4b7a6d1f95a943fa902ae98c6a6ac803c8567491))
+* **test:** anchor retro-pending fixture dates to now so the test cannot rot ([#1041](https://github.com/Necmttn/ax/issues/1041)) ([#1042](https://github.com/Necmttn/ax/issues/1042)) ([f9d692a](https://github.com/Necmttn/ax/commit/f9d692a4fc8184e015018b4ae8afe00903f5832e))
+* **workflows:** drop generic tool-triad arcs before they reach improve recommend ([#1036](https://github.com/Necmttn/ax/issues/1036)) ([#1037](https://github.com/Necmttn/ax/issues/1037)) ([14b10b8](https://github.com/Necmttn/ax/commit/14b10b86730237bbb787d96f49327b3bb0170e2c))
+
 ## [0.40.2](https://github.com/Necmttn/ax/compare/v0.40.1...v0.40.2) (2026-08-21)
 
 
