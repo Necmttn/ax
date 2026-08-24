@@ -9,7 +9,7 @@ import { Flag } from "effect/unstable/cli";
 import { LooseRowSchema } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
 import { prettyPrint } from "@ax/lib/json";
-import { INSIGHT_VIEWS, insightSqlForView } from "../../queries/insights.ts";
+import { frictionTotalSql, INSIGHT_VIEWS, insightSqlForView, toolFailureTotalsSql } from "../../queries/insights.ts";
 import { enrichInsightRows } from "../../queries/insights-enrich.ts";
 import { formatInsightRows } from "../insights-format.ts";
 import { writeDashboard } from "../../dashboard/report.ts";
@@ -37,7 +37,50 @@ const cmdInsights = (input: { readonly view: InsightView; readonly limit: number
         // Classifier views resolve their per-row context here via indexed
         // lookups (the correlated $parent.session form scanned ~1s/row).
         const rows = yield* enrichInsightRows(input.view, [...result] as Array<Record<string, unknown>>);
+        // JSON stays raw; the human views (tools/friction) gain a denominator
+        // header + a cap hint so a raw count reads as a rate, and a full page
+        // reads as "there is more" (#1027).
+        if (!input.json) {
+            const header = yield* insightDenominator(input.view);
+            if (header) console.log(header);
+        }
         console.log(formatInsightRows(input.view, [...rows], { json: input.json }));
+        if (!input.json && rows.length >= limit) {
+            console.log(`\n… showing the top ${limit}; raise with --limit=<n>.`);
+        }
+    });
+
+/** A one-line denominator header for the count-heavy views (#1027). Empty for
+ *  every other view. Reads all-time totals so the shown counts have a scale. */
+const insightDenominator = (view: InsightView) =>
+    Effect.gen(function* () {
+        const numberOf = (row: Record<string, unknown> | undefined, key: string): number => {
+            const v = row?.[key];
+            return typeof v === "number" && Number.isFinite(v) ? v : 0;
+        };
+        if (view === "tools") {
+            const [totals] = yield* cacheRows(
+                LooseRowSchema,
+                { sql: toolFailureTotalsSql(), params: [] },
+                "insights.tools.totals",
+            );
+            const total = numberOf(totals, "total_calls");
+            const failing = numberOf(totals, "failing_calls");
+            if (total === 0) return "";
+            const pct = ((failing / total) * 100).toFixed(1);
+            return `${failing.toLocaleString("en-US")} failing tool calls of ${total.toLocaleString("en-US")} total (${pct}%), all-time:\n`;
+        }
+        if (view === "friction") {
+            const [totals] = yield* cacheRows(
+                LooseRowSchema,
+                { sql: frictionTotalSql(), params: [] },
+                "insights.friction.totals",
+            );
+            const total = numberOf(totals, "total");
+            if (total === 0) return "";
+            return `${total.toLocaleString("en-US")} friction events, all-time:\n`;
+        }
+        return "";
     });
 
 const cmdReport = (input: { readonly limit: number; readonly out: string | undefined }) =>

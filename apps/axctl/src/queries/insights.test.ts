@@ -33,6 +33,8 @@ import {
     postFeatureFixesSql,
     skillCandidatesSql,
     toolFailuresSql,
+    toolFailureTotalsSql,
+    frictionTotalSql,
 } from "./insights.ts";
 
 const STALE_FIELDS = [
@@ -149,6 +151,17 @@ describe("insights query builders", () => {
         expect(sql).toContain("exit_code");
         expect(sql).toContain("LIMIT 7");
         expectNoStaleFields(sql);
+    });
+
+    test("toolFailureTotalsSql counts total + failing calls with the same benign-miss exclusion (#1027)", () => {
+        const sql = toolFailureTotalsSql();
+        expect(sql).toContain("COUNT(*) AS total_calls");
+        expect(sql).toContain("FILTER (WHERE tc.has_error = TRUE AND (co.kind IS NULL OR co.kind <> 'search_miss'))");
+        expect(sql).toContain("LEFT JOIN command_outcome co ON co.tool_call = tc.id");
+    });
+
+    test("frictionTotalSql counts all friction events (#1027)", () => {
+        expect(frictionTotalSql()).toContain("COUNT(*) AS total FROM friction_event");
     });
 
     test("sessionEvidenceSql summarizes sessions through current evidence tables", () => {
