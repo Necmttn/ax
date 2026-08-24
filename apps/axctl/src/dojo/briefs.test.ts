@@ -1,14 +1,14 @@
 // apps/axctl/src/dojo/briefs.test.ts
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import { classifyBriefFile, scanTaskDir } from "./briefs.ts";
+import { classifyBriefFile, scanTaskDir, STALE_BRIEF_DAYS } from "./briefs.ts";
 
-const runScan = (dir: string) =>
-    Effect.runPromise(scanTaskDir(dir).pipe(Effect.provide(BunFileSystem.layer)));
+const runScan = (dir: string, nowMs?: number) =>
+    Effect.runPromise(scanTaskDir(dir, nowMs).pipe(Effect.provide(BunFileSystem.layer)));
 
 describe("classifyBriefFile", () => {
     test("classify brief without primary_role is an unfilled item", () => {
@@ -84,5 +84,48 @@ describe("scanTaskDir", () => {
         const items = await runScan(dir);
         expect(items).toHaveLength(1);
         expect(items[0]?.id).toBe("brief:classify-superpowers__tdd.md");
+    });
+});
+
+describe("scanTaskDir staleness", () => {
+    // Pinned reference "now" - deterministic regardless of wall-clock vs the
+    // file's real mtime.
+    const NOW_MS = new Date("2026-08-20T12:00:00Z").getTime();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    test("a fresh brief (mtime = now) is surfaced", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        const filePath = join(dir, "a1b2c3d4.md");
+        writeFileSync(filePath, "---\nax_id: a1b2c3d4\n---\n");
+        const freshDate = new Date(NOW_MS);
+        utimesSync(filePath, freshDate, freshDate);
+        const items = await runScan(dir, NOW_MS);
+        expect(items).toHaveLength(1);
+        expect(items[0]?.id).toBe("brief:a1b2c3d4.md");
+    });
+
+    test("a brief with mtime older than STALE_BRIEF_DAYS is not surfaced", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        const filePath = join(dir, "a1b2c3d4.md");
+        writeFileSync(filePath, "---\nax_id: a1b2c3d4\n---\n");
+        const staleDate = new Date(NOW_MS - (STALE_BRIEF_DAYS + 1) * DAY_MS);
+        utimesSync(filePath, staleDate, staleDate);
+        const items = await runScan(dir, NOW_MS);
+        expect(items).toEqual([]);
+    });
+
+    test("two dated-duplicate briefs: only the fresh one is surfaced", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        const oldPath = join(dir, "routing-tune-2026-06-12.md");
+        const freshPath = join(dir, "routing-tune-20260812.md");
+        writeFileSync(oldPath, "| id | pattern |\n");
+        writeFileSync(freshPath, "| id | pattern |\n");
+        const staleDate = new Date(NOW_MS - (STALE_BRIEF_DAYS + 5) * DAY_MS);
+        const freshDate = new Date(NOW_MS - 1 * DAY_MS);
+        utimesSync(oldPath, staleDate, staleDate);
+        utimesSync(freshPath, freshDate, freshDate);
+        const items = await runScan(dir, NOW_MS);
+        expect(items).toHaveLength(1);
+        expect(items[0]?.id).toBe("brief:routing-tune-20260812.md");
     });
 });

@@ -112,6 +112,39 @@ describe("item mappers", () => {
         expect(items.map((i) => i.id)).toEqual(["experiment:s5"]);
     });
 
+    test("churn hotspots: long multi-line taskLabel is folded into a bounded, single-line title", () => {
+        const longPrompt = [
+            "Please investigate the flaky ingest watermark bug and also while you're at it",
+            "refactor the whole spool writer, add tests, update docs, and write a design doc",
+            "covering every edge case you can think of, including the ones nobody asked about.",
+        ].join("\n");
+        const items = churnHotspotItems([
+            { ...churnRow("s7", 4, 1, 500), taskLabel: longPrompt },
+        ]);
+        expect(items).toHaveLength(1);
+        const title = items[0]!.title;
+        expect(title.length).toBeLessThanOrEqual(120);
+        expect(title).not.toContain("\n");
+    });
+
+    test("churn hotspots: null taskLabel does not throw and yields a sensible title", () => {
+        const items = churnHotspotItems([
+            { ...churnRow("s8", 4, 1, 500), taskLabel: null },
+        ]);
+        expect(items).toHaveLength(1);
+        expect(items[0]!.title).toContain("s8");
+        expect(items[0]!.title).not.toContain("null");
+    });
+
+    test("routing backtest title reframes spend as under-review, not a savings figure", () => {
+        const items = routingBacktestItems([tune("rt3", "^review", 5, 4.2, true)], 30);
+        expect(items).toHaveLength(1);
+        const title = items[0]!.title;
+        expect(title).toContain("under review");
+        expect(title).toContain("^review");
+        expect(title).toContain("$4.20");
+    });
+
     test("proposal mint emitted only when open proposals are scarce", () => {
         expect(proposalMintItem(0)).not.toBeNull();
         expect(proposalMintItem(2)).not.toBeNull();

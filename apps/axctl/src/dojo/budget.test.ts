@@ -61,7 +61,9 @@ describe("computeBudgetEnvelope", () => {
         expect(env.has_surplus).toBe(false);
         expect(env.source).toBe("unavailable");
         expect(env.binding_window).toBeNull();
-        expect(env.deadline).toBe(new Date(NOW_MS).toISOString());
+        // deadline must be strictly after now - a bare "now" deadline is
+        // already stale by the time a human reads the agenda.
+        expect(Date.parse(env.deadline)).toBeGreaterThan(NOW_MS);
         const forced = computeBudgetEnvelope(null, { force: true }, NOW_MS);
         expect(forced.has_surplus).toBe(true);
         expect(forced.source).toBe("forced");
@@ -83,5 +85,26 @@ describe("computeBudgetEnvelope", () => {
         const env = computeBudgetEnvelope(snap, {}, NOW_MS);
         expect(env.binding_window).toBe("five_hour");
         expect(env.window_remaining_pct).toBe(20);
+    });
+
+    test("a stale snapshot's resets_at in the past is clamped to a future deadline, not passed through", () => {
+        const snap: QuotaSnapshot = {
+            ...snapshot(40, 70),
+            five_hour: { utilization: 40, resets_at: "2026-06-13T09:00:00.000Z" }, // 1h before NOW_MS
+        };
+        const env = computeBudgetEnvelope(snap, {}, NOW_MS);
+        expect(Date.parse(env.deadline)).toBeGreaterThanOrEqual(NOW_MS + 2 * 60 * 60 * 1000);
+    });
+
+    test("a resets_at in the future is used unchanged - clamp does not interfere", () => {
+        const env = computeBudgetEnvelope(snapshot(40, 70), {}, NOW_MS);
+        // earliest reset (five_hour, 2h out) is already in the future
+        expect(env.deadline).toBe("2026-06-13T12:00:00.000Z");
+    });
+
+    test("--until in the past is passed through unchanged - user override is never clamped", () => {
+        const pastIso = "2026-06-13T09:00:00.000Z"; // 1h before NOW_MS
+        const env = computeBudgetEnvelope(snapshot(40, 70), { untilIso: pastIso }, NOW_MS);
+        expect(env.deadline).toBe(pastIso);
     });
 });
