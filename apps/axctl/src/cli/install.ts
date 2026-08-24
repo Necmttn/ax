@@ -367,6 +367,34 @@ export function otelRedirectDoctorCheck(args: {
 }
 
 /**
+ * Discoverability hint printed on a bare `ax install` (#1019). Telemetry is OFF
+ * by default and a bare install never touches OTLP - but then nothing tells the
+ * user (or an agent) that ax HAS an OTLP receiver at all. This names the opt-in,
+ * tailored by whether a foreign collector is already configured. Pure + exported
+ * for tests; the tail does the read-only detection and prints these lines.
+ *
+ * Only fires on `preserve` (the bare, no-flag case): `grant` already acted and
+ * printed what it did; `revoke` is an explicit opt-out we must not nag.
+ */
+export function otelDiscoveryHint(args: {
+    readonly consent: TelemetryConsent;
+    readonly existingEndpoint: string | null;
+}): string[] {
+    if (args.consent !== "preserve") return [];
+    if (args.existingEndpoint) {
+        return [
+            `  otel: telemetry is OFF; you already send OTLP to ${args.existingEndpoint}.`,
+            "        run ax alongside it:   ax install --telemetry --otel-forward",
+            "        or send only to ax:    ax install --telemetry   (backs up + replaces your endpoint)",
+        ];
+    }
+    return [
+        "  otel: ax can ingest OTLP telemetry (cost + latency cross-check), OFF by default.",
+        "        enable:  ax install --telemetry   (add --otel-forward if you already run a collector)",
+    ];
+}
+
+/**
  * Ingest wall-clock budget (seconds). Doctor has no AxConfig layer, so mirror
  * the `AX_INGEST_TIMEOUT_SECONDS` knob with the same lenient
  * parse-or-fallback the config layer uses.
@@ -748,12 +776,32 @@ export function cmdInstall(options: {
             }
         }
 
+        // Discoverability (#1019): a bare install never touches OTLP, so name
+        // the receiver + opt-in here, tailored to whether the user already runs
+        // their own collector. Read-only detection, preserve-path only.
+        const otelHintLines = yield* Effect.gen(function* () {
+            if (consent !== "preserve") return [] as string[];
+            const existingEndpoint = yield* Effect.promise(async () => {
+                try {
+                    const raw = await Bun.file(posixPath.join(HOME, ".claude", "settings.json")).text();
+                    const parsed = JSON.parse(raw) as Record<string, unknown>;
+                    const reps = detectClaudeOtelReplacements(parsed, "http://127.0.0.1:1738");
+                    return reps.find((r) => r.key.endsWith("_ENDPOINT"))?.previous ?? null;
+                } catch { return null; }
+            });
+            return otelDiscoveryHint({ consent, existingEndpoint });
+        });
+
         const { BANNER } = yield* Effect.promise(() => import("./banner.ts"));
         console.log(BANNER);
         console.log("  installed. try:");
         console.log("    axctl ingest          # initial fill");
         console.log("    axctl studio          # live web dashboard");
         console.log("    axctl tui             # interactive terminal dashboard");
+        if (otelHintLines.length > 0) {
+            console.log();
+            for (const line of otelHintLines) console.log(line);
+        }
         console.log();
         console.log("  set up agent guards (worktree safety + model-routing hooks):");
         console.log("    axctl hooks init && axctl hooks install --all --providers=claude,codex");

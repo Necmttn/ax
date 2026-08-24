@@ -48,10 +48,22 @@ export const updateCommand = Command.make(
 ).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
 export const installCommand = Command.make("install", {
-    telemetry: Flag.boolean("telemetry").pipe(Flag.withDefault(false)),
-    noTelemetry: Flag.boolean("no-telemetry").pipe(Flag.withDefault(false)),
-    keepOtel: Flag.boolean("keep-otel").pipe(Flag.withDefault(false)),
-    otelForward: Flag.boolean("otel-forward").pipe(Flag.withDefault(false)),
+    telemetry: Flag.boolean("telemetry").pipe(
+        Flag.withDescription("Opt in to the local OTLP receiver: point Claude Code + Codex at ax (127.0.0.1:1738) so 'ax otel' + cost/latency enrichment work. Off by default; a bare install never touches your OTLP config."),
+        Flag.withDefault(false),
+    ),
+    noTelemetry: Flag.boolean("no-telemetry").pipe(
+        Flag.withDescription("Explicitly opt out of the OTLP receiver (revoke a prior --telemetry)."),
+        Flag.withDefault(false),
+    ),
+    keepOtel: Flag.boolean("keep-otel").pipe(
+        Flag.withDescription("With --telemetry: if you already point OTLP at your own collector, leave it untouched (ax OTLP surfaces stay dark). Mutually exclusive with --otel-forward."),
+        Flag.withDefault(false),
+    ),
+    otelForward: Flag.boolean("otel-forward").pipe(
+        Flag.withDescription("With --telemetry: send OTLP to ax AND relay it on to your existing collector (ax additive). Mutually exclusive with --keep-otel."),
+        Flag.withDefault(false),
+    ),
 }, ({ telemetry, noTelemetry, keepOtel, otelForward }) => {
     // Pure flag validation BEFORE any Effect/install work. fail() calls
     // process.exit(2) synchronously with a clean one-line message - no

@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { CacheRead, CacheUnavailableError, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { cacheReadResults } from "../testing/cache-read.ts";
-import { collectDoctorReport, formatDoctorReport, otelRedirectDoctorCheck } from "./install.ts";
+import { collectDoctorReport, formatDoctorReport, otelRedirectDoctorCheck, otelDiscoveryHint } from "./install.ts";
 
 // `collectDoctorReport` is an Effect requiring FileSystem + Path + CacheRead.
 // Run it against the REAL Bun-backed platform layers, exactly as the
@@ -162,5 +162,28 @@ describe("otelRedirectDoctorCheck (#1014)", () => {
         expect(check.ok).toBe(true);
         expect(check.detail).toContain("FORWARDS");
         expect(check.detail).toContain("logs, metrics");
+    });
+});
+
+describe("otelDiscoveryHint (#1019)", () => {
+    test("bare install with no collector names the opt-in", () => {
+        const lines = otelDiscoveryHint({ consent: "preserve", existingEndpoint: null });
+        expect(lines.length).toBeGreaterThan(0);
+        expect(lines.join("\n")).toContain("--telemetry");
+        expect(lines.join("\n")).toContain("OFF by default");
+    });
+
+    test("bare install WITH an existing collector offers forward vs replace", () => {
+        const lines = otelDiscoveryHint({ consent: "preserve", existingEndpoint: "https://otlp.datadoghq.com/v1/logs" });
+        const joined = lines.join("\n");
+        expect(joined).toContain("https://otlp.datadoghq.com/v1/logs");
+        expect(joined).toContain("--otel-forward");
+        expect(joined).toContain("ax install --telemetry");
+    });
+
+    test("silent on grant (already acted) and revoke (explicit opt-out)", () => {
+        expect(otelDiscoveryHint({ consent: "grant", existingEndpoint: null })).toEqual([]);
+        expect(otelDiscoveryHint({ consent: "grant", existingEndpoint: "https://x/v1/logs" })).toEqual([]);
+        expect(otelDiscoveryHint({ consent: "revoke", existingEndpoint: "https://x/v1/logs" })).toEqual([]);
     });
 });
