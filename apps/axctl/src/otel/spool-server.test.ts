@@ -187,6 +187,65 @@ describe("OTLP spool receiver", () => {
         expect(() => JSON.parse(lines[0]!)).not.toThrow();
         expect(() => JSON.parse(lines[1]!)).not.toThrow();
     });
+
+    it("forwards an accepted body to the configured collector AND still spools it (#1017)", async () => {
+        const now = new Date("2026-08-14T09:00:00.000Z");
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otlpd-fwd-"));
+        roots.push(spoolDir);
+        const forwardConfigPath = join(spoolDir, "otel-forward.json");
+        await writeFile(forwardConfigPath, JSON.stringify({
+            enabled: true,
+            created_at: now.toISOString(),
+            targets: [{ signal: "logs", url: "https://collector.example/v1/logs", headers: { "dd-api-key": "k" } }],
+        }));
+
+        const relayed: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
+        let resolveRelay: () => void = () => {};
+        const relayDone = new Promise<void>((r) => { resolveRelay = r; });
+        const relayFetch = (async (url: string, init: RequestInit) => {
+            relayed.push({ url, body: String(init.body), headers: init.headers as Record<string, string> });
+            resolveRelay();
+            return new Response("ok", { status: 200 });
+        }) as unknown as typeof fetch;
+
+        const server = await Effect.runPromise(
+            startOtlpSpoolServer({ spoolDir, port: 0, now: () => now, forwardConfigPath, relayFetch })
+                .pipe(Effect.provide(platformLayer)),
+        );
+        servers.push(server);
+
+        const response = await fetch(`${server.url}/v1/logs`, { method: "POST", body: '{"resourceLogs":[1]}' });
+        expect(response.status).toBe(200); // the 2xx never waits on the relay
+
+        await relayDone; // the fire-and-forget relay ran
+        expect(relayed).toHaveLength(1);
+        expect(relayed[0].url).toBe("https://collector.example/v1/logs");
+        expect(relayed[0].body).toBe('{"resourceLogs":[1]}');
+        expect(relayed[0].headers["dd-api-key"]).toBe("k");
+
+        // The body still landed in the local spool - forwarding is ADDITIVE.
+        const text = await readFile(join(spoolDir, "2026-08-14.jsonl"), "utf8");
+        expect(JSON.parse(text.trim()).body).toBe('{"resourceLogs":[1]}');
+    });
+
+    it("does not forward when the config is absent or disabled", async () => {
+        const now = new Date("2026-08-14T09:00:00.000Z");
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otlpd-nofwd-"));
+        roots.push(spoolDir);
+        let called = false;
+        const relayFetch = (async () => { called = true; return new Response("ok"); }) as unknown as typeof fetch;
+        const server = await Effect.runPromise(
+            startOtlpSpoolServer({
+                spoolDir, port: 0, now: () => now,
+                forwardConfigPath: join(spoolDir, "absent.json"),
+                relayFetch,
+            }).pipe(Effect.provide(platformLayer)),
+        );
+        servers.push(server);
+        await fetch(`${server.url}/v1/logs`, { method: "POST", body: '{"resourceLogs":[]}' });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(called).toBe(false);
+    });
 });
 
 describe("defaultOtlpSpoolDir (decoupled from AX_DATA_DIR)", () => {
