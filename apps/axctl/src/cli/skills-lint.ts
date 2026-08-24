@@ -14,6 +14,7 @@ import { prettyPrint } from "@ax/lib/json";
 import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { edgeRowId, roleRowId } from "@ax/lib/stable-id";
+import { fetchClassifiedSkillIds } from "../dashboard/role-queries.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,8 +31,14 @@ export interface BriefFrontmatter {
 
 export interface LintBriefResult {
     readonly file: string;
-    /** "applied" = edges written + file removed; "pending" = no primary_role; "error" = something went wrong */
-    readonly action: "applied" | "pending" | "error";
+    /**
+     * "applied" = edges written + file removed; "pending" = no primary_role and
+     * the skill is not yet classified; "reconciled" = pending brief whose skill
+     * was ALREADY classified elsewhere (e.g. `ax skills tag`), so the stale
+     * brief file was removed instead of left pending forever; "error" = something
+     * went wrong.
+     */
+    readonly action: "applied" | "pending" | "reconciled" | "error";
     /** The skill name from ax_classify, when present */
     readonly skill?: string;
     /** Number of edges written (primary + secondary deduplicated) */
@@ -44,6 +51,7 @@ export interface LintReport {
     readonly briefs: LintBriefResult[];
     readonly applied: number;
     readonly pending: number;
+    readonly reconciled: number;
     readonly errors: number;
     readonly dryRun: boolean;
 }
@@ -164,6 +172,33 @@ export function parseBrief(
             : undefined;
 
     return { ax_classify, primary_role, secondary, confidence, rationale };
+}
+
+/**
+ * Extract just the `ax_classify` skill name from a brief - even a PENDING one
+ * (no `primary_role`), where {@link parseBrief} returns null and drops it.
+ * Returns null when the name is absent or invalid. Used to reconcile a stale
+ * pending brief against the sidecar (#1033).
+ */
+export function briefSkillName(content: string): string | null {
+    const raw = extractFrontmatter(content);
+    if (!raw) return null;
+    let parsed: unknown;
+    try {
+        parsed = parseYaml(raw);
+    } catch {
+        return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const name = typeof (parsed as Record<string, unknown>)["ax_classify"] === "string"
+        ? ((parsed as Record<string, unknown>)["ax_classify"] as string).trim()
+        : "";
+    if (!name) return null;
+    try {
+        return validateSkillName(name);
+    } catch {
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +331,15 @@ export const cmdSkillsLint = (
             .map((e) => path.join(opts.taskDir, e))
             .sort();
 
+        // The set of skill ids already classified in the sidecar (by tag,
+        // frontmatter, or a prior brief). A pending brief whose skill is in this
+        // set is stale - the decision was made elsewhere - so lint reconciles it
+        // rather than reporting "pending" forever (#1033). Fetched once, best-effort:
+        // if the sidecar cannot be read, treat nothing as classified (no reconcile).
+        const classifiedIds = new Set(
+            yield* fetchClassifiedSkillIds().pipe(Effect.catch(() => Effect.succeed([] as readonly string[]))),
+        );
+
         const results: LintBriefResult[] = [];
 
         for (const filePath of files) {
@@ -320,11 +364,31 @@ export const cmdSkillsLint = (
                 continue;
             }
 
-            // Pending brief (no primary_role)
+            // Pending brief (no primary_role). But `ax skills tag` (or a prior
+            // classify) may have ALREADY classified this skill in the sidecar
+            // since the brief was emitted - the brief is then stale, not pending.
+            // Reconcile: remove the orphaned file and report it distinctly, so a
+            // tagged skill no longer leaves its brief stuck "pending" forever (#1033).
             if (parsed === null) {
+                const skillName = briefSkillName(content);
+                const skillId = skillName === null ? null : yield* lookupSkillId(read, skillName).pipe(
+                    Effect.catch(() => Effect.succeed(null)),
+                );
+                if (skillId !== null && classifiedIds.has(skillId)) {
+                    if (!opts.dryRun) {
+                        yield* fs.remove(filePath).pipe(orAbsent<void>(undefined));
+                    }
+                    results.push({
+                        file: filePath,
+                        action: "reconciled",
+                        ...(skillName !== null && { skill: skillName }),
+                    });
+                    continue;
+                }
                 results.push({
                     file: filePath,
                     action: "pending",
+                    ...(skillName !== null && { skill: skillName }),
                 });
                 continue;
             }
@@ -365,12 +429,14 @@ export const cmdSkillsLint = (
 
         const applied = results.filter((r) => r.action === "applied").length;
         const pending = results.filter((r) => r.action === "pending").length;
+        const reconciled = results.filter((r) => r.action === "reconciled").length;
         const errors = results.filter((r) => r.action === "error").length;
 
         const report: LintReport = {
             briefs: results,
             applied,
             pending,
+            reconciled,
             errors,
             dryRun: opts.dryRun,
         };
@@ -388,6 +454,11 @@ export const cmdSkillsLint = (
                 console.log(
                     `applied  ${fileName}  skill=${r.skill ?? "?"}  edges=${r.edgesWritten ?? 0}${dryTag}`,
                 );
+            } else if (r.action === "reconciled") {
+                const dryTag = opts.dryRun ? " (dry-run)" : "";
+                console.log(
+                    `reconciled  ${fileName}  skill=${r.skill ?? "?"}  (already classified; stale brief removed)${dryTag}`,
+                );
             } else if (r.action === "error") {
                 console.error(`error    ${fileName}  ${r.error ?? "unknown error"}`);
             }
@@ -401,6 +472,7 @@ export const cmdSkillsLint = (
 
         const parts: string[] = [];
         if (applied > 0) parts.push(`${applied} applied${opts.dryRun ? " (dry-run)" : ""}`);
+        if (reconciled > 0) parts.push(`${reconciled} reconciled${opts.dryRun ? " (dry-run)" : ""}`);
         if (pending > 0) parts.push(`${pending} pending`);
         if (errors > 0) parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
         console.log(parts.join(", ") + ".");
