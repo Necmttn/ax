@@ -89,6 +89,16 @@ const turnWhere = (filters: TurnFilters): Clause =>
     ]);
 
 /**
+ * The first whitespace-delimited term of the query, used ONLY for the snippet's
+ * literal-substring window (#1023). BM25 matches conjunctively across all terms
+ * but the terms need not be adjacent, so `position("duckdb spool" IN text)`
+ * usually returns 0 and the snippet fell back to the unrelated head excerpt.
+ * Windowing on the first term instead makes the match visible. A single-term
+ * query is unchanged (first term === whole query).
+ */
+const firstTerm = (q: string): string => q.trim().split(/\s+/)[0] ?? q;
+
+/**
  * The scored, filtered turn set - shared by the page query and the count query
  * so the two can never disagree about what "matching" means. `?` #1 is the
  * query text; the rest are the filters' own parameters, in order.
@@ -102,11 +112,12 @@ const turnMatchesSql = (where: Clause): string => `
         s.cwd AS cwd,
         t.role AS role,
         t.ts AS ts,
-        -- #921: the index covers FULL turn text, so a hit can sit past the
-        -- 500-char excerpt. Show a match-centered window from the full text
-        -- when the literal query string is locatable in it; BM25 also matches
-        -- stemmed/multi-term forms position() cannot find, so fall back to
-        -- the stored head excerpt rather than showing nothing.
+        -- #921/#1023: the index covers FULL turn text, so a hit can sit past
+        -- the 500-char excerpt. Show a match-centered window from the full text
+        -- around the FIRST query term (bm25 matches all terms but not
+        -- necessarily adjacently, so the joined phrase is rarely locatable);
+        -- fall back to the stored head excerpt when even that term is absent
+        -- (pure-stemming matches).
         COALESCE(
             CASE WHEN position(lower(?) IN lower(t.text)) > 0
                  THEN substr(t.text, CASE WHEN position(lower(?) IN lower(t.text)) > 120
@@ -114,7 +125,7 @@ const turnMatchesSql = (where: Clause): string => `
             END,
             t.text_excerpt
         ) AS text_excerpt,
-        ${matchBm25Sql(TURN_FTS, "t")} AS score
+        ${matchBm25Sql(TURN_FTS, "t", { conjunctive: true })} AS score
     FROM turn t
     JOIN session s ON s.id = t.session
     WHERE TRUE ${where.sql}
@@ -122,24 +133,31 @@ const turnMatchesSql = (where: Clause): string => `
 
 export const turnPageQuery = (filters: TurnFilters, offset: number, limit: number): Clause => {
     const where = turnWhere(filters);
+    const snippet = firstTerm(filters.q);
     return {
+        // Rank by RELEVANCE (bm25 score), recency as the tie-break (#1023). The
+        // score column lives in the `matches` subquery, so ORDER BY reads it
+        // even though the outer SELECT does not project it - the row shape the
+        // reader decodes is unchanged.
         sql: `SELECT turn_id, session_id, project, source, cwd, role, ts, text_excerpt
               FROM (${turnMatchesSql(where)}) matches
               WHERE score IS NOT NULL
-              ORDER BY ts DESC
+              ORDER BY score DESC, ts DESC
               LIMIT ? OFFSET ?`,
-        params: [filters.q, filters.q, filters.q, filters.q, ...where.params, limit, offset],
+        params: [snippet, snippet, snippet, filters.q, ...where.params, limit, offset],
     };
 };
 
 export const turnCountQuery = (filters: TurnFilters): Clause => {
     const where = turnWhere(filters);
+    const snippet = firstTerm(filters.q);
     return {
         sql: `SELECT count(*) AS total FROM (${turnMatchesSql(where)}) matches WHERE score IS NOT NULL`,
-        // Same subquery as the page query, so the same FOUR binds of `q`
-        // (3 snippet + 1 match_bm25) - the optimizer prunes the unused
-        // snippet column, but the placeholders still need their params.
-        params: [filters.q, filters.q, filters.q, filters.q, ...where.params],
+        // Same subquery as the page query, so the same FOUR binds: 3 snippet
+        // (first term) + 1 match_bm25 (full query). The optimizer prunes the
+        // unused snippet column, but the placeholders still need their params.
+        // For a single-term query all four are the same string.
+        params: [snippet, snippet, snippet, filters.q, ...where.params],
     };
 };
 
@@ -238,7 +256,7 @@ const commitMatchesSql = (where: Clause): string => `
         c.repository AS repository,
         c.ts AS ts,
         c.message AS message,
-        ${matchBm25Sql(COMMIT_FTS, "c")} AS score
+        ${matchBm25Sql(COMMIT_FTS, "c", { conjunctive: true })} AS score
     FROM "commit" c
     WHERE TRUE ${where.sql}
 `;

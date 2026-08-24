@@ -116,9 +116,20 @@ export const ftsSchemaName = (target: FtsTarget): string => `fts_main_${target.t
  *
  * The query text is a BOUND parameter (`?`), never interpolated - the whole
  * reason the Surreal path had to inline record literals is gone in DuckDB.
+ *
+ * `conjunctive` (#1023): DuckDB's `match_bm25` defaults to `conjunctive := 0`,
+ * an OR over the query's terms - so `"duckdb spool"` matches any row with
+ * EITHER word, a huge pool for a multi-word query. `conjunctive: true` requires
+ * every (stemmed) term present, which is what a multi-word query reads as.
  */
-export const matchBm25Sql = (target: FtsTarget, alias: string): string =>
-    `${ftsSchemaName(target)}.match_bm25(${alias}.${target.idColumn}, ?)`;
+export const matchBm25Sql = (
+    target: FtsTarget,
+    alias: string,
+    opts: { readonly conjunctive?: boolean } = {},
+): string =>
+    `${ftsSchemaName(target)}.match_bm25(${alias}.${target.idColumn}, ?${
+        opts.conjunctive ? ", conjunctive := 1" : ""
+    })`;
 
 /**
  * (Re)build every FTS index THAT NEEDS IT. Idempotent: `overwrite = 1`
