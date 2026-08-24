@@ -62,6 +62,40 @@ export const HARNESS_TOOL_PREFIXES = ["codex:"] as const;
 export const isHarnessToolSkill = (name: string): boolean =>
     HARNESS_TOOL_PREFIXES.some((p) => name.startsWith(p));
 
+/**
+ * Generic per-tool-call pseudo-skills every JSONL provider synthesizes
+ * (`pi:bash`, `pi:read`, `cursor-tool:edit`, …). `isHarnessToolSkill` only
+ * excludes the `codex:` prefix, so these primitives leak into arc mining, occur
+ * in nearly every session (highest support), and - because different orderings
+ * of the same set are not subsequences of each other - survive maximality
+ * pruning as near-duplicate permutations. An arc composed ENTIRELY of these
+ * primitives is the default shape of a coding turn, not a codifiable workflow.
+ */
+const GENERIC_TOOL_BASENAMES: ReadonlySet<string> = new Set([
+    "bash",
+    "read",
+    "edit",
+    "write",
+    "ls",
+    "grep",
+    "glob",
+]);
+
+/** Strips any `harness:`/`harness-tool:` prefix, lowercased. */
+const toolBasename = (name: string): string => {
+    const i = name.indexOf(":");
+    return (i === -1 ? name : name.slice(i + 1)).toLowerCase();
+};
+
+/**
+ * True when EVERY step is a generic coding primitive - an arc with no real
+ * skill in it. `.every()` (not `.some()`) is deliberate: a mixed arc like
+ * `["recall", "read", "edit", "test"]` names a genuine recurring pattern
+ * alongside generic steps and MUST survive.
+ */
+export const isGenericToolArc = (steps: readonly string[]): boolean =>
+    steps.length > 0 && steps.every((s) => GENERIC_TOOL_BASENAMES.has(toolBasename(s)));
+
 // ---------------------------------------------------------------------------
 // buildPerSession
 // ---------------------------------------------------------------------------
@@ -262,10 +296,11 @@ export const fetchWorkflowArcs: (
         .filter((r) => r.session !== "" && r.skill !== "" && !isHarnessToolSkill(r.skill));
 
     const perSession = buildPerSession(rows);
-    return mineArcs(perSession, {
+    const arcs = mineArcs(perSession, {
         ...(input?.minSessions !== undefined && { minSessions: input.minSessions }),
         ...(input?.limit !== undefined && { limit: input.limit }),
     });
+    return arcs.filter((a) => !isGenericToolArc(a.steps));
 });
 
 const WorkflowSequenceRow = Schema.Struct({
