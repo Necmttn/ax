@@ -51,13 +51,12 @@ call site.
 
 ## Sampling methodology
 
-Profile against a quiet DB or the numbers lie:
+Profile against a fixed published snapshot:
 
-1. `launchctl bootout gui/$UID/com.necmttn.ax-watch` - stop watcher re-fires
-2. wait for `surreal` CPU to settle (`ps aux | rg surreal`)
-3. run progressively bigger samples: one stage (`--stages=claude`) →
+1. Set `AX_NO_AUTO_INGEST=1` to disable the read-driven freshness process.
+2. Set `AX_DUCKDB_SNAPSHOT` to a copy made for the profile run.
+3. Run progressively bigger samples: one stage (`--stages=claude`) →
    source stages (`--stages=claude,codex,git,opencode`) → full default set
 4. `AX_REDERIVE_CLAUDE=1` forces re-parse of watermark-skipped transcripts
    when you need a repeatable workload
-5. restore:
-   `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.necmttn.ax-watch.plist`
+5. Remove the two environment overrides after the profile run.

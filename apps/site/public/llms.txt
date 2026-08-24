@@ -104,7 +104,7 @@ A: `ax sessions here --days=7` - sessions scoped to the current repo. `ax sessio
 A: `ax sessions near <sha>` finds the sessions behind a commit; the `ax:extract-workflow` skill narrates the ordered steps that produced the artifact.
 
 **Q: Where did we discuss/decide Y? I remember it but can't find it.**
-A: `ax recall "Y"` - full-text search across every turn, commit, and skill, across all five harnesses.
+A: `ax recall "Y"` - full-text search across every turn, commit, and skill, across all six harnesses.
 
 **Q: What did that refactor / branch / PR cost?**
 A: `ax costs for --branch <name>` or `--commit <sha>` or `--query "<text>"` - tokens and USD, priced per model with cache buckets.

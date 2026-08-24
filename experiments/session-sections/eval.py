@@ -24,7 +24,7 @@ from typing import Any
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train/evaluate the AX session-section SetFit chunk classifier.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--model-dir", default=".ax/experiments/setfit-session-sections-model")
     parser.add_argument("--out", default=".ax/experiments/setfit-session-sections-e3.json")

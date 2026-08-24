@@ -15,7 +15,7 @@ from eval import apply_label_mode, grouped_stratified_split, load_rows  # noqa: 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit grouped train/test splits for session-section fixtures.")
-    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
+    parser.add_argument("--fixtures", default="experiments/session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--group-field", default="target")
     parser.add_argument("--pair-field", default=None)
     parser.add_argument("--seeds", default="7,13,42")

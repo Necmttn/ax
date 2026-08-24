@@ -42,7 +42,7 @@ CI runs both - failing either blocks merge.
 While developing, skip the compiled binary and run the TypeScript directly:
 
 ```bash
-bun apps/axctl/src/cli/index.ts serve --port=1738
+bun apps/axctl/src/cli/index.ts studio --port=1738
 bun apps/axctl/src/cli/index.ts insights friction --limit=10
 bun apps/axctl/src/cli/index.ts recall "auth middleware"
 ```
@@ -56,7 +56,7 @@ real graph. The stable `ax` (released binary) is left untouched.
 ```bash
 bash scripts/install-dev.sh        # writes ~/.local/bin/ax-dev (a source shim)
 ax-dev ingest --since=1            # ingest into the dev data dir
-ax-dev serve                       # dev dashboard (full live ingest works - runs from source)
+ax-dev studio                      # dev dashboard (full live ingest works - runs from source)
 ax-dev -v                          # shows git provenance: which sha/branch you're on
 rm -rf ~/.local/share/ax-dev       # nuke the dev stack entirely
 ```
@@ -151,24 +151,17 @@ Artifacts land under `~/.local/share/ax/benchmarks/<db>/`.
 
 Full surface in [`docs/insights-cli-reference.md`](insights-cli-reference.md).
 
-## Reactivity (macOS)
+## Reactivity
 
-`axctl install` sets up:
+Reading keeps the cache current. A command can start a detached
+`ax ingest --since=1 --progress=off` when the published snapshot is stale.
+Set `AX_NO_AUTO_INGEST=1` when a test or benchmark needs a stable snapshot.
 
-- launchd watcher on `~/.claude/projects/` and `~/.codex/sessions/`
-- background `axctl ingest --since=1` after recent transcript changes
-- onboarding for git-tracking your global Claude/Codex/skill dirs
+`ax studio` starts an on-demand service. It stops after its browser client
+disconnects. `ax otlpd` is the only optional long-running service installed on
+macOS. It appends telemetry to a local spool for the next ingest.
 
-No daemon holds the graph open - each `axctl ingest` writes the live DuckDB
-database and publishes a fresh read-only snapshot for query commands to read.
-
-Logs land in `~/.local/share/ax/logs/`. Manual control:
-
-```bash
-axctl daemon status --json
-axctl daemon start | stop | restart
-axctl doctor --json
-```
+Use `axctl doctor --json` to inspect the installation.
 
 ## Effect
 
@@ -184,7 +177,7 @@ Working today: Claude + Codex transcript ingest, skill / slash-command
 ingest, git repository / checkout / commit / file ingest, derived signals
 (friction, diagnostics, skill pairs, recovery, recommendations), project
 context + verify commands, live dashboard + static HTML report,
-self-improve guidance queries, launchd reactivity (macOS).
+self-improve guidance queries, read-driven freshness, and optional OTLP receipt.
 
 Tracked next: project memory (`changeset`, `file_memory`), concept/entity
 resolution, guidance lifecycle + outcome tracking, richer live dashboard

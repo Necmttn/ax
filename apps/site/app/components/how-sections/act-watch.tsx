@@ -1,6 +1,6 @@
 import { PROVIDERS } from "~/components/landing-v2/supports-strip";
 
-// ACT 1 - WATCH. The five harnesses as a designed row of transcript sources
+// ACT 1 - WATCH. The six harnesses as a designed row of transcript sources
 // feeding one local graph. Static, designed (no animation) - the LIVE badge
 // marks the graph as current: a stale read quietly forks a catch-up ingest,
 // there is no standing daemon watching it.

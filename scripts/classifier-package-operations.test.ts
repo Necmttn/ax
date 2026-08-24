@@ -48,10 +48,24 @@ const runFs = <A, E>(eff: Effect.Effect<A, E, FileSystem.FileSystem>): Promise<A
     Effect.runPromise(eff.pipe(Effect.provide(BunFileSystem.layer)));
 
 describe("classifier package operations report", () => {
-    test("lists operations from the session-section manifest", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+    test("runs the default experiment manifest from the command line", () => {
+        const result = Bun.spawnSync([
+            "bun",
+            "scripts/classifier-package-operations.ts",
+            "--operation=blind-review-refresh",
+            "--json",
+        ]);
 
-        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json");
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout.toString());
+        expect(report.decision).toBe("operation_found");
+        expect(report.operations[0]?.command).toBe("python3 experiments/session-sections/blind_review_batch_refresh.py");
+    });
+
+    test("lists operations from the session-section manifest", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+
+        const report = buildOperationsReport(manifest, "experiments/session-sections/ax.classifier.json");
 
         expect(report.decision).toBe("operations_listed");
         expect(report.operations.map((operation) => operation.id)).toContain("blind-review-refresh");
@@ -59,13 +73,13 @@ describe("classifier package operations report", () => {
     });
 
     test("selects one operation by id", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-review-refresh");
+        const report = buildOperationsReport(manifest, "experiments/session-sections/ax.classifier.json", "blind-review-refresh");
 
         expect(report.decision).toBe("operation_found");
         expect(report.operations).toHaveLength(1);
-        expect(report.operations[0]?.command).toBe("bun run classifiers:blind-review-refresh");
+        expect(report.operations[0]?.command).toBe("python3 experiments/session-sections/blind_review_batch_refresh.py");
     });
 
     test("reports missing operations without throwing", async () => {
@@ -79,21 +93,21 @@ describe("classifier package operations report", () => {
     });
 
     test("preflights selected operation inputs", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
+        const report = await runFs(buildOperationPreflightReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval"));
 
         expect(report.decision).toBe("ready");
         expect(report.operation?.kind).toBe("train");
         expect(report.inputs).toEqual([{
-            path: "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+            path: "experiments/session-sections/eval-fixtures/chunks.jsonl",
             exists: true,
         }]);
         expect(report.missing_inputs).toEqual([]);
     });
 
     test("preflight reports missing declared inputs", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const testManifest = {
             ...manifest,
             operations: [
@@ -108,7 +122,7 @@ describe("classifier package operations report", () => {
             ],
         };
 
-        const report = await runFs(buildOperationPreflightReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-input-demo"));
+        const report = await runFs(buildOperationPreflightReport(testManifest, "experiments/session-sections/ax.classifier.json", "missing-input-demo"));
 
         expect(report.decision).toBe("missing_inputs");
         expect(report.missing_inputs).toContain(".ax/experiments/does-not-exist-for-preflight-test.json");
@@ -116,28 +130,28 @@ describe("classifier package operations report", () => {
     });
 
     test("preflight reports missing selected operations", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing"));
+        const report = await runFs(buildOperationPreflightReport(manifest, "experiments/session-sections/ax.classifier.json", "missing"));
 
         expect(report.decision).toBe("operation_missing");
         expect(report.failures).toEqual(["classifier package session-section-chunks does not declare operation: missing"]);
     });
 
     test("builds dry-run operation reports without executing", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
+        const report = await runFs(buildOperationDryRunReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval"));
 
         expect(report.schema).toBe("ax.classifier_package_operation_dry_run_report.v1");
         expect(report.decision).toBe("ready_to_run");
         expect(report.would_execute).toBe(false);
-        expect(report.command).toContain("bun run classifiers:setfit-eval");
+        expect(report.command).toContain("uv run --project experiments/session-sections experiments/session-sections/eval.py");
         expect(report.preflight.decision).toBe("ready");
     });
 
     test("dry-run reports blocked operations when preflight fails", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const testManifest = {
             ...manifest,
             operations: [
@@ -152,7 +166,7 @@ describe("classifier package operations report", () => {
             ],
         };
 
-        const report = await runFs(buildOperationDryRunReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blocked-demo"));
+        const report = await runFs(buildOperationDryRunReport(testManifest, "experiments/session-sections/ax.classifier.json", "blocked-demo"));
 
         expect(report.decision).toBe("blocked");
         expect(report.would_execute).toBe(false);
@@ -160,9 +174,9 @@ describe("classifier package operations report", () => {
     });
 
     test("execution plan denies execution by default", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: false,
             allowExpensive: false,
         }));
@@ -173,9 +187,9 @@ describe("classifier package operations report", () => {
     });
 
     test("execution plan blocks expensive operations without explicit allowance", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -187,9 +201,9 @@ describe("classifier package operations report", () => {
     });
 
     test("execution plan marks explicitly allowed operation ready", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
 
-        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: true,
             allowExpensive: true,
         }));
@@ -200,7 +214,7 @@ describe("classifier package operations report", () => {
     });
 
     test("executes ready operation plans and captures output", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -212,7 +226,7 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -233,7 +247,7 @@ describe("classifier package operations report", () => {
     });
 
     test("marks execution failed when declared outputs are missing", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-missing-output-")), "missing.txt");
         const testManifest = {
             ...manifest,
@@ -245,7 +259,7 @@ describe("classifier package operations report", () => {
                 outputs: [missingOutPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-output-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "missing-output-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -261,7 +275,7 @@ describe("classifier package operations report", () => {
     });
 
     test("does not execute denied operation plans", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-denied-output-")), "missing.txt");
         const testManifest = {
             ...manifest,
@@ -273,7 +287,7 @@ describe("classifier package operations report", () => {
                 outputs: [missingOutPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "denied-train-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "denied-train-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -289,8 +303,8 @@ describe("classifier package operations report", () => {
     });
 
     test("writes operations report JSON to disk", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-workflow-status");
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const report = buildOperationsReport(manifest, "experiments/session-sections/ax.classifier.json", "blind-workflow-status");
         const path = join(mkdtempSync(join(tmpdir(), "ax-ops-")), "nested", "report.json");
 
         await runFs(writeOperationsReport(path, report));
@@ -301,8 +315,8 @@ describe("classifier package operations report", () => {
     });
 
     test("writes preflight report JSON to disk", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationPreflightReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval"));
         const path = join(mkdtempSync(join(tmpdir(), "ax-preflight-")), "report.json");
 
         await runFs(writeOperationPreflightReport(path, report));
@@ -313,8 +327,8 @@ describe("classifier package operations report", () => {
     });
 
     test("writes dry-run report JSON to disk", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const report = await runFs(buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationDryRunReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval"));
         const path = join(mkdtempSync(join(tmpdir(), "ax-dry-run-")), "report.json");
 
         await runFs(writeOperationDryRunReport(path, report));
@@ -325,8 +339,8 @@ describe("classifier package operations report", () => {
     });
 
     test("writes execution plan report JSON to disk", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: false,
             allowExpensive: false,
         }));
@@ -340,7 +354,7 @@ describe("classifier package operations report", () => {
     });
 
     test("writes execution report JSON to disk", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-write-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -352,7 +366,7 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -369,7 +383,7 @@ describe("classifier package operations report", () => {
     });
 
     test("builds execution history summaries from execution reports", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-history-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -381,7 +395,7 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -401,8 +415,8 @@ describe("classifier package operations report", () => {
 
     test("discovers and writes execution history reports", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-history-"));
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -424,7 +438,7 @@ describe("classifier package operations report", () => {
     });
 
     test("projects execution reports into graph-ready facts and edges", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-fact-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -436,7 +450,7 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "experiments/session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -836,8 +850,8 @@ describe("classifier package operations report", () => {
     });
 
     test("writes execution fact projection reports", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -856,8 +870,8 @@ describe("classifier package operations report", () => {
     });
 
     test("builds Surreal write plans from execution fact projections", async () => {
-        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
-        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("experiments/session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "experiments/session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
         }));
@@ -2881,7 +2895,7 @@ describe("classifier package operations report", () => {
     test("discovers classifier package manifests", async () => {
         const paths = await runFs(discoverClassifierPackageManifestPaths("packages"));
 
-        expect(paths).toContain("packages/ax-classifier-session-sections/ax.classifier.json");
+        expect(paths).toContain("experiments/session-sections/ax.classifier.json");
         expect(paths).toContain("packages/ax-classifier-direction-event/ax.classifier.json");
         expect(paths).toEqual([...paths].sort());
     });

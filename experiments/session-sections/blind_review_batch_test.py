@@ -317,10 +317,10 @@ Editable field vocabulary:
 
         self.assertIn("Post-edit commands:", enriched)
         self.assertLess(enriched.index("Post-edit commands:"), enriched.index("Editable field vocabulary:"))
-        self.assertIn("bun run classifiers:blind-review-batch -- --mode=evaluate", enriched)
-        self.assertIn("bun run classifiers:blind-review-batch -- --mode=sync", enriched)
-        self.assertIn("bun run classifiers:blind-review-refresh -- --json", enriched)
-        self.assertIn("bun src/cli/index.ts classifiers lifecycle", enriched)
+        self.assertIn("python3 experiments/session-sections/blind_review_batch.py --mode=evaluate", enriched)
+        self.assertIn("python3 experiments/session-sections/blind_review_batch.py --mode=sync", enriched)
+        self.assertIn("python3 experiments/session-sections/blind_review_batch_refresh.py --json", enriched)
+        self.assertIn("bun apps/axctl/src/cli/index.ts classifiers lifecycle", enriched)
         self.assertEqual(enriched.count("Post-edit commands:"), 1)
         self.assertEqual(module.insert_post_edit_commands(enriched).count("Post-edit commands:"), 1)
 

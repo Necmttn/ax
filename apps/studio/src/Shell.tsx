@@ -110,7 +110,7 @@ function ShareChrome({ children }: { children: ReactNode }) {
 /**
  * Studio-only banner.
  * - When no live connection: invites the user to point at their local
- *   `axctl serve`. Try-connect probes /api/skills with CORS.
+ *   `axctl studio`. Try-connect probes /api/skills with CORS.
  * - When connected: shows the endpoint + disconnect.
  */
 function StudioBanner() {
@@ -135,7 +135,7 @@ function StudioBanner() {
         const ok = await studioConnection.probe(target);
         if (!ok) {
             setBusy(false);
-            setError(`Could not reach ${target}/api/skills. Is \`axctl serve\` running? Did CORS land?`);
+            setError(`Could not reach ${target}/api/skills. Is \`axctl studio\` running?`);
             return;
         }
         studioConnection.set(target);
@@ -146,7 +146,7 @@ function StudioBanner() {
         <div className="studio-banner">
             <strong>Mock-mode preview.</strong>
             <span>
-                Run <code>axctl serve</code> locally and connect to see your real graph:
+                Run <code>axctl studio</code> locally and connect to see your real graph:
             </span>
             <input
                 className="banner-input"
@@ -154,7 +154,7 @@ function StudioBanner() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 disabled={busy}
-                aria-label="local axctl serve endpoint"
+                aria-label="local axctl studio endpoint"
             />
             <button type="button" className="banner-btn primary" onClick={connect} disabled={busy}>
                 {busy ? "Connecting…" : "Connect →"}

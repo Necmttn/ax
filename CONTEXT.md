@@ -110,17 +110,19 @@ injection.
 _Avoid_: context blob
 
 **Storage Backend**:
-The SurrealDB persistence engine used by `axctl`, separate from product semantics.
+The two local stores used by `axctl`, separate from product semantics. DuckDB
+holds the rebuildable cache. SQLite holds durable judgments.
 _Avoid_: memory versioning model
 
 **Graph Access Toolkit**:
 The single shared module of safe **Storage Backend** access primitives -
-SurrealQL literals, typed row field access, record selection, statement
-execution, and record-id key derivation - that query modules compose.
+typed row access, statement execution, and record-id key derivation - that query
+modules compose. Reads use the published DuckDB snapshot. Ingest writes use the
+live cache under the ingest lock and publish when complete.
 _Avoid_: db utils
 
 **Current View**:
-A materialized SurrealDB table view that exposes current records for ergonomic reads.
+The published DuckDB snapshot that exposes current records for stable reads.
 _Avoid_: canonical state
 
 **Insights Surface**:
@@ -130,7 +132,7 @@ _Avoid_: report export
 
 **Insights Surface Contract**:
 The schema-typed HTTP API definition (Effect `HttpApi` groups + Schemas in
-`@ax/lib/shared`) that the daemon serves and the studio consumes - the single
+`@ax/lib/shared`) that the on-demand studio service exposes - the single
 source of truth for routes, params, responses, errors, generated docs, and the
 generated client. SSE and binary escape hatches sit outside it as raw routes.
 _Avoid_: route table, endpoint list

@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import { fmtCount } from "@ax/lib/shared/formatters";
@@ -233,6 +234,17 @@ export function MissionControl() {
     const data = q.data ?? null;
     return (
         <InstrumentShell>
+            <nav className="actions" aria-label="Mission Control details" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <Link to="/usage" className="badge review" style={{ textDecoration: "none" }}>
+                    Usage →
+                </Link>
+                <Link to="/team" className="badge review" style={{ textDecoration: "none" }}>
+                    Team metrics →
+                </Link>
+                <Link to="/lab" className="badge review" style={{ textDecoration: "none" }}>
+                    Lab →
+                </Link>
+            </nav>
             <MissionControlContent data={data} isLoading={q.isLoading} error={q.error} />
         </InstrumentShell>
     );

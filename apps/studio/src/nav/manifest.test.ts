@@ -21,6 +21,18 @@ describe("studio nav rail route coverage (#829)", () => {
         expect(registered.length).toBeGreaterThan(0);
     });
 
+    test("the rail has exactly the seven common destinations", () => {
+        expect(NAV_ENTRIES.map((entry) => entry.to)).toEqual([
+            "/",
+            "/sessions",
+            "/cost",
+            "/workflow",
+            "/skills",
+            "/tools",
+            "/improve",
+        ]);
+    });
+
     test("every non-parameterized route is either linked from the rail or explicitly excluded with a reason", () => {
         const navPaths = new Set(NAV_ENTRIES.map((e) => e.to));
         const exclusionPaths = new Set(NAV_EXCLUSIONS.map((e) => e.to));
@@ -48,6 +60,19 @@ describe("studio nav rail route coverage (#829)", () => {
         for (const exclusion of NAV_EXCLUSIONS) {
             expect(exclusion.reason.length).toBeGreaterThan(10);
         }
+    });
+
+    test("context exclusions name their source and graph explorer stays gated", () => {
+        for (const exclusion of NAV_EXCLUSIONS) {
+            if (exclusion.access === "context") {
+                expect(exclusion.from, `${exclusion.to} has no contextual source`).toBeDefined();
+            }
+        }
+        expect(NAV_EXCLUSIONS.find((entry) => entry.to === "/graph")).toMatchObject({
+            access: "context",
+            from: "/lab",
+            capability: "graph-explorer",
+        });
     });
 
     test("no path is both a nav entry and an exclusion", () => {

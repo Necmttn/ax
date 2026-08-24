@@ -47,13 +47,10 @@ export interface DbConditionalRuntime {
 export type RuntimeDeclaration = CommandRuntime | DbConditionalRuntime;
 
 /**
- * Per-command metadata beyond routing. Visibility policy (#173): a hidden
- * command is omitted from `--help`, shell completions, and "did you mean?"
- * while staying fully invokable by exact name (agents, plists, and docs use
- * the names). Read-only insight surfaces MUST stay visible - a hidden command
- * is invisible to agents discovering the tool via `--help`, so it never gets
- * used (blind-dogfood finding). Hide only mutating / maintenance / plumbing
- * verbs.
+ * Per-command metadata beyond routing. A hidden command is omitted from
+ * `--help`, shell completions, and "did you mean?" while staying fully
+ * invokable by exact name. This flag hard-hides internal commands. The public
+ * default surface is smaller and lives in visible-commands.ts.
  */
 export interface CommandMeta {
     readonly runtime: RuntimeDeclaration;
@@ -62,11 +59,9 @@ export interface CommandMeta {
 }
 
 /**
- * One manifest entry: a bare routing declaration (the command is visible) or
- * routing wrapped with metadata (`{ runtime, hidden }`). Families fully own
- * their commands' metadata here; cli/index.ts assembles the root command via
- * a uniform loop over these entries (issue #248) - no per-command
- * `withHidden` calls at the assembly site.
+ * One manifest entry: a bare routing declaration or routing wrapped with
+ * metadata (`{ runtime, hidden }`). Families own runtime and internal
+ * visibility here. cli/index.ts combines this with the public surface policy.
  */
 export type ManifestEntry = RuntimeDeclaration | CommandMeta;
 
