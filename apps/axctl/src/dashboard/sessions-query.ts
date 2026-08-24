@@ -83,8 +83,18 @@ const fetchSessions = (where: Clause): Effect.Effect<SessionRow[], never, CacheR
                       LEFT JOIN (SELECT session, count(*) AS turn_count FROM turn GROUP BY session) tc
                           ON tc.session = s.id
                       LEFT JOIN (
+                          -- Prefer the first real TASK turn over injected context
+                          -- (Codex records the AGENTS.md/CLAUDE.md system prompt as
+                          -- the first user turn, classified message_kind='context';
+                          -- it dominated the summary column and made the listing
+                          -- useless for Codex). Fall back to the earliest user turn
+                          -- when no task turn is classified (null message_kind, or a
+                          -- pre-reingest session).
                           SELECT session, text_excerpt,
-                                 row_number() OVER (PARTITION BY session ORDER BY seq ASC) AS rn
+                                 row_number() OVER (
+                                     PARTITION BY session
+                                     ORDER BY COALESCE(message_kind = 'task', FALSE) DESC, seq ASC
+                                 ) AS rn
                           FROM turn
                           WHERE role = 'user'
                       ) fu ON fu.session = s.id AND fu.rn = 1

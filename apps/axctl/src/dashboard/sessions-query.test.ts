@@ -64,6 +64,22 @@ describe("listSessionsHere", () => {
         expect(rows[0]).toMatchObject({ turn_count: 3, first_user_message: "first message" });
     });
 
+    dtest("the summary skips an injected context turn for the first real task turn (#1029)", async () => {
+        const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-context-"), dylibPath, (w) =>
+            Effect.gen(function* () {
+                yield* w.put("session", { id: "sc", repository: "r1", source: "codex", project: "p", cwd: "/w/ax", started_at: daysAgo(1) });
+                yield* w.putMany("turn", [
+                    // Codex records the AGENTS.md system prompt as the first user
+                    // turn, classified message_kind='context'.
+                    { id: "c1", session: "sc", seq: 1, ts: daysAgo(1), role: "user", text_excerpt: "# AGENTS.md instructions for /w/ax", message_kind: "context" },
+                    { id: "c2", session: "sc", seq: 2, ts: daysAgo(1), role: "user", text_excerpt: "fix the ingest bug", message_kind: "task" },
+                ]);
+            })));
+
+        const rows = await readThroughFixture(fixture, dylibPath, listSessionsHere({ repositoryId: "r1" }));
+        expect(rows[0]?.first_user_message).toBe("fix the ingest bug");
+    });
+
     dtest("respects a custom --days window", async () => {
         const fixture = await runWithPlatform(publishCacheFixture(tempDir("ax-sessions-here-days-"), dylibPath, FIXTURE));
 
