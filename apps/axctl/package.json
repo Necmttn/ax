@@ -1,6 +1,6 @@
 {
   "name": "axctl",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "license": "AGPL-3.0-only",
   "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into a local DuckDB cache and keeps durable judgments in SQLite.",
   "type": "module",
