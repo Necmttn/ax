@@ -20,7 +20,7 @@
  * (which scans runtime sources) does not apply and an Effect `FileSystem`
  * would only add ceremony to something that runs before any layer exists.
  */
-import { afterAll, test } from "bun:test";
+import { afterAll, test, type TestOptions } from "bun:test";
 import { Effect, type Layer } from "effect";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
@@ -29,6 +29,23 @@ import { DuckDb, DuckDbLayer, type DuckDbService } from "../duckdb/client.ts";
 import type { DuckDbDylibError } from "../duckdb/errors.ts";
 
 export const DUCKDB_VERSION = "v1.5.5";
+
+/**
+ * Real DuckDB cases open native connections, apply the full DDL, and often
+ * publish FTS indexes. Bun's five-second unit-test default measures shared CI
+ * runner load for this work. Keep the larger limit on `dtest` only, so ordinary
+ * unit tests still fail quickly.
+ */
+export const REAL_DUCKDB_TEST_TIMEOUT_MS = 30_000;
+
+export type DuckDbTest = (
+    label: string,
+    fn: () => void | Promise<unknown>,
+    options?: number | TestOptions,
+) => void;
+
+export const withRealDuckDbTimeout = (baseTest: DuckDbTest): DuckDbTest =>
+    (label, fn, options = REAL_DUCKDB_TEST_TIMEOUT_MS) => baseTest(label, fn, options);
 
 export type TestDylib =
     | { readonly ok: true; readonly path: string }
@@ -337,7 +354,7 @@ export interface DuckDbTestSetup {
      *  dylib is available - registering at module load (not inside a
      *  `beforeAll`) so bun reports a real SKIP status instead of a silent
      *  PASS on a dylib-less box. */
-    readonly dtest: typeof test;
+    readonly dtest: DuckDbTest;
     /** `DuckDbLayer(dylibPath)`, or `null` when no dylib is available. Only
      *  ever consumed through `withDuckDb` below - exposed too for a suite
      *  that needs to `Effect.provide` it directly. */
@@ -395,7 +412,7 @@ export const duckdbTestSetup = async (
     }
 
     const layer = dylibPath !== null ? DuckDbLayer(dylibPath) : null;
-    const dtest = test.skipIf(dylibPath === null);
+    const dtest = withRealDuckDbTimeout(test.skipIf(dylibPath === null));
 
     // Publish the resolved path into the environment.
     //

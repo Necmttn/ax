@@ -8,11 +8,39 @@ import {
     releaseDownloadSentinel,
     decideFtsGate,
     probeFtsCapable,
+    REAL_DUCKDB_TEST_TIMEOUT_MS,
     repoRootFrom,
     requireFtsFromEnv,
     resolveTestDylib,
     vendorDir,
+    withRealDuckDbTimeout,
 } from "./duckdb-dylib.ts";
+
+describe("real DuckDB test timeout", () => {
+    test("adds the real-database limit when a case has no explicit limit", () => {
+        let received: number | object | undefined;
+        const dtest = withRealDuckDbTimeout((_label, _fn, options) => {
+            received = options;
+        });
+
+        dtest("case", () => undefined);
+
+        expect(received).toBe(REAL_DUCKDB_TEST_TIMEOUT_MS);
+    });
+
+    test("preserves an explicit numeric or object limit", () => {
+        const received: Array<number | object | undefined> = [];
+        const dtest = withRealDuckDbTimeout((_label, _fn, options) => {
+            received.push(options);
+        });
+        const options = { timeout: 12_000, retry: 1 };
+
+        dtest("numeric", () => undefined, 15_000);
+        dtest("object", () => undefined, options);
+
+        expect(received).toEqual([15_000, options]);
+    });
+});
 
 describe("resolveTestDylib", () => {
     test("either resolves to a real file on disk or explains why it cannot", async () => {
