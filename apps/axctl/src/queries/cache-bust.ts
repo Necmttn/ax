@@ -9,8 +9,9 @@
  * "cache busts are cheap"; the reason/offender rollups stay unfiltered so
  * another harness starting to stamp the field shows up for free.
  *
- * Corroboration sums the ledger's two independent prices over the rows where
- * both exist - the read-side half of plan Q1's ±25% agreement guard.
+ * Corroboration compares complete Claude transcript cost with the independent
+ * OTLP `claude_code.cost.usage` cost. Both values are grouped at root-session
+ * grain, so one root never repeats its OTLP cost for each cache bust.
  *
  * `fetchCacheLensCandidates` (slice B, #868) is the MINTING-side sibling of
  * `fetchCacheBustCost`: same ledger, but a per-offender rollup shaped for the
@@ -59,10 +60,10 @@ export interface CacheBustCostResult {
         readonly bustCostUsd: number;
     };
     readonly corroboration: {
-        /** busts where both the ingest price and the flat-rate recompute exist */
-        readonly comparableBusts: number;
-        readonly costUsd: number;
-        readonly corroboratedUsd: number;
+        /** root sessions where transcript and OTLP costs both exist */
+        readonly comparableRoots: number;
+        readonly estimatedUsd: number;
+        readonly otlpUsd: number;
     };
 }
 
@@ -72,6 +73,11 @@ export interface CacheBustCostInput {
 }
 
 const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
+
+/** Difference from the independent value. Callers reject a non-positive
+ * independent value before they call this helper. */
+export const relativeCostDelta = (estimatedUsd: number, independentUsd: number): number =>
+    Math.abs(estimatedUsd - independentUsd) / independentUsd;
 
 const ReasonRow = Schema.Struct({
     reason: Schema.String,
@@ -96,9 +102,9 @@ const CoverageRow = Schema.Struct({
 });
 
 const CorroborationRow = Schema.Struct({
-    comparable_busts: NumberFromBigIntColumn,
-    cost_usd: Schema.NullOr(Schema.Number),
-    corroborated_usd: Schema.NullOr(Schema.Number),
+    comparable_roots: NumberFromBigIntColumn,
+    estimated_usd: Schema.NullOr(Schema.Number),
+    otlp_usd: Schema.NullOr(Schema.Number),
 });
 
 const REASONS_SQL = `
@@ -133,19 +139,71 @@ const COVERAGE_SQL = `
     FROM turn_token_usage
     WHERE source LIKE 'claude%' AND ts > ?`;
 
+// Parent/root lineage from `spawned` (parent -> child). This deliberately
+// mirrors run-evidence-event.sql: min(in_id) makes duplicate parents
+// deterministic and the depth cap stops cycles.
+const ROOT_LINEAGE_CTE = `
+    parent_of AS (
+        SELECT out_id AS child, min(in_id) AS parent
+        FROM spawned
+        WHERE in_id IS NOT NULL AND out_id IS NOT NULL AND in_id <> out_id
+        GROUP BY 1
+    ),
+    walk AS (
+        SELECT child, parent, parent AS root, 1 AS depth FROM parent_of
+        UNION ALL
+        SELECT w.child, w.parent, p.parent AS root, w.depth + 1
+        FROM walk w
+        JOIN parent_of p ON p.child = w.root
+        WHERE w.depth < 32
+    ),
+    lineage AS (
+        SELECT child, arg_max(root, depth) AS root
+        FROM walk
+        GROUP BY child
+    )`;
+
 const CORROBORATION_SQL = `
-    SELECT count(*) AS comparable_busts,
-           coalesce(sum(bust_cost_usd), 0) AS cost_usd,
-           coalesce(sum(corroborated_cost_usd), 0) AS corroborated_usd
-    FROM cache_bust_event
-    WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL AND ts > ?`;
+    WITH RECURSIVE
+    ${ROOT_LINEAGE_CTE},
+    bust_roots AS (
+        SELECT DISTINCT coalesce(l.root, cbe.session) AS root_session
+        FROM cache_bust_event cbe
+        LEFT JOIN lineage l ON l.child = cbe.session
+        WHERE cbe.ts > ?
+    ),
+    transcript_cost AS (
+        SELECT coalesce(l.root, ttu.session) AS root_session,
+               sum(ttu.estimated_cost_usd) AS estimated_usd
+        FROM turn_token_usage ttu
+        LEFT JOIN lineage l ON l.child = ttu.session
+        WHERE ttu.source LIKE 'claude%'
+          AND ttu.estimated_cost_usd IS NOT NULL
+          AND coalesce(l.root, ttu.session) IN (SELECT root_session FROM bust_roots)
+        GROUP BY 1
+    ),
+    otlp_cost AS (
+        SELECT session_id AS root_session, sum(value) AS otlp_usd
+        FROM otel_metric_point
+        WHERE harness = 'claude'
+          AND metric = 'claude_code.cost.usage'
+          AND session_id IN (SELECT root_session FROM bust_roots)
+        GROUP BY 1
+    )
+    SELECT count(*) AS comparable_roots,
+           coalesce(sum(tc.estimated_usd), 0) AS estimated_usd,
+           coalesce(sum(oc.otlp_usd), 0) AS otlp_usd
+    FROM bust_roots br
+    JOIN transcript_cost tc ON tc.root_session = br.root_session
+    JOIN otlp_cost oc ON oc.root_session = br.root_session
+    WHERE tc.estimated_usd > 0 AND oc.otlp_usd > 0`;
 
 const EMPTY_RESULT: CacheBustCostResult = {
     reasons: [],
     skills: [],
     agents: [],
     coverage: { totalTurns: 0, bustTurns: 0, totalCacheCreationUsd: 0, bustCostUsd: 0 },
-    corroboration: { comparableBusts: 0, costUsd: 0, corroboratedUsd: 0 },
+    corroboration: { comparableRoots: 0, estimatedUsd: 0, otlpUsd: 0 },
 };
 
 const TableProbeRow = Schema.Struct({ n: NumberFromBigIntColumn });
@@ -195,9 +253,9 @@ export const fetchCacheBustCost = Effect.fn("queries.fetchCacheBustCost")(
                 bustCostUsd: coverage?.bust_cost_usd ?? 0,
             },
             corroboration: {
-                comparableBusts: corroboration?.comparable_busts ?? 0,
-                costUsd: corroboration?.cost_usd ?? 0,
-                corroboratedUsd: corroboration?.corroborated_usd ?? 0,
+                comparableRoots: corroboration?.comparable_roots ?? 0,
+                estimatedUsd: corroboration?.estimated_usd ?? 0,
+                otlpUsd: corroboration?.otlp_usd ?? 0,
             },
         };
         return result;
@@ -221,10 +279,10 @@ export interface CacheLensCandidateRow {
     readonly sessions: number;
     /** sum(bust_cost_usd) over ALL this offender's busts. */
     readonly bustCostUsd: number;
-    /** busts where BOTH prices exist - the corroboration-comparable subset. */
-    readonly comparableBusts: number;
-    readonly comparableBustCostUsd: number;
-    readonly comparableCorroboratedCostUsd: number;
+    /** root sessions where full transcript and OTLP costs both exist. */
+    readonly comparableRoots: number;
+    readonly comparableEstimatedUsd: number;
+    readonly comparableOtlpUsd: number;
     /** reason -> count, unsorted (evaluateCacheLensCandidate picks the dominant one). */
     readonly reasonCounts: ReadonlyArray<{ readonly reason: string; readonly count: number }>;
 }
@@ -235,9 +293,9 @@ const OffenderRollupRow = Schema.Struct({
     busts: NumberFromBigIntColumn,
     sessions: NumberFromBigIntColumn,
     bust_cost_usd: Schema.Number,
-    comparable_busts: NumberFromBigIntColumn,
-    comparable_bust_cost_usd: Schema.Number,
-    comparable_corroborated_cost_usd: Schema.Number,
+    comparable_roots: NumberFromBigIntColumn,
+    comparable_estimated_usd: Schema.Number,
+    comparable_otlp_usd: Schema.Number,
 });
 
 const OffenderReasonRow = Schema.Struct({
@@ -253,22 +311,67 @@ const OffenderReasonRow = Schema.Struct({
 // native attribution dimension would be one more UNION branch, not a new
 // consumer-side code path).
 const OFFENDER_ROLLUP_SQL = `
-    WITH busts AS (
-        SELECT 'skill' AS kind, attribution_skill AS name, bust_cost_usd, corroborated_cost_usd, session, ts
+    WITH RECURSIVE
+    ${ROOT_LINEAGE_CTE},
+    busts AS (
+        SELECT 'skill' AS kind, attribution_skill AS name, bust_cost_usd, session
         FROM cache_bust_event WHERE attribution_skill IS NOT NULL AND ts > ?
         UNION ALL
-        SELECT 'agent' AS kind, attribution_agent AS name, bust_cost_usd, corroborated_cost_usd, session, ts
+        SELECT 'agent' AS kind, attribution_agent AS name, bust_cost_usd, session
         FROM cache_bust_event WHERE attribution_agent IS NOT NULL AND ts > ?
+    ),
+    offender_roots AS (
+        SELECT DISTINCT b.kind, b.name, coalesce(l.root, b.session) AS root_session
+        FROM busts b
+        LEFT JOIN lineage l ON l.child = b.session
+    ),
+    transcript_cost AS (
+        SELECT coalesce(l.root, ttu.session) AS root_session,
+               sum(ttu.estimated_cost_usd) AS estimated_usd
+        FROM turn_token_usage ttu
+        LEFT JOIN lineage l ON l.child = ttu.session
+        WHERE ttu.source LIKE 'claude%'
+          AND ttu.estimated_cost_usd IS NOT NULL
+          AND coalesce(l.root, ttu.session) IN (SELECT root_session FROM offender_roots)
+        GROUP BY 1
+    ),
+    otlp_cost AS (
+        SELECT session_id AS root_session, sum(value) AS otlp_usd
+        FROM otel_metric_point
+        WHERE harness = 'claude'
+          AND metric = 'claude_code.cost.usage'
+          AND session_id IN (SELECT root_session FROM offender_roots)
+        GROUP BY 1
+    ),
+    comparable AS (
+        SELECT r.kind, r.name, r.root_session, tc.estimated_usd, oc.otlp_usd
+        FROM offender_roots r
+        JOIN transcript_cost tc ON tc.root_session = r.root_session
+        JOIN otlp_cost oc ON oc.root_session = r.root_session
+        WHERE tc.estimated_usd > 0 AND oc.otlp_usd > 0
+    ),
+    comparable_rollup AS (
+        SELECT kind, name,
+               count(*) AS comparable_roots,
+               CAST(coalesce(sum(estimated_usd), 0) AS DOUBLE) AS comparable_estimated_usd,
+               CAST(coalesce(sum(otlp_usd), 0) AS DOUBLE) AS comparable_otlp_usd
+        FROM comparable
+        GROUP BY kind, name
+    ),
+    bust_rollup AS (
+        SELECT kind, name,
+               count(*) AS busts,
+               count(DISTINCT session) AS sessions,
+               CAST(coalesce(sum(bust_cost_usd), 0) AS DOUBLE) AS bust_cost_usd
+        FROM busts
+        GROUP BY kind, name
     )
-    SELECT kind, name,
-           count(*) AS busts,
-           count(DISTINCT session) AS sessions,
-           CAST(coalesce(sum(bust_cost_usd), 0) AS DOUBLE) AS bust_cost_usd,
-           count(*) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL) AS comparable_busts,
-           CAST(coalesce(sum(bust_cost_usd) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL), 0) AS DOUBLE) AS comparable_bust_cost_usd,
-           CAST(coalesce(sum(corroborated_cost_usd) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL), 0) AS DOUBLE) AS comparable_corroborated_cost_usd
-    FROM busts
-    GROUP BY kind, name`;
+    SELECT b.kind, b.name, b.busts, b.sessions, b.bust_cost_usd,
+           coalesce(c.comparable_roots, 0) AS comparable_roots,
+           coalesce(c.comparable_estimated_usd, 0) AS comparable_estimated_usd,
+           coalesce(c.comparable_otlp_usd, 0) AS comparable_otlp_usd
+    FROM bust_rollup b
+    LEFT JOIN comparable_rollup c ON c.kind = b.kind AND c.name = b.name`;
 
 const OFFENDER_REASON_SQL = `
     WITH busts AS (
@@ -314,9 +417,9 @@ export const fetchCacheLensCandidates = Effect.fn("queries.fetchCacheLensCandida
             busts: row.busts,
             sessions: row.sessions,
             bustCostUsd: row.bust_cost_usd,
-            comparableBusts: row.comparable_busts,
-            comparableBustCostUsd: row.comparable_bust_cost_usd,
-            comparableCorroboratedCostUsd: row.comparable_corroborated_cost_usd,
+            comparableRoots: row.comparable_roots,
+            comparableEstimatedUsd: row.comparable_estimated_usd,
+            comparableOtlpUsd: row.comparable_otlp_usd,
             reasonCounts: reasonsByKey.get(offenderKey(row.kind, row.name)) ?? [],
         }));
     },

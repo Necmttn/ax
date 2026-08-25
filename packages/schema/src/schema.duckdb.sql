@@ -1291,11 +1291,9 @@ CREATE INDEX IF NOT EXISTS turn_token_usage_model ON turn_token_usage(model_ref,
 -- Derived INSIDE DuckDB by the `cache-bust` SQL model - REBUILDABLE, id ==
 -- turn_token_usage.id (1:1, so the incremental window UPSERTs idempotently).
 -- bust_cost_usd is the ingest-priced estimated_cache_creation_cost_usd of the
--- busted turn (the cost of re-establishing the cache); corroborated_cost_usd
--- is an INDEPENDENT flat-rate recompute (cache_creation_input_tokens x
--- agent_model.cache_creation_per_million_usd - deliberately no 200k tier, no
--- fast multiplier) so the proposal-minting corroboration guard (plan Q1,
--- ±25% agreement) has a second opinion that shares no code with ingest pricing.
+-- busted turn (the cost of re-establishing the cache). Corroboration joins the
+-- full root-session transcript cost with OTLP claude_code.cost.usage at read
+-- time. It must not store a root cost on every bust row.
 CREATE TABLE IF NOT EXISTS cache_bust_event (
     -- id == turn_token_usage.id (1:1)
     id VARCHAR PRIMARY KEY,
@@ -1309,9 +1307,9 @@ CREATE TABLE IF NOT EXISTS cache_bust_event (
     attribution_agent VARCHAR,
     cache_creation_input_tokens BIGINT,
     bust_cost_usd DOUBLE,
-    corroborated_cost_usd DOUBLE,
     ts TIMESTAMP NOT NULL
 );
+ALTER TABLE cache_bust_event DROP COLUMN IF EXISTS corroborated_cost_usd;
 CREATE INDEX IF NOT EXISTS cache_bust_event_ts ON cache_bust_event(ts);
 CREATE INDEX IF NOT EXISTS cache_bust_event_session_seq ON cache_bust_event(session, seq);
 

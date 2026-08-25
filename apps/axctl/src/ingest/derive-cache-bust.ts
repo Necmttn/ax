@@ -4,9 +4,10 @@
  * row whose billing event carried a cache_miss_reason, the substrate for
  * `ax cost cache` (what re-injects your context, and what re-establishing the
  * cache costs). The whole derivation is the cache-bust SQL MODEL
- * (models/cache-bust-event.sql) - filter + agent_model join + independent
- * flat-rate corroboration price, executed inside DuckDB; no rows cross the
- * JS boundary. Incremental by the ingest since-window; id ==
+ * (models/cache-bust-event.sql) - filter + ingest-priced cache-bust cost,
+ * executed inside DuckDB; no rows cross the JS boundary. Query-time root
+ * corroboration uses independent OTLP cost, so it never repeats root cost per
+ * bust. Incremental by the ingest since-window; id ==
  * turn_token_usage.id so re-runs UPSERT idempotently; version-marked cutover
  * wipes + fully re-derives when the model SQL changes.
  */
@@ -22,11 +23,11 @@ export class CacheBustStats extends BaseStageStats.extend<CacheBustStats>("Cache
 
 export const cacheBustStage: StageDef<CacheBustStats, never, CacheWriteError> = {
     meta: StageMeta.make({
-        // Deps: claude writes the only usage rows that carry
-        // cache_miss_reason_type today; pricing writes the agent_model rates
-        // the corroboration column joins.
+        // Claude writes the only usage rows that carry cache_miss_reason_type
+        // today. Root-session OTLP corroboration runs
+        // at query time after the proposal stage dependencies are complete.
         key: "cache-bust",
-        deps: ["claude", "pricing"],
+        deps: ["claude"],
         tags: ["derive"],
         writes: [
             { table: "cache_bust_event", mode: "derive" },

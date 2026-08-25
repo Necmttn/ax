@@ -39,7 +39,7 @@ import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
-import { fetchCacheLensCandidates, type CacheLensCandidateRow } from "../queries/cache-bust.ts";
+import { fetchCacheLensCandidates, relativeCostDelta, type CacheLensCandidateRow } from "../queries/cache-bust.ts";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
 import { fetchWorkflowArcs, type ArcCandidate } from "../queries/workflow-sequences.ts";
 
@@ -451,10 +451,9 @@ export const buildImageContextProposalWrites = (
 // changes from a mint, only a shortlist row.
 //
 // FOUR guards must ALL pass, operator-approved and not to be weakened:
-//   1. Corroboration (±25%) - the ledger's two independent prices (ingest
-//      pricer vs flat-rate recompute) must agree over the offender's
-//      COMPARABLE busts (both prices present). Zero comparable busts never
-//      mints - there is nothing to corroborate against.
+//   1. Corroboration (±25%) - full Claude transcript cost must agree with
+//      independent OTLP claude_code.cost.usage over the offender's comparable
+//      ROOT sessions. Zero comparable roots never mint.
 //   2. Recurrence - busts across >= 2 distinct SESSIONS in the window. Proxy
 //      for ">= 2 ingest windows" - cache_bust_event carries no run id, so a
 //      session count is the closest signal available. NOT a UTC-calendar-day
@@ -498,12 +497,19 @@ export const evaluateCacheLensCandidate = (
     candidate: CacheLensCandidateRow,
     sinceDays: number,
 ): CacheLensEvaluation | null => {
-    // Guard 1: corroboration. Zero comparable busts (or a zero corroborated
-    // denominator) never mints - there is nothing to agree against.
-    if (candidate.comparableBusts <= 0 || candidate.comparableCorroboratedCostUsd <= 0) return null;
-    const corroborationDeltaPct =
-        Math.abs(candidate.comparableBustCostUsd - candidate.comparableCorroboratedCostUsd) /
-        candidate.comparableCorroboratedCostUsd;
+    // Guard 1: corroboration. Both root totals must be finite and positive.
+    // A zero or non-finite independent denominator cannot define a relative delta.
+    if (
+        candidate.comparableRoots <= 0
+        || !Number.isFinite(candidate.comparableEstimatedUsd)
+        || candidate.comparableEstimatedUsd <= 0
+        || !Number.isFinite(candidate.comparableOtlpUsd)
+        || candidate.comparableOtlpUsd <= 0
+    ) return null;
+    const corroborationDeltaPct = relativeCostDelta(
+        candidate.comparableEstimatedUsd,
+        candidate.comparableOtlpUsd,
+    );
     if (corroborationDeltaPct > CACHE_LENS_CORROBORATION_TOLERANCE) return null;
 
     // Guard 2: recurrence.
@@ -596,7 +602,8 @@ export const deriveCacheLensProposalRows = (
             hypothesis:
                 `${candidate.busts} cache busts across ${candidate.sessions} sessions in the last ` +
                 `${opts.sinceDays}d attributed to ${candidate.kind} "${candidate.name}" ` +
-                `(~$${weeklyStr}/wk at the current rate). The two price estimates differ by ${deltaStr}% ` +
+                `(~$${weeklyStr}/wk at the current rate). Transcript and OTLP cost differ by ${deltaStr}% ` +
+                `over ${candidate.comparableRoots} comparable root sessions ` +
                 `(${evaluation.confidence} confidence). Dominant cause: ${evaluation.dominantReason} ` +
                 `(${dominantPctStr}% of busts). Trim context reloads / large tool output for this ` +
                 `${candidate.kind} - see \`ax cost cache\`.`,
@@ -617,6 +624,9 @@ export const deriveCacheLensProposalRows = (
                 sessions: candidate.sessions,
                 weeklyCostUsd: evaluation.weeklyCostUsd,
                 corroborationDeltaPct: evaluation.corroborationDeltaPct,
+                comparableRoots: candidate.comparableRoots,
+                comparableEstimatedUsd: candidate.comparableEstimatedUsd,
+                comparableOtlpUsd: candidate.comparableOtlpUsd,
                 reasonMix: candidate.reasonCounts,
                 confidence: evaluation.confidence,
             },
@@ -1183,10 +1193,9 @@ export const proposalsStage: StageDef<
     CacheWriteError | CacheReadError | JudgmentError
 > = {
     meta: StageMeta.make({
-        // "cache-bust" (not just "closure"): cache-lens candidates read
-        // cache_bust_event, populated by the cache-bust stage THIS run - the
-        // published snapshot doesn't have it, so proposals must run after it.
-        key: "proposals", deps: ["closure", "cache-bust"], tags: ["derive"],
+        // Cache-lens candidates use THIS run's ledger, OTLP metrics, and
+        // spawned lineage through the live write service.
+        key: "proposals", deps: ["closure", "cache-bust", "otel-spool", "spawned"], tags: ["derive"],
         writes: [{ table: "cites_evidence", mode: "derive" }],
     }),
     run: (ctx: IngestContext, write: CacheWriteService) =>

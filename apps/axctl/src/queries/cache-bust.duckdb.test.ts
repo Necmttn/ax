@@ -3,9 +3,9 @@
  * REAL published DuckDB snapshot.
  *
  * Pins what a mocked seam cannot see:
- *  1. The model materializes ONLY reason-carrying rows, priced twice (ingest
- *     price passed through; corroboration = flat rate off `agent_model`, null
- *     when the model_ref does not resolve to a rate).
+ *  1. The model materializes ONLY reason-carrying rows with the ingest cache
+ *     cost. Query-time corroboration compares full root transcript cost with
+ *     independent OTLP cost once per root.
  *  2. The read window actually FILTERS (one bust is seeded 60 days back).
  *  3. Coverage is claude-only (a codex usage row must not inflate the
  *     denominator) while the reason rollup itself is provider-agnostic.
@@ -28,6 +28,8 @@ const daysAgo = (d: number): Date => new Date(Date.now() - d * 24 * 60 * 60 * 10
 
 const SESSION_A = "019e2531-b552-7b53-a029-c780adbb6560";
 const SESSION_B = "019e2531-ffff-7b53-a029-c780adbb6561";
+const SESSION_C = "019e2531-aaaa-7b53-a029-c780adbb6562";
+const SESSION_D = "019e2531-bbbb-7b53-a029-c780adbb6563";
 
 interface UsageSeed {
     readonly id: string;
@@ -37,7 +39,7 @@ interface UsageSeed {
     readonly source: string;
     readonly cacheCreationTokens: bigint;
     readonly cacheCreationUsd: number | null;
-    readonly modelRef?: string | null;
+    readonly estimatedCostUsd?: number;
     readonly skill?: string | null;
     readonly agent?: string | null;
     readonly cacheMiss?: string | null;
@@ -50,7 +52,7 @@ const usageRow = (seed: UsageSeed) => ({
     seq: seed.seq,
     source: seed.source,
     model: "claude-opus-4-8",
-    model_ref: seed.modelRef ?? null,
+    model_ref: null,
     prompt_tokens: 1000n,
     completion_tokens: 100n,
     cache_creation_input_tokens: seed.cacheCreationTokens,
@@ -58,7 +60,7 @@ const usageRow = (seed: UsageSeed) => ({
     fresh_input_tokens: 1000n,
     estimated_tokens: 1100n,
     estimated_cache_creation_cost_usd: seed.cacheCreationUsd,
-    estimated_cost_usd: (seed.cacheCreationUsd ?? 0) + 1,
+    estimated_cost_usd: seed.estimatedCostUsd ?? (seed.cacheCreationUsd ?? 0) + 1,
     usage_source: "claude_transcript.message_usage",
     usage_quality: "provider_turn",
     attribution_skill: seed.skill ?? null,
@@ -68,23 +70,30 @@ const usageRow = (seed: UsageSeed) => ({
     ts: seed.ts,
 });
 
+const otlpCostRow = (id: string, sessionId: string, value: number) => ({
+    id,
+    harness: "claude",
+    metric: "claude_code.cost.usage",
+    value,
+    unit: "USD",
+    session_id: sessionId,
+    model: null,
+    skill_name: null,
+    agent_name: null,
+    attrs: null,
+    observed_at: hoursAgo(1),
+});
+
 const seedFixture = (write: CacheWriteService) =>
     Effect.gen(function* () {
-        // A priced model row: $18.75 per million cache-creation tokens.
-        yield* write.put("agent_model", {
-            id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
-            display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
-        });
         yield* write.putMany("turn_token_usage", [
-            // Bust with skill attribution + resolvable rate: corroborated =
-            // 1,000,000 * 18.75 / 1e6 = $18.75 vs ingest's $20 (within 25%).
+            // This root has a current bust, a normal usage row, and an older
+            // usage row. Root corroboration includes all three costs.
             usageRow({
                 id: "ttu:1", session: SESSION_A, seq: 1, ts: hoursAgo(2), source: "claude",
-                cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20,
                 skill: "superpowers:subagent-driven-development", cacheMiss: "messages_changed",
             }),
-            // Bust without a model_ref: corroborated stays null, excluded
-            // from the corroboration sums but present in the reason rollup.
             usageRow({
                 id: "ttu:2", session: SESSION_B, seq: 1, ts: hoursAgo(3), source: "claude-subagent",
                 cacheCreationTokens: 200_000n, cacheCreationUsd: 4,
@@ -98,7 +107,7 @@ const seedFixture = (write: CacheWriteService) =>
             // OUTSIDE the 7-day read window - proves the bound filters.
             usageRow({
                 id: "ttu:old", session: SESSION_A, seq: 3, ts: daysAgo(60), source: "claude",
-                cacheCreationTokens: 100_000n, cacheCreationUsd: 2, modelRef: "am:opus",
+                cacheCreationTokens: 100_000n, cacheCreationUsd: 2,
                 cacheMiss: "messages_changed",
             }),
             // A codex row - no reason today, must not enter claude coverage.
@@ -106,6 +115,10 @@ const seedFixture = (write: CacheWriteService) =>
                 id: "ttu:codex", session: SESSION_B, seq: 4, ts: hoursAgo(1), source: "codex",
                 cacheCreationTokens: 300_000n, cacheCreationUsd: 6,
             }),
+        ]);
+        yield* write.putMany("otel_metric_point", [
+            otlpCostRow("otel:a", SESSION_A, 35),
+            otlpCostRow("otel:b", SESSION_B, 5),
         ]);
     });
 
@@ -197,10 +210,10 @@ describe("cache-bust model + fetchCacheBustCost over a published snapshot", () =
             bustCostUsd: 24,
         });
 
-        // Corroboration only sums the bust whose model_ref resolves a rate.
-        expect(week.corroboration.comparableBusts).toBe(1);
-        expect(week.corroboration.costUsd).toBe(20);
-        expect(week.corroboration.corroboratedUsd).toBeCloseTo(18.75, 10);
+        // Both current-bust roots have independent OTLP cost. The first root
+        // also includes its 60-day transcript row because root cost is whole
+        // session cost, not a cache-bust window subtotal.
+        expect(week.corroboration).toEqual({ comparableRoots: 2, estimatedUsd: 40, otlpUsd: 40 });
 
         // The wider window picks up the 60-day-old bust.
         expect(quarter.reasons[0]).toEqual({
@@ -211,36 +224,41 @@ describe("cache-bust model + fetchCacheBustCost over a published snapshot", () =
 });
 
 describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", () => {
-    dtest("aggregates busts per skill/agent offender with recurrence + corroboration fields", async () => {
+    dtest("aggregates each nested root once and excludes roots without OTLP cost", async () => {
         const dir = tempDir("cache-lens-candidates");
         const fixture = await runWithPlatform(
             publishCacheFixture(dir, dylibPath, (write) =>
                 Effect.gen(function* () {
-                    yield* write.put("agent_model", {
-                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
-                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
-                    });
+                    yield* write.putMany("spawned", [
+                        { id: "spawn:a-b", in_id: SESSION_A, out_id: SESSION_B },
+                        { id: "spawn:b-c", in_id: SESSION_B, out_id: SESSION_C },
+                    ]);
                     yield* write.putMany("turn_token_usage", [
-                        // Same skill, two busts on two distinct sessions -> the
-                        // recurrence guard's proxy, both priced twice.
+                        // The two busts are children of SESSION_A. Their root
+                        // transcript and OTLP costs must count once, not twice.
                         usageRow({
-                            id: "ttu:d1", session: SESSION_A, seq: 1, ts: hoursAgo(2), source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            id: "ttu:d1", session: SESSION_B, seq: 1, ts: hoursAgo(2), source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, estimatedCostUsd: 25,
                             skill: "design-curator", cacheMiss: "messages_changed",
                         }),
                         usageRow({
-                            id: "ttu:d2", session: SESSION_B, seq: 1, ts: hoursAgo(26), source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            id: "ttu:d2", session: SESSION_C, seq: 1, ts: hoursAgo(26), source: "claude-subagent",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, estimatedCostUsd: 50,
                             skill: "design-curator", cacheMiss: "messages_changed",
                         }),
-                        // A single agent-attributed bust, no resolvable rate - excluded
-                        // from the comparable subset (corroboration has nothing to check).
                         usageRow({
-                            id: "ttu:a1", session: SESSION_A, seq: 2, ts: hoursAgo(1), source: "claude-subagent",
-                            cacheCreationTokens: 200_000n, cacheCreationUsd: 4,
-                            agent: "review-bot", cacheMiss: "previous_message_not_found",
+                            id: "ttu:root", session: SESSION_A, seq: 1, ts: daysAgo(20), source: "claude",
+                            cacheCreationTokens: 0n, cacheCreationUsd: null, estimatedCostUsd: 25,
+                        }),
+                        // SESSION_D has a bust, but no OTLP row. It stays in
+                        // materiality and recurrence data, never corroboration.
+                        usageRow({
+                            id: "ttu:a1", session: SESSION_D, seq: 1, ts: hoursAgo(1), source: "claude",
+                            cacheCreationTokens: 200_000n, cacheCreationUsd: 10, estimatedCostUsd: 10,
+                            skill: "design-curator", cacheMiss: "previous_message_not_found",
                         }),
                     ]);
+                    yield* write.put("otel_metric_point", otlpCostRow("otel:root", SESSION_A, 100));
                     yield* runCacheBustModels(write, 30);
                 }),
             ),
@@ -256,18 +274,14 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
 
         const skill = candidates.find((c) => c.kind === "skill" && c.name === "design-curator");
         expect(skill).toMatchObject({
-            kind: "skill", name: "design-curator", busts: 2, sessions: 2,
-            bustCostUsd: 40, comparableBusts: 2, comparableBustCostUsd: 40,
+            kind: "skill", name: "design-curator", busts: 3, sessions: 3,
+            bustCostUsd: 50, comparableRoots: 1, comparableEstimatedUsd: 100,
         });
-        expect(skill?.comparableCorroboratedCostUsd).toBeCloseTo(37.5, 5);
-        expect(skill?.reasonCounts).toEqual([{ reason: "messages_changed", count: 2 }]);
-
-        const agent = candidates.find((c) => c.kind === "agent" && c.name === "review-bot");
-        expect(agent).toMatchObject({
-            kind: "agent", name: "review-bot", busts: 1, sessions: 1,
-            bustCostUsd: 4, comparableBusts: 0, comparableBustCostUsd: 0, comparableCorroboratedCostUsd: 0,
-        });
-        expect(agent?.reasonCounts).toEqual([{ reason: "previous_message_not_found", count: 1 }]);
+        expect(skill?.comparableOtlpUsd).toBe(100);
+        expect(skill?.reasonCounts).toEqual(expect.arrayContaining([
+            { reason: "messages_changed", count: 2 },
+            { reason: "previous_message_not_found", count: 1 },
+        ]));
     });
 
     // Regression (#943): the recurrence guard used to count DISTINCT UTC
@@ -285,22 +299,22 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
         const fixture = await runWithPlatform(
             publishCacheFixture(dir, dylibPath, (write) =>
                 Effect.gen(function* () {
-                    yield* write.put("agent_model", {
-                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
-                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
-                    });
                     yield* write.putMany("turn_token_usage", [
                         usageRow({
                             id: "ttu:same-date-1", session: SESSION_A, seq: 1, ts: utcNoonToday, source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20,
                             skill: "same-utc-date-skill", cacheMiss: "messages_changed",
                         }),
                         usageRow({
                             id: "ttu:same-date-2", session: SESSION_B, seq: 1,
                             ts: new Date(utcNoonToday.getTime() + 2 * 60 * 60 * 1000), source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20,
                             skill: "same-utc-date-skill", cacheMiss: "messages_changed",
                         }),
+                    ]);
+                    yield* write.putMany("otel_metric_point", [
+                        otlpCostRow("otel:same-date-a", SESSION_A, 21),
+                        otlpCostRow("otel:same-date-b", SESSION_B, 21),
                     ]);
                     yield* runCacheBustModels(write, 30);
                 }),
@@ -336,22 +350,19 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
         const fixture = await runWithPlatform(
             publishCacheFixture(dir, dylibPath, (write) =>
                 Effect.gen(function* () {
-                    yield* write.put("agent_model", {
-                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
-                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
-                    });
                     yield* write.putMany("turn_token_usage", [
                         usageRow({
                             id: "ttu:two-dates-1", session: SESSION_A, seq: 1, ts: utcNoonYesterday, source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20,
                             skill: "two-utc-dates-skill", cacheMiss: "messages_changed",
                         }),
                         usageRow({
                             id: "ttu:two-dates-2", session: SESSION_A, seq: 2, ts: utcNoonToday, source: "claude",
-                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20,
                             skill: "two-utc-dates-skill", cacheMiss: "messages_changed",
                         }),
                     ]);
+                    yield* write.put("otel_metric_point", otlpCostRow("otel:two-dates", SESSION_A, 42));
                     yield* runCacheBustModels(write, 30);
                 }),
             ),
@@ -365,10 +376,10 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
             }).pipe(Effect.provide(layer)),
         );
         const candidate = candidates.find((c) => c.kind === "skill" && c.name === "two-utc-dates-skill");
-        // Corroboration passes (comparableBusts=2, ingest and flat-rate agree)
+        // Corroboration passes (one comparable root, exact OTLP agreement)
         // and materiality passes ($40 over 7d), so recurrence is the ONLY
         // guard standing between this candidate and a mint.
-        expect(candidate?.comparableBusts).toBe(2);
+        expect(candidate?.comparableRoots).toBe(1);
         expect(candidate?.sessions).toBe(1);
         expect(candidate ? evaluateCacheLensCandidate(candidate, 7) : null).toBeNull();
     });

@@ -139,13 +139,10 @@ describe("drift pins", () => {
         expect(cacheBustModelVersion()).toBe(cb);
     });
 
-    test("the cache-bust model corroborates with the flat rate, never the ingest pricer's tiers", () => {
-        // The corroboration column exists to be INDEPENDENT of ingest pricing
-        // (plan Q1's ±25% guard). Reintroducing the tiered/fast-multiplier
-        // machinery here would make the guard compare a number with itself.
-        expect(CACHE_BUST_EVENT_MODEL.sql).toContain("cache_creation_per_million_usd");
-        expect(CACHE_BUST_EVENT_MODEL.sql).not.toMatch(/above_200k|fast_multiplier/);
-        // The direct price stays the ingest pricer's number.
+    test("the cache-bust model stores only the ingest price", () => {
+        // Independent OTLP corroboration happens at root-session read time.
+        // A model-side rate recompute would make the guard circular again.
+        expect(CACHE_BUST_EVENT_MODEL.sql).not.toMatch(/agent_model|cache_creation_per_million_usd|corroborated_cost_usd/);
         expect(CACHE_BUST_EVENT_MODEL.sql).toContain("estimated_cache_creation_cost_usd");
     });
 
