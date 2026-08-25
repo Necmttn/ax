@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.3](https://github.com/Necmttn/ax/compare/v0.43.2...v0.43.3) (2026-08-25)
+
+
+### Tests
+
+* **ci:** run gated DuckDB smoke cases ([#1075](https://github.com/Necmttn/ax/issues/1075)) ([fbe9967](https://github.com/Necmttn/ax/commit/fbe996786bae86e073ba620e77f16e35a7b65084))
+
 ## [0.43.2](https://github.com/Necmttn/ax/compare/v0.43.1...v0.43.2) (2026-08-25)
 
 
