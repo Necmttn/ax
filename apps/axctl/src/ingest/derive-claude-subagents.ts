@@ -7,7 +7,7 @@ import { edgeRowId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { isNotFound, orAbsent } from "@ax/lib/shared/fs-error";
+import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -59,26 +59,29 @@ const stringField = (row: Record<string, unknown>, key: string): string | null =
  */
 const discover = (
     transcriptsDir: string,
-): Effect.Effect<SubagentManifest[], never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<SubagentManifest[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const out: SubagentManifest[] = [];
-        // Original tolerance: any readdir failure (missing/unreadable) -> skip.
+        // A missing optional root, or a project/session dir with no `subagents/`
+        // subdir (the common case - most sessions spawn none), is NotFound and
+        // stays non-fatal. Every other PlatformError (the root is a regular
+        // file, a permission fault) propagates to the stage boundary (#796).
         const projectDirs = yield* fs
             .readDirectory(transcriptsDir)
-            .pipe(orAbsent<ReadonlyArray<string>>([]));
+            .pipe(skipNotFound<ReadonlyArray<string>>([]));
         for (const projectDir of projectDirs) {
             const fullProject = path.join(transcriptsDir, projectDir);
             const entries = yield* fs
                 .readDirectory(fullProject)
-                .pipe(orAbsent<ReadonlyArray<string>>([]));
+                .pipe(skipNotFound<ReadonlyArray<string>>([]));
             for (const entry of entries) {
                 if (entry.endsWith(".jsonl")) continue;
                 const subagentDir = path.join(fullProject, entry, "subagents");
                 const agentFiles = yield* fs
                     .readDirectory(subagentDir)
-                    .pipe(orAbsent<ReadonlyArray<string>>([]));
+                    .pipe(skipNotFound<ReadonlyArray<string>>([]));
                 for (const agentFile of agentFiles) {
                     if (!agentFile.endsWith(".jsonl")) continue;
                     if (!agentFile.startsWith("agent-")) continue;
@@ -91,14 +94,18 @@ const discover = (
         return out;
     });
 
+/** Exposes {@link discover}'s PlatformError policy for direct, DB-free testing. */
+export const __testDiscoverClaudeSubagents = discover;
+
 const parseManifest = (
     filePath: string,
     projectDir: string,
-): Effect.Effect<SubagentManifest | null, never, FileSystem.FileSystem> =>
+): Effect.Effect<SubagentManifest | null, PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        // Original tolerance: any read failure -> null (file vanished/unreadable).
-        const text = yield* fs.readFileString(filePath).pipe(orAbsent<string | null>(null));
+        // The file vanishing between listing and read (NotFound) -> null;
+        // every other PlatformError propagates (#796).
+        const text = yield* fs.readFileString(filePath).pipe(skipNotFound<string | null>(null));
         if (text === null) return null;
         return buildManifest(text, filePath, projectDir);
     });
@@ -130,16 +137,18 @@ const buildManifest = (
 }
 
 /**
- * Attempt to read `agent-<id>.meta.json` (sibling of the `.jsonl` file).
- * Returns partial/empty object on any failure – callers treat every field optional.
+ * Attempt to read `agent-<id>.meta.json` (sibling of the `.jsonl` file). A
+ * missing sidecar (NotFound - most agents write no meta file) returns a
+ * partial/empty object, since callers treat every field optional; every
+ * other PlatformError propagates (#796).
  */
 const readSubagentMeta = (
     jsonlPath: string,
-): Effect.Effect<SubagentMeta, never, FileSystem.FileSystem> =>
+): Effect.Effect<SubagentMeta, PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const metaPath = jsonlPath.replace(/\.jsonl$/, ".meta.json");
-        const text = yield* fs.readFileString(metaPath).pipe(orAbsent<string | null>(null));
+        const text = yield* fs.readFileString(metaPath).pipe(skipNotFound<string | null>(null));
         if (text === null) return {};
         const parsed = decodeJsonOrNull(text);
         if (!isRecord(parsed)) return {};
@@ -260,13 +269,15 @@ export const deriveClaudeSubagents = (
             // its session/turns/tool_calls/spawned edge persist, so skipping is
             // output-equivalent. stat is cheap relative to the full re-parse +
             // DB writes below; we reuse it for the watermark write at the end.
-            // Original tolerance: bare stat (FOLLOWS) with any error -> null.
+            // The file vanishing between discovery and this stat (NotFound)
+            // -> null (no watermark write this run); every other PlatformError
+            // propagates (#796).
             const fileStat = yield* fs.stat(m.file).pipe(
                 Effect.map((info) => ({
                     mtimeMs: Option.getOrElse(info.mtime, () => new Date(0)).getTime(),
                     size: Number(info.size),
                 })),
-                orAbsent<{ mtimeMs: number; size: number } | null>(null),
+                skipNotFound<{ mtimeMs: number; size: number } | null>(null),
             );
             if (fileStat && wm.unchanged(m.file, fileStat.mtimeMs, fileStat.size)) {
                 skippedUnchanged += 1;

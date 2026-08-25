@@ -89,4 +89,30 @@ describe("walkJsonlFiles", () => {
         expect(await runStrict(missing, 0)).toEqual([]);
         expect(await runLenient(missing, 0)).toEqual([]);
     });
+
+    // #796: a regular file used as the configured root is not "absent" - it's
+    // a real misconfiguration, and the lenient walker used to swallow every
+    // filesystem error into `[]`, indistinguishable from "no sessions yet".
+    // Both walkers must surface a typed failure instead of a silent zero.
+    test("a regular file root propagates a typed failure for both walkers", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-walk-jsonl-regular-root-"));
+        const root = join(base, "not-a-directory.jsonl");
+        await writeFile(root, "{}\n");
+
+        const strictExit = await Effect.runPromiseExit(
+            walkJsonlFilesStrict(root, 0).pipe(Effect.provide(BunFsLayer)),
+        );
+        const lenientExit = await Effect.runPromiseExit(
+            walkJsonlFilesLenient(root, 0).pipe(Effect.provide(BunFsLayer)),
+        );
+
+        expect(strictExit._tag).toBe("Failure");
+        expect(lenientExit._tag).toBe("Failure");
+
+        // Not the vanished-entry/missing-root case - that one recovers to [].
+        const lenientError = await Effect.runPromise(
+            Effect.flip(walkJsonlFilesLenient(root, 0).pipe(Effect.provide(BunFsLayer))),
+        );
+        expect(lenientError.reason._tag).not.toBe("NotFound");
+    });
 });
