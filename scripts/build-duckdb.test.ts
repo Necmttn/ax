@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "yaml";
 
 const binTest = gatedTest({
     reason: "AX_DUCKDB_BIN is not set (no built duckdb binary to exercise)",
@@ -196,4 +197,222 @@ chmod +x "$2/build/release/duckdb"
             }
         },
     );
+});
+
+type WorkflowStep = {
+    id?: string;
+    name?: string;
+    run?: string;
+    uses?: string;
+    if?: string;
+    env?: Record<string, string>;
+    with?: Record<string, string>;
+};
+
+describe("provision-duckdb composite action restores/builds/smokes/saves the DuckDB build", () => {
+    const actionPath = join(repoRoot, ".github/actions/provision-duckdb/action.yml");
+    const action = parse(readFileSync(actionPath, "utf8")) as {
+        runs: { using: string; steps: WorkflowStep[] };
+        outputs?: Record<string, { value: string }>;
+    };
+    const steps = action.runs.steps;
+
+    const restoreStep = steps.find((s) => s.uses?.startsWith("actions/cache/restore"));
+    const saveStep = steps.find((s) => s.uses?.startsWith("actions/cache/save"));
+    const buildStep = steps.find((s) => (s.run ?? "").trim() === "scripts/build-duckdb.sh");
+    const smokeStep = steps.find((s) =>
+        (s.run ?? "").includes("bun scripts/smoke-duckdb-dylib.ts"),
+    );
+
+    test("is a composite action with the DuckDB steps to guard", () => {
+        // A parse/lookup mistake here would make every case below vacuously
+        // true - the same trap check-ci-duckdb.test.ts guards against.
+        expect(action.runs.using).toBe("composite");
+        expect(restoreStep).toBeDefined();
+        expect(saveStep).toBeDefined();
+        expect(buildStep).toBeDefined();
+        expect(smokeStep).toBeDefined();
+    });
+
+    test("the cache is scoped per platform and keyed on every DuckDB build and compatibility input", () => {
+        expect(restoreStep?.with?.path).toBe("dist/duckdb");
+        // The restore/save `key:` reference the computed value by step
+        // output, so the hashFiles inputs live in the step that computes it.
+        const keyStep = steps.find(
+            (s) => (s.run ?? "").includes("GITHUB_OUTPUT") && (s.run ?? "").includes("hashFiles"),
+        );
+        expect(keyStep?.id).toBeDefined();
+        expect(restoreStep?.with?.key).toContain(`steps.${keyStep?.id}.outputs`);
+
+        const key = keyStep?.run ?? "";
+        expect(key).toContain("runner.os");
+        expect(key).toContain("runner.arch");
+        expect(key).toContain("scripts/build-duckdb.sh");
+        expect(key).toContain("scripts/duckdb/extension_config_local.cmake");
+        expect(key).toContain("scripts/smoke-duckdb-dylib.ts");
+        expect(key).toContain(".github/actions/provision-duckdb/action.yml");
+        expect(key).toContain("@duckdb/node-api");
+        expect(key).toContain("@duckdb/node-bindings");
+        // Read only the two exact catalog versions. Hashing package.json or
+        // bun.lock would rebuild native DuckDB after unrelated dependency or
+        // release-version changes.
+        expect(key).toContain('Bun.file("package.json").json()');
+        expect(key).not.toContain("bun.lock");
+    });
+
+    test("save uses the identical key and path as restore", () => {
+        expect(saveStep?.with?.key).toBe(restoreStep?.with?.key);
+        expect(saveStep?.with?.path).toBe("dist/duckdb");
+    });
+
+    test("restores the cache, and builds on a miss, before the smoke step", () => {
+        const restoreIdx = steps.indexOf(restoreStep!);
+        const buildIdx = steps.indexOf(buildStep!);
+        const smokeIdx = steps.indexOf(smokeStep!);
+        expect(restoreIdx).toBeGreaterThanOrEqual(0);
+        expect(buildIdx).toBeGreaterThan(restoreIdx);
+        expect(buildIdx).toBeLessThan(smokeIdx);
+    });
+
+    test("only builds DuckDB from scratch on a cache miss", () => {
+        expect(buildStep?.if).toContain("cache-hit");
+        expect(buildStep?.if).toContain("!=");
+    });
+
+    test("passes STATIC_LIBCPP on Linux only, not on the macOS legs", () => {
+        const staticLibcpp = String(buildStep?.env?.STATIC_LIBCPP ?? "");
+        expect(staticLibcpp).toContain("runner.os == 'Linux'");
+        expect(staticLibcpp).toContain("'1'");
+    });
+
+    test("smokes both the restored shell and the correct dylib unconditionally - restore or build, never skipped on a hit", () => {
+        expect(smokeStep?.if).toBeUndefined();
+        expect(smokeStep?.run).toContain("chmod +x dist/duckdb/duckdb");
+        expect(smokeStep?.run).toContain("build-duckdb.sh --smoke-only");
+        expect(smokeStep?.run).toContain("smoke-duckdb-dylib.ts");
+    });
+
+    test("resolves the platform-specific library rather than hardcoding one extension", () => {
+        const fullText = readFileSync(actionPath, "utf8");
+        expect(fullText).toContain("libduckdb.dylib");
+        expect(fullText).toContain("libduckdb.so");
+        expect(smokeStep?.run).toMatch(/libduckdb\.(dylib|so)|duckdb-lib/);
+    });
+
+    test("saves only after the smoke passes, and never on a cache hit", () => {
+        const smokeIdx = steps.indexOf(smokeStep!);
+        const saveIdx = steps.indexOf(saveStep!);
+        expect(saveIdx).toBeGreaterThan(smokeIdx);
+        expect(saveStep?.if).toContain("cache-hit");
+        expect(saveStep?.if).toContain("!=");
+    });
+
+    test("records a provisioning timing receipt via a cross-step start value, labeled by the caller", () => {
+        const timerStep = steps.find(
+            (s) => (s.run ?? "").includes("GITHUB_OUTPUT") && (s.run ?? "").includes("date +%s"),
+        );
+        expect(timerStep?.id).toBeDefined();
+
+        const summaryStep = steps.find((s) => (s.run ?? "").includes("GITHUB_STEP_SUMMARY"));
+        expect(summaryStep).toBeDefined();
+        expect(summaryStep?.run).toContain(`steps.${timerStep?.id}.outputs`);
+        expect(summaryStep?.run).toContain("cache-hit");
+        expect(summaryStep?.run).toContain("inputs.label");
+        expect(summaryStep?.run).toContain('echo "$receipt"');
+        expect(steps.indexOf(summaryStep!)).toBeGreaterThan(steps.indexOf(smokeStep!));
+    });
+
+    test("exposes cache-hit as an output for callers to key logic off", () => {
+        expect(action.outputs?.["cache-hit"]?.value ?? "").toContain("duckdb-restore.outputs.cache-hit");
+    });
+});
+
+describe("release-please.yml: a trusted default-branch prime primes the same cache release tags restore from", () => {
+    const workflowPath = join(repoRoot, ".github/workflows/release-please.yml");
+    const workflow = parse(readFileSync(workflowPath, "utf8")) as {
+        jobs: Record<
+            string,
+            {
+                needs?: string | string[];
+                if?: string;
+                "timeout-minutes"?: number;
+                outputs?: Record<string, string>;
+                strategy?: { matrix?: { include?: Array<{ runner: string; artifact: string }> } };
+                steps?: WorkflowStep[];
+            }
+        >;
+    };
+    const releasePleaseJob = workflow.jobs["release-please"];
+    const primeJob = workflow.jobs["prime-duckdb-cache"];
+    const buildJob = workflow.jobs["build-artifacts"];
+    const publishJob = workflow.jobs["publish-artifacts"];
+    const provisionUses = "./.github/actions/provision-duckdb";
+
+    test("build-artifacts and prime-duckdb-cache both exist and invoke the identical composite action path", () => {
+        // Cache-key identity between the two jobs comes from literally calling
+        // the same action file, not from two hand-copied formulas that could
+        // drift apart - this is the structural guarantee that a key the prime
+        // job saves is the exact key a release tag will look up.
+        expect(buildJob).toBeDefined();
+        expect(primeJob).toBeDefined();
+        const buildProvisionStep = buildJob?.steps?.find((s) => s.uses === provisionUses);
+        const primeProvisionStep = primeJob?.steps?.find((s) => s.uses === provisionUses);
+        expect(buildProvisionStep).toBeDefined();
+        expect(primeProvisionStep).toBeDefined();
+    });
+
+    test("build-artifacts carries 90 minutes of timeout headroom above recent 12m-33m cold builds", () => {
+        expect(buildJob?.["timeout-minutes"]).toBe(90);
+    });
+
+    test("build-artifacts restores/builds via the composite action before the CLI binary build", () => {
+        const steps = buildJob?.steps ?? [];
+        const provisionIdx = steps.findIndex((s) => s.uses === provisionUses);
+        const buildAxctlIdx = steps.findIndex((s) => (s.run ?? "").includes("scripts/build-axctl.ts"));
+        expect(provisionIdx).toBeGreaterThanOrEqual(0);
+        expect(buildAxctlIdx).toBeGreaterThan(provisionIdx);
+    });
+
+    test("prime-duckdb-cache is gated on release-please's own releases_created output, not guessed from the event", () => {
+        expect(primeJob?.needs).toBe("release-please");
+        expect(primeJob?.if ?? "").toContain("needs.release-please.outputs.releases_created");
+        expect(primeJob?.if ?? "").toContain("== 'true'");
+        // A typo'd output name here would leave the condition permanently
+        // false and the prime job would silently never fire - pin it back to
+        // release-please's actual output wiring.
+        expect(releasePleaseJob?.outputs?.releases_created ?? "").toContain(
+            "steps.release.outputs.releases_created",
+        );
+    });
+
+    test("prime-duckdb-cache's matrix mirrors build-artifacts' matrix runners exactly, so it seeds the same (os, arch) cache keys build-artifacts will look up", () => {
+        const buildRunners = (buildJob?.strategy?.matrix?.include ?? []).map((m) => m.runner).sort();
+        const primeRunners = (primeJob?.strategy?.matrix?.include ?? []).map((m) => m.runner).sort();
+        expect(buildRunners.length).toBeGreaterThan(0);
+        expect(primeRunners).toEqual(buildRunners);
+    });
+
+    test("prime-duckdb-cache never publishes release artifacts - no CLI build, packaging, upload, or gh release calls", () => {
+        const primeText = JSON.stringify(primeJob?.steps ?? []);
+        expect(primeText).not.toContain("build-axctl.ts");
+        expect(primeText).not.toContain("upload-artifact");
+        expect(primeText).not.toContain("gh release");
+        expect(primeText).not.toContain("tar -czf");
+    });
+
+    test("prime-duckdb-cache installs workspace dependencies before the dynamic library smoke", () => {
+        const steps = primeJob?.steps ?? [];
+        const installIdx = steps.findIndex(
+            (s) => (s.run ?? "").trim() === "bun install --frozen-lockfile",
+        );
+        const provisionIdx = steps.findIndex((s) => s.uses === provisionUses);
+        expect(installIdx).toBeGreaterThanOrEqual(0);
+        expect(provisionIdx).toBeGreaterThan(installIdx);
+    });
+
+    test("the release publish-race protection is unchanged: publish-artifacts still gates on the release/tag-dispatch event only", () => {
+        expect(publishJob?.needs).toBe("build-artifacts");
+        expect(publishJob?.if ?? "").not.toContain("prime-duckdb-cache");
+        expect(publishJob?.if ?? "").toContain("github.event_name == 'release'");
+    });
 });

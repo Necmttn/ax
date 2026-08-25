@@ -1,0 +1,107 @@
+name: Provision DuckDB build
+description: >-
+  Restore or build the platform DuckDB artifact used to embed axctl's native
+  dependency, always air-gap smoke the provisioned bytes, and save on a
+  genuine miss. Shared, byte-identical, between release-please.yml's
+  build-artifacts job (tag-scoped) and its prime-duckdb-cache job
+  (default-branch-scoped) - the two callers MUST compute the exact same
+  cache key, and factoring the key computation out here is what guarantees
+  that instead of relying on two hand-copies never drifting apart.
+inputs:
+  label:
+    description: Label for the timing line written to the step summary.
+    required: true
+outputs:
+  cache-hit:
+    description: "'true' if the cache was restored rather than built from scratch"
+    value: ${{ steps.duckdb-restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    # The key is scoped per (os, arch). It includes the native build recipe,
+    # this action's build flags, the smoke contract, and both DuckDB addon
+    # versions. A new smoke contract or addon must miss the old immutable
+    # cache. Otherwise, incompatible restored bytes can fail every later run
+    # without giving the build step a chance to replace them.
+    - name: Compute DuckDB cache key
+      id: duckdb-key
+      shell: bash
+      run: |
+        duckdb_versions="$(bun -e 'const catalog = (await Bun.file("package.json").json()).workspaces.catalog; process.stdout.write(`${catalog["@duckdb/node-api"]}-${catalog["@duckdb/node-bindings"]}`)')"
+        echo "value=duckdb-${{ runner.os }}-${{ runner.arch }}-${duckdb_versions}-${{ hashFiles('scripts/build-duckdb.sh', 'scripts/duckdb/extension_config_local.cmake', 'scripts/smoke-duckdb-dylib.ts', '.github/actions/provision-duckdb/action.yml') }}" >> "$GITHUB_OUTPUT"
+
+    - name: Start DuckDB provision timer
+      id: duckdb-timer
+      shell: bash
+      run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+    # GitHub Actions scopes a saved cache to the ref that created it (plus
+    # that ref's base branches, plus the repository's DEFAULT branch) and
+    # does NOT share a cache between two different tags. Restoring here
+    # picks up either this run's own ref scope or - critically for a
+    # release tag, which has no other tag to fall back to - a prior save
+    # made from the default branch by the prime-duckdb-cache job below.
+    # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+    - name: Restore DuckDB build
+      id: duckdb-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: dist/duckdb
+        key: ${{ steps.duckdb-key.outputs.value }}
+
+    - name: Install DuckDB build tools (Linux)
+      if: runner.os == 'Linux' && steps.duckdb-restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+    - name: Build DuckDB
+      if: steps.duckdb-restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        STATIC_LIBCPP: ${{ runner.os == 'Linux' && '1' || '' }}
+      run: scripts/build-duckdb.sh
+
+    - name: Resolve DuckDB library name
+      id: duckdb-lib
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "macOS" ]; then
+          echo "name=libduckdb.dylib" >> "$GITHUB_OUTPUT"
+        else
+          echo "name=libduckdb.so" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Always smoke, restore or build - proves the bytes about to be embedded
+    # (or, from the prime job, the bytes about to be saved for the next
+    # release) still link fts/json statically, so a poisoned or truncated
+    # cache entry fails here with one clear error instead of downstream in
+    # the shipped binary.
+    - name: Air-gap smoke the provisioned DuckDB
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x dist/duckdb/duckdb
+        scripts/build-duckdb.sh --smoke-only dist/duckdb/duckdb
+        bun scripts/smoke-duckdb-dylib.ts dist/duckdb/${{ steps.duckdb-lib.outputs.name }}
+
+    # Saved only after the smoke passes and only on a genuine miss - a
+    # cache hit must never re-save, and a bad build must never become the
+    # cached answer for every later release.
+    - name: Save DuckDB build
+      if: steps.duckdb-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: dist/duckdb
+        key: ${{ steps.duckdb-key.outputs.value }}
+
+    - name: Record DuckDB provision duration
+      shell: bash
+      run: |
+        elapsed=$(( $(date +%s) - ${{ steps.duckdb-timer.outputs.start }} ))
+        status="miss"
+        if [ "${{ steps.duckdb-restore.outputs.cache-hit }}" = "true" ]; then
+          status="hit"
+        fi
+        receipt="DuckDB provision (${{ inputs.label }}): cache ${status}, ${elapsed}s"
+        echo "$receipt"
+        echo "$receipt" >> "$GITHUB_STEP_SUMMARY"
