@@ -38,6 +38,11 @@ const dylibEnv = <A>(body: () => Promise<A>): Promise<A> => {
 };
 
 const DDL = `
+-- Mirrors the real schema's session table just enough for the empty-publish
+-- guard (publishWouldNotDestroyData counts rows here, not "skill").
+CREATE TABLE IF NOT EXISTS session (
+    id VARCHAR PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS skill (
     id VARCHAR PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -667,6 +672,93 @@ describe("CacheWrite: publish", () => {
                 _tag: "completed",
                 value: [{ id: "run-1", body: "status=partial" }],
             });
+        });
+    });
+});
+
+describe("CacheWrite: publishIntermediateSnapshot (#833)", () => {
+    dtest("publishes what has been written so far, mid-body, before the body returns", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-intermediate-publish-");
+            await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("skill", { id: "s1", name: "first phase" });
+                        yield* write.publishIntermediateSnapshot();
+                        // A snapshot exists and is readable RIGHT NOW, while this
+                        // body effect is still running (nothing has returned yet).
+                        expect(existsSync(p.snapshotPath)).toBe(true);
+                        const seenMidRun = yield* Effect.gen(function* () {
+                            const read = yield* CacheRead;
+                            return yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill");
+                        }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath })));
+                        expect(seenMidRun.map((r) => r.name)).toEqual(["first phase"]);
+                    }),
+                ),
+            );
+        });
+    });
+
+    dtest("does not disable the automatic final publish - later writes still land", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-intermediate-then-final-");
+            await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("skill", { id: "s1", name: "first phase" });
+                        yield* write.publishIntermediateSnapshot();
+                        yield* write.put("skill", { id: "s2", name: "second phase" });
+                    }),
+                ),
+            );
+            const found = await run(
+                Effect.gen(function* () {
+                    const read = yield* CacheRead;
+                    return yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill ORDER BY id");
+                }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
+            );
+            expect(found.map((r) => r.name)).toEqual(["first phase", "second phase"]);
+        });
+    });
+
+    dtest("honors the same empty-publish guard as the final publish", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-intermediate-empty-guard-");
+            // A populated snapshot already exists (the guard counts `session` rows).
+            await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("session", { id: "sess-1" });
+                        yield* write.put("skill", { id: "s1", name: "good" });
+                    }),
+                ),
+            );
+            const before = readFileSync(p.snapshotPath);
+
+            // A SEPARATE, genuinely empty live database (same snapshot target)
+            // tries to publish intermediately - the shape the guard exists for.
+            await run(
+                withIngestLock(
+                    {
+                        lockPath: p.lockPath,
+                        command: "seam-test-empty-intermediate",
+                        staleMs: 60_000,
+                        onBusy: () => Effect.succeed("busy" as const),
+                    },
+                    withCacheWrite(
+                        {
+                            livePath: join(p.dir, "live-empty.duckdb"),
+                            lockPath: p.lockPath,
+                            snapshotPath: p.snapshotPath,
+                            schemaSql: DDL,
+                            publish: false,
+                        },
+                        (write) => write.publishIntermediateSnapshot(),
+                    ),
+                ),
+            );
+
+            expect(readFileSync(p.snapshotPath).equals(before)).toBe(true);
         });
     });
 });

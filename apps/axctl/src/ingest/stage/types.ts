@@ -79,6 +79,26 @@ export class StageMeta extends Schema.Class<StageMeta>("StageMeta")({
     deps: Schema.Array(Schema.String),
     tags: Schema.Array(IngestStageTag),
     writes: Schema.Array(TableWrite),
+    /**
+     * Marks a stage as a FIRST-VALUE provider for the cold-start intermediate
+     * publish (#833): the SIX normalized transcript providers (claude, codex,
+     * pi, omp, opencode, cursor) that turn raw transcripts into `session`/
+     * `turn`/`tool_call` rows, and nothing else.
+     *
+     * Deliberately its OWN field rather than reusing `tags` (`"ingest"` also
+     * covers skills/commands/pricing/git/github-pr - not what a first
+     * usable snapshot needs) or a `writes` MODE (`"parse"` covers every
+     * event-layer writer, including catalog stages this phase must still
+     * wait on as DEPS but not select for on their own). Those two carry
+     * mixed meanings; this field carries exactly one.
+     *
+     * `undefined`/`false` (the default - most stages omit this field
+     * entirely) means "not a first-value provider". The cold-start phase
+     * that reads this (`firstValuePhaseStages` in `./select.ts`) also pulls
+     * in each marked stage's transitive deps, so skills/commands/pricing
+     * still run before claude/codex do.
+     */
+    firstValue: Schema.optional(Schema.Boolean),
 }) {}
 
 /** A stage = metadata + a typed Effect runner. `R` is the union of Effect

@@ -1892,6 +1892,7 @@ export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSys
         key: "codex",
         deps: ["skills", "commands", "pricing"],
         tags: ["ingest"],
+        firstValue: true,
         writes: [
             ...NORMALIZED_BATCH_WRITES,
             { table: "session_token_usage", mode: "parse" },

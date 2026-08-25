@@ -160,6 +160,26 @@ export interface CacheWriteService extends CacheReadService {
     readonly rowsCollapsed: () => ReadonlyMap<string, number>;
     /** The live database being written (not the snapshot). */
     readonly livePath: string;
+    /**
+     * Publish a snapshot from THIS connection's current state, right now,
+     * without waiting for the write body to finish. Runs the exact same path
+     * `withCacheWrite`'s own on-success publish runs (same empty-publish
+     * guard via {@link publishWouldNotDestroyData}, same
+     * `DuckDbService.publishSnapshot(..., { from: conn })` call) - so it sees
+     * exactly what has been committed on this connection so far, nothing
+     * more, and it will not clobber a populated snapshot with an empty
+     * database any more than the final publish would.
+     *
+     * NARROW BY DESIGN, not a general "publish whenever" escape hatch. Its
+     * one sanctioned caller is the cold-start intermediate publish in
+     * `runIngest` (#833): after the first-value provider stages
+     * (claude/codex/pi/omp/opencode/cursor + their deps) finish and every
+     * OTHER stage fiber is paused, so nothing else can write to this
+     * connection while the snapshot is being staged. Calling it while other
+     * writers are still active is a torn-read hazard - the guard here
+     * protects against an EMPTY publish, not a partial one.
+     */
+    readonly publishIntermediateSnapshot: () => Effect.Effect<void, CacheWriteError>;
 }
 
 /** Running totals of writer-side NUL stripping for one `withCacheWrite` body. */
@@ -663,7 +683,8 @@ export const withCacheWrite = <A, E, R>(
                         }
                     }
 
-                    const write = writerOver(conn, options.livePath, target);
+                    const publishNow = () => publishSnapshotNow(fs, opened.db, conn, options.livePath, target);
+                    const write = writerOver(conn, options.livePath, target, publishNow);
                     // Reported on EVERY exit path (`ensuring`), not just a
                     // successful one: a body that scrubbed rows and then failed
                     // for an unrelated reason still changed data on the way
@@ -678,14 +699,12 @@ export const withCacheWrite = <A, E, R>(
                     // leave the previous snapshot exactly as it was. A
                     // maintenance caller opts OUT entirely (see `publish`) -
                     // its body succeeding says nothing about the state of the
-                    // database it would be publishing.
+                    // database it would be publishing. Same helper the
+                    // service's own `publishIntermediateSnapshot` calls, so
+                    // both paths share one empty-publish guard and one
+                    // `publishSnapshot` call site.
                     if (options.publish !== false) {
-                        const safe = yield* publishWouldNotDestroyData(fs, conn, target);
-                        if (safe) {
-                            yield* opened.db
-                                .publishSnapshot(options.livePath, target, { from: conn })
-                                .pipe(Effect.mapError((err) => toPublishError(err, target)));
-                        }
+                        yield* publishNow();
                     }
                     return value;
                 }),
@@ -831,11 +850,36 @@ const toPublishError = (
         ? err
         : new SnapshotPublishError({ snapshotPath: target, message: err.message });
 
+/**
+ * THE ONE PUBLISH CALL SITE. Runs the empty-publish guard, then (only if it
+ * passes) `DuckDbService.publishSnapshot(..., { from: conn })` on the
+ * caller's already-open connection - see RULING R14 in this module's header
+ * for why `from: conn` is load-bearing. Shared by `withCacheWrite`'s
+ * on-success publish and `CacheWriteService.publishIntermediateSnapshot`, so
+ * neither can drift from the other's safety checks.
+ */
+const publishSnapshotNow = (
+    fs: FileSystem.FileSystem,
+    db: DuckDbService,
+    conn: DuckDbConnection,
+    livePath: string,
+    target: string,
+): Effect.Effect<void, CacheWriteError> =>
+    Effect.gen(function* () {
+        const safe = yield* publishWouldNotDestroyData(fs, conn, target);
+        if (safe) {
+            yield* db
+                .publishSnapshot(livePath, target, { from: conn })
+                .pipe(Effect.mapError((err) => toPublishError(err, target)));
+        }
+    });
+
 /** Build the write service over an open read-write connection. */
 const writerOver = (
     conn: DuckDbConnection,
     livePath: string,
     target: string,
+    publishIntermediateSnapshot: () => Effect.Effect<void, CacheWriteError>,
 ): CacheWriteService => {
     // The writer owns exactly one connection for its whole lifetime, so
     // "borrowing" it is just calling with it - no identity check, no reopen: a
@@ -992,5 +1036,5 @@ const writerOver = (
     const nulStripped = (): NulStripTotals => ({ values: nulValues, statements: nulStatements });
     const rowsCollapsed = (): ReadonlyMap<string, number> => new Map(collapsedRows);
 
-    return { ...reader, exec, put, putMany, nulStripped, rowsCollapsed, livePath };
+    return { ...reader, exec, put, putMany, nulStripped, rowsCollapsed, livePath, publishIntermediateSnapshot };
 };

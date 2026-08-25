@@ -30,6 +30,27 @@ describe("StageMeta", () => {
         expect(decoded.key).toBe("signals");
         expect(decoded.writes[0]?.mode).toBe("derive");
     });
+
+    it("leaves firstValue undefined when omitted (not a first-value provider)", () => {
+        const decoded = Schema.decodeUnknownSync(StageMeta)({
+            key: "signals",
+            deps: [],
+            tags: ["derive"],
+            writes: [],
+        });
+        expect(decoded.firstValue).toBeUndefined();
+    });
+
+    it("marks a stage as a first-value provider", () => {
+        const decoded = Schema.decodeUnknownSync(StageMeta)({
+            key: "claude",
+            deps: [],
+            tags: ["ingest"],
+            writes: [],
+            firstValue: true,
+        });
+        expect(decoded.firstValue).toBe(true);
+    });
 });
 
 describe("IngestContext", () => {
