@@ -200,6 +200,18 @@ export const settleStage = (
 ): Effect.Effect<void, CacheWriteError> => {
     if (Exit.isSuccess(exit)) {
         const counts = numericCounts(exit.value);
+        if (exit.value.failedOpenError !== undefined) {
+            const message = exit.value.failedOpenError;
+            return Effect.gen(function* () {
+                yield* writeIngestStageFinish(write, { ...ledgerKey, status: "error", errorText: message, counts, selfMs });
+                yield* writeIngestEvent(write, {
+                    ...ledgerKey,
+                    level: "warn",
+                    message,
+                    counts,
+                });
+            });
+        }
         return Effect.gen(function* () {
             yield* writeIngestStageFinish(write, { ...ledgerKey, status: "ok", counts, selfMs });
             yield* writeIngestEvent(write, {

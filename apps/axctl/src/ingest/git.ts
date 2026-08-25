@@ -7,6 +7,7 @@ import { watermarkRow } from "@ax/lib/duckdb/watermark";
 import { commitRowId, edgeRowId, stableId } from "@ax/lib/stable-id";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 import {
     checkoutRecordKey,
 } from "./record-keys.ts";
@@ -803,18 +804,27 @@ export const gitStage: StageDef<
             // Repo discovery tolerates a vanished override file / missing `.git`
             // (NotFound is recovered inside ingestGit); any PlatformError that
             // escapes here is a genuine FS fault (unreadable repo-list file or a
-            // non-NotFound stat error), so it dies as a defect rather than
-            // masquerading as a recoverable DbError.
-            const result = yield* ingestGit(write, {
+            // non-NotFound stat error), so the stage boundary logs a warning
+            // and returns zero stats rather than hiding the failure.
+            const empty = (error: PlatformError.PlatformError) => GitStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: "git skipped (filesystem error; non-fatal)",
+                commitsIngested: 0,
+                repositoriesSeen: 0,
+                failedOpenError: error.message,
+            });
+            return yield* ingestGit(write, {
                 ...(sinceDays === undefined ? {} : { sinceDays }),
                 ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
-            }).pipe(Effect.catchTag("PlatformError", (e) => Effect.die(e)));
-            return GitStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.commits} commits from ${result.repos} repos`,
-                commitsIngested: result.commits,
-                repositoriesSeen: result.repos,
-            });
+            }).pipe(
+                Effect.map((result) => GitStageStats.make({
+                    durationMs: Date.now() - t0,
+                    summary: `ingested ${result.commits} commits from ${result.repos} repos`,
+                    commitsIngested: result.commits,
+                    repositoriesSeen: result.repos,
+                })),
+                Effect.catchTag("PlatformError", (error) => skipPlatformStage("git", error, empty)),
+            );
         },
     ),
 };

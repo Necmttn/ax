@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
@@ -20,6 +20,7 @@ import {
 } from "./transcripts.ts";
 import { resolveSkillName } from "@ax/lib/skill-id";
 import { loadPricingCatalog } from "./model-pricing.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 
 interface SubagentManifest {
     readonly agentId: string;
@@ -184,7 +185,7 @@ export const deriveClaudeSubagents = (
     opts: DeriveClaudeSubagentsOpts = {},
 ): Effect.Effect<
     DeriveClaudeSubagentsStats,
-    CacheWriteError,
+    CacheWriteError | PlatformError.PlatformError,
     AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
@@ -291,14 +292,14 @@ export const deriveClaudeSubagents = (
             // `extractFileWithSessionId` is now FileSystem-native: a subagent
             // transcript that VANISHED mid-run surfaces a NotFound
             // PlatformError, which we treat as "no usable content" (→ null)
-            // so the run continues; other FS failures die as defects.
+            // so the run continues; other FS failures remain typed failures.
             const extracted = yield* extractFileWithSessionId(
                 m.file,
                 m.project ?? "",
                 m.subagentSessionId,
             ).pipe(
                 Effect.catchTag("PlatformError", (e) =>
-                    isNotFound(e) ? Effect.succeed(null) : Effect.die(e),
+                    isNotFound(e) ? Effect.succeed(null) : Effect.fail(e),
                 ),
             );
 
@@ -498,11 +499,14 @@ export const subagentsStage: StageDef<SubagentsStats, AxConfig | FileSystem.File
     run: (_ctx: IngestContext, write) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveClaudeSubagents(write);
-            return SubagentsStats.make({
-                durationMs: Date.now() - t0,
-                summary: `wrote ${result.written} subagent links`,
-                subagentLinksWritten: result.written,
-            });
+            const empty = (error: PlatformError.PlatformError) => SubagentsStats.make({ durationMs: Date.now() - t0, summary: "subagents skipped (filesystem error; non-fatal)", subagentLinksWritten: 0, failedOpenError: error.message });
+            return yield* deriveClaudeSubagents(write).pipe(
+                Effect.map((result) => SubagentsStats.make({
+                    durationMs: Date.now() - t0,
+                    summary: `wrote ${result.written} subagent links`,
+                    subagentLinksWritten: result.written,
+                })),
+                Effect.catchTag("PlatformError", (error) => skipPlatformStage("subagents", error, empty)),
+            );
         }),
 };

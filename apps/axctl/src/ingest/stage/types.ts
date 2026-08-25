@@ -9,6 +9,8 @@ import { IngestStageTag } from "./tags.ts";
 export class BaseStageStats extends Schema.Class<BaseStageStats>("BaseStageStats")({
     durationMs: Schema.Number,
     summary: Schema.String,
+    /** A failed-open stage returns success so independent stages can continue. */
+    failedOpenError: Schema.optional(Schema.String),
 }) {}
 
 /** Ambient context every stage's run receives. Pipeline owns lifetime; stages

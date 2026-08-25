@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
@@ -19,6 +19,7 @@ import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { JSONL_WORK_UNIT_WRITES, NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 import {
     booleanField,
     boundedExcerpt,
@@ -758,7 +759,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
         const fs = yield* FileSystem.FileSystem;
         // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool; the
         // shadowed `write` routes every write in this stage through it.
-        const spoolDir = yield* fs.makeTempDirectory({ prefix: `ax-spool-${desc.provider}-` }).pipe(Effect.orDie);
+        const spoolDir = yield* fs.makeTempDirectory({ prefix: `ax-spool-${desc.provider}-` });
         const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
         const write = withTableSpool(directWrite, spool);
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
@@ -874,25 +875,40 @@ const makePiLikeStage = (
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
+        const empty = (error: PlatformError.PlatformError) => PiStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `${desc.provider} skipped (filesystem error; non-fatal)`,
+            filesIngested: 0,
+            sessionsIngested: 0,
+            eventsIngested: 0,
+            turnsIngested: 0,
+            toolCallsIngested: 0,
+            skipped: 0,
+            warnings: 0,
+            failedFiles: 1,
+            failedOpenError: error.message,
+        });
         // The directory walk recovers every PlatformError internally, and a
         // per-file `readFileString` fault is now recorded + skipped by the
         // per-file isolation seam (#261, see file-isolation.ts), so no
-        // PlatformError escapes the ingest. Only connection loss and failure
-        // storms abort the stage, as a DbError.
-        const result = yield* ingest(write, { sinceDays, runId: ctx.runId });
-        return PiStageStats.make({
-            durationMs: Date.now() - t0,
-            summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
-                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
-            filesIngested: result.files,
-            sessionsIngested: result.sessions,
-            eventsIngested: result.events,
-            turnsIngested: result.turns,
-            toolCallsIngested: result.toolCalls,
-            skipped: result.skipped,
-            warnings: result.warnings,
-            failedFiles: result.failedFiles,
-        });
+        // A discovery or spool setup PlatformError reaches the stage boundary,
+        // which records failed-open stats. Database errors still abort the stage.
+        return yield* ingest(write, { sinceDays, runId: ctx.runId }).pipe(
+            Effect.map((result) => PiStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
+                    (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
+                filesIngested: result.files,
+                sessionsIngested: result.sessions,
+                eventsIngested: result.events,
+                turnsIngested: result.turns,
+                toolCallsIngested: result.toolCalls,
+                skipped: result.skipped,
+                warnings: result.warnings,
+                failedFiles: result.failedFiles,
+            })),
+            Effect.catchTag("PlatformError", (error) => skipPlatformStage(desc.provider, error, empty)),
+        );
     }),
 });
 
