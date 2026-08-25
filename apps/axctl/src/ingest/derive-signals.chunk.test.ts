@@ -12,6 +12,7 @@
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { deriveSignals, SESSION_BATCH_SIZE, type DeriveStats } from "./derive-signals.ts";
@@ -45,7 +46,7 @@ const runFixture = (): Promise<DeriveStats> =>
                         text_excerpt: "work",
                     })));
                 yield* write.putMany("turn", turns);
-                stats = yield* deriveSignals(write, {});
+                stats = yield* deriveSignals(write, {}).pipe(Effect.provide(BunFileSystem.layer));
             }));
         if (stats === undefined) return yield* Effect.die("fixture body did not run");
         return stats;

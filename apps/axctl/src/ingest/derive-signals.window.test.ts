@@ -13,6 +13,7 @@
  */
 import { describe, expect } from "bun:test";
 import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { deriveSignals, type DeriveStats } from "./derive-signals.ts";
@@ -49,8 +50,8 @@ const runFixture = (): Promise<Runs> =>
                         error_text: "exit 1", exit_code: 1n,
                     },
                 ]);
-                const windowed = yield* deriveSignals(write, { sinceDays: 7 });
-                const allTime = yield* deriveSignals(write, {});
+                const windowed = yield* deriveSignals(write, { sinceDays: 7 }).pipe(Effect.provide(BunFileSystem.layer));
+                const allTime = yield* deriveSignals(write, {}).pipe(Effect.provide(BunFileSystem.layer));
                 runs = { windowed, allTime };
             }));
         if (runs === undefined) return yield* Effect.die("fixture body did not run");

@@ -9,6 +9,7 @@ import {
 } from "@ax/lib/duckdb/self-time";
 import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
 import { deriveReserveMs, deriveStageBudget } from "./derive-budget.ts";
+import { REPARSE_ACTIVE_ENV } from "../reparse-targets.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 
 /** Max stages running their `run` Effect concurrently. Each stage has its own
@@ -30,8 +31,22 @@ export const PIPELINE_CONCURRENCY = 4;
  */
 export const pipelineConcurrency = (env: NodeJS.ProcessEnv = process.env): number => {
     const raw = nonNegativeNumberEnv(env.AX_PIPELINE_CONCURRENCY, 0);
-    return raw >= 1 ? Math.floor(raw) : PIPELINE_CONCURRENCY;
+    if (raw >= 1) return Math.floor(raw);
+    return env[REPARSE_ACTIVE_ENV] === "1" ? 1 : PIPELINE_CONCURRENCY;
 };
+
+/**
+ * A full reparse allocates large provider and derive batches in one Bun VM.
+ * Release completed stage rows before the next serialized stage starts.
+ */
+export const collectAfterReparseStage = (
+    env: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<void> =>
+    env[REPARSE_ACTIVE_ENV] === "1"
+        ? Effect.sync(() => {
+            Bun.gc(true);
+        })
+        : Effect.void;
 
 /** How often the pipeline logs which stages are still running, so a hung or
  *  slow stage is attributable instead of looking like a silent stall (#671).
@@ -370,6 +385,7 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                     inFlight.add(s.meta.key);
                 }).pipe(
                     Effect.andThen(() => guarded),
+                    Effect.tap(() => collectAfterReparseStage()),
                     Effect.ensuring(Effect.sync(() => {
                         inFlight.delete(s.meta.key);
                     })),

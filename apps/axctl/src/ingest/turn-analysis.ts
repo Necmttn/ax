@@ -5,11 +5,22 @@ import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableId } from "@ax/lib/stable-id";
 import { classifyFeedback, classifyUserAsk } from "./ask-outcome.ts";
+import { chunkIds } from "./session-chunk.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const TurnAnalysisKey = Schema.Literal("turn-analysis");
 export type TurnAnalysisKey = typeof TurnAnalysisKey.Type;
+
+/**
+ * How many sessions' turns one `fetchTurnsForSessions` round-trip pulls.
+ * A single unbounded `SELECT ... FROM turn` (with the full `text` column, not
+ * just `text_excerpt`) materialised the whole turn corpus in the Bun VM heap
+ * at once and was one of the fetches behind the ~14 GB RSS segfault on a full
+ * `--reparse=claude` backfill (#917, same root cause as #1021). Mirrors
+ * `derive-signals.ts`'s `SESSION_BATCH_SIZE` / two-pass session-id fetch.
+ */
+export const SESSION_BATCH_SIZE = 25;
 
 export type TurnSpeaker = "user" | "assistant" | "tool";
 export type TurnAnalysisAct =
@@ -428,33 +439,63 @@ const expressesRecordKey = (turnKey: string, signalKey: string): string =>
 const reactsToRecordKey = (fromTurnKey: string, toTurnKey: string): string =>
     stableId("reacts_to", [fromTurnKey, toTurnKey]);
 
-export const buildTurnAnalysisRows = (
-    analyses: readonly TurnAnalysisWrite[],
-) => {
-    const signals = new Map<string, SemanticSignalWrite>();
-    for (const analysis of analyses) {
-        if (!analysis.semanticSignal) continue;
-        const existing = signals.get(analysis.semanticSignal.key);
-        if (!existing) {
-            signals.set(analysis.semanticSignal.key, {
-                ...analysis.semanticSignal,
-                firstSeen: analysis.semanticSignal.ts,
-                lastSeen: analysis.semanticSignal.ts,
-            });
-            continue;
-        }
-        const firstSeen = new Date(existing.firstSeen ?? existing.ts).getTime() <= new Date(analysis.semanticSignal.ts).getTime()
-            ? existing.firstSeen ?? existing.ts
-            : analysis.semanticSignal.ts;
-        const lastSeen = new Date(existing.lastSeen ?? existing.ts).getTime() >= new Date(analysis.semanticSignal.ts).getTime()
-            ? existing.lastSeen ?? existing.ts
-            : analysis.semanticSignal.ts;
-        signals.set(analysis.semanticSignal.key, {
-            ...existing,
-            confidence: Math.max(existing.confidence, analysis.semanticSignal.confidence),
-            firstSeen,
-            lastSeen,
+/**
+ * Fold one turn's semantic signal into a `(signal key -> merged write)`
+ * accumulator: first occurrence seeds firstSeen/lastSeen from its own ts,
+ * every later occurrence widens firstSeen down / lastSeen up and takes the
+ * max confidence. Min/max is commutative, so this can run once over the
+ * whole corpus or incrementally over successive session chunks and land on
+ * the same merged value either way - the property the chunked derive below
+ * depends on (a signal key can span sessions in different chunks).
+ */
+const mergeSignalIntoAccumulator = (
+    accum: Map<string, SemanticSignalWrite>,
+    semanticSignal: SemanticSignalWrite,
+): void => {
+    const existing = accum.get(semanticSignal.key);
+    if (!existing) {
+        accum.set(semanticSignal.key, {
+            ...semanticSignal,
+            firstSeen: semanticSignal.ts,
+            lastSeen: semanticSignal.ts,
         });
+        return;
+    }
+    const firstSeen = new Date(existing.firstSeen ?? existing.ts).getTime() <= new Date(semanticSignal.ts).getTime()
+        ? existing.firstSeen ?? existing.ts
+        : semanticSignal.ts;
+    const lastSeen = new Date(existing.lastSeen ?? existing.ts).getTime() >= new Date(semanticSignal.ts).getTime()
+        ? existing.lastSeen ?? existing.ts
+        : semanticSignal.ts;
+    accum.set(semanticSignal.key, {
+        ...existing,
+        confidence: Math.max(existing.confidence, semanticSignal.confidence),
+        firstSeen,
+        lastSeen,
+    });
+};
+
+const signalAccumToRows = (accum: ReadonlyMap<string, SemanticSignalWrite>) =>
+    [...accum.values()].map((signalWrite) => cacheRow({
+        id: signalWrite.key, kind: signalWrite.kind, label: signalWrite.label,
+        canonical_text: signalWrite.canonicalText, description: signalWrite.description ?? null,
+        method: "heuristic", confidence: signalWrite.confidence,
+        first_seen: tsParam(signalWrite.firstSeen ?? signalWrite.ts),
+        last_seen: tsParam(signalWrite.lastSeen ?? signalWrite.ts), metrics: jsonParam({ source: "turn_analysis" }),
+    }));
+
+/**
+ * Build the per-turn `turn_analysis`/`expresses`/`reacts_to` rows for one
+ * batch of analyses, folding each analysis's semantic signal into `signals`
+ * (mutated in place) rather than returning a batch-local signals list - the
+ * caller decides when the accumulator is complete enough to flush.
+ */
+const buildTurnAnalysisChunkRows = (
+    analyses: readonly TurnAnalysisWrite[],
+    signals: Map<string, SemanticSignalWrite>,
+) => {
+    for (const analysis of analyses) {
+        if (analysis.semanticSignal) mergeSignalIntoAccumulator(signals, analysis.semanticSignal);
     }
     return {
         analyses: analyses.map((analysis) => cacheRow({
@@ -462,13 +503,6 @@ export const buildTurnAnalysisRows = (
             speaker: analysis.speaker, act: analysis.act, sentiment: analysis.sentiment,
             polarity: analysis.polarity, confidence: analysis.confidence, method: analysis.method,
             signals: jsonParam(analysis.signals), text: analysis.text, ts: tsParam(analysis.ts), updated_at: new Date(),
-        })),
-        signals: [...signals.values()].map((signalWrite) => cacheRow({
-            id: signalWrite.key, kind: signalWrite.kind, label: signalWrite.label,
-            canonical_text: signalWrite.canonicalText, description: signalWrite.description ?? null,
-            method: "heuristic", confidence: signalWrite.confidence,
-            first_seen: tsParam(signalWrite.firstSeen ?? signalWrite.ts),
-            last_seen: tsParam(signalWrite.lastSeen ?? signalWrite.ts), metrics: jsonParam({ source: "turn_analysis" }),
         })),
         expresses: analyses.filter((analysis) => analysis.semanticSignal !== null).map((analysis) => cacheRow({
             id: expressesRecordKey(analysis.turnKey, analysis.semanticSignal!.key), in_id: analysis.turnKey,
@@ -484,6 +518,14 @@ export const buildTurnAnalysisRows = (
     };
 };
 
+export const buildTurnAnalysisRows = (
+    analyses: readonly TurnAnalysisWrite[],
+) => {
+    const signals = new Map<string, SemanticSignalWrite>();
+    const rows = buildTurnAnalysisChunkRows(analyses, signals);
+    return { ...rows, signals: signalAccumToRows(signals) };
+};
+
 export function deriveTurnAnalysisRows(rows: readonly TurnAnalysisInput[]): TurnAnalysisWrite[] {
     const previousAssistantBySession = new Map<string, string>();
     return rows.map((row) => {
@@ -495,18 +537,46 @@ export function deriveTurnAnalysisRows(rows: readonly TurnAnalysisInput[]): Turn
     });
 }
 
-const fetchTurns = (write: CacheWriteService, sinceDays: number | undefined): Effect.Effect<readonly TurnAnalysisInput[], CacheReadError> =>
+/**
+ * Every session id that has at least one in-window turn, ordered so chunks
+ * are stable run to run - the cheap first pass (one column, no text) that
+ * bounds the second, expensive pass below.
+ */
+const fetchTurnAnalysisSessionIds = (
+    write: CacheWriteService,
+    sinceDays: number | undefined,
+): Effect.Effect<string[], CacheReadError> =>
     Effect.gen(function* () {
+        const sql = `
+SELECT DISTINCT t.session AS session
+FROM turn t JOIN session s ON s.id = t.session
+${sinceDays === undefined ? "" : "WHERE t.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
+ORDER BY t.session ASC`;
+        const rows = yield* write.rows(Schema.Struct({ session: Schema.String }), sql, sinceDays === undefined ? [] : [sinceDays]);
+        return rows.map((r) => r.session);
+    });
+
+/** Turn rows for a bounded set of session ids - same window filter as the id pass. */
+const fetchTurnsForSessions = (
+    write: CacheWriteService,
+    sessionIds: ReadonlyArray<string>,
+    sinceDays: number | undefined,
+): Effect.Effect<readonly TurnAnalysisInput[], CacheReadError> =>
+    Effect.gen(function* () {
+        if (sessionIds.length === 0) return [];
+        const placeholders = sessionIds.map(() => "?").join(", ");
+        const sql = `
+SELECT t.id, t.session, CAST(t.seq AS DOUBLE) AS seq, t.role, s.source,
+       t.message_kind, t.intent_kind, t.text, t.text_excerpt, t.ts
+FROM turn t JOIN session s ON s.id = t.session
+WHERE t.session IN (${placeholders}) ${sinceDays === undefined ? "" : "AND t.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
+ORDER BY t.session, t.seq`;
         return yield* write.rows(Schema.Struct({
             id: Schema.String, session: Schema.String, seq: Schema.Number, role: Schema.String,
             source: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
             intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
             text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn,
-        }), `SELECT t.id, t.session, CAST(t.seq AS DOUBLE) AS seq, t.role, s.source,
-                    t.message_kind, t.intent_kind, t.text, t.text_excerpt, t.ts
-             FROM turn t JOIN session s ON s.id = t.session
-             ${sinceDays === undefined ? "" : "WHERE t.ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
-             ORDER BY t.session, t.seq`, sinceDays === undefined ? [] : [sinceDays]);
+        }), sql, sinceDays === undefined ? [...sessionIds] : [...sessionIds, sinceDays]);
     });
 
 /**
@@ -524,55 +594,72 @@ const loadAnalyzedTurnKeys = (write: CacheWriteService): Effect.Effect<Set<strin
         return set;
     });
 
-const persistTurnAnalysisRows = (write: CacheWriteService, analyses: readonly TurnAnalysisWrite[]) =>
-    Effect.gen(function* () {
-        const rows = buildTurnAnalysisRows(analyses);
-        yield* write.putMany("turn_analysis", rows.analyses);
-        yield* write.putMany("semantic_signal", rows.signals);
-        yield* write.putMany("expresses", rows.expresses);
-        yield* write.putMany("reacts_to", rows.reactsTo);
-    });
-
 export const deriveTurnAnalysis = (
     write: CacheWriteService,
-    opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
+    opts: { readonly sinceDays: number | undefined; readonly batchSize?: number } = { sinceDays: undefined },
 ): Effect.Effect<TurnAnalysisStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
         // Escape hatch: when the derivation logic itself changes, force a full
         // reset + re-derive of every turn analysis.
         const full = process.env.AX_REDERIVE_ANALYSIS === "1";
-        const rows = yield* fetchTurns(write, opts.sinceDays);
-        // Derive over the full ordered row set so the reacts_to "previous
-        // assistant turn" lookahead has complete session context, then filter
-        // down to only the turns that still need persisting.
-        const allAnalyses = deriveTurnAnalysisRows(rows);
+        const fullRederive = full && opts.sinceDays === undefined;
+        const batchSize = opts.batchSize ?? SESSION_BATCH_SIZE;
 
-        if (full && opts.sinceDays === undefined) {
+        if (fullRederive) {
             for (const table of ["reacts_to", "expresses", "turn_analysis", "semantic_signal"]) yield* write.exec(`DELETE FROM ${table}`);
-            yield* persistTurnAnalysisRows(write, allAnalyses);
-            return {
-                turnsAnalyzed: allAnalyses.length,
-                signalsPromoted: new Set(allAnalyses.map((a) => a.semanticSignal?.key).filter(Boolean)).size,
-                expressesEdges: allAnalyses.filter((a) => a.semanticSignal !== null).length,
-                reactsToEdges: allAnalyses.filter((a) => a.reactsToTurnKey !== null).length,
-            };
         }
 
         // Incremental: turns are append-only, so an existing `turn_analysis`
         // row is output-equivalent (its turn text/role/kind never mutate, and
         // its reacts_to/expresses edges have deterministic ids). Skip those;
         // only derive turns not yet analyzed. No blanket DELETE - the
-        // turn_analysis id is the turn key, so each UPSERT lands in place. This
-        // is a near-no-op on warm runs where almost every turn already exists.
-        const analyzed = yield* loadAnalyzedTurnKeys(write);
-        const analyses = allAnalyses.filter((a) => !analyzed.has(a.turnKey));
-        yield* persistTurnAnalysisRows(write, analyses);
-        return {
-            turnsAnalyzed: analyses.length,
-            signalsPromoted: new Set(analyses.map((a) => a.semanticSignal?.key).filter(Boolean)).size,
-            expressesEdges: analyses.filter((a) => a.semanticSignal !== null).length,
-            reactsToEdges: analyses.filter((a) => a.reactsToTurnKey !== null).length,
-        };
+        // turn_analysis id is the turn key, so each UPSERT lands in place.
+        // This is a near-no-op on warm runs where almost every turn already
+        // exists. In a full rederive every turn is treated as new, so the
+        // analyzed set is never consulted.
+        const analyzed = fullRederive ? undefined : yield* loadAnalyzedTurnKeys(write);
+
+        // Two passes, so the whole turn corpus (including the full `text`
+        // column) never sits in the heap at once (#917): the cheap id pass
+        // bounds what the expensive pass then pulls one session-chunk at a
+        // time. A session's turns are never split across chunks, so the
+        // reacts_to "previous assistant turn" lookback (per-session state)
+        // stays correct per chunk. The `signals` accumulator below is the one
+        // piece of state that genuinely spans chunks - a signal key (kind +
+        // label) is not session-scoped, so the SAME key can recur in a later
+        // chunk and must widen the earlier chunk's firstSeen/lastSeen rather
+        // than being overwritten by it. It stays cheap to carry across
+        // chunks because it is bounded by the small, fixed set of distinct
+        // signal labels, not by corpus size - unlike the per-turn rows below,
+        // which write out (and are dropped) one chunk at a time.
+        const sessionIds = yield* fetchTurnAnalysisSessionIds(write, opts.sinceDays);
+        const signals = new Map<string, SemanticSignalWrite>();
+        let turnsAnalyzed = 0;
+        let expressesEdges = 0;
+        let reactsToEdges = 0;
+
+        for (const idChunk of chunkIds(sessionIds, batchSize)) {
+            const rows = yield* fetchTurnsForSessions(write, idChunk, opts.sinceDays);
+            const allAnalyses = deriveTurnAnalysisRows(rows);
+            const analyses = analyzed === undefined ? allAnalyses : allAnalyses.filter((a) => !analyzed.has(a.turnKey));
+
+            const chunkRows = buildTurnAnalysisChunkRows(analyses, signals);
+            yield* write.putMany("turn_analysis", chunkRows.analyses);
+            yield* write.putMany("expresses", chunkRows.expresses);
+            yield* write.putMany("reacts_to", chunkRows.reactsTo);
+
+            turnsAnalyzed += analyses.length;
+            expressesEdges += chunkRows.expresses.length;
+            reactsToEdges += chunkRows.reactsTo.length;
+            yield* Effect.sync(() => Bun.gc(true));
+        }
+
+        // The signals accumulator only reaches its final firstSeen/lastSeen/
+        // confidence once every chunk has been folded in, so it writes once
+        // here rather than per chunk.
+        yield* write.putMany("semantic_signal", signalAccumToRows(signals));
+
+        return { turnsAnalyzed, signalsPromoted: signals.size, expressesEdges, reactsToEdges };
     });
 
 export class TurnAnalysisStageStats extends BaseStageStats.extend<TurnAnalysisStageStats>("TurnAnalysisStageStats")({

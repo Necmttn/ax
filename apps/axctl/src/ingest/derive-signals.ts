@@ -1,8 +1,9 @@
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, PlatformError, Schema } from "effect";
 import { SkillName } from "@ax/lib/brands";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRow, jsonParam, tsParam } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
+import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import { edgeRowId } from "@ax/lib/stable-id";
 import {
     deriveCorrections, deriveDiagnosticsFromToolCalls,
@@ -11,11 +12,12 @@ import {
     groupTurnsBySession, shouldDeriveAllTimeSkillPairs,
 } from "./signals/core.ts";
 import type {
-    CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent, ProposedEdge, RecoveryEdge,
+    CorrectionEdge, ProposedEdge, RecoveryEdge,
     SessionTurns, SkillPairAccum, ToolCallLike,
 } from "./signals/types.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 
 // Derivation rules live in ./signals/core.ts (pure, fixture-tested by
 // signals/core.test.ts); this file is stage wiring only: SELECTs, the
@@ -34,7 +36,17 @@ import type { StageDef } from "./stage/registry.ts";
  * (`pairsAccum`, `correctionBatch`, ...) live in `deriveSignals`, so partial
  * chunks still sum to the same result the single fetch produced.
  */
-export const SESSION_BATCH_SIZE = 200;
+export const SESSION_BATCH_SIZE = 25;
+
+const SIGNALS_SPOOL_TABLES = [
+    "corrected_by",
+    "proposed",
+    "recovered_by",
+    "skill_paired",
+    "friction_event",
+    "diagnostic_event",
+] as const;
+const SIGNALS_SPOOL_FLUSH_ROWS = 25_000;
 
 /** Group an ordered id list into fixed-size chunks. */
 const chunk = <A>(items: ReadonlyArray<A>, size: number): A[][] => {
@@ -71,10 +83,9 @@ ORDER BY t.session ASC`;
 
 /**
  * Fetch the (session → turns) bundles for a bounded set of session ids. Each
- * turn carries its outgoing `->invoked->skill.name` array so we can detect
- * "proposed but not invoked" without a second query. Same window filter as the
- * id pass, so a session partially in-window contributes only its in-window
- * turns - exactly what the old single fetch did.
+ * The turn rows and invoked-skill edges use separate queries. The former
+ * grouped join built a large native list aggregate before returning any rows.
+ * That query still crashed Bun for one 49k-turn session after session chunking.
  */
 const fetchSessionTurnsForIds = (
     write: CacheWriteService,
@@ -84,29 +95,42 @@ const fetchSessionTurnsForIds = (
     Effect.gen(function* () {
         if (sessionIds.length === 0) return [];
         const placeholders = sessionIds.map(() => "?").join(", ");
-        const sql = `
+        const turnsSql = `
 SELECT
     t.id, t.session, t.seq, t.role, t.text_excerpt, t.ts, t.has_error,
-    s.repository, s.checkout, s.cwd,
-    COALESCE(to_json(list(DISTINCT sk.name) FILTER (WHERE sk.name IS NOT NULL))::VARCHAR, '[]') AS invoked_skills
+    s.repository, s.checkout, s.cwd
 FROM turn t JOIN session s ON s.id = t.session
-LEFT JOIN invoked i ON i.in_id = t.id LEFT JOIN skill sk ON sk.id = i.out_id
 WHERE t.session IN (${placeholders}) ${turnSinceClause(sinceDays, "AND")}
-GROUP BY t.id, t.session, t.seq, t.role, t.text_excerpt, t.ts, t.has_error, s.repository, s.checkout, s.cwd
 ORDER BY t.session ASC, t.seq ASC`;
         const rows = yield* write.rows(Schema.Struct({
             id: Schema.String, session: Schema.String, seq: NumberFromBigIntColumn, role: Schema.String,
             text_excerpt: Schema.NullOr(Schema.String), ts: TimestampColumn, has_error: Schema.Boolean,
             repository: Schema.NullOr(Schema.String), checkout: Schema.NullOr(Schema.String),
-            cwd: Schema.NullOr(Schema.String), invoked_skills: Schema.String,
-        }), sql, [...sessionIds]);
+            cwd: Schema.NullOr(Schema.String),
+        }), turnsSql, [...sessionIds]);
+        const invokedRows = yield* write.rows(Schema.Struct({
+            turn_id: Schema.String,
+            skill_name: Schema.String,
+        }), `
+SELECT DISTINCT i.in_id AS turn_id, sk.name AS skill_name
+FROM invoked i
+JOIN skill sk ON sk.id = i.out_id
+JOIN turn t ON t.id = i.in_id
+WHERE t.session IN (${placeholders}) ${turnSinceClause(sinceDays, "AND")}
+ORDER BY i.in_id, sk.name`, [...sessionIds]);
+        const invokedByTurn = new Map<string, SkillName[]>();
+        for (const row of invokedRows) {
+            const names = invokedByTurn.get(row.turn_id) ?? [];
+            names.push(SkillName.make(row.skill_name));
+            invokedByTurn.set(row.turn_id, names);
+        }
         const mapped = rows.map((row) => ({
             id: row.id, session: row.session, seq: row.seq, role: row.role,
             text_excerpt: row.text_excerpt ?? undefined, ts: row.ts, has_error: row.has_error,
             ...(row.repository === null ? {} : { repository: row.repository }),
             ...(row.checkout === null ? {} : { checkout: row.checkout }),
             ...(row.cwd === null ? {} : { cwd: row.cwd }),
-            invoked_skills: (JSON.parse(row.invoked_skills) as string[]).map((name) => SkillName.make(name)),
+            invoked_skills: invokedByTurn.get(row.id) ?? [],
         }));
         return groupTurnsBySession(mapped);
     });
@@ -194,6 +218,10 @@ export interface DeriveOpts {
 
 export const deriveSignals = Effect.fn("derive.signals")(
     function* (write: CacheWriteService, opts: Partial<DeriveOpts> = {}) {
+        const fs = yield* FileSystem.FileSystem;
+        const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-signals-" });
+        const spool = makeTableSpool({ tables: SIGNALS_SPOOL_TABLES, dir: spoolDir });
+        const spooledWrite = withTableSpool(write, spool);
         const skillNames = yield* fetchSkillNames(write).pipe(
             Effect.withSpan("signals.fetch-skills"),
         );
@@ -214,24 +242,23 @@ export const deriveSignals = Effect.fn("derive.signals")(
         let recoveries = 0;
         let sessionsSeen = 0;
 
-        const correctionBatch: CorrectionEdge[] = [];
-        const proposedBatch: ProposedEdge[] = [];
-        const recoveryBatch: RecoveryEdge[] = [];
-        // Folded into the session-chunk loop below (#1043): each chunk's error
-        // tool_calls are fetched and turned into events immediately, so the
-        // full error corpus never sits in the heap at once the way a single
-        // post-loop fetch did. Only these (much smaller) derived-event
-        // batches accumulate across chunks.
-        const toolFrictionBatch: DerivedFrictionEvent[] = [];
-        const diagnosticBatch: DerivedDiagnosticEvent[] = [];
+        let frictionEvents = 0;
+        let diagnosticEvents = 0;
         const pairsAccum = new Map<string, SkillPairAccum>();
         // Skill pairs are all-time aggregates - a --since-scoped derive must
         // not clobber them. Hoisted above the loop so we neither accumulate
         // pairs we'd discard nor report a mid-loop count that resets to 0.
         // Mirrors the includeSkillPairs gate in core's deriveSignalsFromEvidence.
         const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
+        if (shouldWriteSkillPairs) {
+            yield* write.exec("DELETE FROM friction_event");
+            yield* write.exec("DELETE FROM diagnostic_event").pipe(Effect.withSpan("signals.clear.derived-events"));
+        }
 
         for (const idChunk of chunk(sessionIds, SESSION_BATCH_SIZE)) {
+            const chunkCorrections: CorrectionEdge[] = [];
+            const chunkProposed: ProposedEdge[] = [];
+            const chunkRecoveries: RecoveryEdge[] = [];
             const bundles = yield* fetchSessionTurnsForIds(write, idChunk, opts.sinceDays).pipe(
                 Effect.withSpan("signals.fetch-turns", {
                     attributes: { "signals.chunk_sessions": idChunk.length },
@@ -246,9 +273,9 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 corrections += c.length;
                 proposedSkillEdges += p.length;
                 recoveries += r.length;
-                correctionBatch.push(...c);
-                proposedBatch.push(...p);
-                recoveryBatch.push(...r);
+                chunkCorrections.push(...c);
+                chunkProposed.push(...p);
+                chunkRecoveries.push(...r);
                 if (shouldWriteSkillPairs) deriveSkillPairs(bundle, pairsAccum);
                 if (opts.onProgress && (sessionsSeen <= 5 || sessionsSeen % 50 === 0)) {
                     yield* opts.onProgress({
@@ -273,8 +300,38 @@ export const deriveSignals = Effect.fn("derive.signals")(
                     attributes: { "signals.chunk_sessions": idChunk.length },
                 }),
             );
-            toolFrictionBatch.push(...deriveFrictionFromToolCalls(chunkFailedToolCalls));
-            diagnosticBatch.push(...deriveDiagnosticsFromToolCalls(chunkFailedToolCalls));
+            const chunkFriction = [
+                ...deriveFrictionFromToolCalls(chunkFailedToolCalls),
+                ...deriveFrictionFromCorrections(chunkCorrections),
+            ];
+            const chunkDiagnostics = deriveDiagnosticsFromToolCalls(chunkFailedToolCalls);
+            yield* spooledWrite.putMany("corrected_by", chunkCorrections.map((edge) => cacheRow({
+                id: edgeRowId("corrected_by", edge.fromTurnKey, edge.toTurnKey), in_id: edge.fromTurnKey,
+                out_id: edge.toTurnKey, pattern: edge.pattern, ts: tsParam(edge.ts) ?? new Date(),
+            })));
+            const wasCorrectedTurnKeys = correctedInvokedTurnKeys(chunkCorrections);
+            for (const key of wasCorrectedTurnKeys) yield* write.exec("UPDATE invoked SET was_corrected = true WHERE in_id = ?", [key]);
+            yield* spooledWrite.putMany("proposed", chunkProposed.map((edge) => cacheRow({
+                id: edgeRowId("proposed", edge.fromTurnKey, edge.skillKey), in_id: edge.fromTurnKey,
+                out_id: edge.skillKey, ts: tsParam(edge.ts) ?? new Date(), context_excerpt: edge.contextExcerpt,
+            })));
+            yield* spooledWrite.putMany("recovered_by", chunkRecoveries.map((edge) => cacheRow({
+                id: edgeRowId("recovered_by", edge.fromTurnKey, edge.skillKey), in_id: edge.fromTurnKey,
+                out_id: edge.skillKey, ts: tsParam(edge.ts) ?? new Date(), error_excerpt: edge.errorExcerpt ?? null,
+            })));
+            yield* spooledWrite.putMany("friction_event", chunkFriction.map((event) => cacheRow({
+                id: event.key, session: event.sessionId, turn: event.turnKey, kind: event.kind,
+                text: event.text, labels: jsonParam(event.labels), metrics: jsonParam(event.metrics),
+                raw: jsonParam(event.raw), ts: tsParam(event.ts) ?? new Date(),
+            })));
+            yield* spooledWrite.putMany("diagnostic_event", chunkDiagnostics.map((event) => cacheRow({
+                id: event.key, session: event.sessionId, turn: event.turnKey, kind: event.kind,
+                status: event.status, text: event.text, labels: jsonParam(event.labels),
+                metrics: jsonParam(event.metrics), raw: jsonParam(event.raw), ts: tsParam(event.ts) ?? new Date(),
+            })));
+            frictionEvents += chunkFriction.length;
+            diagnosticEvents += chunkDiagnostics.length;
+            if (spool.pendingRows() >= SIGNALS_SPOOL_FLUSH_ROWS) yield* spool.flush(write);
         }
 
         const pairsList = shouldWriteSkillPairs
@@ -290,13 +347,6 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 skillPairs: pairsList.length,
             });
         }
-        // `toolFrictionBatch` / `diagnosticBatch` were built chunk-by-chunk in
-        // the loop above (#1043); `correctionBatch` still accumulates across
-        // the whole run (it's small - one row per correction, not one per
-        // error tool_call), so its friction derivation stays here, post-loop,
-        // exactly as before.
-        const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
-        const frictionBatch = [...toolFrictionBatch, ...correctionFrictionBatch];
         if (opts.onProgress) {
             yield* opts.onProgress({
                 sessions: totalSessions,
@@ -305,38 +355,12 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 proposedSkillEdges,
                 recoveries,
                 skillPairs: pairsList.length,
-                frictionEvents: frictionBatch.length,
-                diagnosticEvents: diagnosticBatch.length,
+                frictionEvents,
+                diagnosticEvents,
             });
         }
-
-        yield* write.putMany("corrected_by", correctionBatch.map((edge) => cacheRow({
-            id: edgeRowId("corrected_by", edge.fromTurnKey, edge.toTurnKey), in_id: edge.fromTurnKey,
-            out_id: edge.toTurnKey, pattern: edge.pattern, ts: tsParam(edge.ts) ?? new Date(),
-        }))).pipe(
-            Effect.withSpan("signals.write.corrections", {
-                attributes: { "signals.count": correctionBatch.length },
-            }),
-        );
-        // Denormalise was_corrected onto invoked edges so cmdTaste's
-        // corrections subquery becomes a pure index/scan filter (issue #31).
-        const wasCorrectedTurnKeys = correctedInvokedTurnKeys(correctionBatch);
-        for (const key of wasCorrectedTurnKeys) yield* write.exec("UPDATE invoked SET was_corrected = true WHERE in_id = ?", [key]);
-        yield* Effect.void.pipe(
-            Effect.withSpan("signals.write.was-corrected", {
-                attributes: { "signals.count": wasCorrectedTurnKeys.length },
-            }),
-        );
-        yield* write.putMany("proposed", proposedBatch.map((edge) => cacheRow({
-            id: edgeRowId("proposed", edge.fromTurnKey, edge.skillKey), in_id: edge.fromTurnKey,
-            out_id: edge.skillKey, ts: tsParam(edge.ts) ?? new Date(), context_excerpt: edge.contextExcerpt,
-        }))).pipe(
-            Effect.withSpan("signals.write.proposed", {
-                attributes: { "signals.count": proposedBatch.length },
-            }),
-        );
         if (shouldWriteSkillPairs) {
-            yield* write.putMany("skill_paired", pairsList.map(({ edgeId, pair }) => cacheRow({
+            yield* spooledWrite.putMany("skill_paired", pairsList.map(({ edgeId, pair }) => cacheRow({
                 id: edgeId, in_id: pair.fromKey, out_id: pair.toKey, count: pair.count,
                 last_seen: tsParam(pair.lastSeen) ?? new Date(),
             }))).pipe(
@@ -345,42 +369,8 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 }),
             );
         }
-        yield* write.putMany("recovered_by", recoveryBatch.map((edge) => cacheRow({
-            id: edgeRowId("recovered_by", edge.fromTurnKey, edge.skillKey), in_id: edge.fromTurnKey,
-            out_id: edge.skillKey, ts: tsParam(edge.ts) ?? new Date(), error_excerpt: edge.errorExcerpt ?? null,
-        }))).pipe(
-            Effect.withSpan("signals.write.recovered", {
-                attributes: { "signals.count": recoveryBatch.length },
-            }),
-        );
-        // On a FULL re-derive, clear the standalone derived-event tables before
-        // re-inserting so a row the current logic no longer emits cannot orphan
-        // with a stale ts (#549). `shouldWriteSkillPairs` is exactly the
-        // full-derive gate (sinceDays undefined / <=0); a --since run keeps the
-        // UPSERT-only path so it never drops rows whose source is out of window.
-        if (shouldWriteSkillPairs) {
-            yield* write.exec("DELETE FROM friction_event");
-            yield* write.exec("DELETE FROM diagnostic_event").pipe(Effect.withSpan("signals.clear.derived-events"));
-        }
-        yield* write.putMany("friction_event", frictionBatch.map((event) => cacheRow({
-            id: event.key, session: event.sessionId, turn: event.turnKey, kind: event.kind,
-            text: event.text, labels: jsonParam(event.labels), metrics: jsonParam(event.metrics),
-            raw: jsonParam(event.raw), ts: tsParam(event.ts) ?? new Date(),
-        }))).pipe(
-            Effect.withSpan("signals.write.friction", {
-                attributes: { "signals.count": frictionBatch.length },
-            }),
-        );
-        yield* write.putMany("diagnostic_event", diagnosticBatch.map((event) => cacheRow({
-            id: event.key, session: event.sessionId, turn: event.turnKey, kind: event.kind,
-            status: event.status, text: event.text, labels: jsonParam(event.labels),
-            metrics: jsonParam(event.metrics), raw: jsonParam(event.raw), ts: tsParam(event.ts) ?? new Date(),
-        }))).pipe(
-            Effect.withSpan("signals.write.diagnostics", {
-                attributes: { "signals.count": diagnosticBatch.length },
-            }),
-        );
-
+        yield* spool.flush(write);
+        yield* fs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
         yield* Effect.logDebug("signals derived", {
             sessions: totalSessions,
             turns: turnCount,
@@ -388,8 +378,8 @@ export const deriveSignals = Effect.fn("derive.signals")(
             proposedSkillEdges,
             skillPairs: pairsList.length,
             recoveries,
-            frictionEvents: frictionBatch.length,
-            diagnosticEvents: diagnosticBatch.length,
+            frictionEvents,
+            diagnosticEvents,
         });
         return {
             sessions: totalSessions,
@@ -398,8 +388,8 @@ export const deriveSignals = Effect.fn("derive.signals")(
             proposedSkillEdges,
             skillPairs: pairsList.length,
             recoveries,
-            frictionEvents: frictionBatch.length,
-            diagnosticEvents: diagnosticBatch.length,
+            frictionEvents,
+            diagnosticEvents,
         } satisfies DeriveStats;
     },
 );
@@ -424,7 +414,7 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
     proposedSkillEdges: Schema.Number,
 }) {}
 
-export const signalsStage: StageDef<SignalsStats, never, CacheWriteError> = {
+export const signalsStage: StageDef<SignalsStats, FileSystem.FileSystem, CacheWriteError> = {
     meta: StageMeta.make({
         key: "signals",
         deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "subagents", "spawned", "git"],
@@ -444,14 +434,25 @@ export const signalsStage: StageDef<SignalsStats, never, CacheWriteError> = {
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
-        const result = yield* deriveSignals(write, { sinceDays });
-        return SignalsStats.make({
+        const empty = (error: PlatformError.PlatformError) => SignalsStats.make({
             durationMs: Date.now() - t0,
-            summary: `derived ${result.frictionEvents} friction, ${result.diagnosticEvents} diagnostic events`,
-            frictionEvents: result.frictionEvents,
-            diagnosticEvents: result.diagnosticEvents,
-            corrections: result.corrections,
-            proposedSkillEdges: result.proposedSkillEdges,
+            summary: "signals skipped (filesystem error; non-fatal)",
+            frictionEvents: 0,
+            diagnosticEvents: 0,
+            corrections: 0,
+            proposedSkillEdges: 0,
+            failedOpenError: error.message,
         });
+        return yield* deriveSignals(write, { sinceDays }).pipe(
+            Effect.map((result) => SignalsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `derived ${result.frictionEvents} friction, ${result.diagnosticEvents} diagnostic events`,
+                frictionEvents: result.frictionEvents,
+                diagnosticEvents: result.diagnosticEvents,
+                corrections: result.corrections,
+                proposedSkillEdges: result.proposedSkillEdges,
+            })),
+            Effect.catchTag("PlatformError", (error) => skipPlatformStage("signals", error, empty)),
+        );
     }),
 };

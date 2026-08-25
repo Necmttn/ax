@@ -130,6 +130,11 @@ describe("runPipeline", () => {
         expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "0" } as NodeJS.ProcessEnv)).toBe(PIPELINE_CONCURRENCY);
         expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "banana" } as NodeJS.ProcessEnv)).toBe(PIPELINE_CONCURRENCY);
         expect(pipelineConcurrency({ AX_PIPELINE_CONCURRENCY: "2.7" } as NodeJS.ProcessEnv)).toBe(2);
+        expect(pipelineConcurrency({ AX_REPARSE_ACTIVE: "1" } as NodeJS.ProcessEnv)).toBe(1);
+        expect(pipelineConcurrency({
+            AX_REPARSE_ACTIVE: "1",
+            AX_PIPELINE_CONCURRENCY: "2",
+        } as NodeJS.ProcessEnv)).toBe(2);
     });
 
     it("does not let a dep-free long stage block downstream stages whose deps are met", async () => {

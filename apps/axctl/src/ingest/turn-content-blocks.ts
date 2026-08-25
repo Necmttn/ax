@@ -8,6 +8,17 @@ import type { ContentDocumentInput } from "./content-blocks/types.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
+/**
+ * How many turns one `fetchTurnRowBatch` round-trip pulls.
+ * A single unbounded `SELECT ... FROM turn` (with the full `text` column, not
+ * just `text_excerpt`) materialised the whole turn corpus in the Bun VM heap
+ * at once and was one of the fetches behind the ~14 GB RSS segfault on a full
+ * `--reparse=claude` backfill (#917, same root cause as #1021). Mirrors
+ * Turn content has no cross-turn state, so a fixed row limit also splits one
+ * very large session. The real corpus has a session with more than 49k turns.
+ */
+export const TURN_BATCH_SIZE = 5_000;
+
 export const TurnContentBlocksKey = Schema.Literal("turn-content-blocks");
 export type TurnContentBlocksKey = typeof TurnContentBlocksKey.Type;
 
@@ -89,23 +100,49 @@ export function buildTurnContentDocumentWrites(
         .filter((write): write is ContentDocumentWrite => write !== null);
 }
 
-const fetchTurnRows = (
+const TurnContentBlockRowSchema = Schema.Struct({
+    id: Schema.String, session: Schema.String, agent_event: Schema.NullOr(Schema.String),
+    seq: Schema.Number, role: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
+    intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
+    text_excerpt: Schema.NullOr(Schema.String), has_tool_use: Schema.NullOr(Schema.Boolean),
+    has_error: Schema.NullOr(Schema.Boolean), ts: TimestampColumn,
+});
+type FetchedTurnContentBlockRow = typeof TurnContentBlockRowSchema.Type;
+
+/** One stable keyset page. This bounds rows even when one session is very large. */
+const fetchTurnRowBatch = (
     write: CacheWriteService,
+    cursor: { readonly session: string; readonly seq: number; readonly id: string } | undefined,
     sinceDays: number | undefined,
-): Effect.Effect<readonly TurnContentBlockRow[], CacheReadError> =>
+    batchSize: number,
+): Effect.Effect<readonly FetchedTurnContentBlockRow[], CacheReadError> =>
     Effect.gen(function* () {
-        const Row = Schema.Struct({
-            id: Schema.String, session: Schema.NullOr(Schema.String), agent_event: Schema.NullOr(Schema.String),
-            seq: Schema.Number, role: Schema.NullOr(Schema.String), message_kind: Schema.NullOr(Schema.String),
-            intent_kind: Schema.NullOr(Schema.String), text: Schema.NullOr(Schema.String),
-            text_excerpt: Schema.NullOr(Schema.String), has_tool_use: Schema.NullOr(Schema.Boolean),
-            has_error: Schema.NullOr(Schema.Boolean), ts: TimestampColumn,
-        });
-        return yield* write.rows(Row, `
+        const predicates: string[] = [];
+        const params: Array<string | number> = [];
+        if (cursor !== undefined) {
+            predicates.push(`(
+                session > ?
+                OR (session = ? AND seq > CAST(? AS BIGINT))
+                OR (session = ? AND seq = CAST(? AS BIGINT) AND id > ?)
+            )`);
+            params.push(cursor.session, cursor.session, cursor.seq, cursor.session, cursor.seq, cursor.id);
+        }
+        if (sinceDays !== undefined) {
+            predicates.push("ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')");
+            params.push(sinceDays);
+        }
+        params.push(batchSize);
+        const sql = `
 SELECT id, session, agent_event, CAST(seq AS DOUBLE) AS seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, ts
 FROM turn
-${sinceDays === undefined ? "" : "WHERE ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - (CAST(? AS INTEGER) * INTERVAL '1 day')"}
-ORDER BY session, seq`, sinceDays === undefined ? [] : [sinceDays]);
+${predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`}
+ORDER BY session, seq, id
+LIMIT CAST(? AS INTEGER)`;
+        return yield* write.rows(
+            TurnContentBlockRowSchema,
+            sql,
+            params,
+        );
     });
 
 /**
@@ -135,44 +172,55 @@ const loadExistingTurnContentHashes = (write: CacheWriteService): Effect.Effect<
 
 export const deriveAndPersistTurnContentBlocks = (
     write: CacheWriteService,
-    opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
+    opts: { readonly sinceDays: number | undefined; readonly batchSize?: number } = { sinceDays: undefined },
 ): Effect.Effect<TurnContentBlocksStats, CacheReadError | CacheWriteError> =>
     Effect.gen(function* () {
         // Escape hatch: when the derivation logic itself changes, force a full
         // reset + re-derive of every turn content document.
         const full = process.env.AX_REDERIVE_CONTENT === "1";
-        const rows = yield* fetchTurnRows(write, opts.sinceDays);
+        const batchSize = Math.max(1, Math.floor(opts.batchSize ?? TURN_BATCH_SIZE));
 
         if (full) {
-            const writes = buildTurnContentDocumentWrites(rows);
             yield* write.exec("DELETE FROM content_atom WHERE source_kind = 'turn'");
             yield* write.exec("DELETE FROM content_block WHERE source_kind = 'turn'");
             yield* write.exec("DELETE FROM content_document WHERE source_kind = 'turn'");
-            for (const document of writes) yield* writeContentDocument(write, document);
-            const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
-            const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
-            return { turns: rows.length, documents: writes.length, blocks, atoms };
         }
+        // Incremental: only (re)derive turns whose content hash is new or
+        // changed vs. what is already stored. Content-document/block/atom ids
+        // are deterministic per turn, so each UPSERT lands in place (no
+        // blanket DELETE). Turns whose hash matches are skipped - already
+        // derived and output-equivalent. Turns are append-only, so changes
+        // are rare; this is a near-no-op on warm runs. In `full` mode every
+        // turn is rederived, so the hash map is never consulted.
+        const existing = full ? undefined : yield* loadExistingTurnContentHashes(write);
 
-        // Incremental: only (re)derive turns whose content hash is new or changed
-        // vs. what is already stored. Content-document/block/atom ids are
-        // deterministic per turn, so each UPSERT lands in place (no blanket
-        // DELETE). Turns whose hash matches are skipped - already derived and
-        // output-equivalent. Turns are append-only, so changes are rare; this is
-        // a near-no-op on warm runs.
-        const existing = yield* loadExistingTurnContentHashes(write);
-        const writes = buildTurnContentDocumentWrites(rows).filter(
-            (write) => existing.get(write.sourceRef) !== write.contentHash,
-        );
-        for (const document of writes) yield* writeContentDocument(write, document);
-        const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
-        const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
-        return {
-            turns: rows.length,
-            documents: writes.length,
-            blocks,
-            atoms,
-        };
+        let turns = 0;
+        let documents = 0;
+        let blocks = 0;
+        let atoms = 0;
+        let batches = 0;
+        let cursor: { readonly session: string; readonly seq: number; readonly id: string } | undefined;
+        while (true) {
+            const rows = yield* fetchTurnRowBatch(write, cursor, opts.sinceDays, batchSize);
+            if (rows.length === 0) break;
+            turns += rows.length;
+            const candidates = buildTurnContentDocumentWrites(rows);
+            const writes = existing === undefined
+                ? candidates
+                : candidates.filter((doc) => existing.get(doc.sourceRef) !== doc.contentHash);
+            for (const document of writes) yield* writeContentDocument(write, document);
+            documents += writes.length;
+            blocks += writes.reduce((sum, doc) => sum + doc.parsed.blocks.length, 0);
+            atoms += writes.reduce((sum, doc) => sum + doc.parsed.atoms.length, 0);
+            const last = rows[rows.length - 1]!;
+            cursor = { session: last.session, seq: last.seq, id: last.id };
+            batches += 1;
+            // DuckDB result objects become unreachable after each page, but a
+            // tight million-row scan can finish before JSC collects them.
+            // A periodic full collection keeps the page limit effective.
+            if (batches % 5 === 0) yield* Effect.sync(() => Bun.gc(true));
+        }
+        return { turns, documents, blocks, atoms };
     });
 
 export class TurnContentBlocksStageStats extends BaseStageStats.extend<TurnContentBlocksStageStats>("TurnContentBlocksStageStats")({
