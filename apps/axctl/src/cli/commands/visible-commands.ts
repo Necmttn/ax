@@ -34,6 +34,7 @@ export const COMMAND_SURFACES = {
         "routing",
         "directives",
         "thinking",
+        "prompts",
         "digest",
         "team",
         "usage",
