@@ -1765,6 +1765,11 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-claude-" });
         const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
         const write = withTableSpool(directWrite, spool);
+        // Scratch dir holds raw turn text until the spool flushes - a failed
+        // stage (including the flush itself) must not leak it, so the whole
+        // span from here through the final flush is wrapped in `ensuring`
+        // rather than cleaned up only on the success path (#953 follow-up).
+        return yield* Effect.gen(function* () {
         const transcriptsDir = cfg.paths.transcriptsDir;
         const cutoff = opts.sinceDays
             ? Date.now() - opts.sinceDays * 86400 * 1000
@@ -2016,10 +2021,8 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             })),
         });
         // Safety net for any FUTURE write added after the loop: the work-unit
-        // already flushed everything the loop buffered. Then drop the scratch
-        // dir (flushed files are already unlinked; this catches strays).
+        // already flushed everything the loop buffered.
         yield* spool.flush(write);
-        yield* fs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             records: recordCount(),
@@ -2046,6 +2049,14 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             malformedLines: malformedLineCount,
             failedFiles: result.failures.count(),
         } satisfies TranscriptStats;
+        }).pipe(
+            // Drop the scratch dir on every exit path (success, failure, or
+            // interruption), not just after a clean flush. Cleanup failure is
+            // swallowed so it never replaces the original success/failure.
+            Effect.ensuring(
+                fs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore),
+            ),
+        );
     },
 );
 

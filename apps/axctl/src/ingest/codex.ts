@@ -1499,6 +1499,11 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const spoolDir = yield* spoolFs.makeTempDirectory({ prefix: "ax-spool-codex-" });
         const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
         const write = withTableSpool(directWrite, spool);
+        // Scratch dir holds raw turn text until the spool flushes - a failed
+        // stage (including the flush itself) must not leak it, so the whole
+        // span from here through the final flush is wrapped in `ensuring`
+        // rather than cleaned up only on the success path (#953 follow-up).
+        return yield* Effect.gen(function* () {
         // Shared across all files this stage run: the agent_event ghost-index
         // rebuild fires at most once, memoized so file concurrency awaits one
         // in-flight rebuild + a failed rebuild is observable (#680).
@@ -1836,9 +1841,8 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // ingest that never re-triggers the heal). Skip the clear only when a
         // file exhausted the ladder THIS run - that just-written marker stays.
         // Safety net for any future post-loop write; the work-unit already
-        // flushed everything the loop buffered. Then drop the scratch dir.
+        // flushed everything the loop buffered.
         yield* spool.flush(write);
-        yield* spoolFs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore);
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),
@@ -1859,6 +1863,14 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             malformedLines: malformedLineCount,
             failedFiles: result.failures.count(),
         } satisfies CodexStats;
+        }).pipe(
+            // Drop the scratch dir on every exit path (success, failure, or
+            // interruption), not just after a clean flush. Cleanup failure is
+            // swallowed so it never replaces the original success/failure.
+            Effect.ensuring(
+                spoolFs.remove(spoolDir, { recursive: true }).pipe(Effect.ignore),
+            ),
+        );
     },
 );
 
