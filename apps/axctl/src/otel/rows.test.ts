@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { metricPointKey, spanKey, type OtelMetricPointRow } from "./rows.ts";
+import { metricPointKey, metricPointRowId, spanKey, type OtelMetricPointRow } from "./rows.ts";
 import { logEventKey, type OtelLogEventRow } from "./rows.ts";
+import { canonicalAttrsJson } from "./otlp-schema.ts";
 
 describe("otel record keys", () => {
     test("metricPointKey is deterministic for same point", () => {
@@ -23,6 +24,66 @@ describe("otel record keys", () => {
 
     test("spanKey is the span_id", () => {
         expect(spanKey({ span_id: "abc" })).toBe("abc");
+    });
+});
+
+// ==================== #1011: attrs-dimension discrimination + hashed row id
+
+describe("metricPointKey / metricPointRowId discriminate every dimension (#1011)", () => {
+    const base: OtelMetricPointRow = {
+        harness: "claude", metric: "claude_code.cost.usage", value: 0.12,
+        unit: "USD", session_id: "s1", model: "opus", skill_name: null,
+        agent_name: null, attrs: null, observed_at: new Date("2026-06-15T00:00:00Z"),
+    };
+
+    test("distinguishes points differing only in agent.name", () => {
+        const a = { ...base, agent_name: "a" };
+        const b = { ...base, agent_name: "b" };
+        expect(metricPointKey(a)).not.toBe(metricPointKey(b));
+        expect(metricPointRowId(a)).not.toBe(metricPointRowId(b));
+    });
+
+    test("distinguishes points differing only in `type` (carried in attrs)", () => {
+        const a = { ...base, attrs: canonicalAttrsJson(new Map([["type", "input"]])) };
+        const b = { ...base, attrs: canonicalAttrsJson(new Map([["type", "output"]])) };
+        expect(metricPointKey(a)).not.toBe(metricPointKey(b));
+        expect(metricPointRowId(a)).not.toBe(metricPointRowId(b));
+    });
+
+    test("distinguishes points differing only in query_source (carried in attrs)", () => {
+        const a = { ...base, attrs: canonicalAttrsJson(new Map([["query_source", "sonnet"]])) };
+        const b = { ...base, attrs: canonicalAttrsJson(new Map([["query_source", "haiku"]])) };
+        expect(metricPointKey(a)).not.toBe(metricPointKey(b));
+        expect(metricPointRowId(a)).not.toBe(metricPointRowId(b));
+    });
+
+    test("distinguishes points differing only in an MCP server name (carried in attrs)", () => {
+        const a = { ...base, attrs: canonicalAttrsJson(new Map([["mcp.server.name", "linear"]])) };
+        const b = { ...base, attrs: canonicalAttrsJson(new Map([["mcp.server.name", "figma"]])) };
+        expect(metricPointKey(a)).not.toBe(metricPointKey(b));
+        expect(metricPointRowId(a)).not.toBe(metricPointRowId(b));
+    });
+
+    test("attribute wire ORDER does not change the id - canonicalization sorts keys", () => {
+        const wireOrderOne = new Map([["type", "input"], ["query_source", "sonnet"]]);
+        const wireOrderTwo = new Map([["query_source", "sonnet"], ["type", "input"]]);
+        const a = { ...base, attrs: canonicalAttrsJson(wireOrderOne) };
+        const b = { ...base, attrs: canonicalAttrsJson(wireOrderTwo) };
+        expect(a.attrs).toBe(b.attrs); // canonicalAttrsJson itself is order-independent
+        expect(metricPointKey(a)).toBe(metricPointKey(b));
+        expect(metricPointRowId(a)).toBe(metricPointRowId(b));
+    });
+
+    test("same identity, different value - still collapses to ONE id (last-write-win)", () => {
+        const a = { ...base, value: 1 };
+        const b = { ...base, value: 2 };
+        expect(metricPointRowId(a)).toBe(metricPointRowId(b));
+    });
+
+    test("metricPointRowId is a hash, not the raw pipe-joined key verbatim", () => {
+        const id = metricPointRowId(base);
+        expect(id).not.toBe(metricPointKey(base));
+        expect(id).toMatch(/^[0-9a-f]{32}$/);
     });
 });
 

@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { cacheRow } from "@ax/lib/duckdb/row";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import {
-    metricPointKey,
+    metricPointRowId,
     spanKey,
     logEventKey,
     type OtelMetricPointRow,
@@ -21,7 +21,7 @@ export class OtelWriter extends Context.Service<OtelWriter, OtelWriterShape>()("
 export const OtelWriterLive = (write: CacheWriteService): Layer.Layer<OtelWriter> =>
     Layer.succeed(OtelWriter, OtelWriter.of({
         writeMetrics: (rows) => write.putMany("otel_metric_point", rows.map((r) => cacheRow({
-            id: metricPointKey(r),
+            id: metricPointRowId(r),
             harness: r.harness,
             metric: r.metric,
             value: r.value,

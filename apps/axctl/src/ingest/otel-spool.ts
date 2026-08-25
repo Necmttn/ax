@@ -1,6 +1,7 @@
-import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
+import { WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
 import { defaultOtlpSpoolDir } from "../otel/spool-server.ts";
 import { SIGNALS } from "../otel/signals.ts";
 import { OTLP_SIGNAL_PATHS } from "../otel/signal.ts";
@@ -9,6 +10,88 @@ import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { walkJsonlFilesStrict, type JsonlFileCandidate } from "./walk-jsonl.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+
+/**
+ * ---------------------------------------------------------------------------
+ * Metric-point natural-key cutover (#1011)
+ * ---------------------------------------------------------------------------
+ * `otel_metric_point.id` used to hash only (harness, metric, session, model,
+ * skill) + observed_at, omitting most OTLP data-point dimensions (`type`,
+ * `query_source`, `agent.name`, an MCP server name, ...) - distinct points
+ * collapsed onto one id (~600-740 collapsed rows per warm ingest, pure wasted
+ * UPSERT work; no corruption, since dedup always kept the last write).
+ * `metricPointKey`/`metricPointRowId` (apps/axctl/src/otel/rows.ts) now fold
+ * in the full CANONICALIZED attrs JSON, which changes EVERY existing row's
+ * id. A warm ingest normally skips spool files whose (mtime, size) match
+ * their watermark, so without a cutover the stale collapsed rows would sit
+ * next to correctly-keyed new ones forever.
+ *
+ * This cutover runs ONCE per key-version (gated by
+ * METRIC_KEY_CUTOVER_VERSION, mirroring CONTENT_HASH_VERSION in
+ * watermark.ts) and, before the ordinary spool replay that follows:
+ *   1. deletes `telemetry_of` edges targeting otel_metric_point rows,
+ *   2. deletes every otel_metric_point row,
+ *   3. clears otel_spool file watermarks, so every RETAINED spool file
+ *      re-ingests under the ordinary `ingestOtelSpool` call right after -
+ *      that call is steps 4 (replay) and, on success, 5 (marker write).
+ *
+ * IDEMPOTENCY / CRASH WINDOW: the version marker is written ONLY after the
+ * replay succeeds. A crash between the wipe and the marker leaves the
+ * sentinel absent, so the NEXT run repeats the whole sequence: the deletes
+ * are plain DELETEs (idempotent - a second run against already-empty tables
+ * is a no-op) and the replay re-derives deterministic content-hash ids
+ * (idempotent UPSERT), so re-running from scratch is always safe. The only
+ * cost is redundant reprocessing of spool files a crashed run had already
+ * caught up on - it can never leave a mix of old- and new-keyed rows behind,
+ * because step 2 always wipes the table before any replay is trusted to
+ * repopulate it. This all happens against the LIVE cache file inside one
+ * ingest run; a reader of the PUBLISHED snapshot never observes the
+ * mid-cutover empty state, since publish only happens at a successful run's
+ * end.
+ *
+ * RETENTION ASYMMETRY (accepted, not fixed here): the spool retains 90 days
+ * of raw payloads but metric retention prunes at 30 days. Replay restores
+ * whatever raw input is still on disk, and ordinary retention prunes it back
+ * down afterward - a metric older than 90 days at cutover time cannot be
+ * recovered (it would already be gone under the old scheme too).
+ */
+/** Exported for test verification only - bump to re-arm the cutover on a
+ *  future key-scheme change. */
+export const METRIC_KEY_CUTOVER_VERSION = "attrs-key-v1";
+export const METRIC_KEY_CUTOVER_SENTINEL_PATH = "__metric_key_cutover__/otel_spool";
+
+const CutoverSentinelRow = Schema.Struct({ sha: Schema.NullOr(Schema.String) });
+
+const metricKeyCutoverDone = (write: CacheWriteService): Effect.Effect<boolean, CacheWriteError> =>
+    write.first(
+        CutoverSentinelRow,
+        `SELECT sha FROM ${WATERMARK_TABLE} WHERE path = ?`,
+        [METRIC_KEY_CUTOVER_SENTINEL_PATH],
+    ).pipe(
+        Effect.map(Option.match({
+            onNone: () => false,
+            onSome: (row) => row.sha === METRIC_KEY_CUTOVER_VERSION,
+        })),
+    );
+
+/** Steps 1-3: wipe stale metric-point rows/edges and clear otel_spool marks
+ *  so the replay that follows re-derives every retained spool file under the
+ *  new key. Each statement is independently idempotent - safe to re-run if a
+ *  prior attempt crashed before the version marker was written. */
+const runMetricKeyCutover = (write: CacheWriteService): Effect.Effect<void, CacheWriteError> =>
+    Effect.gen(function* () {
+        yield* write.exec("DELETE FROM telemetry_of WHERE out_table = ?", ["otel_metric_point"]);
+        yield* write.exec("DELETE FROM otel_metric_point");
+        yield* write.exec(`DELETE FROM ${WATERMARK_TABLE} WHERE source_kind = ?`, ["otel_spool"]);
+    });
+
+/** Step 5: write the version marker. Called ONLY after step 4 (the ordinary
+ *  replay in `ingestOtelSpool`) has succeeded. */
+const markMetricKeyCutoverDone = (write: CacheWriteService): Effect.Effect<void, CacheWriteError> =>
+    write.put(
+        WATERMARK_TABLE,
+        watermarkRow("otel_spool", METRIC_KEY_CUTOVER_SENTINEL_PATH, { sha: METRIC_KEY_CUTOVER_VERSION }),
+    );
 
 interface SpoolEnvelope {
     readonly path: string;
@@ -96,6 +179,14 @@ export const ingestOtelSpool = (
         let rows = 0;
         let malformed = 0;
 
+        // Metric-point natural-key cutover (#1011, see the block comment
+        // above): runs its destructive wipe BEFORE the watermark-driven
+        // replay below reads marks, so the cleared otel_spool marks are what
+        // the replay actually sees. The version marker is written only after
+        // that replay succeeds (below), never here.
+        const cutoverPending = !(yield* metricKeyCutoverDone(write));
+        if (cutoverPending) yield* runMetricKeyCutover(write);
+
         const result = yield* runJsonlProviderFiles<
             CacheWriteError | PlatformError.PlatformError,
             OtelWriter,
@@ -149,6 +240,11 @@ export const ingestOtelSpool = (
                 }),
         }).pipe(Effect.provide(OtelWriterLive(write)));
 
+        // Step 5: mark the cutover done ONLY now that the replay above (step
+        // 4) has completed without raising - a crash before this line leaves
+        // the sentinel absent, so the next run repeats the wipe + replay.
+        if (cutoverPending) yield* markMetricKeyCutoverDone(write);
+
         return {
             files: result.files,
             skippedUnchanged: result.skippedUnchanged,
@@ -177,7 +273,12 @@ export const otelSpoolStage: StageDef<
     FileSystem.FileSystem | Path.Path,
     DbError | CacheWriteError
 > = {
-    meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"], writes: [{ table: "otel_metric_point", mode: "parse" }, { table: "otel_span", mode: "parse" }, { table: "otel_log_event", mode: "parse" }, { table: "ingest_file_state", mode: "bookkeep" }, { table: "ingest_run", mode: "bookkeep" }] }),
+    // "telemetry_of"/"derive" covers the #1011 metric-key cutover's one-time
+    // DELETE of edges targeting otel_metric_point rows - legal without a
+    // WRITE_MODE_EXCEPTIONS entry since telemetry_of is already a derived-layer
+    // table (the correlation pass, ingest-run's NON_STAGE_WRITERS entry, is the
+    // table's other writer).
+    meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"], writes: [{ table: "otel_metric_point", mode: "parse" }, { table: "otel_span", mode: "parse" }, { table: "otel_log_event", mode: "parse" }, { table: "telemetry_of", mode: "derive" }, { table: "ingest_file_state", mode: "bookkeep" }, { table: "ingest_run", mode: "bookkeep" }] }),
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
         const result = yield* ingestOtelSpool(write, {
