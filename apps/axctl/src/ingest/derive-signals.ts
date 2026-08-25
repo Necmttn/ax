@@ -11,7 +11,7 @@ import {
     groupTurnsBySession, shouldDeriveAllTimeSkillPairs,
 } from "./signals/core.ts";
 import type {
-    CorrectionEdge, ProposedEdge, RecoveryEdge,
+    CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent, ProposedEdge, RecoveryEdge,
     SessionTurns, SkillPairAccum, ToolCallLike,
 } from "./signals/types.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -122,11 +122,33 @@ const fetchSkillNames = (write: CacheWriteService): Effect.Effect<SkillName[], C
             .map((n) => SkillName.make(n));
     });
 
+/**
+ * Fetch the error `tool_call` rows for a bounded set of session ids - the
+ * same session-chunking `fetchSessionTurnsForIds` applies to turns (#1021),
+ * extended to cover this SEPARATE, previously-unbounded materialisation
+ * (#1043). Past ~60-90 days of history the single unbounded `WHERE
+ * tc.has_error = true` fetch (17 columns, including the `output_excerpt` /
+ * `error_text` text columns, for EVERY error in the window) crossed a
+ * threshold that segfaulted the DuckDB->JS bridge at ~2.5 GB RSS. Bounding by
+ * `tc.session IN (...)` caps each round-trip to at most one chunk's worth of
+ * sessions' errors.
+ *
+ * `sinceDays` stays as a second filter even though `sessionIds` is already
+ * window-derived from `fetchSessionIds`: a session can carry both an
+ * in-window turn (which puts it in the id list) and an out-of-window tool
+ * call, and a windowed derive must still skip that old call - pinned by
+ * `derive-signals.window.test.ts`. Keeping it is strictly cheaper than
+ * dropping it (an extra indexed predicate vs. pulling rows this stage would
+ * then have to discard).
+ */
 const fetchFailedToolCalls = (
     write: CacheWriteService,
+    sessionIds: ReadonlyArray<string>,
     sinceDays: number | undefined,
 ): Effect.Effect<ToolCallLike[], CacheWriteError> =>
     Effect.gen(function* () {
+        if (sessionIds.length === 0) return [];
+        const placeholders = sessionIds.map(() => "?").join(", ");
         const sinceFilter = sinceDays && sinceDays > 0 ? `AND tc.ts > CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${Math.trunc(sinceDays)} days'` : "";
         const sql = `
 SELECT
@@ -134,7 +156,7 @@ SELECT
     tc.output_excerpt, tc.error_text, tc.exit_code, tc.duration_ms, tc.has_error,
     tc.cwd, tc.seq, tc.call_id, s.repository, s.checkout
 FROM tool_call tc JOIN session s ON s.id = tc.session
-WHERE tc.has_error = true ${sinceFilter}
+WHERE tc.has_error = true AND tc.session IN (${placeholders}) ${sinceFilter}
 ORDER BY tc.ts DESC`;
         const rows = yield* write.rows(Schema.Struct({
             id: Schema.String, session: Schema.String, turn: Schema.NullOr(Schema.String), name: Schema.String,
@@ -143,7 +165,7 @@ ORDER BY tc.ts DESC`;
             exit_code: Schema.NullOr(NumberFromBigIntColumn), duration_ms: Schema.NullOr(NumberFromBigIntColumn),
             has_error: Schema.Boolean, cwd: Schema.NullOr(Schema.String), seq: NumberFromBigIntColumn,
             call_id: Schema.NullOr(Schema.String), repository: Schema.NullOr(Schema.String), checkout: Schema.NullOr(Schema.String),
-        }), sql);
+        }), sql, [...sessionIds]);
         return [...rows] as unknown as ToolCallLike[];
     });
 
@@ -195,6 +217,13 @@ export const deriveSignals = Effect.fn("derive.signals")(
         const correctionBatch: CorrectionEdge[] = [];
         const proposedBatch: ProposedEdge[] = [];
         const recoveryBatch: RecoveryEdge[] = [];
+        // Folded into the session-chunk loop below (#1043): each chunk's error
+        // tool_calls are fetched and turned into events immediately, so the
+        // full error corpus never sits in the heap at once the way a single
+        // post-loop fetch did. Only these (much smaller) derived-event
+        // batches accumulate across chunks.
+        const toolFrictionBatch: DerivedFrictionEvent[] = [];
+        const diagnosticBatch: DerivedDiagnosticEvent[] = [];
         const pairsAccum = new Map<string, SkillPairAccum>();
         // Skill pairs are all-time aggregates - a --since-scoped derive must
         // not clobber them. Hoisted above the loop so we neither accumulate
@@ -234,6 +263,18 @@ export const deriveSignals = Effect.fn("derive.signals")(
                     });
                 }
             }
+            // Same chunk of session ids that bounded the turns fetch above also
+            // bounds this fetch (#1043) - the failed-tool-calls read is a
+            // SEPARATE materialisation from turns and was still unbounded, which
+            // is what segfaulted a 90-day derive.
+            const chunkFailedToolCalls = yield* fetchFailedToolCalls(write, idChunk, opts.sinceDays).pipe(
+                Effect.tap((calls) => Effect.annotateCurrentSpan("signals.failed_tool_calls", calls.length)),
+                Effect.withSpan("signals.fetch-failed-tools", {
+                    attributes: { "signals.chunk_sessions": idChunk.length },
+                }),
+            );
+            toolFrictionBatch.push(...deriveFrictionFromToolCalls(chunkFailedToolCalls));
+            diagnosticBatch.push(...deriveDiagnosticsFromToolCalls(chunkFailedToolCalls));
         }
 
         const pairsList = shouldWriteSkillPairs
@@ -249,14 +290,13 @@ export const deriveSignals = Effect.fn("derive.signals")(
                 skillPairs: pairsList.length,
             });
         }
-        const failedToolCalls = yield* fetchFailedToolCalls(write, opts.sinceDays).pipe(
-            Effect.tap((calls) => Effect.annotateCurrentSpan("signals.failed_tool_calls", calls.length)),
-            Effect.withSpan("signals.fetch-failed-tools"),
-        );
-        const toolFrictionBatch = deriveFrictionFromToolCalls(failedToolCalls);
+        // `toolFrictionBatch` / `diagnosticBatch` were built chunk-by-chunk in
+        // the loop above (#1043); `correctionBatch` still accumulates across
+        // the whole run (it's small - one row per correction, not one per
+        // error tool_call), so its friction derivation stays here, post-loop,
+        // exactly as before.
         const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
         const frictionBatch = [...toolFrictionBatch, ...correctionFrictionBatch];
-        const diagnosticBatch = deriveDiagnosticsFromToolCalls(failedToolCalls);
         if (opts.onProgress) {
             yield* opts.onProgress({
                 sessions: totalSessions,
