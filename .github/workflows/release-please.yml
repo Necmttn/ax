@@ -45,10 +45,12 @@ jobs:
         include:
           - runner: macos-14
             artifact: axctl-darwin-arm64
-          # Intel macOS. `scripts/build-duckdb.sh` branches on `uname -s` only, so
+          # Intel macOS. GitHub retired the macos-13 image; macos-15-intel is
+          # the current x64 standard runner label. `scripts/build-duckdb.sh`
+          # branches on `uname -s` only, so
           # this leg builds a native x64 libduckdb with no arch-specific casing,
           # and `install.sh` already maps `x86_64` -> `x64` (#835).
-          - runner: macos-13
+          - runner: macos-15-intel
             artifact: axctl-darwin-x64
           - runner: ubuntu-24.04
             artifact: axctl-linux-x64
