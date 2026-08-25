@@ -50,15 +50,40 @@ const BIN_DIR = posixPath.join(HOME, ".local", "bin");
 const OTLPD_LABEL = "com.necmttn.ax-otlpd";
 const OTLPD_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${OTLPD_LABEL}.plist`);
 
+/**
+ * Escapes a value for safe use as literal XML text content in a plist
+ * (property list). `&` must escape first, or the entities inserted for the
+ * other characters would themselves be re-escaped. Every dynamic value
+ * interpolated into `otlpdPlist` (paths, env values) MUST go through this -
+ * an unescaped `&`/`<` breaks the XML, and a raw `<string>` boundary lets
+ * attacker-controlled input (e.g. an env var) inject sibling plist keys.
+ */
+export function escapeXmlText(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&apos;");
+}
+
 // The otlpd spool dir is decoupled from AX_DATA_DIR (see spool-server.ts
 // defaultOtlpSpoolDir) - forward AX_OTLP_SPOOL_DIR into the LaunchAgent's env
 // when the installer's own env carries an override, not AX_DATA_DIR.
 const otlpdSpoolDirEnv = (): string => process.env.AX_OTLP_SPOOL_DIR
     ? `
     <key>AX_OTLP_SPOOL_DIR</key>
-    <string>${process.env.AX_OTLP_SPOOL_DIR}</string>`
+    <string>${escapeXmlText(process.env.AX_OTLP_SPOOL_DIR)}</string>`
     : "";
 
+// ProgramArguments runs binPath directly (no shell) - both the source
+// checkout's bin/axctl (a `#!/usr/bin/env bash` wrapper, executable) and the
+// compiled binary's execPath are directly exec()-able by launchd, so no
+// `/bin/bash -lc "exec \"...\" otlpd"` indirection is needed. That wrapper
+// used to interpolate binPath into a double-quoted shell string unescaped -
+// a path containing shell metacharacters could inject commands. Passing
+// binPath and "otlpd" as separate ProgramArguments entries removes the
+// shell entirely, so there is nothing left to inject into.
 export const otlpdPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -67,9 +92,8 @@ export const otlpdPlist = (binPath: string): string => `<?xml version="1.0" enco
   <string>${OTLPD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>-lc</string>
-    <string>exec "${binPath}" otlpd</string>
+    <string>${escapeXmlText(binPath)}</string>
+    <string>otlpd</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -79,13 +103,13 @@ export const otlpdPlist = (binPath: string): string => `<?xml version="1.0" enco
     <key>Crashed</key><true/>
   </dict>
   <key>StandardOutPath</key>
-  <string>${LOG_DIR}/otlpd.out</string>
+  <string>${escapeXmlText(LOG_DIR)}/otlpd.out</string>
   <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/otlpd.err</string>
+  <string>${escapeXmlText(LOG_DIR)}/otlpd.err</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpdSpoolDirEnv()}
+    <string>${escapeXmlText(HOME)}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpdSpoolDirEnv()}
   </dict>
   <key>ThrottleInterval</key>
   <integer>5</integer>
