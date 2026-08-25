@@ -30,6 +30,64 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
+  # Primes the DuckDB build cache from a TRUSTED default-branch (`main`) run
+  # so the next release tag gets a warm restore instead of a from-scratch
+  # build. GitHub Actions scopes a saved cache to the ref that created it
+  # plus the repository's default branch - it does NOT share a cache
+  # between two different tags - so build-artifacts' tag-scoped save (below)
+  # only ever helps a RETRY of that same tag, never the next release.
+  # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+  #
+  # Gated on `releases_created` (release-please's own output, set only on the
+  # push where it actually cuts a release) so this doesn't run three
+  # expensive full-matrix runners on every ordinary main push - just the rare
+  # push that creates a release. That push's `release: published` event also
+  # triggers build-artifacts on the new tag concurrently, so this prime run
+  # may race it and lose the save on a shared first-ever cache miss; it isn't
+  # racing to help ITS OWN release, only to seed every release after this one.
+  # No release publishing happens here (build/smoke/save only), so the
+  # publish-race protection on build-artifacts/publish-artifacts is untouched.
+  prime-duckdb-cache:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    name: Prime DuckDB cache (${{ matrix.artifact }})
+    runs-on: ${{ matrix.runner }}
+    # Mirrors build-artifacts' cold-build headroom - a prime run misses the
+    # cache exactly like a build-artifacts run would on the same inputs.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # Must match build-artifacts' matrix runners exactly - the cache key
+        # is a function of (runner.os, runner.arch), so priming a runner
+        # build-artifacts doesn't use would seed a key nothing ever reads.
+        include:
+          - runner: macos-14
+            artifact: axctl-darwin-arm64
+          - runner: macos-15-intel
+            artifact: axctl-darwin-x64
+          - runner: ubuntu-24.04
+            artifact: axctl-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      # The dynamic library smoke imports @ax/lib through the workspace link.
+      # Install before both a cache-hit smoke and a cache-miss build.
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      # No CLI build, no packaging, no upload-artifact, no release publish -
+      # this job's only job is to leave a warm, smoke-verified cache entry
+      # behind under the default-branch scope.
+      - name: Provision DuckDB build
+        uses: ./.github/actions/provision-duckdb
+        with:
+          label: ${{ matrix.artifact }} (default-branch prime)
+
   # Artifacts build only on the `release: published` event (or manual dispatch
   # with a tag). The push run that creates the release via release-please must
   # NOT also build - when it did, its publish job raced the release-event run's
@@ -39,6 +97,9 @@ jobs:
     if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
+    # Recent cold-build durations ranged 12m22s-33m39s; 90m matches CI's own
+    # DuckDB cold-build guard and leaves headroom above the slowest observed run.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +141,27 @@ jobs:
       - run: bun test
 
       - run: bun run check:cli-reference
+
+      # DuckDB is a native dep with an expensive from-scratch build
+      # (scripts/build-duckdb.sh, mirrors CI's own `duckdb` job). Reusing a
+      # full built artifact - not a compiler cache - is what lets the
+      # restored bytes be air-gap smoked directly before build-axctl.ts's
+      # writeManifestReusingBuild() embeds them, the same trust proof CI
+      # runs on every fire.
+      #
+      # GitHub Actions caches are scoped per-ref (a saved cache is visible to
+      # the ref that made it, that ref's base branches, and the default
+      # branch - never to another tag), so a cache this job saves under a
+      # release tag is invisible to the NEXT release tag. The
+      # prime-duckdb-cache job below saves the identical key from `main` (a
+      # trusted default-branch run) so every later release tag gets a warm
+      # restore instead of a from-scratch build. The restore/build/smoke/save
+      # logic is factored into ./.github/actions/provision-duckdb so both
+      # jobs compute a byte-identical cache key by construction.
+      - name: Provision DuckDB build
+        uses: ./.github/actions/provision-duckdb
+        with:
+          label: ${{ matrix.artifact }}
 
       - run: bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl
 
