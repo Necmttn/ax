@@ -119,6 +119,29 @@ describe("ci.yml provisions the custom DuckDB", () => {
         // rejects it, and duckdbBinPath falls through to PATH silently.
         expect(runScripts("verify")).toContain("chmod +x dist/duckdb/duckdb");
     });
+
+    test("verify wires the exact real-binary/dylib paths gatedTest reads", () => {
+        // scripts/build-duckdb.test.ts gates its two real smoke cases on
+        // AX_DUCKDB_BIN / AX_DUCKDB_DYLIB directly - DUCKDB_DIST_DIR alone
+        // leaves them gated off even though the artifact was downloaded.
+        const env = job("verify").env ?? {};
+        expect(env.AX_DUCKDB_BIN).toBe("${{ github.workspace }}/dist/duckdb/duckdb");
+        expect(env.AX_DUCKDB_DYLIB).toBe("${{ github.workspace }}/dist/duckdb/libduckdb.so");
+    });
+
+    test("verify still points DUCKDB_DIST_DIR at the same downloaded build", () => {
+        expect(job("verify").env?.DUCKDB_DIST_DIR).toBe("${{ github.workspace }}/dist/duckdb");
+    });
+
+    test("verify orders artifact download, chmod, then bun test", () => {
+        const steps = stepsOf("verify");
+        const download = steps.findIndex((s) => s.uses?.startsWith("actions/download-artifact"));
+        const chmod = steps.findIndex((s) => (s.run ?? "").includes("chmod +x dist/duckdb/duckdb"));
+        const bunTest = steps.findIndex((s) => (s.run ?? "").trim() === "bun test");
+        expect(download).toBeGreaterThanOrEqual(0);
+        expect(chmod).toBeGreaterThan(download);
+        expect(bunTest).toBeGreaterThan(chmod);
+    });
 });
 
 describe("every FTS-dependent suite declares requireFts", () => {
