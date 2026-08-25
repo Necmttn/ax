@@ -31,7 +31,11 @@ import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheFirst, cacheRows } from "@ax/lib/duckdb/query";
 import { andAll, NO_CLAUSE, withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";
-import { FULL_CONTEXT_RULES, type UserTextRules } from "../ingest/normalized/message-kind.ts";
+import {
+    FULL_CONTEXT_RULES,
+    PI_CONTEXT_RULES,
+    type UserTextRules,
+} from "../ingest/normalized/message-kind.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,7 +102,7 @@ export const promptsWhere = (input: PromptsInput): Clause =>
             params: [],
         },
         withinDaysClause("t.ts", input.sinceDays),
-        legacyInjectionClause(FULL_CONTEXT_RULES),
+        legacyInjectionClauseBySource(),
         scopeClause(input.scope),
         queryClause(input.query),
     ]);
@@ -148,6 +152,31 @@ export const legacyInjectionClause = (rules: UserTextRules): Clause => {
     }
 
     return parts.length === 0 ? NO_CLAUSE : { sql: parts.join(" "), params };
+};
+
+/**
+ * Apply the legacy classifier guard only to sources that use that classifier.
+ *
+ * The normalized ingest parsers use FULL_CONTEXT_RULES for Claude and Codex,
+ * PI_CONTEXT_RULES for Pi and Omp, and no context classifier for other sources.
+ * Keep that source split here so a prefix measured for one harness cannot remove
+ * a real prompt from another harness. Unknown sources stay unfiltered as well.
+ */
+const legacyInjectionClauseBySource = (): Clause => {
+    const full = legacyInjectionClause(FULL_CONTEXT_RULES);
+    const pi = legacyInjectionClause(PI_CONTEXT_RULES);
+    const fullBody = full.sql.slice("AND ".length);
+    const piBody = pi.sql.slice("AND ".length);
+
+    return {
+        sql:
+            "AND (" +
+            "s.source NOT IN ('claude', 'codex', 'pi', 'omp')" +
+            " OR (s.source IN ('claude', 'codex') AND " + fullBody + ")" +
+            " OR (s.source IN ('pi', 'omp') AND " + piBody + ")" +
+            ")",
+        params: [...full.params, ...pi.params],
+    };
 };
 
 /**

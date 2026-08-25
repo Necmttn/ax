@@ -29,9 +29,9 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("prompts", { require
 const SESSION = "019e2531-b552-7b53-a029-c780adbb6560";
 const hoursAgo = (h: number): Date => new Date(Date.now() - h * 60 * 60 * 1000);
 
-const userTask = (id: string, seq: number, ts: Date, text: string) => ({
+const userTask = (id: string, seq: number, ts: Date, text: string, session = SESSION) => ({
     id,
-    session: SESSION,
+    session,
     seq: BigInt(seq),
     ts,
     role: "user",
@@ -69,6 +69,27 @@ describe("fetchPrompts over a published snapshot", () => {
                             "<task-notification>agent finished doing work",
                         ),
                     );
+
+                    // The same full-only prefix must be filtered for Claude and
+                    // Codex, but must remain visible for Pi, Omp, OpenCode, and
+                    // Cursor. The suffix makes each source row unique, so prompt
+                    // deduplication cannot hide a source-specific result.
+                    const sourceCases = [
+                        ["claude", "019e2531-b552-7b53-a029-c780adbb6561"],
+                        ["codex", "019e2531-b552-7b53-a029-c780adbb6562"],
+                        ["pi", "019e2531-b552-7b53-a029-c780adbb6563"],
+                        ["omp", "019e2531-b552-7b53-a029-c780adbb6564"],
+                        ["opencode", "019e2531-b552-7b53-a029-c780adbb6565"],
+                        ["cursor", "019e2531-b552-7b53-a029-c780adbb6566"],
+                    ] as const;
+                    for (const [source, session] of sourceCases) {
+                        const text = `Base directory for this skill: source=${source}`;
+                        yield* write.put("session", { id: session, source, cwd: "/Users/x/ax" });
+                        yield* write.put(
+                            "turn",
+                            userTask(`turn:source-${source}`, 1, hoursAgo(6), text, session),
+                        );
+                    }
 
                     // (3) LIKE-metachar rows. Unescaped, searching "100%"
                     // degenerates to "contains 100 anywhere" (the trailing
@@ -108,6 +129,13 @@ describe("fetchPrompts over a published snapshot", () => {
 
         // legacy machine text never reaches the output at all
         expect(browsed.rows.some((r) => r.text.startsWith("<task-notification>"))).toBe(false);
+
+        for (const source of ["claude", "codex"]) {
+            expect(browsed.rows.some((r) => r.source === source && r.text.includes(`source=${source}`))).toBe(false);
+        }
+        for (const source of ["pi", "omp", "opencode", "cursor"]) {
+            expect(browsed.rows.some((r) => r.source === source && r.text.includes(`source=${source}`))).toBe(true);
+        }
 
         // --- (3): a query containing a LIKE metacharacter ---------------------
         const searched = await Effect.runPromise(

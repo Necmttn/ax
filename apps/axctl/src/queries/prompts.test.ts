@@ -12,6 +12,7 @@ import {
 import {
     FULL_CONTEXT_RULES,
     IMAGE_ATTACHMENT_MARKERS,
+    PI_CONTEXT_RULES,
     type UserTextRules,
 } from "../ingest/normalized/message-kind.ts";
 
@@ -156,6 +157,29 @@ describe("promptsWhere", () => {
         // A subagent's opening turn IS a task - an agent wrote it. The kind is
         // right; the author is not who this command is about.
         expect(sql).toContain("s.source NOT LIKE '%-subagent'");
+    });
+
+    test("applies each legacy rule table only to its parser sources", () => {
+        const c = promptsWhere(base);
+        expect(c.sql).toContain("s.source IN ('claude', 'codex')");
+        expect(c.sql).toContain("s.source IN ('pi', 'omp')");
+        // Other and future sources take the no-op branch.
+        expect(c.sql).toContain("s.source NOT IN ('claude', 'codex', 'pi', 'omp')");
+
+        // The full-only prefix is bound once for FULL_CONTEXT_RULES. It is not
+        // present in the PI table, so a future edit cannot silently duplicate it.
+        expect(c.params.filter((p) => p === "Base directory for this skill:%")).toHaveLength(1);
+        expect(c.params.length).toBe(
+            1 + // the `sinceDays` placeholder from withinDaysClause
+            FULL_CONTEXT_RULES.control.length +
+                FULL_CONTEXT_RULES.contextStartsWith.length +
+                FULL_CONTEXT_RULES.contextIncludes.length +
+                FULL_CONTEXT_RULES.attachmentMarkers.length +
+                PI_CONTEXT_RULES.control.length +
+                PI_CONTEXT_RULES.contextStartsWith.length +
+                PI_CONTEXT_RULES.contextIncludes.length +
+                PI_CONTEXT_RULES.attachmentMarkers.length,
+        );
     });
 
     test("the window is cast, or it does not bind at all", () => {
