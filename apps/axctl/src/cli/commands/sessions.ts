@@ -44,7 +44,7 @@ import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts
 import { resolveStudioTarget } from "../banner.ts";
 import { resolvePwdCacheRepository, resolvePwdIdentity, type PwdIdentity } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
-import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
+import { catchDbErrorAndExit, stderrExit, wantsJsonFlag, writeJsonStdout } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
 import { renderSessionMarkdown, renderSessionJson } from "../session-show-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -489,7 +489,7 @@ const cmdSessionShow = (input: {
         const next = buildSessionShowNext(payload, studio);
 
         if (useJson) {
-            console.log(renderSessionJson(payload, { metrics, next }));
+            yield* Effect.promise(() => writeJsonStdout(renderSessionJson(payload, { metrics, next })));
         } else {
             printNextLinks(next);
             console.log(renderSessionMarkdown(payload, { metrics, next }));
