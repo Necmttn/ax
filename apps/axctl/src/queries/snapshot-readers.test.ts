@@ -107,4 +107,37 @@ describe("snapshot-only readers", () => {
             durabilityRatio: 0,
         });
     });
+
+    // #720: overlapping runs can finish in the opposite order they started.
+    // `run:later-start` starts after `run:earlier-start` but completes first;
+    // the ledger's freshest ingest is the one with the LATEST completion
+    // instant, not the latest start.
+    dtest("picks the run with the latest completion instant, not the latest start", async () => {
+        const dir = tempDir("completion-order");
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("ingest_run", {
+                        id: "run:earlier-start",
+                        command: "ingest",
+                        started_at: new Date("2026-08-15T01:00:00.000Z"),
+                        ended_at: new Date("2026-08-15T01:10:00.000Z"),
+                        status: "ok",
+                    });
+                    yield* write.put("ingest_run", {
+                        id: "run:later-start",
+                        command: "ingest",
+                        started_at: new Date("2026-08-15T01:05:00.000Z"),
+                        ended_at: new Date("2026-08-15T01:06:00.000Z"),
+                        status: "ok",
+                    });
+                }),
+            ),
+        );
+        const layer = readFixture(fixture.snapshotPath, dylibPath);
+
+        const lastIngest = await Effect.runPromise(fetchLastSuccessfulIngestAt.pipe(Effect.provide(layer)));
+
+        expect(lastIngest).toBe(Date.parse("2026-08-15T01:10:00.000Z"));
+    });
 });
