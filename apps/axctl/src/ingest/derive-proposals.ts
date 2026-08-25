@@ -455,9 +455,12 @@ export const buildImageContextProposalWrites = (
 //      pricer vs flat-rate recompute) must agree over the offender's
 //      COMPARABLE busts (both prices present). Zero comparable busts never
 //      mints - there is nothing to corroborate against.
-//   2. Recurrence - busts on >= 2 distinct UTC days in the window. Proxy for
-//      ">= 2 ingest windows" - cache_bust_event carries no run id, so a
-//      calendar-day count is the closest signal available.
+//   2. Recurrence - busts across >= 2 distinct SESSIONS in the window. Proxy
+//      for ">= 2 ingest windows" - cache_bust_event carries no run id, so a
+//      session count is the closest signal available. NOT a UTC-calendar-day
+//      count (#943): a UTC-day proxy miscounts for a non-UTC operator - one
+//      local workday straddling UTC midnight reads as two days (false pass),
+//      and two local workdays sharing a UTC date read as one (false fail).
 //   3. Materiality - normalized weekly cost (bust_cost_usd scaled to a 7-day
 //      rate) >= $5. A one-off $50 bust in a 90-day window is not worth an
 //      operator's triage attention; a steady $6/wk drip is.
@@ -467,7 +470,7 @@ export const buildImageContextProposalWrites = (
 // ---------------------------------------------------------------------------
 
 export const CACHE_LENS_CORROBORATION_TOLERANCE = 0.25;
-export const CACHE_LENS_MIN_RECURRENCE_DAYS = 2;
+export const CACHE_LENS_MIN_RECURRENCE_SESSIONS = 2;
 export const CACHE_LENS_MATERIALITY_WEEKLY_USD = 5;
 export const CACHE_LENS_PROPOSAL_CAP = 3;
 export const CACHE_LENS_SECTION = "cache-lens";
@@ -504,7 +507,7 @@ export const evaluateCacheLensCandidate = (
     if (corroborationDeltaPct > CACHE_LENS_CORROBORATION_TOLERANCE) return null;
 
     // Guard 2: recurrence.
-    if (candidate.distinctDays < CACHE_LENS_MIN_RECURRENCE_DAYS) return null;
+    if (candidate.sessions < CACHE_LENS_MIN_RECURRENCE_SESSIONS) return null;
 
     // Guard 3: materiality.
     const windowDays = Math.max(1, sinceDays);
@@ -1099,10 +1102,11 @@ WHERE p.form = 'guidance' AND g.section = ? AND p.status = 'open'`,
         const existingCacheLensOpenSigs = new Set(existingCacheLensOpen.map((r) => r.dedupe_sig));
         // Evaluation window FLOORED at 14 days, independent of the ingest
         // since-window: a warm `--since=1` run would otherwise evaluate a
-        // 1-day window in which the >=2-distinct-days recurrence guard can
-        // never pass (minting dead on exactly the runs that dominate) and the
-        // x7 weekly extrapolation would rest on a single day's sample. The
-        // ledger is cumulative (incremental upserts keyed by ttu.id), so
+        // 1-day window too narrow for the >=2-sessions recurrence guard to
+        // reliably see genuine recurrence (minting starved on exactly the
+        // runs that dominate) and the x7 weekly extrapolation would rest on a
+        // single day's sample. The ledger is cumulative (incremental upserts
+        // keyed by ttu.id), so
         // reading 14d back on a warm run is always valid.
         const cacheLensWindowDays = Math.max(sinceDays, 14);
         const cacheLensCandidates = yield* fetchCacheLensCandidates(write, { sinceDays: cacheLensWindowDays });

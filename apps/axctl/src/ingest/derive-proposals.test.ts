@@ -654,7 +654,6 @@ const makeCacheLensCandidate = (
     name: "design-curator",
     busts: 20,
     sessions: 8,
-    distinctDays: 5,
     bustCostUsd: 10, // 14d window -> $5/wk exactly at the threshold by default below
     comparableBusts: 20,
     comparableBustCostUsd: 10,
@@ -713,14 +712,14 @@ describe("evaluateCacheLensCandidate", () => {
         expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
     });
 
-    test("(c) single-day recurrence does not mint", () => {
-        const candidate = makeCacheLensCandidate({ distinctDays: 1 });
+    test("(c) single-session recurrence does not mint", () => {
+        const candidate = makeCacheLensCandidate({ sessions: 1 });
         expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
     });
 
     test("(d) below $5/wk materiality does not mint", () => {
         // $10 total over a 90d window -> $0.78/wk, well under $5.
-        const candidate = makeCacheLensCandidate({ distinctDays: 3, bustCostUsd: 10 });
+        const candidate = makeCacheLensCandidate({ bustCostUsd: 10 });
         expect(evaluateCacheLensCandidate(candidate, 90)).toBeNull();
     });
 
@@ -782,7 +781,7 @@ describe("deriveCacheLensProposalRows", () => {
 
     test("(b)/(c)/(d) a candidate failing any guard is skipped, not minted", () => {
         const badCorroboration = makeCacheLensCandidate({ name: "bad-corr", comparableCorroboratedCostUsd: 1 });
-        const badRecurrence = makeCacheLensCandidate({ name: "bad-days", distinctDays: 1 });
+        const badRecurrence = makeCacheLensCandidate({ name: "bad-sessions", sessions: 1 });
         const badMateriality = makeCacheLensCandidate({ name: "bad-cost", bustCostUsd: 0.5 });
         const { rows, skipped } = deriveCacheLensProposalRows(
             [badCorroboration, badRecurrence, badMateriality],

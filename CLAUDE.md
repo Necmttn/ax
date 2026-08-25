@@ -488,8 +488,10 @@ discriminator pattern as directives/workflows) - triaged via `ax improve list`
 / `accept` like any other proposal. Mint is NOT apply: no behavior changes, only
 a shortlist row. FOUR guards, all required: (1) corroboration - the ledger's two
 independent prices agree within ±25% over the offender's comparable busts (zero
-comparable busts never mints); (2) recurrence - busts on >= 2 distinct UTC days
-(proxy for >= 2 ingest windows; the ledger carries no run id); (3) materiality -
+comparable busts never mints); (2) recurrence - busts across >= 2 distinct
+sessions (proxy for >= 2 ingest windows; the ledger carries no run id - a UTC
+calendar-day count was tried first and dropped for miscounting across
+timezone boundaries, #943); (3) materiality -
 normalized weekly cost >= $5; (4) cap - at most 3 OPEN cache-lens proposals at a
 time (existing + newly minted this run), highest-weekly-cost first, rest
 skipped. Candidates come from `fetchCacheLensCandidates`
