@@ -101,6 +101,12 @@ jobs:
       # (scripts/bench/duckdb-bin.ts) both prefer this dir over anything else,
       # so no test can silently reach the upstream download.
       DUCKDB_DIST_DIR: ${{ github.workspace }}/dist/duckdb
+      # gatedTest reads these two directly (scripts/build-duckdb.test.ts) to
+      # decide whether the real binary/dylib smoke cases run or skip. Without
+      # them, DUCKDB_DIST_DIR alone leaves those two cases gated off even
+      # though the artifact is right there.
+      AX_DUCKDB_BIN: ${{ github.workspace }}/dist/duckdb/duckdb
+      AX_DUCKDB_DYLIB: ${{ github.workspace }}/dist/duckdb/libduckdb.so
       # Make a broken provisioning step FAIL rather than quietly skip every
       # FTS-dependent suite. CI green must mean the suites ran.
       AX_DUCKDB_REQUIRE_FTS: "1"
