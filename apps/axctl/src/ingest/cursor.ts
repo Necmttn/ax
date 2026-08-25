@@ -1159,6 +1159,7 @@ export const cursorStage: StageDef<CursorStageStats, AxConfig | FileSystem.FileS
         key: "cursor",
         deps: ["skills", "commands"],
         tags: ["ingest"],
+        firstValue: true,
         writes: [...NORMALIZED_BATCH_WRITES, { table: "ingest_file_state", mode: "bookkeep" }],
     }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names

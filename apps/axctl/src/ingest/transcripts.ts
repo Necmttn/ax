@@ -2078,6 +2078,7 @@ export const claudeStage: StageDef<ClaudeStats, AxConfig | FileSystem.FileSystem
         key: "claude",
         deps: ["skills", "commands", "pricing"],
         tags: ["ingest"],
+        firstValue: true,
         writes: [
             ...NORMALIZED_BATCH_WRITES,
             { table: "session_token_usage", mode: "parse" },

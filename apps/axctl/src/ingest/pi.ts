@@ -864,6 +864,7 @@ const makePiLikeStage = (
         key: desc.provider,
         deps: ["skills", "commands"],
         tags: ["ingest"],
+        firstValue: true,
         writes: [
             ...NORMALIZED_BATCH_WRITES,
             { table: "session_token_usage", mode: "parse" },

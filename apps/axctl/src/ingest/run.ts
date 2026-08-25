@@ -1,11 +1,11 @@
-import { Cause, Effect, Exit, Option, References } from "effect";
+import { Cause, Effect, Exit, FileSystem, Option, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { withCacheWrite, type CacheWriteError, type CacheWriteService } from "@ax/lib/duckdb/seam";
-import { buildFtsIndexes } from "@ax/lib/duckdb/fts";
+import { snapshotPath as resolveDefaultSnapshotPath } from "@ax/lib/duckdb";
+import { buildFtsIndexes, TURN_FTS_TARGET } from "@ax/lib/duckdb/fts";
 import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { duckdbAssetPathOption } from "../duckdb-embed-wiring.ts";
-import type { FileSystem } from "effect";
 import { LiveTrace } from "@ax/lib/live-traces/index";
 import { TraceSink } from "@ax/lib/live-traces/Sink";
 import { ProcessService } from "@ax/lib/process";
@@ -23,7 +23,7 @@ import {
     makeStageSelfTime,
 } from "@ax/lib/duckdb/self-time";
 import { runPipeline } from "./stage/runner.ts";
-import { selectByKeys, selectByTag } from "./stage/select.ts";
+import { firstValuePhaseStages, selectByKeys, selectByTag } from "./stage/select.ts";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "./stage/registry.ts";
 import { BaseStageStats, IngestContext, type StageDef } from "./stage/types.ts";
 import { reapStaleIngestRuns } from "./reap-runs.ts";
@@ -463,15 +463,52 @@ export const runIngest = (
             wrapStage(runId, stageDef as StageDef<BaseStageStats, AxConfig | ProcessService, IngestStageError>)
         );
 
-        const stageStats = yield* runPipeline(
-            wrappedStages,
-            ctx,
-            write,
-            {
-                ...(deadlineMs === undefined ? {} : { deadlineMs }),
-                recordStageOutcome: recordRunnerStageOutcome(runId, write),
-            },
-        ).pipe(
+        // Cold-start intermediate publish (#833): give a fresh install a
+        // first usable snapshot instead of making it wait out the whole
+        // graph. Allowed ONLY when no snapshot existed before this run
+        // started - an existing good snapshot is never replaced early, only
+        // by the normal end-of-run publish on success. Checked against the
+        // SAME default `snapshotPath()` `withCacheWrite` above publishes to
+        // (this call never overrides it).
+        const fs = yield* FileSystem.FileSystem;
+        const snapshotExistedAtStart = yield* fs.exists(resolveDefaultSnapshotPath()).pipe(
+            // Uncertain is treated as "existed": the risk of skipping a
+            // harmless intermediate publish is nothing; the risk of running
+            // one against an unreadable "no" is a possible clobber.
+            Effect.orElseSucceed(() => true),
+        );
+        const firstPhaseKeys = snapshotExistedAtStart
+            ? new Set<string>()
+            : new Set(firstValuePhaseStages(selectedStages).map((s) => s.meta.key));
+        const firstPhaseWrapped = wrappedStages.filter((s) => firstPhaseKeys.has(s.meta.key));
+        const remainderWrapped = wrappedStages.filter((s) => !firstPhaseKeys.has(s.meta.key));
+
+        const pipelineOpts = {
+            ...(deadlineMs === undefined ? {} : { deadlineMs }),
+            recordStageOutcome: recordRunnerStageOutcome(runId, write),
+        };
+
+        const runPhases = Effect.gen(function* () {
+            if (firstPhaseWrapped.length === 0 || remainderWrapped.length === 0) {
+                return yield* runPipeline(wrappedStages, ctx, write, pipelineOpts);
+            }
+            // Phase 1, run to completion - every OTHER stage fiber is paused
+            // (not started) until this whole call resolves, which is what
+            // makes the publish right after safe: nothing else can be
+            // writing on this connection while it runs.
+            const firstPhaseStats = yield* runPipeline(firstPhaseWrapped, ctx, write, pipelineOpts);
+            // Only the turn FTS target - the final ingest still builds every
+            // target (see below); a first snapshot is for `ax recall` over
+            // turns, not the much smaller commit table.
+            yield* buildFtsIndexes(write, [TURN_FTS_TARGET]);
+            yield* write.publishIntermediateSnapshot();
+            // Phase 2, the remaining stages - only starts now, after the
+            // publish above has already been awaited.
+            const remainderStats = yield* runPipeline(remainderWrapped, ctx, write, pipelineOpts);
+            return [...firstPhaseStats, ...remainderStats];
+        });
+
+        const stageStats = yield* runPhases.pipe(
             LiveTrace.withTrace({
                 traceId: `ingest:${runId}`,
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,

@@ -77,6 +77,11 @@ describe("StageRegistry", () => {
         expect(uniqueKeys.size).toBe(keys.length);
     });
 
+    it("marks exactly the six normalized transcript providers as firstValue (#833)", () => {
+        const firstValueKeys = ALL_STAGES.filter((s) => s.meta.firstValue === true).map((s) => s.meta.key);
+        expect(firstValueKeys.sort()).toEqual(["claude", "codex", "cursor", "omp", "opencode", "pi"]);
+    });
+
     it("all stage deps reference valid stage keys (deps-validity guard)", () => {
         const keySet = new Set(ALL_STAGES.map((s) => s.meta.key));
         const invalid: Array<{ stage: string; dep: string }> = [];

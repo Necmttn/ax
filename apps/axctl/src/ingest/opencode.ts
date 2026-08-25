@@ -1274,7 +1274,7 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
 }) {}
 
 export const opencodeStage: StageDef<OpenCodeStageStats, AxConfig | FileSystem.FileSystem | Path.Path, import("./stage/registry.ts").IngestStageError> = {
-    meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"], writes: NORMALIZED_BATCH_WRITES }),
+    meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"], firstValue: true, writes: NORMALIZED_BATCH_WRITES }),
     // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
     // this boundary by the stage key, so a named span here would double-wrap.
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
