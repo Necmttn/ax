@@ -34,6 +34,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     dispatches_advice: ["days", "limit"],
     dojo_agenda: ["days", "spar"],
     directives_list: ["limit", "status"],
+    prompts: ["days", "limit", "query", "scope"],
 };
 
 describe("axMcpTools advertised surface", () => {
@@ -61,6 +62,7 @@ describe("axMcpTools advertised surface", () => {
         const runtimeOf = (name: string) => axMcpTools.find((tool) => tool.name === name)?.runtime;
 
         expect(runtimeOf("recall")).toBe("cache");
+        expect(runtimeOf("prompts")).toBe("cache");
         expect(runtimeOf("roles")).toBe("judgment");
         expect(runtimeOf("improve_list")).toBe("judgment");
         expect(runtimeOf("skills_by_role")).toBe("cache-judgment");

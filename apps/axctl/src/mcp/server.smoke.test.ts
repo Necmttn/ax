@@ -46,6 +46,7 @@ const EXPECTED_TOOLS = [
     "dispatches_advice",
     "dojo_agenda",
     "directives_list",
+    "prompts",
 ] as const;
 
 describe("axMcpTools registry", () => {
