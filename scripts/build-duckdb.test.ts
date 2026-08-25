@@ -5,6 +5,7 @@ import {
     accessSync,
     chmodSync,
     constants,
+    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -46,6 +47,98 @@ describe("custom DuckDB build", () => {
         expect(script).toContain("match_bm25");
         expect(script).toContain("json_extract");
         expect(script).toContain("smoke-duckdb-dylib.ts");
+        // The dynamic-library smoke must call a resolvable Bun binary, not a
+        // hardcoded `bun` that only exists on the invoking user's PATH - a
+        // `sudo unshare --net` caller runs under root's PATH, which does not
+        // carry Bun.
+        expect(script).toContain("bun_bin=${BUN_BIN:-bun}");
+        expect(script).toContain('"$bun_bin" "$repo_root/scripts/smoke-duckdb-dylib.ts"');
+        expect(script).not.toMatch(/[^"]bun "\$repo_root\/scripts\/smoke-duckdb-dylib\.ts"/);
+        // A combined mode lets a caller run both smokes as a single unit
+        // (e.g. inside one `sudo unshare --net` process) instead of two
+        // separate invocations that would each need their own isolation.
+        expect(script).toContain("--smoke-artifacts");
+        expect(script).toContain("usage: $0 --smoke-only <duckdb-shell>");
+        expect(script).toContain("usage: $0 --smoke-artifacts <duckdb-shell> <libduckdb>");
+    });
+
+    test("--smoke-artifacts runs both the shell and dylib smokes, and honors BUN_BIN over PATH", () => {
+        const workDir = mkdtempSync(join(tmpdir(), "ax-duckdb-smoke-artifacts-"));
+        try {
+            const shellPath = join(workDir, "fake-duckdb-shell");
+            writeFileSync(
+                shellPath,
+                "#!/bin/sh\nprintf '%s\\n' 'fts=1:hello static world' 'json=42' \"shell-home=$HOME\"\n",
+            );
+            chmodSync(shellPath, 0o755);
+
+            const dylibPath = join(workDir, "fake-libduckdb.so");
+            writeFileSync(dylibPath, "placeholder");
+
+            // A real `bun` planted early on PATH must NOT be the one invoked -
+            // only BUN_BIN's absolute path should run.
+            const wrongBinDir = join(workDir, "wrong-bin");
+            mkdirSync(wrongBinDir);
+            const wrongBun = join(wrongBinDir, "bun");
+            writeFileSync(wrongBun, "#!/bin/sh\nprintf '%s\\n' 'WRONG BUN INVOKED'\nexit 1\n");
+            chmodSync(wrongBun, 0o755);
+
+            const honoredBunDir = join(workDir, "honored-bin");
+            mkdirSync(honoredBunDir);
+            const honoredBun = join(honoredBunDir, "bun-marker");
+            writeFileSync(
+                honoredBun,
+                "#!/bin/sh\nprintf '%s\\n' \"dylib-home=$HOME\" 'DuckDB dynamic library air-gap smoke passed'\n",
+            );
+            chmodSync(honoredBun, 0o755);
+
+            const parentHome = join(workDir, "parent-home");
+            mkdirSync(parentHome);
+
+            const result = spawnSync(
+                join(repoRoot, "scripts/build-duckdb.sh"),
+                ["--smoke-artifacts", shellPath, dylibPath],
+                {
+                    cwd: repoRoot,
+                    encoding: "utf8",
+                    env: {
+                        ...process.env,
+                        PATH: `${wrongBinDir}:${process.env.PATH ?? ""}`,
+                        BUN_BIN: honoredBun,
+                        HOME: parentHome,
+                    },
+                },
+            );
+
+            expect(result.status).toBe(0);
+            expect(result.stdout).toContain("DuckDB air-gap smoke passed");
+            expect(result.stdout).toContain("DuckDB dynamic library air-gap smoke passed");
+            expect(result.stdout).not.toContain("WRONG BUN INVOKED");
+            expect(result.stderr).not.toContain("WRONG BUN INVOKED");
+
+            const shellHome = result.stdout.match(/^shell-home=(.+)$/m)?.[1];
+            const dylibHome = result.stdout.match(/^dylib-home=(.+)$/m)?.[1];
+            expect(shellHome).toBeDefined();
+            expect(dylibHome).toBeDefined();
+            expect(shellHome).not.toBe(parentHome);
+            expect(dylibHome).not.toBe(parentHome);
+            expect(shellHome).not.toBe(dylibHome);
+            expect(existsSync(shellHome!)).toBe(false);
+            expect(existsSync(dylibHome!)).toBe(false);
+        } finally {
+            rmSync(workDir, { recursive: true, force: true });
+        }
+    });
+
+    test("--smoke-artifacts requires exactly a duckdb-shell and a libduckdb argument", () => {
+        const result = spawnSync(join(repoRoot, "scripts/build-duckdb.sh"), ["--smoke-artifacts", "one-arg-only"], {
+            cwd: repoRoot,
+            encoding: "utf8",
+        });
+
+        expect(result.status).toBe(2);
+        expect(result.stderr).toContain("usage:");
+        expect(result.stderr).toContain("--smoke-artifacts <duckdb-shell> <libduckdb>");
     });
 
     test("passes STATIC_LIBCPP from CI to the DuckDB make process", () => {
@@ -139,6 +232,42 @@ chmod +x "$2/build/release/duckdb"
         expect(workflow).toContain("actions/upload-artifact@v4");
     });
 
+    test("installs workspace dependencies before the build, and isolates the post-build smoke under a Linux-only network namespace", () => {
+        const workflowPath = join(repoRoot, ".github/workflows/build-duckdb.yml");
+        const workflow = parse(readFileSync(workflowPath, "utf8")) as {
+            jobs: Record<string, { steps: WorkflowStep[] }>;
+        };
+        const steps = workflow.jobs.build.steps;
+
+        const installIdx = steps.findIndex(
+            (s) => (s.run ?? "").trim() === "bun install --frozen-lockfile",
+        );
+        const buildIdx = steps.findIndex(
+            (s) => (s.run ?? "").includes("scripts/build-duckdb.sh") && !(s.run ?? "").includes("--"),
+        );
+        expect(installIdx).toBeGreaterThanOrEqual(0);
+        expect(buildIdx).toBeGreaterThan(installIdx);
+
+        // The build (make) itself must never run inside the network
+        // namespace - only an ADDITIONAL post-build smoke, Linux-only since
+        // `unshare --net` is a Linux syscall with no macOS equivalent.
+        const isolatedSmokeIdx = steps.findIndex((s) => (s.run ?? "").includes("sudo unshare --net"));
+        expect(isolatedSmokeIdx).toBeGreaterThan(buildIdx);
+        const isolatedSmoke = steps[isolatedSmokeIdx];
+        expect(isolatedSmoke?.if).toBe("runner.os == 'Linux'");
+        expect(isolatedSmoke?.run).toContain("--smoke-artifacts");
+        expect(isolatedSmoke?.run).toContain("BUN_BIN=");
+
+        // Bun must be resolved to an absolute path BEFORE the sudo call - a
+        // `command -v bun` issued inside the sudo'd process would see root's
+        // PATH, which does not carry Bun.
+        const runLines = (isolatedSmoke?.run ?? "").split("\n");
+        const resolveIdx = runLines.findIndex((l) => l.includes("command -v bun"));
+        const sudoIdx = runLines.findIndex((l) => l.includes("sudo unshare --net"));
+        expect(resolveIdx).toBeGreaterThanOrEqual(0);
+        expect(sudoIdx).toBeGreaterThan(resolveIdx);
+    });
+
     // Collapsed from the former AX_DUCKDB_SHELL knob onto the one CLI-binary
     // env name (AX_DUCKDB_BIN) - see scripts/bench/duckdb-bin.ts. This test
     // needs to name a SPECIFIC just-built shell to smoke, not "find any
@@ -220,9 +349,7 @@ describe("provision-duckdb composite action restores/builds/smokes/saves the Duc
     const restoreStep = steps.find((s) => s.uses?.startsWith("actions/cache/restore"));
     const saveStep = steps.find((s) => s.uses?.startsWith("actions/cache/save"));
     const buildStep = steps.find((s) => (s.run ?? "").trim() === "scripts/build-duckdb.sh");
-    const smokeStep = steps.find((s) =>
-        (s.run ?? "").includes("bun scripts/smoke-duckdb-dylib.ts"),
-    );
+    const smokeStep = steps.find((s) => (s.run ?? "").includes("--smoke-artifacts"));
 
     test("is a composite action with the DuckDB steps to guard", () => {
         // A parse/lookup mistake here would make every case below vacuously
@@ -288,8 +415,7 @@ describe("provision-duckdb composite action restores/builds/smokes/saves the Duc
     test("smokes both the restored shell and the correct dylib unconditionally - restore or build, never skipped on a hit", () => {
         expect(smokeStep?.if).toBeUndefined();
         expect(smokeStep?.run).toContain("chmod +x dist/duckdb/duckdb");
-        expect(smokeStep?.run).toContain("build-duckdb.sh --smoke-only");
-        expect(smokeStep?.run).toContain("smoke-duckdb-dylib.ts");
+        expect(smokeStep?.run).toContain("build-duckdb.sh --smoke-artifacts");
     });
 
     test("resolves the platform-specific library rather than hardcoding one extension", () => {
@@ -297,6 +423,26 @@ describe("provision-duckdb composite action restores/builds/smokes/saves the Duc
         expect(fullText).toContain("libduckdb.dylib");
         expect(fullText).toContain("libduckdb.so");
         expect(smokeStep?.run).toMatch(/libduckdb\.(dylib|so)|duckdb-lib/);
+    });
+
+    test("Linux smokes under a real network namespace with an absolute, pre-sudo-resolved Bun; macOS runs the combined smoke directly (no unshare)", () => {
+        const run = smokeStep?.run ?? "";
+        expect(run).toContain("sudo unshare --net");
+        expect(run).toContain("BUN_BIN=");
+        expect(run).toContain("runner.os");
+        expect(run).toContain("Linux");
+
+        const lines = run.split("\n");
+        const resolveIdx = lines.findIndex((l) => l.includes("command -v bun"));
+        const sudoIdx = lines.findIndex((l) => l.includes("sudo unshare --net"));
+        expect(resolveIdx).toBeGreaterThanOrEqual(0);
+        expect(sudoIdx).toBeGreaterThan(resolveIdx);
+
+        // macOS has no `unshare` syscall - its leg must still run the
+        // combined smoke, just without namespace isolation, and never fall
+        // back to a weaker smoke when Linux's isolation "fails".
+        const nonLinuxRunsCombinedSmoke = /else|macOS/.test(run) && run.includes("--smoke-artifacts");
+        expect(nonLinuxRunsCombinedSmoke).toBe(true);
     });
 
     test("saves only after the smoke passes, and never on a cache hit", () => {

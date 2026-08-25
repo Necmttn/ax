@@ -6,6 +6,10 @@ build_root=${DUCKDB_BUILD_ROOT:-"$repo_root/dist/duckdb-build"}
 source_dir="$build_root/src"
 dist_dir=${DUCKDB_DIST_DIR:-"$repo_root/dist/duckdb"}
 config_template="$repo_root/scripts/duckdb/extension_config_local.cmake"
+# A caller running the dylib smoke inside a `sudo unshare --net` process runs
+# under root's PATH, which does not carry Bun - the caller resolves Bun's
+# absolute path first (e.g. `command -v bun`) and passes it through here.
+bun_bin=${BUN_BIN:-bun}
 # Pinned to the v1.5.5 tag's commit sha, not the tag name - a tag can be
 # force-moved on the remote, and a cached checkout could silently drift onto
 # a re-tagged commit without this. Resolve a new sha with:
@@ -79,7 +83,7 @@ smoke_duckdb_dylib() {
     HTTPS_PROXY=http://127.0.0.1:9 \
     ALL_PROXY=http://127.0.0.1:9 \
     NO_PROXY='' \
-        bun "$repo_root/scripts/smoke-duckdb-dylib.ts" "$dylib_path"
+        "$bun_bin" "$repo_root/scripts/smoke-duckdb-dylib.ts" "$dylib_path"
 }
 
 if [[ ${1:-} == "--smoke-only" ]]; then
@@ -91,8 +95,21 @@ if [[ ${1:-} == "--smoke-only" ]]; then
     exit 0
 fi
 
+# Runs both smokes as one unit, so a caller that needs them isolated together
+# (e.g. inside a single `sudo unshare --net` process) can do so with one call
+# instead of orchestrating two separately-isolated invocations.
+if [[ ${1:-} == "--smoke-artifacts" ]]; then
+    if [[ $# -ne 3 ]]; then
+        echo "usage: $0 --smoke-artifacts <duckdb-shell> <libduckdb>" >&2
+        exit 2
+    fi
+    smoke_duckdb "$2"
+    smoke_duckdb_dylib "$3"
+    exit 0
+fi
+
 if [[ $# -ne 0 ]]; then
-    echo "usage: $0 [--smoke-only <duckdb-shell>]" >&2
+    echo "usage: $0 [--smoke-only <duckdb-shell>] [--smoke-artifacts <duckdb-shell> <libduckdb>]" >&2
     exit 2
 fi
 
