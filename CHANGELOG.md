@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.43.1](https://github.com/Necmttn/ax/compare/v0.43.0...v0.43.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* backfill produced edges on warm git ingest ([#1070](https://github.com/Necmttn/ax/issues/1070)) ([f793315](https://github.com/Necmttn/ax/commit/f7933153102c857f8bff78ac75e9ac84badcd1f9))
+* clean ingest spool scratch dirs on failure ([#1067](https://github.com/Necmttn/ax/issues/1067)) ([f21ee26](https://github.com/Necmttn/ax/commit/f21ee2693a875b9f52ba3ad252610997a493d331))
+* **cli:** await large JSON output ([#1066](https://github.com/Necmttn/ax/issues/1066)) ([28c3752](https://github.com/Necmttn/ax/commit/28c3752389c8056061d572ba89edad10a3349c3b))
+* **ingest:** order freshness by completion ([#1064](https://github.com/Necmttn/ax/issues/1064)) ([ce1e301](https://github.com/Necmttn/ax/commit/ce1e301b2a11956aba1a0342d416fb9c35ecdf87))
+* **ingest:** surface discovery filesystem errors ([#1062](https://github.com/Necmttn/ax/issues/1062)) ([6936a32](https://github.com/Necmttn/ax/commit/6936a32c8b9fa267c2536f0930d52493cf667f1f))
+* **install:** escape otlpd plist values ([#1065](https://github.com/Necmttn/ax/issues/1065)) ([837e964](https://github.com/Necmttn/ax/commit/837e9647b6d9e5fae97bf75b43e04bafa3ff1389))
+* restrict blob GC to known file names ([#1068](https://github.com/Necmttn/ax/issues/1068)) ([b134be3](https://github.com/Necmttn/ax/commit/b134be38bd196f71a0aa2d5f063178339d972c40))
+* **runs:** handle pre-ledger snapshots ([#1061](https://github.com/Necmttn/ax/issues/1061)) ([7b0083c](https://github.com/Necmttn/ax/commit/7b0083ca5de3d6ad4877c05e41c820982e923a41))
+* update Codex docs drift gate ([#1071](https://github.com/Necmttn/ax/issues/1071)) ([45c8bc7](https://github.com/Necmttn/ax/commit/45c8bc764c59c3e001b2543307828b77fe00954b))
+
 ## [0.43.0](https://github.com/Necmttn/ax/compare/v0.42.0...v0.43.0) (2026-08-25)
 
 
