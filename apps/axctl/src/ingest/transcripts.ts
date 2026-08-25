@@ -77,6 +77,7 @@ import {
 } from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 import {
     extractClaudeCompaction,
     type CompactionWrite,
@@ -1761,7 +1762,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         // agent_event DELETE - passes through to the direct path. The shadowed
         // `write` below routes EVERY write in this stage through the decorator;
         // the work-unit owns the flush cadence and defers watermarks past it.
-        const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-claude-" }).pipe(Effect.orDie);
+        const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-claude-" });
         const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
         const write = withTableSpool(directWrite, spool);
         const transcriptsDir = cfg.paths.transcriptsDir;
@@ -2098,27 +2099,37 @@ export const claudeStage: StageDef<ClaudeStats, AxConfig | FileSystem.FileSystem
         // The vanished-transcript case is caught + skipped inside
         // `ingestTranscripts`; any PlatformError that escapes here is a
         // genuine FS failure (e.g. an unreadable transcripts root or a
-        // non-NotFound stat/stream error) so it dies as a defect rather
-        // than masquerading as a recoverable DbError.
-        const result = yield* ingestTranscripts(write, {
+        // non-NotFound stat/stream error) so the stage boundary logs a warning
+        // and returns zero stats rather than hiding the failure.
+        const empty = (error: PlatformError.PlatformError) => ClaudeStats.make({
+            durationMs: Date.now() - t0,
+            summary: "claude skipped (filesystem error; non-fatal)",
+            sessionsIngested: 0,
+            turnsIngested: 0,
+            toolCallsIngested: 0,
+            malformedLines: 0,
+            failedFiles: 1,
+            failedOpenError: error.message,
+        });
+        return yield* ingestTranscripts(write, {
             sinceDays,
             project: ctx.claudeProject,
             runId: ctx.runId,
             onProgress: annotateStageProgress,
             onFileFailures,
         }).pipe(
-            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            Effect.map((result) => ClaudeStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
+                    (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
+                sessionsIngested: result.sessions,
+                turnsIngested: result.turns,
+                toolCallsIngested: result.toolCalls,
+                malformedLines: result.malformedLines,
+                failedFiles: result.failedFiles,
+            })),
+            Effect.catchTag("PlatformError", (error) => skipPlatformStage("claude", error, empty)),
         );
-        return ClaudeStats.make({
-            durationMs: Date.now() - t0,
-            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
-                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
-            sessionsIngested: result.sessions,
-            turnsIngested: result.turns,
-            toolCallsIngested: result.toolCalls,
-            malformedLines: result.malformedLines,
-            failedFiles: result.failedFiles,
-        });
     }),
 };

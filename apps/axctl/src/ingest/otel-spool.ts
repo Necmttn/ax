@@ -10,6 +10,7 @@ import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { walkJsonlFilesStrict, type JsonlFileCandidate } from "./walk-jsonl.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 
 /**
  * ---------------------------------------------------------------------------
@@ -281,19 +282,27 @@ export const otelSpoolStage: StageDef<
     meta: StageMeta.make({ key: "otel-spool", deps: [], tags: ["ingest"], writes: [{ table: "otel_metric_point", mode: "parse" }, { table: "otel_span", mode: "parse" }, { table: "otel_log_event", mode: "parse" }, { table: "telemetry_of", mode: "derive" }, { table: "ingest_file_state", mode: "bookkeep" }, { table: "ingest_run", mode: "bookkeep" }] }),
     run: Effect.fn(function* (ctx: IngestContext, write: CacheWriteService) {
         const t0 = Date.now();
-        const result = yield* ingestOtelSpool(write, {
-            ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
-        }).pipe(Effect.catchTag("PlatformError", (error) => Effect.die(error)));
-        return OtelSpoolStageStats.make({
+        const empty = (error: PlatformError.PlatformError) => OtelSpoolStageStats.make({
             durationMs: Date.now() - t0,
-            summary: `ingested ${result.payloads} OTLP payloads, ${result.rows} rows` +
-                (result.malformed > 0 ? `, ${result.malformed} malformed payloads skipped` : "") +
-                (result.failedFiles > 0 ? `, ${result.failedFiles} files failed` : ""),
-            filesIngested: result.files,
-            payloadsIngested: result.payloads,
-            rowsIngested: result.rows,
-            malformedPayloads: result.malformed,
-            failedFiles: result.failedFiles,
+            summary: "otel-spool skipped (filesystem error; non-fatal)",
+            filesIngested: 0, payloadsIngested: 0, rowsIngested: 0,
+            malformedPayloads: 0, failedFiles: 1, failedOpenError: error.message,
         });
+        return yield* ingestOtelSpool(write, {
+            ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
+        }).pipe(
+            Effect.map((result) => OtelSpoolStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.payloads} OTLP payloads, ${result.rows} rows` +
+                    (result.malformed > 0 ? `, ${result.malformed} malformed payloads skipped` : "") +
+                    (result.failedFiles > 0 ? `, ${result.failedFiles} files failed` : ""),
+                filesIngested: result.files,
+                payloadsIngested: result.payloads,
+                rowsIngested: result.rows,
+                malformedPayloads: result.malformed,
+                failedFiles: result.failedFiles,
+            })),
+            Effect.catchTag("PlatformError", (error) => skipPlatformStage("otel-spool", error, empty)),
+        );
     }),
 };

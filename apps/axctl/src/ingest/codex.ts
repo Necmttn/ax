@@ -59,6 +59,7 @@ import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
 import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { canonicalCwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
+import { skipPlatformStage } from "./platform-stage.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1495,7 +1496,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // shadowed `write` routes every write in this stage through it. The
         // per-session agent_event DELETE stays a pass-through exec and fires
         // before that session's first append, so delete-before-insert holds.
-        const spoolDir = yield* spoolFs.makeTempDirectory({ prefix: "ax-spool-codex-" }).pipe(Effect.orDie);
+        const spoolDir = yield* spoolFs.makeTempDirectory({ prefix: "ax-spool-codex-" });
         const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
         const write = withTableSpool(directWrite, spool);
         // Shared across all files this stage run: the agent_event ghost-index
@@ -1910,9 +1911,18 @@ export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSys
         // A vanished session file is caught + skipped inside `ingestCodex`;
         // any PlatformError that escapes here is a genuine FS fault (e.g. an
         // unreadable sessions root or a non-NotFound stat/stream error), so
-        // it dies as a defect rather than masquerading as a recoverable
-        // DbError - mirroring `claudeStage`.
-        const result = yield* ingestCodex(write, {
+        // it reaches the stage boundary as a typed filesystem failure.
+        const empty = (error: PlatformError.PlatformError) => CodexStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: "codex skipped (filesystem error; non-fatal)",
+            sessionsIngested: 0,
+            turnsIngested: 0,
+            toolCallsIngested: 0,
+            malformedLines: 0,
+            failedFiles: 1,
+            failedOpenError: error.message,
+        });
+        return yield* ingestCodex(write, {
             sinceDays,
             runId: ctx.runId,
             onProgress: annotateStageProgress,
@@ -1921,18 +1931,18 @@ export const codexStage: StageDef<CodexStageStats, AxConfig | FileSystem.FileSys
             // ingest leaves repoRoots undefined => all sessions.
             ...(ctx.repoPaths ? { repoRoots: ctx.repoPaths } : {}),
         }).pipe(
-            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            Effect.map((result) => CodexStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
+                    (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
+                sessionsIngested: result.sessions,
+                turnsIngested: result.turns,
+                toolCallsIngested: result.toolCalls,
+                malformedLines: result.malformedLines,
+                failedFiles: result.failedFiles,
+            })),
+            Effect.catchTag("PlatformError", (error) => skipPlatformStage("codex", error, empty)),
         );
-        return CodexStageStats.make({
-            durationMs: Date.now() - t0,
-            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
-                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
-            sessionsIngested: result.sessions,
-            turnsIngested: result.turns,
-            toolCallsIngested: result.toolCalls,
-            malformedLines: result.malformedLines,
-            failedFiles: result.failedFiles,
-        });
     }),
 };

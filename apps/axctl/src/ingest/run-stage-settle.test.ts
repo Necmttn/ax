@@ -1,10 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Schema } from "effect";
 import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { settleStage } from "./run.ts";
 import { BaseStageStats } from "./stage/types.ts";
 import { CacheWriteUnlockedError } from "@ax/lib/duckdb/seam";
 import type { IngestStageError } from "./stage/registry.ts";
+
+class FailedOpenStats extends BaseStageStats.extend<FailedOpenStats>("FailedOpenStats")({
+    failedFiles: Schema.Number,
+}) {}
 
 /** A concrete member of the `IngestStageError` union (it is a type union, not a
  *  class), so a typed-failure Exit can actually be constructed. */
@@ -24,7 +28,7 @@ const stageFailure = (message: string) =>
  */
 
 interface Recorded {
-    readonly finishes: Array<{ readonly status: unknown; readonly errorText: unknown }>;
+    readonly finishes: Array<{ readonly status: unknown; readonly errorText: unknown; readonly counts: unknown }>;
     readonly events: Array<Record<string, unknown>>;
 }
 
@@ -40,7 +44,7 @@ const recordingWrite = (): { readonly write: CacheWriteService; readonly rec: Re
         exec: (sql: string, params?: ReadonlyArray<unknown>) =>
             Effect.sync(() => {
                 if (sql.includes("UPDATE ingest_stage SET status")) {
-                    rec.finishes.push({ status: params?.[0], errorText: params?.[2] });
+                    rec.finishes.push({ status: params?.[0], errorText: params?.[2], counts: params?.[1] });
                 }
             }),
         put: (table: string, row: Record<string, unknown>) =>
@@ -81,6 +85,22 @@ describe("settleStage", () => {
         // writer nulls the column.
         expect(rec.finishes[0]?.errorText).toBeNull();
         expect(rec.events).toHaveLength(1);
+    });
+
+    it("records a failed-open success as an error and warning with counts", async () => {
+        const rec = await Effect.runPromise(
+            settle(Exit.succeed(FailedOpenStats.make({
+                durationMs: 5,
+                summary: "skipped",
+                failedOpenError: "PermissionDenied: /spool",
+                failedFiles: 1,
+            }))),
+        );
+        expect(rec.finishes[0]?.status).toBe("error");
+        expect(String(rec.finishes[0]?.errorText)).toContain("PermissionDenied");
+        expect(String(rec.finishes[0]?.counts)).toContain("failedFiles");
+        expect(rec.events[0]?.level).toBe("warn");
+        expect(rec.events[0]?.message).toContain("PermissionDenied");
     });
 
     it("records error with the failure text on a typed failure", async () => {
