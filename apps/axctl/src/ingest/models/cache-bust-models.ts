@@ -28,7 +28,7 @@ export const CACHE_BUST_MODELS: readonly SqlModel[] = [CACHE_BUST_EVENT_CLEANUP_
 
 /** Changes whenever the model's SQL changes -> one full re-derive. */
 export const cacheBustModelVersion = (): string =>
-    stableDigest(`cache-bust-models-v1${CACHE_BUST_EVENT_CLEANUP_SQL}${CACHE_BUST_EVENT_SQL}`);
+    stableDigest(`cache-bust-models-v2${CACHE_BUST_EVENT_CLEANUP_SQL}${CACHE_BUST_EVENT_SQL}`);
 
 const MARKER_SOURCE_KIND = "cache_bust_model";
 const MARKER_PATH = "__cache_bust_model__";

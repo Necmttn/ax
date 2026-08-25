@@ -655,9 +655,9 @@ const makeCacheLensCandidate = (
     busts: 20,
     sessions: 8,
     bustCostUsd: 10, // 14d window -> $5/wk exactly at the threshold by default below
-    comparableBusts: 20,
-    comparableBustCostUsd: 10,
-    comparableCorroboratedCostUsd: 10, // 0% delta
+    comparableRoots: 8,
+    comparableEstimatedUsd: 10,
+    comparableOtlpUsd: 10, // 0% delta
     reasonCounts: [{ reason: "tool_result_too_large", count: 15 }, { reason: "system_prompt_changed", count: 5 }],
     ...o,
 });
@@ -686,10 +686,10 @@ describe("evaluateCacheLensCandidate", () => {
     });
 
     test("(b) corroboration outside ±25% does not mint", () => {
-        // comparable bust cost $10 vs corroborated $7 -> delta = 3/7 = ~42.9%
+        // transcript cost $10 vs independent OTLP $7 -> delta = 3/7 = ~42.9%
         const candidate = makeCacheLensCandidate({
-            comparableBustCostUsd: 10,
-            comparableCorroboratedCostUsd: 7,
+            comparableEstimatedUsd: 10,
+            comparableOtlpUsd: 7,
         });
         expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
     });
@@ -697,8 +697,8 @@ describe("evaluateCacheLensCandidate", () => {
     test("corroboration exactly at ±25% still mints (boundary is inclusive)", () => {
         // delta = 2.5 / 10 = 25%
         const candidate = makeCacheLensCandidate({
-            comparableBustCostUsd: 12.5,
-            comparableCorroboratedCostUsd: 10,
+            comparableEstimatedUsd: 12.5,
+            comparableOtlpUsd: 10,
             bustCostUsd: 12.5,
         });
         const evaluation = evaluateCacheLensCandidate(candidate, 14);
@@ -707,14 +707,24 @@ describe("evaluateCacheLensCandidate", () => {
         expect(evaluation!.confidence).toBe("medium");
     });
 
-    test("zero comparable busts never mints, regardless of other fields", () => {
-        const candidate = makeCacheLensCandidate({ comparableBusts: 0, comparableBustCostUsd: 0, comparableCorroboratedCostUsd: 0 });
+    test("zero comparable roots never mints, regardless of other fields", () => {
+        const candidate = makeCacheLensCandidate({ comparableRoots: 0, comparableEstimatedUsd: 0, comparableOtlpUsd: 0 });
         expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
     });
 
     test("(c) single-session recurrence does not mint", () => {
         const candidate = makeCacheLensCandidate({ sessions: 1 });
         expect(evaluateCacheLensCandidate(candidate, 14)).toBeNull();
+    });
+
+    test("a zero or non-finite OTLP cost never mints", () => {
+        expect(evaluateCacheLensCandidate(makeCacheLensCandidate({ comparableOtlpUsd: 0 }), 14)).toBeNull();
+        expect(evaluateCacheLensCandidate(makeCacheLensCandidate({ comparableOtlpUsd: Number.NaN }), 14)).toBeNull();
+    });
+
+    test("a zero or negative transcript cost never mints", () => {
+        expect(evaluateCacheLensCandidate(makeCacheLensCandidate({ comparableEstimatedUsd: 0 }), 14)).toBeNull();
+        expect(evaluateCacheLensCandidate(makeCacheLensCandidate({ comparableEstimatedUsd: -1 }), 14)).toBeNull();
     });
 
     test("(d) below $5/wk materiality does not mint", () => {
@@ -780,7 +790,7 @@ describe("deriveCacheLensProposalRows", () => {
     });
 
     test("(b)/(c)/(d) a candidate failing any guard is skipped, not minted", () => {
-        const badCorroboration = makeCacheLensCandidate({ name: "bad-corr", comparableCorroboratedCostUsd: 1 });
+        const badCorroboration = makeCacheLensCandidate({ name: "bad-corr", comparableOtlpUsd: 1 });
         const badRecurrence = makeCacheLensCandidate({ name: "bad-sessions", sessions: 1 });
         const badMateriality = makeCacheLensCandidate({ name: "bad-cost", bustCostUsd: 0.5 });
         const { rows, skipped } = deriveCacheLensProposalRows(

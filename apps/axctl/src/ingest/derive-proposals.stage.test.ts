@@ -6,7 +6,7 @@ describe("proposalsStage", () => {
     it("declares the canonical key/deps/tags", () => {
         expect(Schema.decodeUnknownSync(ProposalsKey)("proposals")).toBe("proposals");
         expect(proposalsStage.meta.key).toBe("proposals");
-        expect(proposalsStage.meta.deps).toEqual(["closure", "cache-bust"]);
+        expect(proposalsStage.meta.deps).toEqual(["closure", "cache-bust", "otel-spool", "spawned"]);
         expect(proposalsStage.meta.tags).toEqual(["derive"]);
     });
 

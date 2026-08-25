@@ -803,7 +803,7 @@ const costCacheTool: AxMcpTool = defineMcpTool({
     name: "cost_cache",
     runtime: "cache",
     description:
-        "Cache-bust cost attribution (#868): which billing events missed the prompt cache, grouped by cache_miss_reason with the cache-creation cost of re-establishing it, top offenders by native skill/agent attribution, a coverage line (share of claude usage rows carrying a reason - null before ~2026-05 and until a --reparse=claude backfill), and a corroboration block (ingest price vs independent flat-rate recompute). Use to find what re-injects context and what trimming it would save.",
+        "Cache-bust cost attribution (#868): which billing events missed the prompt cache, grouped by cache_miss_reason with the cache-creation cost of re-establishing it, top offenders by native skill/agent attribution, a coverage line (share of claude usage rows carrying a reason - null before ~2026-05 and until a --reparse=claude backfill), and a corroboration block (full transcript cost vs independent OTLP claude_code.cost.usage over comparable root sessions). Use to find what re-injects context and what trimming it would save.",
     inputSchema: {
         days: z
             .number()

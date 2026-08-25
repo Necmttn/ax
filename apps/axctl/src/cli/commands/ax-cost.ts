@@ -21,7 +21,7 @@ import {
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import { fetchImageContext } from "../../queries/image-context.ts";
 import { fetchAttributionCost, type AttributionRow } from "../../queries/attribution-cost.ts";
-import { fetchCacheBustCost, type CacheBustOffenderRow } from "../../queries/cache-bust.ts";
+import { fetchCacheBustCost, relativeCostDelta, type CacheBustOffenderRow } from "../../queries/cache-bust.ts";
 import {
     buildCostModelsNext,
     buildCostSplitNext,
@@ -647,14 +647,19 @@ const cmdCostCache = (input: {
         );
 
         const corr = result.corroboration;
-        if (corr.comparableBusts > 0 && corr.costUsd > 0) {
-            const deviation = (100 * Math.abs(corr.corroboratedUsd - corr.costUsd)) / corr.costUsd;
+        if (
+            corr.comparableRoots > 0
+            && Number.isFinite(corr.estimatedUsd)
+            && Number.isFinite(corr.otlpUsd)
+            && corr.otlpUsd > 0
+        ) {
+            const deviation = 100 * relativeCostDelta(corr.estimatedUsd, corr.otlpUsd);
             // "differs by 0.0%" reads as identical; "agrees within 0.0%" read as
             // 0% agreement (#1031). Phrase it as the difference, not the agreement.
             const verdict = deviation <= 25 ? "differs by" : "DIVERGES by";
             console.log(
-                `corroboration: flat-rate recompute ${verdict} ${pct(deviation)} from the ingest price over ` +
-                    `${integer(corr.comparableBusts)} priced busts (<=25% is the proposal guard)`,
+                `corroboration: OTLP root-session cost ${verdict} ${pct(deviation)} from transcript cost over ` +
+                    `${integer(corr.comparableRoots)} comparable roots (<=25% is the proposal guard)`,
             );
         }
 
