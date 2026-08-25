@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.43.0](https://github.com/Necmttn/ax/compare/v0.42.0...v0.43.0) (2026-08-25)
+
+
+### Features
+
+* **ingest:** publish first cold snapshot early ([#1059](https://github.com/Necmttn/ax/issues/1059)) ([c3cf1fb](https://github.com/Necmttn/ax/commit/c3cf1fb291d8be99537b8458943c1d5af1baa27d))
+
+
+### Bug Fixes
+
+* **ingest:** bound reparse memory pressure ([#1060](https://github.com/Necmttn/ax/issues/1060)) ([24e0234](https://github.com/Necmttn/ax/commit/24e0234e7520efa64b2fc6e6623abdf91842144c))
+* **release:** use current Intel macOS runner ([#1057](https://github.com/Necmttn/ax/issues/1057)) ([19b9d5d](https://github.com/Necmttn/ax/commit/19b9d5d9a04cc643c41d471c104c2cb8c5e0a40b))
+
 ## [0.42.0](https://github.com/Necmttn/ax/compare/v0.41.0...v0.42.0) (2026-08-25)
 
 
