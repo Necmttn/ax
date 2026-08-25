@@ -184,6 +184,8 @@ jobs:
 
       - run: bun run check:doc-catalog
 
+      - run: bun run check:harness-docs
+
       - run: bun run check:no-node-fs
 
       - run: bun run check:record-select

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 const CLAUDE_DOCS_INDEX_URL = "https://code.claude.com/docs/llms.txt";
-const CODEX_DOCS_INDEX_URL = "https://developers.openai.com/codex/llms-full.txt";
+const CODEX_DOCS_INDEX_URL = "https://developers.openai.com/codex/llms.txt";
 
 const CLAUDE_WATCHED_SLUGS = [
     "monitoring-usage",
@@ -23,37 +23,25 @@ const CLAUDE_WATCHED_SLUGS = [
 ] as const;
 
 const CODEX_WATCHED_SLUGS = [
-    "config-advanced",
+    "config-file/config-advanced",
     "agent-approvals-security",
-    "concepts/sandboxing",
+    "sandboxing",
     "permissions",
     "hooks",
-    "mcp",
-    "skills",
-    "rules",
+    "extend/mcp",
+    "build-skills",
+    "agent-configuration/rules",
     "plugins",
-    "concepts/subagents",
-    "subagents",
+    "agent-configuration/subagents",
     "app-server",
-    "sdk",
+    "codex-sdk",
     "github-action",
     "cloud",
 ] as const;
 
 const CLAUDE_DOC_URL_RE = /\bhttps:\/\/code\.claude\.com\/docs\/en\/([A-Za-z0-9][A-Za-z0-9/_-]*?)\.md\b/g;
-const CODEX_SOURCE_RE = /^Source:\s+https:\/\/developers\.openai\.com\/codex\/([A-Za-z0-9][A-Za-z0-9/_-]*?)\.md\s*$/gm;
 const CODEX_MARKDOWN_LINK_RE =
-    /\[([^\]]+)\]\(https:\/\/developers\.openai\.com\/codex\/([A-Za-z0-9][A-Za-z0-9/_-]*?)(?:\.md)?(?:#[^)]+)?\)/g;
-const CODEX_ABSOLUTE_URL_RE =
-    /\bhttps:\/\/developers\.openai\.com\/codex\/([A-Za-z0-9][A-Za-z0-9/_-]*?)(?:\.md)?(?=[#)\s"'<]|$)/g;
-const CODEX_RELATIVE_HREF_RE = /\bhref="\/codex\/([A-Za-z0-9][A-Za-z0-9/_-]*?)(?:#[^"]*)?"/g;
-
-const CODEX_HEADING_SLUG_ALIASES = new Map<string, string>([
-    ["Agent approvals & security", "agent-approvals-security"],
-    ["Advanced Configuration", "config-advanced"],
-    ["Codex App Server", "app-server"],
-    ["Codex SDK", "sdk"],
-]);
+    /\[([^\]]+)\]\(https:\/\/learn\.chatgpt\.com\/docs\/([A-Za-z0-9][A-Za-z0-9/_-]*?)\.md(?:\?[^)#]*)?(?:#[^)]+)?\)/g;
 
 export interface DocsEntry {
     readonly slug: string;
@@ -102,36 +90,10 @@ export function parseClaudeDocsIndex(content: string): DocsEntry[] {
 export function parseCodexDocsIndex(content: string): DocsEntry[] {
     const entries: DocsEntry[] = [];
     const seen = new Set<string>();
-
-    let sourceMatch: RegExpExecArray | null;
-    while ((sourceMatch = CODEX_SOURCE_RE.exec(content)) !== null) {
-        const slug = sourceMatch[1] as string;
-        addEntry(entries, seen, slug, slugTitle(slug));
-    }
-
     let linkMatch: RegExpExecArray | null;
     while ((linkMatch = CODEX_MARKDOWN_LINK_RE.exec(content)) !== null) {
         addEntry(entries, seen, linkMatch[2] as string, linkMatch[1] as string);
     }
-
-    let absoluteMatch: RegExpExecArray | null;
-    while ((absoluteMatch = CODEX_ABSOLUTE_URL_RE.exec(content)) !== null) {
-        const slug = absoluteMatch[1] as string;
-        addEntry(entries, seen, slug, slugTitle(slug));
-    }
-
-    let hrefMatch: RegExpExecArray | null;
-    while ((hrefMatch = CODEX_RELATIVE_HREF_RE.exec(content)) !== null) {
-        const slug = hrefMatch[1] as string;
-        addEntry(entries, seen, slug, slugTitle(slug));
-    }
-
-    for (const [title, slug] of CODEX_HEADING_SLUG_ALIASES) {
-        if (content.includes(`\n# ${title}\n`) || content.startsWith(`# ${title}\n`)) {
-            addEntry(entries, seen, slug, title);
-        }
-    }
-
     return entries;
 }
 
