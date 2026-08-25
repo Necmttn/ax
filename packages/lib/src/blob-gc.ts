@@ -6,6 +6,11 @@ import { orAbsent, skipNotFound } from "./shared/fs-error.ts";
 
 const FILE_BUCKETS = ["transcripts", "codex_artifacts"] as const;
 
+// Blob writers use blobName(..., ".jsonl") and may leave the atomic-copy
+// sibling when a process stops. Do not treat unrelated bucket files as blobs.
+const isGcCandidate = (name: string): boolean =>
+    name.endsWith(".jsonl") || name.endsWith(".jsonl.partial");
+
 /** Never delete a blob written more recently than this - guards the window
  *  where a blob has just landed on disk (e.g. serve's live ingest, still
  *  mid-write) but its `session` row referencing it hasn't been upserted yet. */
@@ -151,6 +156,7 @@ export const gcFileBuckets = Effect.fn("blobGc.gcFileBuckets")(function* (
             skipNotFound<ReadonlyArray<string>>([]),
         );
         for (const entry of entries) {
+            if (!isGcCandidate(entry)) continue;
             const filePath = path.join(bucketDir, entry);
             const info = yield* fs.stat(filePath).pipe(skipNotFound(null));
             if (info === null || info.type !== "File") continue;

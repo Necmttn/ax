@@ -273,6 +273,42 @@ describe("gcFileBuckets", () => {
         }).pipe(Effect.provide(layer))));
     });
 
+    dtest("ignores unrelated files and nested layouts", async () => {
+        const referenced = await referencedFrom(
+            [filePointer("transcripts", "keep.jsonl")],
+            "ax-blobgc-known-names-",
+        );
+
+        await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* fs.makeTempDirectoryScoped();
+            const transcripts = path.join(root, "transcripts");
+            const nested = path.join(transcripts, "nested");
+            yield* fs.makeDirectory(nested, { recursive: true });
+            yield* fs.writeFileString(path.join(transcripts, "keep.jsonl"), "keep");
+            yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl"), "remove");
+            yield* fs.writeFileString(path.join(transcripts, "orphan.jsonl.partial"), "remove");
+            yield* fs.writeFileString(path.join(transcripts, ".DS_Store"), "keep");
+            yield* fs.writeFileString(path.join(transcripts, "metadata.json"), "keep");
+            yield* fs.writeFileString(path.join(nested, "orphan.jsonl"), "keep");
+
+            const result = yield* gcFileBuckets(root, {
+                isGlobalIngest: true,
+                referenced,
+                minAgeMs: 0,
+            });
+
+            expect(result).toEqual({ scanned: 3, removed: 2, failed: 0, skipped: false });
+            expect(yield* fs.exists(path.join(transcripts, "keep.jsonl"))).toBe(true);
+            expect(yield* fs.exists(path.join(transcripts, "orphan.jsonl"))).toBe(false);
+            expect(yield* fs.exists(path.join(transcripts, "orphan.jsonl.partial"))).toBe(false);
+            expect(yield* fs.exists(path.join(transcripts, ".DS_Store"))).toBe(true);
+            expect(yield* fs.exists(path.join(transcripts, "metadata.json"))).toBe(true);
+            expect(yield* fs.exists(path.join(nested, "orphan.jsonl"))).toBe(true);
+        }).pipe(Effect.provide(PlatformLayer))));
+    });
+
     dtest("a per-file remove failure is counted and does not abort the rest of GC", async () => {
         const referenced = await referencedFrom(
             [filePointer("transcripts", "keep.jsonl")],
