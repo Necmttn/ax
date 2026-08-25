@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { Effect, FileSystem, Path, type PlatformError, Schema } from "effect";
 import { runCommand } from "@ax/lib/process";
 import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { watermarkRow } from "@ax/lib/duckdb/watermark";
 import { commitRowId, edgeRowId, stableId } from "@ax/lib/stable-id";
@@ -439,6 +440,46 @@ export function deriveRepositoryDisplayName(
     return remoteName && remoteName.length > 0 ? remoteName : posixPath.basename(repoPath);
 }
 
+/**
+ * session -> produced -> commit correlation, decoupled from the `commits`
+ * batch a single `writeRepo` call just walked (#684). A warm run with an
+ * unchanged git watermark passes `commits=[]` to `writeRepo` - but a session
+ * added since the last walk can still cover an ALREADY-persisted commit's ts,
+ * and that pairing was previously never correlated because the produced-edge
+ * write lived inside the `commits.length === 0` early return. This instead
+ * joins every commit already persisted for this repository against every
+ * session already linked to it, entirely inside DuckDB (no cross-store join -
+ * both tables live in the same cache). `edgeRowId` keeps ids stable and
+ * `putMany`'s `ON CONFLICT ("id") DO UPDATE` makes re-running this fully
+ * idempotent, so it is safe to call unconditionally on every `writeRepo`
+ * call - skipped-history or not - rather than reasoning about which commits
+ * were freshly walked.
+ */
+const correlateProducedEdges = (
+    write: CacheWriteService,
+    repositoryId: string,
+    checkoutId: string,
+): Effect.Effect<number, CacheWriteError> =>
+    Effect.gen(function* () {
+        const pairs = yield* write.rows(
+            Schema.Struct({ session_id: Schema.String, commit_id: Schema.String, ts: TimestampColumn }),
+            `SELECT s.id AS session_id, c.id AS commit_id, c.ts AS ts
+FROM commit c
+JOIN session s ON s.checkout = ?
+WHERE c.repository = ?
+  AND s.started_at <= c.ts
+  AND (s.ended_at IS NULL OR s.ended_at >= c.ts)`,
+            [checkoutId, repositoryId],
+        );
+        if (pairs.length === 0) return 0;
+        yield* write.putMany("produced", pairs.map((p) => cacheRow({
+            id: edgeRowId("produced", p.session_id, p.commit_id), in_id: p.session_id,
+            out_id: p.commit_id, repository: repositoryId, checkout: checkoutId,
+            ts: tsParam(p.ts), source: "git", kind: "commit",
+        })));
+        return pairs.length;
+    });
+
 const writeRepo = Effect.fn("git.writeRepo")(
     function* (
         write: CacheWriteService,
@@ -469,14 +510,16 @@ const writeRepo = Effect.fn("git.writeRepo")(
         yield* write.exec(`UPDATE session SET repository = ?, checkout = ? WHERE ${sessionClause.sql}`,
             [repositoryId, checkoutId, ...sessionClause.params]);
 
-        if (commits.length === 0)
+        if (commits.length === 0) {
+            const produced = yield* correlateProducedEdges(write, repositoryId, checkoutId);
             return {
                 commits: 0,
                 files: 0,
-                produced: 0,
+                produced,
                 touched: 0,
                 sessions: linkedSessions,
             } satisfies WriteStats;
+        }
 
         // 1. Bulk-upsert commits. If a previous ingest wrote this repo+sha
         // under the legacy local key, reuse that record id to satisfy the
@@ -509,9 +552,10 @@ const writeRepo = Effect.fn("git.writeRepo")(
         }
         yield* write.putMany("file", fileRows);
 
-        // 3. Write commit -> touched -> file rows. Touched is checkout-scoped
-        //    evidence, so re-runs delete only this checkout's rows before they
-        //    write fresh rows. Sibling worktree evidence is preserved.
+        // 3. Write commit -> touched -> file rows. Touched is
+        //    checkout-scoped evidence, so re-runs delete only this
+        //    checkout's rows before they write fresh rows. Sibling
+        //    worktree evidence is preserved.
         let touchedCount = 0;
         for (const c of commits) {
             if (c.files.length === 0) continue;
@@ -527,25 +571,9 @@ const writeRepo = Effect.fn("git.writeRepo")(
             yield* write.putMany("touched", rows);
         }
 
-        // 4. session -> produced -> commit. For each commit, find sessions whose
-        //    cwd starts with the repo path AND whose [started_at, ended_at]
-        //    range covers the commit ts. The per-commit query avoids loading
-        //    the session table into JavaScript.
-        let producedCount = 0;
-        for (const c of commits) {
-            const cid = commitIds.get(c.sha) ?? commitRowId(repo.repositoryKey, c.sha);
-            const sel = yield* write.rows(Schema.Struct({ id: Schema.String }),
-                "SELECT id FROM session WHERE checkout = ? AND started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)",
-                [checkoutId, new Date(c.ts), new Date(c.ts)]);
-            const sessions = sel;
-            if (sessions.length > 0) {
-                yield* write.putMany("produced", sessions.map((s) => cacheRow({
-                    id: edgeRowId("produced", s.id, cid), in_id: s.id, out_id: cid,
-                    repository: repositoryId, checkout: checkoutId, ts: tsParam(c.ts), source: "git", kind: "commit",
-                })));
-            }
-            producedCount += sessions.length;
-        }
+        // 4. session -> produced -> commit. A session that appears after the
+        //    commit was persisted still gets correlated on the next warm run.
+        const producedCount = yield* correlateProducedEdges(write, repositoryId, checkoutId);
 
         return {
             commits: commits.length,
@@ -763,7 +791,14 @@ export type GitKey = typeof GitKey.Type;
 /**
  * Git stage - ingests Repository commits + touched files.
  *
- * Depends on: (none - leaf)
+ * Depends on: every session-writing provider stage that precedes it in
+ * `ALL_STAGES` (providers plus the subagent parser) - #684. `writeRepo`
+ * links `session.checkout`/`session.repository` and correlates `produced`
+ * edges against whatever sessions already exist at that point, so it must
+ * run after those stages write their sessions, not concurrently with them.
+ * The runner only awaits deps present in the selected stage set
+ * (`runner.ts`'s `runStage`), so this is safe even when a caller runs a
+ * stage subset that omits some of them.
  * Consumed by: {@link SignalsKey}
  * Tags: ingest
  */
@@ -780,7 +815,7 @@ export const gitStage: StageDef<
 > = {
     meta: StageMeta.make({
         key: "git",
-        deps: [],
+        deps: ["claude", "codex", "pi", "omp", "opencode", "cursor", "subagents"],
         tags: ["ingest"],
         writes: [
             { table: "repository", mode: "parse" },
