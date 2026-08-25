@@ -123,11 +123,14 @@ describe("metric/span record-key uniqueness - characterized, see PR for gaps", (
         expect(metricPointKey(b)).not.toBe(metricPointKey(metricRow({ observed_at: new Date("2026-06-15T00:00:01Z") })));
     });
 
-    test("KNOWN GAP: metricPointKey omits agent_name though it is persisted (pinned to prove no drift)", () => {
-        // Two points identical except agent_name collide to ONE record id. This is a
-        // PRE-EXISTING gap (rows.ts:36) - pinned here, filed as a follow-up, not changed.
-        expect(metricPointKey(metricRow({ agent_name: "a" }))).toBe(metricPointKey(metricRow({ agent_name: "b" })));
-        // value/unit are not part of the key (the measurement, not identity)
+    test("FIXED (#1011): metricPointKey now discriminates agent_name too", () => {
+        // Previously a PRE-EXISTING gap (rows.ts:36): two points identical except
+        // agent_name collapsed to ONE record id. metricPointKey now folds
+        // agent_name (and the full canonicalized attrs blob) into the key, so
+        // distinct agents no longer alias.
+        expect(metricPointKey(metricRow({ agent_name: "a" }))).not.toBe(metricPointKey(metricRow({ agent_name: "b" })));
+        // value/unit are STILL not part of the key (the measurement, not identity) -
+        // this remains intentional, not a gap.
         expect(metricPointKey(metricRow({ value: 1 }))).toBe(metricPointKey(metricRow({ value: 2 })));
         expect(metricPointKey(metricRow({ unit: "tok" }))).toBe(metricPointKey(metricRow({ unit: "USD" })));
     });

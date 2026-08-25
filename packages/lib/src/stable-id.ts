@@ -255,6 +255,7 @@ export const NATURAL_KEY_RECIPES: Readonly<Record<string, string>> = {
         "source_kind + the watched path - see watermarkRowId (@ax/lib/duckdb/watermark). The absolute path IS the key here, the one place that is right: a watermark is a statement about one file on THIS machine, in a per-machine rebuildable cache, so it has no path-independent identity",
     invoked: "edgeRowId('invoked', turn row id, skill row id, JSON.stringify(args)) - args discriminates two invocations of the same skill in one turn",
     has_content: "edgeRowId('has_content', tool_call row id, content_type row id) - one classification per (tool_call, content_type) pair, so no discriminator",
+    otel_metric_point: "harness + metric + session_id + model + skill_name + agent_name + the CANONICALIZED (sorted-key) attrs JSON + observed_at - see metricPointKey/metricPointRowId (apps/axctl/src/otel/rows.ts); value is excluded (the measurement, not the point's identity)",
     "<edge>": "edgeRowId: edge table + in_id + out_id + optional discriminator",
     "<derived>": "derivedRowId: owning session row id + source table + source row id + optional extra parts",
 };

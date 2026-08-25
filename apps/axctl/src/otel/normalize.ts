@@ -1,4 +1,4 @@
-import { attrMap, nanoToDate, type MetricsPayload, type OtlpInt64, type TracePayload, type LogsPayload } from "./otlp-schema.ts";
+import { attrMap, canonicalAttrsJson, nanoToDate, type MetricsPayload, type OtlpInt64, type TracePayload, type LogsPayload } from "./otlp-schema.ts";
 import type { OtelMetricPointRow, OtelSpanRow, OtelLogEventRow } from "./rows.ts";
 import { walkResources } from "./signal.ts";
 
@@ -27,7 +27,9 @@ export const normalizeMetrics = (payload: MetricsPayload): OtelMetricPointRow[] 
                         model: str(a.get("model")),
                         skill_name: str(a.get("skill.name")),
                         agent_name: str(a.get("agent.name")),
-                        attrs: a.size ? JSON.stringify(Object.fromEntries(a.entries())) : null,
+                        // Canonicalized (sorted-key) so it can be hashed into
+                        // metricPointKey without wire-order false positives (#1011).
+                        attrs: canonicalAttrsJson(a),
                         observed_at: nanoToDate(dp.timeUnixNano),
                     });
                 }
@@ -56,7 +58,7 @@ export const normalizeTrace = (payload: TracePayload): OtelSpanRow[] =>
                     started_at: started,
                     ended_at: ended,
                     duration_ms: ended.getTime() - started.getTime(),
-                    attrs: a.size ? JSON.stringify(Object.fromEntries(a.entries())) : null,
+                    attrs: canonicalAttrsJson(a),
                     observed_at: started,
                 };
             }),
@@ -155,7 +157,7 @@ export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] =>
                     tool_tokens: num(a.get("tool_token_count")),
                     duration_ms: num(a.get("duration_ms")),
                     status_code: num(a.get("http.response.status_code")),
-                    attrs: a.size ? JSON.stringify(Object.fromEntries(a)) : null,
+                    attrs: canonicalAttrsJson(a),
                     observed_at: eventTime(a, rec.observedTimeUnixNano, rec.timeUnixNano),
                 });
             }

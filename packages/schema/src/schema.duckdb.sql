@@ -2469,6 +2469,17 @@ CREATE INDEX IF NOT EXISTS ingest_file_state_kind_sha ON ingest_file_state(sourc
 -- re-applied to an already-large otel_log_event (codex emits ~1.5M log rows);
 -- CONCURRENTLY builds in the background without locking.
 -- (DuckDB has no CONCURRENTLY index build; the concurrency note is historical.)
+--
+-- otel_metric_point.id NATURAL KEY (#1011, cutover-versioned - see
+-- METRIC_KEY_CUTOVER_VERSION in apps/axctl/src/ingest/otel-spool.ts):
+-- SHA-256(harness, metric, session_id, model, skill_name, agent_name,
+-- CANONICAL attrs JSON [sorted keys - covers every other data-point
+-- dimension: `type`, `query_source`, an MCP server name, ...], observed_at)
+-- via `metricPointKey`/`metricPointRowId` (apps/axctl/src/otel/rows.ts).
+-- `value` is EXCLUDED (the measurement, not the point's identity - a
+-- corrected value for the same point overwrites rather than minting a new
+-- row). The prior key omitted `attrs` and `agent_name`, so distinct points
+-- differing only in one of those collapsed onto one id.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS otel_metric_point (
     id VARCHAR PRIMARY KEY,

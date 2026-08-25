@@ -59,6 +59,23 @@ export const attrMap = (kvs: readonly KeyValue[] | undefined): Map<string, strin
     return m;
 };
 
+/**
+ * Deterministic (sorted-key) JSON encoding of an attribute map.
+ *
+ * `attrMap` preserves the WIRE order of an OTLP KeyValue list, which is not a
+ * stable property of a data point's identity - two exports of the same point
+ * can serialize its attributes in a different order. Anything that folds
+ * `attrs` into a row's identity (see `metricPointKey`, apps/axctl/src/otel/
+ * rows.ts) must hash the CONTENT, not the wire order, or attribute reordering
+ * alone would mint a new row for an unchanged point. Sorting keys here is
+ * what makes that safe.
+ */
+export const canonicalAttrsJson = (a: ReadonlyMap<string, string | number | boolean | null>): string | null => {
+    if (a.size === 0) return null;
+    const sorted = [...a.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return JSON.stringify(Object.fromEntries(sorted));
+};
+
 const Resource = Schema.Struct({ attributes: repeated(KeyValue) });
 
 const NumberDataPoint = Schema.Struct({
