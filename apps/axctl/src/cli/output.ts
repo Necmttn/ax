@@ -38,6 +38,25 @@ export const catchDbErrorAndExit =
             ),
         ) as Effect.Effect<A, never, R>;
 
+/**
+ * Write a JSON payload to stdout, resolving only once the underlying stream
+ * has flushed those bytes - not merely queued them. `console.log`/a bare
+ * `process.stdout.write(...)` return before a slow downstream reader (e.g.
+ * `| jq`) drains the pipe; if the process exits right after, the write can
+ * be truncated mid-stream (#688). `Writable#write`'s callback is the stable
+ * Node/Bun-compatible completion signal - it fires only once this chunk has
+ * been handled, including any backpressure wait - so awaiting it is enough.
+ * Never ends/closes stdout.
+ */
+export function writeJsonStdout(json: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        process.stdout.write(`${json}\n`, (err) => {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+}
+
 /** Report a typed DuckDB cache read failure at a CLI handler boundary. */
 export const catchCacheReadErrorAndExit =
     (prefix: string) =>
