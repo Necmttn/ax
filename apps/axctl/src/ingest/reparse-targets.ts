@@ -39,6 +39,9 @@ export const REPARSE_TARGETS = Object.keys(REPARSE_TARGET_ENV) as ReparseTarget[
 /** The wildcard accepted in place of a target list. */
 export const REPARSE_ALL = "all";
 
+/** Marks the whole ingest run as a memory-heavy reparse. */
+export const REPARSE_ACTIVE_ENV = "AX_REPARSE_ACTIVE";
+
 export interface ReparseSelection {
     /** Env vars to set to "1", deduped, in {@link REPARSE_TARGETS} order. */
     readonly envVars: ReadonlyArray<string>;
@@ -94,4 +97,5 @@ export const applyReparseSelection = (
     env: Record<string, string | undefined> = process.env,
 ): void => {
     for (const name of selection.envVars) env[name] = "1";
+    env[REPARSE_ACTIVE_ENV] = "1";
 };

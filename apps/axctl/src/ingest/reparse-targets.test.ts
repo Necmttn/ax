@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     applyReparseSelection,
+    REPARSE_ACTIVE_ENV,
     REPARSE_TARGET_ENV,
     REPARSE_TARGETS,
     resolveReparseTargets,
@@ -51,7 +52,7 @@ describe("applyReparseSelection", () => {
     test("sets each env var to 1 on the given env", () => {
         const env: Record<string, string | undefined> = {};
         applyReparseSelection(resolveReparseTargets("claude"), env);
-        expect(env).toEqual({ AX_REDERIVE_CLAUDE: "1" });
+        expect(env).toEqual({ AX_REDERIVE_CLAUDE: "1", [REPARSE_ACTIVE_ENV]: "1" });
     });
 
     test("leaves unrelated vars untouched", () => {
@@ -59,6 +60,7 @@ describe("applyReparseSelection", () => {
         applyReparseSelection(resolveReparseTargets("git"), env);
         expect(env.PATH).toBe("/bin");
         expect(env.AX_REDERIVE_GIT).toBe("1");
+        expect(env[REPARSE_ACTIVE_ENV]).toBe("1");
         expect(env.AX_REDERIVE_CLAUDE).toBeUndefined();
     });
 });
