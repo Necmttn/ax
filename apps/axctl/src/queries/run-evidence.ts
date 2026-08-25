@@ -15,7 +15,7 @@
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
-import { CacheRead, type CacheReadError } from "@ax/lib/duckdb/seam";
+import { CacheRead, type CacheReadError, type CacheReadService } from "@ax/lib/duckdb/seam";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import {
     RUN_EVIDENCE_BACKINGS,
@@ -90,6 +90,83 @@ const TimelineDbRow = Schema.Struct({ ts: TimestampColumn, kind: Schema.String, 
 const RefGroupDbRow = Schema.Struct({ ref_kind: Schema.String, n: NumberFromBigIntColumn });
 const HeadDbRow = Schema.Struct({ kind: Schema.String, summary: Schema.NullOr(Schema.String) });
 
+/** The two tables the ledger needs. A snapshot published before #578's DDL
+ *  landed (or one restored from an older backup) has neither - see the
+ *  catalog check below. */
+const RUN_EVIDENCE_TABLES = ["run_evidence_event", "run_evidence_ref"] as const;
+
+const TableCountDbRow = Schema.Struct({ n: NumberFromBigIntColumn });
+
+/**
+ * Whether BOTH ledger tables exist in the published snapshot. Checked via
+ * `information_schema.tables` (the same catalog-probe shape `fts.ts` uses for
+ * `information_schema.schemata`) rather than by running the ledger queries and
+ * inspecting the error: a missing-table `DuckDbQueryError` and any OTHER
+ * `DuckDbQueryError` on these tables (a bad column, a corrupt row) look
+ * identical from the outside, and only the explicit check lets this function
+ * treat "no ledger yet" as an honest zero-event result while still letting
+ * every other query failure surface as a real `CacheReadError`.
+ */
+const ledgerTablesPresent = (cache: CacheReadService): Effect.Effect<boolean, CacheReadError> =>
+    Effect.gen(function* () {
+        const rows = yield* cache.rows(
+            TableCountDbRow,
+            "SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'main' AND table_name IN (?, ?)",
+            [...RUN_EVIDENCE_TABLES],
+        );
+        return (rows[0]?.n ?? 0) >= RUN_EVIDENCE_TABLES.length;
+    });
+
+interface RunEvidenceQueryRows {
+    readonly bareId: string;
+    readonly limit: number;
+    readonly groups: ReadonlyArray<GroupRow>;
+    readonly timelineRows: ReadonlyArray<{
+        readonly ts: Date;
+        readonly kind: string;
+        readonly backing: string;
+        readonly source_table: string;
+        readonly summary: string | null;
+    }>;
+    readonly refGroups: ReadonlyArray<{ readonly ref_kind?: string | null; readonly n?: number | null }>;
+    readonly heads: ReadonlyArray<{ readonly kind: string; readonly summary: string | null }>;
+}
+
+/** Pure assembly of {@link RunEvidenceResult} from decoded rows. Called with
+ *  every array empty when the ledger tables are absent - the SAME shape a
+ *  session with zero rows produces, which is the shape the renderer already
+ *  handles (see `renderRunEvidence`'s `total === 0` branch). */
+const buildRunEvidenceResult = ({ bareId, limit, groups, timelineRows, refGroups, heads }: RunEvidenceQueryRows): RunEvidenceResult => {
+    const headOf = (kind: string): string | null =>
+        heads.find((h) => h.kind === kind)?.summary ?? null;
+
+    const total = groups.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
+    const byKind = tallyByTaxonomy(groups, "kind", RUN_EVIDENCE_KINDS)
+        .sort((a, b) => b.count - a.count);
+    const byBacking = tallyByTaxonomy(groups, "backing", RUN_EVIDENCE_BACKINGS);
+
+    const refTotal = refGroups.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
+    const byRefKind = refGroups
+        .filter((r): r is { ref_kind: string; n: number } => typeof r.ref_kind === "string")
+        .map((r) => ({ key: r.ref_kind, count: typeof r.n === "number" ? r.n : 0 }))
+        .sort((a, b) => b.count - a.count);
+
+    return {
+        session_id: bareId,
+        generated_at: new Date().toISOString(),
+        objective: headOf("objective"),
+        repo: headOf("repo_state"),
+        total,
+        by_kind: byKind,
+        by_backing: byBacking,
+        timeline: timelineRows.map((row) => ({ ...row, ts: row.ts.toISOString() })),
+        ref_total: refTotal,
+        by_ref_kind: byRefKind,
+        covered_kinds: [...RUN_EVIDENCE_COVERED_KINDS],
+        timeline_limit: limit,
+    } satisfies RunEvidenceResult;
+};
+
 const tallyByTaxonomy = (
     rows: ReadonlyArray<GroupRow>,
     field: "kind" | "backing",
@@ -116,6 +193,11 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
         const sessionRef = bareId;
         const limit = Math.max(1, Math.floor(input.timelineLimit ?? RUN_EVIDENCE_TIMELINE_LIMIT));
 
+        const ledgerReady = yield* ledgerTablesPresent(cache);
+        if (!ledgerReady) {
+            return buildRunEvidenceResult({ bareId, limit, groups: [], timelineRows: [], refGroups: [], heads: [] });
+        }
+
         const groups = yield* cache.rows(
             GroupDbRow,
             "SELECT kind, backing, count(*) AS n FROM run_evidence_event WHERE session = ? GROUP BY kind, backing",
@@ -137,36 +219,8 @@ export const fetchRunEvidence = (input: RunEvidenceInput): Effect.Effect<
             "SELECT kind, summary FROM run_evidence_event WHERE session = ? AND kind IN ('objective', 'repo_state') ORDER BY ts DESC",
             [sessionRef],
         );
-        const headOf = (kind: string): string | null =>
-            heads.find((h) => h.kind === kind)?.summary ?? null;
 
-        const rows = groups;
-        const total = rows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
-        const byKind = tallyByTaxonomy(rows, "kind", RUN_EVIDENCE_KINDS)
-            .sort((a, b) => b.count - a.count);
-        const byBacking = tallyByTaxonomy(rows, "backing", RUN_EVIDENCE_BACKINGS);
-
-        const refRows = refGroups;
-        const refTotal = refRows.reduce((acc, r) => acc + (typeof r.n === "number" ? r.n : 0), 0);
-        const byRefKind = refRows
-            .filter((r): r is { ref_kind: string; n: number } => typeof r.ref_kind === "string")
-            .map((r) => ({ key: r.ref_kind, count: typeof r.n === "number" ? r.n : 0 }))
-            .sort((a, b) => b.count - a.count);
-
-        return {
-            session_id: bareId,
-            generated_at: new Date().toISOString(),
-            objective: headOf("objective"),
-            repo: headOf("repo_state"),
-            total,
-            by_kind: byKind,
-            by_backing: byBacking,
-            timeline: timelineRows.map((row) => ({ ...row, ts: row.ts.toISOString() })),
-            ref_total: refTotal,
-            by_ref_kind: byRefKind,
-            covered_kinds: [...RUN_EVIDENCE_COVERED_KINDS],
-            timeline_limit: limit,
-        } satisfies RunEvidenceResult;
+        return buildRunEvidenceResult({ bareId, limit, groups, timelineRows, refGroups, heads });
     });
 
 const nonZero = (counts: ReadonlyArray<RunEvidenceCount>): string =>
