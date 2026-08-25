@@ -65,12 +65,21 @@ jobs:
       # Re-run on a cache HIT too: this is what proves the restored bytes still
       # link fts statically, so a poisoned or truncated cache entry fails here
       # with one clear error instead of downstream as N mystery test failures.
+      #
+      # Runs inside a real Linux network namespace (`sudo unshare --net`), not
+      # just the dead-port proxy env vars build-duckdb.sh also sets - those
+      # proxy vars are defense only, since the DuckDB extension downloader
+      # does not honor them. `unshare --net` is a Linux-only syscall; Bun is
+      # resolved to an absolute path BEFORE the sudo call, since root's PATH
+      # (secure_path) does not carry it.
       - name: Air-gap smoke the provisioned artifact
         run: |
           set -euo pipefail
           chmod +x dist/duckdb/duckdb
-          scripts/build-duckdb.sh --smoke-only dist/duckdb/duckdb
-          bun scripts/smoke-duckdb-dylib.ts dist/duckdb/libduckdb.so
+          bun_bin=$(command -v bun)
+          sudo unshare --net env BUN_BIN="$bun_bin" \
+            scripts/build-duckdb.sh --smoke-artifacts \
+            "$PWD/dist/duckdb/duckdb" "$PWD/dist/duckdb/libduckdb.so"
 
       # Saved only after the smoke passes, so a bad build never becomes the
       # cached answer for every later run.

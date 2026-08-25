@@ -76,13 +76,27 @@ runs:
     # release) still link fts/json statically, so a poisoned or truncated
     # cache entry fails here with one clear error instead of downstream in
     # the shipped binary.
+    #
+    # On Linux this runs inside a real network namespace (`sudo unshare
+    # --net`), not just the dead-port proxy env vars build-duckdb.sh also
+    # sets - those are defense only, since DuckDB's extension downloader does
+    # not honor them. Bun is resolved to an absolute path BEFORE the sudo
+    # call, since root's PATH (secure_path) does not carry it. macOS has no
+    # `unshare` syscall, so it runs the identical combined smoke directly.
     - name: Air-gap smoke the provisioned DuckDB
       shell: bash
       run: |
         set -euo pipefail
         chmod +x dist/duckdb/duckdb
-        scripts/build-duckdb.sh --smoke-only dist/duckdb/duckdb
-        bun scripts/smoke-duckdb-dylib.ts dist/duckdb/${{ steps.duckdb-lib.outputs.name }}
+        shell_path="$PWD/dist/duckdb/duckdb"
+        lib_path="$PWD/dist/duckdb/${{ steps.duckdb-lib.outputs.name }}"
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          bun_bin=$(command -v bun)
+          sudo unshare --net env BUN_BIN="$bun_bin" \
+            scripts/build-duckdb.sh --smoke-artifacts "$shell_path" "$lib_path"
+        else
+          scripts/build-duckdb.sh --smoke-artifacts "$shell_path" "$lib_path"
+        fi
 
     # Saved only after the smoke passes and only on a genuine miss - a
     # cache hit must never re-save, and a bad build must never become the

@@ -53,7 +53,40 @@ describe("ci.yml provisions the custom DuckDB", () => {
     test("the artifact is air-gap smoked, so a poisoned cache cannot pass as a build", () => {
         // The smoke sets autoload/autoinstall off, which is what makes it a
         // proof of STATIC linkage rather than of a populated ~/.duckdb.
-        expect(runScripts("duckdb")).toContain("scripts/smoke-duckdb-dylib.ts");
+        expect(runScripts("duckdb")).toContain("--smoke-artifacts");
+    });
+
+    test("the unconditional post-restore smoke runs both artifacts inside one real network namespace, not just proxy env vars", () => {
+        const steps = stepsOf("duckdb");
+        const smokeStep = steps.find((s) => (s.run ?? "").includes("--smoke-artifacts"));
+        expect(smokeStep).toBeDefined();
+        expect(smokeStep?.if).toBeUndefined();
+
+        const run = smokeStep?.run ?? "";
+        expect(run).toContain("sudo unshare --net");
+        expect(run).toContain("BUN_BIN=");
+        expect(run).toContain("dist/duckdb/duckdb");
+        expect(run).toContain("dist/duckdb/libduckdb.so");
+    });
+
+    test("the post-restore smoke resolves Bun to an absolute path before the sudo call, since root's PATH does not carry Bun", () => {
+        const steps = stepsOf("duckdb");
+        const smokeStep = steps.find((s) => (s.run ?? "").includes("--smoke-artifacts"));
+        const lines = (smokeStep?.run ?? "").split("\n");
+        const resolveIdx = lines.findIndex((l) => l.includes("command -v bun"));
+        const sudoIdx = lines.findIndex((l) => l.includes("sudo unshare --net"));
+        expect(resolveIdx).toBeGreaterThanOrEqual(0);
+        expect(sudoIdx).toBeGreaterThan(resolveIdx);
+    });
+
+    test("chmod still runs before the isolated smoke", () => {
+        const steps = stepsOf("duckdb");
+        const smokeStep = steps.find((s) => (s.run ?? "").includes("--smoke-artifacts"));
+        const lines = (smokeStep?.run ?? "").split("\n");
+        const chmodIdx = lines.findIndex((l) => l.includes("chmod +x dist/duckdb/duckdb"));
+        const sudoIdx = lines.findIndex((l) => l.includes("sudo unshare --net"));
+        expect(chmodIdx).toBeGreaterThanOrEqual(0);
+        expect(sudoIdx).toBeGreaterThan(chmodIdx);
     });
 
     test("installs workspace dependencies before the build runs its library smoke", () => {
@@ -69,7 +102,7 @@ describe("ci.yml provisions the custom DuckDB", () => {
     test("the build is cached, and saved only after the smoke passes", () => {
         const steps = stepsOf("duckdb");
         const restore = steps.findIndex((s) => s.uses?.startsWith("actions/cache/restore"));
-        const smoke = steps.findIndex((s) => (s.run ?? "").includes("smoke-duckdb-dylib.ts"));
+        const smoke = steps.findIndex((s) => (s.run ?? "").includes("--smoke-artifacts"));
         const save = steps.findIndex((s) => s.uses?.startsWith("actions/cache/save"));
         expect(restore).toBeGreaterThanOrEqual(0);
         expect(smoke).toBeGreaterThanOrEqual(0);
