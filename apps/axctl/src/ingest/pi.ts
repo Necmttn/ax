@@ -889,11 +889,8 @@ const makePiLikeStage = (
             failedFiles: 1,
             failedOpenError: error.message,
         });
-        // The directory walk recovers every PlatformError internally, and a
-        // per-file `readFileString` fault is now recorded + skipped by the
-        // per-file isolation seam (#261, see file-isolation.ts), so no
-        // A discovery or spool setup PlatformError reaches the stage boundary,
-        // which records failed-open stats. Database errors still abort the stage.
+        // The directory walk absorbs NotFound only. Other discovery and spool
+        // PlatformError values reach this boundary. Database errors still abort.
         return yield* ingest(write, { sinceDays, runId: ctx.runId }).pipe(
             Effect.map((result) => PiStageStats.make({
                 durationMs: Date.now() - t0,

@@ -1,4 +1,3 @@
-import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { Effect, FileSystem, Option, Path, PlatformError } from "effect";
 
@@ -102,41 +101,50 @@ export const walkJsonlFilesStrict = (
     });
 
 /**
- * Pi semantics: classify entries without following symlinks and absorb every
- * PlatformError as "absent"; callers ignore `sizeBytes`.
+ * Classify one entry without following symbolic links. `readLink` failures
+ * are normal for non-links. The following stat reports other access errors.
+ */
+const classifyEntryNoFollow = (
+    fs: FileSystem.FileSystem,
+    full: string,
+): Effect.Effect<Option.Option<WalkEntry>, PlatformError.PlatformError> =>
+    Effect.gen(function* () {
+        const isLink = yield* fs.readLink(full).pipe(Effect.as(true), orAbsent(false));
+        if (isLink) return Option.none<WalkEntry>();
+
+        return yield* fs.stat(full).pipe(
+            Effect.map((stats) =>
+                stats.type === "Directory"
+                    ? Option.some<WalkEntry>({ kind: "directory" })
+                    : stats.type === "File"
+                      ? Option.some<WalkEntry>({
+                            kind: "file",
+                            mtimeMs: Option.getOrElse(stats.mtime, () => new Date(0)).getTime(),
+                            sizeBytes: Number(stats.size),
+                        })
+                      : Option.none<WalkEntry>(),
+            ),
+            skipNotFound(Option.none<WalkEntry>()),
+        );
+    });
+
+/**
+ * Pi semantics: classify entries without following symbolic links. Missing
+ * paths stay non-fatal. Other PlatformError values reach the stage boundary.
  */
 export const walkJsonlFilesLenient = (
     root: string,
     cutoffMs: number,
-): Effect.Effect<JsonlFileCandidate[], never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<JsonlFileCandidate[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
-        return yield* walkJsonlCore<never, FileSystem.FileSystem>({
+        return yield* walkJsonlCore<PlatformError.PlatformError, never>({
             root,
             cutoffMs,
             joinPath: (dir, entry) => path.join(dir, entry),
-            listDir: (dir) => fs.readDirectory(dir).pipe(orAbsent([] as string[])),
-            classifyEntry: (full) =>
-                classifyNoFollow(full).pipe(
-                    Effect.flatMap((kind) => {
-                        if (kind === "Directory") {
-                            return Effect.succeed(Option.some<WalkEntry>({ kind: "directory" }));
-                        }
-                        if (kind !== "File") return Effect.succeed(Option.none<WalkEntry>());
-
-                        return fs.stat(full).pipe(
-                            Effect.map((stats) =>
-                                Option.some<WalkEntry>({
-                                    kind: "file",
-                                    mtimeMs: Option.getOrElse(stats.mtime, () => new Date(0)).getTime(),
-                                    sizeBytes: Number(stats.size),
-                                }),
-                            ),
-                            orAbsent(Option.none<WalkEntry>()),
-                        );
-                    }),
-                ),
+            listDir: (dir) => fs.readDirectory(dir).pipe(skipNotFound([] as string[])),
+            classifyEntry: (full) => classifyEntryNoFollow(fs, full),
         });
     });
