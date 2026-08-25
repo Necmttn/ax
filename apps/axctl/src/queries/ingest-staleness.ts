@@ -5,10 +5,10 @@
  * dead, and nothing said so - an empty table reads as "you have no data", not
  * "your data stopped 13 days ago". Doctor knew, but only when run by hand.
  *
- * So every DB-backed command pays one indexed query (`status = 'ok'` ORDER BY
- * the indexed `started_at`, LIMIT 1) and prints at most one stderr line. It is
- * wired into `withDb` (cli/index.ts) rather than per-command, so a new read
- * command inherits it without knowing this exists.
+ * So every DB-backed command pays one query, ordered by completion instant,
+ * and prints at most one stderr line. It is wired into `withDb` (cli/index.ts)
+ * rather than per-command, so a new read command inherits it without knowing
+ * this exists.
  *
  * Fail-open: an unreachable DB prints nothing (the command's own error already
  * says that) and a warning never touches stdout, so `--json` stays machine-clean.
@@ -47,17 +47,18 @@ const LastOkRunRow = Schema.Struct({
 
 /**
  * Epoch ms of the newest ingest that finished with status "ok", or null when
- * there is none (or its timestamps are unreadable). Hits the
- * `ingest_run_status_started` index: equality on `status`, ordered by the
- * indexed `started_at`. Reads `ended_at` as the completion instant, falling
- * back to `started_at` for rows written before `ended_at` existed.
+ * there is none (or its timestamps are unreadable). Orders by the completion
+ * instant (`ended_at`, falling back to `started_at` for rows written before
+ * `ended_at` existed) rather than `started_at` - overlapping runs can finish
+ * in the opposite order they started, and it's the completion order that
+ * determines the freshest ingest (#720).
  */
 export const fetchLastSuccessfulIngestAt: Effect.Effect<number | null, CacheReadError, CacheRead> =
     Effect.gen(function* () {
         const cache = yield* CacheRead;
         const rows = yield* cache.rows(
             LastOkRunRow,
-            "SELECT ended_at, started_at FROM ingest_run WHERE status = 'ok' ORDER BY started_at DESC LIMIT 1;",
+            "SELECT ended_at, started_at FROM ingest_run WHERE status = 'ok' ORDER BY COALESCE(ended_at, started_at) DESC LIMIT 1;",
         );
         const row = rows[0];
         if (row === undefined) return null;
