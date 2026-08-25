@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.4](https://github.com/Necmttn/ax/compare/v0.43.3...v0.43.4) (2026-08-25)
+
+
+### Tests
+
+* **duckdb:** prove CI smokes run without network ([#1078](https://github.com/Necmttn/ax/issues/1078)) ([98c97ed](https://github.com/Necmttn/ax/commit/98c97edac9870e43ec4d0fdba986e94c52233b2a))
+
 ## [0.43.3](https://github.com/Necmttn/ax/compare/v0.43.2...v0.43.3) (2026-08-25)
 
 
