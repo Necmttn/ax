@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.42.0](https://github.com/Necmttn/ax/compare/v0.41.0...v0.42.0) (2026-08-25)
+
+
+### Features
+
+* **cli:** ax prompts, and the 43% of "human task" turns that were machine text ([#828](https://github.com/Necmttn/ax/issues/828)) ([a14655a](https://github.com/Necmttn/ax/commit/a14655a3a337bd68566f945319a832413d8e3389))
+* **mcp:** expose prompts query ([#1053](https://github.com/Necmttn/ax/issues/1053)) ([83b457e](https://github.com/Necmttn/ax/commit/83b457e3b4a199e599a45d08fd6f59f21c6756f0))
+
+
+### Bug Fixes
+
+* **cache-lens:** corroborate root costs with OTLP ([#1055](https://github.com/Necmttn/ax/issues/1055)) ([3ed29ac](https://github.com/Necmttn/ax/commit/3ed29ac2418c6770fee78d668bb2353c4f263a60))
+* **dojo:** agenda hygiene - deadline clamp, stale-brief filter, item title framing ([#1044](https://github.com/Necmttn/ax/issues/1044)) ([#1045](https://github.com/Necmttn/ax/issues/1045)) ([b27f752](https://github.com/Necmttn/ax/commit/b27f7523e3b715a49806198b235a46b8f7335c3b))
+* **ingest:** chunk fetchFailedToolCalls to stop derive-signals segfaulting at scale ([#1043](https://github.com/Necmttn/ax/issues/1043)) ([#1048](https://github.com/Necmttn/ax/issues/1048)) ([7ffdbac](https://github.com/Necmttn/ax/commit/7ffdbac141d7bffb876dd010bea6b5e155fd286b))
+* **ingest:** fail soft on provider filesystem errors ([#1056](https://github.com/Necmttn/ax/issues/1056)) ([069fe64](https://github.com/Necmttn/ax/commit/069fe643b7eb9dbdaf07c9d24e3405bd03ec6207))
+* **otel:** metric-point natural key includes all data-point dimensions ([#1011](https://github.com/Necmttn/ax/issues/1011)) ([#1050](https://github.com/Necmttn/ax/issues/1050)) ([5474ff6](https://github.com/Necmttn/ax/commit/5474ff65d6c9faabba2ef31cb3caee1e17bf9212))
+* **prompts:** apply legacy rules by source ([#1054](https://github.com/Necmttn/ax/issues/1054)) ([fe0a79f](https://github.com/Necmttn/ax/commit/fe0a79f7b37b3c01e3aa6761dffa8d969db29321))
+
 ## [0.41.0](https://github.com/Necmttn/ax/compare/v0.40.2...v0.41.0) (2026-08-24)
 
 
