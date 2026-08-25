@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.43.2](https://github.com/Necmttn/ax/compare/v0.43.1...v0.43.2) (2026-08-25)
+
+
+### CI
+
+* cache DuckDB release builds ([#1073](https://github.com/Necmttn/ax/issues/1073)) ([c879453](https://github.com/Necmttn/ax/commit/c8794533b119d8188057e824eb8b09bd15f9a6d7))
+* scope DuckDB integration timeout ([#1072](https://github.com/Necmttn/ax/issues/1072)) ([4929eed](https://github.com/Necmttn/ax/commit/4929eed8e850bf75483e1492abd60d82e8a90094))
+
 ## [0.43.1](https://github.com/Necmttn/ax/compare/v0.43.0...v0.43.1) (2026-08-25)
 
 
