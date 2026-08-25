@@ -17,6 +17,7 @@ import { Effect, Schema } from "effect";
 import { CacheRead, type CacheWriteService } from "@ax/lib/duckdb/seam";
 import { publishCacheFixture, readFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { evaluateCacheLensCandidate } from "../ingest/derive-proposals.ts";
 import { runCacheBustModels, type CacheBustModelStats } from "../ingest/models/cache-bust-models.ts";
 import { fetchCacheBustCost, fetchCacheLensCandidates } from "./cache-bust.ts";
 
@@ -220,8 +221,8 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
                         display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
                     });
                     yield* write.putMany("turn_token_usage", [
-                        // Same skill, two busts exactly 24h apart -> 2 distinct UTC
-                        // days (the recurrence guard's proxy), both priced twice.
+                        // Same skill, two busts on two distinct sessions -> the
+                        // recurrence guard's proxy, both priced twice.
                         usageRow({
                             id: "ttu:d1", session: SESSION_A, seq: 1, ts: hoursAgo(2), source: "claude",
                             cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
@@ -255,7 +256,7 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
 
         const skill = candidates.find((c) => c.kind === "skill" && c.name === "design-curator");
         expect(skill).toMatchObject({
-            kind: "skill", name: "design-curator", busts: 2, sessions: 2, distinctDays: 2,
+            kind: "skill", name: "design-curator", busts: 2, sessions: 2,
             bustCostUsd: 40, comparableBusts: 2, comparableBustCostUsd: 40,
         });
         expect(skill?.comparableCorroboratedCostUsd).toBeCloseTo(37.5, 5);
@@ -263,9 +264,112 @@ describe("fetchCacheLensCandidates over a published snapshot (slice B, #868)", (
 
         const agent = candidates.find((c) => c.kind === "agent" && c.name === "review-bot");
         expect(agent).toMatchObject({
-            kind: "agent", name: "review-bot", busts: 1, sessions: 1, distinctDays: 1,
+            kind: "agent", name: "review-bot", busts: 1, sessions: 1,
             bustCostUsd: 4, comparableBusts: 0, comparableBustCostUsd: 0, comparableCorroboratedCostUsd: 0,
         });
         expect(agent?.reasonCounts).toEqual([{ reason: "previous_message_not_found", count: 1 }]);
+    });
+
+    // Regression (#943): the recurrence guard used to count DISTINCT UTC
+    // CALENDAR DAYS (`count(DISTINCT CAST(ts AS DATE))`), which miscounts for
+    // any non-UTC operator. It now counts DISTINCT SESSIONS instead - these
+    // two cases are exactly the pairs the old proxy got backwards.
+    dtest("recurrence guard: two sessions on ONE UTC date pass (old UTC-day proxy would fail this)", async () => {
+        const dir = tempDir("cache-lens-same-utc-date-two-sessions");
+        // Both busts sit at UTC noon today, 2 hours apart - guaranteed to
+        // share a UTC calendar date, but attributed to two DISTINCT sessions.
+        const now = new Date();
+        const utcNoonToday = new Date(Date.UTC(
+            now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0,
+        ));
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("agent_model", {
+                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
+                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
+                    });
+                    yield* write.putMany("turn_token_usage", [
+                        usageRow({
+                            id: "ttu:same-date-1", session: SESSION_A, seq: 1, ts: utcNoonToday, source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "same-utc-date-skill", cacheMiss: "messages_changed",
+                        }),
+                        usageRow({
+                            id: "ttu:same-date-2", session: SESSION_B, seq: 1,
+                            ts: new Date(utcNoonToday.getTime() + 2 * 60 * 60 * 1000), source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "same-utc-date-skill", cacheMiss: "messages_changed",
+                        }),
+                    ]);
+                    yield* runCacheBustModels(write, 30);
+                }),
+            ),
+        );
+
+        const layer = readFixture(fixture.snapshotPath, dylibPath);
+        const candidates = await Effect.runPromise(
+            Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* fetchCacheLensCandidates(read, { sinceDays: 7 });
+            }).pipe(Effect.provide(layer)),
+        );
+        const candidate = candidates.find((c) => c.kind === "skill" && c.name === "same-utc-date-skill");
+        expect(candidate?.sessions).toBe(2);
+        // Full guard pipeline (corroboration + recurrence + materiality)
+        // passes - the old distinct-UTC-day proxy would have read 1 day here
+        // and rejected it.
+        expect(candidate ? evaluateCacheLensCandidate(candidate, 7) : null).not.toBeNull();
+    });
+
+    dtest("recurrence guard: one session spanning TWO UTC dates fails (old UTC-day proxy would pass this)", async () => {
+        const dir = tempDir("cache-lens-two-utc-dates-one-session");
+        // Two busts on the SAME session, exactly 24h apart - guaranteed to
+        // fall on two distinct UTC calendar dates (UTC has no DST, so +24h
+        // always advances the calendar date by exactly one), but only ONE
+        // distinct session.
+        const now = new Date();
+        const utcNoonToday = new Date(Date.UTC(
+            now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0,
+        ));
+        const utcNoonYesterday = new Date(utcNoonToday.getTime() - 24 * 60 * 60 * 1000);
+        const fixture = await runWithPlatform(
+            publishCacheFixture(dir, dylibPath, (write) =>
+                Effect.gen(function* () {
+                    yield* write.put("agent_model", {
+                        id: "am:opus", name: "claude-opus-4-8", provider: "anthropic",
+                        display_name: "Claude Opus 4.8", cache_creation_per_million_usd: 18.75,
+                    });
+                    yield* write.putMany("turn_token_usage", [
+                        usageRow({
+                            id: "ttu:two-dates-1", session: SESSION_A, seq: 1, ts: utcNoonYesterday, source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "two-utc-dates-skill", cacheMiss: "messages_changed",
+                        }),
+                        usageRow({
+                            id: "ttu:two-dates-2", session: SESSION_A, seq: 2, ts: utcNoonToday, source: "claude",
+                            cacheCreationTokens: 1_000_000n, cacheCreationUsd: 20, modelRef: "am:opus",
+                            skill: "two-utc-dates-skill", cacheMiss: "messages_changed",
+                        }),
+                    ]);
+                    yield* runCacheBustModels(write, 30);
+                }),
+            ),
+        );
+
+        const layer = readFixture(fixture.snapshotPath, dylibPath);
+        const candidates = await Effect.runPromise(
+            Effect.gen(function* () {
+                const read = yield* CacheRead;
+                return yield* fetchCacheLensCandidates(read, { sinceDays: 7 });
+            }).pipe(Effect.provide(layer)),
+        );
+        const candidate = candidates.find((c) => c.kind === "skill" && c.name === "two-utc-dates-skill");
+        // Corroboration passes (comparableBusts=2, ingest and flat-rate agree)
+        // and materiality passes ($40 over 7d), so recurrence is the ONLY
+        // guard standing between this candidate and a mint.
+        expect(candidate?.comparableBusts).toBe(2);
+        expect(candidate?.sessions).toBe(1);
+        expect(candidate ? evaluateCacheLensCandidate(candidate, 7) : null).toBeNull();
     });
 });

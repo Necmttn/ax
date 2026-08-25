@@ -214,9 +214,11 @@ export interface CacheLensCandidateRow {
     /** attribution_skill / attribution_agent exactly as the harness stamped it. */
     readonly name: string;
     readonly busts: number;
+    /** Distinct sessions carrying a bust - the recurrence proxy (see #943:
+     *  a UTC-calendar-day count miscounts across timezone boundaries - one
+     *  local workday straddling UTC midnight reads as two days, and two
+     *  local workdays sharing a UTC date read as one). */
     readonly sessions: number;
-    /** Distinct UTC calendar days carrying a bust - the recurrence proxy. */
-    readonly distinctDays: number;
     /** sum(bust_cost_usd) over ALL this offender's busts. */
     readonly bustCostUsd: number;
     /** busts where BOTH prices exist - the corroboration-comparable subset. */
@@ -232,7 +234,6 @@ const OffenderRollupRow = Schema.Struct({
     name: Schema.String,
     busts: NumberFromBigIntColumn,
     sessions: NumberFromBigIntColumn,
-    distinct_days: NumberFromBigIntColumn,
     bust_cost_usd: Schema.Number,
     comparable_busts: NumberFromBigIntColumn,
     comparable_bust_cost_usd: Schema.Number,
@@ -262,7 +263,6 @@ const OFFENDER_ROLLUP_SQL = `
     SELECT kind, name,
            count(*) AS busts,
            count(DISTINCT session) AS sessions,
-           count(DISTINCT CAST(ts AS DATE)) AS distinct_days,
            CAST(coalesce(sum(bust_cost_usd), 0) AS DOUBLE) AS bust_cost_usd,
            count(*) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL) AS comparable_busts,
            CAST(coalesce(sum(bust_cost_usd) FILTER (WHERE bust_cost_usd IS NOT NULL AND corroborated_cost_usd IS NOT NULL), 0) AS DOUBLE) AS comparable_bust_cost_usd,
@@ -313,7 +313,6 @@ export const fetchCacheLensCandidates = Effect.fn("queries.fetchCacheLensCandida
             name: row.name,
             busts: row.busts,
             sessions: row.sessions,
-            distinctDays: row.distinct_days,
             bustCostUsd: row.bust_cost_usd,
             comparableBusts: row.comparable_busts,
             comparableBustCostUsd: row.comparable_bust_cost_usd,
