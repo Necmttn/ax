@@ -73,6 +73,11 @@ import {
     buildCostSplitNext,
 } from "../nav/next-links.ts";
 import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import {
+    fetchPrompts,
+    PROMPTS_DEFAULT_LIMIT,
+    PROMPTS_DEFAULT_WINDOW_DAYS,
+} from "../queries/prompts.ts";
 import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollup.ts";
 import { fetchRunEvidence } from "../queries/run-evidence.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
@@ -250,6 +255,42 @@ const recallTool: AxMcpTool = defineMcpTool({
         });
         return { ...result, hits, next };
     },
+});
+
+const promptsTool: AxMcpTool = defineMcpTool({
+    name: "prompts",
+    runtime: "cache",
+    description:
+        "Reverse search the prompts you typed across every harness. Browse with no query, or search with a case-insensitive substring. Results are deduplicated by text and sorted newest first.",
+    inputSchema: {
+        query: z
+            .string()
+            .optional()
+            .describe("Case-insensitive substring to match. Omit to browse prompts."),
+        scope: z
+            .string()
+            .optional()
+            .describe("Absolute path scope. Matches that directory and its subdirectories."),
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 90)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max distinct prompts to return (default 40)."),
+    },
+    run: async (args, rt) =>
+        await rt.runPromise(fetchPrompts({
+            sinceDays: args.days ?? PROMPTS_DEFAULT_WINDOW_DAYS,
+            limit: args.limit ?? PROMPTS_DEFAULT_LIMIT,
+            ...(args.query !== undefined ? { query: args.query } : {}),
+            ...(args.scope !== undefined ? { scope: args.scope } : {}),
+        })),
 });
 
 const sessionsAroundTool: AxMcpTool = defineMcpTool({
@@ -993,6 +1034,7 @@ const directivesListTool: AxMcpTool = defineMcpTool({
  */
 export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     recallTool,
+    promptsTool,
     sessionsAroundTool,
     sessionShowTool,
     skillsWeightedTool,

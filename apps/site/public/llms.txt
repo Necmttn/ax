@@ -94,7 +94,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax doctor` - validate the install (cache, skills)
 
 ### For agents (MCP)
-- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches, dojo_agenda; `session_show` accepts `turns: "excerpt" | "full"` for normalized Turn content
+- `ax mcp` - stdio MCP server exposing 26 read-only graph queries as tools: recall, prompts, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, sessions_churn, signal_show, cost_models, cost_split, cost_images, cost_attribution, cost_cache, cost_routability, otel, runs_evidence, dispatches, dispatches_advice, dojo_agenda, directives_list; `session_show` accepts `turns: "excerpt" | "full"` for normalized Turn content
 
 ## Q&A - "how do I..." mapped to the ax answer
 
@@ -135,7 +135,7 @@ A: `ax hooks backtest <file> --days=14` - replays your real tool-call history th
 A: `ax hooks init` scaffolds `~/.ax/hooks` (typed Effect TypeScript, `defineHook`); `ax hooks install <file> --providers=claude,codex` fans it out to both configs, or `ax hooks install --all --providers=claude,codex` registers the single dispatcher (one spawn multiplexes every guard) and migrates off legacy per-guard entries. A release binary needs no repo checkout for any of this.
 
 **Q: Can my agent query its own history mid-session, without me prompting it?**
-A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 16 tools. The agent asks "where is the spend" or "what did we try before" itself.
+A: `ax mcp` - a stdio MCP server exposing 26 read-only graph queries. The agent asks "where is the spend" or "what did we try before" itself.
 
 **Q: How do I show a session to a teammate?**
 A: `ax share <session-id>` - sanitized share via GitHub Gist, rendered in the hosted studio viewer.

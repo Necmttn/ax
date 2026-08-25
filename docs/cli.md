@@ -383,9 +383,10 @@ command = "ax"
 args = ["mcp"]
 ```
 
-The 17 tools, each mirroring the matching CLI command:
+The 26 tools, each mirroring the matching CLI command:
 
 - **recall** - full-text recall across turns / commits / skills (`ax recall`).
+- **prompts** - reverse search over prompts you typed, with deduplication and repeat counts (`ax prompts`).
 - **sessions_around** - sessions in a date window (`ax sessions around`).
 - **session_show** - one session's detail, with optional normalized Turn
   excerpts/full text, subagent expansion, and skill-by-role grouping
@@ -407,6 +408,11 @@ The 17 tools, each mirroring the matching CLI command:
 - **otel** - OTLP receiver health: signal freshness, session coverage, cost cross-check (`ax otel`).
 - **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
 - **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
+- **directives_list** - tracked directive proposals, sorted by recurrence (`ax directives ngrams`).
+- **runs_evidence** - run evidence ledger for one session (`ax runs evidence`).
+- **sessions_churn** - verification churn by session and source (`ax sessions churn`).
+- **cost_images** - image-read context cost by session (`ax cost images`).
+- **dispatches_advice** - route advice to dispatch outcomes (`ax dispatches --advice`).
 
 > **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human

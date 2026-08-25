@@ -743,11 +743,11 @@ ax otlpd listening on http://127.0.0.1:1738`,
         signature: "ax mcp",
         flags: [],
         receipt: `$ ax mcp
-ax MCP server ready (stdio) - 17 read-only tools
-  recall  sessions_around  session_show  skills_weighted  ...`,
+ax MCP server ready (stdio) - 26 read-only tools
+  recall  prompts  sessions_around  session_show  skills_weighted  ...`,
         detail: [
           "The session_show tool accepts turns: excerpt|full to return ordered normalized Turn content without reading harness-specific raw files.",
-          "Exposes 17 read-only tools (recall, sessions_around, session_show, session_metrics, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, signal_show, cost_models, cost_split, cost_routability, dispatches, dojo_agenda).",
+          "Exposes 26 read-only tools (recall, prompts, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, sessions_churn, signal_show, cost_models, cost_split, cost_images, cost_attribution, cost_cache, cost_routability, otel, runs_evidence, dispatches, dispatches_advice, dojo_agenda, directives_list).",
           "Mutating ops and git-resolved queries (sessions here/near) are intentionally not exposed.",
         ],
       },

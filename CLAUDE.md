@@ -660,14 +660,14 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 25 tools
-(`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 26 tools
+(`recall`, `prompts`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
 `session_metrics`, `sessions_churn`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
 `cost_routability`, `cost_attribution`, `cost_cache`, `otel`, `runs_evidence`, `dispatches`, `dispatches_advice`, `dojo_agenda`, `directives_list`) so an agent can query the graph in-context.
 Works from source AND from the compiled binary - DuckDB is a native dep, but
 `libduckdb` is embedded at build time, so a `tools/list` handshake against
-`dist/axctl mcp` returns all 25. Mutating
+`dist/axctl mcp` returns all 26. Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed; `sessions_churn` takes an explicit `project` path instead of `--here`.
 
