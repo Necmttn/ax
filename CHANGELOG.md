@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.6](https://github.com/Necmttn/ax/compare/v0.43.5...v0.43.6) (2026-08-26)
+
+
+### Bug Fixes
+
+* harden snapshot clone publication ([#1087](https://github.com/Necmttn/ax/issues/1087)) ([26055c4](https://github.com/Necmttn/ax/commit/26055c492839bab5abbb9a2fca2d402a45f5b9b7))
+
 ## [0.43.5](https://github.com/Necmttn/ax/compare/v0.43.4...v0.43.5) (2026-08-26)
 
 
