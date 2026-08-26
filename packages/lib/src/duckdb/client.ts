@@ -292,13 +292,14 @@ export const encodeParams = (
  *     row's TS type never depends on a value's magnitude; int128 is
  *     arbitrary-precision in a JS bigint)
  *   - VARCHAR -> string
- *   - TIMESTAMP -> `Date`, MILLISECOND-truncated (P2-2 contract): the napi
+ *   - TIMESTAMP variants -> `Date`, MILLISECOND-truncated (P2-2 contract): the napi
  *     value renders to DuckDB's own text form and goes through the SAME
  *     `coerceValue` text path the FFI client used, so `.999999` still reads
  *     back `.999` and an unparseable rendering (e.g. `infinity`) still falls
  *     back to its text
  *   - DATE/TIME/INTERVAL/DECIMAL -> their DuckDB text rendering (string),
  *     exactly as `duckdb_value_varchar` produced
+ *   - TIME_TZ/UUID/ENUM/BIT -> canonical text from the napi value wrapper
  *
  * Exported for direct unit-testing without a database.
  */
@@ -335,7 +336,7 @@ export const decodeCell = (typeId: number, value: NapiValue): DuckDbValue => {
  *   - duplicate column names (cross-review P2-1, half one: rows are keyed by
  *     name, so two columns sharing one would silently overwrite each other),
  *   - any column outside the supported closed set (`DuckDbUnsupportedTypeError`
- *     via `unsupportedColumns` - a BLOB/TIMESTAMP_TZ/UUID/... column must
+ *     via `unsupportedColumns` - a BLOB/LIST/STRUCT/... column must
  *     never let a differently-shaped value through just because the napi
  *     driver CAN render it; every caller was written against the closed set).
  */

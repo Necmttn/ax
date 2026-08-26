@@ -3,7 +3,7 @@ import { accessorFor, coerceValue, unsupportedColumns } from "./row-decode.ts";
 import { DuckDbTypeId } from "./types.ts";
 
 describe("accessorFor", () => {
-    test("maps each integer width to the widest safe row-major accessor", () => {
+    test("maps each integer width to the widest safe decoder family", () => {
         for (const id of [
             DuckDbTypeId.TINYINT,
             DuckDbTypeId.SMALLINT,
@@ -48,7 +48,7 @@ describe("accessorFor", () => {
         }
     });
 
-    test("refuses BLOB and the nested types (no row-major accessor exists at all)", () => {
+    test("refuses BLOB and the nested types", () => {
         for (const id of [
             DuckDbTypeId.BLOB,
             DuckDbTypeId.LIST,
@@ -61,20 +61,7 @@ describe("accessorFor", () => {
         }
     });
 
-    // Fix round 1 (ruling R10): empirically swept against libduckdb v1.5.5 -
-    // for every one of these eight, duckdb_value_is_null correctly reports
-    // false for a real (non-SQL-NULL) value, for both a bare literal and a
-    // real table column, but duckdb_value_varchar STILL returns a NULL
-    // char* - a different failure mode than BLOB/nested above (which have
-    // no accessor at all; these DO have one, it just doesn't work). The
-    // value is displayable via CAST(col AS VARCHAR) in SQL; the fixed-width
-    // accessors don't rescue it either (duckdb_value_int64 returns a
-    // plausible-looking 0 for all eight, with no failure signal). Before
-    // this fix these all mapped to "varchar" and silently decoded to "".
-    // Some of these assertions used to live in the "reads ... as text" test
-    // above (TIMESTAMP_S/_MS/_NS, UUID, ENUM all asserted "varchar"); they
-    // move here now that that mapping is wrong, rather than being deleted.
-    test("refuses TIME_TZ, TIMESTAMP_TZ, TIMESTAMP_S/MS/NS, UUID, ENUM, BIT - duckdb_value_varchar cannot render them", () => {
+    test("accepts the additional scalar types rendered by the napi reader", () => {
         for (const id of [
             DuckDbTypeId.TIME_TZ,
             DuckDbTypeId.TIMESTAMP_TZ,
@@ -85,7 +72,7 @@ describe("accessorFor", () => {
             DuckDbTypeId.ENUM,
             DuckDbTypeId.BIT,
         ]) {
-            expect(accessorFor(id)).toBeNull();
+            expect(accessorFor(id)).toBe("varchar");
         }
     });
 });
@@ -116,15 +103,30 @@ describe("coerceValue", () => {
         expect(coerceValue(DuckDbTypeId.TIME, "10:11:12")).toBe("10:11:12");
     });
 
-    // Fix round 1 (ruling R10): TIMESTAMP_TZ is no longer in the reachable
-    // set (accessorFor now excludes it entirely, see row-decode.ts's
-    // VARCHAR_TYPES comment - duckdb_value_varchar can't render it, so it
-    // never reaches coerceValue from the real read path). It falls through
-    // to plain text, same as DATE/TIME.
-    test("TIMESTAMP_TZ is no longer special-cased - accessorFor excludes it upstream, so coerceValue now treats it as opaque text like DATE/TIME", () => {
-        expect(coerceValue(DuckDbTypeId.TIMESTAMP_TZ, "2026-08-14 10:11:12+02")).toBe(
-            "2026-08-14 10:11:12+02",
+    test("turns timestamp variants into Dates and applies TIMESTAMP_TZ offsets", () => {
+        for (const id of [
+            DuckDbTypeId.TIMESTAMP_S,
+            DuckDbTypeId.TIMESTAMP_MS,
+            DuckDbTypeId.TIMESTAMP_NS,
+        ]) {
+            const value = coerceValue(id, "2026-08-14 10:11:12.999999999");
+            expect(value).toBeInstanceOf(Date);
+            expect((value as Date).toISOString()).toBe("2026-08-14T10:11:12.999Z");
+        }
+        const zoned = coerceValue(DuckDbTypeId.TIMESTAMP_TZ, "2026-08-14 10:11:12+02:00");
+        expect(zoned).toBeInstanceOf(Date);
+        expect((zoned as Date).toISOString()).toBe("2026-08-14T08:11:12.000Z");
+        const utc = coerceValue(DuckDbTypeId.TIMESTAMP_TZ, "2026-08-14 08:11:12+00");
+        expect((utc as Date).toISOString()).toBe("2026-08-14T08:11:12.000Z");
+    });
+
+    test("keeps TIME_TZ, UUID, ENUM, and BIT in canonical text form", () => {
+        expect(coerceValue(DuckDbTypeId.TIME_TZ, "10:11:12+02:00")).toBe("10:11:12+02:00");
+        expect(coerceValue(DuckDbTypeId.UUID, "11111111-1111-1111-1111-111111111111")).toBe(
+            "11111111-1111-1111-1111-111111111111",
         );
+        expect(coerceValue(DuckDbTypeId.ENUM, "ready")).toBe("ready");
+        expect(coerceValue(DuckDbTypeId.BIT, "1010")).toBe("1010");
     });
 
     // Cross-review P2-2: DuckDB keeps TIMESTAMP at MICROSECOND grain and a JS
@@ -143,6 +145,7 @@ describe("coerceValue", () => {
 
     test("leaves an unparseable timestamp as its original text rather than an Invalid Date", () => {
         expect(coerceValue(DuckDbTypeId.TIMESTAMP, "infinity")).toBe("infinity");
+        expect(coerceValue(DuckDbTypeId.TIMESTAMP_TZ, "infinity")).toBe("infinity");
     });
 
     /**
@@ -183,7 +186,7 @@ describe("coerceValue", () => {
 });
 
 describe("unsupportedColumns", () => {
-    test("returns only the columns with no row-major accessor", () => {
+    test("returns only the columns with no decoder", () => {
         const columns = [
             { name: "id", typeId: DuckDbTypeId.BIGINT },
             { name: "payload", typeId: DuckDbTypeId.BLOB },

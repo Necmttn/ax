@@ -11,12 +11,8 @@ const NESTED_TYPES: ReadonlySet<number> = new Set([
 
 /**
  * The SQL to suggest projecting the column through instead, tailored to WHY
- * this client can't decode `typeId`: BLOB and the nested types have no
- * row-major accessor at all, while `TIME_TZ`/`TIMESTAMP_TZ` (and, as of fix
- * round 1, several other types - see the comment on `VARCHAR_TYPES` in
- * row-decode.ts) DO have an accessor kind assigned but the underlying
- * `duckdb_value_varchar` call fails for them regardless - `CAST(col AS
- * VARCHAR)` is the one workaround proven to render every case tried so far.
+ * this client cannot decode `typeId`. BLOB needs a hexadecimal projection.
+ * Nested types need JSON. Unknown future types use a text cast.
  */
 const workaroundFor = (typeId: number, column: string): string => {
     if (typeId === DuckDbTypeId.BLOB) return `hex(${column})`;
@@ -50,13 +46,8 @@ export class DuckDbDecodeError extends Schema.TaggedErrorClass<DuckDbDecodeError
 }) {}
 
 /**
- * A result column has a type this client cannot read through the row-major
- * `duckdb_value_*` API. Two distinct reasons land here: BLOB and the nested
- * types have no pointer-based accessor at all; TIME_TZ/TIMESTAMP_TZ and
- * several other types (fix round 1 - see `VARCHAR_TYPES` in row-decode.ts)
- * DO have an accessor assigned but `duckdb_value_varchar` fails for them
- * regardless. Project the column in SQL instead - `hex(col)` / `to_json(col)`
- * / `CAST(col AS VARCHAR)`, depending on which.
+ * A result column has a type outside the client's closed decode contract.
+ * Project it with `hex`, `to_json`, or `CAST`, depending on its type.
  */
 export class DuckDbUnsupportedTypeError extends Schema.TaggedErrorClass<DuckDbUnsupportedTypeError>(
     "DuckDbUnsupportedTypeError",

@@ -80,17 +80,13 @@ function surrealTypesByTable(): Map<string, Map<string, SurrealFieldType>> {
 
 /** Maps a Surreal DEFINE FIELD TYPE to the DuckDB type it must translate to.
  *
- *  P2-3 (native list columns for scalar `array<T>` fields) and P2-1
- *  (`datetime` -> TIMESTAMPTZ) are both REVERTED (see the UTC CONTRACT / FFI
- *  CLIENT COMPATIBILITY notes in schema.duckdb.sql's header): the bun:ffi
- *  DuckDB client's row-major `duckdb_value_*` accessors cannot decode
- *  TIMESTAMP_TZ or LIST, so every scalar array stays JSON-encoded VARCHAR
- *  (same as record/object arrays - no distinction by element type anymore)
- *  and every datetime is plain TIMESTAMP. */
+ *  Native list columns remain outside the read contract. Every array stays
+ *  JSON-encoded VARCHAR. Datetimes remain plain TIMESTAMP to preserve the
+ *  current UTC storage contract. TIMESTAMPTZ needs a separate migration. */
 function expectedDuckType(t: string): string {
     if (t.startsWith("record<")) return "VARCHAR";
     // Every array<T> - scalar or not - is JSON-encoded VARCHAR now; DuckDB
-    // native list columns (`T[]`) are banned (FFI client can't decode LIST).
+    // Native list columns (`T[]`) remain outside the read contract.
     if (t.startsWith("array<")) return "VARCHAR";
     if (t === "object") return "VARCHAR";
     switch (t) {
@@ -105,9 +101,8 @@ function expectedDuckType(t: string): string {
         case "bool":
             return "BOOLEAN";
         case "datetime":
-            // Plain TIMESTAMP, never TIMESTAMPTZ - the FFI client cannot decode
-            // TIMESTAMP_TZ (DuckDbUnsupportedTypeError, probe-confirmed). Writers
-            // must normalize to UTC before insert; readers append `Z`.
+            // Keep the current UTC storage contract. Writers normalize to UTC
+            // before insert, and readers append `Z`.
             return "TIMESTAMP";
         default:
             return `?${t}`;
@@ -328,28 +323,17 @@ describe("type + nullability parity (Surreal DEFINE FIELD TYPE == owning engine'
     });
 });
 
-// Regression guard for the whole "DDL drifted ahead of the FFI client" conflict
-// class (TIMESTAMPTZ + native LIST columns were both added in a review round
-// that didn't know the reader can't decode either - see the BANNED TYPES note
-// in schema.duckdb.sql's header). The bun:ffi DuckDB client decodes results
-// with the deprecated row-major `duckdb_value_*` accessors (it cannot pass
-// structs by value, so it can't use the columnar/vector API); a probe against
-// the real client + dylib confirmed TIMESTAMP_TZ and LIST both raise
-// DuckDbUnsupportedTypeError. None of these may appear as a column type
-// anywhere in the DDL, and this test scans every column's actual type token -
-// not a fixed set of "known offender" columns - so a future column reintroducing
-// any of them fails here regardless of which table it lands on.
-describe("banned-type guard (FFI client compatibility)", () => {
-    // Derived, not hand-maintained (v2 W1 "derived schema truth"): a type
-    // token is banned exactly when the FFI client has no row-major accessor
+// A type can enter the DDL only after the read decoder supports it.
+describe("banned-type guard (read decoder compatibility)", () => {
+    // A token is banned exactly when the client has no decoder
     // for it - `accessorFor` (packages/lib/src/duckdb/row-decode.ts) returns
     // null for the `DuckDbTypeId` (packages/lib/src/duckdb/types.ts) it maps
     // to. Two SQL spelling aliases are added on top because they are real
     // spellings a DDL author could type for the same (unsupported) type but
     // are not `DuckDbTypeId` enum key names themselves.
     const SQL_SPELLING_ALIASES = [
-        "TIMESTAMPTZ", // alias for TIMESTAMP_TZ / TIMESTAMP WITH TIME ZONE
-        "TIMETZ", // alias for TIME_TZ
+        ...(accessorFor(DuckDbTypeId.TIMESTAMP_TZ) === null ? ["TIMESTAMPTZ"] : []),
+        ...(accessorFor(DuckDbTypeId.TIME_TZ) === null ? ["TIMETZ"] : []),
     ];
     const BANNED_TYPE_TOKENS = [
         ...Object.entries(DuckDbTypeId)
@@ -358,27 +342,20 @@ describe("banned-type guard (FFI client compatibility)", () => {
         ...SQL_SPELLING_ALIASES,
     ];
 
-    test("the derived set still covers every previously known FFI-unreadable spelling", () => {
-        // Regression floor: the derivation must never shrink below the set
-        // that was hand-maintained before this chunk (it may grow - see the
-        // parser-sanity test below for the exact superset this derives to).
+    test("the derived set still covers every unsupported stored shape", () => {
         for (const must of [
-            "UUID",
-            "ENUM",
-            "BIT",
-            "TIMESTAMP_S",
-            "TIMESTAMP_MS",
-            "TIMESTAMP_NS",
-            "TIMESTAMP_TZ",
-            "TIMESTAMPTZ",
-            "TIME_TZ",
-            "TIMETZ",
+            "BLOB",
+            "LIST",
+            "STRUCT",
+            "MAP",
+            "UNION",
+            "ARRAY",
         ]) {
             expect(BANNED_TYPE_TOKENS).toContain(must);
         }
     });
 
-    test("no column in the DDL uses a banned (FFI-unreadable) type", () => {
+    test("no column in the DDL uses a type outside the read contract", () => {
         const problems: string[] = [];
         let checked = 0;
 
@@ -386,7 +363,7 @@ describe("banned-type guard (FFI client compatibility)", () => {
             for (const def of parseDuckdbColumnDefs(table)) {
                 checked += 1;
                 if (def.type.endsWith("[]")) {
-                    // Native DuckDB list column - the FFI client cannot decode LIST.
+                    // Native DuckDB list columns remain outside the read contract.
                     problems.push(`${table}.${def.name}: native LIST column (${def.type}) is banned`);
                     continue;
                 }
@@ -403,33 +380,17 @@ describe("banned-type guard (FFI client compatibility)", () => {
 
     // Pins the exact derived set so a future accessorFor/DuckDbTypeId change
     // is a visible diff here, not a silent widening or narrowing. The
-    // derivation is WIDER than the hand-written list it replaced (which had
-    // exactly the 10 entries in the regression-floor test above): BLOB,
-    // STRUCT, MAP, UNION, ARRAY and INVALID also have no row-major accessor
-    // and are real DuckDB type spellings, so they are correctly banned too -
-    // none of them appear as a column type in the current DDL (verified by
-    // the "no column ... banned" test above still passing), so this is a
-    // strictly more complete guard, not a behavior change.
+    // The exact set makes every decoder change visible in this policy test.
     test("pins the exact derived token set", () => {
         expect([...BANNED_TYPE_TOKENS].sort()).toEqual(
             [
                 "ARRAY",
-                "BIT",
                 "BLOB",
-                "ENUM",
                 "INVALID",
                 "LIST",
                 "MAP",
                 "STRUCT",
-                "TIME_TZ",
-                "TIMESTAMP_MS",
-                "TIMESTAMP_NS",
-                "TIMESTAMP_S",
-                "TIMESTAMP_TZ",
-                "TIMESTAMPTZ",
-                "TIMETZ",
                 "UNION",
-                "UUID",
             ].sort(),
         );
     });
