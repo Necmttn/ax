@@ -146,7 +146,14 @@ export interface CodexTurnTokenUsage {
 }
 
 function outputText(input: unknown): string | null {
-    return typeof input === "string" ? input : jsonText(input);
+    if (typeof input === "string") return input;
+    if (Array.isArray(input)) {
+        const flattened = textFromContent(input, { acceptedTypes: RESPONSES_TEXT_TYPES });
+        if (flattened !== null) return flattened;
+    }
+    // Unknown shapes (plain objects, empty/no-text arrays) fall back to a
+    // JSON dump so callers still get something to scan/store.
+    return jsonText(input);
 }
 
 function codexMessageRecord(payload: Record<string, unknown>): Record<string, unknown> | null {
