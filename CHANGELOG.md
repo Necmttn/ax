@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.9](https://github.com/Necmttn/ax/compare/v0.43.8...v0.43.9) (2026-08-26)
+
+
+### Bug Fixes
+
+* **profile:** match guardrail evidence by command ([cf21641](https://github.com/Necmttn/ax/commit/cf21641159ef61d3900fea8859125598ddcd8dd8))
+
 ## [0.43.8](https://github.com/Necmttn/ax/compare/v0.43.7...v0.43.8) (2026-08-26)
 
 
