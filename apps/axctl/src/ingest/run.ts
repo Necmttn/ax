@@ -538,10 +538,17 @@ export const runIngest = (
             Effect.catch((error): Effect.Effect<OtelRetentionOutcome> =>
                 Effect.succeed({ error: errorText(error) })),
         );
+        // FTS is NOT best-effort (#952): a failed rebuild here propagates and
+        // fails the whole run, same as every other unguarded `yield*` in this
+        // body - `withCacheWrite` publishes only on success (see seam.ts), so
+        // a failed FTS build correctly withholds the publish and leaves the
+        // previous snapshot in place, rather than shipping a snapshot whose
+        // index is stale or missing.
         yield* buildFtsIndexes(write);
         // Idempotent, version-gated seed - not a stage (nothing here is
-        // derived from transcripts); best-effort like FTS, a failure here
-        // must not fail the whole run (regex judgment path stays the floor).
+        // derived from transcripts); UNLIKE FTS above, a failure here is
+        // best-effort and must not fail the whole run (regex judgment path
+        // stays the floor).
         yield* seedClassifierWeights(write).pipe(Effect.ignore);
         return {
             runId,
