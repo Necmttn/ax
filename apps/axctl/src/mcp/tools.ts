@@ -79,6 +79,7 @@ import {
     PROMPTS_DEFAULT_WINDOW_DAYS,
 } from "../queries/prompts.ts";
 import { OTEL_DEFAULT_WINDOW_DAYS, fetchOtelRollup } from "../queries/otel-rollup.ts";
+import { OTEL_RETENTION_DAYS } from "../otel/retention.ts";
 import { fetchRunEvidence } from "../queries/run-evidence.ts";
 import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchAttributionCost } from "../queries/attribution-cost.ts";
@@ -832,14 +833,14 @@ const otelTool: AxMcpTool = defineMcpTool({
     name: "otel",
     runtime: "full",
     description:
-        "OTLP receiver health: per (harness, signal) all-time row count + freshness reduced to a health verdict (flowing <6h / stale <48h / cold / none); session correlation coverage (share of windowed sessions carrying a telemetry_of edge - 0% means telemetry arrives but is not linked to sessions); and OTLP claude cost metric vs transcript cost over the window. Use to check whether harness telemetry is flowing and being correlated.",
+        `Retained OTLP telemetry health (rows are retained ${OTEL_RETENTION_DAYS} days, then pruned): per (harness, signal) row count + freshness reduced to a health verdict (flowing <6h / stale <48h / cold / none); session correlation coverage (share of windowed top-level sessions whose uuid matches an otel session_id, NOT a telemetry_of edge - 0% means telemetry arrives but its session id is not reaching the receiver); and OTLP claude cost metric vs transcript cost over the window. A '--days' window wider than the retention period has incomplete OTLP coverage and OTLP cost for the pruned portion. Transcript cost keeps the selected window. Use to check whether harness telemetry is flowing and being correlated.`,
     inputSchema: {
         days: z
             .number()
             .int()
             .positive()
             .optional()
-            .describe("Window in days for coverage + cost (default 14). Signal freshness is all-time."),
+            .describe(`Window in days for coverage + cost (default 14). Signal freshness spans the full ${OTEL_RETENTION_DAYS}-day retention window, not just --days.`),
     },
     run: async (args, rt) => {
         const sinceDays = args.days ?? OTEL_DEFAULT_WINDOW_DAYS;

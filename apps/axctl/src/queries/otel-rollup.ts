@@ -7,7 +7,7 @@
  * question - "is telemetry even flowing, and is it being correlated to my
  * sessions?" - so this query exposes:
  *
- *   - per (harness, signal) all-time volume + freshness (last-received age),
+ *   - per (harness, signal) retained volume + freshness (last-received age),
  *     reduced to a health verdict (flowing / stale / cold / none);
  *   - coverage: of windowed TOP-LEVEL sessions, how many have matching otel
  *     telemetry, by `session_id` match (NOT the `telemetry_of` edge - that is
@@ -17,13 +17,18 @@
  *     side by side (they are stored separately to avoid double-counting).
  *
  * Deref-free: plain GROUP BY / count() aggregates per table, intersected in JS.
- * Signals are all-time (the "is the receiver alive" question is not windowed);
- * coverage + cost are scoped to `--days`.
+ * Signals are unwindowed by `--days` (the "is the receiver alive" question is
+ * not scoped to the coverage/cost window) but are NOT all-time: `retainRecentOtel`
+ * (`../otel/retention.ts`) prunes OTLP rows past `OTEL_RETENTION_DAYS` (30 days),
+ * so a signal count only ever reflects that retained window - `retention_days`
+ * on the result discloses it, and coverage + cost are scoped to `--days` on top
+ * of that same retained data.
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns";
 import { cacheRows } from "@ax/lib/duckdb/query";
 import { daysAgoExpr } from "@ax/lib/duckdb/clause";
+import { OTEL_RETENTION_DAYS } from "../otel/retention.ts";
 import { fetchCostModels } from "./cost-analytics.ts";
 
 // ---------------------------------------------------------------------------
@@ -37,7 +42,7 @@ export type OtelHealth = "flowing" | "stale" | "cold" | "none";
 export interface OtelSignalRow {
     readonly harness: string;
     readonly signal: OtelSignalKind;
-    /** all-time row count for this (harness, signal) */
+    /** row count for this (harness, signal) over the retained window (see `retention_days`) */
     readonly count: number;
     readonly last_observed_at: string | null;
     readonly age_ms: number | null;
@@ -62,6 +67,8 @@ export interface OtelCostCompare {
 
 export interface OtelRollupResult {
     readonly since_days: number;
+    /** OTLP rows older than this are pruned. Wider `--days` values have incomplete OTLP coverage and cost. */
+    readonly retention_days: number;
     readonly generated_at: string;
     readonly signals: ReadonlyArray<OtelSignalRow>;
     readonly coverage: OtelCoverage;
@@ -164,7 +171,7 @@ export const fetchOtelRollup = Effect.fn("queries.fetchOtelRollup")(
         const days = Math.max(1, Math.floor(input.sinceDays));
         const nowMs = Date.now();
 
-        // -- signals: all-time count + freshness per (harness, signal) -------
+        // -- signals: retained-window count + freshness per (harness, signal) -
         const signals: OtelSignalRow[] = [];
         for (const [signal, table] of SIGNAL_TABLES) {
             const rows = yield* cacheRows(
@@ -244,6 +251,7 @@ export const fetchOtelRollup = Effect.fn("queries.fetchOtelRollup")(
 
         return {
             since_days: days,
+            retention_days: OTEL_RETENTION_DAYS,
             generated_at: new Date(nowMs).toISOString(),
             signals,
             coverage: {

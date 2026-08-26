@@ -344,21 +344,32 @@ alternative is a local collector fanning out to both. The Codex path
 (`applyCodexOtelToml`) was already shape-aware - it leaves a
 deliberately-different exporter kind alone.
 
+OTLP rows (and the `telemetry_of` edges pointing at them) are retained for
+`OTEL_RETENTION_DAYS` (30 days) then pruned by `retainRecentOtel`
+(`apps/axctl/src/otel/retention.ts`) - a session older than that has lost its
+telemetry enrichment for good, not just from the read surface below.
+
 `ax otel [--days=N] [--json]` is the **read surface** for the receiver itself
 (previously write-only - data landed in `otel_*` and only enriched insights, with
-nothing to inspect it). Shows per `(harness, signal)` all-time row count +
-freshness reduced to a health verdict (✓ flowing <6h / ⚠ stale <48h / ✗ cold /
-· none); **coverage** (share of windowed TOP-LEVEL sessions whose uuid matches an
-otel `session_id` - subagents excluded since OTLP is emitted at the top-level
-session; measured by session_id match, NOT the `telemetry_of` edge, because that
-is what enrichment actually joins on); and OTLP `claude_code.cost.usage` vs
-transcript cost over the window (independent cross-check; per-event log token
-sums are intentionally NOT surfaced - they double-count). Query:
-`apps/axctl/src/queries/otel-rollup.ts` (deref-free, signals all-time,
-coverage+cost windowed). MCP: `otel`. We keep OTLP **content-stripped** on
-purpose - the prompts/responses/tool I/O another tool would scrape from OTLP
-request bodies are already in `turn.text` / `tool_call.input_json|output_json`
-from transcript parsing, so capturing bodies would only duplicate + re-leak them.
+nothing to inspect it). Shows per `(harness, signal)` a row count over the
+retained window + freshness reduced to a health verdict (✓ flowing <6h /
+⚠ stale <48h / ✗ cold / · none); **coverage** (share of windowed TOP-LEVEL
+sessions whose uuid matches an otel `session_id` - subagents excluded since
+OTLP is emitted at the top-level session; measured by session_id match, NOT the
+`telemetry_of` edge, because that is what enrichment actually joins on); and
+OTLP `claude_code.cost.usage` vs transcript cost over the window (independent
+cross-check; per-event log token sums are intentionally NOT surfaced - they
+double-count). The result carries `retention_days` (the shared
+`OTEL_RETENTION_DAYS` constant) and both the CLI text and the MCP tool warn
+when `--days` exceeds it, since the older portion of that window is already
+pruned and OTLP coverage/cost read as incomplete, not zero. Transcript cost
+keeps the selected window. Query:
+`apps/axctl/src/queries/otel-rollup.ts` (deref-free, signals span the retained
+window rather than `--days`, coverage+cost windowed). MCP: `otel`. We keep OTLP
+**content-stripped** on purpose - the prompts/responses/tool I/O another tool
+would scrape from OTLP request bodies are already in `turn.text` /
+`tool_call.input_json|output_json` from transcript parsing, so capturing
+bodies would only duplicate + re-leak them.
 
 ### Run evidence ledger (#578)
 

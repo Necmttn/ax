@@ -201,9 +201,15 @@ rows written before the rule existed.
 `/v1/metrics` + `/v1/logs` + `/v1/traces` endpoints `ax otlpd` exposes). It
 answers "is harness telemetry flowing, and is it reaching my sessions?":
 
-- **Signal health**: per `(harness, signal)` an all-time row count plus how long
-  ago the last point arrived, reduced to a verdict - `✓ flowing` (<6h),
-  `⚠ stale` (<48h), `✗ cold`, or `· none`.
+- **Retention**: OTLP rows (and the `telemetry_of` edges pointing at them) are
+  retained for `OTEL_RETENTION_DAYS` (30 days), then pruned
+  (`apps/axctl/src/otel/retention.ts`). Signal counts, OTLP coverage, and OTLP
+  cost only reflect that retained window. Transcript cost keeps its selected
+  window. A wider `--days` value reports incomplete OTLP data for the pruned
+  portion. The CLI text and `retention_days` field disclose this limit.
+- **Signal health**: per `(harness, signal)` a row count over the retained
+  window plus how long ago the last point arrived, reduced to a verdict -
+  `✓ flowing` (<6h), `⚠ stale` (<48h), `✗ cold`, or `· none`.
 - **Coverage**: the share of windowed top-level sessions whose uuid matches an
   otel `session_id` (subagents excluded - OTLP is emitted at the top-level
   session). A live 0% means telemetry is arriving but its session id is not
