@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.18](https://github.com/Necmttn/ax/compare/v0.43.17...v0.43.18) (2026-08-26)
+
+
+### Performance
+
+* benchmark DuckDB index efficacy ([#1120](https://github.com/Necmttn/ax/issues/1120)) ([03b221c](https://github.com/Necmttn/ax/commit/03b221c05910720dccc072ab603135947781fa4b))
+
 ## [0.43.17](https://github.com/Necmttn/ax/compare/v0.43.16...v0.43.17) (2026-08-26)
 
 
