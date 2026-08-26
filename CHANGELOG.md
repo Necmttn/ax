@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.43.13](https://github.com/Necmttn/ax/compare/v0.43.12...v0.43.13) (2026-08-26)
+
+
+### Bug Fixes
+
+* cap skill taste commit credit ([#1108](https://github.com/Necmttn/ax/issues/1108)) ([82e8e5d](https://github.com/Necmttn/ax/commit/82e8e5d27e27e89f915f5fe9453963a0aec7075e))
+* define capped profile spans ([#1107](https://github.com/Necmttn/ax/issues/1107)) ([427e73a](https://github.com/Necmttn/ax/commit/427e73ad242f946758d8ce4d5f9e39192f0a2757))
+
 ## [0.43.12](https://github.com/Necmttn/ax/compare/v0.43.11...v0.43.12) (2026-08-26)
 
 
