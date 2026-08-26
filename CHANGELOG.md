@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.16](https://github.com/Necmttn/ax/compare/v0.43.15...v0.43.16) (2026-08-26)
+
+
+### Bug Fixes
+
+* share derive deadline across pending stages ([#1115](https://github.com/Necmttn/ax/issues/1115)) ([1902209](https://github.com/Necmttn/ax/commit/1902209c068219d9ac80eae8d11185aa1a4dfc25))
+
 ## [0.43.15](https://github.com/Necmttn/ax/compare/v0.43.14...v0.43.15) (2026-08-26)
 
 
