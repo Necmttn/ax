@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.10](https://github.com/Necmttn/ax/compare/v0.43.9...v0.43.10) (2026-08-26)
+
+
+### Bug Fixes
+
+* filter stale harness preambles from reads ([#1101](https://github.com/Necmttn/ax/issues/1101)) ([4dd59f2](https://github.com/Necmttn/ax/commit/4dd59f2d390d89a5e60175ac38f01b8fd7210255))
+
 ## [0.43.9](https://github.com/Necmttn/ax/compare/v0.43.8...v0.43.9) (2026-08-26)
 
 
