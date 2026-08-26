@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.15](https://github.com/Necmttn/ax/compare/v0.43.14...v0.43.15) (2026-08-26)
+
+
+### Bug Fixes
+
+* verify ingest deadlines through the command boundary ([#1113](https://github.com/Necmttn/ax/issues/1113)) ([208fc00](https://github.com/Necmttn/ax/commit/208fc0009914d105f9ab92043002c87adc4f97e0))
+
 ## [0.43.14](https://github.com/Necmttn/ax/compare/v0.43.13...v0.43.14) (2026-08-26)
 
 
