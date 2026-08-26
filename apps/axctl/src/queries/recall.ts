@@ -43,6 +43,7 @@ import {
 } from "@ax/lib/duckdb/clause";
 import { TimestampColumn } from "@ax/lib/duckdb/columns";
 import { COMMIT_FTS_TARGET, matchBm25Sql, TURN_FTS_TARGET, type FtsTarget } from "@ax/lib/duckdb/fts";
+import { userTurnCompatClause } from "./user-turn-compat.ts";
 
 /** Re-exported FROM the fts module (#921) so the reader can never drift from
  *  the target `buildFtsIndexes` actually indexes. Turn search covers the FULL
@@ -86,6 +87,11 @@ const turnWhere = (filters: TurnFilters): Clause =>
         sinceClause("t.ts", filters.since),
         filters.sessionIds ? inClause("t.session", filters.sessionIds) : NO_CLAUSE,
         eqClause("s.repository", filters.repositoryId),
+        // Stale `message_kind='task'` rows from before the classifier learned a
+        // harness-wrapper shape (#1095) must not surface as a "task" hit for a
+        // USER turn. Guarded by `roleExpr` so an assistant hit - which can
+        // legitimately echo the same wrapper text - is never excluded by it.
+        userTurnCompatClause({ roleExpr: "t.role" }),
     ]);
 
 /**
