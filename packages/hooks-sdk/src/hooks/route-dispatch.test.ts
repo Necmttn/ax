@@ -37,6 +37,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.AX_SPEND_MODE;
+  delete process.env.AX_ROUTE_DISPATCH;
+});
+
+test("AX_ROUTE_DISPATCH=off disables the guard", async () => {
+  process.env.AX_ROUTE_DISPATCH = "off";
+  const v = await run({ description: "locate all usages" });
+  expect(v._tag).toBe("Allow");
 });
 
 // ---------------------------------------------------------------------------

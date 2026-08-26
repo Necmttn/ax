@@ -29,6 +29,7 @@
  *  shim runs in the AGENT's process, so it forwards these into the payload. */
 export const FORWARDED_ENV_KEYS = [
     "ALLOW_MAIN_WRITE",
+    "AX_ROUTE_DISPATCH",
     "ALLOW_BRANCH_CHECKOUT",
     "ALLOW_DIRTY_MAIN_MUTATION",
     "AX_SPEND_MODE",

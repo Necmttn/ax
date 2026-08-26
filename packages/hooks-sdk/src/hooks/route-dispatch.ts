@@ -19,6 +19,8 @@
  * Mode is determined by AX_SPEND_MODE env override (conserve|splurge), else
  * by computeSpendMode reading the quota cache. Stale/missing cache → conserve
  * (fail-safe).
+ * Set `AX_ROUTE_DISPATCH=off` to disable this guard without removing its
+ * registration. The guard then returns Allow before it reads routing state.
  *
  * The routing-table schema, built-in defaults, and the fail-open read live in
  * ../routing-table.ts (ADR-0014) - the same module `ax routing compile|tune`
@@ -70,6 +72,8 @@ const hook = defineHook({
   // (R = never is assignable to the HookDefinition's R = GitEnv.)
   run: (event) =>
     Effect.sync(() => {
+      if (readEnv(event, "AX_ROUTE_DISPATCH") === "off") return { _tag: "Allow" } as const;
+
       const input = (event.tool?.input ?? {}) as Record<string, unknown>;
       const modelRaw = input.model;
       const explicit = typeof modelRaw === "string" && modelRaw.length > 0;
