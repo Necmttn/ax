@@ -918,6 +918,117 @@ describe("Codex transcript extraction", () => {
         expect(toolTurn).toMatchObject({ role: "tool_call" });
     });
 
+    test("exec custom_tool_call output as an input_text array is decoded to plain text and not flagged as an error", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T14:00:00.000Z",
+                payload: {
+                    id: "codex-exec-array",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T14:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T14:00:01.000Z",
+                payload: {
+                    type: "custom_tool_call",
+                    status: "completed",
+                    name: "exec",
+                    call_id: "call-exec-ok",
+                    input: "bun test error-handling.test.ts",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T14:00:02.000Z",
+                payload: {
+                    type: "custom_tool_call_output",
+                    call_id: "call-exec-ok",
+                    output: [
+                        {
+                            type: "input_text",
+                            text:
+                                "Script completed\n" +
+                                "Wall time 0.2 seconds\n" +
+                                "Output:\n",
+                        },
+                        {
+                            type: "input_text",
+                            text:
+                                "tests/error-handling.test.ts .... 12 passed, 0 failed\n" +
+                                "0 \"not found\" warnings",
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const call = extracted.toolCalls.find((c) => c.callId === "call-exec-ok");
+        expect(call).toBeDefined();
+        if (!call) return;
+        expect(call.toolName).toBe("exec");
+        expect(call.hasError).toBe(false);
+        expect(call.errorText).toBeNull();
+        expect(call.outputExcerpt ?? "").toContain("12 passed, 0 failed");
+        expect(call.outputExcerpt ?? "").not.toContain('"type":"input_text"');
+        expect(call.outputExcerpt ?? "").not.toContain("[{");
+    });
+
+    test("exec custom_tool_call Script failed output as an input_text array remains an error", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T14:10:00.000Z",
+                payload: {
+                    id: "codex-exec-array-fail",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T14:10:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T14:10:01.000Z",
+                payload: {
+                    type: "custom_tool_call",
+                    status: "completed",
+                    name: "exec",
+                    call_id: "call-exec-fail",
+                    input: "bun test error-handling.test.ts",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T14:10:02.000Z",
+                payload: {
+                    type: "custom_tool_call_output",
+                    call_id: "call-exec-fail",
+                    output: [
+                        {
+                            type: "input_text",
+                            text:
+                                "Script failed in 0.1 seconds:\n" +
+                                "tests/error-handling.test.ts .... 1 failed\n" +
+                                "Wall time: 0.1 seconds",
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const call = extracted.toolCalls.find((c) => c.callId === "call-exec-fail");
+        expect(call).toBeDefined();
+        if (!call) return;
+        expect(call.hasError).toBe(true);
+    });
+
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
         const execOutput =
             "Chunk ID: abc\nWall time: 0.2000 seconds\nProcess exited with code 1\nOriginal token count: 30\nOutput:\nfatal: not a git repository\n";

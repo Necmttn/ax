@@ -177,16 +177,39 @@ export function parseCodexFunctionOutput(
 ): ParsedFunctionOutput {
     const text = (output ?? "").replace(/\r\n/g, "\n");
     const exitCode = parseIntegerMatch(text.match(/Process exited with code\s+(-?\d+)/i));
-    const durationSeconds = parseFloatMatch(text.match(/Wall time:\s*([0-9]+(?:\.[0-9]+)?)\s*seconds/i));
+    const durationSeconds = parseFloatMatch(
+        text.match(/Wall time:?\s*([0-9]+(?:\.[0-9]+)?)\s*seconds/i),
+    );
     const outputBody = text.match(/(?:^|\n)Output:\n([\s\S]*)$/)?.[1] ?? text;
     const outputExcerpt = boundExcerpt(outputBody.trim());
+    const explicitStatus = explicitResultStatus(text);
 
     return {
         exitCode,
         durationMs: durationSeconds === null ? null : Math.round(durationSeconds * 1000),
         outputExcerpt,
-        hasError: exitCode !== null ? exitCode !== 0 : looksLikeError(outputExcerpt),
+        hasError: explicitStatus !== null
+            ? explicitStatus === "error"
+            : exitCode !== null
+            ? exitCode !== 0
+            : looksLikeError(outputExcerpt),
     };
+}
+
+/**
+ * Codex exec results (the "run a script" tool) open with an explicit status
+ * header - "Script completed"/"Script failed"/"Script running with cell ID
+ * ..." (still pending, e.g. a background cell). That header is authoritative:
+ * a completed script's own output commonly contains words like "failed" or
+ * "not found" (test names, log lines) that would otherwise trip
+ * `looksLikeError`'s text scan.
+ */
+function explicitResultStatus(text: string): "success" | "error" | "pending" | null {
+    const header = text.trimStart();
+    if (/^Script completed\b/i.test(header)) return "success";
+    if (/^Script failed\b/i.test(header)) return "error";
+    if (/^Script running with cell ID\b/i.test(header)) return "pending";
+    return null;
 }
 
 function extractCommandTokens(command: string | null | undefined): string[] | null {
