@@ -747,6 +747,7 @@ const ALLOW_EMPTY_PUBLISH_ENV = "AX_ALLOW_EMPTY_PUBLISH";
  */
 const publishWouldNotDestroyData = (
     fs: FileSystem.FileSystem,
+    db: DuckDbService,
     conn: DuckDbConnection,
     target: string,
 ): Effect.Effect<boolean> =>
@@ -761,7 +762,7 @@ const publishWouldNotDestroyData = (
         // means the count could not be read, which is not evidence of emptiness.
         if (incoming !== 0) return true;
 
-        const existing = yield* countSessionsIn(conn, target).pipe(Effect.orElseSucceed(() => 0));
+        const existing = yield* countSessionsIn(db, target).pipe(Effect.orElseSucceed(() => 0));
         if (existing <= 0) return true; // empty over empty: no loss either way
 
         yield* Effect.logError(
@@ -788,19 +789,29 @@ const sessionCount = (
         Effect.map((result) => Number(result.rows[0]?.n ?? 0)),
     );
 
-/** Sessions in ANOTHER database file, read-only, without disturbing it. The
- *  alias is unlikely to collide and is detached on every exit path. */
+/**
+ * Sessions in ANOTHER database file, read-only, without disturbing the
+ * writer's own connection. #952: this used to `ATTACH ... AS ax_publish_guard
+ * (READ_ONLY)` / `DETACH` on the SHARED writer connection - a fixed alias
+ * name, so a `DETACH` that failed (silently ignored) left it attached, and
+ * every LATER guard check on that same connection then failed its own
+ * `ATTACH` (duplicate alias), which `Effect.orElseSucceed(() => 0)` above
+ * turns into "existing <= 0" - the guard degrading to a silent no-op for the
+ * rest of that connection's lifetime. Opening a dedicated, throwaway
+ * connection has no shared state to poison and is closed on every exit path
+ * (`acquireUseRelease`), so a close failure here cannot carry forward either.
+ */
 const countSessionsIn = (
-    conn: DuckDbConnection,
+    db: DuckDbService,
     path: string,
-): Effect.Effect<number, DuckDbQueryError | DuckDbUnsupportedTypeError> =>
+): Effect.Effect<number, DuckDbQueryError | DuckDbUnsupportedTypeError | DuckDbOpenError> =>
     Effect.acquireUseRelease(
-        conn.exec(`ATTACH '${path.replace(/'/g, "''")}' AS ax_publish_guard (READ_ONLY)`),
-        () =>
-            conn.query("SELECT CAST(count(*) AS DOUBLE) AS n FROM ax_publish_guard.session").pipe(
+        db.open(path, { readOnly: true }),
+        (conn) =>
+            conn.query("SELECT CAST(count(*) AS DOUBLE) AS n FROM session").pipe(
                 Effect.map((result) => Number(result.rows[0]?.n ?? 0)),
             ),
-        () => conn.exec("DETACH ax_publish_guard").pipe(Effect.ignore),
+        (conn) => conn.close,
     );
 
 /**
@@ -866,7 +877,7 @@ const publishSnapshotNow = (
     target: string,
 ): Effect.Effect<void, CacheWriteError> =>
     Effect.gen(function* () {
-        const safe = yield* publishWouldNotDestroyData(fs, conn, target);
+        const safe = yield* publishWouldNotDestroyData(fs, db, conn, target);
         if (safe) {
             yield* db
                 .publishSnapshot(livePath, target, { from: conn })
@@ -883,8 +894,12 @@ const writerOver = (
 ): CacheWriteService => {
     // The writer owns exactly one connection for its whole lifetime, so
     // "borrowing" it is just calling with it - no identity check, no reopen: a
-    // writer must keep reading the LIVE database it is writing.
-    const reader = readerOver((use) => use(conn), target);
+    // writer must keep reading the LIVE database it is writing. #952: the
+    // reported `snapshotPath` must reflect that - `target` is the PUBLISH
+    // destination, not what this connection is actually open on, and a
+    // caller that reads `write.snapshotPath` to reason about what it is
+    // querying would be told the wrong file.
+    const reader = readerOver((use) => use(conn), livePath);
 
     /**
      * THE NUL CHOKE POINT (#790). Every write this seam issues - `exec`, `put`,

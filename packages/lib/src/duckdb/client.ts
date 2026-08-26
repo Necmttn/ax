@@ -43,7 +43,13 @@ import { posixPath } from "../shared/path.ts";
 import { stageAndRename } from "../staged-rename.ts";
 import { loadNodeApiOver, type DuckDbNodeApi } from "./binding.ts";
 import { canonicalPath } from "./canonical-path.ts";
-import { cloneFile, statSnapshot, statsEqual, walIsQuiescent } from "./clone-file.ts";
+import {
+    clearPartialClone as clearPartialCloneFile,
+    cloneFile,
+    statSnapshot,
+    statsEqual,
+    walIsQuiescent,
+} from "./clone-file.ts";
 import { resolveDylibPath } from "./dylib.ts";
 import {
     DuckDbDecodeError,
@@ -742,22 +748,36 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
         const cloneDisabledByEnv = (): boolean =>
             (process.env.AX_SNAPSHOT_CLONE ?? "").trim().toLowerCase() === "off";
 
-        /** Best-effort: only ever called on a path where `cloneFile` already
-         *  wrote something to `tmp` and a LATER guard rejected it, so the
-         *  fallback about to run (`copyThrough` on the SAME `tmp`) doesn't
-         *  `ATTACH` onto a stale, half-trusted clone. Never fails - a removal
-         *  failure here just surfaces naturally as the fallback's own ATTACH
-         *  error against a non-empty path, which is a legible failure either
-         *  way. This is NOT the tmp-cleanup `stageAndRename`'s finalizer
-         *  already owns (that still runs unconditionally on every exit); it
-         *  exists only so the same `tmp` path can be reused a second time
-         *  within THIS one `stage` call. */
-        const clearPartialClone = (tmp: string): Effect.Effect<void> =>
-            fs.remove(tmp, { force: true, recursive: true }).pipe(
-                Effect.catch((err) =>
-                    Effect.logWarning(
-                        `ax duckdb: could not clear the partially-cloned temp file at ${tmp} before falling back to the logical copy: ${err.message}`,
-                    ),
+        /**
+         * Called on EVERY path where `cloneFile` has already started - a
+         * successful clone that a later guard rejected, AND a `cloneFile`
+         * call that itself reported `{ cloneable: false }` (`copyfile(3)`
+         * does not promise a failed clone wrote nothing at `tmp`; ENOSPC
+         * mid-clone can leave a truncated destination - #952) - so the
+         * fallback about to run (`copyThrough` on the SAME `tmp`) never
+         * `ATTACH`es onto a stale, partially-written clone.
+         *
+         * UNLIKE the earlier best-effort version, a removal failure here is
+         * NOT swallowed: it FAILS this Effect with a `SnapshotPublishError`,
+         * which aborts `attemptClone` and therefore the whole `stage` step -
+         * `stageAndRename` never reaches the rename, so the previous snapshot
+         * is left exactly as it was. Falling through to `logicalCopy` on a
+         * `tmp` that could not be cleared would ATTACH onto (or overwrite
+         * into) a path in an unknown, half-cloned state - a legible failure
+         * here is safer than a copy of uncertain provenance. This is NOT the
+         * tmp-cleanup `stageAndRename`'s finalizer already owns (that still
+         * runs unconditionally on every exit, best-effort); it exists only so
+         * the same `tmp` path can be reused a second time within THIS one
+         * `stage` call.
+         */
+        const clearPartialClone = (tmp: string): Effect.Effect<void, SnapshotPublishError> =>
+            clearPartialCloneFile(fs, tmp).pipe(
+                Effect.mapError(
+                    (err) =>
+                        new SnapshotPublishError({
+                            snapshotPath: targetPath,
+                            message: `could not clear the partially-cloned temp file at ${tmp} before falling back to the logical copy: ${err.message}`,
+                        }),
                 ),
             );
 
@@ -770,7 +790,7 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
          * `tmp` has been checkpoint-consistent, byte-cloned without a torn
          * read, and has itself opened read-only and answered a sanity query.
          *
-         * Safety protocol (all four must hold):
+         * Safety protocol (all five must hold):
          *  (a) `CHECKPOINT` succeeds on the connection that actually owns the
          *      live database - the writer's own `options.from` when given
          *      (RULING R14: a second handle on `livePath` cannot be trusted
@@ -785,13 +805,34 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
          *      after the clone syscall reports the identical size + mtime -
          *      the torn-copy tripwire: something else wrote to `livePath`
          *      while the clone ran, so its contents can no longer be trusted.
+         *      The stat is taken via `clone-file.ts`'s `statSnapshot`, which
+         *      carries the filesystem's raw nanosecond mtime rather than
+         *      `Date`'s whole-millisecond `getTime()` - a same-size rewrite
+         *      landing inside the SAME millisecond as the pre-clone stat is
+         *      otherwise invisible (#952).
+         *  (e) `<livePath>.wal` is RE-CHECKED for quiescence after the clone
+         *      syscall returns (#952) - (b) alone only covers the window
+         *      before the clone started; a commit on another handle that
+         *      lands entirely in the WAL (never touching the base file's
+         *      size/mtime) during the check->clone window would pass (c)'s
+         *      torn-copy tripwire undetected while still being missing from
+         *      the clone.
          *  (d) the staged clone at `tmp` opens read-only and answers
          *      `SELECT count(*) AS n FROM duckdb_tables()` with a positive
          *      count, closed again before this returns.
+         *
+         * Every rejection reached AFTER `cloneFile` has written to `tmp`
+         * clears it first (`clearPartialClone`) - including `!clone.cloneable`
+         * itself, since `copyfile(3)` does not promise a failed clone wrote
+         * nothing there. A `clearPartialClone` failure aborts the whole
+         * attempt rather than falling through to the logical copy.
          */
         const attemptClone = (
             tmp: string,
-        ): Effect.Effect<{ readonly mode: "clone" } | { readonly mode: "copy"; readonly reason: string }> =>
+        ): Effect.Effect<
+            { readonly mode: "clone" } | { readonly mode: "copy"; readonly reason: string },
+            SnapshotPublishError
+        > =>
             Effect.gen(function* () {
                 if (cloneDisabledByEnv()) {
                     return { mode: "copy", reason: "AX_SNAPSHOT_CLONE=off" } as const;
@@ -814,14 +855,14 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
                     } as const;
                 }
 
-                // (b) post-checkpoint WAL tripwire.
+                // (b) post-checkpoint WAL tripwire, before the clone starts.
                 const walQuiescent = yield* walIsQuiescent(fs, livePath);
                 if (!walQuiescent) {
                     return { mode: "copy", reason: "WAL is non-empty after checkpoint" } as const;
                 }
 
                 // (c) torn-copy tripwire, half one: stat before the clone.
-                const before = yield* Effect.result(statSnapshot(fs, livePath));
+                const before = yield* Effect.result(statSnapshot(livePath));
                 if (before._tag === "Failure") {
                     return {
                         mode: "copy",
@@ -831,11 +872,16 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
 
                 const clone = yield* cloneFile(livePath, tmp);
                 if (!clone.cloneable) {
+                    // #952: a failed clonefile(3) call is not guaranteed to
+                    // have left `tmp` empty (e.g. ENOSPC mid-clone can leave a
+                    // truncated destination) - clear it before falling
+                    // through to the logical copy on the same path.
+                    yield* clearPartialClone(tmp);
                     return { mode: "copy", reason: clone.reason ?? "clonefile syscall failed" } as const;
                 }
 
                 // (c) torn-copy tripwire, half two: stat after the clone.
-                const after = yield* Effect.result(statSnapshot(fs, livePath));
+                const after = yield* Effect.result(statSnapshot(livePath));
                 if (after._tag === "Failure") {
                     yield* clearPartialClone(tmp);
                     return {
@@ -848,6 +894,20 @@ const makeService = (api: DuckDbNodeApi, fs: FileSystem.FileSystem): DuckDbServi
                     return {
                         mode: "copy",
                         reason: "torn-copy tripwire: the live database's size/mtime changed during the clone",
+                    } as const;
+                }
+
+                // (e) #952: re-check the WAL AFTER the clone, before trusting
+                // it - (b) only guards the window BEFORE the clone started. A
+                // concurrent commit on another handle can land entirely in
+                // the WAL without moving the base file's size or mtime, which
+                // (c) cannot see at all.
+                const walQuiescentAfterClone = yield* walIsQuiescent(fs, livePath);
+                if (!walQuiescentAfterClone) {
+                    yield* clearPartialClone(tmp);
+                    return {
+                        mode: "copy",
+                        reason: "WAL is non-empty after the clone - a concurrent commit landed during the check->clone window",
                     } as const;
                 }
 

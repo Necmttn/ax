@@ -205,6 +205,27 @@ describe("CacheWrite: the ingest lock IS the write capability", () => {
     });
 });
 
+describe("CacheWrite: writer path metadata (#952)", () => {
+    /**
+     * `writerOver` used to report `snapshotPath = target` (the PUBLISH
+     * destination) while its `reader` actually queried through `conn`, which
+     * is open on the LIVE database - `write.snapshotPath` told a caller a
+     * different file than the one every read on `write` actually goes
+     * through. A writer must report the path it reads, which is `livePath`.
+     */
+    dtest("write.snapshotPath reports the LIVE path being written, not the publish target", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-writer-path-");
+            const outcome = await run(asIngest(p, (write) => Effect.succeed(write.snapshotPath)));
+
+            expect(outcome._tag).toBe("completed");
+            const reported = outcome._tag === "completed" ? outcome.value : null;
+            expect(reported).toBe(p.livePath);
+            expect(reported).not.toBe(p.snapshotPath);
+        });
+    });
+});
+
 describe("CacheWrite: the semantics the DDL cannot express", () => {
     dtest("stamps skill.ingested_at even when the caller supplies its own value", async () => {
         await dylibEnv(async () => {
@@ -563,6 +584,45 @@ describe("CacheWrite: publish", () => {
     });
 
     /**
+     * #952: `buildFtsIndexes` runs at the tail of `ax ingest` UNGUARDED (no
+     * `Effect.ignore`) - a build failure must fail the whole ingest body, not
+     * be swallowed as best-effort, precisely so this guarantee holds: an
+     * index rebuild that dies partway through must not be able to publish a
+     * snapshot whose FTS state is inconsistent with its data. An unsafe
+     * identifier is a deterministic way to make `buildFtsIndexes` fail
+     * (`Effect.die`) without needing to fabricate a real rebuild fault.
+     */
+    dtest("a failing FTS build preserves the previous snapshot - FTS failures are fatal, not best-effort", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-fts-fatal-");
+            await run(asIngest(p, (write) => write.put("skill", { id: "s1", name: "good" })));
+            const before = readFileSync(p.snapshotPath);
+
+            const unsafeTarget: FtsTarget = { table: "turn; DROP TABLE turn", idColumn: "id", textColumn: "text_excerpt" };
+
+            const exit = await Effect.runPromiseExit(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("skill", { id: "s2", name: "doomed" });
+                        yield* buildFtsIndexes(write, [unsafeTarget]);
+                    }),
+                ).pipe(Effect.provide(Platform)) as Effect.Effect<unknown, unknown>,
+            );
+
+            expect(exit._tag).toBe("Failure");
+            expect(readFileSync(p.snapshotPath).equals(before)).toBe(true);
+
+            const found = await run(
+                Effect.gen(function* () {
+                    const read = yield* CacheRead;
+                    return yield* read.rows(SkillRow, "SELECT id, name, ingested_at FROM skill ORDER BY id");
+                }).pipe(Effect.provide(CacheReadLayer({ snapshotPath: p.snapshotPath }))),
+            );
+            expect(found.map((r) => r.name)).toEqual(["good"]);
+        });
+    });
+
+    /**
      * THE REGRESSION. "Publish only on success" is gated on `body` succeeding,
      * which means "the ingest succeeded" only while ingest is the sole caller of
      * this seam. It is not - the CLI stamps the `ingest_run` row from `onTimeout`
@@ -758,6 +818,78 @@ describe("CacheWrite: publishIntermediateSnapshot (#833)", () => {
                 ),
             );
 
+            expect(readFileSync(p.snapshotPath).equals(before)).toBe(true);
+        });
+    });
+
+    /**
+     * #952: the empty-publish guard used to `ATTACH ... AS ax_publish_guard
+     * (READ_ONLY)` / `DETACH ax_publish_guard` on the SHARED writer
+     * connection, under a FIXED alias name. A `DETACH` failure was silently
+     * ignored, so it left the alias attached - and every LATER guard
+     * evaluation on that SAME connection then failed its own `ATTACH`
+     * (duplicate alias), which the guard's `orElseSucceed(() => 0)` turned
+     * into "existing <= 0" - i.e. the guard silently stopped protecting data
+     * for the rest of that connection's lifetime.
+     *
+     * The fix opens a dedicated, throwaway connection per guard check instead
+     * of touching the writer's connection at all. This proves BOTH halves:
+     * (a) the writer's own connection never gets anything attached to it, and
+     * (b) two guard evaluations in a row on the SAME writer connection both
+     * still refuse correctly - the shape the old fixed-alias bug degraded.
+     */
+    dtest("checking the empty-publish guard never attaches anything onto the writer's connection, and a second check still works", async () => {
+        await dylibEnv(async () => {
+            const p = paths("ax-seam-guard-no-attach-");
+            await run(
+                asIngest(p, (write) =>
+                    Effect.gen(function* () {
+                        yield* write.put("session", { id: "sess-1" });
+                        yield* write.put("skill", { id: "s1", name: "good" });
+                    }),
+                ),
+            );
+            const before = readFileSync(p.snapshotPath);
+
+            const outcome = await run(
+                withIngestLock(
+                    {
+                        lockPath: p.lockPath,
+                        command: "seam-test-guard-no-attach",
+                        staleMs: 60_000,
+                        onBusy: () => Effect.succeed("busy" as const),
+                    },
+                    withCacheWrite(
+                        {
+                            livePath: join(p.dir, "live-empty.duckdb"),
+                            lockPath: p.lockPath,
+                            snapshotPath: p.snapshotPath,
+                            schemaSql: DDL,
+                            publish: false,
+                        },
+                        (write) =>
+                            Effect.gen(function* () {
+                                // Two guard evaluations in a row, on the SAME
+                                // connection - the second one degrading is
+                                // exactly the old bug's shape.
+                                yield* write.publishIntermediateSnapshot();
+                                yield* write.publishIntermediateSnapshot();
+                                return yield* write.rows(
+                                    Schema.Struct({ database_name: Schema.String }),
+                                    "SELECT database_name FROM duckdb_databases() WHERE NOT internal",
+                                );
+                            }),
+                    ),
+                ),
+            );
+
+            expect(outcome._tag).toBe("completed");
+            const databases = outcome._tag === "completed" ? outcome.value.map((r) => r.database_name) : [];
+            expect(databases).not.toContain("ax_publish_guard");
+            expect(databases).toHaveLength(1); // only the live database itself
+
+            // And both guard evaluations actually refused: the populated
+            // snapshot from run 1 is untouched.
             expect(readFileSync(p.snapshotPath).equals(before)).toBe(true);
         });
     });

@@ -12,10 +12,17 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem } from "@effect/platform-bun";
 import { Effect, FileSystem } from "effect";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cloneFile, statsEqual, walIsQuiescent, type FileStatSnapshot } from "./clone-file.ts";
+import {
+    clearPartialClone,
+    cloneFile,
+    statSnapshot,
+    statsEqual,
+    walIsQuiescent,
+    type FileStatSnapshot,
+} from "./clone-file.ts";
 
 const withTempDir = async (body: (dir: string) => Promise<void>): Promise<void> => {
     const dir = mkdtempSync(join(tmpdir(), "ax-clone-file-"));
@@ -97,21 +104,55 @@ describe("cloneFile", () => {
 
 describe("statsEqual (torn-copy tripwire, pure half)", () => {
     test("true for identical size + mtime", () => {
-        const a: FileStatSnapshot = { size: 1024, mtimeMs: 1_700_000_000_000 };
-        const b: FileStatSnapshot = { size: 1024, mtimeMs: 1_700_000_000_000 };
+        const a: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_000_000_000n };
+        const b: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_000_000_000n };
         expect(statsEqual(a, b)).toBe(true);
     });
 
     test("false when size differs", () => {
-        const a: FileStatSnapshot = { size: 1024, mtimeMs: 1_700_000_000_000 };
-        const b: FileStatSnapshot = { size: 2048, mtimeMs: 1_700_000_000_000 };
+        const a: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_000_000_000n };
+        const b: FileStatSnapshot = { size: 2048, mtimeNs: 1_700_000_000_000_000_000n };
         expect(statsEqual(a, b)).toBe(false);
     });
 
-    test("false when mtime differs", () => {
-        const a: FileStatSnapshot = { size: 1024, mtimeMs: 1_700_000_000_000 };
-        const b: FileStatSnapshot = { size: 1024, mtimeMs: 1_700_000_000_001 };
+    test("false when mtime differs by a whole millisecond", () => {
+        const a: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_000_000_000n };
+        const b: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_001_000_000_000n };
         expect(statsEqual(a, b)).toBe(false);
+    });
+
+    /** #952: the whole point of carrying `mtimeNs` instead of `Date`'s
+     *  whole-millisecond `getTime()` - two mtimes that round to the SAME
+     *  millisecond (both `...123` ms) but differ at the sub-millisecond
+     *  (nanosecond) grain must still compare unequal, or an in-place rewrite
+     *  landing inside one millisecond window is invisible to the tripwire. */
+    test("false when mtimes differ only below whole-millisecond precision", () => {
+        const a: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_123_000_000n };
+        const b: FileStatSnapshot = { size: 1024, mtimeNs: 1_700_000_000_123_500_000n };
+        expect(statsEqual(a, b)).toBe(false);
+    });
+});
+
+describe("statSnapshot (precise mtime via statSync bigint)", () => {
+    test("captures size and a nanosecond-precision mtime as a bigint", async () => {
+        await withTempDir(async (dir) => {
+            const file = join(dir, "f.bin");
+            writeFileSync(file, "hello");
+
+            const snap = await Effect.runPromise(statSnapshot(file));
+
+            expect(snap.size).toBe(5);
+            expect(typeof snap.mtimeNs).toBe("bigint");
+            expect(snap.mtimeNs > 0n).toBe(true);
+        });
+    });
+
+    test("fails with a typed PreciseStatError when the path does not exist", async () => {
+        await withTempDir(async (dir) => {
+            const exit = await Effect.runPromiseExit(statSnapshot(join(dir, "missing.bin")));
+
+            expect(exit._tag).toBe("Failure");
+        });
     });
 });
 
@@ -160,6 +201,92 @@ describe("walIsQuiescent (post-checkpoint WAL tripwire)", () => {
             const quiescent = await runWithFs((fs) => walIsQuiescent(fs, live));
 
             expect(quiescent).toBe(false);
+        });
+    });
+
+    /**
+     * #952: the pre-clone WAL check alone only guards the window BEFORE the
+     * clone starts - a commit on another handle that lands entirely in the
+     * WAL during the check->clone window is invisible to it. The fix is to
+     * re-run this SAME primitive again after the clone; that is only a valid
+     * fix if the primitive is stateless and re-evaluates the file fresh on
+     * every call rather than caching its first answer, which is what this
+     * proves: calling it a second time, after new bytes land, flips the
+     * result from quiescent to not - exactly what a post-clone re-check
+     * needs to catch a race the pre-clone check missed.
+     */
+    test("re-checking after new bytes land on the WAL flips quiescent to non-quiescent (post-clone recheck, #952)", async () => {
+        await withTempDir(async (dir) => {
+            const live = join(dir, "live.duckdb");
+            writeFileSync(live, "stem");
+            writeFileSync(`${live}.wal`, "");
+
+            const beforeClone = await runWithFs((fs) => walIsQuiescent(fs, live));
+            expect(beforeClone).toBe(true);
+
+            // Simulates a commit on another handle landing in the WAL during
+            // the check -> clone window - the exact case the pre-clone check
+            // cannot see, and the post-clone recheck exists to catch.
+            writeFileSync(`${live}.wal`, "a-commit-that-landed-during-the-clone");
+
+            const afterClone = await runWithFs((fs) => walIsQuiescent(fs, live));
+            expect(afterClone).toBe(false);
+        });
+    });
+});
+
+describe("clearPartialClone (temp cleanup after a rejected clone attempt) (#952)", () => {
+    test("removes a partially-cloned temp file", async () => {
+        await withTempDir(async (dir) => {
+            const tmp = join(dir, "partial.duckdb");
+            writeFileSync(tmp, "partial-clone-bytes");
+
+            await runWithFs((fs) => clearPartialClone(fs, tmp).pipe(Effect.orDie));
+
+            expect(existsSync(tmp)).toBe(false);
+        });
+    });
+
+    test("is a no-op when there is nothing at the temp path (force semantics)", async () => {
+        await withTempDir(async (dir) => {
+            const tmp = join(dir, "never-existed.duckdb");
+
+            await runWithFs((fs) => clearPartialClone(fs, tmp).pipe(Effect.orDie));
+
+            expect(existsSync(tmp)).toBe(false);
+        });
+    });
+
+    /**
+     * The safety property #952 depends on: a caller (`publishSnapshot` in
+     * `client.ts`) that cannot clear a partial clone must STOP rather than
+     * fall through to a fallback of unknown provenance at the same path. A
+     * removal failure has to actually surface as a typed failure - not be
+     * swallowed - for that guarantee to hold.
+     */
+    test("fails with a typed ClearPartialCloneError when removal is denied, and leaves the file in place", async () => {
+        await withTempDir(async (dir) => {
+            const lockedDir = join(dir, "locked");
+            mkdirSync(lockedDir);
+            const tmp = join(lockedDir, "partial.duckdb");
+            writeFileSync(tmp, "partial-clone-bytes");
+            // Read+execute, no write: removing a file inside must fail.
+            chmodSync(lockedDir, 0o555);
+
+            try {
+                const exit = await Effect.runPromiseExit(
+                    Effect.gen(function* () {
+                        const fs = yield* FileSystem.FileSystem;
+                        return yield* clearPartialClone(fs, tmp);
+                    }).pipe(Effect.provide(BunFileSystem.layer)) as Effect.Effect<void, unknown>,
+                );
+
+                expect(exit._tag).toBe("Failure");
+                expect(existsSync(tmp)).toBe(true);
+            } finally {
+                // Restore write access so withTempDir's own cleanup can remove it.
+                chmodSync(lockedDir, 0o755);
+            }
         });
     });
 });
