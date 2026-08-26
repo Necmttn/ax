@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.7](https://github.com/Necmttn/ax/compare/v0.43.6...v0.43.7) (2026-08-26)
+
+
+### Bug Fixes
+
+* repair cache indexes after upgrades ([#1089](https://github.com/Necmttn/ax/issues/1089)) ([7585292](https://github.com/Necmttn/ax/commit/758529277858cca3ea4c46c79c24869d4489f7da))
+
 ## [0.43.6](https://github.com/Necmttn/ax/compare/v0.43.5...v0.43.6) (2026-08-26)
 
 
