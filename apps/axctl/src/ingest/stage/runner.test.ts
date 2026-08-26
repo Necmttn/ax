@@ -801,4 +801,49 @@ describe("runPipeline derive budget (#697)", () => {
         );
         expect(stats.map((s) => s.summary).sort()).toEqual(["claude ok", "outcomes ok"]);
     });
+
+    it("concurrency 1: two independent hanging derive stages both time out - the first no longer starves the second (#721)", async () => {
+        // Regression for the fix: `deriveStageBudget` used to hand a STARTING
+        // derive the ENTIRE time left before the deadline. With
+        // AX_PIPELINE_CONCURRENCY=1, hang-a would run first, burn the whole
+        // window until the hung detector fired, and by the time hang-b
+        // finally got its permit no time was left - it read `skip`, not
+        // `timeout`, and never even ran. Dividing the remaining budget across
+        // every still-unsettled derive stage means each independent hang
+        // below gets its own even share instead, so both hit the wall-clock
+        // hung detector and both are recorded `timeout`.
+        const savedConcurrency = process.env.AX_PIPELINE_CONCURRENCY;
+        process.env.AX_PIPELINE_CONCURRENCY = "1";
+        try {
+            const rec = outcomeRecorder();
+            const started = Date.now();
+            const stats = await Effect.runPromise(
+                runPipeline(
+                    [hangs("hang-a", ["derive"]), hangs("hang-b", ["derive"])],
+                    ctx,
+                    {
+                        deadlineMs: started + 300,
+                        reserveMs: 0,
+                        recordStageOutcome: rec.recordStageOutcome,
+                    },
+                ) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>,
+            );
+
+            expect(stats).toHaveLength(2);
+            expect(rec.seen).toHaveLength(2);
+            const statusByKey = new Map(rec.seen.map((r) => [r.key, r.status]));
+            // THE load-bearing assertion: both stages settle `timeout`, never
+            // `skipped` - the old code let hang-a claim the whole window and
+            // left hang-b with nothing.
+            expect(statusByKey.get("hang-a")).toBe("timeout");
+            expect(statusByKey.get("hang-b")).toBe("timeout");
+            expect(stats.every((s) => s.summary === "timed out (hung detector)")).toBe(true);
+            // Generous: this only guards against the pipeline hanging outright,
+            // not the precise per-stage split.
+            expect(Date.now() - started).toBeLessThan(5_000);
+        } finally {
+            if (savedConcurrency === undefined) delete process.env.AX_PIPELINE_CONCURRENCY;
+            else process.env.AX_PIPELINE_CONCURRENCY = savedConcurrency;
+        }
+    });
 });

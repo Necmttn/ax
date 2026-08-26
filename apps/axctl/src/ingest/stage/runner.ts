@@ -193,8 +193,11 @@ export const topoLayers = <S extends BaseStageStats, R, E>(
  *  `opts.deadlineMs` is the run's wall-clock deadline (epoch ms). Derive stages
  *  are budgeted against it so the pass ends cleanly instead of being killed by
  *  the outer ingest timeout (#697); omit it and derives keep only their static
- *  `AX_STAGE_TIMEOUT_SECONDS` cap. `opts.reserveMs` overrides the finalization
- *  reserve (env default) - tests pass 0.
+ *  `AX_STAGE_HUNG_SECONDS` cap. The time left before the deadline is divided
+ *  across every derive stage that has not yet settled, so one heavy starter
+ *  cannot claim the whole remaining budget and starve derives still waiting on
+ *  their deps (#721). `opts.reserveMs` overrides the finalization reserve (env
+ *  default) - tests pass 0.
  *
  *  `opts.recordStageOutcome` lets the caller record the two outcomes only the
  *  RUNNER knows about, which the stage's own `Exit` cannot express: a watchdog
@@ -235,6 +238,24 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
         const hungCapMs = deriveStageHungSeconds() * 1000;
         const deadlineMs = opts.deadlineMs ?? null;
         const reserveMs = opts.reserveMs ?? deriveReserveMs();
+
+        // Count of derive stages that have not yet SETTLED (succeeded, failed,
+        // timed out, or been skipped for want of budget) - including ones still
+        // waiting on their deps. `deriveStageBudget` divides the time left
+        // before the deadline across this count so one heavy starter cannot
+        // claim the whole remaining budget and starve derives still queued
+        // behind it (#721). A starting stage reads the count BEFORE it
+        // decrements its own entry, so two derives starting in the same tick
+        // both see the conservative (not-yet-decremented) total - neither has
+        // settled yet, so neither should shrink the other's share. Plain
+        // `let`, not a Ref: every read/write below happens synchronously
+        // inside `Effect.sync`/`Effect.suspend` bodies with no `yield*` in
+        // between, so there is no interleaving window for another fiber to
+        // observe a half-updated count.
+        let remainingDeriveStages = stages.filter((s) => s.meta.tags.includes("derive")).length;
+        const settleDeriveStage = Effect.sync(() => {
+            remainingDeriveStages = Math.max(0, remainingDeriveStages - 1);
+        });
 
         const runStage = (s: StageDef<S, R, E>) =>
             Effect.gen(function* () {
@@ -277,6 +298,7 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                             deadlineMs,
                             nowMs: Date.now(),
                             reserveMs,
+                            remainingDeriveStages,
                         });
                         if (budget._tag === "skip") {
                             const reason = `skipped - ${budget.reason}`;
@@ -380,7 +402,15 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                                     ),
                             }),
                         );
-                    });
+                    }).pipe(
+                        // Decrement exactly once per derive stage, on every
+                        // settle path - skip, self-time timeout, hung timeout,
+                        // failure, or success alike - so the next stage's
+                        // budget read (#721) reflects one fewer stage still
+                        // competing for the remaining wall time. `ensuring`
+                        // fires on both success and failure exits.
+                        Effect.ensuring(settleDeriveStage),
+                    );
                 const tracked = Effect.sync(() => {
                     inFlight.add(s.meta.key);
                 }).pipe(
