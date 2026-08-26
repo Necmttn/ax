@@ -6,7 +6,6 @@
 ### Bug Fixes
 
 * **profile:** match guardrail evidence by command ([cf21641](https://github.com/Necmttn/ax/commit/cf21641159ef61d3900fea8859125598ddcd8dd8))
-* **profile:** match guardrail evidence by command ([455148e](https://github.com/Necmttn/ax/commit/455148e42e2b8b221d8037eeb1009eb09b62ac32))
 
 ## [0.43.8](https://github.com/Necmttn/ax/compare/v0.43.7...v0.43.8) (2026-08-26)
 
