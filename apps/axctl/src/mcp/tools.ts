@@ -872,7 +872,7 @@ const costRoutabilityTool: AxMcpTool = defineMcpTool({
             .int()
             .positive()
             .optional()
-            .describe("Window in days (default 30)."),
+            .describe("Window in days (default 14)."),
         min_run: z
             .number()
             .int()
@@ -881,7 +881,7 @@ const costRoutabilityTool: AxMcpTool = defineMcpTool({
             .describe("Min consecutive same-class turns for a span to count (default 1)."),
     },
     run: async (args, rt) => {
-        const days = args.days ?? 30;
+        const days = args.days ?? COST_DEFAULT_WINDOW_DAYS;
         const minRun = args.min_run ?? 1;
         const result = await rt.runPromise(fetchRoutability({ days, minRun }));
         return result;
