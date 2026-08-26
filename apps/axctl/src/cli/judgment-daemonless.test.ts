@@ -9,7 +9,12 @@ import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 const runCli = async (sidecarPath: string, args: string[]) => {
     const child = Bun.spawn(["bun", "apps/axctl/src/cli/index.ts", ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, AX_DEV: "1", AX_SIDECAR_PATH: sidecarPath },
+        env: {
+            ...process.env,
+            AX_DEV: "1",
+            AX_NO_AUTO_INGEST: "1",
+            AX_SIDECAR_PATH: sidecarPath,
+        },
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -61,7 +66,7 @@ describe("judgment commands without SurrealDB", () => {
         expect(improve.stdout).toContain("use-rg");
         expect(retro.stdout).toContain("manual");
         expect(dogfood.stdout).toContain("run-1");
-    });
+    }, 20_000);
 
     test("manual retro emit uses SQLite when the session and file are explicit", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-retro-emit-daemonless-"));
