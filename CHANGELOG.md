@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.14](https://github.com/Necmttn/ax/compare/v0.43.13...v0.43.14) (2026-08-26)
+
+
+### Bug Fixes
+
+* suppress installed hook proposals ([#1110](https://github.com/Necmttn/ax/issues/1110)) ([e14ae02](https://github.com/Necmttn/ax/commit/e14ae020cb971dca1cc14fdf8f1ecd7a0ac1ed7f))
+
 ## [0.43.13](https://github.com/Necmttn/ax/compare/v0.43.12...v0.43.13) (2026-08-26)
 
 
