@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.5](https://github.com/Necmttn/ax/compare/v0.43.4...v0.43.5) (2026-08-26)
+
+
+### Bug Fixes
+
+* **otel:** disclose the retained telemetry window ([#1080](https://github.com/Necmttn/ax/issues/1080)) ([f8b74f7](https://github.com/Necmttn/ax/commit/f8b74f7360d8e3ad6d5907e104c9a3e188e9b5d6))
+
 ## [0.43.4](https://github.com/Necmttn/ax/compare/v0.43.3...v0.43.4) (2026-08-25)
 
 
