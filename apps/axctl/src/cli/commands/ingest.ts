@@ -12,8 +12,17 @@ import { posixPath } from "@ax/lib/shared/path";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { duckdbAssetPathOption } from "../../duckdb-embed-wiring.ts";
-import { runIngest, withIngestRunFinish, type RunIngestResult } from "../../ingest/run.ts";
-import { resolveIngestDeadlineSeconds } from "../../ingest/deadline.ts";
+import {
+    runIngest,
+    withIngestRunFinish,
+    type RunIngestOptions,
+    type RunIngestResult,
+} from "../../ingest/run.ts";
+import {
+    resolveIngestDeadlineSeconds,
+    type IngestDeadlineDecision,
+    type IngestDeadlineInput,
+} from "../../ingest/deadline.ts";
 import { snapshotPath } from "@ax/lib/duckdb/client";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { cmdIngestRepairIndexes, formatIndexRepairResult } from "../../ingest/repair-indexes.ts";
@@ -181,6 +190,45 @@ interface IngestCommandOpts {
     readonly claudeProject?: string;
 }
 
+/** One resolved clock value, projected to both consumers that must agree.
+ * Keeping the two option fragments together prevents the derive deadline and
+ * outer lock timeout from drifting apart. */
+export interface IngestCommandTiming {
+    readonly decision: IngestDeadlineDecision;
+    readonly runOptions: Pick<RunIngestOptions, "deadlineMs">;
+    readonly lockOptions: { readonly timeoutSeconds: number };
+}
+
+/** Resolve the CLI deadline once, then prepare the exact option fragments sent
+ * to `runIngest` and `withIngestLock`. Exported for boundary tests. */
+export const resolveIngestCommandTiming = (
+    input: IngestDeadlineInput & { readonly nowMs: number },
+): IngestCommandTiming => {
+    const decision = resolveIngestDeadlineSeconds(input);
+    return {
+        decision,
+        runOptions: decision.seconds > 0
+            ? { deadlineMs: input.nowMs + decision.seconds * 1000 }
+            : {},
+        lockOptions: { timeoutSeconds: decision.seconds },
+    };
+};
+
+/** Narrow command dependency seam. Production uses the real ingest runner;
+ * tests substitute only this expensive boundary while retaining the real
+ * command, filesystem probe, deadline resolution, and lock orchestration. */
+export interface IngestCommandDeps {
+    readonly nowMs: () => number;
+    readonly runIngest: typeof runIngest;
+    readonly withIngestLock: typeof withIngestLock;
+}
+
+const liveIngestCommandDeps: IngestCommandDeps = {
+    nowMs: Date.now,
+    runIngest,
+    withIngestLock,
+};
+
 /**
  * Blob GC deletes any bucket blob no `session` row references. That is only
  * safe when the run built a COMPLETE reference set - i.e. a truly GLOBAL
@@ -324,7 +372,11 @@ const runMaintenanceHalf = <A, E, R>(
 // Exported for `ax segment import` (#902): after loading a segment it triggers
 // the wide-window re-derive through this exact path, so the lock, deadline,
 // verdicts, and maintenance summary behave like any other ingest.
-export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
+export const cmdIngest = (
+    args: string[],
+    opts: IngestCommandOpts = {},
+    deps: IngestCommandDeps = liveIngestCommandDeps,
+) =>
     Effect.gen(function* () {
         const commandName = opts.command ?? "ingest";
         const cfg = yield* AxConfig;
@@ -335,15 +387,16 @@ export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // every first ingest used to fail (#830). "First run" = no published
         // snapshot yet; `fs.exists` is fail-open to false, so a filesystem
         // hiccup degrades to today's behaviour rather than granting hours.
-        const deadline = resolveIngestDeadlineSeconds({
+        const timing = resolveIngestCommandTiming({
             configuredSeconds: cfg.knobs.ingestTimeoutSeconds,
             knobExplicitlySet: (process.env.AX_INGEST_TIMEOUT_SECONDS ?? "").trim().length > 0,
             firstRun: !(yield* (yield* FileSystem.FileSystem)
                 .exists(snapshotPath())
                 .pipe(Effect.orElseSucceed(() => true))),
+            nowMs: deps.nowMs(),
         });
-        const timeoutSeconds = deadline.seconds;
-        if (deadline.upgraded) yield* Effect.logInfo(`ingest: ${deadline.reason}`);
+        const timeoutSeconds = timing.lockOptions.timeoutSeconds;
+        if (timing.decision.upgraded) yield* Effect.logInfo(`ingest: ${timing.decision.reason}`);
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.
         const runId = runIdFor(commandName);
@@ -377,7 +430,7 @@ export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // for why these must not publish a snapshot.
         const cacheWriteOptions = maintenanceCacheWriteOptions(cfg.paths.dataDir, lockPath);
 
-        const work = runIngest({
+        const work = deps.runIngest({
             command: commandName,
             args,
             cwd: opts.cwd ?? process.cwd(),
@@ -392,7 +445,7 @@ export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             // Computed from the same `timeoutSeconds` knob the lock uses; the
             // lock's own clock starts a hair after this, so the deadline reads
             // slightly early - the derive reserve absorbs that.
-            ...(timeoutSeconds > 0 ? { deadlineMs: Date.now() + timeoutSeconds * 1000 } : {}),
+            ...timing.runOptions,
         });
 
         // Best-effort maintenance, still under the lock, but NOT subject to
@@ -454,10 +507,10 @@ export const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // lock to age into a cooldown - interrupting the fiber doesn't prove
         // DuckDB stopped work, so the next ingest must hold off until
         // the lock goes stale rather than charging a still-busy DB.
-        const outcome = yield* withIngestLock(
+        const outcome = yield* deps.withIngestLock(
             {
                 ...ingestLockOptions(path, cfg.paths.dataDir, commandName, timeoutSeconds),
-                timeoutSeconds,
+                ...timing.lockOptions,
                 onBusy: (holder) =>
                     Effect.sync(() =>
                         process.stderr.write(
