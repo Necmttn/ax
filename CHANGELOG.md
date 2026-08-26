@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.11](https://github.com/Necmttn/ax/compare/v0.43.10...v0.43.11) (2026-08-26)
+
+
+### Bug Fixes
+
+* suppress universal taste pattern ([#1103](https://github.com/Necmttn/ax/issues/1103)) ([af4111f](https://github.com/Necmttn/ax/commit/af4111fa8df5e3e6996b6545e9eecf7133e0c608))
+
 ## [0.43.10](https://github.com/Necmttn/ax/compare/v0.43.9...v0.43.10) (2026-08-26)
 
 
