@@ -86,6 +86,9 @@ describe("ax skills family - direct-call against a published cache", () => {
         expect(out).toContain("composto");
         // tdd has no invocations/proposals - issue #47's zero-score inclusion.
         expect(out).toContain("tdd");
+        expect(out).toContain("score = total - 2×corr + min(cmts, total) - 0.5×prop");
+        expect(out).toContain("clean  invocations with no tool/turn error - display only");
+        expect(out).toContain("cmts   commits correlated with a session that invoked this skill");
     }, 60_000);
 
     dtest("pairs reads skill_paired joined to skill, not Surreal", async () => {
