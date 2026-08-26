@@ -139,11 +139,12 @@ const CACHE_ROUTES: Readonly<Record<string, ReadonlyArray<Record<string, unknown
             e: new Date("2026-06-12T10:30:00Z"),
         },
     ],
-    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL)
+    // fetchGuardrailHookEvidence (GUARDRAIL_HOOK_EVIDENCE_SQL) - grouped by the
+    // real executed `command`, not the `hook_name` event label (#1086).
     "FROM hook_command_invocation": [
-        { hook_name: "/Users/me/.ax/hooks/enforce-worktree.ts", fires: 412, blocked: 9, warned: 0 },
-        { hook_name: "route-dispatch", fires: 25, blocked: 0, warned: 12 },
-        { hook_name: "uninstalled.ts", fires: 99, blocked: 99, warned: 0 },
+        { command: "bun /Users/me/.ax/hooks/enforce-worktree.ts # ax:74da7418", fires: 412, blocked: 9, warned: 0 },
+        { command: "bun /Users/me/.ax/hooks/route-dispatch.ts # ax:9c1a0b2e", fires: 25, blocked: 0, warned: 12 },
+        { command: "bun /Users/me/.ax/hooks/uninstalled.ts # ax:deadbeef", fires: 99, blocked: 99, warned: 0 },
     ],
 };
 

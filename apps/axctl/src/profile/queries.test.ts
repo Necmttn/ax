@@ -503,21 +503,21 @@ describe("fetchWindowedSessions", () => {
 });
 
 describe("fetchGuardrailHookEvidence", () => {
-    test("returns per-hook fire/block/warn counts from hook evidence", async () => {
+    test("returns per-command fire/block/warn counts from hook evidence", async () => {
         const cache = cacheRead({
             "FROM hook_command_invocation": [
-                { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
-                { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
+                { command: "bun ~/.ax/hooks/enforce-worktree.ts # ax:74da7418", fires: 12, blocked: 3, warned: 1 },
+                { command: "bun ~/.ax/hooks/dispatch.ts # ax:9c1a0b2e", fires: 8, blocked: 0, warned: 6 },
             ],
         });
         const rows = await runCache(fetchGuardrailHookEvidence({ windowDays: 14 }), cache.layer);
         expect(rows).toEqual([
-            { hook_name: "enforce-worktree", fires: 12, blocked: 3, warned: 1 },
-            { hook_name: "route-dispatch", fires: 8, blocked: 0, warned: 6 },
+            { command: "bun ~/.ax/hooks/enforce-worktree.ts # ax:74da7418", fires: 12, blocked: 3, warned: 1 },
+            { command: "bun ~/.ax/hooks/dispatch.ts # ax:9c1a0b2e", fires: 8, blocked: 0, warned: 6 },
         ]);
         expect(cache.captured[0]).toContain("FROM hook_command_invocation");
         expect(cache.captured[0]).toContain("INTERVAL '1 day'");
-        expect(cache.captured[0]).toContain("GROUP BY hook_name");
+        expect(cache.captured[0]).toContain("GROUP BY command");
         expect(cache.captured[0]).toContain("effect = 'blocked'");
         expect(cache.captured[0]).toContain("'injected_context'");
     });
