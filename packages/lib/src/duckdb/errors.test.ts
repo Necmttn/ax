@@ -35,19 +35,8 @@ describe("duckdb errors", () => {
         expect(err.message).toContain("to_json(tags)");
     });
 
-    // Fix round 1 (ruling R10): every accessor-failure type (the eight swept
-    // against libduckdb v1.5.5, plus whatever the general Part B guard
-    // catches next) wants a CAST suggestion, not hex()/to_json() - neither
-    // of those apply to a scalar type.
-    test("every accessor-failure type suggests CAST(col AS VARCHAR)", () => {
-        for (const [column, typeId] of [
-            ["t", 30 /* TIME_TZ */],
-            ["ts", 31 /* TIMESTAMP_TZ */],
-            ["id", 27 /* UUID */],
-            ["created", 20 /* TIMESTAMP_S */],
-        ] as const) {
-            const err = new DuckDbUnsupportedTypeError({ column, typeId });
-            expect(err.message).toContain(`CAST(${column} AS VARCHAR)`);
-        }
+    test("an unknown future scalar type suggests CAST(col AS VARCHAR)", () => {
+        const err = new DuckDbUnsupportedTypeError({ column: "future", typeId: 999 });
+        expect(err.message).toContain("CAST(future AS VARCHAR)");
     });
 });

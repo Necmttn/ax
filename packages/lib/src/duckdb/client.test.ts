@@ -134,61 +134,58 @@ describe("DuckDb", () => {
         ),
     );
 
-    // Fix round 1 (ruling R10), Part A: duckdb_value_varchar returns a NULL
-    // pointer for TIMESTAMP WITH TIME ZONE (verified against libduckdb
-    // v1.5.5 directly, on both a literal and a real table column), so it is
-    // now excluded from row-decode.ts's VARCHAR_TYPES - querying it raises
-    // DuckDbUnsupportedTypeError naming the column instead of silently
-    // decoding to "". The documented workaround (CAST ... AS VARCHAR) works.
     dtest(
-        "refuses to decode TIMESTAMP WITH TIME ZONE instead of returning an empty string",
+        "decodes napi scalar wrappers, timestamp variants, and nulls",
         withDuckDb((db) =>
             Effect.gen(function* () {
                 const conn = yield* db.open(tempDb());
-                const result = yield* Effect.result(
-                    conn.query("SELECT TIMESTAMP WITH TIME ZONE '2026-08-14 10:11:12+02' AS ts_tz"),
+                yield* conn.exec("CREATE TYPE mood AS ENUM ('ready', 'waiting')");
+                yield* conn.exec(
+                    `CREATE TABLE scalar_values (
+                        ts_s TIMESTAMP_S,
+                        ts_ms TIMESTAMP_MS,
+                        ts_ns TIMESTAMP_NS,
+                        ts_tz TIMESTAMPTZ,
+                        time_tz TIMETZ,
+                        id UUID,
+                        state mood,
+                        bits BIT
+                    )`,
                 );
-                expect(result._tag).toBe("Failure");
-                if (result._tag === "Failure") {
-                    expect(result.failure._tag).toBe("DuckDbUnsupportedTypeError");
-                    expect((result.failure as { message: string }).message).toContain(
-                        "CAST(ts_tz AS VARCHAR)",
-                    );
-                }
-                // the documented workaround works
-                const ok = yield* conn.query(
-                    "SELECT CAST(TIMESTAMP WITH TIME ZONE '2026-08-14 10:11:12+02' AS VARCHAR) AS ts_tz",
+                yield* conn.exec(
+                    `INSERT INTO scalar_values VALUES (
+                        '2026-08-14 10:11:12',
+                        '2026-08-14 10:11:12.123',
+                        '2026-08-14 10:11:12.123456789',
+                        '2026-08-14 10:11:12+02:00',
+                        '10:11:12+02:00',
+                        '11111111-1111-1111-1111-111111111111',
+                        'ready',
+                        '1010'
+                    )`,
                 );
-                expect(typeof ok.rows[0]!.ts_tz).toBe("string");
-                yield* conn.close;
-            }),
-        ),
-    );
+                yield* conn.exec("INSERT INTO scalar_values VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)");
 
-    // Fix round 1 (ruling R10): UUID showed the exact same accessor failure
-    // as TIMESTAMP_TZ during the investigation (duckdb_value_varchar -> NULL
-    // for a real, non-SQL-NULL value) and is excluded from VARCHAR_TYPES the
-    // same way - confirmed structurally here, mirroring the TZ test above.
-    dtest(
-        "refuses to decode UUID instead of returning an empty string",
-        withDuckDb((db) =>
-            Effect.gen(function* () {
-                const conn = yield* db.open(tempDb());
-                yield* conn.exec("CREATE TABLE u (id UUID)");
-                yield* conn.exec("INSERT INTO u VALUES ('11111111-1111-1111-1111-111111111111')");
-                const result = yield* Effect.result(conn.query("SELECT id FROM u"));
-                expect(result._tag).toBe("Failure");
-                if (result._tag === "Failure") {
-                    expect(result.failure._tag).toBe("DuckDbUnsupportedTypeError");
-                    expect((result.failure as { message: string }).message).toContain("CAST(id AS VARCHAR)");
-                }
-                // the documented workaround works, including for a NULL row
-                yield* conn.exec("INSERT INTO u VALUES (NULL)");
-                const ok = yield* conn.query("SELECT CAST(id AS VARCHAR) AS id FROM u ORDER BY id");
-                expect(ok.rows).toEqual([
-                    { id: "11111111-1111-1111-1111-111111111111" },
-                    { id: null },
-                ]);
+                const result = yield* conn.query("SELECT * FROM scalar_values ORDER BY id NULLS LAST");
+                const row = result.rows[0]!;
+                expect((row.ts_s as Date).toISOString()).toBe("2026-08-14T10:11:12.000Z");
+                expect((row.ts_ms as Date).toISOString()).toBe("2026-08-14T10:11:12.123Z");
+                expect((row.ts_ns as Date).toISOString()).toBe("2026-08-14T10:11:12.123Z");
+                expect((row.ts_tz as Date).toISOString()).toBe("2026-08-14T08:11:12.000Z");
+                expect(row.time_tz).toBe("10:11:12+02");
+                expect(row.id).toBe("11111111-1111-1111-1111-111111111111");
+                expect(row.state).toBe("ready");
+                expect(row.bits).toBe("1010");
+                expect(result.rows[1]).toEqual({
+                    ts_s: null,
+                    ts_ms: null,
+                    ts_ns: null,
+                    ts_tz: null,
+                    time_tz: null,
+                    id: null,
+                    state: null,
+                    bits: null,
+                });
                 yield* conn.close;
             }),
         ),

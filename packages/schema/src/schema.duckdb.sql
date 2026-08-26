@@ -58,12 +58,11 @@
 -- TYPES. Surreal `datetime` -> plain `TIMESTAMP` (NOT `TIMESTAMPTZ`). `int` ->
 -- BIGINT, `float`/`number` -> DOUBLE, `bool` -> BOOLEAN.
 --
--- UTC CONTRACT (supersedes P2-1; reverted from TIMESTAMPTZ, see FFI CLIENT
--- COMPATIBILITY below). All TIMESTAMP columns store UTC instants. Writers MUST
+-- UTC CONTRACT (supersedes P2-1). All TIMESTAMP columns store UTC instants. Writers MUST
 -- normalize to UTC before insert - DuckDB silently drops offsets on naive
 -- TIMESTAMP inserts, so an offset string reaching the DB is a writer bug.
--- Readers append `Z` when they need an ISO string back out. TIMESTAMPTZ is
--- banned in this file: the FFI client cannot decode it (see below).
+-- Readers append `Z` when they need an ISO string back out. The reader now
+-- supports TIMESTAMPTZ, but changing stored columns needs a separate migration.
 --
 -- ARRAYS (P2-3, reverted). Surreal `array<T>` where T is a scalar (string/int/
 -- float/number/bool/datetime) stays JSON-encoded VARCHAR, marked `-- JSON` at
@@ -71,24 +70,19 @@
 -- of records/objects, `flexible`/nested-object shapes - v3 has no
 -- `flexible<object>`). An earlier revision of this file made scalar arrays
 -- native DuckDB list columns (`VARCHAR[]` etc.) since DuckDB lists are a real
--- first-class type; that native-list form is banned here until the FFI client
--- gains LIST decoding (see below) - all scalar arrays are JSON text in VARCHAR
+-- first-class type; that native-list form is banned until the client gains
+-- LIST decoding (see below) - all scalar arrays are JSON text in VARCHAR
 -- for now, readable with DuckDB's json functions.
 --
--- FFI CLIENT COMPATIBILITY. Every reader of this cache goes through the
+-- READ CLIENT COMPATIBILITY. Every reader of this cache goes through the
 -- `@ax/lib/duckdb` client, which answers for a CLOSED SET of column types
 -- (row-decode.ts). The set was forced by the original bun:ffi client's
 -- row-major `duckdb_value_*` accessors; the napi driver that replaced it
 -- (#880) keeps the set closed as a compatibility contract - every query and
--- this DDL were written against exactly these types, and widening the set
--- silently would change what existing readers decode to. BANNED TYPES - none
--- of these may appear as a column type in this file:
---   UUID, ENUM, BIT, TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP_NS, TIMESTAMP_TZ,
---   TIME_TZ, LIST
--- The client raises `DuckDbUnsupportedTypeError` for all of them - not a
--- column type any writer should be allowed to introduce silently, so
--- duckdb-parity.test.ts scans every column type token in this file against
--- this exact list.
+-- this DDL were written against exactly these types. New scalar types enter
+-- only after explicit decode rules and boundary tests. Nested native types,
+-- including LIST, remain outside the contract. `duckdb-parity.test.ts` derives
+-- the banned type tokens from the decoder.
 --
 -- NUL-BYTE CONTRACT. Text columns must never contain NUL bytes - the FFI
 -- client's CString decode truncates at the first NUL, silently dropping

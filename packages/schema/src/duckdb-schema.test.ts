@@ -158,18 +158,12 @@ describe("types and Surreal leftovers", () => {
         }
     });
 
-    // P2-1 (TIMESTAMPTZ for every datetime) is REVERTED: the bun:ffi DuckDB
-    // client cannot decode TIMESTAMP_TZ (probe-confirmed DuckDbUnsupportedTypeError
-    // against the real client + dylib). Every datetime column is plain TIMESTAMP
-    // now, under a UTC contract (writers normalize to UTC before insert; readers
-    // append `Z`). TIMESTAMPTZ is a banned type - see the banned-type guard in
-    // duckdb-parity.test.ts for the exhaustive per-column scan; this test just
-    // pins the header-level contract.
-    test("datetimes are plain TIMESTAMP (UTC contract); TIMESTAMPTZ is banned", () => {
+    // Every stored datetime remains plain TIMESTAMP under the UTC contract.
+    // TIMESTAMPTZ decoder support does not change the DDL without a migration.
+    test("datetimes remain plain TIMESTAMP under the UTC contract", () => {
         expect(DUCKDB_SCHEMA_SQL).toMatch(/\bTIMESTAMP\b/);
         expect(DUCKDB_SCHEMA_SQL).not.toMatch(/\bDATETIME\b/);
-        // No column declaration line (comments stripped via `statements`) may use
-        // TIMESTAMPTZ - the FFI client can't decode it.
+        // No stored column changes type in this decoder-only change.
         expect(statements).not.toMatch(/\bTIMESTAMPTZ\b/);
     });
 
@@ -185,11 +179,9 @@ describe("types and Surreal leftovers", () => {
 });
 
 describe("arrays (P2-3, reverted)", () => {
-    // P2-3 (native DuckDB list columns for scalar array<T> fields) is REVERTED:
-    // the bun:ffi DuckDB client cannot decode LIST columns (probe-confirmed
-    // DuckDbUnsupportedTypeError against the real client + dylib). Every
+    // Native LIST columns remain outside the read contract. Every
     // array<T> field - scalar or record/object - now stays JSON-encoded
-    // VARCHAR, same treatment. See the ARRAYS / BANNED TYPES notes in the
+    // VARCHAR, same treatment. See the ARRAYS / READ CLIENT notes in the
     // schema.duckdb.sql header; the exhaustive per-column scan lives in the
     // banned-type guard in duckdb-parity.test.ts.
     test("formerly-native-list scalar array fields are JSON VARCHAR, not list columns", () => {

@@ -77,11 +77,9 @@ describe("schema.duckdb.sql loads into a fresh DuckDB", () => {
     // semantics, JSON-encoded scalar arrays) and asserts the values survive a
     // round trip through the real DuckDB engine.
     //
-    // TIMESTAMPTZ + native list columns (P2-1/P2-3 as originally reviewed) are
-    // REVERTED: the bun:ffi DuckDB client's row-major `duckdb_value_*`
-    // accessors cannot decode TIMESTAMP_TZ or LIST (probe-confirmed
-    // DuckDbUnsupportedTypeError). This test now exercises the UTC-contract
-    // TIMESTAMP path and JSON-encoded VARCHAR arrays in their place.
+    // The schema keeps plain UTC TIMESTAMP columns. TIMESTAMPTZ decoder support
+    // does not change stored columns without a separate migration. Native LIST
+    // stays unsupported, so arrays remain JSON-encoded VARCHAR values.
     test("representative inserts round-trip through UTC timestamps, JSON-encoded arrays, defaults, and a polymorphic edge", () => {
         withTempDuckdbDir((dbPath) => {
             const script = [

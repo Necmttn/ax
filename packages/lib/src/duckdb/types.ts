@@ -50,8 +50,8 @@ export const duckDbTypeName = (id: number): string =>
 /**
  * Every JS value a decoded cell can take.
  *
- * `Date` (a `TIMESTAMP` column) is MILLISECOND-grain while DuckDB stores
- * microseconds, so the last three digits of a sub-second value are TRUNCATED
+ * `Date` values from timestamp columns are MILLISECOND-grain. Finer DuckDB
+ * timestamp variants therefore lose their sub-millisecond digits
  * on the way out - `10:11:12.999999` reads back as `10:11:12.999`
  * (cross-review P2-2; see `finishTimestamp` in row-decode.ts for why this is
  * the accepted trade for ax data, and what to do when it is not acceptable:

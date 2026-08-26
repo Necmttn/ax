@@ -4,8 +4,8 @@
  *
  * The set was originally forced by the `bun:ffi` client's row-major
  * `duckdb_value_*` accessors (`bun:ffi` could not pass structs by value, so
- * BLOB/LIST/STRUCT/... had no accessor at all). The napi driver (#880) COULD
- * render more types - the set stays closed anyway, as a compatibility
+ * BLOB/LIST/STRUCT/... had no accessor at all). The napi driver (#880) CAN
+ * render more scalar types - the set stays closed anyway, as a compatibility
  * contract: every caller, and the DDL itself (JSON-in-VARCHAR for arrays and
  * nested objects), was written against exactly these types, and widening the
  * set silently would change what existing queries decode to. This module
@@ -34,41 +34,10 @@ const UINT64_TYPES: ReadonlySet<number> = new Set([
 const DOUBLE_TYPES: ReadonlySet<number> = new Set([DuckDbTypeId.FLOAT, DuckDbTypeId.DOUBLE]);
 
 /**
- * Types with no fixed-width row-major accessor that DuckDB WILL render
- * faithfully as text via `duckdb_value_varchar`: strings, date/time/plain
- * timestamp, intervals, 128-bit ints, decimal. `SQLNULL` is here too, but
- * never actually reaches the accessor - a literal SQL `NULL`'s cell always
- * reports `duckdb_value_is_null() == true`, so `readResult` takes the
- * null-cell branch before any accessor is called for it.
- *
- * EIGHT other types were empirically swept against libduckdb v1.5.5 (fix
- * round 1, ruling R10) and are DELIBERATELY EXCLUDED, for a DIFFERENT reason
- * than BLOB/nested types below (which have no row-major accessor at all):
- * for these eight, `duckdb_value_is_null` correctly reports `false` for a
- * real value, but `duckdb_value_varchar` still returns a NULL `char *` - on
- * both a bare literal and a real table column, and even though a SQL
- * `CAST(col AS VARCHAR)` on the same value renders it fine. (One caveat:
- * UUID's `duckdb_value_is_null` was also observed reporting `false` for a
- * GENUINELY NULL value under a `WHERE u IS NULL` filter - the other seven
- * were not re-swept for the same anomaly. This does not change shipped
- * behavior: UUID is rejected earlier, structurally, at `unsupportedColumns`
- * below, so `readResult`'s per-cell `is_null` check is never reached for it
- * at all.) The fixed-width
- * accessors don't rescue them either: `duckdb_value_int64` was checked and
- * returns a plausible-looking `0` for every one of them, with no failure
- * signal at all - so none of these should ever be routed to
- * `int64`/`uint64`/`double` as a workaround. Before this fix, the NULL
- * varchar pointer silently decoded to `""` for all eight. A future reader:
- * do not try to "fix" this by giving these an accessor again without first
- * re-verifying against whatever libduckdb build is in use.
- *
- *   TIME_TZ (30), TIMESTAMP_TZ (31), TIMESTAMP_S (20), TIMESTAMP_MS (21),
- *   TIMESTAMP_NS (22), UUID (27), ENUM (23), BIT (29)
- *
- * `client.ts`'s `readResult` also carries a general guard for this exact
- * failure shape (not-null cell, NULL varchar pointer) on any type still
- * listed here as "varchar" - it is what would have caught these eight
- * before they shipped, and is what will catch whatever DuckDB adds next.
+ * Scalar types that the current napi reader can normalize through text.
+ * The name stays `VARCHAR_TYPES` for compatibility with `accessorFor`.
+ * Some entries arrive as napi value objects. `client.ts` passes their
+ * canonical `String(value)` representation to `coerceValue`.
  */
 const VARCHAR_TYPES: ReadonlySet<number> = new Set([
     DuckDbTypeId.VARCHAR,
@@ -80,9 +49,17 @@ const VARCHAR_TYPES: ReadonlySet<number> = new Set([
     DuckDbTypeId.UHUGEINT,
     DuckDbTypeId.DECIMAL,
     DuckDbTypeId.SQLNULL,
+    DuckDbTypeId.TIMESTAMP_S,
+    DuckDbTypeId.TIMESTAMP_MS,
+    DuckDbTypeId.TIMESTAMP_NS,
+    DuckDbTypeId.ENUM,
+    DuckDbTypeId.UUID,
+    DuckDbTypeId.BIT,
+    DuckDbTypeId.TIME_TZ,
+    DuckDbTypeId.TIMESTAMP_TZ,
 ]);
 
-/** Which `duckdb_value_*` accessor reads this column, or null when none can. */
+/** Decoder family for this column. `varchar` also covers napi wrapper text. */
 export const accessorFor = (typeId: number): AccessorKind | null => {
     if (typeId === DuckDbTypeId.BOOLEAN) return "boolean";
     if (INT64_TYPES.has(typeId)) return "int64";
@@ -103,6 +80,10 @@ export const accessorFor = (typeId: number): AccessorKind | null => {
  */
 const parseTimestamp = (text: string): Date | string =>
     finishTimestamp(`${text.replace(" ", "T")}Z`, text);
+
+/** TIMESTAMP_TZ includes an offset. The napi renderer shortens whole-hour offsets. */
+const parseTimestampTz = (text: string): Date | string =>
+    finishTimestamp(text.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"), text);
 
 /**
  * Parse `iso`; fall back to `original` text rather than an Invalid Date.
@@ -168,7 +149,15 @@ export const coerceValue = (
     raw: boolean | bigint | number | string,
 ): DuckDbValue => {
     if (typeof raw === "string") {
-        if (typeId === DuckDbTypeId.TIMESTAMP) return parseTimestamp(raw);
+        if (
+            typeId === DuckDbTypeId.TIMESTAMP ||
+            typeId === DuckDbTypeId.TIMESTAMP_S ||
+            typeId === DuckDbTypeId.TIMESTAMP_MS ||
+            typeId === DuckDbTypeId.TIMESTAMP_NS
+        ) {
+            return parseTimestamp(raw);
+        }
+        if (typeId === DuckDbTypeId.TIMESTAMP_TZ) return parseTimestampTz(raw);
         if (typeId === DuckDbTypeId.HUGEINT || typeId === DuckDbTypeId.UHUGEINT) {
             return parseHugeint(raw);
         }
