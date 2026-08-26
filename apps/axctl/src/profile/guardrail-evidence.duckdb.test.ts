@@ -16,7 +16,7 @@ import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { fetchGuardrailHookEvidence } from "./queries.ts";
 import { deriveGuardrailReceipts } from "./guardrails.ts";
 
-const { dylibPath, dtest, tempDir } = await duckdbTestSetup("guardrail evidence");
+const { dylibPath, dtest, tempDir } = await duckdbTestSetup("guardrail evidence", { requireFts: true });
 
 const daysAgo = (d: number): Date => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
 
