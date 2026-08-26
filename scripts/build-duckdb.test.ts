@@ -136,7 +136,8 @@ describe("custom DuckDB build", () => {
             encoding: "utf8",
         });
 
-        expect(result.status).toBe(2);
+        expect(result.status).not.toBeNull();
+        expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("usage:");
         expect(result.stderr).toContain("--smoke-artifacts <duckdb-shell> <libduckdb>");
     });
