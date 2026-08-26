@@ -217,10 +217,10 @@ export function formatProfile(p: ProfileV1): string {
         lines.push("");
         lines.push("insights:");
         lines.push(
-            `  ${ins.hours_total.toFixed(1)}h total  ·  longest: ${formatLongestSession(ins.longest_session_minutes)}  ·  landed clean: ${deepPct}%`,
+            `  ${ins.hours_total.toFixed(1)}h capped session spans  ·  longest capped span: ${formatLongestSession(ins.longest_session_minutes)}  ·  landed clean: ${deepPct}%`,
         );
         lines.push(
-            `  peak hour: ${String(ins.peak_hour_utc).padStart(2, "0")}:00 UTC  ·  max parallel: ${ins.max_parallel_sessions}  ·  spawned: ${integer(ins.subagents_spawned)}  ·  commits: ${integer(ins.commits)}`,
+            `  peak session-start hour: ${String(ins.peak_hour_utc).padStart(2, "0")}:00 UTC  ·  max parallel: ${ins.max_parallel_sessions}  ·  spawned: ${integer(ins.subagents_spawned)}  ·  commits: ${integer(ins.commits)}`,
         );
         if (ins.tool_calls !== undefined && ins.tool_calls > 0) {
             const verifPct = ins.verification_calls !== undefined

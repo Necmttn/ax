@@ -299,7 +299,7 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                 <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
                 <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
                 {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
-                {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
+                {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="capped spans" />}
                 <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
                 <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
             </div>
@@ -1074,16 +1074,16 @@ export function buildInsightCards(
             viz: signalStrength(ins.max_parallel_sessions, 10),
         },
         {
-            q: "Longest single run?",
+            q: "Longest capped span?",
             a: fmtDuration(ins.longest_session_minutes),
-            s: "one session, end to end, without letting go",
+            s: "longest capped session span - each session is capped at 24h, so this reads 24h for any longer, possibly multi-day, run",
             // share of a 12-hour marathon, against a 6-hour "deep run" goal line
             viz: bulletCount(ins.longest_session_minutes, 12 * 60),
         },
         {
-            q: "When are you most alive?",
+            q: "Peak session-start hour?",
             a: <>{fmtHour(ins.peak_hour_utc)}<small> UTC</small></>,
-            s: "the hour the graph lights up",
+            s: "peak session-start hour - most sessions kick off around here",
             viz: cometPct(Math.max(0, ins.peak_hour_utc) / 23),
         },
         {
@@ -1112,9 +1112,9 @@ export function buildInsightCards(
                 : bulletCount(ins.commits, 100),
         },
         {
-            q: "Time in the loop?",
+            q: "Total capped session spans?",
             a: <>{fmtCompact(ins.hours_total)}<small> hrs</small></>,
-            s: "of recorded agent time on the clock",
+            s: "sum of per-session spans, each capped at 24h",
         },
     ];
 

@@ -68,7 +68,7 @@ export const RADAR_AXES_META: readonly AxisMeta[] = [
     { key: "RIGOR", label: "RIGOR", note: "verification share of tool calls" },
     { key: "DELEGATION", label: "DELEG", note: "subagents per session" },
     { key: "BREADTH", label: "BREADTH", note: "distinct skills × repos" },
-    { key: "ENDURANCE", label: "ENDURE", note: "hours in the loop" },
+    { key: "ENDURANCE", label: "ENDURE", note: "capped session-span hours" },
 ];
 
 /* ---------- compare query helpers ---------- */
@@ -250,7 +250,7 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
             [1000, 80],
             [3000, 100],
         ]);
-        enduranceRaw = { label: `${fmtCompact.format(ins.hours_total)} hrs`, value: ins.hours_total };
+        enduranceRaw = { label: `${fmtCompact.format(ins.hours_total)} capped span hrs`, value: ins.hours_total };
     } else {
         missing.push("ENDURANCE");
     }
@@ -361,7 +361,7 @@ function blurbFor(top: RadarAxisKey, second: RadarAxisKey, p: ProfileV1): string
                     ? `${fmtCompact.format(ins.distinct_skills)} distinct skills`
                     : "the width of your rig";
             case "ENDURANCE":
-                return ins ? `${fmtCompact.format(ins.hours_total)} hours in the loop` : "your hours on the clock";
+                return ins ? `${fmtCompact.format(ins.hours_total)} capped session-span hours` : "your capped session spans";
         }
     };
     return `The stars are flattered, but it's ${fact(top)} and ${fact(second)} that wrote this chart.`;
