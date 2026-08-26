@@ -1309,6 +1309,17 @@ CREATE TABLE IF NOT EXISTS cache_bust_event (
     bust_cost_usd DOUBLE,
     ts TIMESTAMP NOT NULL
 );
+-- DROP the two secondary indexes before the ALTER (#1084): a cache upgraded
+-- from a pre-#1055 version already has them, `ts` sits AFTER
+-- corroborated_cost_usd in column order, and DuckDB refuses "Cannot drop
+-- this column: an index depends on a column after it!" while either index
+-- still exists. A fresh database has neither index yet, so the DROPs are
+-- no-ops there. The CREATE INDEX IF NOT EXISTS lines below restore both on
+-- every open (upgraded or fresh) - cheap on this table's size, and it keeps
+-- this block self-contained instead of depending on migration order staying
+-- undisturbed elsewhere in the file.
+DROP INDEX IF EXISTS cache_bust_event_ts;
+DROP INDEX IF EXISTS cache_bust_event_session_seq;
 ALTER TABLE cache_bust_event DROP COLUMN IF EXISTS corroborated_cost_usd;
 CREATE INDEX IF NOT EXISTS cache_bust_event_ts ON cache_bust_event(ts);
 CREATE INDEX IF NOT EXISTS cache_bust_event_session_seq ON cache_bust_event(session, seq);
