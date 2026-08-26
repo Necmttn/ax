@@ -840,9 +840,14 @@ export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
 
 // --- guardrail receipts -----------------------------------------------------
 
+// Grouped by \`command\` (the actual executable invocation, e.g.
+// "bun /Users/me/.ax/hooks/enforce-worktree.ts # ax:74da7418"), NOT
+// \`hook_name\` - hook_name holds the harness EVENT label (e.g.
+// "PreToolUse:Bash"), not the hook's identity, so grouping by it collapses
+// every distinct hook into a handful of event buckets. See #1086.
 const GUARDRAIL_HOOK_EVIDENCE_SQL = `
 SELECT
-    hook_name,
+    command,
     count(*) AS fires,
     SUM(CASE WHEN effect = 'blocked' OR provider_status = 'blocking_error' THEN 1 ELSE 0 END) AS blocked,
     SUM(CASE WHEN effect IN ('notified', 'injected_context', 'modified_input') THEN 1 ELSE 0 END) AS warned
@@ -850,7 +855,7 @@ FROM hook_command_invocation
 WHERE TRUE`;
 
 const GuardrailHookDbRow = Schema.Struct({
-    hook_name: Schema.String,
+    command: Schema.String,
     fires: NumberFromBigIntColumn,
     blocked: NumberFromBigIntColumn,
     warned: NumberFromBigIntColumn,
@@ -864,17 +869,17 @@ export const fetchGuardrailHookEvidence = Effect.fn("profile.fetchGuardrailHookE
             "guardrailHookEvidence",
             read.rows(
                 GuardrailHookDbRow,
-                `${GUARDRAIL_HOOK_EVIDENCE_SQL} ${within.sql} AND hook_name IS NOT NULL `
-                    + "GROUP BY hook_name ORDER BY fires DESC LIMIT 1000",
+                `${GUARDRAIL_HOOK_EVIDENCE_SQL} ${within.sql} AND command IS NOT NULL `
+                    + "GROUP BY command ORDER BY fires DESC LIMIT 1000",
                 within.params,
             ),
         );
         return rows.map((r) => ({
-            hook_name: r.hook_name,
+            command: r.command,
             fires: r.fires,
             blocked: r.blocked,
             warned: r.warned,
-        })).filter((r) => r.hook_name.length > 0) satisfies GuardrailHookEvidenceRow[];
+        })).filter((r) => r.command.length > 0) satisfies GuardrailHookEvidenceRow[];
     },
 );
 

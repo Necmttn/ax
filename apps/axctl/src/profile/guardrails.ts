@@ -1,7 +1,7 @@
 import type { GuardrailReceipts } from "./schema.ts";
 
 export interface GuardrailHookEvidenceRow {
-    readonly hook_name: string;
+    readonly command: string;
     readonly fires: number;
     readonly blocked: number;
     readonly warned: number;
@@ -18,10 +18,14 @@ const hookNameFromFile = (file: string): string | null => {
     return name.length > 0 ? name : null;
 };
 
-const hookNameFromEvidence = (hookName: string): string => {
-    const base = hookName.split(/[\\/]/).at(-1) ?? hookName;
-    return base.replace(/\.(?:ts|js)$/, "");
-};
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Match only the installed hook path. The extension and following command
+// boundary prevent a short hook name from matching a longer sibling name.
+const commandRunsHook = (command: string, hookName: string): boolean =>
+    new RegExp(
+        `(?:^|[/\\\\])\\.ax[/\\\\]hooks[/\\\\]${escapeRegex(hookName)}\\.(?:ts|js)(?=$|[\\s"';&|)])`,
+    ).test(command);
 
 export function deriveGuardrailReceipts(input: {
     readonly hookFiles: ReadonlyArray<string>;
@@ -39,8 +43,11 @@ export function deriveGuardrailReceipts(input: {
     }
 
     for (const row of input.hookEvidence) {
-        const name = hookNameFromEvidence(row.hook_name);
-        if (!totals.has(name)) continue;
+        const matches = hookNames.filter((candidate) => commandRunsHook(row.command, candidate));
+        // A dispatcher command can contain multiple hook paths. Its attribution
+        // needs a separate rule, so this profile excludes ambiguous evidence.
+        if (matches.length !== 1) continue;
+        const name = matches[0];
         const prev = totals.get(name) ?? { fires: 0, blocked: 0, warned: 0 };
         totals.set(name, {
             fires: prev.fires + row.fires,
