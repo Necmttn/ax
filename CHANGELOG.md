@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.17](https://github.com/Necmttn/ax/compare/v0.43.16...v0.43.17) (2026-08-26)
+
+
+### Bug Fixes
+
+* stabilize judgment integration test on Intel ([#1118](https://github.com/Necmttn/ax/issues/1118)) ([95b3691](https://github.com/Necmttn/ax/commit/95b3691809d4b992b181ca43b1dd019816928ef7))
+
 ## [0.43.16](https://github.com/Necmttn/ax/compare/v0.43.15...v0.43.16) (2026-08-26)
 
 
