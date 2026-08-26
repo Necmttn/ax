@@ -185,7 +185,7 @@ describe("profileToAxes - raws", () => {
         expect(a.raws.RIGOR.label).toBe("2.9% verification share");
         expect(a.raws.DELEGATION.label).toBe("0.87 subagents/session");
         expect(a.raws.BREADTH.label).toBe("84 skills · 12 repos");
-        expect(a.raws.ENDURANCE.label).toBe("2.3K hrs");
+        expect(a.raws.ENDURANCE.label).toBe("2.3K capped span hrs");
     });
 
     it("carries comparable numerics matching the axis direction", () => {

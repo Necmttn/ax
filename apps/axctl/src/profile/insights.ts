@@ -47,9 +47,11 @@ export interface InsightsInput {
 }
 
 export interface InsightsResult {
+    /** Sum of per-session spans, each capped at 24h - not a measure of active/working time. */
     readonly hours_total: number;
     readonly longest_session_minutes: number;
     readonly deep_session_share: number;
+    /** UTC hour with the most session STARTS in the window - not the hour with the most turns/activity. */
     readonly peak_hour_utc: number;
     readonly busiest_day: { readonly date: string; readonly sessions: number };
     readonly max_parallel_sessions: number;

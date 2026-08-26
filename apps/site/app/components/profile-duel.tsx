@@ -106,7 +106,7 @@ function vitalRows(a: ProfileV1, b: ProfileV1): VitalCompare[] {
     }
     if (a.insights || b.insights) {
         rows.push({
-            label: "hours in loop",
+            label: "capped span hours",
             a: a.insights ? `${fmtCompact(a.insights.hours_total)} hrs` : "-",
             b: b.insights ? `${fmtCompact(b.insights.hours_total)} hrs` : "-",
             aNum: a.insights?.hours_total ?? null,

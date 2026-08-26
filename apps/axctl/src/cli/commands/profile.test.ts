@@ -74,3 +74,40 @@ describe("formatProfile guardrail receipts", () => {
         expect(out).toContain("1 no longer needed (resolved or never fired)");
     });
 });
+
+describe("formatProfile insight labels", () => {
+    test("defines capped spans and session-start peak hour", () => {
+        const out = formatProfile({
+            v: 1,
+            github: "octocat",
+            generated_at: "2026-08-26T00:00:00Z",
+            window_days: 30,
+            stats: {
+                sessions: 3,
+                active_days: 2,
+                streak_days: 1,
+                tokens: { prompt: 1, completion: 1, total: 2 },
+                models: [],
+                harnesses: ["claude"],
+            },
+            rig: { skills: [], hooks: [], routing_table: false },
+            insights: {
+                hours_total: 26,
+                longest_session_minutes: 1440,
+                deep_session_share: 0,
+                peak_hour_utc: 6,
+                busiest_day: { date: "2026-08-25", sessions: 2 },
+                max_parallel_sessions: 2,
+                subagents_spawned: 0,
+                commits: 0,
+                tools_top: [],
+            },
+        });
+
+        expect(out).toContain("26.0h capped session spans");
+        expect(out).toContain("longest capped span: 24h+");
+        expect(out).toContain("peak session-start hour: 06:00 UTC");
+        expect(out).not.toContain("26.0h total");
+        expect(out).not.toContain("peak hour:");
+    });
+});
