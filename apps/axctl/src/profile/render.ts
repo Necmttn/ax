@@ -11,7 +11,6 @@
  * `CacheRead`, so that is the whole of `buildProfile`'s data requirement.
  */
 import { Effect } from "effect";
-import { fetchContentTypeBreakdown } from "../queries/content-types.ts";
 import { fetchCostModels } from "../queries/cost-analytics.ts";
 import {
     fetchAcceptedProposals,
@@ -40,7 +39,7 @@ import { deriveGuardrailReceipts } from "./guardrails.ts";
 import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
-import { buildToolOutputMixPattern, deriveTastePatterns } from "./taste.ts";
+import { deriveTastePatterns } from "./taste.ts";
 import { decodeProfile, type Highlights, type ProfileV1 } from "./schema.ts";
 import { deriveWorkflowArcs } from "./workflow.ts";
 import { computeDownstreamShares } from "./downstream.ts";
@@ -74,8 +73,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
         // 22 windowedInvocations  23 windowedSessions
         // 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
-        // 27 contentTypeBreakdown
-        // 28 guardrailHookEvidence  29 guardrailVerdicts
+        // 27 guardrailHookEvidence  28 guardrailVerdicts
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -99,8 +97,6 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 24 deepSessions (outcome-density DEPTH numerator + non-subagent
         // denominator). Internally fans out: total-count -> produced -> landed-loc.
         const deep = yield* fetchDeepSessionCount({ windowDays });
-        // 27 content-type breakdown (appended last; keeps mock order in render.test.ts aligned)
-        const contentTypes = yield* fetchContentTypeBreakdown();
         const guardrailHookEvidence = yield* fetchGuardrailHookEvidence({ windowDays });
         const guardrailVerdicts = yield* fetchGuardrailVerdicts({ windowDays });
 
@@ -121,8 +117,6 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         });
 
         const patterns = deriveTastePatterns(proposals);
-        const mixPattern = buildToolOutputMixPattern(contentTypes, totals.sessions);
-        if (mixPattern !== null) patterns.push(mixPattern);
 
         // null when there is no data at all -> section omitted below.
         const insights = deriveInsights({
