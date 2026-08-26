@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
     COST_SESSIONS_LEGEND,
+    costWindowHeader,
     renderCostModelsTable,
     renderCostSessionsTable,
     renderCostSplitTable,
 } from "./ax-cost.ts";
-import type {
-    CostModelsResult,
-    CostSessionsResult,
-    CostSplitResult,
+import {
+    COST_DEFAULT_WINDOW_DAYS,
+    type CostModelsResult,
+    type CostSessionsResult,
+    type CostSplitResult,
 } from "../../queries/cost-analytics.ts";
 
 describe("renderCostModelsTable", () => {
@@ -126,5 +128,18 @@ describe("renderCostSessionsTable", () => {
         expect(COST_SESSIONS_LEGEND).toContain("cost = est. USD");
         expect(COST_SESSIONS_LEGEND).toContain("out_tok = output");
         expect(COST_SESSIONS_LEGEND).toContain("cache_tok = cache-hit");
+    });
+});
+
+describe("costWindowHeader", () => {
+    test("states the requested day window", () => {
+        expect(costWindowHeader(14)).toBe("window: last 14 days");
+        expect(costWindowHeader(30)).toBe("window: last 30 days");
+    });
+
+    test("matches the shared default window used across ax cost subcommands", () => {
+        expect(costWindowHeader(COST_DEFAULT_WINDOW_DAYS)).toBe(
+            `window: last ${COST_DEFAULT_WINDOW_DAYS} days`,
+        );
     });
 });

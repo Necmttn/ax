@@ -55,7 +55,7 @@ const CostSplitAggRow = Schema.Struct({
 // Shared constants + SQL-boundary helpers
 // ---------------------------------------------------------------------------
 
-/** Default look-back window for all `ax cost *` subcommands (models / sessions / split). */
+/** Default look-back window for every `ax cost *` subcommand (CLI and MCP). */
 export const COST_DEFAULT_WINDOW_DAYS = 14;
 
 /**

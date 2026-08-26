@@ -33,6 +33,18 @@ import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
 
 // ---------------------------------------------------------------------------
+// Shared window header - printed first (before any table/no-data message) on
+// every human-readable `ax cost *` subcommand so the requested day window is
+// never ambiguous. JSON output is unaffected. Replaces the footer-only
+// "(N days)" mentions that used to be scattered (and sometimes absent, e.g.
+// `sessions` / `routability`) across the individual commands.
+// ---------------------------------------------------------------------------
+
+export function costWindowHeader(days: number): string {
+    return `window: last ${days} days`;
+}
+
+// ---------------------------------------------------------------------------
 // ax cost models [--days=N] [--json]
 // ---------------------------------------------------------------------------
 
@@ -82,6 +94,8 @@ const cmdCostModels = (input: {
             return;
         }
 
+        console.log(costWindowHeader(input.sinceDays));
+
         if (result.rows.length === 0) {
             console.log("(no session token usage in the requested window)");
             return;
@@ -89,7 +103,7 @@ const cmdCostModels = (input: {
 
         printNextLinks(buildCostModelsNext(result));
         console.log(renderCostModelsTable(result));
-        console.log(`\ntotal: ${usd(result.total_cost_usd)}  (${input.sinceDays} days)`);
+        console.log(`\ntotal: ${usd(result.total_cost_usd)}`);
     });
 
 const costModelsCommand = Command.make(
@@ -173,6 +187,8 @@ const cmdCostSessions = (input: {
             console.log(prettyPrint(result));
             return;
         }
+
+        console.log(costWindowHeader(input.sinceDays));
 
         if (result.rows.length === 0) {
             console.log("(no priced sessions in the requested window)");
@@ -276,6 +292,8 @@ const cmdCostSplit = (input: {
             return;
         }
 
+        console.log(costWindowHeader(input.sinceDays));
+
         if (result.rows.length === 0) {
             console.log("(no cost data in the requested window)");
             return;
@@ -283,7 +301,6 @@ const cmdCostSplit = (input: {
 
         printNextLinks(buildCostSplitNext(result));
         console.log(renderCostSplitTable(result));
-        console.log(`\n(${input.sinceDays} days)`);
     });
 
 const costSplitCommand = Command.make(
@@ -364,13 +381,14 @@ const cmdCostRoutability = (input: {
             return;
         }
 
+        console.log(costWindowHeader(input.days));
         console.log(renderRoutability(result));
     });
 
 const costRoutabilityCommand = Command.make(
     "routability",
     {
-        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
         minRun: Flag.integer("min-run").pipe(Flag.withDefault(1)),
         json: jsonFlag,
     },
@@ -386,7 +404,7 @@ const costRoutabilityCommand = Command.make(
 ).pipe(
     Command.withDescription(
         "Estimate how much main-agent spend was routable to a cheaper subagent. " +
-        "--days=N (default 30)  --min-run=N (default 1)  --json",
+        "--days=N (default 14)  --min-run=N (default 1)  --json",
     ),
 );
 
@@ -409,6 +427,8 @@ const cmdCostImages = (input: {
             console.log(prettyPrint(result));
             return;
         }
+
+        console.log(costWindowHeader(input.sinceDays));
 
         if (result.rows.length === 0) {
             console.log("(no image content in the requested window)");
@@ -447,7 +467,6 @@ const cmdCostImages = (input: {
             `main-thread image context: ${mb(t.mainBytes)} MB (${integer(t.mainCalls)} calls) - persists + re-bills across turns`,
         );
         console.log(`subagent: ${mb(t.subagentBytes)} MB (${integer(t.subagentCalls)} calls) - isolated`);
-        console.log(`\n(${input.sinceDays} days)`);
     });
 
 const costImagesCommand = Command.make(
@@ -490,6 +509,8 @@ const cmdCostAttribution = (input: {
             console.log(prettyPrint(result));
             return;
         }
+
+        console.log(costWindowHeader(input.sinceDays));
 
         const cov = result.coverage;
         if (cov.attributedTurns === 0) {
@@ -541,7 +562,7 @@ const cmdCostAttribution = (input: {
             const mix = result.apiErrors.map((r) => `${r.status}×${integer(r.turns)}`).join(", ");
             console.log(`api errors: ${mix}`);
         }
-        console.log(`\n(${input.sinceDays} days; native = harness-stamped, cross-check vs invoked-edge inference)`);
+        console.log("\n(native = harness-stamped, cross-check vs invoked-edge inference)");
     });
 
 const costAttributionCommand = Command.make(
@@ -586,6 +607,8 @@ const cmdCostCache = (input: {
             console.log(prettyPrint(result));
             return;
         }
+
+        console.log(costWindowHeader(input.sinceDays));
 
         if (result.coverage.bustTurns === 0) {
             console.log("(no cache-bust events in the requested window)");
@@ -671,7 +694,7 @@ const cmdCostCache = (input: {
         if (trims.length > 0) console.log(`trimming: ${trims.join("; ")}`);
 
         console.log(
-            `\n(${input.sinceDays} days; a bust = a billing event whose prompt cache missed; ` +
+            "\n(a bust = a billing event whose prompt cache missed; " +
                 "cost = the cache-creation tokens that re-established it on that turn)",
         );
     });
