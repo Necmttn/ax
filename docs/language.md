@@ -132,8 +132,12 @@ The outcome locked at a checkpoint. Five values:
 
 ### ax-score
 
-The composite taste metric for skills, computed across recency,
-frequency, and clean-run rate. Exposed by `axctl skills taste`.
+The composite taste metric for skills: an ALL-TIME score (not a 30-day
+or recency-weighted metric) computed from invocations, same-session
+corrections, correlated commits, and proposal-edge counts.
+Clean-run rate does not affect the score. Exact formula and column
+legend are printed by `axctl skills taste`
+(`apps/axctl/src/queries/skill-taste-score.ts`).
 
 ### ax-signal
 

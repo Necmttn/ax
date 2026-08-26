@@ -3,11 +3,14 @@ import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import type { CacheReadService } from "@ax/lib/duckdb/seam";
+import { computeTasteScore } from "../../queries/skill-taste-score.ts";
 
 // Local copy of dashboard/triage.ts's fetchSkillTriage SKILL_SUMMARY_SQL -
 // the TUI hot path and the web dashboard's triage view compute the same
-// skill-summary shape, but each surface carries its own local copy rather
-// than cross-importing between dashboard/ and tui/.
+// skill-summary shape, but each surface carries its own local copy of the SQL
+// rather than cross-importing between dashboard/ and tui/. The taste_score
+// formula itself (a pure, dependency-free helper) is NOT duplicated - both
+// surfaces, plus the CLI, share queries/skill-taste-score.ts.
 
 const SKILL_SUMMARY_SQL = `
 SELECT
@@ -266,7 +269,7 @@ const enrichSkillRow = (
     const proposals = Number(row.proposals ?? 0);
     return {
         ...row,
-        taste_score: totalInv - 2 * corrections + commitsAfter - 0.5 * proposals,
+        taste_score: computeTasteScore({ total: totalInv, corrections, cmts: commitsAfter, proposals }),
         // Preserve the extra field for callers that already tolerate it,
         // without adding it to the public SkillRow interface.
         last_project: lastProjectBySkill.get(row.name) ?? null,

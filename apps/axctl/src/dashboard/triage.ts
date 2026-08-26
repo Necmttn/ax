@@ -6,6 +6,7 @@ import { Judgment, TextColumn, TimestampColumn, type JudgmentError } from "@ax/l
 import { stableId } from "@ax/lib/stable-id";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { countField } from "@ax/lib/shared/row-fields";
+import { computeTasteScore } from "../queries/skill-taste-score.ts";
 import type {
     SkillRow,
     SkillTriageEntry,
@@ -80,9 +81,10 @@ const recordArrayField = (row: Record<string, unknown>, key: string): string[] =
 
 // Local DuckDB translations of queries/skill-summary.ts (chunk 2b's, not yet
 // ported - same "copy the shape, don't import" pattern used elsewhere in
-// this migration, so this module never depends on queries/ for its read
-// path). taste_score = total_inv - 2*corrections + commits_after -
-// 0.5*proposals (computed in enrichSummaryRow, unchanged).
+// this migration, so this module never depends on queries/ for its SQL read
+// path). taste_score itself is computed via the shared, all-time
+// computeTasteScore helper (queries/skill-taste-score.ts) in enrichSummaryRow
+// below - not duplicated here.
 const SKILL_SUMMARY_SQL = `
 SELECT
     sk.name AS name,
@@ -148,7 +150,7 @@ SELECT
     0 AS corrections,
     (SELECT count(*) FROM proposed p WHERE p.out_id = sk.id) AS proposals,
     0 AS commits_after,
-    -0.5 * (SELECT count(*) FROM proposed p WHERE p.out_id = sk.id) AS taste_score
+    0 AS taste_score
 FROM skill sk
 WHERE NOT EXISTS (SELECT 1 FROM invoked iv WHERE iv.out_id = sk.id)
     AND EXISTS (SELECT 1 FROM proposed p WHERE p.out_id = sk.id)
@@ -262,7 +264,7 @@ const enrichSummaryRow = (
         ...raw,
         last_project: lastProjectBySkill.get(name) ?? null,
         commits_after: commitsAfter,
-        taste_score: totalInv - 2 * corrections + commitsAfter - 0.5 * proposals,
+        taste_score: computeTasteScore({ total: totalInv, corrections, cmts: commitsAfter, proposals }),
     };
 };
 
@@ -433,8 +435,17 @@ export const fetchSkillTriage = (): Effect.Effect<
             });
         }
         for (const raw of proposedOnly) {
-            const row = coerceRow(raw);
-            if (!row.name || seen.has(row.name)) continue;
+            const coerced = coerceRow(raw);
+            if (!coerced.name || seen.has(coerced.name)) continue;
+            const row: SkillRow = {
+                ...coerced,
+                taste_score: computeTasteScore({
+                    total: coerced.total_inv,
+                    corrections: coerced.corrections,
+                    cmts: coerced.commits_after,
+                    proposals: coerced.proposals,
+                }),
+            };
             const rec = recommendForSkill(row);
             rows.push({
                 ...row,

@@ -26,6 +26,7 @@ import {
 import { fetchSkillBloat } from "../../queries/skill-bloat.ts";
 import { fetchSkillLoaded } from "../../queries/skill-loaded.ts";
 import { fetchSkillStats } from "../../queries/skill-stats.ts";
+import { computeTasteScore, TASTE_SCORE_FORMULA, TASTE_SCORE_LEGEND } from "../../queries/skill-taste-score.ts";
 import { fetchUnusedSkills, formatLastUsed } from "../../queries/unused-skills.ts";
 import { skillsConfigSubcommands } from "../../skills/cli.ts";
 import { printNextLinks } from "../next-format.ts";
@@ -520,15 +521,16 @@ export const cmdTaste = (input: TasteInput) =>
         // (negative), corrections within 3 turns of invocation in the same
         // session (negative - user pushed back), commits produced by sessions
         // that invoked this skill (positive - led to a real change), and
-        // proposed-but-not-invoked (negative - assistant suggested it but
-        // never fired, wasted suggestion).
+        // proposal edges into the skill (negative).
         //
         // `corrections` counts invocations where the next user turn within 3
         // seq steps in the same session triggered a corrected_by edge.
-        // `commits_after` counts `produced` edges from sessions that invoked
-        // this skill (proxy for "skill use led to a commit").
+        // `commits_after` counts DISTINCT `produced` edges from sessions that
+        // invoked this skill - a same-session correlation, not "after this
+        // invocation" despite the field name (kept for compatibility).
         // `proposals` counts proposed edges into this skill.
-        // taste_score = inv_total - 2*corrections + commits_after - 0.5*proposals
+        // taste_score is an ALL-TIME composite (see TASTE_SCORE_FORMULA in
+        // queries/skill-taste-score.ts, shared with the triage dashboard).
         //
         // PERF (issue #31): The previous form ran 4-5 correlated subqueries
         // per skill (`WHERE out = $parent.id AND <pred>`), each forcing the
@@ -623,7 +625,7 @@ GROUP BY i.out_id`,
                 corrections,
                 proposals,
                 commits_after: commitsAfter,
-                taste_score: invTotal - 2 * corrections + commitsAfter - 0.5 * proposals,
+                taste_score: computeTasteScore({ total: invTotal, corrections, cmts: commitsAfter, proposals }),
             });
         }
         // Sort to mirror the original ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC.
@@ -667,6 +669,10 @@ GROUP BY i.out_id`,
             );
         }
         console.log(`\n(${rows.length} / ${totalRows} skills shown)`);
+        console.log(`\n${TASTE_SCORE_FORMULA} (all-time, not a 30-day score)`);
+        for (const l of TASTE_SCORE_LEGEND) {
+            console.log(`  ${l.key.padEnd(6)} ${l.desc}`);
+        }
     });
 
 interface PairsInput {
@@ -790,7 +796,7 @@ const tasteCommand = Command.make(
     },
     ({ limit, includeTools }) => cmdTaste({ limit, includeTools }),
 ).pipe(Command.withDescription(
-    "Rank named skills by usage, corrections, proposals, and produced commits. " +
+    "Rank named skills by an all-time composite score: " + TASTE_SCORE_FORMULA + ". " +
     "Synthetic provider tools are hidden by default; use --include-tools to rank them too.",
 ));
 
