@@ -9,14 +9,6 @@ import { buildProfile } from "./render.ts";
 // SQL; a statement missing a route surfaces as an "out of results" mock
 // failure rather than a silent wrong answer.
 
-// `fetchContentTypeBreakdown` (queries/content-types.ts) reads the published
-// CacheRead snapshot, matched below by its own "has_content" fragment (a
-// different wave-3 chunk's convention, unchanged here).
-const contentTypeRows = [
-    { ct: "content_type:code", calls: 10, bytes: 800 },
-    { ct: "content_type:text", calls: 5, bytes: 200 },
-];
-
 // One entry per queries.ts CacheRead statement, keyed by a fragment of that
 // statement's own SQL text unique enough not to collide with any other
 // statement in this file (verified by hand against queries.ts; every key
@@ -166,17 +158,14 @@ const verdictRows = [
 const runProfile = <A, E>(
     effect: Effect.Effect<A, E, unknown>,
     proposals: ReadonlyArray<Record<string, unknown>> = proposalRows,
-    contentTypes: ReadonlyArray<Record<string, unknown>> = contentTypeRows,
     cacheOverrides: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(
-    // Dispatched by SQL text: content-type breakdown (`has_content`, a
-    // different wave-3 chunk's convention) first, then per-test overrides,
-    // then the default CACHE_ROUTES table built above. The pricing-catalog
-    // lookup inside fetchCostModels resolves when a row stores zero cost
-    // against real tokens - none of these fixtures do, so falling through to
-    // empty is the right answer for it.
+    // Dispatched by SQL text: per-test overrides first, then the default
+    // CACHE_ROUTES table built above. The pricing-catalog lookup inside
+    // fetchCostModels resolves when a row stores zero cost against real
+    // tokens - none of these fixtures do, so falling through to empty is the
+    // right answer for it.
     cacheReadTestLayer((sql) => {
-        if (sql.includes("has_content")) return contentTypes;
         for (const [key, rows] of Object.entries(cacheOverrides)) {
             if (sql.includes(key)) return rows;
         }
@@ -236,6 +225,7 @@ describe("buildProfile", () => {
         expect(p.rig.skills[0]!.runs).toBe(88);
         expect(p.rig.skills[0]!.downstream_share).toBeDefined();
         expect(p.rig.rules).toEqual({ count: 2 });
+        expect(p.taste!.patterns).toHaveLength(1);
         expect(p.taste!.patterns[0]!.name).toBe("stop-edit-loops-early");
         // activity
         expect(p.activity).toBeDefined();
@@ -303,14 +293,8 @@ describe("buildProfile", () => {
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
-    test("no proposals -> taste has only the mix pattern from content types", async () => {
+    test("no proposals -> taste omitted (no universal tool-output-mix pattern generated)", async () => {
         const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), []);
-        expect(p.taste?.patterns).toHaveLength(1);
-        expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
-    });
-
-    test("no proposals + no content types -> taste omitted", async () => {
-        const p = await runProfile(buildProfile({ windowDays: 30, includeCost: true, env }), [], []);
         expect(p.taste).toBeUndefined();
     });
 
@@ -320,7 +304,6 @@ describe("buildProfile", () => {
         const p = await runProfile(
             buildProfile({ windowDays: 30, includeCost: true, env }),
             proposalRows,
-            contentTypeRows,
             {
                 "count(*) AS sessions\nFROM session\nWHERE started_at IS NOT NULL": [],
                 "FROM session_token_usage\nWHERE ts IS NOT NULL": [],
