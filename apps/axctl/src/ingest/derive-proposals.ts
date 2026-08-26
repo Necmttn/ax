@@ -42,6 +42,10 @@ import { fetchImageContext, type ImageContextResult } from "../queries/image-con
 import { fetchCacheLensCandidates, relativeCostDelta, type CacheLensCandidateRow } from "../queries/cache-bust.ts";
 import { deriveDirectiveCandidates, scoreDirectiveCandidates, type DirectiveCandidate, type DirectiveTurnRow } from "./directives.ts";
 import { fetchWorkflowArcs, type ArcCandidate } from "../queries/workflow-sequences.ts";
+import { readConfiguredHooks } from "../hooks/config.ts";
+import { hasActiveClaudeRouteDispatch } from "../hooks/installed-guards.ts";
+import { HookProviderRegistryDefault } from "../hooks/providers/registry.ts";
+import type { ConfiguredHook } from "../hooks/providers/types.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
@@ -315,6 +319,9 @@ export interface RoutingProposalRow {
     readonly sig: string;
 }
 
+export const ROUTING_PROPOSAL_TITLE = "Route mechanical subagent dispatches to cheaper models";
+export const ROUTING_PROPOSAL_INSTALLED_REASON = "route_dispatch_already_installed";
+
 /**
  * Derive a single routing-form proposal row from dispatch candidate analytics.
  *
@@ -333,7 +340,7 @@ export const deriveRoutingProposalRow = (input: {
 }): RoutingProposalRow | null => {
     if (input.candidateCount < 5 || input.totalEstSavingsUsd < 5) return null;
 
-    const title = "Route mechanical subagent dispatches to cheaper models";
+    const title = ROUTING_PROPOSAL_TITLE;
     const normTitle = normalizeTitle(title);
     const sig = dedupeSig("hook", normTitle);
 
@@ -366,12 +373,26 @@ export const deriveRoutingProposalRow = (input: {
 /**
  * Build cache write rows for a routing proposal. Mirrors
  * buildGuidanceProposalWrites: insert on first sight, update mutable
- * fields on re-derive. No typed payload table (hook form is self-contained).
+ * fields on re-derive. The typed payload carries all four safety gates, so
+ * `ax improve accept` can emit the existing manual task brief.
  */
 export const buildRoutingProposalWrites = (
     row: RoutingProposalRow,
     existingSigs: ReadonlySet<string> = new Set(),
-): ProposalWrite[] => [proposalWrite(row, "hook", { frequency: row.frequency }, existingSigs.has(row.sig))];
+): ProposalWrite[] => [
+    proposalWrite(row, "hook", { frequency: row.frequency }, existingSigs.has(row.sig)),
+    { store: "judgment", table: "hook_proposal", row: judgmentRow({
+        id: row.proposalKey,
+        proposal: row.proposalKey,
+        event_name: "PreToolUse",
+        target_tool: "Agent",
+        hook_command: "bun ~/.ax/hooks/route-dispatch.ts",
+        recovery_path: "Remove the route-dispatch hook registration from Claude settings.",
+        smoke_test_command: "ax hooks backtest ~/.ax/hooks/route-dispatch.ts --days=7",
+        disable_command: "AX_ROUTE_DISPATCH=off",
+        failure_mode: "fail_open",
+    }) },
+];
 
 // ---------------------------------------------------------------------------
 // Image context proposal (form='subagent') - isolate heavy visual context signal
@@ -683,6 +704,16 @@ const sha256Prefix = (value: string, length = 16): string => {
 
 export const dedupeSig = (form: string, normalizedTitle: string): string =>
     `${form}__${sha256Prefix(`${form}:${normalizedTitle}`)}`;
+
+export const ROUTING_PROPOSAL_SIG = dedupeSig("hook", normalizeTitle(ROUTING_PROPOSAL_TITLE));
+
+export const supersedeInstalledRoutingProposal = (
+    judgment: JudgmentService,
+): Effect.Effect<number, JudgmentError> =>
+    judgment.exec(
+        "UPDATE proposal SET status = 'superseded', reject_reason = ?, updated_at = ? WHERE dedupe_sig = ? AND status = 'open'",
+        [ROUTING_PROPOSAL_INSTALLED_REASON, new Date(), ROUTING_PROPOSAL_SIG],
+    );
 
 interface ProposalDedupeMigrationRow {
     readonly id: string;
@@ -1027,16 +1058,27 @@ FROM skill_candidate`),
         // nothing into the wrong store for a whole chunk without anyone noticing.
         // Any failure below fails the stage, loudly.
 
-        // Routing proposal (form='hook'): derive from dispatch candidate analytics.
+        // Routing proposal (form='hook'): installed CONFIGURATION is the source
+        // of truth. Silent Allow verdicts do not create hook-fire evidence.
         const sinceDays = opts.sinceDays ?? 14;
         const dispatchResult = yield* fetchDispatchCandidates(write, { sinceDays });
+        // Installed-state suppression is an optional local-config observation.
+        // A missing, unreadable, or invalid settings file must not stop ingest.
+        const configuredHooks = yield* readConfiguredHooks({ providerFilter: "claude" }).pipe(
+            Effect.provide(HookProviderRegistryDefault),
+            Effect.orElseSucceed((): ReadonlyArray<ConfiguredHook> => []),
+        );
+        const routingInstalled = hasActiveClaudeRouteDispatch(configuredHooks);
+        if (routingInstalled) {
+            yield* supersedeInstalledRoutingProposal(judgment);
+        }
         const routingRow = deriveRoutingProposalRow({
             candidateCount: dispatchResult.candidates.length,
             totalEstSavingsUsd: dispatchResult.total_est_savings_usd,
             sinceDays,
             topClasses: dispatchResult.top_classes,
         });
-        const routingWrites = routingRow
+        const routingWrites = routingRow && !routingInstalled
             ? buildRoutingProposalWrites(routingRow, existingSigs)
             : [];
 
@@ -1151,7 +1193,7 @@ WHERE p.form = 'guidance' AND g.section = ? AND p.status = 'open'`,
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
-            routingProposals: routingRow ? 1 : 0,
+            routingProposals: routingRow && !routingInstalled ? 1 : 0,
             imageContextProposals: imageContextRow ? 1 : 0,
             directiveProposals: directiveRows.length,
             workflowProposals: workflowRows.length,

@@ -49,6 +49,8 @@ export interface ReadOptions {
     readonly repoRoot?: string | null | undefined;
 }
 
+export type ConfiguredReadOptions = Omit<ReadOptions, "withEvidence">;
+
 const resolveRepoRoot = (
     override: string | null | undefined,
 ): Effect.Effect<string | null, never, FileSystem.FileSystem> =>
@@ -99,17 +101,13 @@ const writeParked = (
 ): Effect.Effect<void, PlatformError, FileSystem.FileSystem | Path.Path> =>
     writeFileAtomic(parkedPath(file), `${JSON.stringify(entries, null, 2)}\n`);
 
-/**
- * Read every declared hook across the selected providers/scopes/files.
- * When `withEvidence` is set, joins fired counts from `queryHookSummary`
- * (matched by exact command string).
- */
-export const readAllHooks = (
-    opts: ReadOptions = {},
+/** Read configured hooks only. This seam has no cache dependency. */
+export const readConfiguredHooks = (
+    opts: ConfiguredReadOptions = {},
 ): Effect.Effect<
-    ReadonlyArray<ConfiguredHookWithEvidence>,
+    ReadonlyArray<ConfiguredHook>,
     PlatformError | HookConfigParseError | HookConfigSchemaError,
-    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const registry = yield* HookProviderRegistry;
@@ -142,7 +140,20 @@ export const readAllHooks = (
             ? collected.filter((h) => h.event === opts.eventFilter)
             : collected;
 
-        if (!opts.withEvidence) return filtered;
+        return filtered;
+    });
+
+/** Read configured hooks and optionally join cache-derived fire evidence. */
+export const readAllHooks = (
+    opts: ReadOptions = {},
+): Effect.Effect<
+    ReadonlyArray<ConfiguredHookWithEvidence>,
+    PlatformError | HookConfigParseError | HookConfigSchemaError,
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | CacheRead
+> =>
+    Effect.gen(function* () {
+        const configured = yield* readConfiguredHooks(opts);
+        if (!opts.withEvidence) return configured;
 
         const summary = yield* queryHookSummary({ tail: 1000 });
         const firedByCommand = new Map<string, { count: number; lastSeen?: Date | string | undefined }>();
@@ -153,7 +164,7 @@ export const readAllHooks = (
                 lastSeen: row.last_seen ?? prev?.lastSeen,
             });
         }
-        return filtered.map((h) => {
+        return configured.map((h) => {
             const ev = firedByCommand.get(h.command);
             return ev ? { ...h, fired: ev.count, lastSeen: ev.lastSeen } : { ...h, fired: 0 };
         });

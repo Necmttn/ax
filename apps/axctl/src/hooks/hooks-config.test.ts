@@ -13,6 +13,7 @@ import { HookProviderRegistry, HookProviderRegistryDefault, HookProviderRegistry
 import { deriveHookId, deriveOwner, axMarkerId, embedMarker } from "./providers/ownership.ts";
 import {
     readAllHooks,
+    readConfiguredHooks,
     addHook,
     removeHook,
     editHook,
@@ -343,6 +344,28 @@ describe("config orchestration", () => {
         expect(withEv[0]!.fired).toBe(7);
         void file;
         void program;
+    });
+
+    test("readConfiguredHooks needs no CacheRead service", async () => {
+        const root = mk();
+        const layer = Layer.mergeAll(fsLayers, HookProviderRegistryDefault);
+        const rows = await Effect.runPromise(
+            addHook({
+                provider: "claude",
+                scope: "project",
+                repoRoot: root,
+                input: { event: "PreToolUse", matcher: "Agent", command: "bun /x/route-dispatch.js" },
+            }).pipe(
+                Effect.flatMap(() => readConfiguredHooks({
+                    providerFilter: "claude",
+                    scopeFilter: "project",
+                    repoRoot: root,
+                })),
+                Effect.provide(layer),
+            ),
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ event: "PreToolUse", matcher: "Agent", enabled: true });
     });
 
     test("add then remove leaves the file with no hooks", async () => {

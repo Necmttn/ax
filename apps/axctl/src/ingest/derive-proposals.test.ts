@@ -27,7 +27,10 @@ import {
     normalizeTitle,
     parseMetrics,
     migrateProposalDedupeSigs,
+    ROUTING_PROPOSAL_INSTALLED_REASON,
+    ROUTING_PROPOSAL_SIG,
     skillProposalFrequency,
+    supersedeInstalledRoutingProposal,
 } from "./derive-proposals.ts";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import type { ImageContextResult } from "../queries/image-context.ts";
@@ -499,6 +502,57 @@ describe("buildRoutingProposalWrites", () => {
     test("statement contains form hook and frequency", () => {
         const writes = buildRoutingProposalWrites(baseRoutingRow, new Set());
         expect(writes[0]!.row).toMatchObject({ form: "hook", frequency: baseRoutingRow.frequency });
+    });
+
+    test("writes an acceptable hook payload with every safety gate", () => {
+        const payload = buildRoutingProposalWrites(baseRoutingRow, new Set())
+            .find((write) => write.table === "hook_proposal");
+        expect(payload?.row).toMatchObject({
+            event_name: "PreToolUse",
+            target_tool: "Agent",
+            hook_command: "bun ~/.ax/hooks/route-dispatch.ts",
+            disable_command: "AX_ROUTE_DISPATCH=off",
+            failure_mode: "fail_open",
+        });
+        expect(payload?.row.recovery_path).toBeTruthy();
+        expect(payload?.row.smoke_test_command).toBeTruthy();
+    });
+});
+
+describe("installed route-dispatch proposal cleanup", () => {
+    test("supersedes only the matching open proposal with a machine reason", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-routing-proposal-"));
+        try {
+            const rows = await Effect.runPromise(Effect.gen(function* () {
+                const judgment = yield* Judgment;
+                yield* judgment.put("proposal", {
+                    id: "routing-open", form: "hook", title: "routing", hypothesis: "test",
+                    dedupe_sig: ROUTING_PROPOSAL_SIG, confidence: "high", status: "open",
+                });
+                yield* judgment.put("proposal", {
+                    id: "other-open", form: "hook", title: "other", hypothesis: "test",
+                    dedupe_sig: "hook__other", confidence: "low", status: "open",
+                });
+                expect(yield* supersedeInstalledRoutingProposal(judgment)).toBe(1);
+                return yield* judgment.rows(Schema.Struct({
+                    id: Schema.String,
+                    status: Schema.String,
+                    reject_reason: Schema.NullOr(Schema.String),
+                }), "SELECT id, status, reject_reason FROM proposal ORDER BY id");
+            }).pipe(
+                Effect.scoped,
+                Effect.provide(JudgmentLayer({
+                    sidecarPath: join(dir, "judgment.sqlite"),
+                    schemaSql: SIDECAR_SCHEMA_SQL,
+                })),
+            ));
+            expect(rows).toEqual([
+                { id: "other-open", status: "open", reject_reason: null },
+                { id: "routing-open", status: "superseded", reject_reason: ROUTING_PROPOSAL_INSTALLED_REASON },
+            ]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
 
