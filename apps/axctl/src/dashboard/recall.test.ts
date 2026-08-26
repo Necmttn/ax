@@ -61,6 +61,8 @@ const turn = (
     seq,
     ts: T(ts),
     role,
+    message_kind: role === "user" ? "task" : "assistant",
+    intent_kind: role === "user" ? "organic_task" : "assistant",
     text,
     text_excerpt: text,
     has_tool_use: false,
@@ -298,6 +300,75 @@ describe("recall: turn source", () => {
         expect(second.hits.map((h) => h.turn_id)).toEqual(["turn:1"]);
         expect(second.truncated).toBe(false);
     });
+});
+
+describe("recall: user-turn compat filter (#1095)", () => {
+    dtest(
+        "excludes a stale message_kind='task' user preamble hit, keeps assistant + unknown-source hits, and keeps page/count in agreement",
+        async () => {
+            const res = await withRecall("ax-recall-compat-", (w) =>
+                Effect.gen(function* () {
+                    yield* w.putMany("session", [
+                        session("session:a", { project: "ax" }),
+                        // A source the classifier has no rule table for at all -
+                        // must stay unfiltered.
+                        session("session:c", { project: "oc", source: "opencode" }),
+                    ]);
+                    yield* w.putMany("turn", [
+                        // A pre-classifier-fix row: the ingest classifier had not
+                        // yet learned this harness-wrapper shape when the row was
+                        // written, so `message_kind` was stamped 'task'. It still
+                        // carries the query term and must NOT surface as a user
+                        // hit.
+                        turn(
+                            "turn:preamble",
+                            "session:a",
+                            1,
+                            "<recommended_plugins> here is a list of plugins mentioning duckdb",
+                            "2026-08-10T10:00:00.000Z",
+                        ),
+                        // The genuine ask, same session and source.
+                        turn(
+                            "turn:real",
+                            "session:a",
+                            2,
+                            "please fix the duckdb spool bug",
+                            "2026-08-10T11:00:00.000Z",
+                        ),
+                        // An assistant turn that happens to quote the same wrapper
+                        // text - the filter is user-only, so this must survive.
+                        turn(
+                            "turn:assistant-echo",
+                            "session:a",
+                            3,
+                            "<recommended_plugins> duckdb reference",
+                            "2026-08-10T12:00:00.000Z",
+                            "assistant",
+                        ),
+                        // Same wrapper shape, but a source outside the classifier's
+                        // coverage - unknown-source behavior stays unchanged.
+                        turn(
+                            "turn:unknown-source",
+                            "session:c",
+                            1,
+                            "<recommended_plugins> duckdb notes for opencode",
+                            "2026-08-10T13:00:00.000Z",
+                        ),
+                    ]);
+                }),
+                { q: "duckdb" },
+            );
+
+            const ids = res.hits.map((h) => h.turn_id);
+            expect(ids).not.toContain("turn:preamble");
+            expect(ids).toContain("turn:real");
+            expect(ids).toContain("turn:assistant-echo");
+            expect(ids).toContain("turn:unknown-source");
+            // total_counts must describe exactly the rows that came back - not a
+            // different set (see `promptsWhere`'s docstring on the same hazard).
+            expect(res.total_counts.turn).toBe(ids.length);
+        },
+    );
 });
 
 describe("recall: session prefilters", () => {

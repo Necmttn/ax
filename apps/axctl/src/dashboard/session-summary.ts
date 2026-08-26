@@ -3,6 +3,7 @@ import { CacheRead, type CacheReadError } from "@ax/lib/duckdb";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { SessionSummary } from "@ax/lib/shared/dashboard-types";
+import { userTurnCompatClause } from "../queries/user-turn-compat.ts";
 
 // DB-ONLY session summary for the canvas detail card. Deliberately avoids
 // `locateTranscript` + the full JSONL read/parse that `fetchSessionInspect`
@@ -11,9 +12,21 @@ import type { SessionSummary } from "@ax/lib/shared/dashboard-types";
 // token usage, spawn edges. ~ms per query, run concurrently.
 
 // real first ask: a 'task'-kind user turn (skips AGENTS.md/CLAUDE.md context
-// injections that also carry role='user'). Falls back to any user turn.
-const FIRST_USER_SQL = `SELECT text_excerpt, seq FROM turn WHERE session = ? AND role = 'user' AND message_kind = 'task' ORDER BY seq ASC LIMIT 1`;
-const FIRST_USER_FALLBACK_SQL = `SELECT text_excerpt, seq FROM turn WHERE session = ? AND role = 'user' ORDER BY seq ASC LIMIT 1`;
+// injections that also carry role='user') that ALSO passes the source-aware
+// wrapper-text compat filter (#1095) - a stale `message_kind='task'` row from
+// before the classifier learned a harness-wrapper shape (e.g.
+// `<recommended_plugins>`, `<local-command-stdout>`) must not win the summary.
+// No fallback to "any user turn" here on purpose (#1095): that fallback is
+// what let an unfiltered wrapper preamble stand in as `first_ask`/`task` when
+// no genuine task turn existed - a session with no real ask now reports
+// neither rather than a plausible-looking wrong one.
+// `textExpr` targets `text_excerpt`, matching what the ingest classifier
+// itself sees (`classifyUserText` never reads the full `text` column).
+const firstUserCompat = userTurnCompatClause({ sourceExpr: "s.source", textExpr: "t.text_excerpt" });
+const FIRST_USER_SQL = `SELECT t.text_excerpt AS text_excerpt, t.seq AS seq
+    FROM turn t JOIN session s ON s.id = t.session
+    WHERE t.session = ? AND t.role = 'user' AND t.message_kind = 'task' ${firstUserCompat.sql}
+    ORDER BY t.seq ASC LIMIT 1`;
 // session_health.task_label is the boilerplate-filtered, organic-task-detected
 // label the canvas already shows - prefer it when present.
 const TASK_LABEL_SQL = `SELECT task_label FROM session_health WHERE session = ? LIMIT 1`;
@@ -48,9 +61,8 @@ export const fetchSessionSummary = (
     Effect.gen(function* () {
         const bare = toBareSessionId(sessionId);
         const db = yield* CacheRead;
-        const [fu, fuFallback, label, la, corr, tc, tok, sub, tools] = yield* Effect.all([
-            db.rows(ExcerptRow, FIRST_USER_SQL, [bare]),
-            db.rows(ExcerptRow, FIRST_USER_FALLBACK_SQL, [bare]),
+        const [fu, label, la, corr, tc, tok, sub, tools] = yield* Effect.all([
+            db.rows(ExcerptRow, FIRST_USER_SQL, [bare, ...firstUserCompat.params]),
             db.rows(LabelRow, TASK_LABEL_SQL, [bare]),
             db.rows(ExcerptRow, LAST_ASSISTANT_SQL, [bare]),
             db.rows(ExcerptRow, CORRECTION_SQL, [bare]),
@@ -60,7 +72,7 @@ export const fetchSessionSummary = (
             db.rows(ToolRow, TOOLS_SQL, [bare]),
         ], { concurrency: "unbounded" });
 
-        const firstAsk = excerpt(fu[0]) ?? excerpt(fuFallback[0]);
+        const firstAsk = excerpt(fu[0]);
         const taskLabelRaw = label[0]?.task_label;
         const taskLabel = typeof taskLabelRaw === "string" && taskLabelRaw.trim().length > 0
             ? taskLabelRaw.replace(/\s+/g, " ").trim() : null;

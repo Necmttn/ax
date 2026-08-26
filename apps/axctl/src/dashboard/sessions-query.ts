@@ -19,6 +19,7 @@ import { CacheRead } from "@ax/lib/duckdb/seam";
 import { sessionIdsByPrefixCacheQuery } from "../queries/session-detail-cache.ts";
 import { runCacheQuery } from "@ax/lib/duckdb/query";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
+import { userTurnCompatPredicate } from "../queries/user-turn-compat.ts";
 
 // ---------------------------------------------------------------------------
 // Row shape
@@ -67,6 +68,22 @@ const toSessionRow = (row: typeof SessionEnrichedRow.Type): SessionRow => ({
 });
 
 /**
+ * The source-aware compat predicate that keeps a STALE `message_kind='task'`
+ * harness-wrapper row (e.g. `<recommended_plugins>`, pre-classifier-fix rows,
+ * #1095) from outranking a genuine task turn below - computed once since it
+ * does not depend on `where`.
+ *
+ * `textExpr` targets `text_excerpt`, not the full `text` column: the ingest
+ * classifier (`classifyUserText`, `ingest/normalized/message-kind.ts`) itself
+ * only ever sees the excerpt, and this projection selects `text_excerpt` -
+ * `text` is not even joined in here.
+ */
+const firstUserCompat = userTurnCompatPredicate({
+    sourceExpr: "s2.source",
+    textExpr: "t2.text_excerpt",
+});
+
+/**
  * The one session projection every list variant shares: turn count and the
  * first user-role turn's excerpt, both joined in rather than fanned out.
  * `where` is appended after `WHERE TRUE` on the outer `session s` scan.
@@ -87,20 +104,25 @@ const fetchSessions = (where: Clause): Effect.Effect<SessionRow[], never, CacheR
                           -- (Codex records the AGENTS.md/CLAUDE.md system prompt as
                           -- the first user turn, classified message_kind='context';
                           -- it dominated the summary column and made the listing
-                          -- useless for Codex). Fall back to the earliest user turn
-                          -- when no task turn is classified (null message_kind, or a
-                          -- pre-reingest session).
-                          SELECT session, text_excerpt,
+                          -- useless for Codex) AND over a STALE task-classified
+                          -- harness-wrapper row (#1095: message_kind is stamped at
+                          -- ingest, so a row written before the classifier learned a
+                          -- wrapper shape keeps 'task' forever without a re-parse).
+                          -- Fall back to the earliest COMPATIBLE user turn when
+                          -- no task turn is classified. If every user row is a
+                          -- wrapper, the left join returns no summary.
+                          SELECT t2.session AS session, t2.text_excerpt AS text_excerpt,
                                  row_number() OVER (
-                                     PARTITION BY session
-                                     ORDER BY COALESCE(message_kind = 'task', FALSE) DESC, seq ASC
+                                     PARTITION BY t2.session
+                                     ORDER BY COALESCE(t2.message_kind = 'task', FALSE) DESC, t2.seq ASC
                                  ) AS rn
-                          FROM turn
-                          WHERE role = 'user'
+                          FROM turn t2
+                          JOIN session s2 ON s2.id = t2.session
+                          WHERE t2.role = 'user' AND ${firstUserCompat.sql}
                       ) fu ON fu.session = s.id AND fu.rn = 1
                       WHERE TRUE ${where.sql}
                       ORDER BY s.started_at DESC`,
-                params: where.params,
+                params: [...firstUserCompat.params, ...where.params],
             },
             "sessions-query.list",
         ),

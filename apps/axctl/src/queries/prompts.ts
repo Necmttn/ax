@@ -32,10 +32,12 @@ import { NumberFromBigIntColumn, TimestampColumn } from "@ax/lib/duckdb/columns"
 import { cacheFirst, cacheRows } from "@ax/lib/duckdb/query";
 import { andAll, NO_CLAUSE, withinDaysClause, type Clause } from "@ax/lib/duckdb/clause";
 import {
-    FULL_CONTEXT_RULES,
-    PI_CONTEXT_RULES,
-    type UserTextRules,
-} from "../ingest/normalized/message-kind.ts";
+    escapeLike,
+    legacyInjectionClause,
+    userTurnCompatClause,
+} from "./user-turn-compat.ts";
+
+export { escapeLike, legacyInjectionClause };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,93 +104,10 @@ export const promptsWhere = (input: PromptsInput): Clause =>
             params: [],
         },
         withinDaysClause("t.ts", input.sinceDays),
-        legacyInjectionClauseBySource(),
+        userTurnCompatClause(),
         scopeClause(input.scope),
         queryClause(input.query),
     ]);
-
-/**
- * A read-time repeat of the classifier's rules, DERIVED FROM THE SAME TABLES.
- *
- * WHY IT IS NEEDED AT ALL: `message_kind` is stamped at INGEST, so every row
- * written before the classifier learned a shape keeps the old kind. Re-parsing a
- * year of transcripts to correct history is expensive and not something a read
- * command may assume has happened, so without this the command would print
- * `<task-notification>` blocks at anyone whose store predates the fix - which is
- * everyone, on the day it ships.
- *
- * WHY IT IS NOT DUPLICATION: it is GENERATED from `UserTextRules`, not
- * hand-copied. A rule added to the classifier hardens the future ingest AND this
- * legacy read path in the same edit, and there is no second list to forget. That
- * distinction is the whole reason the rules are exported data rather than a
- * `switch`. Hand-copying them here was the first plan and would have recreated
- * exactly the divergence the classifier fix existed to remove.
- *
- * This clause becomes redundant once every row has been re-parsed. It is cheap,
- * it is generated, and "redundant" is the correct end state - do not delete it
- * on the strength of one machine's store being current.
- */
-export const legacyInjectionClause = (rules: UserTextRules): Clause => {
-    // `control` is included: an interrupt marker is not a typed request either.
-    const prefixes = [...rules.control, ...rules.contextStartsWith];
-    const parts: string[] = [];
-    const params: (string | number)[] = [];
-
-    for (const prefix of prefixes) {
-        parts.push("AND t.text NOT LIKE ? ESCAPE '\\'");
-        params.push(`${escapeLike(prefix)}%`);
-    }
-    for (const needle of rules.contextIncludes) {
-        parts.push("AND t.text NOT LIKE ? ESCAPE '\\'");
-        params.push(`%${escapeLike(needle)}%`);
-    }
-    for (const marker of rules.attachmentMarkers) {
-        // The marker-only test, in SQL: strip every marker and require something
-        // to be left. Mirrors `isOnlyAttachmentMarkers`, from the same RegExp.
-        parts.push(
-            "AND trim(regexp_replace(replace(t.text, chr(10), ' '), ?, '', 'g')) <> ''",
-        );
-        params.push(marker.source);
-    }
-
-    return parts.length === 0 ? NO_CLAUSE : { sql: parts.join(" "), params };
-};
-
-/**
- * Apply the legacy classifier guard only to sources that use that classifier.
- *
- * The normalized ingest parsers use FULL_CONTEXT_RULES for Claude and Codex,
- * PI_CONTEXT_RULES for Pi and Omp, and no context classifier for other sources.
- * Keep that source split here so a prefix measured for one harness cannot remove
- * a real prompt from another harness. Unknown sources stay unfiltered as well.
- */
-const legacyInjectionClauseBySource = (): Clause => {
-    const full = legacyInjectionClause(FULL_CONTEXT_RULES);
-    const pi = legacyInjectionClause(PI_CONTEXT_RULES);
-    const fullBody = full.sql.slice("AND ".length);
-    const piBody = pi.sql.slice("AND ".length);
-
-    return {
-        sql:
-            "AND (" +
-            "s.source NOT IN ('claude', 'codex', 'pi', 'omp')" +
-            " OR (s.source IN ('claude', 'codex') AND " + fullBody + ")" +
-            " OR (s.source IN ('pi', 'omp') AND " + piBody + ")" +
-            ")",
-        params: [...full.params, ...pi.params],
-    };
-};
-
-/**
- * Escape the LIKE metacharacters in a literal prefix.
- *
- * Necessary, not decorative: `<recommended_plugins>` contains `_`, which LIKE
- * reads as "any single character". Unescaped it would also exclude a human
- * prompt that happened to differ in that position - a silent over-filter, which
- * is the failure shape this whole change is about.
- */
-export const escapeLike = (literal: string): string =>
-    literal.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 /**
  * Scope to a directory SUBTREE, not one exact path: agents run in worktrees
