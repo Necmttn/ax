@@ -90,12 +90,12 @@ describe("edge tables", () => {
 
     test("every relation table is indexed on both sides", () => {
         // A composite index does NOT serve a leftmost-prefix seek the way a
-        // B-tree would: measured on duckdb v1.5.5 (2M rows, 500k distinct
-        // keys, 200 sequential `WHERE in_id = ?` point lookups), a composite
-        // (in_id, out_id, args) index cost 2.10s user - statistically the
-        // same as NO index at all (2.17s user) - while a single-column
-        // (in_id) ART index cost 0.12s user. Only a single-column index is
-        // actually served, so require one per side.
+        // B-tree would: `scripts/bench/index-efficacy.ts` measures DuckDB v1.5.5
+        // with 2M rows, 500k distinct
+        // keys, and 200 separate `WHERE in_id = ?` point lookups. Stable runs
+        // show the composite (in_id, out_id, args) index tracks no index, while
+        // the single-column (in_id) ART index is materially faster. Require a
+        // single-column index per side.
         const indexes = parseDuckdbIndexes();
         const uncovered = relationTables
             // `plays_role` is a relation that moved to the sidecar; SQLite serves

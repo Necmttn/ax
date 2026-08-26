@@ -57,3 +57,9 @@ jobs:
         env:
           AX_DUCKDB_BIN: ${{ steps.duckdb.outputs.bin }}
         run: bun test scripts/bench
+
+      - name: Compare DuckDB index variants
+        if: steps.duckdb.outputs.skip != 'true'
+        env:
+          AX_DUCKDB_BIN: ${{ steps.duckdb.outputs.bin }}
+        run: bun scripts/bench/index-efficacy.ts

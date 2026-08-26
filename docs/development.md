@@ -147,6 +147,16 @@ scripts/bench-empty-db.sh --since=90
 
 Artifacts land under `~/.local/share/ax/benchmarks/<db>/`.
 
+Compare DuckDB point lookups with no index, a composite index, and a
+single-column index:
+
+```bash
+AX_DUCKDB_BIN=dist/duckdb/duckdb bun scripts/bench/index-efficacy.ts
+```
+
+The comparison uses DuckDB v1.5.5 and reports raw samples, medians, and speed
+ratios. It stops when row checks fail or measurements are unstable.
+
 ## CLI reference
 
 Full surface in [`docs/insights-cli-reference.md`](insights-cli-reference.md).
