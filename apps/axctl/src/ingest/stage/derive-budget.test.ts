@@ -23,6 +23,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: now + 900_000,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         })).toEqual({ _tag: "capped", capMs: 300_000 });
     });
 
@@ -33,6 +34,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: now + 100_000,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         })).toEqual({ _tag: "capped", capMs: 70_000 });
     });
 
@@ -42,6 +44,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: now + 30_000,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         });
         expect(budget._tag).toBe("skip");
     });
@@ -52,6 +55,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: now - 1,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         })._tag).toBe("skip");
     });
 
@@ -61,6 +65,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: null,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         })).toEqual({ _tag: "capped", capMs: 300_000 });
     });
 
@@ -70,6 +75,7 @@ describe("deriveStageBudget", () => {
             deadlineMs: null,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
         })).toEqual({ _tag: "uncapped" });
     });
 
@@ -79,6 +85,62 @@ describe("deriveStageBudget", () => {
             deadlineMs: now + 100_000,
             nowMs: now,
             reserveMs: 30_000,
+            remainingDeriveStages: 1,
+        })).toEqual({ _tag: "capped", capMs: 70_000 });
+    });
+
+    test("no deadline: remainingDeriveStages > 1 still uncaps (infinity / N is infinity)", () => {
+        expect(deriveStageBudget({
+            staticCapMs: 0,
+            deadlineMs: null,
+            nowMs: now,
+            reserveMs: 30_000,
+            remainingDeriveStages: 5,
+        })).toEqual({ _tag: "uncapped" });
+    });
+
+    test("two remaining derive stages split the time-to-deadline evenly", () => {
+        // 200s left, minus a 30s reserve => 170s to split two ways => 85s each,
+        // not the 170s a single starter would have claimed under the old code.
+        expect(deriveStageBudget({
+            staticCapMs: 300_000,
+            deadlineMs: now + 200_000,
+            nowMs: now,
+            reserveMs: 30_000,
+            remainingDeriveStages: 2,
+        })).toEqual({ _tag: "capped", capMs: 85_000 });
+    });
+
+    test("four remaining derive stages each get a quarter of the time to the deadline", () => {
+        // 400s left, minus a 30s reserve => 370s split four ways => 92.5s each.
+        expect(deriveStageBudget({
+            staticCapMs: 300_000,
+            deadlineMs: now + 400_000,
+            nowMs: now,
+            reserveMs: 30_000,
+            remainingDeriveStages: 4,
+        })).toEqual({ _tag: "capped", capMs: 92_500 });
+    });
+
+    test("the static cap still bounds a stage's share even with many remaining stages", () => {
+        // Plenty of time to the deadline, but only 2 remaining stages share it -
+        // each would get more than the static cap, so the static cap wins.
+        expect(deriveStageBudget({
+            staticCapMs: 60_000,
+            deadlineMs: now + 900_000,
+            nowMs: now,
+            reserveMs: 30_000,
+            remainingDeriveStages: 2,
+        })).toEqual({ _tag: "capped", capMs: 60_000 });
+    });
+
+    test("a non-positive remainingDeriveStages is treated as 1, never divides by zero", () => {
+        expect(deriveStageBudget({
+            staticCapMs: 300_000,
+            deadlineMs: now + 100_000,
+            nowMs: now,
+            reserveMs: 30_000,
+            remainingDeriveStages: 0,
         })).toEqual({ _tag: "capped", capMs: 70_000 });
     });
 });
