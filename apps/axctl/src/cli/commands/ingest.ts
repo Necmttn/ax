@@ -16,6 +16,7 @@ import { runIngest, withIngestRunFinish, type RunIngestResult } from "../../inge
 import { resolveIngestDeadlineSeconds } from "../../ingest/deadline.ts";
 import { snapshotPath } from "@ax/lib/duckdb/client";
 import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
+import { cmdIngestRepairIndexes, formatIndexRepairResult } from "../../ingest/repair-indexes.ts";
 import type { OtelRetentionResult } from "../../otel/retention.ts";
 import { ingestLockOptions, withIngestLock } from "@ax/lib/ingest-lock";
 import { StageRegistry, type IngestStageError, type StageRegistryShape } from "../../ingest/stage/registry.ts";
@@ -737,6 +738,22 @@ const ingestReapCommand = Command.make(
     ),
 );
 
+const ingestRepairIndexesCommand = Command.make(
+    "repair-indexes",
+    { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)) },
+    ({ dryRun }) =>
+        Effect.gen(function* () {
+            const result = yield* cmdIngestRepairIndexes({ dryRun });
+            console.log(formatIndexRepairResult(result));
+        }),
+).pipe(
+    Command.withDescription(
+        "Rebuild explicit secondary indexes on the live cache (#1084) - e.g. after an upgrade left " +
+            "one missing. Primary-key and UNIQUE-constraint-backed indexes are out of scope (see the " +
+            "command's own output). Use --dry-run to preview without touching the catalog.",
+    ),
+);
+
 export const ingestCommand = Command.make(
     "ingest",
     {
@@ -809,7 +826,7 @@ export const ingestCommand = Command.make(
             "watermark and re-read inputs ax already ingested - needed to backfill evidence a " +
             "parser fix newly recovers.",
     ),
-    Command.withSubcommands([ingestHereCommand, ingestReapCommand]),
+    Command.withSubcommands([ingestHereCommand, ingestReapCommand, ingestRepairIndexesCommand]),
 );
 
 // Shared flag specs + handlers for the derive verbs. They back BOTH the flat
