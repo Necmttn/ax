@@ -5,19 +5,27 @@ import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 const OTEL_TABLES = ["otel_metric_point", "otel_span", "otel_log_event"] as const;
 const CountRow = Schema.Struct({ count: NumberFromBigIntColumn });
 
+/**
+ * OTLP rows (and the `telemetry_of` edges pointing at them) are retained for
+ * this many days, then deleted by `retainRecentOtel`. Read surfaces (`ax otel`,
+ * the `otel` MCP tool) import this same constant so their disclosure and
+ * `--days`-exceeds-retention warning can never drift from the actual cutoff.
+ */
+export const OTEL_RETENTION_DAYS = 30;
+
 export interface OtelRetentionResult {
     readonly deletedByTable: Record<string, number>;
     readonly deletedEdges: number;
 }
 
-/** Keep 30 days of OTLP rows and remove relation rows without a target. */
+/** Keep `OTEL_RETENTION_DAYS` of OTLP rows and remove relation rows without a target. */
 export const retainRecentOtel = Effect.fn("otel.retention")(function* (write: CacheWriteService) {
     // The CAST is load-bearing: `CURRENT_TIMESTAMP` is TIMESTAMPTZ, and
     // TIMESTAMPTZ - INTERVAL is resolved by the ICU extension, which the shipped
     // static build does not carry - so the uncast form is a binder error there.
     // `observed_at` is a naive UTC TIMESTAMP (schema.duckdb.sql UTC CONTRACT) and
     // the seam pins connections to UTC, so the cast preserves meaning.
-    const cutoff = "CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '30 days'";
+    const cutoff = `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - INTERVAL '${OTEL_RETENTION_DAYS} days'`;
     const deletedByTable: Record<string, number> = {};
     for (const table of OTEL_TABLES) {
         const rows = yield* write.rows(

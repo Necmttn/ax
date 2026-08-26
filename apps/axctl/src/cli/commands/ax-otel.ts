@@ -16,6 +16,7 @@ import {
     healthGlyph,
     type OtelRollupResult,
 } from "../../queries/otel-rollup.ts";
+import { OTEL_RETENTION_DAYS } from "../../otel/retention.ts";
 import { integer, usd } from "../render.ts";
 import { renderTable } from "../table.js";
 import type { Column } from "../table.js";
@@ -26,7 +27,10 @@ export function renderOtelRollup(result: OtelRollupResult): string {
     const out: string[] = [];
 
     if (result.signals.length === 0) {
-        out.push("(no OTLP telemetry received - is `ax otlpd` running and the harness configured? `ax install` writes the config)");
+        out.push(
+            `(no retained OTLP telemetry - is \`ax otlpd\` running and the harness configured? `
+            + `\`ax install\` writes the config. Rows are retained ${result.retention_days} days.)`,
+        );
     } else {
         type Row = { sig: string; n: string; last: string };
         const rows: Row[] = result.signals.map((s) => ({
@@ -41,6 +45,8 @@ export function renderOtelRollup(result: OtelRollupResult): string {
         ];
         out.push(renderTable({ columns: cols, rows, gap: "  " }));
         out.push("  ✓ flowing (<6h)   ⚠ stale (<48h)   ✗ cold   · none");
+        out.push("");
+        out.push(`retained OTLP telemetry: rows are kept ${result.retention_days} days, then pruned`);
     }
 
     const c = result.coverage;
@@ -49,6 +55,12 @@ export function renderOtelRollup(result: OtelRollupResult): string {
     const hasOtlp = result.signals.some((s) => s.count > 0);
     if (hasOtlp && c.window_sessions > 0 && c.pct === 0) {
         out.push("  ⚠ telemetry is arriving but matches 0 sessions in the window - check that the harness session id reaches the receiver");
+    }
+    if (result.since_days > result.retention_days) {
+        out.push(
+            `  ⚠ --days=${result.since_days} exceeds the ${result.retention_days}d retention window - `
+            + "OTLP coverage and OTLP cost are incomplete for the pruned portion",
+        );
     }
 
     out.push("");
@@ -84,7 +96,8 @@ export const otelCommand = Command.make(
 ).pipe(
     Command.withDescription(
         "OTLP receiver health: per-harness signal freshness, session correlation coverage, "
-        + "and OTLP vs transcript cost. --days=N (default 14)  --json",
+        + `and OTLP vs transcript cost. Rows are retained ${OTEL_RETENTION_DAYS} days. `
+        + "--days=N (default 14)  --json",
     ),
 );
 

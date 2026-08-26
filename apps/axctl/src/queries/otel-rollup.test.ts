@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { publishCacheFixture, readThroughFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
+import { OTEL_RETENTION_DAYS } from "../otel/retention.ts";
 import {
     FLOWING_MS,
     STALE_MS,
@@ -117,11 +118,22 @@ describe("fetchOtelRollup", () => {
 
         expect(result.coverage.window_sessions).toBe(0);
     });
+
+    dtest("reports the shared OTEL_RETENTION_DAYS constant as retention_days", async () => {
+        const fixture = await runWithPlatform(
+            publishCacheFixture(tempDir("ax-otel-rollup-retention-"), dylibPath, () => Effect.void),
+        );
+
+        const result = await readThroughFixture(fixture, dylibPath, fetchOtelRollup({ sinceDays: 14 }));
+
+        expect(result.retention_days).toBe(OTEL_RETENTION_DAYS);
+    });
 });
 
 describe("renderOtelRollup", () => {
     const base: OtelRollupResult = {
         since_days: 14,
+        retention_days: OTEL_RETENTION_DAYS,
         generated_at: new Date(NOW).toISOString(),
         signals: [
             { harness: "claude", signal: "metric", count: 16700, last_observed_at: new Date(NOW - 2 * 24 * 3_600_000).toISOString(), age_ms: 2 * 24 * 3_600_000, health: "cold" },
@@ -140,7 +152,7 @@ describe("renderOtelRollup", () => {
     it("does not warn when there is no telemetry at all", () => {
         const empty: OtelRollupResult = { ...base, signals: [], coverage: { window_sessions: 279, linked_sessions: 0, pct: 0 } };
         const out = renderOtelRollup(empty);
-        expect(out).toContain("no OTLP telemetry received");
+        expect(out).toContain("no retained OTLP telemetry");
         expect(out).not.toContain("matches 0 sessions");
     });
 
@@ -149,5 +161,28 @@ describe("renderOtelRollup", () => {
         const out = renderOtelRollup(linked);
         expect(out).not.toContain("matches 0 sessions");
         expect(out).toContain("(54.8%)");
+    });
+
+    it("discloses the retention window when telemetry exists", () => {
+        const out = renderOtelRollup(base);
+        expect(out).toContain(`retained OTLP telemetry: rows are kept ${OTEL_RETENTION_DAYS} days, then pruned`);
+    });
+
+    it("states the retention window in the empty state", () => {
+        const empty: OtelRollupResult = { ...base, signals: [], coverage: { window_sessions: 279, linked_sessions: 0, pct: 0 } };
+        const out = renderOtelRollup(empty);
+        expect(out).toContain(`Rows are retained ${OTEL_RETENTION_DAYS} days`);
+    });
+
+    it("does not warn about the window when --days is within retention", () => {
+        const out = renderOtelRollup(base);
+        expect(out).not.toContain("exceeds the");
+    });
+
+    it("warns when --days exceeds the retention window", () => {
+        const wide: OtelRollupResult = { ...base, since_days: OTEL_RETENTION_DAYS + 10 };
+        const out = renderOtelRollup(wide);
+        expect(out).toContain(`--days=${OTEL_RETENTION_DAYS + 10} exceeds the ${OTEL_RETENTION_DAYS}d retention window`);
+        expect(out).toContain("OTLP coverage and OTLP cost are incomplete");
     });
 });
