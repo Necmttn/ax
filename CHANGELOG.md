@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.12](https://github.com/Necmttn/ax/compare/v0.43.11...v0.43.12) (2026-08-26)
+
+
+### Bug Fixes
+
+* align cost command windows ([#1105](https://github.com/Necmttn/ax/issues/1105)) ([d9f9441](https://github.com/Necmttn/ax/commit/d9f9441e60bc8dfe30d0481ebf190c23cee0524d))
+
 ## [0.43.11](https://github.com/Necmttn/ax/compare/v0.43.10...v0.43.11) (2026-08-26)
 
 
