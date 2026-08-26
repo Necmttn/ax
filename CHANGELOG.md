@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.8](https://github.com/Necmttn/ax/compare/v0.43.7...v0.43.8) (2026-08-26)
+
+
+### Bug Fixes
+
+* classify Codex exec results by status header ([#1091](https://github.com/Necmttn/ax/issues/1091)) ([4b27dcd](https://github.com/Necmttn/ax/commit/4b27dcd3f8308ec47b4a022db0d2f3d07370732b))
+
 ## [0.43.7](https://github.com/Necmttn/ax/compare/v0.43.6...v0.43.7) (2026-08-26)
 
 
