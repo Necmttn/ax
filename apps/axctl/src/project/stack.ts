@@ -46,13 +46,49 @@ export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo,
 
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyPackageInfo();
         const record = parsed as Record<string, unknown>;
+        let packageManager = typeof record.packageManager === "string" ? record.packageManager : null;
+        if (!packageManager) {
+            const locks = [
+                ["bun.lock", "bun"], ["bun.lockb", "bun"], ["pnpm-lock.yaml", "pnpm"],
+                ["yarn.lock", "yarn"], ["package-lock.json", "npm"],
+            ] as const;
+            const found = [] as string[];
+            for (const [lock, manager] of locks) {
+                if (yield* fs.exists(path.join(root, lock)).pipe(orAbsent(false))) found.push(manager);
+            }
+            const managers = [...new Set(found)];
+            packageManager = managers.length === 1 ? managers[0]! : managers.length > 1 ? "conflict" : null;
+        }
         return {
             packageJsonPath: pkgPath,
-            packageManager: typeof record.packageManager === "string" ? record.packageManager : null,
+            packageManager,
             scripts: asStringRecord(record.scripts),
             dependencies: packageNames(record.dependencies),
             devDependencies: packageNames(record.devDependencies),
         };
+    });
+
+export const loadPackageInfos = (
+    root: string | null,
+    changedPaths: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<PackageInfo>, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        if (!root) return [];
+        const path = yield* Path.Path;
+        const dirs = new Set([root]);
+        for (const changedPath of changedPaths) {
+            const relativePath = changedPath.replaceAll("\\", "/");
+            const absolutePath = path.resolve(root, relativePath);
+            const relativeToRoot = path.relative(root, absolutePath);
+            if (relativeToRoot === ".." || relativeToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue;
+            let dir = path.dirname(absolutePath);
+            while (dir !== root) {
+                dirs.add(dir);
+                dir = path.dirname(dir);
+            }
+        }
+        const infos = yield* Effect.all([...dirs].map((dir) => loadPackageInfo(dir)), { concurrency: "unbounded" });
+        return infos.filter((info) => info.packageJsonPath !== null);
     });
 
 export function packageSignals(pkg: PackageInfo): ReadonlyArray<StackSignal> {
@@ -146,12 +182,15 @@ export const loadInstructionMatches = (
 
 export const loadProjectStack = (
     root: string | null,
+    changedPaths: ReadonlyArray<string> = [],
 ): Effect.Effect<ProjectStack, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const pkg = yield* loadPackageInfo(root);
+        const packages = yield* loadPackageInfos(root, changedPaths);
         const instructions = yield* loadInstructionMatches(root);
         return {
             package: pkg,
+            packages,
             signals: packageSignals(pkg),
             instructions,
         };

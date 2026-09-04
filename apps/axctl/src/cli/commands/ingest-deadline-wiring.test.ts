@@ -34,7 +34,7 @@ describe("ingest command deadline wiring", () => {
         });
         expect(firstRun.lockOptions.timeoutSeconds).toBe(FIRST_RUN_INGEST_TIMEOUT_SECONDS);
         expect(firstRun.runOptions.deadlineMs).toBe(
-            NOW_MS + firstRun.lockOptions.timeoutSeconds * 1000,
+            NOW_MS + firstRun.decision.seconds * 1000,
         );
 
         const explicit = resolveIngestCommandTiming({
@@ -45,6 +45,40 @@ describe("ingest command deadline wiring", () => {
         });
         expect(explicit.lockOptions.timeoutSeconds).toBe(37);
         expect(explicit.runOptions.deadlineMs).toBe(NOW_MS + 37_000);
+    });
+
+    test("derive-only with AX_STAGE_HUNG_SECONDS=180 does not inherit a divided shared deadline", () => {
+        const timing = resolveIngestCommandTiming({
+            configuredSeconds: 900,
+            knobExplicitlySet: false,
+            firstRun: false,
+            deriveOnly: true,
+            nowMs: NOW_MS,
+        });
+        expect(timing.runOptions).toEqual({});
+        expect(timing.lockOptions).toEqual({});
+    });
+
+    test("real lock seam leaves an unset derive-only timeout disabled", async () => {
+        const dataDir = mkdtempSync(join(tmpdir(), "ax-ingest-lock-seam-"));
+        const lockPath = join(dataDir, "ingest.lock");
+        const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+        const run = (timeoutSeconds?: number) => withIngestLock(
+            {
+                lockPath,
+                command: "test",
+                staleMs: 10_000,
+                ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
+                onBusy: () => Effect.succeed("busy" as const),
+            },
+            Effect.sleep(20).pipe(Effect.as("completed" as const)),
+        ).pipe(Effect.provide(platform));
+        try {
+            expect((await Effect.runPromise(run()))._tag).toBe("completed");
+            expect((await Effect.runPromise(run(0.001)))._tag).toBe("timeout");
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true });
+        }
     });
 
     test("the real cmdIngest boundary forwards first-run and explicit deadlines", async () => {

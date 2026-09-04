@@ -55,6 +55,8 @@ export interface IngestDeadlineInput {
      * transcript, commit and skill on disk is read for the first time.
      */
     readonly firstRun: boolean;
+    /** Derive-only runs have no shared deadline unless explicitly requested. */
+    readonly deriveOnly?: boolean;
 }
 
 export interface IngestDeadlineDecision {
@@ -81,6 +83,13 @@ export const resolveIngestDeadlineSeconds = (
             seconds: input.configuredSeconds,
             upgraded: false,
             reason: "AX_INGEST_TIMEOUT_SECONDS was set explicitly",
+        };
+    }
+    if (input.deriveOnly) {
+        return {
+            seconds: 0,
+            upgraded: false,
+            reason: "derive-only uses AX_STAGE_HUNG_SECONDS unless a shared timeout is explicit",
         };
     }
     if (!input.firstRun) {

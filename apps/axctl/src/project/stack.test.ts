@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { extractInstructionMatches, loadPackageInfo, packageSignals } from "./stack.ts";
+import { extractInstructionMatches, loadPackageInfo, loadPackageInfos, packageSignals } from "./stack.ts";
 
 const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -23,6 +23,24 @@ describe("loadPackageInfo", () => {
                 dependencies: [],
                 devDependencies: [],
             });
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+
+    test("discovers the nearest manifest for POSIX and Windows changed paths", async () => {
+        const root = await mkdtemp(join(tmpdir(), "ax-stack-nested-"));
+        try {
+            await writeFile(join(root, "package.json"), JSON.stringify({ name: "root" }));
+            await mkdir(join(root, "apps", "axctl", "src", "project"), { recursive: true });
+            await writeFile(join(root, "apps", "axctl", "src", "project", "verify.ts"), "");
+            await Bun.write(join(root, "apps", "axctl", "package.json"), JSON.stringify({ name: "axctl" }));
+            for (const changedPath of ["apps/axctl/src/project/verify.ts", "apps\\axctl\\src\\project\\verify.ts"]) {
+                const infos = await Effect.runPromise(loadPackageInfos(root, [changedPath]).pipe(Effect.provide(fsLayer)));
+                expect(infos.map((info) => info.packageJsonPath)).toContain(join(root, "apps", "axctl", "package.json"));
+            }
+            const escaped = await Effect.runPromise(loadPackageInfos(root, ["../outside/file.ts"]).pipe(Effect.provide(fsLayer)));
+            expect(escaped).toHaveLength(1);
         } finally {
             await rm(root, { recursive: true, force: true });
         }
