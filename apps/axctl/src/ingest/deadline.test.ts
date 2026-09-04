@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import {
     FIRST_RUN_INGEST_TIMEOUT_SECONDS,
     resolveIngestDeadlineSeconds,
@@ -11,6 +11,10 @@ import {
  * first run failed with two stages reported failed (#830).
  */
 describe("resolveIngestDeadlineSeconds", () => {
+    test("derive-only has no shared deadline unless explicitly configured", () => {
+        expect(resolveIngestDeadlineSeconds({ ...base, firstRun: false, deriveOnly: true }).seconds).toBe(0);
+        expect(resolveIngestDeadlineSeconds({ ...base, firstRun: false, deriveOnly: true, knobExplicitlySet: true }).seconds).toBe(900);
+    });
     const base = { configuredSeconds: 900, knobExplicitlySet: false, firstRun: false } as const;
 
     it("raises a first run past the incremental default", () => {

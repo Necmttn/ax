@@ -196,13 +196,13 @@ interface IngestCommandOpts {
 export interface IngestCommandTiming {
     readonly decision: IngestDeadlineDecision;
     readonly runOptions: Pick<RunIngestOptions, "deadlineMs">;
-    readonly lockOptions: { readonly timeoutSeconds: number };
+    readonly lockOptions: { readonly timeoutSeconds?: number };
 }
 
 /** Resolve the CLI deadline once, then prepare the exact option fragments sent
  * to `runIngest` and `withIngestLock`. Exported for boundary tests. */
 export const resolveIngestCommandTiming = (
-    input: IngestDeadlineInput & { readonly nowMs: number },
+    input: IngestDeadlineInput & { readonly nowMs: number; readonly deriveOnly?: boolean },
 ): IngestCommandTiming => {
     const decision = resolveIngestDeadlineSeconds(input);
     return {
@@ -210,7 +210,7 @@ export const resolveIngestCommandTiming = (
         runOptions: decision.seconds > 0
             ? { deadlineMs: input.nowMs + decision.seconds * 1000 }
             : {},
-        lockOptions: { timeoutSeconds: decision.seconds },
+        lockOptions: decision.seconds > 0 ? { timeoutSeconds: decision.seconds } : {},
     };
 };
 
@@ -394,8 +394,9 @@ export const cmdIngest = (
                 .exists(snapshotPath())
                 .pipe(Effect.orElseSucceed(() => true))),
             nowMs: deps.nowMs(),
+            deriveOnly: args.includes("--derive-only"),
         });
-        const timeoutSeconds = timing.lockOptions.timeoutSeconds;
+        const timeoutSeconds = timing.decision.seconds;
         if (timing.decision.upgraded) yield* Effect.logInfo(`ingest: ${timing.decision.reason}`);
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.

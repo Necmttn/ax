@@ -1,6 +1,6 @@
 ---
 name: dojo
-description: Surplus-quota training loop over the ax graph - the agent burns the remaining 5h/7d plan-quota window on self-improvement: locking pending verdicts, filling briefs, backtesting routing classes, minting proposals, running worktree experiments, and drafting upstream issue reports. Triggers when the user says "/dojo", "enter the dojo", "dojo time", "train overnight", "burn my surplus quota", "dream mode" (legacy name), or invokes /loop /dojo. Requires ax (axctl) on PATH and the local SurrealDB running. Do NOT auto-trigger on unrelated work or when the user merely mentions quotas.
+description: "Surplus-quota training loop over the ax graph - the agent burns the remaining 5h/7d plan-quota window on self-improvement: locking pending verdicts, filling briefs, backtesting routing classes, minting proposals, running worktree experiments, and drafting upstream issue reports. Triggers when the user says \"/dojo\", \"enter the dojo\", \"dojo time\", \"train overnight\", \"burn my surplus quota\", \"dream mode\" (legacy name), or invokes /loop /dojo. Requires ax (axctl) on PATH. ax uses embedded DuckDB; no database daemon is required. Do NOT auto-trigger on unrelated work or when the user merely mentions quotas."
 ---
 
 # ax:dojo - overnight training loop

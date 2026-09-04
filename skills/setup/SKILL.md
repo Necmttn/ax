@@ -27,13 +27,16 @@ an ax workflow (`ax improve list`, `ax recall …`).
 ## Install
 
 ```bash
-# 1. CLI binary (downloads the latest GitHub release; macOS-first,
-#    Linux works for ingest + CLI without launchd reactivity).
-curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
+# 1. Download the installer and inspect it before executing. Review the target
+#    paths first; this repository does not publish a checksum for install.sh.
+curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh -o /tmp/ax-install.sh
+less /tmp/ax-install.sh
+read -r -p "Execute this installer? [y/N] " answer
+case "$answer" in [yY][eE][sS]|[yY]) bash /tmp/ax-install.sh ;; *) echo "Installer not run." ;; esac
 
-# 2. Skills - installs this skill + ax:retro + ax:extract-workflow
-#    into ~/.claude/skills/ (and ~/.agents/skills/ for codex).
-npx skills add Necmttn/ax
+# 2. Review the skill changes and confirm before installing into the selected
+#    agent skill directory. Omit -g unless a global install is intentional.
+npx skills add Necmttn/ax -a codex
 
 # 3. First ingest - seeds the graph from the user's last 7 days of
 #    Claude Code + Codex transcripts.

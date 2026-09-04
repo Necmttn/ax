@@ -51,6 +51,8 @@ export interface StackSignal {
 
 export interface ProjectStack {
     readonly package: PackageInfo;
+    /** Package manifests selected for changed paths, including the root. */
+    readonly packages?: ReadonlyArray<PackageInfo>;
     readonly signals: ReadonlyArray<StackSignal>;
     readonly instructions: ReadonlyArray<InstructionMatch>;
 }
