@@ -15,8 +15,10 @@ import { posixPath } from "@ax/lib/shared/path";
 import {
     type InterventionSafetyContract,
     EXPERIMENT_STATUS_PUBLISHING,
+    EXPERIMENT_STATUS_SCAFFOLDED,
     EXPERIMENT_STATUS_TASK_EMITTED,
     PROPOSAL_STATUS_ACCEPTED,
+    PROPOSAL_STATUS_OPEN,
     PROPOSAL_STATUS_REJECTED,
     planAcceptCandidate,
     planLockVerdict,
@@ -293,30 +295,87 @@ const validateSig = (sig: string): void => {
     }
 };
 
-const saveAcceptedExperiment = (
+/**
+ * A first accept that reached the write and found the decision already made by
+ * someone else. It is a LOST RACE, not a fault: the caller turns it into a
+ * `wrong_status` result and publishes nothing.
+ */
+export class AcceptRaceLostError extends Schema.TaggedErrorClass<AcceptRaceLostError>(
+    "AcceptRaceLostError",
+)("AcceptRaceLostError", {
+    message: Schema.String,
+}) {}
+
+/**
+ * Phase one of a first accept: claim the proposal and create its experiment, in
+ * ONE transaction, and only if this attempt is the one making the decision.
+ *
+ * Both writes are GATED, and both gates protect a user decision the old
+ * unconditional pair could destroy:
+ *
+ *   - `WHERE status = 'open'` on the proposal. An unconditional UPDATE re-stamps
+ *     `accepted` over a REJECTED proposal, reversing the rejection, and over an
+ *     already-accepted one, re-opening a settled decision.
+ *   - `ON CONFLICT DO NOTHING` on the experiment. The previous `put` was an
+ *     UPSERT: a stale accept arriving after another accept finished and the user
+ *     locked a verdict would overwrite that row back to `publishing` with
+ *     `locked_verdict = NULL`, silently discarding the verdict.
+ *
+ * Losing either gate FAILS the transaction, so SQLite rolls the whole phase back
+ * - the proposal is never left claimed by an attempt that could not create its
+ * experiment - and the failure stops the publication before anything lands on
+ * disk.
+ */
+const claimAcceptedExperiment = (
     judgment: JudgmentService,
     proposalId: string,
     experimentId: string,
     status: string,
     values: { readonly artifactPath?: string; readonly taskPath?: string },
-) => judgment.transaction((transaction) => Effect.gen(function* () {
-    const now = new Date();
-    yield* transaction.exec(
-        "UPDATE proposal SET status = ?, updated_at = ? WHERE id = ?",
-        [PROPOSAL_STATUS_ACCEPTED, now, proposalId],
+): Effect.Effect<void, JudgmentError | AcceptRaceLostError> =>
+    judgment.transaction((transaction) => Effect.gen(function* () {
+        const now = new Date();
+        const claimed = yield* transaction.exec(
+            "UPDATE proposal SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+            [PROPOSAL_STATUS_ACCEPTED, now, proposalId, PROPOSAL_STATUS_OPEN],
+        );
+        if (claimed === 0) {
+            return yield* new AcceptRaceLostError({
+                message: `proposal ${proposalId} is no longer open`,
+            });
+        }
+        const created = yield* transaction.exec(
+            `INSERT INTO experiment
+                 (id, proposal, artifact, artifact_path, scaffolded_at, created_at, locked_verdict, status, task_path)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO NOTHING`,
+            [
+                experimentId,
+                proposalId,
+                null,
+                values.artifactPath ?? null,
+                values.artifactPath === undefined ? null : now,
+                now,
+                null,
+                status,
+                values.taskPath ?? null,
+            ],
+        );
+        if (created === 0) {
+            return yield* new AcceptRaceLostError({
+                message: `experiment ${experimentId} already exists`,
+            });
+        }
+    }));
+
+/** `null` when the claim landed, else why it lost. */
+const claimOutcome = (
+    claim: Effect.Effect<void, JudgmentError | AcceptRaceLostError>,
+): Effect.Effect<string | null, JudgmentError> =>
+    claim.pipe(
+        Effect.as(null as string | null),
+        Effect.catchTag("AcceptRaceLostError", (err) => Effect.succeed(err.message)),
     );
-    yield* transaction.put("experiment", {
-        id: experimentId,
-        proposal: proposalId,
-        artifact: null,
-        artifact_path: values.artifactPath ?? null,
-        scaffolded_at: values.artifactPath === undefined ? null : now,
-        created_at: now,
-        locked_verdict: null,
-        status,
-        task_path: values.taskPath ?? null,
-    });
-}));
 
 /** Whether the experiment reached `task_emitted`, and why not when it did not. */
 type PublicationFinish =
@@ -329,6 +388,19 @@ const ExperimentStateRow = Schema.Struct({
 });
 
 /**
+ * The ONLY statuses that mean "a brief for this experiment is published". A
+ * concurrent `ax improve lint` reconcile moves a reconciled row from
+ * `task_emitted` to `scaffolded`, so both count; `scaffolded` is deliberate, not
+ * incidental. Every other value - `publishing`, `retired`, `regressed`, and
+ * anything a later release adds - is NOT a published state, and a no-op update
+ * that lands on one is a failure to finish, never a success.
+ */
+const PUBLISHED_EXPERIMENT_STATUSES: ReadonlySet<string> = new Set([
+    EXPERIMENT_STATUS_TASK_EMITTED,
+    EXPERIMENT_STATUS_SCAFFOLDED,
+]);
+
+/**
  * Move an experiment off `publishing` once its brief is on disk.
  *
  * BOTH predicates are load-bearing. `status = 'publishing'` stops a second retry
@@ -337,10 +409,16 @@ const ExperimentStateRow = Schema.Struct({
  * at all - the status test alone cannot see that, because a locked row can still
  * read `publishing`.
  *
- * A no-op update is ambiguous on its own, so the row is re-read to tell the two
- * apart: another attempt that already finished the publication (complete), or a
- * locked/retired row this attempt must not claim (incomplete). Callers must not
- * report a completed publication for the second.
+ * A no-op update is ambiguous on its own, so the row is re-read. The order of
+ * the two tests below is the contract:
+ *
+ *   1. `locked_verdict` FIRST. A judged row is never claimed as this attempt's
+ *      completed publication, whatever its status says - including a row that
+ *      was retired or regressed while carrying a verdict, which a status-first
+ *      test would wave through without ever reading the lock.
+ *   2. Then an ALLOWLIST of published statuses. "not publishing any more" is not
+ *      the same claim as "published": `retired` and `regressed` both satisfy the
+ *      first and neither satisfies the second.
  */
 const finishPublication = (
     judgment: JudgmentService,
@@ -361,11 +439,22 @@ const finishPublication = (
         if (row === undefined) {
             return { finished: false, locked: false, reason: `experiment ${experimentKey} is gone` };
         }
-        // Another attempt got there first: the publication IS complete.
-        if (row.status !== EXPERIMENT_STATUS_PUBLISHING) return { finished: true };
-        return row.locked_verdict === null
-            ? { finished: false, locked: false, reason: `experiment ${experimentKey} could not be finished` }
-            : { finished: false, locked: true, reason: `experiment verdict already locked: ${row.locked_verdict}` };
+        if (row.locked_verdict !== null) {
+            // The status rides along in the reason so a locked row that another
+            // attempt HAD published still reports what is actually on record.
+            return {
+                finished: false,
+                locked: true,
+                reason: `experiment verdict already locked: ${row.locked_verdict} (status=${row.status})`,
+            };
+        }
+        // Another attempt got there first and published: complete.
+        if (PUBLISHED_EXPERIMENT_STATUSES.has(row.status)) return { finished: true };
+        return {
+            finished: false,
+            locked: false,
+            reason: `experiment ${experimentKey} is ${row.status}, not published`,
+        };
     });
 
 /** What a publish attempt did with the task path. */
@@ -546,9 +635,14 @@ export const acceptProposal = (
                     artifact_path: scaffold.path,
                 };
             }
-            yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, {
-                artifactPath: scaffold.path,
-            });
+            const skillClaim = yield* claimOutcome(claimAcceptedExperiment(
+                judgment, proposalKey, experimentKey, experimentStatus, { artifactPath: scaffold.path },
+            ));
+            if (skillClaim !== null) {
+                // Another accept settled this proposal while the stub was being
+                // written. The stub stays on disk; the decision is not reversed.
+                return { status: "wrong_status", message: skillClaim, artifact_path: scaffold.path };
+            }
             return {
                 status: "ok",
                 proposal_id: `proposal:${proposalKey}`,
@@ -592,9 +686,12 @@ export const acceptProposal = (
                     artifact_path: wfScaffold.path,
                 };
             }
-            yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, {
-                artifactPath: wfScaffold.path,
-            });
+            const wfClaim = yield* claimOutcome(claimAcceptedExperiment(
+                judgment, proposalKey, experimentKey, experimentStatus, { artifactPath: wfScaffold.path },
+            ));
+            if (wfClaim !== null) {
+                return { status: "wrong_status", message: wfClaim, artifact_path: wfScaffold.path };
+            }
             return {
                 status: "ok",
                 proposal_id: `proposal:${proposalKey}`,
@@ -641,7 +738,7 @@ export const acceptProposal = (
         // above authorized it); a resume publishes exclusively and keeps whatever
         // is already there. A failure propagates with the experiment still
         // `publishing`, so the next accept resumes instead of refusing.
-        const outcome = yield* publishTaskBrief({
+        const published = yield* publishTaskBrief({
             taskPath,
             content: taskContent,
             // Replacement needs the operator's explicit force on a first accept.
@@ -650,7 +747,7 @@ export const acceptProposal = (
             replace: resumed === null && opts.force === true,
             ...(resumed === null
                 ? {
-                    beforePublish: saveAcceptedExperiment(
+                    beforePublish: claimAcceptedExperiment(
                         judgment,
                         proposalKey,
                         experimentKey,
@@ -659,7 +756,22 @@ export const acceptProposal = (
                     ),
                 }
                 : {}),
-        });
+        }).pipe(
+            Effect.map((outcome) => ({ lost: null, outcome }) as const),
+            // A lost phase-one claim aborts the publish while the brief is still
+            // only a staging file, so nothing reaches the task path and the
+            // staging file is removed on the way out.
+            Effect.catchTag("AcceptRaceLostError", (err) =>
+                Effect.succeed({ lost: err.message, outcome: null } as const)),
+        );
+        if (published.lost !== null) {
+            return {
+                status: "wrong_status",
+                proposal_id: `proposal:${proposalKey}`,
+                message: `${published.lost}; nothing was published to ${taskPath}`,
+            };
+        }
+        const outcome = published.outcome;
 
         // Phase 3: a readable brief is on disk - this attempt's, or the one it
         // refused to replace - so the publication can be finished. This path
