@@ -7,6 +7,7 @@ import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName } from "@ax/lib/skill-id";
 import { skillRowId } from "@ax/lib/stable-id";
+import type { RealHookEffect } from "@ax/lib/shared/hook-effects";
 import { blobName, putBlobFromFile } from "@ax/lib/blob-store";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { JSONL_WORK_UNIT_WRITES, NORMALIZED_BATCH_WRITES } from "./stage/table-writes.ts";
@@ -138,21 +139,13 @@ export type HookProviderStatus = "progress_only" | "success" | "blocking_error";
 export type HookEffect = "allowed" | "blocked" | "injected_context" | "modified_input" | "notified" | "no_op" | "unknown";
 
 /**
- * The effects that mean a hook actually DID something to the run - the single
- * real-effect vocabulary, owned here beside {@link HookEffect} so no reader
- * invents a second one. `allowed`/`no_op`/`unknown` are fires with no observed
- * consequence and never count as an intervention.
- *
- * Consumers: `derive-run-evidence`'s policy-decision read (a `policy_decision`
- * event is by definition a real intervention) and `derive-opportunities`'
- * hook-form addressed detector.
+ * The four real-intervention effects live in `@ax/lib/shared/hook-effects` so a
+ * derivation needing them does not import this parser for four strings. The
+ * coupling back to the union this parser writes is TYPE-only, and it is checked:
+ * this alias stops compiling if the shared list ever names an effect that is not
+ * a {@link HookEffect}.
  */
-export const REAL_HOOK_EFFECTS: ReadonlyArray<HookEffect> = [
-    "blocked",
-    "injected_context",
-    "modified_input",
-    "notified",
-];
+export type _RealHookEffectsAreHookEffects = RealHookEffect extends HookEffect ? true : never;
 
 export interface HarnessHookEventWrite {
     readonly key: string;

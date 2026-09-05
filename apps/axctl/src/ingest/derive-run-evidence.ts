@@ -31,7 +31,7 @@ import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "@ax/lib/ids";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
 import { checkFamilyFromCommand, isCheckFamily } from "./check-family.ts";
-import { REAL_HOOK_EFFECTS } from "./transcripts.ts";
+import { REAL_HOOK_EFFECTS } from "@ax/lib/shared/hook-effects";
 import {
     runEvidenceEventRecordKey,
     runEvidenceRefRecordKey,

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -79,14 +79,26 @@ describe("overlapFilesMatch", () => {
 });
 
 describe("buildOpportunityRows", () => {
-    test("emits one bound row per match with a stable edge id", () => {
+    test("emits one row per match with a stable edge id and an ISO matched_at", () => {
         const rows = buildOpportunityRows("exp_1", [
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z" },
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_b", ts: "2026-05-25T01:00:00.000Z" },
         ]);
         expect(rows).toHaveLength(2);
-        expect(rows[0]).toMatchObject({ in_id: "exp_1", out_id: "edge_a", out_table: "later_fixed_by", was_addressed: false });
-        expect(rows[0]!.id).toBe(opportunityKey("exp_1", "edge_a"));
+        expect(rows[0]).toEqual({
+            id: opportunityKey("exp_1", "edge_a"),
+            out_id: "edge_a",
+            out_table: "later_fixed_by",
+            matched_at: "2026-05-25T00:00:00.000Z",
+            was_addressed: false,
+        });
+    });
+
+    test("carries no in_id - the replacement statement binds the experiment", () => {
+        const rows = buildOpportunityRows("exp_1", [
+            { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z" },
+        ]);
+        expect(rows[0]).not.toHaveProperty("in_id");
     });
 
     test("no matches -> no statements", () => {
@@ -138,6 +150,20 @@ describe("safeFileMtimeMs", () => {
             const when = new Date("2026-01-02T03:04:05.000Z");
             await utimes(file, when, when);
             expect(await runMtime(file)).toBe(when.getTime());
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("returns null for a directory - a directory mtime is not artifact activity", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-mtime-"));
+        try {
+            // The guidance path became a directory (a stray `mkdir -p`, a
+            // reshaped checkout). Its mtime moves whenever anything lands
+            // inside it, which says nothing about the guidance file.
+            const asDir = join(dir, "CLAUDE.md");
+            await mkdir(asDir);
+            expect(await runMtime(asDir)).toBeNull();
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
@@ -262,6 +288,22 @@ describe("hookOpportunityAddressed", () => {
     test("does not fall back to the window when the fire carries tool-call identity", () => {
         const fires = [invocation({ tool_call: "tool-call-9" })];
         expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1" }), fires)).toBe(false);
+    });
+
+    test("a named fire never credits a call whose own identity is unknown", () => {
+        // The fire names `toolu_1`; this call carries no `call_id` at all, so it
+        // is not the named call. Falling through to the window here would credit
+        // a call the fire demonstrably did not act on.
+        const fires = [invocation({ tool_call_id: "toolu_1" })];
+        expect(hookOpportunityAddressed(opportunity({ call_id: null }), fires)).toBe(false);
+    });
+
+    test("the row reference still wins over the provider id", () => {
+        // Both identities present and disagreeing: `tool_call` is the row this
+        // fire was recorded against, so it decides.
+        const fires = [invocation({ tool_call: "tool-call-1", tool_call_id: "toolu_other" })];
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1", call_id: "toolu_1" }), fires)).toBe(true);
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-2", call_id: "toolu_other" }), fires)).toBe(false);
     });
 
     test("falls back to the time window inside the same session when neither record has identity", () => {

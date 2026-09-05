@@ -12,7 +12,7 @@
  * by hand.
  */
 import { describe, expect } from "bun:test";
-import { mkdir, utimes } from "node:fs/promises";
+import { mkdir, rm, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
@@ -20,10 +20,22 @@ import { AxConfigTest } from "@ax/lib/config";
 import { FixturePlatform, publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
 import { Judgment, JudgmentLayer } from "@ax/lib/sqlite";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
+import { WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { acceptProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
-import { deriveOpportunities, type DeriveOpportunitiesStats } from "./derive-opportunities.ts";
+import {
+    deriveOpportunities,
+    opportunityKey,
+    replaceOpportunities,
+    type DeriveOpportunitiesStats,
+} from "./derive-opportunities.ts";
+import {
+    OPPORTUNITY_VERSION,
+    OPPORTUNITY_VERSION_PATH,
+    OPPORTUNITY_VERSION_SOURCE,
+} from "./opportunity-cache-version.ts";
 import { ingestTranscripts } from "./transcripts.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("opportunity artifact identity", {
@@ -212,13 +224,23 @@ const installHookExperiment = async (harness: Harness, opts: {
     expect(lint.reconciled).toHaveLength(1);
 };
 
-/** Ingest the transcripts, derive opportunities, and read back what landed. */
-const ingestAndDerive = async (
+/** One open cache fixture: the production DDL, a real ingest lock, and the real
+ *  sidecar behind `deriveOpportunities`. Handed to the body so a test can run
+ *  MORE THAN ONE pass and inspect what survived between them. */
+interface CacheSession {
+    readonly write: CacheWriteService;
+    /** Parse the fixture's transcripts through the real claude stage. */
+    readonly ingest: Effect.Effect<unknown, unknown, never>;
+    readonly derive: Effect.Effect<DeriveOpportunitiesStats, unknown, never>;
+    readonly rows: Effect.Effect<ReadonlyArray<OpportunityRow>, unknown, never>;
+    /** The stored derivation-version token, or null when no sentinel exists. */
+    readonly sentinel: Effect.Effect<string | null, unknown, never>;
+}
+
+const inCache = async <A>(
     harness: Harness,
-    seed?: (write: Parameters<Parameters<typeof publishCacheFixture>[2]>[0]) => Effect.Effect<unknown, unknown, never>,
-): Promise<{ readonly stats: DeriveOpportunitiesStats; readonly rows: ReadonlyArray<OpportunityRow> }> => {
-    let stats: DeriveOpportunitiesStats | null = null;
-    let rows: ReadonlyArray<OpportunityRow> = [];
+    body: (session: CacheSession) => Effect.Effect<A, unknown, never>,
+): Promise<A> => {
     // The claude stage walks this directory even when a scenario has no
     // transcripts (the guidance cases), so it always has to exist.
     await mkdir(harness.transcriptsDir, { recursive: true });
@@ -226,25 +248,49 @@ const ingestAndDerive = async (
         JudgmentLayer({ sidecarPath: harness.sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL }),
         BunFileSystem.layer,
     );
+    let captured: { readonly value: A } | null = null;
     await runWithPlatform(publishCacheFixture(join(harness.root, "cache"), dylibPath, (write) =>
         Effect.gen(function* () {
-            if (seed) yield* seed(write);
-            yield* ingestTranscripts(write).pipe(
-                Effect.provide(AxConfigTest({ paths: { transcriptsDir: harness.transcriptsDir } })),
-                Effect.provide(FixturePlatform),
-            );
-            stats = yield* deriveOpportunities(write).pipe(
-                Effect.provide(judgmentLayer),
-                Effect.scoped,
-            );
-            const read = yield* write.raw(
-                "SELECT in_id, out_id, out_table, was_addressed FROM opportunity ORDER BY out_id",
-            );
-            rows = read.rows as unknown as OpportunityRow[];
+            const session: CacheSession = {
+                write,
+                ingest: ingestTranscripts(write).pipe(
+                    Effect.provide(AxConfigTest({ paths: { transcriptsDir: harness.transcriptsDir } })),
+                    Effect.provide(FixturePlatform),
+                ),
+                derive: deriveOpportunities(write).pipe(Effect.provide(judgmentLayer), Effect.scoped),
+                rows: Effect.gen(function* () {
+                    const read = yield* write.raw(
+                        "SELECT in_id, out_id, out_table, was_addressed FROM opportunity ORDER BY out_id",
+                    );
+                    return read.rows as unknown as OpportunityRow[];
+                }),
+                sentinel: Effect.gen(function* () {
+                    const read = yield* write.raw(
+                        `SELECT sha FROM ${WATERMARK_TABLE} WHERE source_kind = ? AND path = ?`,
+                        [OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH],
+                    );
+                    const row = (read.rows as unknown as Array<{ sha: string | null }>)[0];
+                    return row?.sha ?? null;
+                }),
+            };
+            captured = { value: yield* body(session) };
         })));
-    if (stats === null) throw new Error("deriveOpportunities did not run");
-    return { stats, rows };
+    if (captured === null) throw new Error("the cache body did not complete");
+    return (captured as { readonly value: A }).value;
 };
+
+/** Ingest the transcripts, derive opportunities once, and read back what landed. */
+const ingestAndDerive = async (
+    harness: Harness,
+    seed?: (write: CacheWriteService) => Effect.Effect<unknown, unknown, never>,
+): Promise<{ readonly stats: DeriveOpportunitiesStats; readonly rows: ReadonlyArray<OpportunityRow> }> =>
+    inCache(harness, (session) =>
+        Effect.gen(function* () {
+            if (seed) yield* seed(session.write);
+            yield* session.ingest;
+            const stats = yield* session.derive;
+            return { stats, rows: yield* session.rows };
+        }));
 
 /** Transcript timestamps must sit after the observed install, which happens at
  *  the real clock during `lint`. A minute of margin keeps it deterministic. */
@@ -458,6 +504,39 @@ describe("hook form: observed marker identity", () => {
         expect(rows.map((r) => r.was_addressed)).toEqual([false]);
     });
 
+    dtest("a failure from before the install was never this hook's opportunity", async () => {
+        const harness = makeHarness("ax-opp-identity-window-");
+        const command = "bun ~/.ax/hooks/guard.ts # ax:74da7418";
+        await installHookExperiment(harness, {
+            sig: "74da7418",
+            eventName: "PreToolUse",
+            settingsCommand: command,
+        });
+        const beforeInstall = new Date(Date.now() - 3_600_000).toISOString();
+        await writeTranscript(harness, SESSION, [
+            assistantToolUse({ sessionId: SESSION, toolUseId: "toolu_old", ts: beforeInstall }),
+            failingToolResult({
+                sessionId: SESSION,
+                toolUseId: "toolu_old",
+                ts: beforeInstall,
+                text: "error: pathspec did not match",
+            }),
+            assistantToolUse({ sessionId: SESSION, toolUseId: "toolu_new", ts: afterInstall(0) }),
+            failingToolResult({
+                sessionId: SESSION,
+                toolUseId: "toolu_new",
+                ts: afterInstall(500),
+                text: `PreToolUse:Bash hook error: [${command}]: BLOCKED`,
+            }),
+        ]);
+
+        const { stats, rows } = await ingestAndDerive(harness);
+        // Both calls failed; only the one after the observed install counts.
+        expect(stats.byHookForm).toBe(1);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.out_id).toContain("toolu_new");
+    });
+
     dtest("an uninstalled hook has unavailable evidence, not zero addressed", async () => {
         const harness = makeHarness("ax-opp-identity-uninstalled-");
         const command = "bun ~/.ax/hooks/guard.ts # ax:74da7418";
@@ -608,5 +687,172 @@ describe("stale opportunity rows", () => {
             out_table: "friction_event", was_addressed: true,
         });
         expect(rows.some((r) => r.in_id === experimentKey && r.out_id === "friction-1")).toBe(true);
+    });
+});
+
+describe("failure-safe replacement", () => {
+    dtest("a failed replacement preserves every previous row", async () => {
+        const harness = makeHarness("ax-opp-identity-atomic-");
+        const keep = {
+            id: "row-keep", out_id: "evidence-keep", out_table: "tool_call",
+            matched_at: "2026-09-01T00:00:00.000Z", was_addressed: true,
+        };
+        const drop = {
+            id: "row-drop", out_id: "evidence-drop", out_table: "tool_call",
+            matched_at: "2026-09-01T01:00:00.000Z", was_addressed: false,
+        };
+        const other = {
+            id: "row-other", out_id: "evidence-other", out_table: "tool_call",
+            matched_at: "2026-09-01T02:00:00.000Z", was_addressed: true,
+        };
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                yield* replaceOpportunities(session.write, "experiment-a", [keep, drop]);
+                yield* replaceOpportunities(session.write, "experiment-b", [other]);
+                const before = yield* session.rows;
+
+                // One unusable timestamp in an otherwise ordinary replacement:
+                // it would have flipped `row-keep` and deleted `row-drop`.
+                const failed = yield* replaceOpportunities(session.write, "experiment-a", [
+                    { ...keep, was_addressed: false },
+                    { ...drop, id: "row-new", matched_at: "not-a-timestamp" },
+                ]).pipe(Effect.result);
+
+                return { failed, before, after: yield* session.rows };
+            }));
+
+        expect(result.failed._tag).toBe("Failure");
+        // Not "most rows survived" - the previous state is byte-for-byte intact.
+        expect(result.after).toEqual(result.before);
+        expect(result.after).toHaveLength(3);
+    });
+
+    dtest("an empty replacement clears only the selected experiment", async () => {
+        const harness = makeHarness("ax-opp-identity-empty-");
+        const mine = {
+            id: "row-mine", out_id: "evidence-mine", out_table: "tool_call",
+            matched_at: "2026-09-01T00:00:00.000Z", was_addressed: true,
+        };
+        const theirs = {
+            id: "row-theirs", out_id: "evidence-theirs", out_table: "tool_call",
+            matched_at: "2026-09-01T01:00:00.000Z", was_addressed: true,
+        };
+
+        const rows = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                yield* replaceOpportunities(session.write, "experiment-a", [mine]);
+                yield* replaceOpportunities(session.write, "experiment-b", [theirs]);
+                yield* replaceOpportunities(session.write, "experiment-a", []);
+                return yield* session.rows;
+            }));
+
+        expect(rows.map((r) => r.out_id)).toEqual(["evidence-theirs"]);
+    });
+});
+
+describe("guidance form: a failed stat is unavailable evidence", () => {
+    dtest("clears the experiment's rows instead of publishing them as unaddressed", async () => {
+        const harness = makeHarness("ax-opp-identity-stat-");
+        const guidancePath = join(harness.root, "CLAUDE.md");
+        const experimentKey = await installGuidanceExperiment(harness, { sig: "use-rg", guidancePath });
+        const correctionAt = new Date(Date.now() + 60_000);
+        await utimes(guidancePath, correctionAt, correctionAt);
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
+                const first = yield* session.derive;
+                const seeded = yield* session.rows;
+
+                // The recorded artifact goes away between runs. The detector now
+                // has no reading at all - which is not the same as a reading of
+                // "ignored", so the old rows must not simply stay.
+                yield* Effect.promise(() => rm(guidancePath));
+                const second = yield* session.derive;
+                return { first, seeded, second, after: yield* session.rows };
+            }));
+
+        expect(result.first.byGuidanceForm).toBe(1);
+        expect(result.seeded.map((r) => r.in_id)).toEqual([experimentKey]);
+        expect(result.second.artifactUnavailable).toBe(1);
+        expect(result.second.byGuidanceForm).toBe(0);
+        expect(result.after).toEqual([]);
+    });
+
+    dtest("a guidance path that became a directory clears its stale rows", async () => {
+        const harness = makeHarness("ax-opp-identity-dir-");
+        const guidancePath = join(harness.root, "CLAUDE.md");
+        const experimentKey = await installGuidanceExperiment(harness, { sig: "use-rg", guidancePath });
+        const correctionAt = new Date(Date.now() + 60_000);
+        await utimes(guidancePath, correctionAt, correctionAt);
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
+                yield* session.derive;
+                const seeded = yield* session.rows;
+
+                // The file is replaced by a directory of the same name. Its
+                // mtime is fresh, so the old detector would have called every
+                // opportunity addressed on the strength of a `mkdir`.
+                yield* Effect.promise(() => rm(guidancePath));
+                yield* Effect.promise(() => mkdir(guidancePath));
+                const second = yield* session.derive;
+                return { seeded, second, after: yield* session.rows };
+            }));
+
+        expect(result.seeded.map((r) => r.in_id)).toEqual([experimentKey]);
+        expect(result.second.artifactUnavailable).toBe(1);
+        expect(result.second.byGuidanceForm).toBe(0);
+        expect(result.after).toEqual([]);
+    });
+});
+
+describe("derivation-version sentinel", () => {
+    dtest("stamps a complete pass, and a later failed pass revokes it", async () => {
+        const harness = makeHarness("ax-opp-identity-sentinel-");
+        const guidancePath = join(harness.root, "CLAUDE.md");
+        const experimentKey = await installGuidanceExperiment(harness, { sig: "use-rg", guidancePath });
+        const correctionAt = new Date(Date.now() + 60_000);
+        await utimes(guidancePath, correctionAt, correctionAt);
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
+                yield* session.derive;
+                const afterSuccess = yield* session.sentinel;
+                const rowsAfterSuccess = yield* session.rows;
+
+                // A second correction gives the next pass a NEW row to insert,
+                // and another experiment already owns that row id - so the
+                // replacement statement fails.
+                yield* session.write.putMany("friction_event", [correctionRow("friction-2", correctionAt)]);
+                yield* replaceOpportunities(session.write, "experiment-elsewhere", [{
+                    id: opportunityKey(experimentKey, "friction-2"),
+                    out_id: "evidence-elsewhere",
+                    out_table: "friction_event",
+                    matched_at: correctionAt.toISOString(),
+                    was_addressed: true,
+                }]);
+
+                const failed = yield* session.derive.pipe(Effect.result);
+                return {
+                    afterSuccess,
+                    rowsAfterSuccess,
+                    failed,
+                    afterFailure: yield* session.sentinel,
+                    rows: yield* session.rows,
+                };
+            }));
+
+        expect(result.afterSuccess).toBe(OPPORTUNITY_VERSION);
+        expect(result.failed._tag).toBe("Failure");
+        // A cache published mid-failure carries no success certificate, even
+        // though the previous pass had earned one.
+        expect(result.afterFailure).toBeNull();
+        // ...and the failed pass changed none of the rows it had already written.
+        expect(result.rows.filter((r) => r.in_id === experimentKey))
+            .toEqual(result.rowsAfterSuccess.filter((r) => r.in_id === experimentKey));
     });
 });
