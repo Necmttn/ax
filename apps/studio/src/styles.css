@@ -1983,132 +1983,6 @@ td.skill-cell .description {
     letter-spacing: 0.06em;
 }
 
-/* Live ingest stage checklist */
-.ingest-stages {
-    list-style: none;
-    margin: 8px 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.ingest-stage {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    font-size: 13px;
-}
-
-.ingest-stage-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-/* Skipped-file failures under a stage row (per-file isolation, issue #257):
-   collapsed count summary, expands to the capped detail list. */
-.ingest-stage-skipped {
-    margin: 0 0 2px 26px;
-    font-size: 12px;
-}
-
-.ingest-stage-skipped > summary {
-    cursor: pointer;
-    color: var(--gold);
-    width: fit-content;
-}
-
-.ingest-stage-skipped-list {
-    list-style: none;
-    margin: 4px 0 2px;
-    padding: 0 0 0 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    border-left: 2px solid var(--line);
-}
-
-.ingest-stage-skipped-list > li {
-    display: flex;
-    flex-wrap: wrap;
-    column-gap: 8px;
-    min-width: 0;
-}
-
-.ingest-stage-skipped-path {
-    font-family: inherit;
-    overflow-wrap: anywhere;
-}
-
-.ingest-stage-skipped-error {
-    color: var(--muted);
-    overflow-wrap: anywhere;
-}
-
-.ingest-stage-skipped-overflow {
-    color: var(--muted);
-    font-style: italic;
-}
-
-.ingest-stage-glyph {
-    width: 16px;
-    text-align: center;
-    font-weight: 700;
-}
-
-.ingest-stage-name {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.ingest-stage-status {
-    font-size: 11px;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-}
-
-.ingest-stage-bar {
-    flex: 0 0 120px;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--track);
-    overflow: hidden;
-}
-
-.ingest-stage-bar-fill {
-    display: block;
-    height: 100%;
-    background: var(--green);
-    transition: width 0.2s ease-out;
-}
-
-.ingest-stage.ok .ingest-stage-glyph {
-    color: var(--green);
-}
-
-.ingest-stage.error .ingest-stage-glyph {
-    color: var(--red);
-}
-
-.ingest-stage.running .ingest-stage-glyph {
-    color: var(--muted);
-    animation: ingest-pulse 1s ease-in-out infinite;
-}
-
-@keyframes ingest-pulse {
-    0%, 100% { opacity: 0.35; }
-    50% { opacity: 1; }
-}
-
 .wrapped-heatmap {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(14px, 1fr));
@@ -2361,7 +2235,6 @@ td.skill-cell .description {
 
 @media (prefers-reduced-motion: reduce) {
     .live-indicator.on .live-dot,
-    .ingest-stage.running .ingest-stage-glyph,
     tr.row-just-saved td {
         animation: none;
     }
@@ -2446,44 +2319,6 @@ td.skill-cell .description {
 }
 .shell-footer a:hover {
     text-decoration: underline;
-}
-
-/* ---- ingest splash overlay ---- */
-.ingest-splash {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(20, 18, 14, 0.45);
-    backdrop-filter: blur(2px);
-}
-.ingest-splash-panel {
-    width: min(560px, calc(100vw - 32px));
-    max-height: calc(100vh - 64px);
-    overflow-y: auto;
-    background: var(--panel);
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
-}
-.masthead-ingest-btn {
-    font-size: 12px;
-    padding: 4px 10px;
-    cursor: pointer;
-    background: var(--track);
-    color: var(--muted);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    font-family: ui-monospace, Menlo, monospace;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-.masthead-ingest-btn:hover {
-    border-color: var(--green);
-    color: var(--ink);
-}
-.masthead-ingest-error {
-    max-width: 280px;
 }
 
 /* ---- wrapped recap cards (trace cards) ---- */
