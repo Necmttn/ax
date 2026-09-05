@@ -307,6 +307,12 @@ const improveAcceptCommand = Command.make(
                 }
                 process.exit(2);
             }
+            if (result.status === "verdict_locked") {
+                // The brief may be on disk, but the experiment was judged and
+                // must not be moved - never print this as an emitted task.
+                console.error(result.message ?? "experiment verdict already locked");
+                process.exit(2);
+            }
             if (result.status === "unsupported_form") {
                 fail(result.message ?? "unsupported form");
             }
