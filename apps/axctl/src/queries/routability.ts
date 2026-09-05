@@ -14,7 +14,7 @@
  */
 import { Effect, Schema } from "effect";
 import { NumberFromBigIntColumn } from "@ax/lib/duckdb/columns";
-import { cacheRows } from "@ax/lib/duckdb/query";
+import { cacheRows, cacheRowsOrFail } from "@ax/lib/duckdb/query";
 import { daysAgoExpr } from "@ax/lib/duckdb/clause";
 import { JUDGMENT_GUARD_RE } from "./routing-tune.ts";
 import { MODEL_ALIASES, reprice } from "./reprice.ts";
@@ -728,11 +728,13 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
     function* (input: RoutabilityInput) {
         const days = sinceDays(input.days);
 
+        // Every input contributes to the decision. A failed read is unavailable
+        // evidence, not an empty measured set; transport boundaries report it.
         const [turnRows, toolCallRows, usageRows, agentModelRows] = yield* Effect.all([
-            cacheRows(TurnRow, { sql: TURNS_SQL, params: [days] }, "routability turns"),
-            cacheRows(ToolCallRow, { sql: TOOL_CALLS_SQL, params: [days] }, "routability tool calls"),
-            cacheRows(TurnUsageRow, { sql: TURN_USAGE_SQL, params: [days] }, "routability turn usage"),
-            cacheRows(AgentModelRow, { sql: AGENT_MODELS_SQL, params: [] }, "routability agent models"),
+            cacheRowsOrFail(TurnRow, { sql: TURNS_SQL, params: [days] }),
+            cacheRowsOrFail(ToolCallRow, { sql: TOOL_CALLS_SQL, params: [days] }),
+            cacheRowsOrFail(TurnUsageRow, { sql: TURN_USAGE_SQL, params: [days] }),
+            cacheRowsOrFail(AgentModelRow, { sql: AGENT_MODELS_SQL, params: [] }),
         ], { concurrency: 4 });
 
         // Env-gated (#911): `loadLearnedJudgmentModel` returns `undefined` WITHOUT
