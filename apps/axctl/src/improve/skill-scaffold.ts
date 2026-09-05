@@ -13,8 +13,9 @@
  * the existing path or error.
  */
 
-import { Effect, FileSystem, type PlatformError } from "effect";
+import { Effect, FileSystem, PlatformError } from "effect";
 import { homedir } from "node:os";
+import { stringify as stringifyYaml } from "yaml";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 
@@ -59,9 +60,7 @@ export const scaffoldContent = (input: ScaffoldInput): string => {
     const trigger = input.triggerPattern?.trim();
     const impact = input.expectedImpact?.trim();
     return `---
-name: ${nameKebab}
-description: ${description}
----
+${stringifyYaml({ name: nameKebab, description })}---
 
 # ${input.title}
 
@@ -85,6 +84,13 @@ export const scaffoldSkill = (
     opts: ScaffoldOptions,
 ): Effect.Effect<ScaffoldResult, PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        if (!kebabCase(opts.input.title)) {
+            return yield* Effect.fail(PlatformError.badArgument({
+                module: "skill-scaffold",
+                method: "scaffoldSkill",
+                description: "Skill title must contain at least one ASCII letter or digit after normalization",
+            }));
+        }
         const fs = yield* FileSystem.FileSystem;
         const dir = skillScaffoldDir(opts.input.title, opts.baseDir);
         const path = posixPath.join(dir, "SKILL.md");
