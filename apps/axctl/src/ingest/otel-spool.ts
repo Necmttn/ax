@@ -149,6 +149,55 @@ const parseBody = (body: string): unknown | undefined => {
     }
 };
 
+/** Cursor lives in the existing watermark sha column, not in the judgment store.
+ * The suffix verifies the old boundary after same-inode truncation/rewrite.
+ * Reads stop at discovery size, so appends during parsing remain for next run.
+ */
+const readSpoolTail = (fs: FileSystem.FileSystem, candidate: JsonlFileCandidate, previous: string | null) =>
+    Effect.gen(function* () {
+        const file = yield* fs.open(candidate.path);
+        const stat = yield* file.stat;
+        const identity = `${stat.dev}:${stat.ino._tag === "Some" ? stat.ino.value : "unknown"}`;
+        const end = Math.min(candidate.sizeBytes, Number(stat.size));
+        const readRange = (start: number, length: number) => Effect.gen(function* () {
+            yield* file.seek(start, "start");
+            const chunks: Uint8Array[] = [];
+            let remaining = length;
+            while (remaining > 0) {
+                const chunk = yield* file.readAlloc(Math.min(remaining, 64 * 1024));
+                if (chunk._tag === "None" || chunk.value.length === 0) break;
+                chunks.push(chunk.value);
+                remaining -= chunk.value.length;
+            }
+            return Buffer.concat(chunks);
+        });
+        let start = 0;
+        if (previous !== null) {
+            let cursor: unknown;
+            try { cursor = JSON.parse(previous); } catch { cursor = null; }
+            if (cursor !== null && typeof cursor === "object") {
+                const c = cursor as Record<string, unknown>;
+                if (c.version === 1 && c.identity === identity && typeof c.offset === "number"
+                    && Number.isSafeInteger(c.offset) && c.offset > 0 && c.offset <= end
+                    && typeof c.anchor === "string") {
+                    const boundary = yield* readRange(Math.max(0, c.offset - 256), Math.min(c.offset, 256));
+                    if (new Bun.CryptoHasher("sha256").update(boundary).digest("hex") === c.anchor) start = c.offset;
+                }
+            }
+        }
+        const bytes = yield* readRange(start, end - start);
+        // A receiver can be in the middle of an append. Never consume an
+        // unterminated record, including a partial UTF-8 code point.
+        const complete = bytes.lastIndexOf(10) + 1;
+        const offset = start + complete;
+        const anchorBytes = yield* readRange(Math.max(0, offset - 256), Math.min(offset, 256));
+        return {
+            text: bytes.subarray(0, complete).toString("utf8"),
+            sha: JSON.stringify({ version: 1, identity, offset,
+                anchor: new Bun.CryptoHasher("sha256").update(anchorBytes).digest("hex") }),
+        };
+    }).pipe(Effect.scoped);
+
 export interface IngestOtelSpoolOptions {
     readonly spoolDir?: string;
     readonly runId?: string;
@@ -198,17 +247,11 @@ export const ingestOtelSpool = (
             forceEnv: "AX_REDERIVE_OTEL_SPOOL",
             source: "otel-spool",
             ...(opts.runId === undefined ? {} : { runId: opts.runId }),
-            processFile: (candidate) =>
+            processFile: (candidate, _index, loop) =>
                 Effect.gen(function* () {
-                    // Whole-file read (not a true tail): the daily spool file is
-                    // re-read in full whenever it changes. The work-unit
-                    // watermark (jsonl-work-unit.ts) skips UNCHANGED files, so a
-                    // quiescent day is not re-read; only a file that grew is read
-                    // whole. A real offset tail is a larger change, deferred
-                    // past the wave-1 seam.
-                    const text = yield* fs.readFileString(candidate.path);
+                    const tail = yield* readSpoolTail(fs, candidate, loop.storedSha(candidate.path));
                     const writer = yield* OtelWriter;
-                    for (const line of text.split("\n")) {
+                    for (const line of tail.text.split("\n")) {
                         if (line.trim().length === 0) continue;
                         const envelope = decodeEnvelope(line);
                         const signal = envelope ? OTLP_SIGNAL_PATHS[envelope.path] : undefined;
@@ -237,7 +280,7 @@ export const ingestOtelSpool = (
                         payloads += 1;
                         rows += normalized.length;
                     }
-                    return true;
+                    return { sha: tail.sha };
                 }),
         }).pipe(Effect.provide(OtelWriterLive(write)));
 
