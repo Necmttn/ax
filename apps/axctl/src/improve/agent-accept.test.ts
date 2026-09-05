@@ -5,6 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { buildAgentAcceptPrompt } from "./agent-accept.ts";
 import { acceptProposal, shouldScaffoldWorkflowSkill } from "./actions.ts";
@@ -609,12 +610,11 @@ describe("acceptProposal task publication", () => {
             runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
         ]);
 
-        // Whichever attempt loses the exclusive publish finds a regular file that
-        // appeared after its own probe, and keeps it rather than overwriting.
-        expect([first.status, second.status]).toContain("ok");
-        for (const result of [first, second]) {
-            expect(["ok", "wrong_status", "scaffold_exists"]).toContain(result.status);
-        }
+        // Exactly one attempt claims the proposal. The loser's phase-one gate
+        // fails inside the transaction, so it never publishes and never
+        // re-stamps the decision.
+        expect([first.status, second.status].filter((s) => s === "ok")).toHaveLength(1);
+        expect([first.status, second.status].filter((s) => s === "wrong_status")).toHaveLength(1);
         expect(readdirSync(root).filter((name) => name === `${sig}.md`)).toHaveLength(1);
         expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
         expect(stagingFiles(root, sig)).toHaveLength(0);
@@ -631,6 +631,104 @@ describe("acceptProposal task publication", () => {
         expect(forced.status).toBe("ok");
         expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
         expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+    });
+
+    /**
+     * Drive a REAL concurrent state change: the trigger fires inside the accept
+     * transaction, so by the time the publication tries to finish, the row
+     * already carries the status (and verdict) another actor set. No mocks - the
+     * database moves the row exactly as `ax improve housekeep` or a verdict lock
+     * would.
+     */
+    const acceptWithExperimentTrigger = (sigSuffix: string, setClause: string) =>
+        runWithProposal(
+            { ...fixture, id: `state-${sigSuffix}`, dedupe_sig: `state_${sigSuffix}` },
+            (_judgment, root) => Effect.gen(function* () {
+                const accepted = yield* acceptProposal({ sigOrId: `state_${sigSuffix}`, taskDir: root });
+                const stored = yield* findStoredProposal(`state_${sigSuffix}`);
+                return { accepted, root, stored, sig: `state_${sigSuffix}` };
+            }),
+            `CREATE TRIGGER move_experiment AFTER INSERT ON experiment
+             BEGIN UPDATE experiment SET ${setClause} WHERE id = NEW.id; END;`,
+        );
+
+    test.each([
+        ["retired", "status = 'retired'", null],
+        ["regressed", "status = 'regressed'", null],
+        ["retired_locked", "status = 'retired', locked_verdict = 'no_longer_needed'", "no_longer_needed"],
+        ["regressed_locked", "status = 'regressed', locked_verdict = 'regressed'", "regressed"],
+    ] as const)(
+        "does not report a completed publication when the experiment goes %s",
+        async (label, setClause, lockedVerdict) => {
+            const result = await acceptWithExperimentTrigger(label, setClause);
+
+            // "not publishing any more" is not "published": neither state may
+            // report success, and a locked row reports the lock, not the status.
+            expect(result.accepted.status).toBe(lockedVerdict === null ? "wrong_status" : "verdict_locked");
+            expect(result.accepted.message).toContain("was left in place and the acceptance was not finished");
+            if (lockedVerdict === null) {
+                expect(result.accepted.message).toContain("not published");
+            } else {
+                expect(result.accepted.message).toContain(`verdict already locked: ${lockedVerdict}`);
+            }
+            // The row keeps the state the other actor set - nothing was moved to
+            // task_emitted behind their back.
+            expect(result.stored?.experiment?.status).toBe(setClause.includes("retired") ? "retired" : "regressed");
+            expect(result.stored?.experiment?.locked_verdict).toBe(lockedVerdict);
+            // The brief itself was published and is left in place.
+            expect(readFileSync(join(result.root, `${result.sig}.md`), "utf8")).toContain(`<!--ax:${result.sig}-->`);
+            expect(stagingFiles(result.root, result.sig)).toHaveLength(0);
+        },
+    );
+
+    test("treats a concurrent lint reconcile to scaffolded as published", async () => {
+        // `ax improve lint` moves a reconciled row task_emitted -> scaffolded.
+        // That IS a published state, so the publication counts as finished.
+        const result = await acceptWithExperimentTrigger("scaffolded", "status = 'scaffolded'");
+
+        expect(result.accepted.status).toBe("ok");
+        expect(result.stored?.experiment?.status).toBe("scaffolded");
+        expect(readFileSync(join(result.root, `${result.sig}.md`), "utf8")).toContain(`<!--ax:${result.sig}-->`);
+    });
+
+    test("a stale first accept never overwrites a finished, verdict-locked experiment", async () => {
+        // The state a stale accept walks into: another accept already published
+        // and the user locked a verdict, but this attempt still reads the
+        // proposal as open (its plan snapshot is out of date).
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-stale-"));
+        const experimentKey = stableId("experiment", [fixture.id]);
+        const settled = new Date("2026-01-02T00:00:00Z");
+        await runInRoot(root, (judgment) => Effect.gen(function* () {
+            yield* seedProposal(judgment, fixture);
+            yield* judgment.put("experiment", {
+                id: experimentKey,
+                proposal: fixture.id,
+                artifact: null,
+                artifact_path: null,
+                scaffolded_at: null,
+                created_at: settled,
+                locked_verdict: "adopted",
+                status: "task_emitted",
+                task_path: join(root, `${sig}.md`),
+            });
+        }));
+
+        const stale = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(stale.status).toBe("wrong_status");
+        expect(stale.message).toContain("nothing was published");
+        // The verdict and the finished status survive: no upsert reset them.
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
+        expect(state.experimentId).toBe(experimentKey);
+        const stored = await runInRoot(root, () => findStoredProposal(sig));
+        expect(stored?.experiment?.locked_verdict).toBe("adopted");
+        expect(stored?.experiment?.created_at.toISOString()).toBe(settled.toISOString());
+        // The whole phase rolled back, so the proposal was not claimed either.
+        expect(state.proposalStatus).toBe("open");
+        // And nothing reached the task path.
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
     });
 
     test("does not report a completed publication for a verdict-locked experiment", async () => {
