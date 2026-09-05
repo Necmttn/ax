@@ -136,16 +136,14 @@ interface Edit {
 }
 
 export type HookProviderStatus = "progress_only" | "success" | "blocking_error";
-export type HookEffect = "allowed" | "blocked" | "injected_context" | "modified_input" | "notified" | "no_op" | "unknown";
-
 /**
- * The four real-intervention effects live in `@ax/lib/shared/hook-effects` so a
- * derivation needing them does not import this parser for four strings. The
- * coupling back to the union this parser writes is TYPE-only, and it is checked:
- * this alias stops compiling if the shared list ever names an effect that is not
- * a {@link HookEffect}.
+ * Every effect this parser can write. The four real-intervention members are
+ * BUILT FROM `@ax/lib/shared/hook-effects`, so a derivation that needs only
+ * those four does not import this parser to get them, and the two cannot drift
+ * apart: they are literally the same type here. The rest are fires with no
+ * observed consequence.
  */
-export type _RealHookEffectsAreHookEffects = RealHookEffect extends HookEffect ? true : never;
+export type HookEffect = RealHookEffect | "allowed" | "no_op" | "unknown";
 
 export interface HarnessHookEventWrite {
     readonly key: string;
