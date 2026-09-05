@@ -223,4 +223,4 @@ dtest("deriveCheckpoints counts subsequent sessions against production DDL and p
     const after = await observe(now);
     expect(after.stats.checkpointsInserted).toBe(0);
     expect(after.rows).toEqual(forced.rows);
-}, 90_000); // Production DDL setup publishes 11 snapshots and derives 17 times.
+}, 90_000); // Multiple production snapshots and checkpoint refreshes share this budget.
