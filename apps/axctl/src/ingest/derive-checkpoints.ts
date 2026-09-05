@@ -2,7 +2,7 @@
  * Derive-Checkpoints Stage (Phase C6).
  *
  * For each active experiment, at the +3 / +10 / +30 session marks measured
- * by count of sessions created after experiment.created_at, emit one
+ * by count of sessions started after experiment.created_at, emit one
  * `checkpoint` row carrying:
  *  - measured  : { opportunities, addressed, ratio, built }
  *  - suggested : adopted | ignored | regressed | no_longer_needed | partial
@@ -12,7 +12,7 @@
  * may ship eight sessions in a day or none in a weekend. The verdict should
  * ride exposure to the pattern, not the wall clock. See issue #83.
  *
- * v1 exposure definition: count of sessions whose `created_at` is after
+ * v1 exposure definition: count of sessions whose `started_at` is after
  * `experiment.created_at`. (Refinements to narrow this to "sessions that
  * touched the artifact file" or "sessions that fired the trigger pattern"
  * are tracked in follow-ups.)
@@ -137,7 +137,7 @@ export const deriveCheckpoints = (
             const [opportunityRows, addressedRows, sessionRows] = yield* Effect.all([
                 cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ?", [experimentKey]),
                 cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM opportunity WHERE in_id = ? AND was_addressed = true", [experimentKey]),
-                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM session WHERE created_at > ?", [exp.created_at]),
+                cache.rows(CountRow, "SELECT count(*)::INTEGER AS count FROM session WHERE started_at > ?", [exp.created_at]),
             ], { concurrency: 3 });
             const sessionsSince = sessionRows[0]?.count ?? 0;
             const due = dueCheckpointKinds(sessionsSince, existing);
