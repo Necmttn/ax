@@ -31,6 +31,7 @@ import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import { stableDigest } from "@ax/lib/ids";
 import { EDIT_TOOL_NAMES } from "@ax/lib/shared/tool-classes";
 import { checkFamilyFromCommand, isCheckFamily } from "./check-family.ts";
+import { REAL_HOOK_EFFECTS } from "@ax/lib/shared/hook-effects";
 import {
     runEvidenceEventRecordKey,
     runEvidenceRefRecordKey,
@@ -582,7 +583,7 @@ export const policyDecisionSql = (since: number | undefined): string =>
     `SELECT id, session, tool_call AS toolCall,
             CAST(ts AS VARCHAR) AS ts, hook_name AS hookName, effect, provider_status AS providerStatus
      FROM hook_command_invocation
-     WHERE session IS NOT NULL AND effect IN ('blocked', 'injected_context', 'modified_input', 'notified') ${sinceAnd(since)}`;
+     WHERE session IS NOT NULL AND effect IN (${REAL_HOOK_EFFECTS.map((e) => `'${e}'`).join(", ")}) ${sinceAnd(since)}`;
 
 // Repo state: each session's checkout (single-hop derefs for repo identity).
 // NOTE: dirty is intentionally not read - the git ingest writes it always-false.
