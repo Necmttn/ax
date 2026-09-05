@@ -30,8 +30,8 @@ unrelated context into the loop.
 - Window for hook signals: last 7 days. Widen to 30 if evidence is sparse.
 - Don't apply changes silently. Every accept/reject/verdict gets the
   user's explicit yes per row.
-- The retro is read-mostly. Skill scaffolds + verdict locks are the only
-  side-effects.
+- The retro is read-mostly. Its side-effects are the Step 1 checkpoint
+  measurements, the task briefs `accept` emits, and verdict locks.
 
 ## Workflow
 
@@ -91,15 +91,43 @@ picks it up.
 
 ### Step 1 - Snapshot
 
-Run silently (parallel where possible):
+Measure first, then read. The checkpoint pass is what turns due windows
+into current ones; a verdict read taken before it reports whatever the
+last run happened to leave behind.
 
-```bash
-ax improve list --status=open --json
-ax improve list --status=accepted --json
-ax improve verdict --json
-ax retro list --since=7 --json         # cluster-derived friction summary
-ax hooks summary --since=7 --tail=20   # optional; tolerate failure
-```
+1. Run the prerequisite ALONE and wait for it:
+
+   ```bash
+   AX_NO_AUTO_INGEST=1 ax improve checkpoint --json
+   ```
+
+   It reads the published snapshot and writes checkpoint judgments only -
+   no transcript parsing, no guidance edits, no verdict locks. Leave
+   `--force` out of an ordinary retro; it rewrites unreviewed windows that
+   are already current.
+
+2. On success, run the reads (parallel is fine). Prefix EVERY command -
+   a prefix on the first one leaves the freshness drive on for the rest:
+
+   ```bash
+   AX_NO_AUTO_INGEST=1 ax improve list --status=open --json
+   AX_NO_AUTO_INGEST=1 ax improve list --status=accepted --json
+   AX_NO_AUTO_INGEST=1 ax improve verdict --json
+   AX_NO_AUTO_INGEST=1 ax retro list --since=7 --json        # cluster-derived friction summary
+   AX_NO_AUTO_INGEST=1 ax hooks summary --since=7 --tail=20  # optional; tolerate failure
+   ```
+
+3. If the checkpoint run fails, tell the user measurement is unavailable
+   and continue with proposal review only. Any suggestion already stored
+   belongs to an earlier run - report it as that, and skip the verdict
+   step.
+
+4. If the checkpoint result reports `cacheRefreshRequired` above zero, the
+   opportunity evidence needs deriving; say so, and treat those
+   experiments as unmeasured. When the user asks for current evidence, run
+   three operations in order, each awaited on its own: `ax ingest` (wait
+   for successful publication), the checkpoint prerequisite, then the
+   reads.
 
 `ax retro list` reflects three pattern types now:
 - **tool failures** (skill form) -> `Pre-<Tool> guard` proposals
@@ -112,8 +140,9 @@ If any of those surfaced, mention them so the user knows to triage in
 Step 2.
 
 Compute counts: open proposals (by form), accepted experiments with
-`locked_verdict IS NONE`, checkpoints due since last lock. Then render
-to the user as 2-4 lines, e.g.:
+`locked_verdict IS NONE`, and - separately - experiments whose current
+view carries a `current_reason` (insufficient data or a lifecycle state).
+Then render to the user as 2-4 lines, e.g.:
 
 > 7 open proposals (3 skill, 4 guidance). 2 accepted experiments are
 > waiting on a verdict. Hook activity last 7d: 142 invocations, 3
@@ -140,9 +169,12 @@ Order open proposals by `frequency` desc. For each, in turn:
 
 4. Branch:
    - **accept** → run `ax improve accept <dedupe_sig>`.
-     Tell the user where the SKILL.md was scaffolded.
-     Offer: *"Want to refine the scaffolded SKILL.md right now?"*
-     If yes: read the file, propose edits, write them back.
+     By default this emits a TASK BRIEF and returns its `task_path`; it
+     does not install the artifact. Report that path.
+     Offer: *"Want me to implement the brief now?"*
+     If yes: implement it, then run `ax improve lint` so ax reconciles the
+     marker it finds on disk and records the installed artifact. Until
+     lint records one, the experiment has no measurable installation.
    - **reject** → ask for a short reason (≤80 chars).
      Run `ax improve reject <dedupe_sig> --reason "<reason>"`.
    - **skip** → no command. Move on; the proposal stays open for the
@@ -155,22 +187,31 @@ After the loop, summarize: *"Accepted 3, rejected 1, skipped 2."*
 For each experiment whose latest checkpoint is unlocked
 (`locked_verdict IS NONE`), in age order:
 
-1. Run `ax improve verdict <dedupe_sig>` to fetch the experiment +
-   checkpoint history.
+1. Run `AX_NO_AUTO_INGEST=1 ax improve verdict <dedupe_sig>` to fetch the
+   experiment + checkpoint history.
 
-2. Render the most recent checkpoint as 2-3 lines:
+2. When the current view carries a `current_reason`, there is no
+   suggestion to confirm. Report the reason as it is - `no opportunities
+   in the window`, `no detector for this form`, `retired` - and move to
+   the next experiment. A suggestion in the `checkpoints` history is
+   history, not a recommendation.
 
-   > **Schema change guardrail** - t+30 checkpoint
-   > 12 opportunities in window, 8 addressed (66%). Suggested: **adopted**.
+3. Otherwise render the current checkpoint as 2-3 lines:
 
-3. Ask the user to confirm the suggested verdict OR override:
+   > **Schema change guardrail** - +30s checkpoint
+   > 12 opportunities in window, 8 addressed (66%) - observed use.
+   > Suggested: **adopted**.
+
+4. Ask the user to confirm the suggested verdict OR override:
    - `adopted` (artifact is doing real work)
    - `ignored` (user wrote it but never invoked it)
    - `regressed` (it made things worse)
    - `partial` (mixed signal)
    - `no_longer_needed` (pattern self-resolved; trigger stopped firing)
 
-4. Run `ax improve verdict <dedupe_sig> --set <verdict>` to lock it.
+5. Run `ax improve verdict <dedupe_sig> --set <verdict>` to lock it. All
+   five values stay available to the user by hand, including
+   `no_longer_needed`, which the algorithm never suggests on its own.
 
 ### Step 4 - Hook effectiveness pass (optional)
 
@@ -251,7 +292,7 @@ ax improve show <dedupe_sig> [--json]
 ax improve accept <dedupe_sig> [--force]
 ax improve reject <dedupe_sig> --reason "<text>"
 ax improve verdict [<dedupe_sig>] [--set <verdict>] [--json]
-ax improve checkpoint [--force]
+ax improve checkpoint [--force]            # Step 1 prerequisite; --force only on request
 ax improve reset --yes                     # destructive; only when user requests
 
 ax retro pending [--since=N] [--idle-min=N] [--json]   # Step 0 backlog
@@ -278,6 +319,8 @@ without explicit user confirmation in this session.
   want `--force` or to abandon.
 - `ax improve verdict --set` reports `verdict_locked` → that experiment
   is already finalized; show the locked value and move on.
+- `ax improve checkpoint` fails → measurement is unavailable for this
+  retro. Say so, skip Step 3, and keep Step 2 going.
 - `ax hooks summary` returns nothing → retry with `--since=30`; if
   still empty, the hook telemetry pipeline is idle, surface as a TODO.
 - Read/query error → tell the user to check `docs/development.md#setup`

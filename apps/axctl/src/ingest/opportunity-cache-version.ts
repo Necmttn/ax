@@ -24,5 +24,13 @@ export const OPPORTUNITY_VERSION_SOURCE = "opportunity_derivation";
  *  file, and deliberately not shared with a transcript or content-hash mark. */
 export const OPPORTUNITY_VERSION_PATH = "__opportunity_derivation__";
 
-/** The token stored in `sha`. Bump it when matching semantics change again. */
-export const OPPORTUNITY_VERSION = "artifact-identity-v2";
+/**
+ * The token stored in `sha`. Bump it when matching semantics change again.
+ *
+ * `artifact-identity-v2` (#1133) certified the artifact-identity rules only.
+ * `eligible-install-v3` (#1134) adds the eligibility gate and moves EVERY
+ * form's evidence window to the observed install, so rows a v2 pass produced
+ * describe a different question and cannot certify a v3 measurement - a
+ * checkpoint reader that finds the old token asks for derivation instead.
+ */
+export const OPPORTUNITY_VERSION = "eligible-install-v3";

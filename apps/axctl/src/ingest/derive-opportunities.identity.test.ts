@@ -809,6 +809,79 @@ describe("guidance form: a failed stat is unavailable evidence", () => {
     });
 });
 
+describe("skill form: the cited candidate has to exist", () => {
+    /** Seed one accepted+installed skill experiment straight into the real
+     *  sidecar. The install path itself is covered by the hook/guidance cases
+     *  above; what this case is about is which DETECTOR the cache-side lookup
+     *  selects. */
+    const installSkillExperiment = (harness: Harness, opts: {
+        readonly sig: string;
+        readonly trigger: string;
+        readonly installedAt: Date;
+    }) => harness.judgment(Effect.gen(function* () {
+        const judgment = yield* Judgment;
+        yield* judgment.put("proposal", {
+            id: `proposal-${opts.sig}`, form: "skill", title: "Guard schema edits",
+            hypothesis: "schema edits keep failing", dedupe_sig: opts.sig, frequency: 3,
+            confidence: "high", status: "accepted", origin: "agent", hypothesis_template: null,
+            evidence_query: null, reject_reason: null, baseline: null,
+            created_at: opts.installedAt, updated_at: opts.installedAt,
+        });
+        yield* judgment.put("skill_proposal", {
+            id: `skill-${opts.sig}`, proposal: `proposal-${opts.sig}`,
+            trigger_pattern: opts.trigger, suspected_gap: "gap",
+            proposed_behavior: "behavior", expected_impact: null,
+        });
+        yield* judgment.put("experiment", {
+            id: `experiment-${opts.sig}`, proposal: `proposal-${opts.sig}`, artifact: null,
+            artifact_path: join(harness.root, "skills", opts.sig, "SKILL.md"),
+            scaffolded_at: opts.installedAt, created_at: opts.installedAt,
+            locked_verdict: null, status: "scaffolded", task_path: null,
+        });
+    }));
+
+    dtest("a dangling cites_evidence edge falls through to the tool trigger", async () => {
+        const harness = makeHarness("ax-opp-identity-candidate-");
+        const installedAt = new Date(Date.now() - 60_000);
+        await installSkillExperiment(harness, {
+            sig: "guard-schema",
+            trigger: "tool=Bash",
+            installedAt,
+        });
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                // The proposal cites a candidate that is no longer in the cache
+                // (retired, or dropped by a rebuild). The old lookup trusted the
+                // edge, chose the legacy candidate detector, and derived its
+                // match tokens from a row it could not read - so the experiment
+                // produced nothing at all.
+                yield* session.write.put("cites_evidence", {
+                    id: "cites-dangling", in_id: "proposal-guard-schema", out_id: "skill_candidate-gone",
+                    in_table: "proposal", out_table: "skill_candidate", count: 1, kind: null,
+                    ts: installedAt,
+                });
+                yield* session.write.put("session", {
+                    id: "skill-session", source: "claude",
+                    started_at: installedAt, ended_at: null,
+                });
+                yield* session.write.put("tool_call", {
+                    id: "failing-bash", session: "skill-session", agent_event: null, turn: null,
+                    tool: null, name: "Bash", ts: new Date(installedAt.getTime() + 30_000),
+                    status: "error", input_json: null, output_json: null, raw: null,
+                    duration_ms: null, seq: 1, call_id: null, cwd: null, command_text: null,
+                    command_norm: null, command_tool: null, output_excerpt: null,
+                    error_text: "boom", exit_code: 1, has_error: true,
+                });
+                const stats = yield* session.derive;
+                return { stats, rows: yield* session.rows };
+            }));
+
+        expect(result.rows.map((row) => row.out_id)).toEqual(["failing-bash"]);
+        expect(result.stats.bySkillForm).toBe(1);
+    });
+});
+
 describe("derivation-version sentinel", () => {
     dtest("stamps a complete pass, and a later failed pass revokes it", async () => {
         const harness = makeHarness("ax-opp-identity-sentinel-");
