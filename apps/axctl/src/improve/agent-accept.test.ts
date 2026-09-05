@@ -610,15 +610,37 @@ describe("acceptProposal task publication", () => {
             runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
         ]);
 
-        // Exactly one attempt claims the proposal. The loser's phase-one gate
-        // fails inside the transaction, so it never publishes and never
-        // re-stamps the decision.
-        expect([first.status, second.status].filter((s) => s === "ok")).toHaveLength(1);
-        expect([first.status, second.status].filter((s) => s === "wrong_status")).toHaveLength(1);
+        // NOTHING synchronises the two plan reads, so the second caller's answer
+        // depends on WHEN it looked, and several answers are correct:
+        //   - it read `open` too       -> its phase-one gate loses -> wrong_status
+        //   - it read the claim mid-flight (accepted + publishing + a task path,
+        //     no verdict)              -> a legitimate resume       -> ok
+        //   - it read the finished row -> wrong_status
+        //   - its exists probe saw the published file -> scaffold_exists
+        // Demanding one ok and one wrong_status would pin an interleaving this
+        // test cannot force. The losing-claim assertion belongs to the
+        // deterministic transaction-boundary tests ("a stale first accept ..."
+        // and "... a winner experiment stored under a different id"), which
+        // construct the state instead of racing for it.
+        //
+        // What holds under EVERY interleaving is asserted here.
+        expect([first.status, second.status]).toContain("ok");
+        for (const result of [first, second]) {
+            expect(["ok", "wrong_status", "scaffold_exists"]).toContain(result.status);
+        }
+        // One brief, whole, written once. The heading opens the document exactly
+        // once, so a second copy concatenated onto the first would show up here
+        // (the marker itself appears three times in one rendered brief).
         expect(readdirSync(root).filter((name) => name === `${sig}.md`)).toHaveLength(1);
-        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
+        const body = readFileSync(join(root, `${sig}.md`), "utf8");
+        expect(body).toContain(`<!--ax:${sig}-->`);
+        expect(body.split(`# ax task: ${sig} (form=guidance)`)).toHaveLength(2);
+        expect(lstatSync(join(root, `${sig}.md`)).isFile()).toBe(true);
+        // No attempt left staging litter, and the durable state is published.
         expect(stagingFiles(root, sig)).toHaveLength(0);
-        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
+        expect(state.proposalStatus).toBe("accepted");
     });
 
     test("an explicit force still replaces an existing brief", async () => {
