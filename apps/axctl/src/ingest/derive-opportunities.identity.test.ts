@@ -826,6 +826,11 @@ describe("timestamp projections carry an explicit zone", () => {
         process.env.TZ = "Asia/Singapore";
         let stored: ReadonlyArray<{ readonly in_id: string; readonly matched_at: string }>;
         try {
+            // The regression is only a regression if the host really is on a
+            // non-UTC clock while the derivation runs. `getTimezoneOffset` is
+            // evaluated now, against the TZ just set, so this fails loudly on a
+            // runner that ignores the variable rather than passing vacuously.
+            expect(correctionAt.getTimezoneOffset()).toBe(-480);
             stored = await inCache(harness, (session) =>
                 Effect.gen(function* () {
                     yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
