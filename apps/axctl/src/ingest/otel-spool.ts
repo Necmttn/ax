@@ -2,6 +2,7 @@ import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect"
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { DbError } from "@ax/lib/errors";
 import { WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
+import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { defaultOtlpSpoolDir } from "../otel/spool-server.ts";
 import { SIGNALS } from "../otel/signals.ts";
 import { OTLP_SIGNAL_PATHS } from "../otel/signal.ts";
@@ -176,6 +177,21 @@ export const ingestOtelSpool = (
         const fs = yield* FileSystem.FileSystem;
         const spoolDir = opts.spoolDir ?? defaultOtlpSpoolDir();
         const candidates = yield* walkJsonlFilesStrict(spoolDir, 0);
+        // The receiver is database-free. Reconcile retention here under the
+        // ingest write capability, after a successful directory walk. Only
+        // remove marks in this spool directory whose files are truly absent.
+        const path = yield* Path.Path;
+        const discovered = new Set(candidates.map((candidate) => candidate.path));
+        const marks = yield* write.rows(Schema.Struct({ path: Schema.String }),
+            `SELECT path FROM ${WATERMARK_TABLE} WHERE source_kind = ?`, ["otel_spool"]);
+        for (const mark of marks) {
+            if (discovered.has(mark.path) || !mark.path.endsWith(".jsonl")) continue;
+            const relative = path.relative(path.resolve(spoolDir), path.resolve(mark.path));
+            if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+            const exists = yield* fs.stat(mark.path).pipe(Effect.as(true), skipNotFound(false));
+            if (!exists) yield* write.exec(
+                `DELETE FROM ${WATERMARK_TABLE} WHERE source_kind = ? AND path = ?`, ["otel_spool", mark.path]);
+        }
         let payloads = 0;
         let rows = 0;
         let malformed = 0;
