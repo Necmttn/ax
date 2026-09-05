@@ -48,12 +48,20 @@ const tracePoints = (p: ProposalDto): TracePoint[] => {
     return points;
 };
 
+/**
+ * The strip carries the counts and nothing else (#1134).
+ *
+ * It used to add `is-win` whenever the last bar sat at zero, celebrating the
+ * one reading that is NOT a result: zero opportunities means the window had
+ * nothing to measure - no trigger fired, or no detector watched for one - and
+ * that is insufficient data, not a confirmed win. The only verdict styling left
+ * is the human's: `accent` carries the locked verdict's colour.
+ */
 function TraceStrip({ points, accent }: { readonly points: TracePoint[]; readonly accent: string }) {
     const max = Math.max(...points.map((pt) => pt.opportunities), 1);
-    const lastIsZero = points.length > 1 && points[points.length - 1]!.opportunities === 0;
     return (
         <span
-            className={`experiment-trace${lastIsZero ? " is-win" : ""}`}
+            className="experiment-trace"
             title={points.map((pt) => `${pt.label}: ${pt.opportunities} opportunities, ${pt.addressed} addressed`).join(" · ")}
         >
             {points.map((pt, i) => {

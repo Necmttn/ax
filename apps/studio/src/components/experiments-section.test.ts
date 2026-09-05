@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
-import { experimentDisplayState } from "./experiments-section.tsx";
+import { ExperimentsSection, experimentDisplayState } from "./experiments-section.tsx";
 
 const proposal = (experiment: Record<string, unknown>): ProposalDto => ({
     id: "proposal:abc",
@@ -104,5 +106,39 @@ describe("experimentDisplayState", () => {
         }));
         expect(state.badge).toBe("normalized");
         expect(state.note).toBe("pattern resolved · no longer firing");
+    });
+});
+
+describe("the rendered trace strip", () => {
+    const render = (p: ProposalDto): string =>
+        renderToStaticMarkup(
+            createElement(ExperimentsSection, { proposals: [p], onOpen: () => undefined }),
+        );
+
+    test("a window that measured nothing is never marked a win", () => {
+        const empty = checkpoint({
+            suggested: null,
+            measured: {
+                opportunities: 0, addressed: 0, ratio: 0, built: true,
+                measurement_status: "insufficient_data", reason: "no_opportunities",
+            },
+        });
+        const markup = render(proposal({
+            latest_checkpoint: empty,
+            checkpoints: [checkpoint(), empty],
+            current_reason: "no_opportunities",
+        }));
+        expect(markup).toContain('class="experiment-trace"');
+        expect(markup).not.toContain("is-win");
+    });
+
+    test("the human's locked verdict still colours the strip", () => {
+        const markup = render(proposal({
+            locked_verdict: "adopted",
+            latest_checkpoint: checkpoint({ user_verdict: "adopted" }),
+            checkpoints: [checkpoint({ user_verdict: "adopted" })],
+        }));
+        expect(markup).toContain("experiment-trace-addr accent-green");
+        expect(markup).not.toContain("is-win");
     });
 });
