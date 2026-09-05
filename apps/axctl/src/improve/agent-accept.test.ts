@@ -731,6 +731,60 @@ describe("acceptProposal task publication", () => {
         expect(stagingFiles(root, sig)).toHaveLength(0);
     });
 
+    test("a first accept loses to a winner experiment stored under a different id", async () => {
+        // `experiment(proposal)` is UNIQUE, so the winner row survives whatever id
+        // it was written under - a retro registration and an accept derive
+        // different ids for the same proposal. The claim must classify THAT
+        // conflict as a lost race too, not just an id collision.
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-otherid-"));
+        const winnerId = "winner-experiment-row";
+        const settled = new Date("2026-01-03T00:00:00Z");
+        expect(winnerId).not.toBe(stableId("experiment", [fixture.id]));
+        await runInRoot(root, (judgment) => Effect.gen(function* () {
+            yield* seedProposal(judgment, fixture);           // proposal stays OPEN
+            yield* judgment.put("experiment", {
+                id: winnerId,
+                proposal: fixture.id,
+                artifact: null,
+                artifact_path: null,
+                scaffolded_at: null,
+                created_at: settled,
+                locked_verdict: "adopted",
+                status: "task_emitted",
+                task_path: join(root, "winner-brief.md"),
+            });
+            yield* judgment.put("checkpoint", {
+                id: "winner-checkpoint",
+                experiment: winnerId,
+                kind: "+3s",
+                measured: "{}",
+                suggested: "adopted",
+                user_verdict: "adopted",
+                observed_at: settled,
+            });
+        }));
+
+        const lost = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(lost.status).toBe("wrong_status");
+        expect(lost.message).toContain("nothing was published");
+        // The winner row is untouched, down to its id, verdict and timestamp.
+        const stored = await runInRoot(root, () => findStoredProposal(sig));
+        expect(stored?.experiment?.id).toBe(winnerId);
+        expect(stored?.experiment?.status).toBe("task_emitted");
+        expect(stored?.experiment?.locked_verdict).toBe("adopted");
+        expect(stored?.experiment?.created_at.toISOString()).toBe(settled.toISOString());
+        expect(stored?.experiment?.task_path).toBe(join(root, "winner-brief.md"));
+        // Its checkpoints survive with the user's verdict intact.
+        expect(stored?.experiment?.checkpoints).toHaveLength(1);
+        expect(stored?.experiment?.checkpoints[0]?.user_verdict).toBe("adopted");
+        // The phase rolled back whole: the proposal was never claimed.
+        expect(stored?.status).toBe("open");
+        // Nothing published, and this attempt's staging file is gone.
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
     test("does not report a completed publication for a verdict-locked experiment", async () => {
         // The verdict lands between the plan read and the final update: the
         // trigger locks the row inside the accept transaction itself, so the
