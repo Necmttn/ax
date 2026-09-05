@@ -93,7 +93,7 @@ export function extractRoles(fm: Record<string, unknown>, skillName?: string): s
     return result;
 }
 
-function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
+export function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     const m = content.match(FRONTMATTER_RE);
     if (!m) {
         return { name: fallbackName, description: undefined, frontmatter: {}, body: content, roles: [] };
