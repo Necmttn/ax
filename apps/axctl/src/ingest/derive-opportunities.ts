@@ -1,10 +1,12 @@
 /**
  * Derive-Opportunities Stage (Phase C5 + form-aware extension).
  *
- * Each active experiment (proposal.status='accepted', locked_verdict
- * IS NONE) collects `opportunity` rows for every new piece of trigger-
- * matching evidence after experiment.created_at. C6 then aggregates the
- * count + addressed ratio into a `checkpoint` row at t+7/t+30/t+90.
+ * Each ELIGIBLE experiment collects `opportunity` rows for every new piece of
+ * trigger-matching evidence after its OBSERVED INSTALL. C6 then aggregates the
+ * count + addressed ratio into a `checkpoint` row at +3/+10/+30 sessions.
+ * Eligibility is the shared rule in `improve/measurement.ts` (#1134): accepted
+ * proposal, `scaffolded` experiment, no locked verdict, a recorded artifact and
+ * install time. Anything else has no measurable installation.
  *
  * Form coverage:
  *  - skill (closure-derived, cites skill_candidate): legacy detector via
@@ -26,8 +28,9 @@
  * install time has UNAVAILABLE evidence: it contributes no rows, and its stale
  * ones are cleared rather than left to read as "not addressed".
  *
- * Measurement starts at `experiment.scaffolded_at` (the observed install),
- * because acceptance can precede installation by days.
+ * Measurement starts at `experiment.scaffolded_at` (the observed install) for
+ * EVERY form, because acceptance can precede installation by days and evidence
+ * from that gap could not have met the artifact.
  *
  * The opportunity row is a RELATION (in=experiment, out=evidence record).
  * Edge id = sha-style key over (experimentKey, evidenceKey) so re-derive
@@ -46,6 +49,11 @@ import { tsParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
+import {
+    detectorSupport,
+    measurementEligibility,
+    parseSkillTriggerTool,
+} from "../improve/measurement.ts";
 import { parseHookCommandMarkers } from "../improve/markers.ts";
 import { REAL_HOOK_EFFECTS, isRealHookEffect } from "@ax/lib/shared/hook-effects";
 import { WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
@@ -192,18 +200,15 @@ export const hookOpportunityAddressed = (
     });
 };
 
-/**
- * Parse a skill_proposal.trigger_pattern of the form `tool=<Name>` and
- * return the tool name. Returns null for any other shape.
- */
-export const parseSkillTriggerTool = (pattern: string): string | null => {
-    const m = /^tool=(.+)$/.exec(pattern.trim());
-    return m && m[1] ? m[1].trim() : null;
-};
+/** Re-exported from the shared measurement helper, which owns the one
+ *  definition of "a skill trigger this codebase can detect" (#1134). */
+export { parseSkillTriggerTool } from "../improve/measurement.ts";
 
 interface ActiveExperimentRow {
     readonly id: string | { tb: string; id: string };
     readonly created_at: string;
+    /** experiment lifecycle: task_emitted | scaffolded | regressed | retired. */
+    readonly status: string;
     /** When `improve lint` OBSERVED the artifact installed - the earliest time a
      *  measurement can mean anything. Null until lint has reconciled the marker
      *  (acceptance can precede installation by days). */
@@ -462,12 +467,22 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
         // The one field that has to cross: `cites_evidence` is a MINED edge and
         // stays in the cache, so the skill_candidate a proposal cites is looked
         // up here and matched to its (sidecar) proposal id in JS.
+        //
+        // The join RESOLVES the candidate rather than trusting the edge. A
+        // dangling edge - the candidate was retired, or a rebuilt cache dropped
+        // it - would otherwise select the legacy detector, whose match tokens
+        // are derived from the candidate name it cannot read; the experiment
+        // would silently produce no rows instead of falling through to the
+        // supported `tool=<name>` trigger the proposal may still carry.
         const candidateByProposal = new Map<string, string>();
         if (active.length > 0) {
             const proposalIds = active.map((proposal) => proposal.id);
             const citesRaw = yield* write.raw(
-                `SELECT in_id, out_id FROM cites_evidence
-                 WHERE out_table = 'skill_candidate' AND in_id IN (${proposalIds.map(() => "?").join(", ")})`,
+                `SELECT ce.in_id AS in_id, ce.out_id AS out_id
+                 FROM cites_evidence AS ce
+                 JOIN skill_candidate AS sc ON sc.id = ce.out_id
+                 WHERE ce.out_table = 'skill_candidate'
+                   AND ce.in_id IN (${proposalIds.map(() => "?").join(", ")})`,
                 proposalIds,
             );
             for (const row of citesRaw.rows as Array<Record<string, unknown>>) {
@@ -484,6 +499,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
             return {
                 id: experiment.id,
                 created_at: experiment.created_at.toISOString(),
+                status: experiment.status,
                 scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
                 form: proposal.form,
                 dedupe_sig: proposal.dedupe_sig,
@@ -519,9 +535,46 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
             if (!experimentKey) continue;
             rebuiltExperimentKeys.push(experimentKey);
             const form = exp.form;
+            const candidateKey = exp.candidate_id ? recordKeyPart(exp.candidate_id, "skill_candidate") : null;
+
+            // Eligibility first, and it is the SAME rule the checkpoint reader
+            // applies (`improve/measurement.ts`). An experiment that never
+            // reached `scaffolded`, or has retired, has no measurable
+            // installation - so it collects no rows, and the replacement below
+            // clears any it still carries rather than leaving them to read as
+            // "not addressed". `active` already pinned accepted + unlocked.
+            const eligibility = measurementEligibility({
+                proposalStatus: "accepted",
+                experimentStatus: exp.status,
+                lockedVerdict: null,
+                artifactPath: exp.artifact_path,
+                scaffoldedAt: exp.scaffolded_at,
+            });
+            if (!eligibility.eligible) {
+                if (eligibility.reason === "artifact_unavailable" || eligibility.reason === "not_started") {
+                    artifactUnavailable += 1;
+                }
+                continue;
+            }
+            // Every form's evidence window starts at the OBSERVED install, not
+            // at acceptance: a failure, correction or fix-chain from the gap
+            // between the two could not have met the artifact.
+            const installedAt = new Date(exp.scaffolded_at!);
+            const support = detectorSupport({
+                form,
+                skillTrigger: exp.skill_trigger,
+                hasSkillCandidate: candidateKey !== null,
+                hookTargetTool: exp.hook_payload?.target_tool ?? null,
+                hookEventName: exp.hook_payload?.event_name ?? null,
+                dedupeSig: exp.dedupe_sig,
+                artifactPath: exp.artifact_path,
+            });
+            if (!support.supported) {
+                if (support.reason === "artifact_unavailable") artifactUnavailable += 1;
+                continue;
+            }
 
             // -------- skill form (legacy: closure-derived via skill_candidate) --------
-            const candidateKey = exp.candidate_id ? recordKeyPart(exp.candidate_id, "skill_candidate") : null;
             if (form === "skill" && candidateKey) {
                 const tokens = triggerTokensFromCandidate(candidateKey);
                 if (tokens.length === 0) continue;
@@ -529,7 +582,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 const fixesResult = yield* write.raw(`
                     SELECT id, CAST(ts AS VARCHAR) AS ts, overlap_files
                     FROM later_fixed_by
-                    WHERE ts > ?`, [new Date(exp.created_at)]);
+                    WHERE ts > ?`, [installedAt]);
                 const fixes = fixesResult.rows as unknown as LaterFixedByRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const fix of fixes) {
@@ -550,7 +603,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, new Date(exp.created_at)]);
+                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, installedAt]);
                             invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
@@ -580,7 +633,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 const callsResult = yield* write.raw(`
                     SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(exp.created_at)]);
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, installedAt]);
                 const calls = callsResult.rows as unknown as ToolCallRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const c of calls) {
@@ -602,7 +655,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, new Date(exp.created_at)]);
+                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, installedAt]);
                             invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
@@ -626,22 +679,16 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
             // -------- hook form --------
             if (form === "hook") {
-                const tool = exp.hook_payload?.target_tool ?? null;
-                const eventName = exp.hook_payload?.event_name ?? null;
-                if (!tool) continue;
-
-                // The identity a fire has to carry to be THIS hook. Without an
-                // installed marker + a configured event + an observed install
-                // time there is nothing to match on: the hook is UNMEASURED, not
-                // unaddressed, so its stale rows go and no new ones land. The
-                // executable is never guessed from the proposal - a wrapper, a
-                // python/node/bun script and an inline command all look the same
-                // from here, and only the marker distinguishes them.
-                const installedAt = exp.scaffolded_at;
-                if (!eventName || exp.dedupe_sig.length === 0 || installedAt === null) {
-                    artifactUnavailable += 1;
-                    continue;
-                }
+                // The identity a fire has to carry to be THIS hook: the target
+                // tool, the configured event, and the installed marker. The
+                // detector gate above already refused the hook without all
+                // three - it is UNMEASURED, not unaddressed, so its stale rows
+                // go and no new ones land. The executable is never guessed from
+                // the proposal: a wrapper, a python/node/bun script and an
+                // inline command all look the same from here, and only the
+                // marker distinguishes them.
+                const tool = exp.hook_payload!.target_tool!;
+                const eventName = exp.hook_payload!.event_name!;
 
                 // Both sides of the match are windowed on the OBSERVED install:
                 // a call that failed before the hook existed was never an
@@ -650,7 +697,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 const callsResult = yield* write.raw(`
                     SELECT id, session, call_id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(installedAt)]);
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, installedAt]);
                 const calls = callsResult.rows as unknown as HookToolCallRow[];
                 const matches: Array<{
                     evidenceTable: string;
@@ -682,7 +729,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     FROM hook_command_invocation
                     WHERE ts > ? AND event_name = ? AND provider_status <> 'progress_only'
                       AND effect IN (${REAL_HOOK_EFFECTS.map(() => "?").join(", ")})`,
-                    [new Date(installedAt), eventName, ...REAL_HOOK_EFFECTS]);
+                    [installedAt, eventName, ...REAL_HOOK_EFFECTS]);
                 const fires = (invResult.rows as unknown as HookInvocationFact[]).filter(
                     (invocation) => isCreditableHookInvocation(invocation, {
                         dedupeSig: exp.dedupe_sig,
@@ -710,19 +757,14 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 // this experiment. No recorded path (or no observed install
                 // time) = unavailable artifact evidence; the user has to run
                 // `ax improve lint` in the target repository first.
-                const artifactPath = installedArtifactPath(exp.artifact_path);
-                const installedAt = exp.scaffolded_at;
-                if (artifactPath === null || installedAt === null) {
-                    artifactUnavailable += 1;
-                    continue;
-                }
+                const artifactPath = installedArtifactPath(exp.artifact_path)!;
 
                 // Cheap initial wedge: every correction friction_event AFTER the
                 // install is one opportunity for the guidance to have prevented.
                 const frictionResult = yield* write.raw(`
                     SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM friction_event
-                    WHERE kind = 'correction' AND ts > ?`, [new Date(installedAt)]);
+                    WHERE kind = 'correction' AND ts > ?`, [installedAt]);
                 const events = frictionResult.rows as unknown as FrictionEventRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const ev of events) {

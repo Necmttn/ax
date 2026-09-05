@@ -5,7 +5,8 @@ import { fmtTs } from "@ax/lib/shared/formatters";
  * Experiments - past bets paying off. The deck above is futures; this is
  * the ledger of accepted improvements with their measured effect. The
  * trace strip is the argument: baseline frequency, then opportunities at
- * +3/+10/+30 sessions. A bar shrinking to zero is a confirmed win.
+ * +3/+10/+30 sessions. A bar at zero means the window had nothing to measure -
+ * insufficient data, not a confirmed win (#1134); the human places the verdict.
  */
 
 const VERDICT_ACCENT: Record<string, string> = {
@@ -75,7 +76,30 @@ function TraceStrip({ points, accent }: { readonly points: TracePoint[]; readonl
     );
 }
 
-const stateOf = (p: ProposalDto): { accent: string; badge: string; note: string } => {
+/**
+ * Why the current recommendation is missing, in the user's words (#1134).
+ *
+ * `measuring…` used to cover all of these, which read as "give it time" for
+ * states time cannot fix: a form with no detector, an experiment that retired,
+ * evidence that has to be re-derived. The DTO's `current_reason` distinguishes
+ * them, and each gets its own line here.
+ */
+const REASON_NOTE: Record<string, string> = {
+    no_opportunities: "insufficient data · no opportunities in the window",
+    detector_unavailable: "detector unavailable",
+    artifact_unavailable: "insufficient data · no installed artifact recorded",
+    refresh_required: "insufficient data · evidence needs derivation",
+    not_started: "artifact not installed yet",
+    retired: "retired",
+    regressed: "marked regressed",
+    not_accepted: "proposal not accepted",
+};
+
+/** The badge/note/accent one experiment card renders. Exported as a pure
+ *  function so the state machine is testable without a DOM. */
+export const experimentDisplayState = (
+    p: ProposalDto,
+): { accent: string; badge: string; note: string } => {
     const exp = p.experiment;
     const verdict = exp?.locked_verdict ?? null;
     const checkpoints = (exp?.checkpoints ?? []).filter((c) => c.measured);
@@ -93,13 +117,29 @@ const stateOf = (p: ProposalDto): { accent: string; badge: string; note: string 
         return { accent, badge: VERDICT_LABEL[verdict] ?? verdict, note };
     }
     if (checkpoints.length === 0) {
-        return { accent: "blue", badge: "pending", note: "waiting for sessions…" };
+        const reason = exp?.current_reason ?? null;
+        const pending = reason === null || reason === "no_checkpoint"
+            ? "waiting for sessions…"
+            : REASON_NOTE[reason] ?? "insufficient data";
+        return { accent: "blue", badge: "pending", note: pending };
     }
-    const suggested = exp?.latest_checkpoint?.suggested;
+    const suggested = exp?.latest_checkpoint?.suggested ?? null;
+    const badge = `${checkpoints.length}/3 checkpoints`;
+    if (suggested === null) {
+        // Neutral styling: an unavailable measurement is not a bad result.
+        const reason = exp?.current_reason ?? null;
+        return {
+            accent: "muted",
+            badge,
+            note: reason === null ? "insufficient data" : REASON_NOTE[reason] ?? "insufficient data",
+        };
+    }
     return {
         accent: suggested === "regressed" ? "rose" : "blue",
-        badge: `${checkpoints.length}/3 checkpoints`,
-        note: suggested ? `suggested: ${suggested}` : "measuring…",
+        badge,
+        // Invocation counts show the artifact was PRESENT when the trigger
+        // fired. They do not show that the work got better.
+        note: `suggested: ${suggested} · observed use`,
     };
 };
 
@@ -132,15 +172,16 @@ export function ExperimentsSection({
                 <div className="experiments-empty">
                     <p className="experiments-empty-head">No bets placed yet.</p>
                     <p className="proposal-prose" style={{ color: "var(--muted)" }}>
-                        Accept an improvement from the deck above - ax measures whether the
-                        fix actually changed your sessions over the next 30. A trace bar
-                        that shrinks to zero is a confirmed win.
+                        Accept an improvement from the deck above - ax tracks how often
+                        the artifact was there when its trigger fired, over the next 30
+                        sessions. A window with nothing to measure reports insufficient
+                        data; you place the verdict.
                     </p>
                 </div>
             ) : (
                 <div className="experiments-list">
                     {experiments.map((p) => {
-                        const st = stateOf(p);
+                        const st = experimentDisplayState(p);
                         const exp = p.experiment!;
                         const artifact = exp.artifact_path?.split("/").pop() ?? null;
                         return (

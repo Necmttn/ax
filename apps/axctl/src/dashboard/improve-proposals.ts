@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { CacheRead } from "@ax/lib/duckdb/seam";
-import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
+import type { CheckpointSnapshotDto, ProposalDto } from "@ax/lib/shared/dashboard-types";
 import {
     estimateImpactCached,
     type ImpactEstimateCache,
@@ -8,6 +8,7 @@ import {
 } from "../improve/impact.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 import { listStoredProposals, type StoredCheckpoint, type StoredProposal } from "../improve/judgment-proposals.ts";
+import { currentCheckpointProjection } from "../improve/measurement.ts";
 
 /** Brief shown for an open proposal - shared by /api/improve rows and next-action cards. */
 export const proposalReviewBrief = (p: ProposalDto): string =>
@@ -134,8 +135,19 @@ const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
     return { ...p, hypothesis: hydrated };
 });
 
-const checkpointDto = (checkpoint: StoredCheckpoint) => {
+/**
+ * One stored checkpoint as the studio sees it.
+ *
+ * The numeric fields are validated (a malformed blob yields `measured: null`
+ * rather than a half-typed object), and the #1134 status fields ride along when
+ * present: without them the studio cannot tell "measured a zero" from "had
+ * nothing to measure", and it rendered both as a quiet `measuring…`.
+ */
+const checkpointDto = (checkpoint: StoredCheckpoint): CheckpointSnapshotDto => {
     const measured = checkpoint.measured;
+    const status = measured.measurement_status;
+    const reason = measured.reason;
+    const version = measured.measurement_version;
     const typedMeasured =
         typeof measured.opportunities === "number" &&
         typeof measured.addressed === "number" &&
@@ -146,6 +158,9 @@ const checkpointDto = (checkpoint: StoredCheckpoint) => {
                 addressed: measured.addressed,
                 ratio: measured.ratio,
                 built: measured.built,
+                ...(status === "measured" || status === "insufficient_data" ? { measurement_status: status } : {}),
+                ...(typeof reason === "string" ? { reason } : {}),
+                ...(typeof version === "number" ? { measurement_version: version } : {}),
             }
             : null;
     return {
@@ -159,6 +174,24 @@ const checkpointDto = (checkpoint: StoredCheckpoint) => {
 
 const proposalDto = (proposal: StoredProposal): ProposalDto => {
     const checkpoints = proposal.experiment?.checkpoints.map(checkpointDto) ?? [];
+    // `checkpoints` is history; `latest_checkpoint` is the CURRENT
+    // recommendation, and it withholds a suggestion the experiment's present
+    // state no longer supports (#1134).
+    const newest = proposal.experiment?.checkpoints.at(-1);
+    const projection = proposal.experiment === null || proposal.experiment === undefined
+        ? null
+        : currentCheckpointProjection({
+            proposalStatus: proposal.status,
+            experimentStatus: proposal.experiment.status,
+            lockedVerdict: proposal.experiment.locked_verdict,
+            artifactPath: proposal.experiment.artifact_path,
+            scaffoldedAt: proposal.experiment.scaffolded_at,
+        }, newest === undefined ? null : {
+            suggested: newest.suggested,
+            user_verdict: newest.user_verdict,
+            measured: newest.measured,
+        });
+    const latest = checkpoints.at(-1);
     return {
         id: proposal.id,
         form: proposal.form,
@@ -187,7 +220,10 @@ const proposalDto = (proposal: StoredProposal): ProposalDto => {
             locked_verdict: proposal.experiment.locked_verdict,
             created_at: proposal.experiment.created_at.toISOString(),
             scaffolded_at: proposal.experiment.scaffolded_at?.toISOString() ?? null,
-            latest_checkpoint: checkpoints.at(-1) ?? null,
+            latest_checkpoint: latest === undefined
+                ? null
+                : { ...latest, suggested: projection?.suggested ?? null },
+            current_reason: projection?.reason ?? null,
             checkpoints,
         },
     };

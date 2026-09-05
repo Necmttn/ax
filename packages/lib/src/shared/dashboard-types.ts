@@ -851,6 +851,14 @@ export interface CheckpointSnapshotDto {
         readonly addressed: number;
         readonly ratio: number;
         readonly built: boolean;
+        /** #1134: whether this window measured anything at all. Absent on rows
+         *  written before the corrected rules. */
+        readonly measurement_status?: "measured" | "insufficient_data" | string;
+        /** Why there is no suggestion: no_opportunities | detector_unavailable
+         *  | artifact_unavailable | refresh_required. */
+        readonly reason?: string;
+        /** Format version of this measured blob (2 = the corrected rules). */
+        readonly measurement_version?: number;
     } | null;
     readonly observed_at: string;
 }
@@ -869,8 +877,16 @@ export interface ExperimentDto {
     readonly locked_verdict: CheckpointVerdictDto | string | null;
     readonly created_at: string;
     readonly scaffolded_at: string | null;
+    /** The CURRENT recommendation: the newest row, with `suggested` withheld
+     *  when today's eligibility or measurement no longer supports it (#1134). */
     readonly latest_checkpoint: CheckpointSnapshotDto | null;
-    /** full +3s/+10s/+30s series, observed_at ASC - drives the trace strip */
+    /** Why `latest_checkpoint.suggested` is null - a lifecycle state
+     *  (`not_started`, `retired`, ...) or a measurement gap
+     *  (`no_opportunities`, `detector_unavailable`, `refresh_required`,
+     *  `no_checkpoint`). Null when the suggestion stands on its own. */
+    readonly current_reason?: string | null;
+    /** full +3s/+10s/+30s series, observed_at ASC - drives the trace strip.
+     *  HISTORY: rows keep the suggestion they were written with. */
     readonly checkpoints?: ReadonlyArray<CheckpointSnapshotDto>;
 }
 

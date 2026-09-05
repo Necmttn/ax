@@ -54,3 +54,83 @@ describe("fetchImproveProposals", () => {
         expect(await Effect.runPromise(fetchImproveProposals(deps()).pipe(Effect.provide(env([]))))).toEqual([]);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Checkpoint DTOs - history versus current recommendation (#1134)
+// ---------------------------------------------------------------------------
+
+const measured = (overrides: Record<string, unknown> = {}) => ({
+    opportunities: 12, addressed: 8, ratio: 8 / 12, built: true,
+    measurement_status: "measured", measurement_version: 2,
+    ...overrides,
+});
+
+const experimentRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "experiment-one", proposal: "abc", artifact: null,
+    artifact_path: "/repo/CLAUDE.md", scaffolded_at: new Date("2026-01-10T00:00:00Z"),
+    created_at: new Date("2026-01-01T00:00:00Z"), locked_verdict: null,
+    status: "scaffolded", task_path: null,
+    ...overrides,
+});
+
+const checkpointRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "cp-1", experiment: "experiment-one", kind: "+3s", measured: measured(),
+    suggested: "adopted", user_verdict: null, observed_at: new Date("2026-01-20T00:00:00Z"),
+    ...overrides,
+});
+
+const withExperiment = (
+    experiment: Record<string, unknown>,
+    checkpoints: ReadonlyArray<Record<string, unknown>>,
+) => Layer.mergeAll(
+    judgmentTestLayer((sql) =>
+        sql.includes("FROM proposal") ? [proposal({ status: "accepted" })]
+        : sql.includes("FROM experiment") ? [experiment]
+        : sql.includes("FROM checkpoint") ? checkpoints
+        : []),
+    cacheReadTestLayer(() => []),
+);
+
+const experimentDto = async (
+    experiment: Record<string, unknown>,
+    checkpoints: ReadonlyArray<Record<string, unknown>>,
+) => {
+    const rows = await Effect.runPromise(
+        fetchImproveProposals(deps()).pipe(Effect.provide(withExperiment(experiment, checkpoints))),
+    );
+    return rows[0]?.experiment;
+};
+
+describe("checkpoint DTOs", () => {
+    it("preserves the optional measurement status, reason and version", async () => {
+        const exp = await experimentDto(experimentRow(), [checkpointRow({
+            suggested: null,
+            measured: measured({
+                opportunities: 0, addressed: 0, ratio: 0,
+                measurement_status: "insufficient_data", reason: "no_opportunities",
+            }),
+        })]);
+        expect(exp?.checkpoints?.[0]?.measured).toEqual({
+            opportunities: 0, addressed: 0, ratio: 0, built: true,
+            measurement_status: "insufficient_data", reason: "no_opportunities",
+            measurement_version: 2,
+        });
+        // JSON null, not an absent field and not a substitute verdict string.
+        expect(exp?.checkpoints?.[0]?.suggested).toBeNull();
+        expect(exp?.latest_checkpoint?.suggested).toBeNull();
+        expect(exp?.current_reason).toBe("no_opportunities");
+    });
+
+    it("keeps history while the current projection withholds an unsafe suggestion", async () => {
+        const exp = await experimentDto(experimentRow({ status: "retired" }), [checkpointRow()]);
+        expect(exp?.checkpoints?.[0]?.suggested).toBe("adopted");
+        expect(exp?.latest_checkpoint?.suggested).toBeNull();
+        expect(exp?.current_reason).toBe("retired");
+    });
+
+    it("passes a current measured suggestion through untouched", async () => {
+        const exp = await experimentDto(experimentRow(), [checkpointRow()]);
+        expect(exp?.latest_checkpoint?.suggested).toBe("adopted");
+        expect(exp?.current_reason).toBeNull();
+    });
+});
