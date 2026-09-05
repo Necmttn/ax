@@ -9,7 +9,7 @@
  * undeclared-write failure modes are UPDATEs, which change no count [R#4]
  * (pinned below by the invoked-positions case: count constant, hash moves).
  *
- * Coverage is a deliberate SUBSET: six stages whose fixtures are cheap,
+ * Coverage is a deliberate SUBSET: seven stages whose fixtures are cheap,
  * chosen to exercise each write mode (parse via the shared normalized batch,
  * enrich via UPDATE stamping, derive, bookkeep) plus the
  * session-health-writes-session_token_usage exception. The static test in
@@ -34,6 +34,16 @@ import { outcomesStage } from "./outcomes.ts";
 import { contentTypesStage } from "./derive-content-types.ts";
 import { sessionHealthStage } from "./session-health.ts";
 import { deriveMetricsStage } from "./derive-metrics.ts";
+import { opportunitiesStage } from "./derive-opportunities.ts";
+import {
+    OPPORTUNITY_VERSION,
+    OPPORTUNITY_VERSION_PATH,
+    OPPORTUNITY_VERSION_SOURCE,
+} from "./opportunity-cache-version.ts";
+import { Layer } from "effect";
+import { JudgmentLayer } from "@ax/lib/sqlite";
+import { WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
+import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("table-writes behavior", { requireFts: true });
 
@@ -64,6 +74,8 @@ const assertStageWrites = (
     label: string,
     seed: (write: CacheWriteService) => Effect.Effect<void, unknown, unknown>,
     provide: <A, E>(effect: Effect.Effect<A, E, unknown>) => Effect.Effect<A, E, never>,
+    /** Assert on the store the stage left behind, while the fixture is open. */
+    inspect?: (write: CacheWriteService) => Effect.Effect<void, unknown, unknown>,
 ): Promise<{ changed: readonly string[]; before: Digest; after: Digest }> => {
     // Identity, not key equality: the descriptor exercised IS the registered one.
     expect((ALL_STAGES as readonly unknown[]).includes(stage)).toBe(true);
@@ -79,6 +91,7 @@ const assertStageWrites = (
                 const declared = new Set(stage.meta.writes.map((w) => w.table));
                 const undeclared = changed.filter((table) => !declared.has(table));
                 expect(undeclared, `${label}: undeclared writes`).toEqual([]);
+                if (inspect) yield* provide(inspect(write));
                 outcome = { changed, before, after };
             }),
         ),
@@ -181,5 +194,37 @@ describe("event-layer write contract (behavioral)", () => {
         expect(changed).toContain("session_metrics");
         // The enrich write: cost backfill UPDATEs the seeded usage row.
         expect(changed).toContain("session_token_usage");
+    }, 60_000);
+
+    dtest("opportunities (derive + the derivation-version bookkeep)", async () => {
+        // No proposals: an empty eligible set is still a COMPLETE corrected
+        // pass, so the sentinel is earned and the row is the only thing that
+        // moves. That also pins the new bookkeeping declaration behaviorally.
+        const sidecarPath = join(tempDir("ax-tw-opportunities-sidecar-"), "judgment.sqlite");
+        const provideJudgment = <A, E>(effect: Effect.Effect<A, E, unknown>): Effect.Effect<A, E, never> =>
+            effect.pipe(
+                Effect.provide(Layer.mergeAll(
+                    JudgmentLayer({ sidecarPath, schemaSql: SIDECAR_SCHEMA_SQL }),
+                    FixturePlatform,
+                )),
+                Effect.scoped,
+            ) as Effect.Effect<A, E, never>;
+
+        const { changed } = await assertStageWrites(
+            opportunitiesStage,
+            "opportunities",
+            noSeed,
+            provideJudgment,
+            (write) => Effect.gen(function* () {
+                const result = yield* write.raw(
+                    `SELECT sha FROM ${WATERMARK_TABLE} WHERE source_kind = ? AND path = ?`,
+                    [OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH],
+                );
+                const rows = result.rows as unknown as Array<{ sha: string | null }>;
+                expect(rows).toHaveLength(1);
+                expect(rows[0]!.sha).toBe(OPPORTUNITY_VERSION);
+            }),
+        );
+        expect(changed).toEqual(["ingest_file_state"]);
     }, 60_000);
 });

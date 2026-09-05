@@ -32,18 +32,28 @@
  * The opportunity row is a RELATION (in=experiment, out=evidence record).
  * Edge id = sha-style key over (experimentKey, evidenceKey) so re-derive
  * passes are idempotent; every selected experiment's rows are REBUILT each run
- * so a match the corrected rules drop cannot survive as a stale row.
+ * so a match the corrected rules drop cannot survive as a stale row. The
+ * rebuild is one atomic MERGE per experiment (ingest holds no transaction), and
+ * a completed pass stamps the derivation-version sentinel that tells a
+ * checkpoint reader these rows came from the corrected rules
+ * (`opportunity-cache-version.ts`).
  */
 
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { jsonArrayField } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import { tsParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import { parseHookCommandMarkers } from "../improve/markers.ts";
-import { REAL_HOOK_EFFECTS } from "./transcripts.ts";
+import { REAL_HOOK_EFFECTS, isRealHookEffect } from "@ax/lib/shared/hook-effects";
+import { WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
+import {
+    OPPORTUNITY_VERSION,
+    OPPORTUNITY_VERSION_PATH,
+    OPPORTUNITY_VERSION_SOURCE,
+} from "./opportunity-cache-version.ts";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface DeriveOpportunitiesStats {
@@ -69,9 +79,6 @@ export interface DeriveOpportunitiesStats {
  * land asynchronously.
  */
 export const ADDRESSED_WINDOW_MS = 60 * 60 * 1000;
-
-/** Bound the `IN (...)` list of the per-experiment rebuild delete. */
-const DELETE_CHUNK = 200;
 
 export const kebabNameFromArtifactPath = (path: string | null): string | null => {
     if (!path) return null;
@@ -150,7 +157,7 @@ export const isCreditableHookInvocation = (
     identity: { readonly dedupeSig: string; readonly eventName: string },
 ): boolean =>
     invocation.provider_status !== "progress_only"
-    && REAL_HOOK_EFFECTS.includes(invocation.effect as (typeof REAL_HOOK_EFFECTS)[number])
+    && isRealHookEffect(invocation.effect)
     && invocation.event_name === identity.eventName
     && commandCarriesMarker(invocation.command, identity.dedupeSig);
 
@@ -172,8 +179,12 @@ export const hookOpportunityAddressed = (
     return invocations.some((invocation) => {
         if (!call.session || !invocation.session || call.session !== invocation.session) return false;
         if (invocation.tool_call !== null) return invocation.tool_call === call.id;
-        if (invocation.tool_call_id !== null && call.call_id !== null) {
-            return invocation.tool_call_id === call.call_id;
+        // A NAMED fire credits the call it names and nothing else. When the call
+        // it points at carries no comparable id, the answer is "not this one" -
+        // falling through to the window here would let a fire that named some
+        // other call credit a call of unknown identity.
+        if (invocation.tool_call_id !== null) {
+            return call.call_id !== null && invocation.tool_call_id === call.call_id;
         }
         const fireMs = new Date(invocation.ts).getTime();
         if (!Number.isFinite(callMs) || !Number.isFinite(fireMs)) return false;
@@ -266,6 +277,22 @@ export const overlapFilesMatch = (
     return false;
 };
 
+/**
+ * One `opportunity` row as the atomic replacement sees it.
+ *
+ * `in_id` is deliberately ABSENT: the replacement statement derives it from the
+ * bound experiment id, so a row can never claim to belong to another experiment
+ * and reach past this experiment's scope.
+ */
+export interface OpportunityReplacementRow {
+    readonly id: string;
+    readonly out_id: string;
+    readonly out_table: string;
+    /** ISO-8601; the statement casts it to TIMESTAMP. */
+    readonly matched_at: string;
+    readonly was_addressed: boolean;
+}
+
 export const buildOpportunityRows = (
     experimentKey: string,
     matches: ReadonlyArray<{
@@ -274,16 +301,89 @@ export const buildOpportunityRows = (
         readonly ts: string;
         readonly addressed?: boolean;
     }>,
-): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => {
-    const rows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
+): OpportunityReplacementRow[] => {
+    const rows: OpportunityReplacementRow[] = [];
     for (const m of matches) {
-        const edgeKey = opportunityKey(experimentKey, m.evidenceKey);
-        rows.push(cacheRow({ id: edgeKey, in_id: experimentKey, out_id: m.evidenceKey,
-            out_table: m.evidenceTable, matched_at: tsParam(m.ts) ?? new Date(),
-            was_addressed: m.addressed ?? false }));
+        rows.push({
+            id: opportunityKey(experimentKey, m.evidenceKey),
+            out_id: m.evidenceKey,
+            out_table: m.evidenceTable,
+            matched_at: (tsParam(m.ts) ?? new Date()).toISOString(),
+            was_addressed: m.addressed ?? false,
+        });
     }
     return rows;
 };
+
+/**
+ * Replace exactly one experiment's derived rows, in ONE statement.
+ *
+ * The seam runs ingest WITHOUT a transaction (see `seam.ts`), so a
+ * `DELETE`-then-`INSERT` pair has a real window in which the experiment has lost
+ * its old rows and not yet gained its new ones - and if the insert fails, that
+ * window becomes the published state. DuckDB applies a `MERGE` as one statement:
+ * inserts, updates and the scoped delete either all land or none do, and a
+ * failure leaves every previous row exactly as it was.
+ *
+ * The delete arm is bounded by `target.in_id = ?`, so it can only ever remove
+ * rows of the experiment being replaced; every other experiment is untouched.
+ * An empty `rows` array is a meaningful call - it clears this experiment.
+ */
+export const REPLACE_OPPORTUNITIES_SQL = `
+MERGE INTO opportunity AS target
+USING (
+    SELECT
+        CAST(? AS VARCHAR) AS in_id,
+        value ->> 'id' AS id,
+        value ->> 'out_id' AS out_id,
+        value ->> 'out_table' AS out_table,
+        CAST(value ->> 'matched_at' AS TIMESTAMP) AS matched_at,
+        CAST(value ->> 'was_addressed' AS BOOLEAN) AS was_addressed
+    FROM json_each(CAST(? AS JSON))
+) AS source
+ON target.id = source.id AND target.in_id = source.in_id
+WHEN MATCHED THEN UPDATE SET
+    out_id = source.out_id,
+    out_table = source.out_table,
+    matched_at = source.matched_at,
+    was_addressed = source.was_addressed
+WHEN NOT MATCHED THEN INSERT
+    (id, in_id, out_id, out_table, matched_at, was_addressed)
+    VALUES (source.id, source.in_id, source.out_id, source.out_table, source.matched_at, source.was_addressed)
+WHEN NOT MATCHED BY SOURCE AND target.in_id = CAST(? AS VARCHAR) THEN DELETE
+`;
+
+/** Duplicate ids inside one replacement have ambiguous MERGE semantics, so they
+ *  are rejected BEFORE the statement rather than left to a cryptic engine error.
+ *  Ids come from {@link opportunityKey}, so a duplicate means two evidence rows
+ *  collided on a key - a bug worth failing loudly on, never one to dedupe away. */
+const duplicateRowId = (rows: readonly OpportunityReplacementRow[]): string | null => {
+    const seen = new Set<string>();
+    for (const row of rows) {
+        if (seen.has(row.id)) return row.id;
+        seen.add(row.id);
+    }
+    return null;
+};
+
+export const replaceOpportunities = (
+    write: CacheWriteService,
+    experimentKey: string,
+    rows: readonly OpportunityReplacementRow[],
+): Effect.Effect<void, CacheWriteError | CacheReadError> =>
+    Effect.gen(function* () {
+        const duplicate = duplicateRowId(rows);
+        if (duplicate !== null) {
+            return yield* Effect.die(
+                new Error(`opportunity replacement for ${experimentKey} repeats row id ${duplicate}`),
+            );
+        }
+        yield* write.raw(REPLACE_OPPORTUNITIES_SQL, [
+            experimentKey,
+            JSON.stringify(rows),
+            experimentKey,
+        ]);
+    });
 
 interface SkillIdRow {
     readonly id: string | { tb: string; id: string };
@@ -294,11 +394,20 @@ interface InvokedTsRow {
 }
 
 /**
- * Best-effort file mtime in epoch-ms, or `null` when the file is absent /
- * unreadable. OLD: `statSync` in try/catch returning `null` on ANY fault →
- * `orAbsent` (a missing or unreadable guidance target is "not addressed").
- * `fs.stat` follows symlinks (matching node's `statSync`); `.mtime` is an
- * `Option<Date>`, so a stat that lands but lacks mtime also maps to `null`.
+ * The artifact's mtime in epoch-ms, or `null` when there is NO READING to be
+ * had: the path is absent, unreadable, carries no mtime, or is not a regular
+ * file. Every one of those means the evidence is UNAVAILABLE - not that the
+ * guidance went unaddressed - and the caller treats it that way.
+ *
+ * The file-type check is load-bearing. A guidance path can become a DIRECTORY
+ * (a `CLAUDE.md/` created by a stray `mkdir -p`, a checkout that reshaped the
+ * tree), and a directory's mtime moves whenever anything inside it is created
+ * or removed. Counting that as activity on the guidance file would manufacture
+ * `was_addressed = true` out of unrelated filesystem noise.
+ *
+ * `fs.stat` follows symlinks (matching node's `statSync`), so a symlink to a
+ * real file still reads as a file. `.mtime` is an `Option<Date>`, so a stat that
+ * lands but lacks one maps to `null` too.
  */
 export const safeFileMtimeMs = (
     absPath: string,
@@ -307,6 +416,7 @@ export const safeFileMtimeMs = (
         const fs = yield* FileSystem.FileSystem;
         const info = yield* fs.stat(absPath).pipe(Effect.asSome, orAbsent(Option.none()));
         if (Option.isNone(info)) return null;
+        if (info.value.type !== "File") return null;
         return Option.match(info.value.mtime, {
             onNone: () => null,
             onSome: (d) => d.getTime(),
@@ -333,6 +443,15 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
     Judgment | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
+        // FIRST, before any read or write: drop the version certificate. Ingest
+        // can continue past a failed stage and publish a partially changed
+        // cache, and such a snapshot must not keep an older pass's success
+        // marker. Nothing re-stamps it except a complete pass below.
+        yield* write.exec(
+            `DELETE FROM ${WATERMARK_TABLE} WHERE source_kind = ? AND path = ?`,
+            [OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH],
+        );
+
         // Active = accepted proposal + experiment without a locked verdict.
         // Both live in the sidecar, so this is the sidecar's own reader rather
         // than a join in SQL.
@@ -390,8 +509,10 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
         let artifactUnavailable = 0;
         // Every experiment this run SELECTED gets its derived rows rebuilt, so a
         // `was_addressed` computed by the old matching rules cannot outlive them.
+        // An experiment that computes NO rows still gets a replacement call: that
+        // is what clears rows the corrected rules no longer match.
         const rebuiltExperimentKeys: string[] = [];
-        const allRows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
+        const rowsByExperiment = new Map<string, OpportunityReplacementRow[]>();
 
         for (const exp of experiments) {
             const experimentKey = recordKeyPart(exp.id, "experiment");
@@ -447,7 +568,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -499,7 +620,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -522,10 +643,14 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     continue;
                 }
 
+                // Both sides of the match are windowed on the OBSERVED install:
+                // a call that failed before the hook existed was never an
+                // opportunity for it, and counting it would dilute the ratio
+                // with failures the hook could not have been present for.
                 const callsResult = yield* write.raw(`
                     SELECT id, session, call_id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(exp.created_at)]);
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(installedAt)]);
                 const calls = callsResult.rows as unknown as HookToolCallRow[];
                 const matches: Array<{
                     evidenceTable: string;
@@ -572,7 +697,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 byHookForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -611,18 +736,29 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 // This is FILE ACTIVITY on the installed guidance file, not
                 // proof that behaviour improved - the indicator is kept as-is
                 // for this bounded patch, only pointed at the right file.
-                // Defensive: stat may fail.
+                //
+                // No reading at all - the path is missing, unreadable, or is not
+                // a regular file any more - is UNAVAILABLE evidence, not a
+                // negative reading. Emitting `was_addressed = false` rows here
+                // would publish "the guidance was ignored" on the strength of a
+                // failed syscall or a directory's mtime. Clear this experiment's
+                // rows instead (`rowsByExperiment` stays unset, so the
+                // replacement below removes them) and report the gap.
                 const mtimeMs = yield* safeFileMtimeMs(artifactPath);
+                if (mtimeMs === null) {
+                    artifactUnavailable += 1;
+                    continue;
+                }
                 const enriched = matches.map((m) => {
                     const matchedMs = new Date(m.ts).getTime();
-                    const addressed = mtimeMs !== null && mtimeMs > matchedMs;
+                    const addressed = mtimeMs > matchedMs;
                     if (addressed) totalAddressed += 1;
                     return { ...m, addressed };
                 });
 
                 totalOpportunities += matches.length;
                 byGuidanceForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -631,18 +767,24 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
         // Rebuild, don't accumulate: an opportunity the corrected identity rules
         // no longer match must DISAPPEAR, and a `was_addressed` computed by the
-        // old rules must not stay authoritative. Only the experiments this run
-        // selected are cleared - unrelated experiments (and every sidecar
-        // judgment) are untouched. Same write service, same held lock, so the
-        // delete and the insert land together.
-        for (let i = 0; i < rebuiltExperimentKeys.length; i += DELETE_CHUNK) {
-            const chunk = rebuiltExperimentKeys.slice(i, i + DELETE_CHUNK);
-            yield* write.exec(
-                `DELETE FROM opportunity WHERE in_id IN (${chunk.map(() => "?").join(", ")})`,
-                chunk,
-            );
+        // old rules must not stay authoritative. Each experiment is replaced by
+        // ONE atomic statement scoped to its own `in_id`, so a failure mid-way
+        // leaves that experiment's previous rows intact and every other
+        // experiment (and every sidecar judgment) untouched.
+        for (const key of rebuiltExperimentKeys) {
+            yield* replaceOpportunities(write, key, rowsByExperiment.get(key) ?? []);
         }
-        yield* write.putMany("opportunity", allRows);
+
+        // Only now - after every selected replacement landed - does the snapshot
+        // deserve the certificate that its opportunity rows came from the
+        // corrected derivation. A failure above skips this, leaving the sentinel
+        // deleted, so a cache published mid-failure reads as "needs derivation".
+        yield* write.put(
+            WATERMARK_TABLE,
+            watermarkRow(OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH, {
+                sha: OPPORTUNITY_VERSION,
+            }),
+        );
         return {
             experimentsScanned: experiments.length,
             opportunities: totalOpportunities,
@@ -678,7 +820,16 @@ export const opportunitiesStage: StageDef<
     Judgment | FileSystem.FileSystem,
     CacheWriteError | CacheReadError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"], writes: [{ table: "opportunity", mode: "derive" }] }),
+    meta: StageMeta.make({
+        key: "opportunities",
+        deps: ["proposals"],
+        tags: ["derive"],
+        writes: [
+            { table: "opportunity", mode: "derive" },
+            // The derivation-version sentinel (see opportunity-cache-version.ts).
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
