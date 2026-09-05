@@ -7,8 +7,8 @@
  * (CLI or HTTP) can render however it likes.
  */
 
-import { Effect, FileSystem, type PlatformError } from "effect";
-import { Judgment, type JudgmentError, type JudgmentService } from "@ax/lib/sqlite";
+import { Effect, FileSystem, Option, type PlatformError, Schema } from "effect";
+import { Judgment, TextColumn, type JudgmentError, type JudgmentService } from "@ax/lib/sqlite";
 import { stableId } from "@ax/lib/stable-id";
 import { isAlreadyExists, orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -318,21 +318,82 @@ const saveAcceptedExperiment = (
     });
 }));
 
+/** Whether the experiment reached `task_emitted`, and why not when it did not. */
+type PublicationFinish =
+    | { readonly finished: true }
+    | { readonly finished: false; readonly locked: boolean; readonly reason: string };
+
+const ExperimentStateRow = Schema.Struct({
+    status: TextColumn,
+    locked_verdict: Schema.NullOr(TextColumn),
+});
+
 /**
- * Move an experiment off `publishing` once its brief is on disk. The status
- * predicate is the guard: a concurrent retire or a second retry finds no
- * `publishing` row, so this can never revive a closed experiment.
+ * Move an experiment off `publishing` once its brief is on disk.
+ *
+ * BOTH predicates are load-bearing. `status = 'publishing'` stops a second retry
+ * and a concurrent retire from being re-opened; `locked_verdict IS NULL` stops a
+ * row somebody judged BETWEEN the plan read and this update from being written
+ * at all - the status test alone cannot see that, because a locked row can still
+ * read `publishing`.
+ *
+ * A no-op update is ambiguous on its own, so the row is re-read to tell the two
+ * apart: another attempt that already finished the publication (complete), or a
+ * locked/retired row this attempt must not claim (incomplete). Callers must not
+ * report a completed publication for the second.
  */
 const finishPublication = (
     judgment: JudgmentService,
     experimentKey: string,
-) => judgment.exec(
-    "UPDATE experiment SET status = ? WHERE id = ? AND status = ?",
-    [EXPERIMENT_STATUS_TASK_EMITTED, experimentKey, EXPERIMENT_STATUS_PUBLISHING],
-);
+): Effect.Effect<PublicationFinish, JudgmentError> =>
+    Effect.gen(function* () {
+        const changed = yield* judgment.exec(
+            "UPDATE experiment SET status = ? WHERE id = ? AND status = ? AND locked_verdict IS NULL",
+            [EXPERIMENT_STATUS_TASK_EMITTED, experimentKey, EXPERIMENT_STATUS_PUBLISHING],
+        );
+        if (changed > 0) return { finished: true };
+        const current = yield* judgment.first(
+            ExperimentStateRow,
+            "SELECT status, locked_verdict FROM experiment WHERE id = ? LIMIT 1",
+            [experimentKey],
+        );
+        const row = Option.getOrUndefined(current);
+        if (row === undefined) {
+            return { finished: false, locked: false, reason: `experiment ${experimentKey} is gone` };
+        }
+        // Another attempt got there first: the publication IS complete.
+        if (row.status !== EXPERIMENT_STATUS_PUBLISHING) return { finished: true };
+        return row.locked_verdict === null
+            ? { finished: false, locked: false, reason: `experiment ${experimentKey} could not be finished` }
+            : { finished: false, locked: true, reason: `experiment verdict already locked: ${row.locked_verdict}` };
+    });
 
 /** What a publish attempt did with the task path. */
 type PublishOutcome = "published" | "kept_existing";
+
+/**
+ * Decide what an exclusive publish's `AlreadyExists` actually found.
+ *
+ * `stat` FOLLOWS symlinks, which is what makes it the right probe here: a
+ * symlink resolving to a regular file is a brief the operator chose to keep, and
+ * a DANGLING symlink reports NotFound and is rejected. A directory reports its
+ * own type and is rejected. Either way the path is left untouched - this only
+ * decides whether the caller may treat the publication as finished.
+ */
+const keepUsableDestination = (
+    fs: FileSystem.FileSystem,
+    taskPath: string,
+    alreadyExists: PlatformError.PlatformError,
+): Effect.Effect<PublishOutcome, PlatformError.PlatformError> =>
+    fs.stat(taskPath).pipe(
+        Effect.map((info) => info.type === "File"),
+        // Any fault (a dangling symlink's NotFound, a permission error) means
+        // "cannot confirm a readable brief", which is not a finished publication.
+        orAbsent(false),
+        Effect.flatMap((usable) =>
+            usable ? Effect.succeed("kept_existing" as PublishOutcome) : Effect.fail(alreadyExists),
+        ),
+    );
 
 /**
  * Stage the rendered brief beside its target, then publish it in one step.
@@ -345,14 +406,26 @@ type PublishOutcome = "published" | "kept_existing";
  *
  * `replace` picks how the staged file lands, and the two modes are not
  * interchangeable:
- *   - `true` - the FIRST accept, which has already established that replacing is
- *     authorized (the path was free, or the caller passed `force`). `rename`
- *     swaps the target atomically.
+ *   - `true` - ONLY a first accept carrying an explicit `force`. That flag is the
+ *     operator's authority to overwrite; `rename` then swaps the target
+ *     atomically. An earlier "the path was free" probe is NOT authority - the
+ *     path can fill between the probe and the publish - so ordinary acceptance
+ *     publishes exclusively too.
  *   - `false` - a RESUMED publication, which has no such authority. `link`
  *     creates the target ONLY if nothing is there and fails with `AlreadyExists`
- *     otherwise, which is reported as `kept_existing`. There is deliberately no
- *     stat first: a file can appear between a probe and a rename, and the rename
- *     would then destroy it. The exclusive create IS the check.
+ *     otherwise. There is deliberately no stat first: a file can appear between a
+ *     probe and a rename, and the rename would then destroy it. The exclusive
+ *     create IS the check.
+ *
+ * `AlreadyExists` alone does not mean "a brief is already published". It also
+ * describes a DIRECTORY on the path and a DANGLING SYMLINK - `link` refuses
+ * both, and neither is a task file anyone can read. So the destination is
+ * validated AFTER the refusal, which is safe precisely because the exclusive
+ * create already failed: whatever is there was not put there by this attempt and
+ * is left exactly as found. A regular file (or a symlink resolving to one) is
+ * reported as `kept_existing`; anything else re-raises the `AlreadyExists`
+ * failure, so the caller cannot mistake an unusable path for a finished
+ * publication.
  *
  * `beforePublish` runs after the staged file is complete and before it lands, so
  * a failure there aborts with the target untouched.
@@ -382,7 +455,7 @@ const publishTaskBrief = <E, R>(input: {
                 Effect.as("published" as PublishOutcome),
                 Effect.catchTag("PlatformError", (err) =>
                     isAlreadyExists(err)
-                        ? Effect.succeed("kept_existing" as PublishOutcome)
+                        ? keepUsableDestination(fs, input.taskPath, err)
                         : Effect.fail(err),
                 ),
             );
@@ -571,7 +644,10 @@ export const acceptProposal = (
         const outcome = yield* publishTaskBrief({
             taskPath,
             content: taskContent,
-            replace: resumed === null,
+            // Replacement needs the operator's explicit force on a first accept.
+            // Everything else - ordinary acceptance included - publishes
+            // exclusively and keeps whatever it finds.
+            replace: resumed === null && opts.force === true,
             ...(resumed === null
                 ? {
                     beforePublish: saveAcceptedExperiment(
@@ -585,22 +661,37 @@ export const acceptProposal = (
                 : {}),
         });
 
-        // Phase 3: a brief is on disk - this attempt's, or the one it refused to
-        // replace - so the publication is done. This path always emits a task,
-        // including when a resume arrives with --auto-scaffold, so the final
-        // status is task_emitted either way.
-        yield* finishPublication(judgment, experimentKey);
+        // Phase 3: a readable brief is on disk - this attempt's, or the one it
+        // refused to replace - so the publication can be finished. This path
+        // always emits a task, including when a resume arrives with
+        // --auto-scaffold, so the final status is task_emitted either way.
+        const finish = yield* finishPublication(judgment, experimentKey);
+        if (!finish.finished) {
+            // The brief is published, but this experiment must not be moved.
+            // Reporting "ok" here would claim a completed acceptance for a row
+            // somebody already judged.
+            return {
+                status: finish.locked ? "verdict_locked" : "wrong_status",
+                proposal_id: `proposal:${proposalKey}`,
+                experiment_id: experimentId,
+                task_path: taskPath,
+                message: `${finish.reason}; the brief at ${taskPath} was left in place and the acceptance was not finished`,
+            };
+        }
 
+        const keptMessage = resumed === null
+            ? `a task brief appeared at ${taskPath} first; kept it (pass force=true to overwrite)`
+            : `finished the interrupted publication; kept the existing brief at ${taskPath}`;
         return {
             status: "ok",
             proposal_id: `proposal:${proposalKey}`,
             experiment_id: experimentId,
             task_path: taskPath,
-            ...(resumed === null ? {} : {
-                message: outcome === "kept_existing"
-                    ? `finished the interrupted publication; kept the existing brief at ${taskPath}`
-                    : `finished the interrupted publication at ${taskPath}`,
-            }),
+            ...(outcome === "kept_existing"
+                ? { message: keptMessage }
+                : resumed === null
+                    ? {}
+                    : { message: `finished the interrupted publication at ${taskPath}` }),
         };
     });
 
