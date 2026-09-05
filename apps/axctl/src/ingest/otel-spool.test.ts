@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CacheWriteService } from "@ax/lib/duckdb/seam";
 import { Effect, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
@@ -45,6 +46,21 @@ const metricPayload = {
 };
 
 describe("otel-spool ingest stage", () => {
+    dtest("only decodes appended payloads on the next ingest", async () => {
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-tail-"));
+        roots.push(spoolDir);
+        const path = join(spoolDir, "2026-08-14.jsonl");
+        const line = JSON.stringify({ path: "/v1/metrics", body: JSON.stringify(metricPayload) }) + "\n";
+        await writeFile(path, line);
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-tail-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(1);
+                yield* Effect.promise(() => appendFile(path, line));
+                expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(1);
+            }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+        ));
+    });
+
     dtest("decodes a spool file and writes OTLP rows once", async () => {
         const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-spool-stage-"));
         roots.push(spoolDir);
@@ -73,6 +89,81 @@ describe("otel-spool ingest stage", () => {
         expect(first).toMatchObject({ files: 1, payloads: 1, rows: 1, malformed: 0 });
         expect(second).toMatchObject({ files: 0, skippedUnchanged: 1 });
         expect(rows).toEqual([{ metric: "claude_code.cost.usage", session_id: "session-1" }]);
+    });
+
+    dtest("retains partial UTF-8 records until the terminating newline arrives", async () => {
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-partial-"));
+        roots.push(spoolDir);
+        const path = join(spoolDir, "2026-08-14.jsonl");
+        const payload = JSON.stringify(metricPayload).replace("session-1", "session-日本語");
+        const bytes = Buffer.from(JSON.stringify({ path: "/v1/metrics", body: payload }) + "\n");
+        const split = bytes.indexOf(Buffer.from("日")) + 1;
+        await writeFile(path, bytes.subarray(0, split));
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-partial-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                expect(yield* ingestOtelSpool(write, { spoolDir })).toMatchObject({ payloads: 0, malformed: 0 });
+                yield* Effect.promise(() => appendFile(path, bytes.subarray(split)));
+                expect(yield* ingestOtelSpool(write, { spoolDir })).toMatchObject({ payloads: 1, malformed: 0 });
+                const rows = yield* write.rows(Schema.Struct({ session_id: Schema.String }),
+                    "SELECT session_id FROM otel_metric_point");
+                expect(rows).toEqual([{ session_id: "session-日本語" }]);
+            }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+        ));
+    });
+
+    dtest("replays truncated, rewritten and replaced files and honors forced replay", async () => {
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-rewrite-"));
+        roots.push(spoolDir);
+        const path = join(spoolDir, "2026-08-14.jsonl");
+        const line = JSON.stringify({ path: "/v1/metrics", body: JSON.stringify(metricPayload) }) + "\n";
+        await writeFile(path, line.repeat(2));
+        const previousForce = process.env.AX_REDERIVE_OTEL_SPOOL;
+        try {
+            await runWithPlatform(publishCacheFixture(tempDir("ax-otel-rewrite-db-"), dylibPath, (write) =>
+                Effect.gen(function* () {
+                    expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(2);
+                    yield* Effect.promise(() => writeFile(path, line));
+                    expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(1);
+                    // Same inode, larger rewrite, changed old boundary.
+                    yield* Effect.promise(() => writeFile(path, line.replace("session-1", "session-2").repeat(2)));
+                    expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(2);
+                    // Rename replacement guarantees a different inode.
+                    yield* Effect.promise(async () => {
+                        await writeFile(path + ".new", line.repeat(3));
+                        await rename(path + ".new", path);
+                    });
+                    expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(3);
+                    process.env.AX_REDERIVE_OTEL_SPOOL = "1";
+                    expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(3);
+                }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+            ));
+        } finally {
+            if (previousForce === undefined) delete process.env.AX_REDERIVE_OTEL_SPOOL;
+            else process.env.AX_REDERIVE_OTEL_SPOOL = previousForce;
+        }
+    });
+
+    dtest("does not advance the cursor after a failed payload write", async () => {
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-retry-"));
+        roots.push(spoolDir);
+        const path = join(spoolDir, "2026-08-14.jsonl");
+        const line = JSON.stringify({ path: "/v1/metrics", body: JSON.stringify(metricPayload) }) + "\n";
+        await writeFile(path, line);
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-retry-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* ingestOtelSpool(write, { spoolDir });
+                yield* Effect.promise(() => appendFile(path, line.repeat(2)));
+                let calls = 0;
+                const failing: CacheWriteService = { ...write, putMany: (table, rows) => {
+                    if (table === "otel_metric_point" && ++calls === 2) {
+                        return write.exec("INSERT INTO missing_spool_test_table VALUES (1)").pipe(Effect.asVoid);
+                    }
+                    return write.putMany(table, rows);
+                } };
+                expect((yield* ingestOtelSpool(failing, { spoolDir })).failedFiles).toBe(1);
+                expect((yield* ingestOtelSpool(write, { spoolDir })).payloads).toBe(2);
+            }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+        ));
     });
 
     it("declares the ingest stage contract", () => {

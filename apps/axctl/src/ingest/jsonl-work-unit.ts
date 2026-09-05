@@ -92,6 +92,8 @@ export const shouldHeartbeatIngestRun = (completedFiles: number): boolean =>
 export interface JsonlWorkUnitLoop {
     /** Files currently in flight (the current file IS counted here). */
     readonly activeFiles: number;
+    /** Provider-owned cursor when contentHash is off; null during forced runs. */
+    readonly storedSha: (path: string) => string | null;
 }
 
 export interface RunJsonlProviderFilesOptions<E, R, C extends JsonlFileCandidate> {
@@ -133,12 +135,14 @@ export interface RunJsonlProviderFilesOptions<E, R, C extends JsonlFileCandidate
      * live `loop` accessor for any progress emits. Return `true` on success
      * (the work-unit then commits the watermark), or `false` if the file
      * vanished / had nothing to write and must NOT advance the watermark.
+     * Append-only providers can return { sha } to commit a provider cursor
+     * after writes succeed. This requires contentHash to remain off.
      */
     readonly processFile: (
         candidate: C,
         index: number,
         loop: JsonlWorkUnitLoop,
-    ) => Effect.Effect<boolean, E, R>;
+    ) => Effect.Effect<boolean | { readonly sha: string }, E, R>;
 }
 
 export interface JsonlWorkUnitResult {
@@ -173,6 +177,7 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
         let skippedUnchanged = 0;
         let refreshedUnchanged = 0;
         const loop: JsonlWorkUnitLoop = {
+            storedSha: wm.storedSha,
             get activeFiles() {
                 return activeFiles;
             },
@@ -255,15 +260,20 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                             // false ⇒ vanished/empty: never count, never commit
                             // (so it isn't marked done and retries next run).
                             if (!committed) return;
+                            // Append-only providers persist a cursor in sha.
+                            // The content-hash tier retains its own hash contract.
+                            const markSha = typeof committed === "object" && opts.contentHash !== true
+                                ? committed.sha
+                                : contentSha;
                             files += 1;
                             const completedFiles = files;
                             // Commit ONLY after writes succeed. With a spool,
                             // "succeed" includes the flush, so the mark is
                             // deferred to the flush cycle instead.
                             if (opts.spool !== undefined) {
-                                pendingMarks.push(wm.row(candidate.path, candidate.mtimeMs, candidate.sizeBytes, contentSha));
+                                pendingMarks.push(wm.row(candidate.path, candidate.mtimeMs, candidate.sizeBytes, markSha));
                             } else {
-                                yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes, contentSha);
+                                yield* wm.commit(candidate.path, candidate.mtimeMs, candidate.sizeBytes, markSha);
                             }
                             if (opts.runId !== undefined && shouldHeartbeatIngestRun(completedFiles)) {
                                 // Courtesy signal only: a transient heartbeat
