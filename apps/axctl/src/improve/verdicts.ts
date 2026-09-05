@@ -20,6 +20,7 @@ import {
     type StoredCheckpoint,
     type StoredProposal,
 } from "./judgment-proposals.ts";
+import { currentCheckpointProjection, type CurrentProjection } from "./measurement.ts";
 
 /** One experiment row in the verdict listing, with its newest checkpoint
  *  inlined as `latest_checkpoint` (or `null` when none exists yet). */
@@ -68,9 +69,45 @@ const checkpointRow = (checkpoint: StoredCheckpoint) => ({
     observed_at: checkpoint.observed_at.toISOString(),
 });
 
+/**
+ * History versus recommendation (#1134).
+ *
+ * `checkpoints` is the stored evidence trail and is returned verbatim - a row
+ * that once suggested `adopted` keeps saying so. `latest_checkpoint` is the
+ * CURRENT recommendation, and it carries the newest row's suggestion only when
+ * that suggestion still stands: the experiment is eligible today, the row was
+ * measured under the current rules, and it had something to measure. Otherwise
+ * the suggestion reads null and `current_reason` names why, so a retired or
+ * unrefreshed experiment can never present an old positive answer as advice.
+ */
+const currentView = (proposal: StoredProposal): {
+    readonly latest: ReturnType<typeof checkpointRow> | null;
+    readonly projection: CurrentProjection;
+} => {
+    const experiment = proposal.experiment!;
+    const newest = experiment.checkpoints.at(-1);
+    const projection = currentCheckpointProjection({
+        proposalStatus: proposal.status,
+        experimentStatus: experiment.status,
+        lockedVerdict: experiment.locked_verdict,
+        artifactPath: experiment.artifact_path,
+        scaffoldedAt: experiment.scaffolded_at,
+    }, newest === undefined ? null : {
+        suggested: newest.suggested,
+        user_verdict: newest.user_verdict,
+        measured: newest.measured,
+    });
+    return {
+        latest: newest === undefined
+            ? null
+            : { ...checkpointRow(newest), suggested: projection.suggested },
+        projection,
+    };
+};
+
 const toVerdictListRow = (proposal: StoredProposal): VerdictListRow => {
     const experiment = proposal.experiment!;
-    const latest = experiment.checkpoints.at(-1);
+    const current = currentView(proposal);
     return {
         title: proposal.title,
         dedupe_sig: proposal.dedupe_sig,
@@ -78,21 +115,26 @@ const toVerdictListRow = (proposal: StoredProposal): VerdictListRow => {
         created_at: experiment.created_at.toISOString(),
         scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
         locked_verdict: experiment.locked_verdict,
-        latest_checkpoint: latest ? checkpointRow(latest) : null,
+        latest_checkpoint: current.latest,
+        current_reason: current.projection.reason,
     };
 };
 
 const toVerdictShowRow = (proposal: StoredProposal): VerdictShowRow => {
     const experiment = proposal.experiment!;
+    const current = currentView(proposal);
     return {
         id: experiment.id,
         title: proposal.title,
         dedupe_sig: proposal.dedupe_sig,
         proposal_status: proposal.status,
+        experiment_status: experiment.status,
         artifact_path: experiment.artifact_path,
         created_at: experiment.created_at.toISOString(),
         scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
         locked_verdict: experiment.locked_verdict,
+        latest_checkpoint: current.latest,
+        current_reason: current.projection.reason,
         checkpoints: experiment.checkpoints.toReversed().map(checkpointRow),
     };
 };

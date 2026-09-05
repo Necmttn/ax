@@ -26,6 +26,7 @@ import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import { fetchSkillHygiene } from "../queries/skill-hygiene.ts";
 import { fetchImproveProposals, proposalReviewBrief } from "./improve-proposals.ts";
+import { currentCheckpointProjection } from "../improve/measurement.ts";
 import { findStaleOpenProposals, type StaleProposalRow } from "../improve/housekeep.ts";
 import { interventionFormSpec } from "../improve/intervention-forms.ts";
 import { fetchToolFailures } from "./tool-failures.ts";
@@ -141,29 +142,51 @@ export const proposalCards = (
 // ---------------------------------------------------------------------------
 
 /**
- * Cards for accepted proposals whose experiment needs a verdict locked.
- * Only includes proposals where:
- * - status === "accepted"
- * - experiment exists
- * - experiment.locked_verdict is null/undefined (not yet decided)
+ * Cards for accepted proposals whose experiment has a MEASURED verdict waiting.
+ *
+ * A next action has to be actionable, and "lock a verdict" is not - it is a
+ * one-click decision - unless a current measurement supports it. So the card
+ * appears only when the experiment is eligible today (installed, not retired,
+ * not locked) AND its newest window carries a real suggestion under the current
+ * measurement rules (#1134). An unbuilt, retired, unrefreshed or
+ * nothing-to-measure experiment stays visible in the ordinary experiment lists,
+ * where its state is described, rather than being surfaced here as a decision
+ * the user could take on no evidence.
  */
 export const verdictCards = (
     proposals: ReadonlyArray<ProposalDto>,
 ): NextActionCard[] =>
     capByImpact(
         proposals
-            .filter(
-                (p) =>
-                    p.status === "accepted" &&
-                    p.experiment != null &&
-                    (p.experiment.locked_verdict == null),
-            )
+            .filter((p) => {
+                const experiment = p.experiment;
+                if (experiment == null) return false;
+                // A locked experiment is decided, so it gets no card at all -
+                // the projection deliberately keeps showing its verdict, which
+                // is right for a display and wrong for an action.
+                if (experiment.locked_verdict != null) return false;
+                // Everything else is the SHARED projection, not a second copy
+                // of the version/status/count rules: an action offered on
+                // evidence the read surfaces refuse to present would be exactly
+                // the one-click null verdict #1134 removes.
+                return currentCheckpointProjection({
+                    proposalStatus: p.status,
+                    experimentStatus: experiment.status ?? "",
+                    lockedVerdict: null,
+                    artifactPath: experiment.artifact_path,
+                    scaffoldedAt: experiment.scaffolded_at,
+                }, experiment.latest_checkpoint === null || experiment.latest_checkpoint === undefined
+                    ? null
+                    : {
+                        suggested: experiment.latest_checkpoint.suggested,
+                        user_verdict: experiment.latest_checkpoint.user_verdict,
+                        measured: experiment.latest_checkpoint.measured,
+                    }).suggested !== null;
+            })
             .map((p): NextActionCard => {
                 const experiment = p.experiment!;
                 const suggested = experiment.latest_checkpoint?.suggested ?? null;
-                const evidenceLine = suggested != null
-                    ? `experiment scaffolded, suggested verdict: ${suggested}`
-                    : "experiment scaffolded, no checkpoint yet";
+                const evidenceLine = `experiment scaffolded, suggested verdict: ${suggested}`;
 
                 return {
                     id: `verdict:${p.dedupe_sig}`,

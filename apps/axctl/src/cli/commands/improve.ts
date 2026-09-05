@@ -5,7 +5,7 @@ import { Judgment } from "@ax/lib/sqlite";
 import { prettyPrint } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { homedir } from "node:os";
-import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
+import { deriveCheckpoints, type DeriveCheckpointsStats } from "../../ingest/derive-checkpoints.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal, setVerdict } from "../../improve/actions.ts";
 import { lintFiles } from "../../improve/lint.ts";
@@ -410,6 +410,153 @@ const ALLOWED_VERDICTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Short, honest text for a missing recommendation (#1134).
+ *
+ * Two different absences share this table: a MEASUREMENT gap (nothing to
+ * measure, no detector, evidence that needs re-deriving) and a LIFECYCLE state
+ * (never installed, retired). Neither is "waiting for more sessions", and
+ * saying so would send the user off to generate exposure that no detector will
+ * ever read.
+ */
+const MEASUREMENT_REASON_TEXT: Readonly<Record<string, string>> = {
+    no_opportunities: "no opportunities in the window",
+    detector_unavailable: "no detector for this form",
+    artifact_unavailable: "no installed artifact recorded",
+    refresh_required: "opportunity evidence needs derivation",
+    no_checkpoint: "no checkpoint yet",
+    not_started: "artifact not installed yet",
+    retired: "experiment retired",
+    regressed: "experiment marked regressed",
+    not_accepted: "proposal not accepted",
+    locked: "verdict locked",
+};
+
+export const measurementReasonText = (reason: string | null | undefined): string | null =>
+    typeof reason === "string" ? MEASUREMENT_REASON_TEXT[reason] ?? reason : null;
+
+/** Reasons that describe the EXPERIMENT rather than a measured window - they
+ *  read as a state, not as "insufficient data". */
+const LIFECYCLE_REASONS: ReadonlySet<string> = new Set([
+    "no_checkpoint", "not_started", "retired", "regressed", "not_accepted", "locked",
+]);
+
+const currentBadge = (row: Record<string, unknown>): string => {
+    const checkpoint = row.latest_checkpoint as Record<string, unknown> | null | undefined;
+    const kind = checkpoint ? String(checkpoint.kind ?? "?") : null;
+    const suggested = checkpoint?.suggested ?? null;
+    if (suggested !== null && suggested !== undefined) return `${kind} suggested: ${String(suggested)}`;
+    const reason = typeof row.current_reason === "string" ? row.current_reason : null;
+    const text = measurementReasonText(reason) ?? "insufficient data";
+    if (reason !== null && LIFECYCLE_REASONS.has(reason)) return text;
+    return kind === null ? `insufficient data: ${text}` : `${kind} insufficient data: ${text}`;
+};
+
+/** One row of `ax improve verdict` (no positional argument). */
+export const formatVerdictListLine = (row: Record<string, unknown>): string => {
+    const badge = row.locked_verdict
+        ? `locked: ${String(row.locked_verdict)}`
+        : currentBadge(row);
+    return `  ${String(row.dedupe_sig ?? "?")}  [${badge}]  ${String(row.title ?? "?")}`;
+};
+
+/** The CURRENT recommendation line in `ax improve verdict <id>`, printed above
+ *  the stored history so the two are never confused. */
+export const formatCurrentVerdictLine = (row: Record<string, unknown>): string => {
+    const checkpoint = row.latest_checkpoint as Record<string, unknown> | null | undefined;
+    const suggested = checkpoint?.suggested ?? null;
+    if (suggested !== null && suggested !== undefined) {
+        return `  current       ${String(checkpoint?.kind ?? "?")} suggested: ${String(suggested)}` +
+            " (observed use, not proven improvement)";
+    }
+    const reason = typeof row.current_reason === "string" ? row.current_reason : null;
+    const text = measurementReasonText(reason);
+    if (reason !== null && LIFECYCLE_REASONS.has(reason)) return `  current       ${text}`;
+    return `  current       insufficient data${text === null ? "" : ` - ${text}`}`;
+};
+
+/**
+ * Is this stored row the one the CURRENT recommendation came from?
+ *
+ * Kind equality alone is not enough. When the projection suppresses the newest
+ * row's suggestion, that row is evidence like any other - matching it by kind
+ * would leave an old positive answer standing unlabelled at the bottom of the
+ * output, which is the exact confusion the current/history split exists to end.
+ * So: only a live recommendation (a suggestion, and no reason withholding it)
+ * marks its row current.
+ */
+export const isCurrentCheckpointRow = (
+    row: Record<string, unknown>,
+    checkpoint: Record<string, unknown>,
+): boolean => {
+    const latest = row.latest_checkpoint as Record<string, unknown> | null | undefined;
+    if (latest == null) return false;
+    if (latest.suggested === null || latest.suggested === undefined) return false;
+    if (row.current_reason !== null && row.current_reason !== undefined) return false;
+    return checkpoint.kind === latest.kind;
+};
+
+/** One stored checkpoint in the history block. `isCurrent` marks the row the
+ *  current recommendation came from; every other row is labelled historical so
+ *  an old positive answer cannot be mistaken for today's advice. */
+export const formatCheckpointHistoryLine = (
+    checkpoint: Record<string, unknown>,
+    isCurrent: boolean,
+): string => {
+    const measured = checkpoint.measured as Record<string, unknown> | string | undefined;
+    const fields = typeof measured === "object" && measured !== null ? measured : {};
+    const opportunities = Number(fields.opportunities ?? 0);
+    const addressed = Number(fields.addressed ?? 0);
+    const reasonText = measurementReasonText(
+        typeof fields.reason === "string" ? fields.reason : null,
+    );
+    const verdict = checkpoint.suggested
+        ? `suggested: ${String(checkpoint.suggested)}`
+        : `insufficient data${reasonText === null ? "" : `: ${reasonText}`}`;
+    return `    ${String(checkpoint.kind ?? "?")}  observed=${String(checkpoint.observed_at ?? "?")}  ` +
+        `opportunities=${opportunities} addressed=${addressed}  ${verdict}  ` +
+        `user_verdict=${checkpoint.user_verdict ? String(checkpoint.user_verdict) : "(none)"}` +
+        `${isCurrent ? "" : "  (historical)"}`;
+};
+
+/**
+ * The `ax improve checkpoint` summary.
+ *
+ * A run that writes nothing has to say WHICH nothing it hit. "No new windows
+ * due" used to be printed even when every experiment was excluded, or when the
+ * opportunity evidence itself needed re-deriving - two states the user can act
+ * on, reported as one they cannot.
+ */
+export const formatCheckpointSummary = (stats: DeriveCheckpointsStats): string[] => {
+    const lines = [
+        `checkpoints scanned: ${stats.experimentsScanned} eligible experiment(s)`,
+        `checkpoints excluded: ${stats.experimentsExcluded} (not installed, retired, regressed or locked)`,
+        `checkpoints inserted: ${stats.checkpointsInserted}`,
+        `checkpoints refreshed: ${stats.checkpointsRefreshed}`,
+        `checkpoints skipped: ${stats.checkpointsSkipped}`,
+    ];
+    if (stats.insufficientData > 0) {
+        lines.push(`insufficient data: ${stats.insufficientData} window(s) - stored with no suggested verdict`);
+    }
+    if (stats.checkpointsInserted + stats.checkpointsRefreshed > 0) return lines;
+    lines.push("");
+    if (stats.cacheRefreshRequired > 0) {
+        lines.push(
+            `${stats.cacheRefreshRequired} experiment(s) need opportunity derivation - ` +
+            "run `ax ingest`, then re-run this command",
+        );
+    } else if (stats.experimentsScanned === 0) {
+        lines.push(
+            `No eligible experiments: ${stats.experimentsExcluded} excluded ` +
+            "(run `ax improve lint` to record an installed artifact)",
+        );
+    } else {
+        lines.push("No new windows due. Re-run with --force to refresh unreviewed checkpoints");
+        lines.push("(use `axctl improve verdict <id>` to see suggested verdicts).");
+    }
+    return lines;
+};
+
+/**
  * `axctl improve verdict` - surface checkpoint-derived suggested verdicts
  * for each active experiment, let the human lock the final one. Three modes:
  *
@@ -440,15 +587,7 @@ const cmdImproveVerdict = (input: {
                 return;
             }
             console.log("Current experiments (newest first):");
-            for (const row of list) {
-                const cp = row.latest_checkpoint as Record<string, unknown> | null;
-                const verdict = row.locked_verdict
-                    ? `[locked: ${String(row.locked_verdict)}]`
-                    : cp
-                        ? `[${String(cp.kind ?? "?")} suggested: ${String(cp.suggested ?? "?")}]`
-                        : "[no checkpoint yet]";
-                console.log(`  ${String(row.dedupe_sig ?? "?")}  ${verdict}  ${String(row.title ?? "?")}`);
-            }
+            for (const row of list) console.log(formatVerdictListLine(row));
             console.log("");
             console.log("Run `axctl improve checkpoint` to refresh due windows.");
             console.log("Run `axctl improve verdict <sig> --set <verdict>` to lock.");
@@ -480,19 +619,15 @@ const cmdImproveVerdict = (input: {
         console.log(`  artifact      ${String(row.artifact_path ?? "(none)")}`);
         console.log(`  scaffolded_at ${String(row.scaffolded_at ?? "(none)")}`);
         console.log(`  verdict       ${row.locked_verdict ? String(row.locked_verdict) + " (locked)" : "pending"}`);
+        console.log(formatCurrentVerdictLine(row));
         if (checkpoints.length === 0) {
             console.log(`  checkpoints   none (run \`axctl improve checkpoint\` once due windows pass)`);
         } else {
+            // History below the current state, and marked as history: only a
+            // LIVE recommendation claims a row as current.
             console.log(`  checkpoints:`);
             for (const cp of checkpoints) {
-                const measured = cp.measured as Record<string, unknown> | string | undefined;
-                const opp = (typeof measured === "object" && measured) ? Number(measured.opportunities ?? 0) : 0;
-                const add = (typeof measured === "object" && measured) ? Number(measured.addressed ?? 0) : 0;
-                console.log(
-                    `    ${String(cp.kind ?? "?")}  observed=${String(cp.observed_at ?? "?")}  ` +
-                    `opportunities=${opp} addressed=${add}  suggested=${String(cp.suggested ?? "?")}  ` +
-                    `user_verdict=${cp.user_verdict ? String(cp.user_verdict) : "(none)"}`,
-                );
+                console.log(formatCheckpointHistoryLine(cp, isCurrentCheckpointRow(row, cp)));
             }
         }
         console.log("");
@@ -567,14 +702,7 @@ const cmdImproveCheckpoint = (input: {
             console.log(prettyPrint(stats));
             return;
         }
-        console.log(`checkpoints scanned: ${stats.experimentsScanned} experiments`);
-        console.log(`checkpoints inserted: ${stats.checkpointsInserted}`);
-        console.log(`checkpoints skipped: ${stats.checkpointsSkipped}`);
-        if (stats.checkpointsInserted === 0) {
-            console.log("");
-            console.log("No new windows due. Re-run with --force to refresh existing checkpoints");
-            console.log("(use `axctl improve verdict <id>` to see suggested verdicts).");
-        }
+        for (const line of formatCheckpointSummary(stats)) console.log(line);
     });
 
 const improveCheckpointCommand = Command.make(
