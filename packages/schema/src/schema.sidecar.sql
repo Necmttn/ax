@@ -164,7 +164,10 @@ CREATE TABLE IF NOT EXISTS experiment (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     locked_verdict TEXT,
     status TEXT NOT NULL DEFAULT 'task_emitted',
-    -- task_emitted | scaffolded | regressed | retired
+    -- publishing | task_emitted | scaffolded | regressed | retired
+    -- `publishing` is transient: the accept transaction has committed but the
+    -- task brief is not on disk yet, so a retry finishes the publication instead
+    -- of refusing it (see apps/axctl/src/improve/actions.ts).
     task_path TEXT
     -- absolute path to .ax/tasks/<id>.md while pending
 );

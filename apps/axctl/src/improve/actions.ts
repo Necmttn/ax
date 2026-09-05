@@ -14,6 +14,8 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import {
     type InterventionSafetyContract,
+    EXPERIMENT_STATUS_PUBLISHING,
+    EXPERIMENT_STATUS_TASK_EMITTED,
     PROPOSAL_STATUS_ACCEPTED,
     PROPOSAL_STATUS_REJECTED,
     planAcceptCandidate,
@@ -316,6 +318,48 @@ const saveAcceptedExperiment = (
     });
 }));
 
+/**
+ * Move an experiment off `publishing` once its brief is on disk. The status
+ * predicate is the guard: a concurrent retire or a second retry finds no
+ * `publishing` row, so this can never revive a closed experiment.
+ */
+const finishPublication = (
+    judgment: JudgmentService,
+    experimentKey: string,
+) => judgment.exec(
+    "UPDATE experiment SET status = ? WHERE id = ? AND status = ?",
+    [EXPERIMENT_STATUS_TASK_EMITTED, experimentKey, EXPERIMENT_STATUS_PUBLISHING],
+);
+
+/** True only for a real file: a directory sitting on the task path is not a brief. */
+const publishedTaskExists = (
+    fs: FileSystem.FileSystem,
+    taskPath: string,
+): Effect.Effect<boolean, never> =>
+    fs.stat(taskPath).pipe(
+        Effect.map((info) => info.type === "File"),
+        orAbsent(false),
+    );
+
+/**
+ * Drop the staged temp files an interrupted publication left behind. Their name
+ * carries the pid of the process that died, so only the recovering run can tell
+ * they are garbage. Best-effort: a sweep failure must not fail the recovery.
+ */
+const sweepStagedTasks = (
+    fs: FileSystem.FileSystem,
+    taskDir: string,
+    taskFileName: string,
+): Effect.Effect<void, never> =>
+    fs.readDirectory(taskDir).pipe(
+        orAbsent([] as ReadonlyArray<string>),
+        Effect.flatMap((names) => Effect.forEach(
+            names.filter((name) => name.startsWith(`${taskFileName}.tmp.`)),
+            (name) => fs.remove(posixPath.join(taskDir, name), { force: true }).pipe(Effect.ignore),
+            { discard: true },
+        )),
+    );
+
 export const acceptProposal = (
     opts: AcceptOptions,
 ): Effect.Effect<AcceptResult, JudgmentError | PlatformError.PlatformError, Judgment | FileSystem.FileSystem> =>
@@ -329,6 +373,11 @@ export const acceptProposal = (
             proposalStatus: row.status,
             autoScaffold: Boolean(opts.autoScaffold),
             safetyContract: safetyContractForRow(row),
+            experiment: row.experiment === null ? null : {
+                status: row.experiment.status,
+                taskPath: row.experiment.task_path,
+                lockedVerdict: row.experiment.locked_verdict,
+            },
         });
         if (acceptPlan.status === "wrong_status") {
             const existing = row.experiment;
@@ -349,7 +398,7 @@ export const acceptProposal = (
             }
             return result;
         }
-        if (acceptPlan.status !== "ok") {
+        if (acceptPlan.status !== "ok" && acceptPlan.status !== "resume_publication") {
             return {
                 status: acceptPlan.status,
                 message: acceptPlan.message,
@@ -357,12 +406,17 @@ export const acceptProposal = (
         }
         const experimentStatus = acceptPlan.experimentStatus;
 
-        const experimentKey = stableId("experiment", [proposalKey]);
+        // A resumed accept finishes the publication the earlier run committed:
+        // same experiment row, same intended path, no second proposal update.
+        const resumed = acceptPlan.status === "resume_publication" ? row.experiment : null;
+        const experimentKey = resumed?.id ?? stableId("experiment", [proposalKey]);
         const experimentId = `experiment:${experimentKey}`;
         const judgment = yield* Judgment;
 
-        // autoScaffold=true && form=skill: legacy direct-write path
-        if (opts.autoScaffold && row.form === "skill") {
+        // autoScaffold=true && form=skill: legacy direct-write path.
+        // Both scaffold paths write the artifact BEFORE they commit, so they can
+        // never leave a `publishing` row - a resume always belongs to the task path.
+        if (opts.autoScaffold && row.form === "skill" && resumed === null) {
             validateSig(row.dedupe_sig);
             const payload = row.skill_payload ?? null;
             if (!payload) {
@@ -406,7 +460,7 @@ export const acceptProposal = (
         // autoScaffold=true && form=guidance && section=workflows: scaffold SKILL.md stub (#588)
         // Uses suggested_text (the arc "plan → tdd → review → commit") as the stub body.
         // Directives and all other guidance sections fall through to the brief path below.
-        if (opts.autoScaffold && shouldScaffoldWorkflowSkill(row)) {
+        if (opts.autoScaffold && shouldScaffoldWorkflowSkill(row) && resumed === null) {
             validateSig(row.dedupe_sig);
             const scaffoldOutcome = yield* runSafeScaffold({
                 title: row.title,
@@ -449,16 +503,34 @@ export const acceptProposal = (
 
         // Default path for all v0 forms: emit .ax/tasks/<dedupe_sig>.md
         validateSig(row.dedupe_sig);
-        const taskDir = opts.taskDir ?? defaultTaskDir();
-        const taskPath = posixPath.join(taskDir, `${row.dedupe_sig}.md`);
+        // A resume keeps the path the interrupted run recorded, even when the
+        // caller's taskDir has since changed.
+        const taskPath = resumed?.task_path
+            ?? posixPath.join(opts.taskDir ?? defaultTaskDir(), `${row.dedupe_sig}.md`);
+        const taskDir = posixPath.dirname(taskPath);
 
-        // existsSync probe: any fault → treat as absent (orAbsent(false)).
-        const taskExists = yield* fs.exists(taskPath).pipe(orAbsent(false));
-        if (taskExists && !opts.force) {
+        if (resumed === null) {
+            // existsSync probe: any fault → treat as absent (orAbsent(false)).
+            const taskExists = yield* fs.exists(taskPath).pipe(orAbsent(false));
+            if (taskExists && !opts.force) {
+                return {
+                    status: "scaffold_exists",
+                    message: `task brief already exists at ${taskPath} (pass force=true to overwrite)`,
+                    task_path: taskPath,
+                };
+            }
+        } else if (yield* publishedTaskExists(fs, taskPath)) {
+            // The brief is already there: either the rename landed and only the
+            // status update was lost, or the operator wrote the file themselves.
+            // Never overwrite it - just finish the acceptance in the sidecar.
+            yield* finishPublication(judgment, experimentKey);
+            yield* sweepStagedTasks(fs, taskDir, `${row.dedupe_sig}.md`);
             return {
-                status: "scaffold_exists",
-                message: `task brief already exists at ${taskPath} (pass force=true to overwrite)`,
+                status: "ok",
+                proposal_id: `proposal:${proposalKey}`,
+                experiment_id: experimentId,
                 task_path: taskPath,
+                message: `finished the interrupted publication; kept the existing brief at ${taskPath}`,
             };
         }
 
@@ -473,23 +545,44 @@ export const acceptProposal = (
         const tmpPath = `${taskPath}.tmp.${process.pid}`;
         yield* fs.writeFileString(tmpPath, taskContent);
 
-        yield* saveAcceptedExperiment(judgment, proposalKey, experimentKey, experimentStatus, { taskPath }).pipe(
-            // Best-effort cleanup of the staged temp file on DB failure (matches
-            // main's `try { unlinkSync(tmpPath); } catch {}`): force tolerates an
-            // already-absent temp and `ignore` swallows any other fault so the
-            // original DbError still propagates.
-            Effect.tapError(() => fs.remove(tmpPath, { force: true }).pipe(Effect.ignore)),
-        );
+        if (resumed === null) {
+            // Phase 1: accept the proposal and record the path this run intends to
+            // publish, as `publishing`. That status is what a later retry reads to
+            // tell an interrupted publication from a completed acceptance.
+            yield* saveAcceptedExperiment(
+                judgment,
+                proposalKey,
+                experimentKey,
+                EXPERIMENT_STATUS_PUBLISHING,
+                { taskPath },
+            ).pipe(
+                // Best-effort cleanup of the staged temp file on DB failure (matches
+                // main's `try { unlinkSync(tmpPath); } catch {}`): force tolerates an
+                // already-absent temp and `ignore` swallows any other fault so the
+                // original DbError still propagates.
+                Effect.tapError(() => fs.remove(tmpPath, { force: true }).pipe(Effect.ignore)),
+            );
+        }
 
-        // Commit the staged write to its final path. Propagates on failure
-        // (original used bare renameSync, no try/catch).
+        // Phase 2: commit the staged write to its final path. A failure here
+        // propagates and leaves the experiment `publishing`, so the next accept
+        // resumes instead of refusing.
         yield* fs.rename(tmpPath, taskPath);
+
+        // Phase 3: the brief is on disk, so the publication is done. This path
+        // always emits a task, including when a resume arrives with
+        // --auto-scaffold, so the final status is task_emitted either way.
+        yield* finishPublication(judgment, experimentKey);
+        if (resumed !== null) yield* sweepStagedTasks(fs, taskDir, `${row.dedupe_sig}.md`);
 
         return {
             status: "ok",
             proposal_id: `proposal:${proposalKey}`,
             experiment_id: experimentId,
             task_path: taskPath,
+            ...(resumed === null
+                ? {}
+                : { message: `finished the interrupted publication at ${taskPath}` }),
         };
     });
 

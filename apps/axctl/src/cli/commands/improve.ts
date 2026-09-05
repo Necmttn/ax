@@ -318,6 +318,8 @@ const improveAcceptCommand = Command.make(
             }
 
             // status === "ok"
+            // Set only when this run finished an interrupted publication.
+            if (result.message) console.log(result.message);
             if (result.task_path) {
                 console.log(`task emitted at ${result.task_path}`);
                 console.log(`apply with your agent: \`claude "do ${result.task_path}"\``);

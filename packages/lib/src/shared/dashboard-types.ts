@@ -856,6 +856,8 @@ export interface CheckpointSnapshotDto {
 }
 
 export type ExperimentStatus =
+    /** transient: accepted and committed, brief not yet on disk */
+    | "publishing"
     | "task_emitted"
     | "scaffolded"
     | "regressed"
