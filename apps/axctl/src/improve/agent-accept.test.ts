@@ -92,6 +92,13 @@ const runWithProposal = <A>(
     }), schemaSuffix);
 };
 
+/**
+ * The staging files an attempt owns: `<sig>.md.<pid>.<uuid>.tmp`, siblings of the
+ * brief. Tests assert an attempt leaves none of its own behind.
+ */
+const stagingFiles = (root: string, sig: string): ReadonlyArray<string> =>
+    readdirSync(root).filter((name) => name.startsWith(`${sig}.md.`) && name.endsWith(".tmp"));
+
 describe("buildAgentAcceptPrompt", () => {
     test("includes the proposal and evidence", () => {
         const text = buildAgentAcceptPrompt({
@@ -303,7 +310,7 @@ describe("acceptProposal with real SQLite", () => {
 
         expect(result.exit._tag).toBe("Failure");
         expect(existsSync(join(result.root, `${sig}.md`))).toBe(false);
-        expect(readdirSync(result.root).filter((name) => name.includes(`${sig}.md.tmp.`))).toHaveLength(0);
+        expect(stagingFiles(result.root, sig)).toHaveLength(0);
     });
 
     test("uses different stable experiment IDs for different proposals", async () => {
@@ -406,7 +413,7 @@ describe("acceptProposal publication recovery", () => {
         expect(retry.experiment_id).toBe(`experiment:${before.experimentId}`);
         expect(after.experimentStatus).toBe("task_emitted");
         expect(after.taskPath).toBe(before.taskPath);
-        expect(readdirSync(root).filter((name) => name.includes(`${sig}.md.tmp.`))).toHaveLength(0);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
     });
 
     test("refuses a repeated retry once the publication is complete", async () => {
@@ -423,16 +430,65 @@ describe("acceptProposal publication recovery", () => {
         expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe(body);
     });
 
-    test("never overwrites a brief that is already on disk", async () => {
+    test("never replaces a user file sitting on the task path", async () => {
         const root = await interruptPublication();
         rmSync(join(root, `${sig}.md`), { recursive: true });
+        // The recovery never probes the path before it publishes, so a file that
+        // is there when the exclusive publish runs is a file that appeared during
+        // publication as far as the code is concerned.
         writeFileSync(join(root, `${sig}.md`), "operator edit\n");
 
         const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
 
         expect(retry.status).toBe("ok");
+        expect(retry.message).toContain("kept the existing brief");
         expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe("operator edit\n");
         expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("keeps a user file that appears while the recovery is staging its brief", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        // Race the operator's editor against the recovery: whoever the exclusive
+        // publish finds first wins, and the recovery must never destroy the file.
+        const [retry] = await Promise.all([
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+            Effect.runPromise(Effect.sync(() => writeFileSync(join(root, `${sig}.md`), "operator edit\n"))),
+        ]);
+
+        expect(retry.status).toBe("ok");
+        const landed = readFileSync(join(root, `${sig}.md`), "utf8");
+        // Either order is legal; what is not legal is a truncated or mixed file.
+        expect(landed === "operator edit\n" || landed.includes(`<!--ax:${sig}-->`)).toBe(true);
+        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("two concurrent recoveries publish one brief and lose no files", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        const [first, second] = await Promise.all([
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+        ]);
+
+        // One attempt publishes. The other either loses the exclusive publish and
+        // keeps the brief it found (`ok`), or arrives after the winner already
+        // finished the experiment and correctly refuses (`wrong_status`). Neither
+        // may fail, and neither may delete the other's staging file.
+        expect([first.status, second.status]).toContain("ok");
+        for (const result of [first, second]) {
+            expect(["ok", "wrong_status"]).toContain(result.status);
+            if (result.status === "ok") expect(result.task_path).toBe(join(root, `${sig}.md`));
+        }
+        expect(readdirSync(root).filter((name) => name === `${sig}.md`)).toHaveLength(1);
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
     });
 
     test("finishes the brief even when the retry asks for a direct scaffold", async () => {
