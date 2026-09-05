@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { CacheReadLayer, withCacheWrite } from "@ax/lib/duckdb/seam";
 import { withIngestLock } from "@ax/lib/ingest-lock";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
-import { Judgment, JudgmentLayer, TextColumn } from "@ax/lib/sqlite";
+import { Judgment, JudgmentLayer, TextColumn, TimestampColumn } from "@ax/lib/sqlite";
+import CACHE_DDL from "@ax/schema/schema.duckdb.sql" with { type: "text" };
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import {
     checkpointKey,
@@ -16,10 +17,6 @@ import {
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("derive checkpoints");
 const Platform = Layer.merge(BunFileSystem.layer, BunPath.layer);
-const CACHE_DDL = `
-CREATE TABLE opportunity (id VARCHAR PRIMARY KEY, in_id VARCHAR NOT NULL, was_addressed BOOLEAN NOT NULL);
-CREATE TABLE session (id VARCHAR PRIMARY KEY, created_at TIMESTAMP);
-`;
 
 describe("computeSuggestedVerdict", () => {
     test("opportunities=0 + no frequency info -> no_longer_needed", () => {
@@ -104,11 +101,11 @@ describe("checkpointKey", () => {
     });
 });
 
-dtest("deriveCheckpoints uses DuckDB facts and SQLite judgments", async () => {
+dtest("deriveCheckpoints counts subsequent sessions against production DDL and persists SQLite checkpoints", async () => {
     const root = tempDir("ax-checkpoint-sidecar-");
     const lockPath = join(root, "ingest.lock");
     const snapshotPath = join(root, "snapshot.duckdb");
-    const publish = withIngestLock({
+    const publish = (sessionCount: number, addressed = true) => withIngestLock({
         lockPath,
         command: "derive-checkpoints-test",
         staleMs: 60_000,
@@ -120,23 +117,34 @@ dtest("deriveCheckpoints uses DuckDB facts and SQLite judgments", async () => {
         schemaSql: CACHE_DDL,
         ...(dylibPath === null ? {} : { assetPath: dylibPath }),
     }, (write) => Effect.gen(function* () {
-        yield* write.putMany("session", [1, 2, 3].map((n) => ({
-            id: `session-${n}`,
-            created_at: new Date(`2026-01-0${n + 1}T00:00:00Z`),
-        })));
-        yield* write.putMany("opportunity", [
-            { id: "o1", in_id: "experiment-one", was_addressed: true },
-            { id: "o2", in_id: "experiment-one", was_addressed: true },
-            { id: "o3", in_id: "experiment-one", was_addressed: false },
+        yield* write.putMany("session", [
+            // Neither an earlier start nor an exact boundary start counts,
+            // even when the session ends after the experiment starts.
+            { id: "older", started_at: new Date("2025-12-31T23:59:59.999Z"), ended_at: new Date("2026-02-01T00:00:00Z") },
+            { id: "boundary", started_at: new Date("2026-01-01T00:00:00Z"), ended_at: new Date("2026-02-01T00:00:00Z") },
+            { id: "unknown", started_at: null, ended_at: new Date("2026-02-01T00:00:00Z") },
+            ...Array.from({ length: sessionCount }, (_, n) => ({
+                id: `session-${n + 1}`,
+                started_at: new Date(Date.parse("2026-01-01T00:00:00Z") + n + 1),
+                ended_at: null,
+            })),
         ]);
+        yield* write.putMany("opportunity", [
+            { id: "o1", in_id: "experiment-one", was_addressed: addressed },
+            { id: "o2", in_id: "experiment-one", was_addressed: addressed },
+            { id: "o3", in_id: "experiment-one", was_addressed: false },
+        ].map((row) => ({
+            ...row, out_id: "session-1", out_table: "session",
+            matched_at: new Date("2026-01-02T00:00:00Z"),
+        })));
     })));
-    await Effect.runPromise(publish.pipe(Effect.provide(Platform)));
+    await Effect.runPromise(publish(0).pipe(Effect.provide(Platform)));
 
-    const layer = Layer.mergeAll(
+    const layer = () => Layer.mergeAll(
         CacheReadLayer({ snapshotPath, ...(dylibPath === null ? {} : { assetPath: dylibPath }) }),
         JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: SIDECAR_SCHEMA_SQL }),
     );
-    const result = await Effect.runPromise(Effect.gen(function* () {
+    await Effect.runPromise(Effect.gen(function* () {
         const judgment = yield* Judgment;
         const now = new Date("2026-01-01T00:00:00Z");
         yield* judgment.put("proposal", {
@@ -147,16 +155,72 @@ dtest("deriveCheckpoints uses DuckDB facts and SQLite judgments", async () => {
         });
         yield* judgment.put("experiment", {
             id: "experiment-one", proposal: "proposal-one", artifact: null,
-            artifact_path: "/tmp/plan.md", scaffolded_at: now, created_at: now,
+            artifact_path: join(root, "plan.md"), scaffolded_at: now, created_at: now,
             locked_verdict: null, status: "scaffolded", task_path: null,
         });
-        const stats = yield* deriveCheckpoints({ now: new Date("2026-02-01T00:00:00Z") });
+    }).pipe(Effect.provide(layer()), Effect.scoped));
+
+    const observe = (now: Date, force = false) => Effect.runPromise(Effect.gen(function* () {
+        const stats = yield* deriveCheckpoints({ now, force });
+        const judgment = yield* Judgment;
         const rows = yield* judgment.rows(
-            Schema.Struct({ kind: TextColumn, suggested: TextColumn }),
-            "SELECT kind, suggested FROM checkpoint ORDER BY kind",
+            Schema.Struct({
+                id: TextColumn, kind: TextColumn, suggested: TextColumn,
+                measured: TextColumn, observed_at: TimestampColumn,
+            }),
+            "SELECT id, kind, suggested, measured, observed_at FROM checkpoint ORDER BY kind",
         );
         return { stats, rows };
-    }).pipe(Effect.provide(layer), Effect.scoped));
-    expect(result.stats.checkpointsInserted).toBe(1);
-    expect(result.rows).toEqual([{ kind: "+3s", suggested: "adopted" }]);
+    }).pipe(Effect.provide(layer()), Effect.scoped));
+
+    const now = new Date("2026-02-01T00:00:00Z");
+    const later = new Date("2026-02-02T00:00:00Z");
+    const cases = [
+        { count: 0, inserted: 0, kinds: [] },
+        { count: 2, inserted: 0, kinds: [] },
+        { count: 3, inserted: 1, kinds: ["+3s"] },
+        { count: 9, inserted: 0, kinds: ["+3s"] },
+        { count: 10, inserted: 1, kinds: ["+10s", "+3s"] },
+        { count: 29, inserted: 0, kinds: ["+10s", "+3s"] },
+        { count: 30, inserted: 1, kinds: ["+10s", "+30s", "+3s"] },
+    ];
+    for (const { count, inserted, kinds } of cases) {
+        await Effect.runPromise(publish(count).pipe(Effect.provide(Platform)));
+        const result = await observe(now);
+        expect(result.stats.experimentsScanned).toBe(1);
+        expect(result.stats.checkpointsInserted).toBe(inserted);
+        expect(result.rows.map((row) => row.kind)).toEqual(kinds);
+        for (const row of result.rows) {
+            expect(row.suggested).toBe("adopted");
+            expect(JSON.parse(row.measured)).toEqual({
+                opportunities: 3, addressed: 2, ratio: 2 / 3, built: true,
+                current_frequency: 3, baseline_frequency: 3,
+            });
+        }
+        const repeated = await observe(later);
+        expect(repeated.stats.checkpointsInserted).toBe(0);
+        expect(repeated.rows).toEqual(result.rows);
+    }
+
+    const before = await observe(now);
+    await Effect.runPromise(publish(30, false).pipe(Effect.provide(Platform)));
+    const unchanged = await observe(later);
+    expect(unchanged.stats.checkpointsInserted).toBe(0);
+    expect(unchanged.rows).toEqual(before.rows);
+
+    const forced = await observe(later, true);
+    expect(forced.stats.checkpointsInserted).toBe(3);
+    expect(forced.rows.map((row) => row.id)).toEqual(before.rows.map((row) => row.id));
+    expect(forced.rows.map((row) => row.kind)).toEqual(["+10s", "+30s", "+3s"]);
+    for (const row of forced.rows) {
+        expect(row.observed_at).toEqual(later);
+        expect(row.suggested).toBe("ignored");
+        expect(JSON.parse(row.measured)).toEqual({
+            opportunities: 3, addressed: 0, ratio: 0, built: true,
+            current_frequency: 3, baseline_frequency: 3,
+        });
+    }
+    const after = await observe(now);
+    expect(after.stats.checkpointsInserted).toBe(0);
+    expect(after.rows).toEqual(forced.rows);
 });
