@@ -6,6 +6,7 @@ import { Effect, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
 import { duckdbTestSetup } from "@ax/lib/testing/duckdb-dylib";
+import { pruneOtlpSpool } from "../otel/spool-server.ts";
 import { cacheRow } from "@ax/lib/duckdb/row";
 import { WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
 import { metricPointRowId } from "../otel/rows.ts";
@@ -203,4 +204,37 @@ describe("stampReceivedAt (timeless-event epoch collision guard)", () => {
         expect(stampReceivedAt(rows, null)[0]!.observed_at.getTime()).toBe(0);
         expect(stampReceivedAt(rows, new Date("nope"))[0]!.observed_at.getTime()).toBe(0);
     });
+});
+
+describe("OTLP spool retention watermarks", () => {
+    dtest("removes watermarks for pruned files while preserving other spool directories", async () => {
+        const spoolDir = await mkdtemp(join(tmpdir(), "ax-otel-prune-"));
+        const otherDir = await mkdtemp(join(tmpdir(), "ax-otel-other-"));
+        roots.push(spoolDir, otherDir);
+        const oldPath = join(spoolDir, "2026-01-01.jsonl");
+        const keptPath = join(spoolDir, "2026-08-14.jsonl");
+        const otherPath = join(otherDir, "2026-01-01.jsonl");
+        const line = JSON.stringify({ path: "/v1/metrics", body: JSON.stringify(metricPayload) }) + "\n";
+        await Promise.all([oldPath, keptPath, otherPath].map((path) => writeFile(path, line)));
+        await runWithPlatform(publishCacheFixture(tempDir("ax-otel-prune-db-"), dylibPath, (write) =>
+            Effect.gen(function* () {
+                yield* ingestOtelSpool(write, { spoolDir });
+                yield* ingestOtelSpool(write, { spoolDir: otherDir });
+                expect(yield* pruneOtlpSpool({ spoolDir, now: new Date("2026-08-14T12:00:00Z") })).toBe(1);
+                // A missing file in a different configured directory remains
+                // that directory's responsibility, even when it shares a name.
+                yield* Effect.promise(() => rm(otherPath));
+                yield* ingestOtelSpool(write, { spoolDir });
+                const marks = yield* write.rows(Schema.Struct({ path: Schema.String }),
+                    "SELECT path FROM ingest_file_state WHERE source_kind = 'otel_spool' ORDER BY path");
+                expect(marks.map((row) => row.path).sort()).toEqual([
+                    keptPath, otherPath, METRIC_KEY_CUTOVER_SENTINEL_PATH,
+                ].sort());
+                const sentinels = yield* write.rows(Schema.Struct({ path: Schema.String }),
+                    "SELECT path FROM ingest_file_state WHERE path = ?", [METRIC_KEY_CUTOVER_SENTINEL_PATH]);
+                expect(sentinels).toHaveLength(1);
+            }).pipe(Effect.provide(BunFileSystem.layer), Effect.provide(BunPath.layer)),
+        ));
+    });
+
 });
