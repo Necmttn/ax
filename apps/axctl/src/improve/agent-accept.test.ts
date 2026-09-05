@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer } from "effect";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { buildAgentAcceptPrompt } from "./agent-accept.ts";
 import { acceptProposal, shouldScaffoldWorkflowSkill } from "./actions.ts";
+import { findStoredProposal } from "./judgment-proposals.ts";
 
 type ProposalFixture = {
     readonly id: string;
@@ -57,12 +58,17 @@ const seedProposal = (judgment: JudgmentService, row: ProposalFixture) =>
         }
     });
 
-const runWithProposal = <A>(
-    row: ProposalFixture,
-    body: (judgment: JudgmentService, root: string) => Effect.Effect<A, unknown, Judgment | FileSystem.FileSystem>,
-    schemaSuffix = "",
-): Promise<A> => {
-    const root = mkdtempSync(join(tmpdir(), "ax-accept-sidecar-"));
+type SidecarBody<A> = (
+    judgment: JudgmentService,
+    root: string,
+) => Effect.Effect<A, unknown, Judgment | FileSystem.FileSystem>;
+
+/**
+ * One run against the sidecar file in `root`. Each call opens its own layer, so
+ * two calls over the same root are two independent processes as far as the
+ * SQLite file is concerned - which is what a retry after a crash looks like.
+ */
+const runInRoot = <A>(root: string, body: SidecarBody<A>, schemaSuffix = ""): Promise<A> => {
     const layer = Layer.mergeAll(
         JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: `${SIDECAR_SCHEMA_SQL}\n${schemaSuffix}` }),
         BunFileSystem.layer,
@@ -70,9 +76,20 @@ const runWithProposal = <A>(
     );
     return Effect.runPromise(Effect.gen(function* () {
         const judgment = yield* Judgment;
-        yield* seedProposal(judgment, row);
         return yield* body(judgment, root);
     }).pipe(Effect.provide(layer), Effect.scoped));
+};
+
+const runWithProposal = <A>(
+    row: ProposalFixture,
+    body: SidecarBody<A>,
+    schemaSuffix = "",
+): Promise<A> => {
+    const root = mkdtempSync(join(tmpdir(), "ax-accept-sidecar-"));
+    return runInRoot(root, (judgment, dir) => Effect.gen(function* () {
+        yield* seedProposal(judgment, row);
+        return yield* body(judgment, dir);
+    }), schemaSuffix);
 };
 
 describe("buildAgentAcceptPrompt", () => {
@@ -323,6 +340,147 @@ describe("acceptProposal with real SQLite", () => {
         }));
         expect(result.exit._tag).toBe("Failure");
         expect(readdirSync(result.root).filter((name) => name.endsWith(".md"))).toHaveLength(0);
+    });
+});
+
+describe("acceptProposal publication recovery", () => {
+    const sig = "resume_publication";
+    const fixture: ProposalFixture = {
+        id: "resume-one",
+        form: "guidance",
+        title: "Use rg",
+        hypothesis: "Search is slow.",
+        dedupe_sig: sig,
+        guidance_payload: { file_target: "CLAUDE.md", section: "tools", suggested_text: "Use rg." },
+    };
+
+    /**
+     * Interrupt a publication for real: a directory sits on the task path, so the
+     * write and the accept transaction both succeed and only the rename fails.
+     * Nothing here is mocked - the fault is in the filesystem the code really uses.
+     */
+    const interruptPublication = async (): Promise<string> => {
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-resume-"));
+        await runInRoot(root, (judgment) => seedProposal(judgment, fixture));
+        mkdirSync(join(root, `${sig}.md`));
+        const exit = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root, force: true }).pipe(Effect.exit));
+        expect(exit._tag).toBe("Failure");
+        return root;
+    };
+
+    const storedState = (root: string) =>
+        runInRoot(root, () => Effect.gen(function* () {
+            const stored = yield* findStoredProposal(sig);
+            return {
+                proposalStatus: stored?.status ?? null,
+                experimentId: stored?.experiment?.id ?? null,
+                experimentStatus: stored?.experiment?.status ?? null,
+                taskPath: stored?.experiment?.task_path ?? null,
+            };
+        }));
+
+    test("keeps the experiment publishing when the rename fails after the commit", async () => {
+        const root = await interruptPublication();
+        const state = await storedState(root);
+        expect(state.proposalStatus).toBe("accepted");
+        expect(state.experimentStatus).toBe("publishing");
+        expect(state.taskPath).toBe(join(root, `${sig}.md`));
+        expect(existsSync(join(root, `${sig}.md`, "anything"))).toBe(false);
+    });
+
+    test("finishes the interrupted publication on a process-style retry", async () => {
+        const root = await interruptPublication();
+        const before = await storedState(root);
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("ok");
+        expect(retry.task_path).toBe(join(root, `${sig}.md`));
+        const body = readFileSync(retry.task_path!, "utf8");
+        expect(body).toContain(`<!--ax:${sig}-->`);
+        expect(body).toContain("Use rg.");
+        const after = await storedState(root);
+        expect(after.experimentId).toBe(before.experimentId);
+        expect(retry.experiment_id).toBe(`experiment:${before.experimentId}`);
+        expect(after.experimentStatus).toBe("task_emitted");
+        expect(after.taskPath).toBe(before.taskPath);
+        expect(readdirSync(root).filter((name) => name.includes(`${sig}.md.tmp.`))).toHaveLength(0);
+    });
+
+    test("refuses a repeated retry once the publication is complete", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+        const body = readFileSync(join(root, `${sig}.md`), "utf8");
+
+        const again = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(again.status).toBe("wrong_status");
+        expect(again.message).toBe("proposal already accepted");
+        expect(again.existing_experiment?.id).toBeDefined();
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe(body);
+    });
+
+    test("never overwrites a brief that is already on disk", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        writeFileSync(join(root, `${sig}.md`), "operator edit\n");
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("ok");
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe("operator edit\n");
+        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+    });
+
+    test("finishes the brief even when the retry asks for a direct scaffold", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-resume-skill-"));
+        const skillSig = "resume_skill";
+        await runInRoot(root, (judgment) => seedProposal(judgment, {
+            id: "resume-skill",
+            form: "skill",
+            title: "Guard Bash",
+            hypothesis: "Bash fails.",
+            dedupe_sig: skillSig,
+            skill_payload: {
+                trigger_pattern: "tool=Bash",
+                suspected_gap: "no validation",
+                proposed_behavior: "validate first",
+                expected_impact: "fewer failures",
+            },
+        }));
+        mkdirSync(join(root, `${skillSig}.md`));
+        await runInRoot(root, () =>
+            acceptProposal({ sigOrId: skillSig, taskDir: root, force: true }).pipe(Effect.exit));
+        rmSync(join(root, `${skillSig}.md`), { recursive: true });
+
+        const retry = await runInRoot(root, () => acceptProposal({
+            sigOrId: skillSig,
+            taskDir: root,
+            autoScaffold: true,
+            scaffoldBaseDir: join(root, "skills"),
+        }));
+
+        expect(retry.status).toBe("ok");
+        expect(retry.task_path).toBe(join(root, `${skillSig}.md`));
+        expect(existsSync(join(root, "skills"))).toBe(false);
+        const stored = await runInRoot(root, () => findStoredProposal(skillSig));
+        expect(stored?.experiment?.status).toBe("task_emitted");
+    });
+
+    test("does not revive an experiment a verdict already judged", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        await runInRoot(root, (judgment) =>
+            judgment.exec("UPDATE experiment SET locked_verdict = ? WHERE status = ?", ["adopted", "publishing"]));
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("wrong_status");
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect((await storedState(root)).experimentStatus).toBe("publishing");
     });
 });
 
