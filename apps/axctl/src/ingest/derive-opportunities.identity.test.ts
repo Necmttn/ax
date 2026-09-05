@@ -820,6 +820,16 @@ describe("timestamp projections carry an explicit zone", () => {
         await utimes(guidancePath, correctionAt, correctionAt);
 
         const previousTz = process.env.TZ;
+        // Deleting TZ does NOT put the runtime back: bun keeps resolving the
+        // last zone it was ASSIGNED, so an unset variable leaves Asia/Singapore
+        // in force for every later test in this process (root saw the
+        // run-evidence SQL/TS parity case fail behind exactly that leak). The
+        // effective zone therefore has to be captured and re-ASSIGNED, not
+        // merely unset. The offset probe is a FIXED instant so the before/after
+        // comparison cannot move for a DST reason.
+        const priorZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const OFFSET_PROBE = new Date("2026-09-05T00:00:00Z");
+        const priorOffset = OFFSET_PROBE.getTimezoneOffset();
         // The host offset is the whole bug: DuckDB stores UTC, and a zone-less
         // projection came back through `new Date(...)` as LOCAL time, moving
         // every matched_at by the offset - out of its own install window.
@@ -842,14 +852,21 @@ describe("timestamp projections carry an explicit zone", () => {
                     return read.rows as unknown as ReadonlyArray<{ in_id: string; matched_at: string }>;
                 }));
         } finally {
+            // ASSIGN first - that is what makes the runtime re-resolve - and
+            // only then restore the variable's original shape.
+            process.env.TZ = previousTz ?? priorZone;
             if (previousTz === undefined) delete process.env.TZ;
-            else process.env.TZ = previousTz;
         }
 
         expect(stored).toHaveLength(1);
         expect(stored[0]!.in_id).toBe(experimentKey);
         // EXACT, not "within a window": an offset-shifted row differs by hours.
         expect(stored[0]!.matched_at).toBe(correctionAt.toISOString());
+        // Isolation is part of the contract: this case mutates process-wide
+        // state, and the next test in this process must not inherit it.
+        expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(priorZone);
+        expect(OFFSET_PROBE.getTimezoneOffset()).toBe(priorOffset);
+        expect(process.env.TZ).toBe(previousTz);
     });
 });
 
