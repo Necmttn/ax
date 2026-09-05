@@ -28,9 +28,13 @@ export const OPPORTUNITY_VERSION_PATH = "__opportunity_derivation__";
  * The token stored in `sha`. Bump it when matching semantics change again.
  *
  * `artifact-identity-v2` (#1133) certified the artifact-identity rules only.
- * `eligible-install-v3` (#1134) adds the eligibility gate and moves EVERY
- * form's evidence window to the observed install, so rows a v2 pass produced
- * describe a different question and cannot certify a v3 measurement - a
- * checkpoint reader that finds the old token asks for derivation instead.
+ * `eligible-install-v3` (#1134) added the eligibility gate and moved EVERY
+ * form's evidence window to the observed install.
+ * `utc-matched-at-v4` (#1134) fixes the timestamp projections: rows derived
+ * before it carry a `matched_at` shifted by the host's UTC offset, so on any
+ * non-UTC machine they sit outside their own install window and read as absent
+ * evidence. Those rows are not repairable in place - only a re-derivation can
+ * restore the instants - so a checkpoint reader that finds an older token asks
+ * for derivation rather than measuring them.
  */
-export const OPPORTUNITY_VERSION = "eligible-install-v3";
+export const OPPORTUNITY_VERSION = "utc-matched-at-v4";

@@ -809,6 +809,45 @@ describe("guidance form: a failed stat is unavailable evidence", () => {
     });
 });
 
+describe("timestamp projections carry an explicit zone", () => {
+    dtest("a correction keeps its instant on a UTC+8 host", async () => {
+        const harness = makeHarness("ax-opp-identity-tz-");
+        const guidancePath = join(harness.root, "CLAUDE.md");
+        const experimentKey = await installGuidanceExperiment(harness, { sig: "use-rg", guidancePath });
+        // A whole number of milliseconds, so the round-trip is exact rather
+        // than "close enough" - the shift this guards against is 8 HOURS.
+        const correctionAt = new Date(Math.floor((Date.now() + 60_000) / 1000) * 1000 + 541);
+        await utimes(guidancePath, correctionAt, correctionAt);
+
+        const previousTz = process.env.TZ;
+        // The host offset is the whole bug: DuckDB stores UTC, and a zone-less
+        // projection came back through `new Date(...)` as LOCAL time, moving
+        // every matched_at by the offset - out of its own install window.
+        process.env.TZ = "Asia/Singapore";
+        let stored: ReadonlyArray<{ readonly in_id: string; readonly matched_at: string }>;
+        try {
+            stored = await inCache(harness, (session) =>
+                Effect.gen(function* () {
+                    yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
+                    yield* session.derive;
+                    const read = yield* session.write.raw(
+                        `SELECT in_id, strftime(matched_at, '%Y-%m-%dT%H:%M:%S.%gZ') AS matched_at
+                         FROM opportunity`,
+                    );
+                    return read.rows as unknown as ReadonlyArray<{ in_id: string; matched_at: string }>;
+                }));
+        } finally {
+            if (previousTz === undefined) delete process.env.TZ;
+            else process.env.TZ = previousTz;
+        }
+
+        expect(stored).toHaveLength(1);
+        expect(stored[0]!.in_id).toBe(experimentKey);
+        // EXACT, not "within a window": an offset-shifted row differs by hours.
+        expect(stored[0]!.matched_at).toBe(correctionAt.toISOString());
+    });
+});
+
 describe("skill form: the cited candidate has to exist", () => {
     /** Seed one accepted+installed skill experiment straight into the real
      *  sidecar. The install path itself is covered by the hook/guidance cases
