@@ -137,6 +137,23 @@ interface Edit {
 export type HookProviderStatus = "progress_only" | "success" | "blocking_error";
 export type HookEffect = "allowed" | "blocked" | "injected_context" | "modified_input" | "notified" | "no_op" | "unknown";
 
+/**
+ * The effects that mean a hook actually DID something to the run - the single
+ * real-effect vocabulary, owned here beside {@link HookEffect} so no reader
+ * invents a second one. `allowed`/`no_op`/`unknown` are fires with no observed
+ * consequence and never count as an intervention.
+ *
+ * Consumers: `derive-run-evidence`'s policy-decision read (a `policy_decision`
+ * event is by definition a real intervention) and `derive-opportunities`'
+ * hook-form addressed detector.
+ */
+export const REAL_HOOK_EFFECTS: ReadonlyArray<HookEffect> = [
+    "blocked",
+    "injected_context",
+    "modified_input",
+    "notified",
+];
+
 export interface HarnessHookEventWrite {
     readonly key: string;
     readonly session: string;
