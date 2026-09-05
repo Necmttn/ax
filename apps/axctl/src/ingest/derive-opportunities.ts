@@ -32,6 +32,10 @@
  * EVERY form, because acceptance can precede installation by days and evidence
  * from that gap could not have met the artifact.
  *
+ * Every timestamp this stage reads back is projected as an explicit UTC instant
+ * ({@link utcTs}); a bare `CAST(ts AS VARCHAR)` is a zone-less string that JS
+ * silently reads as host-local time.
+ *
  * The opportunity row is a RELATION (in=experiment, out=evidence record).
  * Edge id = sha-style key over (experimentKey, evidenceKey) so re-derive
  * passes are idempotent; every selected experiment's rows are REBUILT each run
@@ -250,6 +254,25 @@ interface FrictionEventRow {
     readonly id: string | { tb: string; id: string };
     readonly ts: string;
 }
+
+/**
+ * Project a TIMESTAMP column as an EXPLICIT UTC instant (#1134).
+ *
+ * `CAST(ts AS VARCHAR)` yields `2026-09-05 17:32:41.541` - a naive local-looking
+ * string with no zone. The DuckDB side is fine (the seam pins every connection
+ * to UTC), but `new Date(...)`/`tsParam` then read that string as HOST-LOCAL
+ * time, so on a UTC+8 machine a correction recorded at 17:32Z came back as
+ * 09:32Z. Every consumer of these rows inherited the shift: `matched_at` landed
+ * eight hours early, the install window then excluded the very evidence it was
+ * meant to admit, and the ±window hook/skill correlations compared instants
+ * that were never on the same clock.
+ *
+ * `%g` is DuckDB's millisecond specifier, so this is the ISO-8601 `Z` form JS
+ * parses unambiguously - matching the precision `Date` keeps. The fix stays
+ * local to this file's projections: `tsParam` is a shared seam helper and does
+ * not get to guess a zone the query failed to state.
+ */
+const utcTs = (column: string): string => `strftime(${column}, '%Y-%m-%dT%H:%M:%S.%gZ')`;
 
 export const opportunityKey = (experimentKey: string, evidenceKey: string): string =>
     `${safeKeyPart(experimentKey).slice(0, 48)}__${safeKeyPart(evidenceKey).slice(0, 48)}__${Bun.hash(`${experimentKey}:${evidenceKey}`).toString(16).slice(0, 12)}`;
@@ -580,7 +603,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 if (tokens.length === 0) continue;
 
                 const fixesResult = yield* write.raw(`
-                    SELECT id, CAST(ts AS VARCHAR) AS ts, overlap_files
+                    SELECT id, ${utcTs("ts")} AS ts, overlap_files
                     FROM later_fixed_by
                     WHERE ts > ?`, [installedAt]);
                 const fixes = fixesResult.rows as unknown as LaterFixedByRow[];
@@ -603,7 +626,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, installedAt]);
+                            const invokedResult = yield* write.raw(`SELECT ${utcTs("ts")} AS ts FROM invoked WHERE out_id = ? AND ts > ?`, [skillKey, installedAt]);
                             invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
@@ -631,7 +654,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 if (!tool) continue;
 
                 const callsResult = yield* write.raw(`
-                    SELECT id, CAST(ts AS VARCHAR) AS ts
+                    SELECT id, ${utcTs("ts")} AS ts
                     FROM tool_call
                     WHERE name = ? AND has_error = true AND ts > ?`, [tool, installedAt]);
                 const calls = callsResult.rows as unknown as ToolCallRow[];
@@ -655,7 +678,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                     if (skillRow?.id) {
                         const skillKey = recordKeyPart(skillRow.id, "skill");
                         if (skillKey) {
-                            const invokedResult = yield* write.raw("SELECT CAST(ts AS VARCHAR) AS ts FROM invoked WHERE out_id = ? AND ts > ?", [skillKey, installedAt]);
+                            const invokedResult = yield* write.raw(`SELECT ${utcTs("ts")} AS ts FROM invoked WHERE out_id = ? AND ts > ?`, [skillKey, installedAt]);
                             invokedTimestamps = (invokedResult.rows as unknown as InvokedTsRow[])
                                 .map((r) => new Date(r.ts).getTime())
                                 .filter((t) => Number.isFinite(t));
@@ -695,7 +718,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 // opportunity for it, and counting it would dilute the ratio
                 // with failures the hook could not have been present for.
                 const callsResult = yield* write.raw(`
-                    SELECT id, session, call_id, CAST(ts AS VARCHAR) AS ts
+                    SELECT id, session, call_id, ${utcTs("ts")} AS ts
                     FROM tool_call
                     WHERE name = ? AND has_error = true AND ts > ?`, [tool, installedAt]);
                 const calls = callsResult.rows as unknown as HookToolCallRow[];
@@ -724,7 +747,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 // credit a prefix collision or a filename that merely contains
                 // the signature.
                 const invResult = yield* write.raw(`
-                    SELECT session, CAST(ts AS VARCHAR) AS ts, command, event_name,
+                    SELECT session, ${utcTs("ts")} AS ts, command, event_name,
                            tool_call, tool_call_id, effect, provider_status
                     FROM hook_command_invocation
                     WHERE ts > ? AND event_name = ? AND provider_status <> 'progress_only'
@@ -762,7 +785,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 // Cheap initial wedge: every correction friction_event AFTER the
                 // install is one opportunity for the guidance to have prevented.
                 const frictionResult = yield* write.raw(`
-                    SELECT id, CAST(ts AS VARCHAR) AS ts
+                    SELECT id, ${utcTs("ts")} AS ts
                     FROM friction_event
                     WHERE kind = 'correction' AND ts > ?`, [installedAt]);
                 const events = frictionResult.rows as unknown as FrictionEventRow[];
