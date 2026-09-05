@@ -9,6 +9,16 @@ export const isNotFound = (e: PlatformError.PlatformError): boolean =>
     e.reason._tag === "NotFound";
 
 /**
+ * True iff a `PlatformError` is "the path is already there" (EEXIST). It is the
+ * answer an EXCLUSIVE create (`FileSystem.link`, an `open` with a `wx` flag)
+ * gives when the target appeared before it got there - the race an
+ * exists-then-write pair cannot see, so a caller that must never replace a file
+ * tests this rather than probing the path first.
+ */
+export const isAlreadyExists = (e: PlatformError.PlatformError): boolean =>
+    e.reason._tag === "AlreadyExists";
+
+/**
  * Recover a NotFound (vanished file) read to `fallback`; RE-RAISE every other
  * `PlatformError` (never swallow IO/permission errors). Composes data-last:
  *

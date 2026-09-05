@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer } from "effect";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Judgment, JudgmentLayer, type JudgmentService } from "@ax/lib/sqlite";
+import { stableId } from "@ax/lib/stable-id";
 import { SIDECAR_SCHEMA_SQL } from "@ax/schema/sidecar-ddl";
 import { buildAgentAcceptPrompt } from "./agent-accept.ts";
 import { acceptProposal, shouldScaffoldWorkflowSkill } from "./actions.ts";
+import { findStoredProposal } from "./judgment-proposals.ts";
 
 type ProposalFixture = {
     readonly id: string;
@@ -57,12 +59,17 @@ const seedProposal = (judgment: JudgmentService, row: ProposalFixture) =>
         }
     });
 
-const runWithProposal = <A>(
-    row: ProposalFixture,
-    body: (judgment: JudgmentService, root: string) => Effect.Effect<A, unknown, Judgment | FileSystem.FileSystem>,
-    schemaSuffix = "",
-): Promise<A> => {
-    const root = mkdtempSync(join(tmpdir(), "ax-accept-sidecar-"));
+type SidecarBody<A> = (
+    judgment: JudgmentService,
+    root: string,
+) => Effect.Effect<A, unknown, Judgment | FileSystem.FileSystem>;
+
+/**
+ * One run against the sidecar file in `root`. Each call opens its own layer, so
+ * two calls over the same root are two independent processes as far as the
+ * SQLite file is concerned - which is what a retry after a crash looks like.
+ */
+const runInRoot = <A>(root: string, body: SidecarBody<A>, schemaSuffix = ""): Promise<A> => {
     const layer = Layer.mergeAll(
         JudgmentLayer({ sidecarPath: join(root, "judgment.sqlite"), schemaSql: `${SIDECAR_SCHEMA_SQL}\n${schemaSuffix}` }),
         BunFileSystem.layer,
@@ -70,10 +77,28 @@ const runWithProposal = <A>(
     );
     return Effect.runPromise(Effect.gen(function* () {
         const judgment = yield* Judgment;
-        yield* seedProposal(judgment, row);
         return yield* body(judgment, root);
     }).pipe(Effect.provide(layer), Effect.scoped));
 };
+
+const runWithProposal = <A>(
+    row: ProposalFixture,
+    body: SidecarBody<A>,
+    schemaSuffix = "",
+): Promise<A> => {
+    const root = mkdtempSync(join(tmpdir(), "ax-accept-sidecar-"));
+    return runInRoot(root, (judgment, dir) => Effect.gen(function* () {
+        yield* seedProposal(judgment, row);
+        return yield* body(judgment, dir);
+    }), schemaSuffix);
+};
+
+/**
+ * The staging files an attempt owns: `<sig>.md.<pid>.<uuid>.tmp`, siblings of the
+ * brief. Tests assert an attempt leaves none of its own behind.
+ */
+const stagingFiles = (root: string, sig: string): ReadonlyArray<string> =>
+    readdirSync(root).filter((name) => name.startsWith(`${sig}.md.`) && name.endsWith(".tmp"));
 
 describe("buildAgentAcceptPrompt", () => {
     test("includes the proposal and evidence", () => {
@@ -286,7 +311,7 @@ describe("acceptProposal with real SQLite", () => {
 
         expect(result.exit._tag).toBe("Failure");
         expect(existsSync(join(result.root, `${sig}.md`))).toBe(false);
-        expect(readdirSync(result.root).filter((name) => name.includes(`${sig}.md.tmp.`))).toHaveLength(0);
+        expect(stagingFiles(result.root, sig)).toHaveLength(0);
     });
 
     test("uses different stable experiment IDs for different proposals", async () => {
@@ -323,6 +348,488 @@ describe("acceptProposal with real SQLite", () => {
         }));
         expect(result.exit._tag).toBe("Failure");
         expect(readdirSync(result.root).filter((name) => name.endsWith(".md"))).toHaveLength(0);
+    });
+});
+
+describe("acceptProposal task publication", () => {
+    const sig = "resume_publication";
+    const fixture: ProposalFixture = {
+        id: "resume-one",
+        form: "guidance",
+        title: "Use rg",
+        hypothesis: "Search is slow.",
+        dedupe_sig: sig,
+        guidance_payload: { file_target: "CLAUDE.md", section: "tools", suggested_text: "Use rg." },
+    };
+
+    /**
+     * Interrupt a publication for real: a directory sits on the task path, so the
+     * write and the accept transaction both succeed and only the rename fails.
+     * Nothing here is mocked - the fault is in the filesystem the code really uses.
+     */
+    const interruptPublication = async (): Promise<string> => {
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-resume-"));
+        await runInRoot(root, (judgment) => seedProposal(judgment, fixture));
+        mkdirSync(join(root, `${sig}.md`));
+        const exit = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root, force: true }).pipe(Effect.exit));
+        expect(exit._tag).toBe("Failure");
+        return root;
+    };
+
+    /** A root holding one OPEN proposal - the state a first accept starts from. */
+    const seedFresh = async (): Promise<string> => {
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-initial-"));
+        await runInRoot(root, (judgment) => seedProposal(judgment, fixture));
+        return root;
+    };
+
+    const storedState = (root: string) =>
+        runInRoot(root, () => Effect.gen(function* () {
+            const stored = yield* findStoredProposal(sig);
+            return {
+                proposalStatus: stored?.status ?? null,
+                experimentId: stored?.experiment?.id ?? null,
+                experimentStatus: stored?.experiment?.status ?? null,
+                taskPath: stored?.experiment?.task_path ?? null,
+            };
+        }));
+
+    test("keeps the experiment publishing when the rename fails after the commit", async () => {
+        const root = await interruptPublication();
+        const state = await storedState(root);
+        expect(state.proposalStatus).toBe("accepted");
+        expect(state.experimentStatus).toBe("publishing");
+        expect(state.taskPath).toBe(join(root, `${sig}.md`));
+        expect(existsSync(join(root, `${sig}.md`, "anything"))).toBe(false);
+    });
+
+    test("finishes the interrupted publication on a process-style retry", async () => {
+        const root = await interruptPublication();
+        const before = await storedState(root);
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("ok");
+        expect(retry.task_path).toBe(join(root, `${sig}.md`));
+        const body = readFileSync(retry.task_path!, "utf8");
+        expect(body).toContain(`<!--ax:${sig}-->`);
+        expect(body).toContain("Use rg.");
+        const after = await storedState(root);
+        expect(after.experimentId).toBe(before.experimentId);
+        expect(retry.experiment_id).toBe(`experiment:${before.experimentId}`);
+        expect(after.experimentStatus).toBe("task_emitted");
+        expect(after.taskPath).toBe(before.taskPath);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("refuses a repeated retry once the publication is complete", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+        const body = readFileSync(join(root, `${sig}.md`), "utf8");
+
+        const again = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(again.status).toBe("wrong_status");
+        expect(again.message).toBe("proposal already accepted");
+        expect(again.existing_experiment?.id).toBeDefined();
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe(body);
+    });
+
+    test("never replaces a user file sitting on the task path", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        // The recovery never probes the path before it publishes, so a file that
+        // is there when the exclusive publish runs is a file that appeared during
+        // publication as far as the code is concerned.
+        writeFileSync(join(root, `${sig}.md`), "operator edit\n");
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("ok");
+        expect(retry.message).toContain("kept the existing brief");
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toBe("operator edit\n");
+        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("keeps a user file that appears while the recovery is staging its brief", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        // Race the operator's editor against the recovery: whoever the exclusive
+        // publish finds first wins, and the recovery must never destroy the file.
+        const [retry] = await Promise.all([
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+            Effect.runPromise(Effect.sync(() => writeFileSync(join(root, `${sig}.md`), "operator edit\n"))),
+        ]);
+
+        expect(retry.status).toBe("ok");
+        const landed = readFileSync(join(root, `${sig}.md`), "utf8");
+        // Either order is legal; what is not legal is a truncated or mixed file.
+        expect(landed === "operator edit\n" || landed.includes(`<!--ax:${sig}-->`)).toBe(true);
+        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("two concurrent recoveries publish one brief and lose no files", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+
+        const [first, second] = await Promise.all([
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+        ]);
+
+        // One attempt publishes. The other either loses the exclusive publish and
+        // keeps the brief it found (`ok`), or arrives after the winner already
+        // finished the experiment and correctly refuses (`wrong_status`). Neither
+        // may fail, and neither may delete the other's staging file.
+        expect([first.status, second.status]).toContain("ok");
+        for (const result of [first, second]) {
+            expect(["ok", "wrong_status"]).toContain(result.status);
+            if (result.status === "ok") expect(result.task_path).toBe(join(root, `${sig}.md`));
+        }
+        expect(readdirSync(root).filter((name) => name === `${sig}.md`)).toHaveLength(1);
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
+    });
+
+    test("finishes the brief even when the retry asks for a direct scaffold", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-resume-skill-"));
+        const skillSig = "resume_skill";
+        await runInRoot(root, (judgment) => seedProposal(judgment, {
+            id: "resume-skill",
+            form: "skill",
+            title: "Guard Bash",
+            hypothesis: "Bash fails.",
+            dedupe_sig: skillSig,
+            skill_payload: {
+                trigger_pattern: "tool=Bash",
+                suspected_gap: "no validation",
+                proposed_behavior: "validate first",
+                expected_impact: "fewer failures",
+            },
+        }));
+        mkdirSync(join(root, `${skillSig}.md`));
+        await runInRoot(root, () =>
+            acceptProposal({ sigOrId: skillSig, taskDir: root, force: true }).pipe(Effect.exit));
+        rmSync(join(root, `${skillSig}.md`), { recursive: true });
+
+        const retry = await runInRoot(root, () => acceptProposal({
+            sigOrId: skillSig,
+            taskDir: root,
+            autoScaffold: true,
+            scaffoldBaseDir: join(root, "skills"),
+        }));
+
+        expect(retry.status).toBe("ok");
+        expect(retry.task_path).toBe(join(root, `${skillSig}.md`));
+        expect(existsSync(join(root, "skills"))).toBe(false);
+        const stored = await runInRoot(root, () => findStoredProposal(skillSig));
+        expect(stored?.experiment?.status).toBe("task_emitted");
+    });
+
+    test("keeps a directory on the task path and leaves the publication unfinished", async () => {
+        const root = await interruptPublication();
+        // interruptPublication left the blocking directory in place: it is what
+        // made the first rename fail. The recovery must not adopt it as a brief.
+        mkdirSync(join(root, `${sig}.md`, "child"), { recursive: true });
+
+        const exit = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root }).pipe(Effect.exit));
+
+        expect(exit._tag).toBe("Failure");
+        // The directory is untouched, and the experiment is still publishing -
+        // a later retry can still finish it once the path is cleared.
+        expect(lstatSync(join(root, `${sig}.md`)).isDirectory()).toBe(true);
+        expect(existsSync(join(root, `${sig}.md`, "child"))).toBe(true);
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("publishing");
+        expect(state.proposalStatus).toBe("accepted");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("keeps a dangling symlink on the task path and leaves the publication unfinished", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        symlinkSync(join(root, "no-such-target.md"), join(root, `${sig}.md`));
+
+        const exit = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root }).pipe(Effect.exit));
+
+        expect(exit._tag).toBe("Failure");
+        // The link itself survives, still pointing where the operator aimed it,
+        // and nothing was written through it.
+        expect(lstatSync(join(root, `${sig}.md`)).isSymbolicLink()).toBe(true);
+        expect(readlinkSync(join(root, `${sig}.md`))).toBe(join(root, "no-such-target.md"));
+        expect(existsSync(join(root, "no-such-target.md"))).toBe(false);
+        expect((await storedState(root)).experimentStatus).toBe("publishing");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("does not revive an experiment a verdict already judged", async () => {
+        const root = await interruptPublication();
+        rmSync(join(root, `${sig}.md`), { recursive: true });
+        await runInRoot(root, (judgment) =>
+            judgment.exec("UPDATE experiment SET locked_verdict = ? WHERE status = ?", ["adopted", "publishing"]));
+
+        const retry = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(retry.status).toBe("wrong_status");
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect((await storedState(root)).experimentStatus).toBe("publishing");
+    });
+
+    test("an ordinary first accept never replaces a path its probe could not see", async () => {
+        const root = await seedFresh();
+        // `exists` follows the link, so the probe reports the path free; `link`
+        // does not, so the exclusive publish is the only thing that sees it.
+        // Under a replacing rename this symlink would be destroyed.
+        symlinkSync(join(root, "no-such-target.md"), join(root, `${sig}.md`));
+
+        const exit = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root }).pipe(Effect.exit));
+
+        expect(exit._tag).toBe("Failure");
+        expect(lstatSync(join(root, `${sig}.md`)).isSymbolicLink()).toBe(true);
+        expect(existsSync(join(root, "no-such-target.md"))).toBe(false);
+        expect((await storedState(root)).experimentStatus).toBe("publishing");
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("two concurrent first accepts publish one brief and keep the other", async () => {
+        const root = await seedFresh();
+
+        const [first, second] = await Promise.all([
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+            runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root })),
+        ]);
+
+        // NOTHING synchronises the two plan reads, so the second caller's answer
+        // depends on WHEN it looked, and several answers are correct:
+        //   - it read `open` too       -> its phase-one gate loses -> wrong_status
+        //   - it read the claim mid-flight (accepted + publishing + a task path,
+        //     no verdict)              -> a legitimate resume       -> ok
+        //   - it read the finished row -> wrong_status
+        //   - its exists probe saw the published file -> scaffold_exists
+        // Demanding one ok and one wrong_status would pin an interleaving this
+        // test cannot force. The losing-claim assertion belongs to the
+        // deterministic transaction-boundary tests ("a stale first accept ..."
+        // and "... a winner experiment stored under a different id"), which
+        // construct the state instead of racing for it.
+        //
+        // What holds under EVERY interleaving is asserted here.
+        expect([first.status, second.status]).toContain("ok");
+        for (const result of [first, second]) {
+            expect(["ok", "wrong_status", "scaffold_exists"]).toContain(result.status);
+        }
+        // One brief, whole, written once. The heading opens the document exactly
+        // once, so a second copy concatenated onto the first would show up here
+        // (the marker itself appears three times in one rendered brief).
+        expect(readdirSync(root).filter((name) => name === `${sig}.md`)).toHaveLength(1);
+        const body = readFileSync(join(root, `${sig}.md`), "utf8");
+        expect(body).toContain(`<!--ax:${sig}-->`);
+        expect(body.split(`# ax task: ${sig} (form=guidance)`)).toHaveLength(2);
+        expect(lstatSync(join(root, `${sig}.md`)).isFile()).toBe(true);
+        // No attempt left staging litter, and the durable state is published.
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
+        expect(state.proposalStatus).toBe("accepted");
+    });
+
+    test("an explicit force still replaces an existing brief", async () => {
+        const root = await seedFresh();
+        writeFileSync(join(root, `${sig}.md`), "stale brief\n");
+
+        const forced = await runInRoot(root, () =>
+            acceptProposal({ sigOrId: sig, taskDir: root, force: true }));
+
+        expect(forced.status).toBe("ok");
+        expect(readFileSync(join(root, `${sig}.md`), "utf8")).toContain(`<!--ax:${sig}-->`);
+        expect((await storedState(root)).experimentStatus).toBe("task_emitted");
+    });
+
+    /**
+     * Drive a REAL concurrent state change: the trigger fires inside the accept
+     * transaction, so by the time the publication tries to finish, the row
+     * already carries the status (and verdict) another actor set. No mocks - the
+     * database moves the row exactly as `ax improve housekeep` or a verdict lock
+     * would.
+     */
+    const acceptWithExperimentTrigger = (sigSuffix: string, setClause: string) =>
+        runWithProposal(
+            { ...fixture, id: `state-${sigSuffix}`, dedupe_sig: `state_${sigSuffix}` },
+            (_judgment, root) => Effect.gen(function* () {
+                const accepted = yield* acceptProposal({ sigOrId: `state_${sigSuffix}`, taskDir: root });
+                const stored = yield* findStoredProposal(`state_${sigSuffix}`);
+                return { accepted, root, stored, sig: `state_${sigSuffix}` };
+            }),
+            `CREATE TRIGGER move_experiment AFTER INSERT ON experiment
+             BEGIN UPDATE experiment SET ${setClause} WHERE id = NEW.id; END;`,
+        );
+
+    test.each([
+        ["retired", "status = 'retired'", null],
+        ["regressed", "status = 'regressed'", null],
+        ["retired_locked", "status = 'retired', locked_verdict = 'no_longer_needed'", "no_longer_needed"],
+        ["regressed_locked", "status = 'regressed', locked_verdict = 'regressed'", "regressed"],
+    ] as const)(
+        "does not report a completed publication when the experiment goes %s",
+        async (label, setClause, lockedVerdict) => {
+            const result = await acceptWithExperimentTrigger(label, setClause);
+
+            // "not publishing any more" is not "published": neither state may
+            // report success, and a locked row reports the lock, not the status.
+            expect(result.accepted.status).toBe(lockedVerdict === null ? "wrong_status" : "verdict_locked");
+            expect(result.accepted.message).toContain("was left in place and the acceptance was not finished");
+            if (lockedVerdict === null) {
+                expect(result.accepted.message).toContain("not published");
+            } else {
+                expect(result.accepted.message).toContain(`verdict already locked: ${lockedVerdict}`);
+            }
+            // The row keeps the state the other actor set - nothing was moved to
+            // task_emitted behind their back.
+            expect(result.stored?.experiment?.status).toBe(setClause.includes("retired") ? "retired" : "regressed");
+            expect(result.stored?.experiment?.locked_verdict).toBe(lockedVerdict);
+            // The brief itself was published and is left in place.
+            expect(readFileSync(join(result.root, `${result.sig}.md`), "utf8")).toContain(`<!--ax:${result.sig}-->`);
+            expect(stagingFiles(result.root, result.sig)).toHaveLength(0);
+        },
+    );
+
+    test("treats a concurrent lint reconcile to scaffolded as published", async () => {
+        // `ax improve lint` moves a reconciled row task_emitted -> scaffolded.
+        // That IS a published state, so the publication counts as finished.
+        const result = await acceptWithExperimentTrigger("scaffolded", "status = 'scaffolded'");
+
+        expect(result.accepted.status).toBe("ok");
+        expect(result.stored?.experiment?.status).toBe("scaffolded");
+        expect(readFileSync(join(result.root, `${result.sig}.md`), "utf8")).toContain(`<!--ax:${result.sig}-->`);
+    });
+
+    test("a stale first accept never overwrites a finished, verdict-locked experiment", async () => {
+        // The state a stale accept walks into: another accept already published
+        // and the user locked a verdict, but this attempt still reads the
+        // proposal as open (its plan snapshot is out of date).
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-stale-"));
+        const experimentKey = stableId("experiment", [fixture.id]);
+        const settled = new Date("2026-01-02T00:00:00Z");
+        await runInRoot(root, (judgment) => Effect.gen(function* () {
+            yield* seedProposal(judgment, fixture);
+            yield* judgment.put("experiment", {
+                id: experimentKey,
+                proposal: fixture.id,
+                artifact: null,
+                artifact_path: null,
+                scaffolded_at: null,
+                created_at: settled,
+                locked_verdict: "adopted",
+                status: "task_emitted",
+                task_path: join(root, `${sig}.md`),
+            });
+        }));
+
+        const stale = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(stale.status).toBe("wrong_status");
+        expect(stale.message).toContain("nothing was published");
+        // The verdict and the finished status survive: no upsert reset them.
+        const state = await storedState(root);
+        expect(state.experimentStatus).toBe("task_emitted");
+        expect(state.experimentId).toBe(experimentKey);
+        const stored = await runInRoot(root, () => findStoredProposal(sig));
+        expect(stored?.experiment?.locked_verdict).toBe("adopted");
+        expect(stored?.experiment?.created_at.toISOString()).toBe(settled.toISOString());
+        // The whole phase rolled back, so the proposal was not claimed either.
+        expect(state.proposalStatus).toBe("open");
+        // And nothing reached the task path.
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("a first accept loses to a winner experiment stored under a different id", async () => {
+        // `experiment(proposal)` is UNIQUE, so the winner row survives whatever id
+        // it was written under - a retro registration and an accept derive
+        // different ids for the same proposal. The claim must classify THAT
+        // conflict as a lost race too, not just an id collision.
+        const root = mkdtempSync(join(tmpdir(), "ax-accept-otherid-"));
+        const winnerId = "winner-experiment-row";
+        const settled = new Date("2026-01-03T00:00:00Z");
+        expect(winnerId).not.toBe(stableId("experiment", [fixture.id]));
+        await runInRoot(root, (judgment) => Effect.gen(function* () {
+            yield* seedProposal(judgment, fixture);           // proposal stays OPEN
+            yield* judgment.put("experiment", {
+                id: winnerId,
+                proposal: fixture.id,
+                artifact: null,
+                artifact_path: null,
+                scaffolded_at: null,
+                created_at: settled,
+                locked_verdict: "adopted",
+                status: "task_emitted",
+                task_path: join(root, "winner-brief.md"),
+            });
+            yield* judgment.put("checkpoint", {
+                id: "winner-checkpoint",
+                experiment: winnerId,
+                kind: "+3s",
+                measured: "{}",
+                suggested: "adopted",
+                user_verdict: "adopted",
+                observed_at: settled,
+            });
+        }));
+
+        const lost = await runInRoot(root, () => acceptProposal({ sigOrId: sig, taskDir: root }));
+
+        expect(lost.status).toBe("wrong_status");
+        expect(lost.message).toContain("nothing was published");
+        // The winner row is untouched, down to its id, verdict and timestamp.
+        const stored = await runInRoot(root, () => findStoredProposal(sig));
+        expect(stored?.experiment?.id).toBe(winnerId);
+        expect(stored?.experiment?.status).toBe("task_emitted");
+        expect(stored?.experiment?.locked_verdict).toBe("adopted");
+        expect(stored?.experiment?.created_at.toISOString()).toBe(settled.toISOString());
+        expect(stored?.experiment?.task_path).toBe(join(root, "winner-brief.md"));
+        // Its checkpoints survive with the user's verdict intact.
+        expect(stored?.experiment?.checkpoints).toHaveLength(1);
+        expect(stored?.experiment?.checkpoints[0]?.user_verdict).toBe("adopted");
+        // The phase rolled back whole: the proposal was never claimed.
+        expect(stored?.status).toBe("open");
+        // Nothing published, and this attempt's staging file is gone.
+        expect(existsSync(join(root, `${sig}.md`))).toBe(false);
+        expect(stagingFiles(root, sig)).toHaveLength(0);
+    });
+
+    test("does not report a completed publication for a verdict-locked experiment", async () => {
+        // The verdict lands between the plan read and the final update: the
+        // trigger locks the row inside the accept transaction itself, so the
+        // status test alone would still have moved it to task_emitted.
+        const result = await runWithProposal(
+            { ...fixture, id: "locked-race", dedupe_sig: "locked_race" },
+            (_judgment, root) => Effect.gen(function* () {
+                const accepted = yield* acceptProposal({ sigOrId: "locked_race", taskDir: root });
+                const stored = yield* findStoredProposal("locked_race");
+                return { accepted, root, stored };
+            }),
+            `CREATE TRIGGER lock_experiment AFTER INSERT ON experiment
+             BEGIN UPDATE experiment SET locked_verdict = 'adopted' WHERE id = NEW.id; END;`,
+        );
+
+        expect(result.accepted.status).toBe("verdict_locked");
+        expect(result.accepted.message).toContain("verdict already locked: adopted");
+        expect(result.accepted.message).toContain("was left in place");
+        // The brief did land - it is the experiment row that must not move.
+        expect(readFileSync(join(result.root, "locked_race.md"), "utf8")).toContain("<!--ax:locked_race-->");
+        expect(result.stored?.experiment?.status).toBe("publishing");
+        expect(result.stored?.experiment?.locked_verdict).toBe("adopted");
+        expect(stagingFiles(result.root, "locked_race")).toHaveLength(0);
     });
 });
 

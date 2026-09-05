@@ -307,6 +307,12 @@ const improveAcceptCommand = Command.make(
                 }
                 process.exit(2);
             }
+            if (result.status === "verdict_locked") {
+                // The brief may be on disk, but the experiment was judged and
+                // must not be moved - never print this as an emitted task.
+                console.error(result.message ?? "experiment verdict already locked");
+                process.exit(2);
+            }
             if (result.status === "unsupported_form") {
                 fail(result.message ?? "unsupported form");
             }
@@ -318,6 +324,8 @@ const improveAcceptCommand = Command.make(
             }
 
             // status === "ok"
+            // Set only when this run finished an interrupted publication.
+            if (result.message) console.log(result.message);
             if (result.task_path) {
                 console.log(`task emitted at ${result.task_path}`);
                 console.log(`apply with your agent: \`claude "do ${result.task_path}"\``);

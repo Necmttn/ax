@@ -17,6 +17,14 @@ export const MANUAL_TASK_PROPOSAL_FORMS = INTERVENTION_FORMS;
 
 export const EXPERIMENT_STATUS_TASK_EMITTED = "task_emitted";
 export const EXPERIMENT_STATUS_SCAFFOLDED = "scaffolded";
+/**
+ * Transient: the accept transaction has committed, but the task brief is not on
+ * disk yet. It is the durable difference between an INTERRUPTED publication (a
+ * retry must finish it) and a COMPLETED acceptance (a retry is wrong_status).
+ * No accept ever leaves it as a final status - `acceptedExperimentStatus` never
+ * returns it, and the publication finalizes it in the same call.
+ */
+export const EXPERIMENT_STATUS_PUBLISHING = "publishing";
 export const LIFECYCLE_VERDICT_REGRESSED = "regressed";
 export type ExperimentStatus =
     | typeof EXPERIMENT_STATUS_TASK_EMITTED
@@ -109,17 +117,47 @@ export type AcceptCandidatePlan =
         readonly experimentStatus: ExperimentStatus;
     }
     | {
+        /** Finish an interrupted publication in place, on the same experiment. */
+        readonly status: "resume_publication";
+        readonly experimentStatus: ExperimentStatus;
+    }
+    | {
         readonly status: "wrong_status" | "unsupported_form";
         readonly message: string;
     };
+
+/** The stored experiment an accept retry would land on, if there is one. */
+export interface AcceptExperimentState {
+    readonly status: string;
+    readonly taskPath: string | null;
+    readonly lockedVerdict: string | null;
+}
+
+/**
+ * True iff an accept retry should FINISH a publication rather than refuse it:
+ * the experiment still says `publishing`, it names the path it meant to write,
+ * and nobody has judged it. A retired or verdict-locked experiment is never
+ * revived, and a completed acceptance stays `wrong_status`.
+ */
+export function isInterruptedPublication(
+    proposalStatus: string,
+    experiment: AcceptExperimentState | null | undefined,
+): boolean {
+    return proposalStatus === PROPOSAL_STATUS_ACCEPTED
+        && experiment?.status === EXPERIMENT_STATUS_PUBLISHING
+        && experiment.taskPath !== null
+        && experiment.lockedVerdict === null;
+}
 
 export function planAcceptCandidate(input: {
     readonly form: string;
     readonly proposalStatus: string;
     readonly autoScaffold: boolean;
     readonly safetyContract?: InterventionSafetyContract | null;
+    readonly experiment?: AcceptExperimentState | null;
 }): AcceptCandidatePlan {
-    if (input.proposalStatus !== PROPOSAL_STATUS_OPEN) {
+    const resume = isInterruptedPublication(input.proposalStatus, input.experiment);
+    if (input.proposalStatus !== PROPOSAL_STATUS_OPEN && !resume) {
         return {
             status: "wrong_status",
             message: `proposal already ${input.proposalStatus}`,
@@ -141,10 +179,10 @@ export function planAcceptCandidate(input: {
             };
         }
     }
-    return {
-        status: "ok",
-        experimentStatus: acceptedExperimentStatus(input),
-    };
+    const experimentStatus = acceptedExperimentStatus(input);
+    return resume
+        ? { status: "resume_publication", experimentStatus }
+        : { status: "ok", experimentStatus };
 }
 
 export type RejectCandidatePlan =

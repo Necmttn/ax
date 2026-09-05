@@ -79,6 +79,57 @@ describe("intervention lifecycle vocabulary", () => {
         });
     });
 
+    test("plans a resume only for an interrupted publication", () => {
+        const publishing = { status: "publishing", taskPath: "/tmp/ax/tasks/sig.md", lockedVerdict: null };
+        expect(planAcceptCandidate({
+            form: "guidance",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            experiment: publishing,
+        })).toEqual({
+            status: "resume_publication",
+            experimentStatus: "task_emitted",
+        });
+        // A completed acceptance keeps the old answer.
+        expect(planAcceptCandidate({
+            form: "guidance",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            experiment: { status: "task_emitted", taskPath: "/tmp/ax/tasks/sig.md", lockedVerdict: null },
+        })).toEqual({
+            status: "wrong_status",
+            message: "proposal already accepted",
+        });
+        // A retired or judged experiment is never revived.
+        expect(planAcceptCandidate({
+            form: "guidance",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            experiment: { ...publishing, lockedVerdict: "adopted" },
+        }).status).toBe("wrong_status");
+        expect(planAcceptCandidate({
+            form: "guidance",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            experiment: { status: "retired", taskPath: "/tmp/ax/tasks/sig.md", lockedVerdict: null },
+        }).status).toBe("wrong_status");
+        // No intended path means there is nothing to finish.
+        expect(planAcceptCandidate({
+            form: "guidance",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            experiment: { ...publishing, taskPath: null },
+        }).status).toBe("wrong_status");
+        // Safety gates still apply to a resumed acceptance.
+        expect(planAcceptCandidate({
+            form: "hook",
+            proposalStatus: "accepted",
+            autoScaffold: false,
+            safetyContract: null,
+            experiment: publishing,
+        }).status).toBe("unsupported_form");
+    });
+
     test("plans reject transitions with the default reject reason", () => {
         expect(planRejectCandidate({ proposalStatus: "open" })).toEqual({
             status: "ok",
