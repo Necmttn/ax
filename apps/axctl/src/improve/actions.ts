@@ -319,7 +319,14 @@ export class AcceptRaceLostError extends Schema.TaggedErrorClass<AcceptRaceLostE
  *   - `ON CONFLICT DO NOTHING` on the experiment. The previous `put` was an
  *     UPSERT: a stale accept arriving after another accept finished and the user
  *     locked a verdict would overwrite that row back to `publishing` with
- *     `locked_verdict = NULL`, silently discarding the verdict.
+ *     `locked_verdict = NULL`, silently discarding the verdict. The clause names
+ *     NO conflict target on purpose: `experiment` is unique on `id` AND on
+ *     `proposal` (`experiment_proposal_uq`), and the winner's row can carry a
+ *     DIFFERENT id - `ax retro emit`'s registration and an accept derive ids
+ *     their own way. Targeting `(id)` left that second conflict unhandled, so it
+ *     surfaced as a raw UNIQUE constraint failure instead of a lost race. Either
+ *     conflict now yields `created === 0`, which is the same answer: somebody
+ *     else owns this proposal's experiment.
  *
  * Losing either gate FAILS the transaction, so SQLite rolls the whole phase back
  * - the proposal is never left claimed by an attempt that could not create its
@@ -348,7 +355,7 @@ const claimAcceptedExperiment = (
             `INSERT INTO experiment
                  (id, proposal, artifact, artifact_path, scaffolded_at, created_at, locked_verdict, status, task_path)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (id) DO NOTHING`,
+             ON CONFLICT DO NOTHING`,
             [
                 experimentId,
                 proposalId,
@@ -363,7 +370,9 @@ const claimAcceptedExperiment = (
         );
         if (created === 0) {
             return yield* new AcceptRaceLostError({
-                message: `experiment ${experimentId} already exists`,
+                // Names the proposal, not this attempt's id: the row that won
+                // may be stored under a different one.
+                message: `an experiment for proposal ${proposalId} already exists`,
             });
         }
     }));
