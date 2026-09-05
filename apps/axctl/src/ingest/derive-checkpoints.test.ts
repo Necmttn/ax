@@ -547,7 +547,10 @@ dtest("a missing or foreign derivation marker forces refresh instead of measurin
     const invalidMarkers: ReadonlyArray<PublishOpts> = [
         { marker: null },
         { marker: "" },
+        // Every superseded token: rows they certified answer a different
+        // question (#1133 identity rules, pre-UTC matched_at) than this reader asks.
         { marker: "artifact-identity-v2" },
+        { marker: "eligible-install-v3" },
         { marker: "who-knows" },
         { marker: OPPORTUNITY_VERSION, markerSource: "some_other_stage" },
     ];
