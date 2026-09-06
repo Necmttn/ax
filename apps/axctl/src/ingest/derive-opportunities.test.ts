@@ -1,4 +1,4 @@
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -6,15 +6,19 @@ import { Effect } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import {
     buildOpportunityRows,
-    hookBasenameFromArtifactPath,
+    commandCarriesMarker,
+    hookOpportunityAddressed,
+    installedArtifactPath,
+    isCreditableHookInvocation,
     kebabNameFromArtifactPath,
     opportunityKey,
     overlapFilesMatch,
     parseOverlapFiles,
     parseSkillTriggerTool,
-    resolveGuidanceTargetPath,
     safeFileMtimeMs,
     triggerTokensFromCandidate,
+    type HookInvocationFact,
+    type HookOpportunityFact,
 } from "./derive-opportunities.ts";
 
 const runMtime = (absPath: string): Promise<number | null> =>
@@ -75,14 +79,26 @@ describe("overlapFilesMatch", () => {
 });
 
 describe("buildOpportunityRows", () => {
-    test("emits one bound row per match with a stable edge id", () => {
+    test("emits one row per match with a stable edge id and an ISO matched_at", () => {
         const rows = buildOpportunityRows("exp_1", [
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z" },
             { evidenceTable: "later_fixed_by", evidenceKey: "edge_b", ts: "2026-05-25T01:00:00.000Z" },
         ]);
         expect(rows).toHaveLength(2);
-        expect(rows[0]).toMatchObject({ in_id: "exp_1", out_id: "edge_a", out_table: "later_fixed_by", was_addressed: false });
-        expect(rows[0]!.id).toBe(opportunityKey("exp_1", "edge_a"));
+        expect(rows[0]).toEqual({
+            id: opportunityKey("exp_1", "edge_a"),
+            out_id: "edge_a",
+            out_table: "later_fixed_by",
+            matched_at: "2026-05-25T00:00:00.000Z",
+            was_addressed: false,
+        });
+    });
+
+    test("carries no in_id - the replacement statement binds the experiment", () => {
+        const rows = buildOpportunityRows("exp_1", [
+            { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z" },
+        ]);
+        expect(rows[0]).not.toHaveProperty("in_id");
     });
 
     test("no matches -> no statements", () => {
@@ -111,21 +127,6 @@ describe("kebabNameFromArtifactPath (C5a addressed-detector helper)", () => {
     });
 });
 
-describe("hookBasenameFromArtifactPath (hook-form addressed-detector helper)", () => {
-    test("returns the .sh basename", () => {
-        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/pre-bash-guard.sh"))
-            .toBe("pre-bash-guard.sh");
-        expect(hookBasenameFromArtifactPath("./hooks/my-hook.sh")).toBe("my-hook.sh");
-    });
-
-    test("returns null for null/empty/non-.sh paths", () => {
-        expect(hookBasenameFromArtifactPath(null)).toBeNull();
-        expect(hookBasenameFromArtifactPath("")).toBeNull();
-        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/script.py")).toBeNull();
-        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/")).toBeNull();
-    });
-});
-
 describe("parseSkillTriggerTool", () => {
     test("extracts the tool name from a tool=<Name> pattern", () => {
         expect(parseSkillTriggerTool("tool=Bash")).toBe("Bash");
@@ -137,27 +138,6 @@ describe("parseSkillTriggerTool", () => {
         expect(parseSkillTriggerTool("garbage")).toBeNull();
         expect(parseSkillTriggerTool("")).toBeNull();
         expect(parseSkillTriggerTool("cmd=foo")).toBeNull();
-    });
-});
-
-describe("resolveGuidanceTargetPath", () => {
-    const home = "/Users/test";
-
-    test("expands bare CLAUDE.md / AGENTS.md to <home>/.claude/<file>", () => {
-        expect(resolveGuidanceTargetPath("CLAUDE.md", home)).toBe("/Users/test/.claude/CLAUDE.md");
-        expect(resolveGuidanceTargetPath("AGENTS.md", home)).toBe("/Users/test/.claude/AGENTS.md");
-    });
-
-    test("expands ~/ prefix to home", () => {
-        expect(resolveGuidanceTargetPath("~/.claude/CLAUDE.md", home)).toBe("/Users/test/.claude/CLAUDE.md");
-    });
-
-    test("leaves absolute paths unchanged", () => {
-        expect(resolveGuidanceTargetPath("/etc/foo", home)).toBe("/etc/foo");
-    });
-
-    test("leaves other relative paths unchanged", () => {
-        expect(resolveGuidanceTargetPath("docs/notes.md", home)).toBe("docs/notes.md");
     });
 });
 
@@ -175,6 +155,20 @@ describe("safeFileMtimeMs", () => {
         }
     });
 
+    test("returns null for a directory - a directory mtime is not artifact activity", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-mtime-"));
+        try {
+            // The guidance path became a directory (a stray `mkdir -p`, a
+            // reshaped checkout). Its mtime moves whenever anything lands
+            // inside it, which says nothing about the guidance file.
+            const asDir = join(dir, "CLAUDE.md");
+            await mkdir(asDir);
+            expect(await runMtime(asDir)).toBeNull();
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
     test("returns null for a missing file (orAbsent)", async () => {
         const dir = await mkdtemp(join(tmpdir(), "ax-mtime-"));
         try {
@@ -182,5 +176,150 @@ describe("safeFileMtimeMs", () => {
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// F02 (#1133): observed artifact identity
+// ---------------------------------------------------------------------------
+
+const invocation = (over: Partial<HookInvocationFact> = {}): HookInvocationFact => ({
+    session: "session-1",
+    ts: "2026-05-25T00:00:00.000Z",
+    command: "echo 'ax:74da7418' && bun ~/.ax/hooks/enforce-worktree.ts",
+    event_name: "PreToolUse",
+    tool_call: null,
+    tool_call_id: null,
+    effect: "blocked",
+    provider_status: "blocking_error",
+    ...over,
+});
+
+const opportunity = (over: Partial<HookOpportunityFact> = {}): HookOpportunityFact => ({
+    id: "tool-call-1",
+    session: "session-1",
+    call_id: null,
+    ts: "2026-05-25T00:00:00.000Z",
+    ...over,
+});
+
+describe("installedArtifactPath", () => {
+    test("returns the recorded path", () => {
+        expect(installedArtifactPath("/repo/.claude/settings.json")).toBe("/repo/.claude/settings.json");
+    });
+
+    test("null for a missing or blank path - never a guessed global file", () => {
+        expect(installedArtifactPath(null)).toBeNull();
+        expect(installedArtifactPath("")).toBeNull();
+        expect(installedArtifactPath("   ")).toBeNull();
+        expect(installedArtifactPath("CLAUDE.md")).toBe("CLAUDE.md");
+    });
+});
+
+describe("commandCarriesMarker", () => {
+    test("matches the complete installed marker id in any command shape", () => {
+        expect(commandCarriesMarker("echo 'ax:74da7418' && bash guard.sh", "74da7418")).toBe(true);
+        expect(commandCarriesMarker("python3 ~/.ax/hooks/guard.py # ax:74da7418", "74da7418")).toBe(true);
+        expect(commandCarriesMarker("node ./guard.js --sig ax:74da7418", "74da7418")).toBe(true);
+        expect(commandCarriesMarker("bun ~/.ax/hooks/dispatch.ts # ax:74da7418", "74da7418")).toBe(true);
+        expect(commandCarriesMarker("ax:74da7418", "74da7418")).toBe(true);
+    });
+
+    test("a shared prefix is not the same identity", () => {
+        expect(commandCarriesMarker("echo 'ax:74da7418ff' && bash guard.sh", "74da7418")).toBe(false);
+        expect(commandCarriesMarker("echo 'ax:74da7418' && bash guard.sh", "74da7418ff")).toBe(false);
+        expect(commandCarriesMarker("echo 'ax:74da' && bash guard.sh", "74da7418")).toBe(false);
+    });
+
+    test("no marker at all is not a match", () => {
+        expect(commandCarriesMarker("bash /Users/x/.claude/hooks/74da7418.sh", "74da7418")).toBe(false);
+        expect(commandCarriesMarker("", "74da7418")).toBe(false);
+        expect(commandCarriesMarker("echo 'ax:74da7418'", "")).toBe(false);
+    });
+
+    test("picks the right one when two markers share a prefix", () => {
+        const command = "echo 'ax:74da7418' && echo 'ax:74da7418ff' && bash guard.sh";
+        expect(commandCarriesMarker(command, "74da7418")).toBe(true);
+        expect(commandCarriesMarker(command, "74da7418ff")).toBe(true);
+        expect(commandCarriesMarker(command, "74da74")).toBe(false);
+    });
+});
+
+describe("isCreditableHookInvocation", () => {
+    const identity = { dedupeSig: "74da7418", eventName: "PreToolUse" };
+
+    test("credits a real-effect fire carrying the installed marker", () => {
+        expect(isCreditableHookInvocation(invocation(), identity)).toBe(true);
+        expect(isCreditableHookInvocation(invocation({ effect: "injected_context", provider_status: "success" }), identity)).toBe(true);
+        expect(isCreditableHookInvocation(invocation({ effect: "modified_input", provider_status: "success" }), identity)).toBe(true);
+        expect(isCreditableHookInvocation(invocation({ effect: "notified", provider_status: "success" }), identity)).toBe(true);
+    });
+
+    test("rejects a different configured event name", () => {
+        expect(isCreditableHookInvocation(invocation({ event_name: "PostToolUse" }), identity)).toBe(false);
+    });
+
+    test("rejects progress_only, no_op, unknown and allowed records", () => {
+        expect(isCreditableHookInvocation(invocation({ provider_status: "progress_only" }), identity)).toBe(false);
+        expect(isCreditableHookInvocation(invocation({ effect: "no_op", provider_status: "success" }), identity)).toBe(false);
+        expect(isCreditableHookInvocation(invocation({ effect: "unknown", provider_status: "success" }), identity)).toBe(false);
+        expect(isCreditableHookInvocation(invocation({ effect: "allowed", provider_status: "success" }), identity)).toBe(false);
+    });
+
+    test("rejects a command without the installed marker identity", () => {
+        expect(isCreditableHookInvocation(invocation({ command: "bash /Users/x/.claude/hooks/guard.sh" }), identity)).toBe(false);
+        expect(isCreditableHookInvocation(invocation({ command: "echo 'ax:74da7418ff' && bash guard.sh" }), identity)).toBe(false);
+    });
+});
+
+describe("hookOpportunityAddressed", () => {
+    test("exact tool_call identity credits only its own call", () => {
+        const fires = [invocation({ tool_call: "tool-call-1" })];
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1" }), fires)).toBe(true);
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-2" }), fires)).toBe(false);
+    });
+
+    test("exact tool_call_id identity credits only its own call", () => {
+        const fires = [invocation({ tool_call_id: "toolu_1" })];
+        expect(hookOpportunityAddressed(opportunity({ call_id: "toolu_1" }), fires)).toBe(true);
+        expect(hookOpportunityAddressed(opportunity({ call_id: "toolu_2" }), fires)).toBe(false);
+    });
+
+    test("does not fall back to the window when the fire carries tool-call identity", () => {
+        const fires = [invocation({ tool_call: "tool-call-9" })];
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1" }), fires)).toBe(false);
+    });
+
+    test("a named fire never credits a call whose own identity is unknown", () => {
+        // The fire names `toolu_1`; this call carries no `call_id` at all, so it
+        // is not the named call. Falling through to the window here would credit
+        // a call the fire demonstrably did not act on.
+        const fires = [invocation({ tool_call_id: "toolu_1" })];
+        expect(hookOpportunityAddressed(opportunity({ call_id: null }), fires)).toBe(false);
+    });
+
+    test("the row reference still wins over the provider id", () => {
+        // Both identities present and disagreeing: `tool_call` is the row this
+        // fire was recorded against, so it decides.
+        const fires = [invocation({ tool_call: "tool-call-1", tool_call_id: "toolu_other" })];
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1", call_id: "toolu_1" }), fires)).toBe(true);
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-2", call_id: "toolu_other" }), fires)).toBe(false);
+    });
+
+    test("falls back to the time window inside the same session when neither record has identity", () => {
+        const fires = [invocation({ ts: "2026-05-25T00:30:00.000Z" })];
+        expect(hookOpportunityAddressed(opportunity(), fires)).toBe(true);
+        expect(hookOpportunityAddressed(opportunity({ ts: "2026-05-25T04:00:00.000Z" }), fires)).toBe(false);
+    });
+
+    test("never credits across sessions", () => {
+        const fires = [invocation({ session: "session-2", tool_call: "tool-call-1" })];
+        expect(hookOpportunityAddressed(opportunity({ id: "tool-call-1" }), fires)).toBe(false);
+        expect(hookOpportunityAddressed(opportunity(), [invocation({ session: "session-2" })])).toBe(false);
+        expect(hookOpportunityAddressed(opportunity({ session: null }), [invocation({ session: null })])).toBe(false);
+    });
+
+    test("no fires at all is not addressed", () => {
+        expect(hookOpportunityAddressed(opportunity(), [])).toBe(false);
     });
 });

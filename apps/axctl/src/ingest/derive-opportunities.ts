@@ -12,25 +12,48 @@
  *  - skill (retro-derived, no skill_candidate): trigger_pattern fallback,
  *    matches failing tool_call rows for the named tool.
  *  - hook: failing tool_call rows for hook_proposal.target_tool;
- *    was_addressed if a hook_command_invocation referencing the scaffold's
- *    basename fired within ±ADDRESSED_WINDOW_MS.
- *  - guidance: friction_event rows of kind='correction'; was_addressed if
- *    the target file's mtime is later than the opportunity's matched_at.
+ *    was_addressed if a hook_command_invocation carrying the experiment's
+ *    COMPLETE `ax:<dedupe_sig>` marker, on the configured event, with a real
+ *    effect, correlates to the failing call (exact tool-call identity first,
+ *    ±ADDRESSED_WINDOW_MS inside the same session only as a fallback).
+ *  - guidance: friction_event rows of kind='correction'; was_addressed if the
+ *    OBSERVED artifact's (experiment.artifact_path) mtime is later than the
+ *    opportunity's matched_at - file activity, not proof of better behaviour.
  *  - automation/subagent: explicitly skipped pending detectors.
+ *
+ * Artifact identity comes from what `improve lint` RECORDED (#1133), never from
+ * a path guessed off the proposal. An experiment with no recorded artifact /
+ * install time has UNAVAILABLE evidence: it contributes no rows, and its stale
+ * ones are cleared rather than left to read as "not addressed".
+ *
+ * Measurement starts at `experiment.scaffolded_at` (the observed install),
+ * because acceptance can precede installation by days.
  *
  * The opportunity row is a RELATION (in=experiment, out=evidence record).
  * Edge id = sha-style key over (experimentKey, evidenceKey) so re-derive
- * passes are idempotent.
+ * passes are idempotent; every selected experiment's rows are REBUILT each run
+ * so a match the corrected rules drop cannot survive as a stale row. The
+ * rebuild is one atomic MERGE per experiment (ingest holds no transaction), and
+ * a completed pass stamps the derivation-version sentinel that tells a
+ * checkpoint reader these rows came from the corrected rules
+ * (`opportunity-cache-version.ts`).
  */
 
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { jsonArrayField } from "@ax/lib/decode";
-import { homedir } from "node:os";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { cacheRow, tsParam } from "@ax/lib/duckdb/row";
+import { tsParam } from "@ax/lib/duckdb/row";
 import type { CacheReadError, CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
 import type { Judgment, JudgmentError } from "@ax/lib/sqlite";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
+import { parseHookCommandMarkers } from "../improve/markers.ts";
+import { REAL_HOOK_EFFECTS, isRealHookEffect } from "@ax/lib/shared/hook-effects";
+import { WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
+import {
+    OPPORTUNITY_VERSION,
+    OPPORTUNITY_VERSION_PATH,
+    OPPORTUNITY_VERSION_SOURCE,
+} from "./opportunity-cache-version.ts";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface DeriveOpportunitiesStats {
@@ -40,6 +63,10 @@ export interface DeriveOpportunitiesStats {
     readonly bySkillForm: number;
     readonly byHookForm: number;
     readonly byGuidanceForm: number;
+    /** Experiments whose installed artifact could not be resolved - no recorded
+     *  `artifact_path` / `scaffolded_at`, so their evidence is UNAVAILABLE
+     *  rather than negative. Their stale rows are cleared, not kept. */
+    readonly artifactUnavailable: number;
 }
 
 /**
@@ -63,14 +90,106 @@ export const kebabNameFromArtifactPath = (path: string | null): string | null =>
 };
 
 /**
- * Extract the hook script basename from an experiment's artifact_path,
- * e.g. `/Users/x/.claude/hooks/pre-bash-guard.sh` → `pre-bash-guard.sh`.
- * Returns null for empty/non-.sh paths.
+ * The artifact ax OBSERVED being installed - `experiment.artifact_path`, written
+ * by `improve lint` (lint.ts) when it reconciles the marker it actually found on
+ * disk. A blank/absent value means nothing was reconciled yet: the caller reports
+ * unavailable artifact evidence rather than guessing a path from the proposal
+ * (a guessed `<basename>.sh` misses python/node/bun/inline hooks, and a bare
+ * `CLAUDE.md` expanded to `~/.claude/CLAUDE.md` measures a DIFFERENT file that
+ * merely shares a basename).
  */
-export const hookBasenameFromArtifactPath = (path: string | null): string | null => {
-    if (!path) return null;
-    const last = path.split("/").pop();
-    return last && last.endsWith(".sh") ? last : null;
+export const installedArtifactPath = (path: string | null): string | null => {
+    const trimmed = path?.trim() ?? "";
+    return trimmed.length > 0 ? trimmed : null;
+};
+
+/**
+ * Does this hook command carry the experiment's installed marker identity?
+ *
+ * The task template installs `ax:<dedupe_sig>` INSIDE the configured command,
+ * and every producer path preserves the command verbatim (progress line,
+ * `hook_success` attachment, and the command recovered from a blocked
+ * tool_result), so the marker survives into `hook_command_invocation.command`.
+ *
+ * Identity is COMPLETE-id equality through the shared marker parser, never a
+ * SQL substring: `ax:74da7418` and `ax:74da7418ff` are different experiments,
+ * and a shell filename that happens to contain the signature is not a marker.
+ */
+export const commandCarriesMarker = (command: string, dedupeSig: string): boolean => {
+    if (dedupeSig.length === 0) return false;
+    return parseHookCommandMarkers(command).some((marker) => marker.id === dedupeSig);
+};
+
+/** The `hook_command_invocation` columns the hook detector reads. */
+export interface HookInvocationFact {
+    readonly session: string | null;
+    readonly ts: string;
+    readonly command: string;
+    readonly event_name: string;
+    /** ref -> tool_call.id (the row key), when the harness named the call. */
+    readonly tool_call: string | null;
+    /** The provider's own tool-use id, comparable to `tool_call.call_id`. */
+    readonly tool_call_id: string | null;
+    readonly effect: string;
+    readonly provider_status: string;
+}
+
+/** The `tool_call` columns the hook detector correlates against. */
+export interface HookOpportunityFact {
+    readonly id: string;
+    readonly session: string | null;
+    readonly call_id: string | null;
+    readonly ts: string;
+}
+
+/**
+ * Is this fire evidence that THIS experiment's hook ran with a real effect?
+ *
+ * Three independent gates, all required: the installed marker identity, the
+ * configured event name, and a real effect. `progress_only` records are a
+ * mid-flight status line rather than an outcome, and `no_op`/`unknown`/`allowed`
+ * are fires with no observed consequence - none of them is an intervention.
+ * A hook that passes SILENTLY is written nowhere by the harness, so it stays
+ * unmeasured; presence of the configuration is not evidence that it ran.
+ */
+export const isCreditableHookInvocation = (
+    invocation: HookInvocationFact,
+    identity: { readonly dedupeSig: string; readonly eventName: string },
+): boolean =>
+    invocation.provider_status !== "progress_only"
+    && isRealHookEffect(invocation.effect)
+    && invocation.event_name === identity.eventName
+    && commandCarriesMarker(invocation.command, identity.dedupeSig);
+
+/**
+ * Did a creditable fire address this failing tool call?
+ *
+ * Same session always (a fire in another run says nothing about this one). Then
+ * exact tool-call correlation is PREFERRED: when the fire names a call - either
+ * the `tool_call` row ref or the provider's `tool_call_id` - it credits that one
+ * call and no other. The ±{@link ADDRESSED_WINDOW_MS} window survives only as
+ * the fallback for fires the harness recorded without any call identity.
+ */
+export const hookOpportunityAddressed = (
+    call: HookOpportunityFact,
+    invocations: readonly HookInvocationFact[],
+    windowMs: number = ADDRESSED_WINDOW_MS,
+): boolean => {
+    const callMs = new Date(call.ts).getTime();
+    return invocations.some((invocation) => {
+        if (!call.session || !invocation.session || call.session !== invocation.session) return false;
+        if (invocation.tool_call !== null) return invocation.tool_call === call.id;
+        // A NAMED fire credits the call it names and nothing else. When the call
+        // it points at carries no comparable id, the answer is "not this one" -
+        // falling through to the window here would let a fire that named some
+        // other call credit a call of unknown identity.
+        if (invocation.tool_call_id !== null) {
+            return call.call_id !== null && invocation.tool_call_id === call.call_id;
+        }
+        const fireMs = new Date(invocation.ts).getTime();
+        if (!Number.isFinite(callMs) || !Number.isFinite(fireMs)) return false;
+        return Math.abs(fireMs - callMs) <= windowMs;
+    });
 };
 
 /**
@@ -82,25 +201,17 @@ export const parseSkillTriggerTool = (pattern: string): string | null => {
     return m && m[1] ? m[1].trim() : null;
 };
 
-/**
- * Resolve a guidance_proposal.file_target to an absolute filesystem path.
- * - "CLAUDE.md" / "AGENTS.md" → `<home>/.claude/<file>`
- * - "~/foo" → `<home>/foo`
- * - absolute paths returned unchanged
- * - anything else returned unchanged (caller defends against stat failure)
- */
-export const resolveGuidanceTargetPath = (target: string, home: string): string => {
-    const t = target.trim();
-    if (t.startsWith("/")) return t;
-    if (t.startsWith("~/")) return `${home}/${t.slice(2)}`;
-    if (t === "CLAUDE.md" || t === "AGENTS.md") return `${home}/.claude/${t}`;
-    return t;
-};
-
 interface ActiveExperimentRow {
     readonly id: string | { tb: string; id: string };
     readonly created_at: string;
+    /** When `improve lint` OBSERVED the artifact installed - the earliest time a
+     *  measurement can mean anything. Null until lint has reconciled the marker
+     *  (acceptance can precede installation by days). */
+    readonly scaffolded_at: string | null;
     readonly form: string;
+    /** The proposal's `ax:<dedupe_sig>` marker identity, installed inside the
+     *  hook command by the task template. */
+    readonly dedupe_sig: string;
     readonly candidate_id: string | { tb: string; id: string } | null;
     readonly artifact_path: string | null;
     readonly skill_trigger: string | null;
@@ -125,12 +236,13 @@ interface ToolCallRow {
     readonly ts: string;
 }
 
-interface FrictionEventRow {
-    readonly id: string | { tb: string; id: string };
-    readonly ts: string;
+interface HookToolCallRow extends ToolCallRow {
+    readonly session: string | null;
+    readonly call_id: string | null;
 }
 
-interface HookInvocationTsRow {
+interface FrictionEventRow {
+    readonly id: string | { tb: string; id: string };
     readonly ts: string;
 }
 
@@ -165,6 +277,22 @@ export const overlapFilesMatch = (
     return false;
 };
 
+/**
+ * One `opportunity` row as the atomic replacement sees it.
+ *
+ * `in_id` is deliberately ABSENT: the replacement statement derives it from the
+ * bound experiment id, so a row can never claim to belong to another experiment
+ * and reach past this experiment's scope.
+ */
+export interface OpportunityReplacementRow {
+    readonly id: string;
+    readonly out_id: string;
+    readonly out_table: string;
+    /** ISO-8601; the statement casts it to TIMESTAMP. */
+    readonly matched_at: string;
+    readonly was_addressed: boolean;
+}
+
 export const buildOpportunityRows = (
     experimentKey: string,
     matches: ReadonlyArray<{
@@ -173,16 +301,89 @@ export const buildOpportunityRows = (
         readonly ts: string;
         readonly addressed?: boolean;
     }>,
-): Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> => {
-    const rows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
+): OpportunityReplacementRow[] => {
+    const rows: OpportunityReplacementRow[] = [];
     for (const m of matches) {
-        const edgeKey = opportunityKey(experimentKey, m.evidenceKey);
-        rows.push(cacheRow({ id: edgeKey, in_id: experimentKey, out_id: m.evidenceKey,
-            out_table: m.evidenceTable, matched_at: tsParam(m.ts) ?? new Date(),
-            was_addressed: m.addressed ?? false }));
+        rows.push({
+            id: opportunityKey(experimentKey, m.evidenceKey),
+            out_id: m.evidenceKey,
+            out_table: m.evidenceTable,
+            matched_at: (tsParam(m.ts) ?? new Date()).toISOString(),
+            was_addressed: m.addressed ?? false,
+        });
     }
     return rows;
 };
+
+/**
+ * Replace exactly one experiment's derived rows, in ONE statement.
+ *
+ * The seam runs ingest WITHOUT a transaction (see `seam.ts`), so a
+ * `DELETE`-then-`INSERT` pair has a real window in which the experiment has lost
+ * its old rows and not yet gained its new ones - and if the insert fails, that
+ * window becomes the published state. DuckDB applies a `MERGE` as one statement:
+ * inserts, updates and the scoped delete either all land or none do, and a
+ * failure leaves every previous row exactly as it was.
+ *
+ * The delete arm is bounded by `target.in_id = ?`, so it can only ever remove
+ * rows of the experiment being replaced; every other experiment is untouched.
+ * An empty `rows` array is a meaningful call - it clears this experiment.
+ */
+export const REPLACE_OPPORTUNITIES_SQL = `
+MERGE INTO opportunity AS target
+USING (
+    SELECT
+        CAST(? AS VARCHAR) AS in_id,
+        value ->> 'id' AS id,
+        value ->> 'out_id' AS out_id,
+        value ->> 'out_table' AS out_table,
+        CAST(value ->> 'matched_at' AS TIMESTAMP) AS matched_at,
+        CAST(value ->> 'was_addressed' AS BOOLEAN) AS was_addressed
+    FROM json_each(CAST(? AS JSON))
+) AS source
+ON target.id = source.id AND target.in_id = source.in_id
+WHEN MATCHED THEN UPDATE SET
+    out_id = source.out_id,
+    out_table = source.out_table,
+    matched_at = source.matched_at,
+    was_addressed = source.was_addressed
+WHEN NOT MATCHED THEN INSERT
+    (id, in_id, out_id, out_table, matched_at, was_addressed)
+    VALUES (source.id, source.in_id, source.out_id, source.out_table, source.matched_at, source.was_addressed)
+WHEN NOT MATCHED BY SOURCE AND target.in_id = CAST(? AS VARCHAR) THEN DELETE
+`;
+
+/** Duplicate ids inside one replacement have ambiguous MERGE semantics, so they
+ *  are rejected BEFORE the statement rather than left to a cryptic engine error.
+ *  Ids come from {@link opportunityKey}, so a duplicate means two evidence rows
+ *  collided on a key - a bug worth failing loudly on, never one to dedupe away. */
+const duplicateRowId = (rows: readonly OpportunityReplacementRow[]): string | null => {
+    const seen = new Set<string>();
+    for (const row of rows) {
+        if (seen.has(row.id)) return row.id;
+        seen.add(row.id);
+    }
+    return null;
+};
+
+export const replaceOpportunities = (
+    write: CacheWriteService,
+    experimentKey: string,
+    rows: readonly OpportunityReplacementRow[],
+): Effect.Effect<void, CacheWriteError | CacheReadError> =>
+    Effect.gen(function* () {
+        const duplicate = duplicateRowId(rows);
+        if (duplicate !== null) {
+            return yield* Effect.die(
+                new Error(`opportunity replacement for ${experimentKey} repeats row id ${duplicate}`),
+            );
+        }
+        yield* write.raw(REPLACE_OPPORTUNITIES_SQL, [
+            experimentKey,
+            JSON.stringify(rows),
+            experimentKey,
+        ]);
+    });
 
 interface SkillIdRow {
     readonly id: string | { tb: string; id: string };
@@ -193,11 +394,20 @@ interface InvokedTsRow {
 }
 
 /**
- * Best-effort file mtime in epoch-ms, or `null` when the file is absent /
- * unreadable. OLD: `statSync` in try/catch returning `null` on ANY fault →
- * `orAbsent` (a missing or unreadable guidance target is "not addressed").
- * `fs.stat` follows symlinks (matching node's `statSync`); `.mtime` is an
- * `Option<Date>`, so a stat that lands but lacks mtime also maps to `null`.
+ * The artifact's mtime in epoch-ms, or `null` when there is NO READING to be
+ * had: the path is absent, unreadable, carries no mtime, or is not a regular
+ * file. Every one of those means the evidence is UNAVAILABLE - not that the
+ * guidance went unaddressed - and the caller treats it that way.
+ *
+ * The file-type check is load-bearing. A guidance path can become a DIRECTORY
+ * (a `CLAUDE.md/` created by a stray `mkdir -p`, a checkout that reshaped the
+ * tree), and a directory's mtime moves whenever anything inside it is created
+ * or removed. Counting that as activity on the guidance file would manufacture
+ * `was_addressed = true` out of unrelated filesystem noise.
+ *
+ * `fs.stat` follows symlinks (matching node's `statSync`), so a symlink to a
+ * real file still reads as a file. `.mtime` is an `Option<Date>`, so a stat that
+ * lands but lacks one maps to `null` too.
  */
 export const safeFileMtimeMs = (
     absPath: string,
@@ -206,6 +416,7 @@ export const safeFileMtimeMs = (
         const fs = yield* FileSystem.FileSystem;
         const info = yield* fs.stat(absPath).pipe(Effect.asSome, orAbsent(Option.none()));
         if (Option.isNone(info)) return null;
+        if (info.value.type !== "File") return null;
         return Option.match(info.value.mtime, {
             onNone: () => null,
             onSome: (d) => d.getTime(),
@@ -232,6 +443,15 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
     Judgment | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
+        // FIRST, before any read or write: drop the version certificate. Ingest
+        // can continue past a failed stage and publish a partially changed
+        // cache, and such a snapshot must not keep an older pass's success
+        // marker. Nothing re-stamps it except a complete pass below.
+        yield* write.exec(
+            `DELETE FROM ${WATERMARK_TABLE} WHERE source_kind = ? AND path = ?`,
+            [OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH],
+        );
+
         // Active = accepted proposal + experiment without a locked verdict.
         // Both live in the sidecar, so this is the sidecar's own reader rather
         // than a join in SQL.
@@ -264,7 +484,9 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
             return {
                 id: experiment.id,
                 created_at: experiment.created_at.toISOString(),
+                scaffolded_at: experiment.scaffolded_at?.toISOString() ?? null,
                 form: proposal.form,
+                dedupe_sig: proposal.dedupe_sig,
                 artifact_path: experiment.artifact_path,
                 candidate_id: candidateByProposal.get(proposal.id) ?? null,
                 skill_trigger: proposal.skill_payload?.trigger_pattern ?? null,
@@ -284,13 +506,18 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
         let bySkillForm = 0;
         let byHookForm = 0;
         let byGuidanceForm = 0;
-        const allRows: Array<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>> = [];
-
-        const home = homedir();
+        let artifactUnavailable = 0;
+        // Every experiment this run SELECTED gets its derived rows rebuilt, so a
+        // `was_addressed` computed by the old matching rules cannot outlive them.
+        // An experiment that computes NO rows still gets a replacement call: that
+        // is what clears rows the corrected rules no longer match.
+        const rebuiltExperimentKeys: string[] = [];
+        const rowsByExperiment = new Map<string, OpportunityReplacementRow[]>();
 
         for (const exp of experiments) {
             const experimentKey = recordKeyPart(exp.id, "experiment");
             if (!experimentKey) continue;
+            rebuiltExperimentKeys.push(experimentKey);
             const form = exp.form;
 
             // -------- skill form (legacy: closure-derived via skill_candidate) --------
@@ -341,7 +568,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
@@ -393,67 +620,109 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
 
                 totalOpportunities += matches.length;
                 bySkillForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
             // -------- hook form --------
             if (form === "hook") {
                 const tool = exp.hook_payload?.target_tool ?? null;
+                const eventName = exp.hook_payload?.event_name ?? null;
                 if (!tool) continue;
 
+                // The identity a fire has to carry to be THIS hook. Without an
+                // installed marker + a configured event + an observed install
+                // time there is nothing to match on: the hook is UNMEASURED, not
+                // unaddressed, so its stale rows go and no new ones land. The
+                // executable is never guessed from the proposal - a wrapper, a
+                // python/node/bun script and an inline command all look the same
+                // from here, and only the marker distinguishes them.
+                const installedAt = exp.scaffolded_at;
+                if (!eventName || exp.dedupe_sig.length === 0 || installedAt === null) {
+                    artifactUnavailable += 1;
+                    continue;
+                }
+
+                // Both sides of the match are windowed on the OBSERVED install:
+                // a call that failed before the hook existed was never an
+                // opportunity for it, and counting it would dilute the ratio
+                // with failures the hook could not have been present for.
                 const callsResult = yield* write.raw(`
-                    SELECT id, CAST(ts AS VARCHAR) AS ts
+                    SELECT id, session, call_id, CAST(ts AS VARCHAR) AS ts
                     FROM tool_call
-                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(exp.created_at)]);
-                const calls = callsResult.rows as unknown as ToolCallRow[];
-                const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
+                    WHERE name = ? AND has_error = true AND ts > ?`, [tool, new Date(installedAt)]);
+                const calls = callsResult.rows as unknown as HookToolCallRow[];
+                const matches: Array<{
+                    evidenceTable: string;
+                    evidenceKey: string;
+                    ts: string;
+                    call: HookOpportunityFact;
+                }> = [];
                 for (const c of calls) {
                     const evidenceKey = recordKeyPart(c.id, "tool_call");
                     if (!evidenceKey) continue;
-                    matches.push({ evidenceTable: "tool_call", evidenceKey, ts: c.ts });
+                    matches.push({
+                        evidenceTable: "tool_call",
+                        evidenceKey,
+                        ts: c.ts,
+                        call: { id: evidenceKey, session: c.session, call_id: c.call_id, ts: c.ts },
+                    });
                 }
                 if (matches.length === 0) continue;
 
-                // was_addressed: any hook_command_invocation whose command
-                // references the scaffold basename, near the failing call.
-                const basename = hookBasenameFromArtifactPath(exp.artifact_path);
-                let invocationTimestamps: number[] = [];
-                if (basename) {
-                    const invResult = yield* write.raw(`
-                        SELECT CAST(ts AS VARCHAR) AS ts
-                        FROM hook_command_invocation
-                        WHERE command LIKE ? AND ts > ?`, [`%${basename}%`, new Date(exp.created_at)]);
-                    invocationTimestamps = (invResult.rows as unknown as HookInvocationTsRow[])
-                        .map((r) => new Date(r.ts).getTime())
-                        .filter((t) => Number.isFinite(t));
-                }
+                // was_addressed: a hook_command_invocation recorded AFTER the
+                // install, carrying this experiment's complete marker id, on the
+                // configured event, with a real effect. Marker identity is
+                // matched in JS through the shared parser - a SQL substring would
+                // credit a prefix collision or a filename that merely contains
+                // the signature.
+                const invResult = yield* write.raw(`
+                    SELECT session, CAST(ts AS VARCHAR) AS ts, command, event_name,
+                           tool_call, tool_call_id, effect, provider_status
+                    FROM hook_command_invocation
+                    WHERE ts > ? AND event_name = ? AND provider_status <> 'progress_only'
+                      AND effect IN (${REAL_HOOK_EFFECTS.map(() => "?").join(", ")})`,
+                    [new Date(installedAt), eventName, ...REAL_HOOK_EFFECTS]);
+                const fires = (invResult.rows as unknown as HookInvocationFact[]).filter(
+                    (invocation) => isCreditableHookInvocation(invocation, {
+                        dedupeSig: exp.dedupe_sig,
+                        eventName,
+                    }),
+                );
                 const enriched = matches.map((m) => {
-                    const matchedMs = new Date(m.ts).getTime();
-                    const addressed = invocationTimestamps.some(
-                        (t) => Math.abs(t - matchedMs) <= ADDRESSED_WINDOW_MS,
-                    );
+                    const addressed = hookOpportunityAddressed(m.call, fires);
                     if (addressed) totalAddressed += 1;
-                    return { ...m, addressed };
+                    return { evidenceTable: m.evidenceTable, evidenceKey: m.evidenceKey, ts: m.ts, addressed };
                 });
 
                 totalOpportunities += matches.length;
                 byHookForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
             // -------- guidance form --------
             if (form === "guidance") {
-                const target = exp.guidance_payload?.file_target ?? null;
-                if (!target) continue;
+                // The file lint OBSERVED the marker in, not the proposal's
+                // `file_target`. A bare `CLAUDE.md` in a proposal must never be
+                // read as `~/.claude/CLAUDE.md`: that is a DIFFERENT file that
+                // merely shares a basename, and its mtime says nothing about
+                // this experiment. No recorded path (or no observed install
+                // time) = unavailable artifact evidence; the user has to run
+                // `ax improve lint` in the target repository first.
+                const artifactPath = installedArtifactPath(exp.artifact_path);
+                const installedAt = exp.scaffolded_at;
+                if (artifactPath === null || installedAt === null) {
+                    artifactUnavailable += 1;
+                    continue;
+                }
 
-                // Cheap initial wedge: every recent correction friction_event
-                // is one opportunity for the guidance to have prevented.
+                // Cheap initial wedge: every correction friction_event AFTER the
+                // install is one opportunity for the guidance to have prevented.
                 const frictionResult = yield* write.raw(`
                     SELECT id, CAST(ts AS VARCHAR) AS ts
                     FROM friction_event
-                    WHERE kind = 'correction' AND ts > ?`, [new Date(exp.created_at)]);
+                    WHERE kind = 'correction' AND ts > ?`, [new Date(installedAt)]);
                 const events = frictionResult.rows as unknown as FrictionEventRow[];
                 const matches: Array<{ evidenceTable: string; evidenceKey: string; ts: string }> = [];
                 for (const ev of events) {
@@ -463,28 +732,59 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
                 }
                 if (matches.length === 0) continue;
 
-                // was_addressed: target file mtime > matched_at. The file
-                // either has been touched post-accept (every later
-                // opportunity addressed) or not. Defensive: stat may fail.
-                const absPath = resolveGuidanceTargetPath(target, home);
-                const mtimeMs = yield* safeFileMtimeMs(absPath);
+                // was_addressed: the recorded artifact's mtime > matched_at.
+                // This is FILE ACTIVITY on the installed guidance file, not
+                // proof that behaviour improved - the indicator is kept as-is
+                // for this bounded patch, only pointed at the right file.
+                //
+                // No reading at all - the path is missing, unreadable, or is not
+                // a regular file any more - is UNAVAILABLE evidence, not a
+                // negative reading. Emitting `was_addressed = false` rows here
+                // would publish "the guidance was ignored" on the strength of a
+                // failed syscall or a directory's mtime. Clear this experiment's
+                // rows instead (`rowsByExperiment` stays unset, so the
+                // replacement below removes them) and report the gap.
+                const mtimeMs = yield* safeFileMtimeMs(artifactPath);
+                if (mtimeMs === null) {
+                    artifactUnavailable += 1;
+                    continue;
+                }
                 const enriched = matches.map((m) => {
                     const matchedMs = new Date(m.ts).getTime();
-                    const addressed = mtimeMs !== null && mtimeMs > matchedMs;
+                    const addressed = mtimeMs > matchedMs;
                     if (addressed) totalAddressed += 1;
                     return { ...m, addressed };
                 });
 
                 totalOpportunities += matches.length;
                 byGuidanceForm += matches.length;
-                allRows.push(...buildOpportunityRows(experimentKey, enriched));
+                rowsByExperiment.set(experimentKey, buildOpportunityRows(experimentKey, enriched));
                 continue;
             }
 
             // automation + subagent forms: detectors deferred to follow-up.
         }
 
-        yield* write.putMany("opportunity", allRows);
+        // Rebuild, don't accumulate: an opportunity the corrected identity rules
+        // no longer match must DISAPPEAR, and a `was_addressed` computed by the
+        // old rules must not stay authoritative. Each experiment is replaced by
+        // ONE atomic statement scoped to its own `in_id`, so a failure mid-way
+        // leaves that experiment's previous rows intact and every other
+        // experiment (and every sidecar judgment) untouched.
+        for (const key of rebuiltExperimentKeys) {
+            yield* replaceOpportunities(write, key, rowsByExperiment.get(key) ?? []);
+        }
+
+        // Only now - after every selected replacement landed - does the snapshot
+        // deserve the certificate that its opportunity rows came from the
+        // corrected derivation. A failure above skips this, leaving the sentinel
+        // deleted, so a cache published mid-failure reads as "needs derivation".
+        yield* write.put(
+            WATERMARK_TABLE,
+            watermarkRow(OPPORTUNITY_VERSION_SOURCE, OPPORTUNITY_VERSION_PATH, {
+                sha: OPPORTUNITY_VERSION,
+            }),
+        );
         return {
             experimentsScanned: experiments.length,
             opportunities: totalOpportunities,
@@ -492,6 +792,7 @@ export const deriveOpportunities = (write: CacheWriteService): Effect.Effect<
             bySkillForm,
             byHookForm,
             byGuidanceForm,
+            artifactUnavailable,
         };
     });
 
@@ -519,14 +820,26 @@ export const opportunitiesStage: StageDef<
     Judgment | FileSystem.FileSystem,
     CacheWriteError | CacheReadError | JudgmentError
 > = {
-    meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"], writes: [{ table: "opportunity", mode: "derive" }] }),
+    meta: StageMeta.make({
+        key: "opportunities",
+        deps: ["proposals"],
+        tags: ["derive"],
+        writes: [
+            { table: "opportunity", mode: "derive" },
+            // The derivation-version sentinel (see opportunity-cache-version.ts).
+            { table: "ingest_file_state", mode: "bookkeep" },
+        ],
+    }),
     run: (_ctx: IngestContext, write: CacheWriteService) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const result = yield* deriveOpportunities(write);
+            const unavailable = result.artifactUnavailable > 0
+                ? `, ${result.artifactUnavailable} without installed-artifact evidence (run \`ax improve lint\` in the target repo)`
+                : "";
             return OpportunitiesStats.make({
                 durationMs: Date.now() - t0,
-                summary: `scanned ${result.experimentsScanned} experiments, derived ${result.opportunities} opportunities`,
+                summary: `scanned ${result.experimentsScanned} experiments, derived ${result.opportunities} opportunities${unavailable}`,
                 experimentsScanned: result.experimentsScanned,
                 opportunities: result.opportunities,
             });
