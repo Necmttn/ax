@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { parse as parseYaml } from "yaml";
+import { parseSkillFile } from "../ingest/skills.ts";
 import { kebabCase, scaffoldContent, scaffoldSkill, skillScaffoldFile, type ScaffoldOptions } from "./skill-scaffold.ts";
 
 // scaffoldSkill now returns an Effect requiring FileSystem + Path (migrated to
@@ -62,6 +64,63 @@ describe("scaffoldContent", () => {
 });
 
 describe("scaffoldSkill", () => {
+    test.each(["", "   ", "!!!", "日本語", "🚀"])("rejects an empty normalized name: %j", async (title) => {
+        const root = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
+        const input = {
+            title,
+            hypothesis: "Problem: repeated root checks",
+            proposedBehavior: "Check the files.",
+            dedupeSig: "skill__empty",
+            nowIso: "2026-05-25T00:00:00.000Z",
+        };
+        try {
+            const baseDir = join(root, "not-created");
+            await expect(runScaffold({ baseDir, input })).rejects.toThrow("Skill title must contain at least one ASCII letter or digit");
+            expect(existsSync(baseDir)).toBe(false);
+            const existing = join(root, "SKILL.md");
+            writeFileSync(existing, "Keep this file.");
+            for (const force of [false, true]) {
+                await expect(runScaffold({ baseDir: root, input, force })).rejects.toThrow("Skill title must contain at least one ASCII letter or digit");
+                expect(readFileSync(existing, "utf-8")).toBe("Keep this file.");
+            }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["colon", "Problem: repeated root checks", "Problem: repeated root checks"],
+        ["quotes", '"Check" the user\'s files # carefully', '"Check" the user\'s files # carefully'],
+        ["newline", "First line\nSecond line", "First line Second line"],
+        ["Unicode", "Vérifier 日本語 🚀", "Vérifier 日本語 🚀"],
+        ["YAML scalar", "null", "null"],
+    ])("creates parseable metadata for %s", async (_label, hypothesis, description) => {
+        const baseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
+        try {
+            const result = await runScaffold({
+                baseDir,
+                input: {
+                    title: "Café Checks",
+                    hypothesis: hypothesis!,
+                    proposedBehavior: "Check the files.",
+                    dedupeSig: "skill__metadata",
+                    nowIso: "2026-05-25T00:00:00.000Z",
+                },
+            });
+            expect(result.created).toBe(true);
+            expect(result.path).toBe(join(baseDir, "cafe-checks", "SKILL.md"));
+            const content = readFileSync(result.path, "utf-8");
+            // The real parser tolerates invalid YAML, so also require strict YAML.
+            expect(parseYaml(content.split("---\n")[1]!)).toEqual({ name: "cafe-checks", description });
+            const parsed = parseSkillFile(content, "fallback-must-not-be-used");
+            expect(parsed.name).toBe("cafe-checks");
+            expect(parsed.description).toBe(description);
+            expect(parsed.body).toContain("Check the files.");
+        } finally {
+            rmSync(baseDir, { recursive: true, force: true });
+        }
+    });
+
     test("creates SKILL.md under baseDir/<kebab-name>/", async () => {
         const baseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
         try {
