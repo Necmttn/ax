@@ -148,6 +148,21 @@ describe("model pricing", () => {
             inputAbove200kPerMillionUsd: 0.4,
             outputAbove200kPerMillionUsd: 1.8,
         });
+        // gpt-6-astra rates verified 2026-09-06 against openai.com/api/pricing
+        // and models.dev's `openai` provider entry (exact agreement).
+        expect(pricingForModel("gpt-6-astra", catalog)).toMatchObject({
+            inputPerMillionUsd: 10,
+            outputPerMillionUsd: 50,
+            cacheCreationPerMillionUsd: 12.5,
+            cacheReadPerMillionUsd: 1,
+            inputAbove200kPerMillionUsd: 20,
+            outputAbove200kPerMillionUsd: 75,
+        });
+        // Suffixed variants (pro/fast) route to the same base tier.
+        expect(pricingForModel("gpt-6-astra-pro", catalog)).toMatchObject({
+            inputPerMillionUsd: 10,
+            outputPerMillionUsd: 50,
+        });
     });
 
     it("bills at base rates by default and at the fast tier only when asked", () => {

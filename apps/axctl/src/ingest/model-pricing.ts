@@ -219,6 +219,25 @@ const RAW_BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing>> 
         contextWindow: 1_050_000,
         pricingSource: MODEL_PRICING_SOURCE,
     },
+    // Verified 2026-09-06 against openai.com/api/pricing (raw HTML table,
+    // "standard"/"context_over_200k" rows) and models.dev's `openai` provider
+    // entry - both agree exactly. Same shape as the gpt-5.6 tiers above: own
+    // >200k context tier, fastMultiplier:1 (fast-tier pricing isn't modeled
+    // separately for this family, matching sol/terra/luna above).
+    "gpt-6-astra": {
+        provider: "openai",
+        inputPerMillionUsd: 10,
+        outputPerMillionUsd: 50,
+        cacheCreationPerMillionUsd: 12.5,
+        cacheReadPerMillionUsd: 1,
+        inputAbove200kPerMillionUsd: 20,
+        outputAbove200kPerMillionUsd: 75,
+        cacheCreationAbove200kPerMillionUsd: 25,
+        cacheReadAbove200kPerMillionUsd: 2,
+        fastMultiplier: 1,
+        contextWindow: 1_050_000,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
     "gpt-5-mini": {
         provider: "openai",
         inputPerMillionUsd: 0.25,
@@ -527,6 +546,9 @@ export function pricingForModel(
     if (modelKey.startsWith("gpt-5.6-terra")) return catalog.get("gpt-5.6-terra") ?? null;
     if (modelKey.startsWith("gpt-5.6-luna")) return catalog.get("gpt-5.6-luna") ?? null;
     if (/^gpt-5\.6(?:-|$)/i.test(modelKey)) return catalog.get("gpt-5.5") ?? catalog.get("gpt-5") ?? null;
+    // Dated/suffixed gpt-6-astra variants (e.g. gpt-6-astra-pro, gpt-6-astra-fast)
+    // price at the same tier as the base entry above.
+    if (modelKey.startsWith("gpt-6-astra")) return catalog.get("gpt-6-astra") ?? null;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
     if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
