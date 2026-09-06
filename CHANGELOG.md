@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.44.0](https://github.com/Necmttn/ax/compare/v0.43.18...v0.44.0) (2026-09-06)
+
+
+### Features
+
+* **duckdb:** decode additional scalar types ([#1122](https://github.com/Necmttn/ax/issues/1122)) ([455dff0](https://github.com/Necmttn/ax/commit/455dff0a4624e74e03a50c78c4bc8b0cc108632b))
+
+
+### Bug Fixes
+
+* **cost:** add gpt-6-astra pricing to built-in catalog ([#1143](https://github.com/Necmttn/ax/issues/1143)) ([a5c553f](https://github.com/Necmttn/ax/commit/a5c553f30fee7350eec9fe160177a80fa8d65a72))
+* **cost:** propagate unavailable routability evidence ([#1137](https://github.com/Necmttn/ax/issues/1137)) ([5cf6869](https://github.com/Necmttn/ax/commit/5cf6869751b02a51a2896d678582df58dff3ed05))
+* **improve:** calculate checkpoints from production session timestamps ([#1135](https://github.com/Necmttn/ax/issues/1135)) ([ecd59b3](https://github.com/Necmttn/ax/commit/ecd59b386d57973ac5d313ea2a3fa7049942885b))
+* **improve:** measure reconciled artifacts and replace evidence atomically ([#1139](https://github.com/Necmttn/ax/issues/1139)) ([68b3e14](https://github.com/Necmttn/ax/commit/68b3e143d8d4c29a00bbfe2562957454ac80b5db))
+* **improve:** require usable evidence before suggesting verdicts ([#1145](https://github.com/Necmttn/ax/issues/1145)) ([af58836](https://github.com/Necmttn/ax/commit/af58836206d13b55eca648c6c9640b291c60aa02))
+* **improve:** resume interrupted task publication and preserve decisions ([#1138](https://github.com/Necmttn/ax/issues/1138)) ([64e0b7b](https://github.com/Necmttn/ax/commit/64e0b7bbde2b10754e6b5f670f4c5419c097a70d))
+* **improve:** serialize generated skill metadata safely ([#1136](https://github.com/Necmttn/ax/issues/1136)) ([e360605](https://github.com/Necmttn/ax/commit/e3606059de734d6daf54eda2b4d52d10da3de13b))
+* **ingest:** remove watermarks for pruned OTLP spool files ([#1126](https://github.com/Necmttn/ax/issues/1126)) ([a74155f](https://github.com/Necmttn/ax/commit/a74155f60ce0485a16164b6f408b20794d88fdd4))
+* **ingest:** resume OTLP spool reads at the completed byte offset ([#1125](https://github.com/Necmttn/ax/issues/1125)) ([fe3260e](https://github.com/Necmttn/ax/commit/fe3260e27cc02651a6fdb2365526c0f508226fc5))
+* **studio:** remove the retired browser ingest control ([#1141](https://github.com/Necmttn/ax/issues/1141)) ([0835b60](https://github.com/Necmttn/ax/commit/0835b607b32c80fc1822599a1f120ff2812d09a1))
+
 ## [0.43.18](https://github.com/Necmttn/ax/compare/v0.43.17...v0.43.18) (2026-08-26)
 
 
