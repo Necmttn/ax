@@ -41,7 +41,22 @@ const openProposal = (overrides: Partial<ProposalDto> = {}): ProposalDto => ({
     ...overrides,
 });
 
-const acceptedWithExperiment = (withCheckpoint: boolean): ProposalDto => ({
+const measuredCheckpoint = (overrides: Record<string, unknown> = {}) => ({
+    kind: "+3s",
+    suggested: "adopted" as string | null,
+    user_verdict: null,
+    measured: {
+        opportunities: 12, addressed: 8, ratio: 8 / 12, built: true,
+        measurement_status: "measured", measurement_version: 2,
+    },
+    observed_at: "2026-06-03T00:00:00Z",
+    ...overrides,
+});
+
+const acceptedWithExperiment = (
+    withCheckpoint: boolean,
+    experimentOverrides: Record<string, unknown> = {},
+): ProposalDto => ({
     id: "proposal:def",
     form: "guidance",
     title: "Always read CLAUDE.md before editing",
@@ -54,21 +69,15 @@ const acceptedWithExperiment = (withCheckpoint: boolean): ProposalDto => ({
     created_at: "2026-06-01T00:00:00Z",
     experiment: {
         id: "exp:1",
-        artifact_path: null,
+        artifact_path: "/repo/CLAUDE.md",
         status: "scaffolded",
         task_path: null,
         locked_verdict: null,
         created_at: "2026-06-02T00:00:00Z",
         scaffolded_at: "2026-06-02T00:00:00Z",
-        latest_checkpoint: withCheckpoint
-            ? {
-                  kind: "+3s",
-                  suggested: "adopted",
-                  user_verdict: null,
-                  measured: null,
-                  observed_at: "2026-06-03T00:00:00Z",
-              }
-            : null,
+        latest_checkpoint: withCheckpoint ? measuredCheckpoint() : null,
+        current_reason: withCheckpoint ? null : "no_checkpoint",
+        ...experimentOverrides,
     },
 });
 
@@ -297,21 +306,20 @@ describe("fixKind", () => {
 });
 
 describe("verdictCards", () => {
-    test("only accepted proposals with experiment and no locked_verdict", () => {
+    test("only accepted, eligible experiments carrying a current measured suggestion", () => {
         const proposals = [
             openProposal({ status: "open" }),
-            acceptedWithExperiment(false),
+            acceptedWithExperiment(true),
             lockedExperimentProposal(),
             // accepted but no experiment
             openProposal({ status: "accepted", dedupe_sig: "no-exp" }),
         ];
         const cards = verdictCards(proposals);
-        // Only acceptedWithExperiment (no checkpoint, no locked verdict)
         expect(cards).toHaveLength(1);
         expect(cards[0]!.id).toBe("verdict:def456");
     });
 
-    test("suggested_verdict passthrough when checkpoint exists", () => {
+    test("suggested_verdict passthrough for a measured checkpoint", () => {
         const cards = verdictCards([acceptedWithExperiment(true)]);
         expect(cards[0]!.inline_action).toEqual({
             type: "verdict",
@@ -321,23 +329,81 @@ describe("verdictCards", () => {
         });
     });
 
-    test("suggested_verdict is null when no checkpoint", () => {
-        const cards = verdictCards([acceptedWithExperiment(false)]);
-        expect(cards[0]!.inline_action!.suggested_verdict).toBeNull();
+    test("no card at all when there is nothing to lock", () => {
+        // A one-click verdict on an absent measurement is exactly the invitation
+        // #1134 removes: the experiment stays in the normal lists instead.
+        expect(verdictCards([acceptedWithExperiment(false)])).toEqual([]);
     });
 
-    test("brief mentions the suggested verdict when present", () => {
+    test("no card for an insufficient-data or unrefreshed window", () => {
+        for (const checkpoint of [
+            measuredCheckpoint({
+                suggested: null,
+                measured: {
+                    opportunities: 0, addressed: 0, ratio: 0, built: true,
+                    measurement_status: "insufficient_data", reason: "no_opportunities",
+                    measurement_version: 2,
+                },
+            }),
+            measuredCheckpoint({
+                measured: { opportunities: 12, addressed: 8, ratio: 8 / 12, built: true },
+            }),
+        ]) {
+            expect(verdictCards([acceptedWithExperiment(true, {
+                latest_checkpoint: checkpoint,
+            })])).toEqual([]);
+        }
+    });
+
+    test("no card for a malformed or missing measurement status", () => {
+        for (const measured of [
+            // no status at all
+            { opportunities: 12, addressed: 8, ratio: 8 / 12, built: true, measurement_version: 2 },
+            // a status nothing writes
+            {
+                opportunities: 12, addressed: 8, ratio: 8 / 12, built: true,
+                measurement_status: "estimated", measurement_version: 2,
+            },
+            // measured, but with no usable count behind it
+            {
+                addressed: 8, ratio: 8 / 12, built: true,
+                measurement_status: "measured", measurement_version: 2,
+            },
+            {
+                opportunities: -4, addressed: 8, ratio: 8 / 12, built: true,
+                measurement_status: "measured", measurement_version: 2,
+            },
+            {
+                opportunities: 0, addressed: 0, ratio: 0, built: true,
+                measurement_status: "measured", measurement_version: 2,
+            },
+        ]) {
+            expect(verdictCards([acceptedWithExperiment(true, {
+                latest_checkpoint: measuredCheckpoint({ measured }),
+            })])).toEqual([]);
+        }
+    });
+
+    test("no card for an unbuilt, retired or regressed experiment", () => {
+        for (const overrides of [
+            { status: "task_emitted" },
+            { status: "retired" },
+            { status: "regressed" },
+            { artifact_path: null },
+            { scaffolded_at: null },
+        ]) {
+            expect(verdictCards([acceptedWithExperiment(true, overrides)])).toEqual([]);
+        }
+    });
+
+    test("brief mentions the suggested verdict", () => {
         const cards = verdictCards([acceptedWithExperiment(true)]);
         expect(cards[0]!.brief).toContain("adopted");
     });
 
-    test("link is null", () => {
-        const cards = verdictCards([acceptedWithExperiment(false)]);
+    test("link is null and the title says Lock verdict", () => {
+        const cards = verdictCards([acceptedWithExperiment(true)]);
         expect(cards[0]!.link).toBeNull();
-    });
-
-    test("title contains 'Lock verdict'", () => {
-        const cards = verdictCards([acceptedWithExperiment(false)]);
         expect(cards[0]!.title).toMatch(/^Lock verdict:/);
     });
 });

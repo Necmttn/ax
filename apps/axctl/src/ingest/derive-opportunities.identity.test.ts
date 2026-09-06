@@ -809,6 +809,140 @@ describe("guidance form: a failed stat is unavailable evidence", () => {
     });
 });
 
+describe("timestamp projections carry an explicit zone", () => {
+    dtest("a correction keeps its instant on a UTC+8 host", async () => {
+        const harness = makeHarness("ax-opp-identity-tz-");
+        const guidancePath = join(harness.root, "CLAUDE.md");
+        const experimentKey = await installGuidanceExperiment(harness, { sig: "use-rg", guidancePath });
+        // A whole number of milliseconds, so the round-trip is exact rather
+        // than "close enough" - the shift this guards against is 8 HOURS.
+        const correctionAt = new Date(Math.floor((Date.now() + 60_000) / 1000) * 1000 + 541);
+        await utimes(guidancePath, correctionAt, correctionAt);
+
+        const previousTz = process.env.TZ;
+        // Deleting TZ does NOT put the runtime back: bun keeps resolving the
+        // last zone it was ASSIGNED, so an unset variable leaves Asia/Singapore
+        // in force for every later test in this process (root saw the
+        // run-evidence SQL/TS parity case fail behind exactly that leak). The
+        // effective zone therefore has to be captured and re-ASSIGNED, not
+        // merely unset. The offset probe is a FIXED instant so the before/after
+        // comparison cannot move for a DST reason.
+        const priorZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const OFFSET_PROBE = new Date("2026-09-05T00:00:00Z");
+        const priorOffset = OFFSET_PROBE.getTimezoneOffset();
+        // The host offset is the whole bug: DuckDB stores UTC, and a zone-less
+        // projection came back through `new Date(...)` as LOCAL time, moving
+        // every matched_at by the offset - out of its own install window.
+        process.env.TZ = "Asia/Singapore";
+        let stored: ReadonlyArray<{ readonly in_id: string; readonly matched_at: string }>;
+        try {
+            // The regression is only a regression if the host really is on a
+            // non-UTC clock while the derivation runs. `getTimezoneOffset` is
+            // evaluated now, against the TZ just set, so this fails loudly on a
+            // runner that ignores the variable rather than passing vacuously.
+            expect(correctionAt.getTimezoneOffset()).toBe(-480);
+            stored = await inCache(harness, (session) =>
+                Effect.gen(function* () {
+                    yield* session.write.putMany("friction_event", [correctionRow("friction-1", correctionAt)]);
+                    yield* session.derive;
+                    const read = yield* session.write.raw(
+                        `SELECT in_id, strftime(matched_at, '%Y-%m-%dT%H:%M:%S.%gZ') AS matched_at
+                         FROM opportunity`,
+                    );
+                    return read.rows as unknown as ReadonlyArray<{ in_id: string; matched_at: string }>;
+                }));
+        } finally {
+            // ASSIGN first - that is what makes the runtime re-resolve - and
+            // only then restore the variable's original shape.
+            process.env.TZ = previousTz ?? priorZone;
+            if (previousTz === undefined) delete process.env.TZ;
+        }
+
+        expect(stored).toHaveLength(1);
+        expect(stored[0]!.in_id).toBe(experimentKey);
+        // EXACT, not "within a window": an offset-shifted row differs by hours.
+        expect(stored[0]!.matched_at).toBe(correctionAt.toISOString());
+        // Isolation is part of the contract: this case mutates process-wide
+        // state, and the next test in this process must not inherit it.
+        expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(priorZone);
+        expect(OFFSET_PROBE.getTimezoneOffset()).toBe(priorOffset);
+        expect(process.env.TZ).toBe(previousTz);
+    });
+});
+
+describe("skill form: the cited candidate has to exist", () => {
+    /** Seed one accepted+installed skill experiment straight into the real
+     *  sidecar. The install path itself is covered by the hook/guidance cases
+     *  above; what this case is about is which DETECTOR the cache-side lookup
+     *  selects. */
+    const installSkillExperiment = (harness: Harness, opts: {
+        readonly sig: string;
+        readonly trigger: string;
+        readonly installedAt: Date;
+    }) => harness.judgment(Effect.gen(function* () {
+        const judgment = yield* Judgment;
+        yield* judgment.put("proposal", {
+            id: `proposal-${opts.sig}`, form: "skill", title: "Guard schema edits",
+            hypothesis: "schema edits keep failing", dedupe_sig: opts.sig, frequency: 3,
+            confidence: "high", status: "accepted", origin: "agent", hypothesis_template: null,
+            evidence_query: null, reject_reason: null, baseline: null,
+            created_at: opts.installedAt, updated_at: opts.installedAt,
+        });
+        yield* judgment.put("skill_proposal", {
+            id: `skill-${opts.sig}`, proposal: `proposal-${opts.sig}`,
+            trigger_pattern: opts.trigger, suspected_gap: "gap",
+            proposed_behavior: "behavior", expected_impact: null,
+        });
+        yield* judgment.put("experiment", {
+            id: `experiment-${opts.sig}`, proposal: `proposal-${opts.sig}`, artifact: null,
+            artifact_path: join(harness.root, "skills", opts.sig, "SKILL.md"),
+            scaffolded_at: opts.installedAt, created_at: opts.installedAt,
+            locked_verdict: null, status: "scaffolded", task_path: null,
+        });
+    }));
+
+    dtest("a dangling cites_evidence edge falls through to the tool trigger", async () => {
+        const harness = makeHarness("ax-opp-identity-candidate-");
+        const installedAt = new Date(Date.now() - 60_000);
+        await installSkillExperiment(harness, {
+            sig: "guard-schema",
+            trigger: "tool=Bash",
+            installedAt,
+        });
+
+        const result = await inCache(harness, (session) =>
+            Effect.gen(function* () {
+                // The proposal cites a candidate that is no longer in the cache
+                // (retired, or dropped by a rebuild). The old lookup trusted the
+                // edge, chose the legacy candidate detector, and derived its
+                // match tokens from a row it could not read - so the experiment
+                // produced nothing at all.
+                yield* session.write.put("cites_evidence", {
+                    id: "cites-dangling", in_id: "proposal-guard-schema", out_id: "skill_candidate-gone",
+                    in_table: "proposal", out_table: "skill_candidate", count: 1, kind: null,
+                    ts: installedAt,
+                });
+                yield* session.write.put("session", {
+                    id: "skill-session", source: "claude",
+                    started_at: installedAt, ended_at: null,
+                });
+                yield* session.write.put("tool_call", {
+                    id: "failing-bash", session: "skill-session", agent_event: null, turn: null,
+                    tool: null, name: "Bash", ts: new Date(installedAt.getTime() + 30_000),
+                    status: "error", input_json: null, output_json: null, raw: null,
+                    duration_ms: null, seq: 1, call_id: null, cwd: null, command_text: null,
+                    command_norm: null, command_tool: null, output_excerpt: null,
+                    error_text: "boom", exit_code: 1, has_error: true,
+                });
+                const stats = yield* session.derive;
+                return { stats, rows: yield* session.rows };
+            }));
+
+        expect(result.rows.map((row) => row.out_id)).toEqual(["failing-bash"]);
+        expect(result.stats.bySkillForm).toBe(1);
+    });
+});
+
 describe("derivation-version sentinel", () => {
     dtest("stamps a complete pass, and a later failed pass revokes it", async () => {
         const harness = makeHarness("ax-opp-identity-sentinel-");
