@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
-import { IngestSplash } from "./components/ingest-splash.tsx";
 import { useIngestEvents } from "./use-ingest-events.ts";
 import { fmtLastUsed } from "@ax/lib/shared/formatters";
 import { cmpSemver, STUDIO_VERSION } from "./version.ts";
@@ -35,7 +34,7 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 /** The instrument rail shell + the live/connection chrome the old masthead
- *  carried (live indicator, ingest splash, mock-mode connect banner). Renders
+ *  carried (live indicator and mock-mode connect banner). Renders
  *  the legacy studio routes inside the unified dark HUD; their content is
  *  dark-bridged via the .rdx studio-token mapping until each is restyled to
  *  instrument cards. */
@@ -61,7 +60,6 @@ function InstrumentChrome({ children }: { children: ReactNode }) {
                         <span className="live-dot" />
                         {live.connected ? "live" : "offline"}
                     </span>
-                    <IngestSplash />
                 </div>
             )}
             {children}

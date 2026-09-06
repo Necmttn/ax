@@ -18,9 +18,7 @@ import { api } from "../api.ts";
  * single source of truth for whether the flag is on, so gate on it here too.
  */
 export function LabRoute() {
-    // Same query key IngestSplash already uses for its own /api/version probe
-    // (mounted on every route via InstrumentChrome) - shares that cache entry
-    // instead of firing a second identical request.
+    // Cache the capability probe so repeat visits share the same version read.
     const version = useQuery({
         queryKey: ["daemon-version"],
         queryFn: () => api.version(),

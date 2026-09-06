@@ -539,17 +539,6 @@ export const api = {
                     ...(params.limit != null ? { limit: params.limit } : {}),
                 },
             })),
-    /** Trigger a live ingest run. Returns the full Durable Streams sidecar URL
-     *  the browser subscribes to directly (the sidecar has permissive CORS and
-     *  runs on its own localhost port). */
-    ingest: (params: { since?: number } = {}) =>
-        viaContract(
-            "/api/ingest",
-            (c) => c.live.ingestTrigger({
-                payload: params.since != null ? { since: params.since } : {},
-            }),
-            { method: "POST" },
-        ),
     toolFailures: () =>
         viaContract("/api/tool-failures", (c) => c.insights.toolFailures()),
     toolFailureDetail: (label: string) =>
