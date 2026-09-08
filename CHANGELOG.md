@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.1](https://github.com/Necmttn/ax/compare/v0.44.0...v0.44.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* harden derive timeouts and project verification ([#1124](https://github.com/Necmttn/ax/issues/1124)) ([b17f26c](https://github.com/Necmttn/ax/commit/b17f26c33cb0c81d2141f64013215a7bba74d05a))
+
 ## [0.44.0](https://github.com/Necmttn/ax/compare/v0.43.18...v0.44.0) (2026-09-06)
 
 
