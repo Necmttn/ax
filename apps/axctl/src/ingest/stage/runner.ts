@@ -190,7 +190,8 @@ export const topoLayers = <S extends BaseStageStats, R, E>(
  *  once. Each stage is wrapped in `LiveTrace.step` so progress flows through
  *  the configured `TraceTransport` (ADR-0007).
  *
- *  `opts.deadlineMs` is the run's wall-clock deadline (epoch ms). Derive stages
+ *  `opts.deadlineMs` is the run's wall-clock deadline (epoch ms). Derive-only
+ *  CLI runs omit it unless `AX_INGEST_TIMEOUT_SECONDS` is explicit. Derive stages
  *  are budgeted against it so the pass ends cleanly instead of being killed by
  *  the outer ingest timeout (#697); omit it and derives keep only their static
  *  `AX_STAGE_HUNG_SECONDS` cap. The time left before the deadline is divided
@@ -371,14 +372,21 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                             );
                         if (budget._tag === "uncapped") return selfGuarded;
                         const capSeconds = Math.round(budget.capMs / 1000);
+                        const deadlineCapped = hungCapMs <= 0 || budget.capMs < hungCapMs;
+                        const capName = deadlineCapped
+                            ? "shared ingest deadline"
+                            : "wall-clock hung detector";
                         return selfGuarded.pipe(
                             Effect.timeoutOrElse({
                                 duration: budget.capMs,
                                 orElse: () =>
                                     Effect.logWarning(
                                         `ingest: derive stage '${s.meta.key}' still running after ${capSeconds}s ` +
-                                            `of wall clock (hung detector) - skipping it (failed open) so the ` +
-                                            `run can finish. Raise/disable with AX_STAGE_HUNG_SECONDS.`,
+                                            `of wall clock (${capName}) - skipping it (failed open) so the ` +
+                                            `run can finish. ` +
+                                            (deadlineCapped
+                                                ? "Raise AX_INGEST_TIMEOUT_SECONDS."
+                                                : "Raise/disable with AX_STAGE_HUNG_SECONDS."),
                                     ).pipe(
                                         // Overwrite the `interrupted` row the
                                         // stage's own finalizer just wrote with
@@ -390,8 +398,9 @@ export const runPipeline = <S extends BaseStageStats, R, E>(
                                             opts.recordStageOutcome?.(s.meta.key, {
                                                 status: "timeout",
                                                 errorText:
-                                                    `hung - still running after the ${capSeconds}s wall-clock hung ` +
-                                                    `detector (raise or disable with AX_STAGE_HUNG_SECONDS); ` +
+                                                    `${deadlineCapped ? "deadline" : "hung"} - still running after ` +
+                                                    `the ${capSeconds}s ${capName} ` +
+                                                    `(raise ${deadlineCapped ? "AX_INGEST_TIMEOUT_SECONDS" : "or disable with AX_STAGE_HUNG_SECONDS"}); ` +
                                                     `the run continued without this stage`,
                                             }) ?? Effect.void,
                                         ),

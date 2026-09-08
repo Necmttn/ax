@@ -21,7 +21,7 @@ const buildProjectGrounding = (
 ): Effect.Effect<ProjectGrounding, never, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
-        const stack = yield* loadProjectStack(git.root);
+        const stack = yield* loadProjectStack(git.root, git.changes.map((change) => change.path));
         const checks = deriveVerificationChecks({ git, stack });
         const diagnostics = yield* queryLiveDiagnostics(git.root);
         return {

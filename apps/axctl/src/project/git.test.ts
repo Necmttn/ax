@@ -1,10 +1,10 @@
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import { ProcessServiceTest } from "@ax/lib/process";
+import { ProcessServiceLive, ProcessServiceTest } from "@ax/lib/process";
 import { getGitState } from "./git.ts";
 
 const STATUS_OUTPUT = ["## main", "M  src/a.ts", " M src/b.ts", "?? new.md", ""].join("\0");
@@ -57,4 +57,18 @@ describe("getGitState", () => {
             await rm(root, { recursive: true, force: true });
         }
     });
+});
+
+
+test("expands untracked package directories into source files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ax-git-package-"));
+    try {
+        expect(Bun.spawnSync(["git", "init", "--quiet", root]).exitCode).toBe(0);
+        await mkdir(join(root, "frontend"));
+        await writeFile(join(root, "frontend", "package.json"), "{}");
+        await writeFile(join(root, "frontend", "main.ts"), "export {};");
+        const state = await Effect.runPromise(getGitState(root).pipe(Effect.provide(Layer.merge(ProcessServiceLive, BunFileSystem.layer))));
+        expect(state.changes.map(c => c.path)).toContain("frontend/main.ts");
+        expect(state.changes.map(c => c.path)).toContain("frontend/package.json");
+    } finally { await rm(root, { recursive: true, force: true }); }
 });

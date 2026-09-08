@@ -196,13 +196,13 @@ interface IngestCommandOpts {
 export interface IngestCommandTiming {
     readonly decision: IngestDeadlineDecision;
     readonly runOptions: Pick<RunIngestOptions, "deadlineMs">;
-    readonly lockOptions: { readonly timeoutSeconds: number };
+    readonly lockOptions: { readonly timeoutSeconds?: number };
 }
 
 /** Resolve the CLI deadline once, then prepare the exact option fragments sent
  * to `runIngest` and `withIngestLock`. Exported for boundary tests. */
 export const resolveIngestCommandTiming = (
-    input: IngestDeadlineInput & { readonly nowMs: number },
+    input: IngestDeadlineInput & { readonly nowMs: number; readonly deriveOnly?: boolean },
 ): IngestCommandTiming => {
     const decision = resolveIngestDeadlineSeconds(input);
     return {
@@ -210,7 +210,7 @@ export const resolveIngestCommandTiming = (
         runOptions: decision.seconds > 0
             ? { deadlineMs: input.nowMs + decision.seconds * 1000 }
             : {},
-        lockOptions: { timeoutSeconds: decision.seconds },
+        lockOptions: decision.seconds > 0 ? { timeoutSeconds: decision.seconds } : {},
     };
 };
 
@@ -394,8 +394,9 @@ export const cmdIngest = (
                 .exists(snapshotPath())
                 .pipe(Effect.orElseSucceed(() => true))),
             nowMs: deps.nowMs(),
+            deriveOnly: args.includes("--derive-only"),
         });
-        const timeoutSeconds = timing.lockOptions.timeoutSeconds;
+        const timeoutSeconds = timing.decision.seconds;
         if (timing.decision.upgraded) yield* Effect.logInfo(`ingest: ${timing.decision.reason}`);
         // The runId is minted HERE (not inside runIngest) so the timeout and
         // failure paths below can address the `ingest_run` row.
@@ -503,10 +504,9 @@ export const cmdIngest = (
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
         // redundant run is harmless and avoids the pile-up that wedges the DB).
-        // The timeout lives inside the lock so that a timed-out run LEAVES its
-        // lock to age into a cooldown - interrupting the fiber doesn't prove
-        // DuckDB stopped work, so the next ingest must hold off until
-        // the lock goes stale rather than charging a still-busy DB.
+        // A timed-out run leaves its lock in place. Interrupting the fiber does
+        // not prove DuckDB stopped work, so another process waits for the owner
+        // to exit. A live holder never loses its lock solely because of age.
         const outcome = yield* deps.withIngestLock(
             {
                 ...ingestLockOptions(path, cfg.paths.dataDir, commandName, timeoutSeconds),

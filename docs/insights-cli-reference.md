@@ -900,7 +900,7 @@ axctl skills lint --task-dir=.ax/tasks --json
 Sweeps all prior `source="brief"` edges for a skill before writing the current
 set, so role shrinkage is handled atomically.
 
-### `ax skills weighted [--window=Nd --limit=N --doctor-threshold=N --json]`
+### `ax skills weighted [--window=Nd --limit=N --doctor-threshold=N --include-tools --json]`
 
 Rank skills by a composite weighted score over a rolling time window. The score
 blends invocations (positive), errors near invocation (negative), user
@@ -914,12 +914,14 @@ Flags:
 - `--limit=N` (default 25) - rows to show
 - `--doctor-threshold=N` (default 5) - correction count above which a skill is
   flagged for review
+- `--include-tools` - include provider built-in tools; they are excluded by default
 - `--json`
 
 ```bash
 axctl skills weighted
 axctl skills weighted --window=7 --limit=10
 axctl skills weighted --doctor-threshold=3 --json
+axctl skills weighted --include-tools --limit=10
 ```
 
 ### `ax skills by-role <role> [--json --limit=N]`

@@ -734,6 +734,28 @@ describe("runPipeline derive budget (#697)", () => {
         expect(stats[0]?.summary).toMatch(/timed out|skipped/);
     });
 
+    it("names the shared deadline when it beats AX_STAGE_HUNG_SECONDS", async () => {
+        const previousHung = process.env.AX_STAGE_HUNG_SECONDS;
+        const previousHeartbeat = process.env.AX_INGEST_HEARTBEAT_SECONDS;
+        process.env.AX_STAGE_HUNG_SECONDS = "180";
+        process.env.AX_INGEST_HEARTBEAT_SECONDS = "0";
+        try {
+            const rec = outcomeRecorder();
+            await Effect.runPromise(runPipeline([hangs("deadline", ["derive"])], ctx, {
+                deadlineMs: Date.now() + 80,
+                reserveMs: 0,
+                recordStageOutcome: rec.recordStageOutcome,
+            }) as Effect.Effect<ReadonlyArray<BaseStageStats>, never, never>);
+            expect(rec.seen[0]!.errorText).toContain("AX_INGEST_TIMEOUT_SECONDS");
+            expect(rec.seen[0]!.errorText).not.toContain("AX_STAGE_HUNG_SECONDS");
+        } finally {
+            if (previousHung === undefined) delete process.env.AX_STAGE_HUNG_SECONDS;
+            else process.env.AX_STAGE_HUNG_SECONDS = previousHung;
+            if (previousHeartbeat === undefined) delete process.env.AX_INGEST_HEARTBEAT_SECONDS;
+            else process.env.AX_INGEST_HEARTBEAT_SECONDS = previousHeartbeat;
+        }
+    });
+
     it("an ingest-tagged stage is exempt - a real backfill legitimately runs long", async () => {
         const stats = await Effect.runPromise(
             runPipeline([instant("skills", ["ingest"])], ctx, {

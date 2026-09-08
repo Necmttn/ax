@@ -73,24 +73,15 @@
  * work: a second in-process ingest must skip as busy, not queue.
  *
  * TIMEOUT / INTERRUPT. On normal completion (or a normal error) the lock is
- * released. On TIMEOUT or INTERRUPT it is deliberately LEFT in place: interrupting
- * the fiber does not prove the in-flight work stopped, so the stale lock becomes a
- * cooldown window - the next ingest skips until it ages past `staleMs`, giving
- * things time to settle. A hard process crash (no finalizer) is recovered by the
- * dead-pid / staleness takeover.
+ * released. On timeout or interruption it remains on disk. Another process must
+ * wait for the holder to exit: elapsed time cannot prove native work stopped.
+ * Dead processes and reused process ids remain recoverable through the liveness
+ * and fingerprint checks. An active same-process holder also blocks a new run.
  *
- * TWO RESIDUALS - what a plain lockfile cannot arbitrate (issue #789):
- *  1. The takeover removes BY PATH. Invariant 5 closes the common interleave, but
- *     not the window between the confirm re-read and the remove itself: a racer
- *     descheduled inside it can still delete a lock installed after its read. No
- *     additional re-check closes this - every step here is check-then-act on a
- *     path, so another check only moves the window.
- *  2. `staleMs` is a TIMEOUT-based liveness heuristic, not a proof. A process
- *     merely SUSPENDED past the window - `SIGSTOP`, suspend-to-RAM, a VM snapshot
- *     restore, a forward NTP step - can have its live lock taken over.
- * Only an OS advisory lock (`flock`/`fcntl`) held ACROSS the takeover, or a design
- * that never removes a foreign file, actually closes either. Both are out of scope
- * here and tracked on #789.
+ * RESIDUAL - what a plain lockfile cannot arbitrate (issue #789): takeover removes
+ * by path. A racer descheduled between confirmation and removal can delete a
+ * successor's lock. Only an OS advisory lock held across takeover, or a design
+ * that never removes a foreign file, closes this remaining check/remove race.
  *
  * RULING R6: this is a runtime module under `packages/lib/src/`, so `node:fs` /
  * `node:path` are banned. Filesystem access goes through `FileSystem.FileSystem`.
@@ -138,12 +129,9 @@ export type IngestLockOutcome<A, A2> =
  * `dataDir` is `AxConfig.paths.dataDir`, and `<dataDir>/ingest.lock` is THE one
  * lock path in v2 - there is no environment override and no second default.
  *
- * `timeoutSeconds` here only SIZES the staleness grace window - it is
- * deliberately not itself part of the returned object. A caller that wants
- * `work` bounded spreads this alongside its own `timeoutSeconds`; a caller that
- * wants `work` unbounded (the dashboard's live-ingest path) spreads this and
- * stops there, still sizing `staleMs` off the same number so a would-be timeout
- * leaves a lock that ages out on the same schedule a bounded run's would have.
+ * `staleMs` remains in the option shape for existing callers. It no longer
+ * authorizes takeover of a live process. `timeoutSeconds` bounds work only when
+ * a caller separately passes it to `withIngestLock`.
  */
 export const ingestLockOptions = (
     path: Path.Path,
@@ -282,7 +270,7 @@ const acquireMutexFor = (key: string): Semaphore.Semaphore => {
  * BOTH HALVES ARE CHECKED, and the file half is not optional. The registry
  * alone answers "did this process take a lock at this path and not release it" -
  * which is NOT the same question. Between the acquire and the write, invariant
- * 5's takeover (or a `staleMs` misjudgement, or a stray `rm`) can hand the lock
+ * 5's takeover (or a stray `rm`) can hand the lock
  * to someone else, and the registry cannot see that happen: it holds the token
  * WE minted, so a replaced lock file still read as "held here" and the seam
  * opened the live database while another process owned it - two writers, the
@@ -323,14 +311,14 @@ const UNKNOWN_HOLDER = (now: number): IngestLockInfo => ({ pid: -1, startedAt: n
  *
  * Returns `{ _tag: "completed", value }` with the work's value on success,
  * `{ _tag: "busy", value }` with the `onBusy` value when skipped, or
- * `{ _tag: "timeout" }` when `work` timed out (the lock is then left to age out
- * as a cooldown).
+ * `{ _tag: "timeout" }` when `work` timed out (the lock remains until the
+ * owner exits or this process explicitly starts another run).
  */
 export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
     opts: {
         readonly lockPath: string;
         readonly command: string;
-        /** a lock older than this (ms) is considered stale and taken over */
+        /** Legacy age setting; a live holder never expires based on elapsed time. */
         readonly staleMs: number;
         /** hard wall-clock cap on `work`; omitted = no timeout */
         readonly timeoutSeconds?: number;
@@ -341,7 +329,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
          *  under test is not decided by whether the runner allows `ps`. */
         readonly procStartedAt?: ProcStartedAtProbe;
         readonly onBusy: (holder: IngestLockInfo) => Effect.Effect<A2, E2, R2>;
-        /** run when `work` exceeds `timeoutSeconds` (lock left to age) - e.g.
+        /** run when `work` exceeds `timeoutSeconds` (lock retained) - e.g.
          *  finalize the run row + tell the user; runs AFTER the interrupted
          *  work's own finalizers have completed */
         readonly onTimeout?: () => Effect.Effect<void, never, never>;
@@ -396,7 +384,6 @@ export const withIngestLock = <A, E, R, A2, E2, R2, R3 = never>(
             if (text === null) return null;
             const holder = decodeLockPayload(text);
             if (holder === null) return null; // corrupt => take it over
-            if (now() - holder.startedAt >= opts.staleMs) return null; // aged out
             if (holder.pid === process.pid && !inProcessHolders.has(key)) {
                 // Our own pid, but this process is not holding it: a leftover
                 // from a crashed earlier run, or a pid the OS reused. Liveness

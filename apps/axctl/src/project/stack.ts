@@ -2,6 +2,8 @@ import { Effect, FileSystem, Path } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import type { InstructionMatch, PackageInfo, ProjectStack, StackSignal } from "./types.ts";
 
+import { projectRelativePath } from "./package-path.ts";
+
 const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 
 function emptyPackageInfo(): PackageInfo {
@@ -28,7 +30,7 @@ function packageNames(value: unknown): ReadonlyArray<string> {
     return Object.keys(value as Record<string, unknown>).sort();
 }
 
-export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo, never, FileSystem.FileSystem | Path.Path> =>
+export const loadPackageInfo = (root: string | null, boundary: string | null = root): Effect.Effect<PackageInfo, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!root) return emptyPackageInfo();
 
@@ -36,23 +38,63 @@ export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo,
         const path = yield* Path.Path;
 
         const pkgPath = path.join(root, "package.json");
-        // existsSync probe → orAbsent(false): a fault means "treat as absent".
-        if (!(yield* fs.exists(pkgPath).pipe(orAbsent(false)))) return emptyPackageInfo();
+        const realBoundary = yield* fs.realPath(boundary ?? root).pipe(Effect.orElseSucceed(() => null));
+        const realManifest = yield* fs.realPath(pkgPath).pipe(Effect.orElseSucceed(() => null));
+        if (!realBoundary || !realManifest) return emptyPackageInfo();
+        const relative = path.relative(realBoundary, realManifest);
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return emptyPackageInfo();
 
         const parsed = yield* Effect.tryPromise({
-            try: () => Bun.file(pkgPath).json() as Promise<unknown>,
+            try: () => Bun.file(realManifest).json() as Promise<unknown>,
             catch: () => "PackageJsonReadError" as const,
         }).pipe(Effect.orElseSucceed(() => null));
 
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyPackageInfo();
         const record = parsed as Record<string, unknown>;
+        let packageManager = typeof record.packageManager === "string" ? record.packageManager : null;
+        if (!packageManager) {
+            const locks = [
+                ["bun.lock", "bun"], ["bun.lockb", "bun"], ["pnpm-lock.yaml", "pnpm"],
+                ["yarn.lock", "yarn"], ["package-lock.json", "npm"],
+            ] as const;
+            const found = [] as string[];
+            for (const [lock, manager] of locks) {
+                if (yield* fs.exists(path.join(root, lock)).pipe(orAbsent(false))) found.push(manager);
+            }
+            const managers = [...new Set(found)];
+            packageManager = managers.length === 1 ? managers[0]! : managers.length > 1 ? "conflict" : null;
+        }
         return {
             packageJsonPath: pkgPath,
-            packageManager: typeof record.packageManager === "string" ? record.packageManager : null,
+            packageManager,
             scripts: asStringRecord(record.scripts),
             dependencies: packageNames(record.dependencies),
             devDependencies: packageNames(record.devDependencies),
         };
+    });
+
+export const loadPackageInfos = (
+    root: string | null,
+    changedPaths: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<PackageInfo>, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        if (!root) return [];
+        const path = yield* Path.Path;
+        const checkout = path.resolve(root);
+        const dirs = new Set([checkout]);
+        for (const changedPath of changedPaths) {
+            const relativePath = projectRelativePath(changedPath);
+            if (relativePath === null) continue;
+            let dir = path.dirname(path.resolve(checkout, relativePath));
+            while (dir !== checkout) {
+                dirs.add(dir);
+                const parent = path.dirname(dir);
+                if (parent === dir) break;
+                dir = parent;
+            }
+        }
+        const infos = yield* Effect.all([...dirs].map((dir) => loadPackageInfo(dir, checkout)), { concurrency: 8 });
+        return infos.filter((info) => info.packageJsonPath !== null);
     });
 
 export function packageSignals(pkg: PackageInfo): ReadonlyArray<StackSignal> {
@@ -146,12 +188,15 @@ export const loadInstructionMatches = (
 
 export const loadProjectStack = (
     root: string | null,
+    changedPaths: ReadonlyArray<string> = [],
 ): Effect.Effect<ProjectStack, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const pkg = yield* loadPackageInfo(root);
+        const packages = yield* loadPackageInfos(root, changedPaths);
         const instructions = yield* loadInstructionMatches(root);
         return {
             package: pkg,
+            packages,
             signals: packageSignals(pkg),
             instructions,
         };

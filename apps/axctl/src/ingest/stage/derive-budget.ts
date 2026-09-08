@@ -78,5 +78,6 @@ export const deriveStageBudget = (input: {
     const shareOfDeadline = untilDeadline / stageCount;
     const staticCap = input.staticCapMs > 0 ? input.staticCapMs : Number.POSITIVE_INFINITY;
     const capMs = Math.min(staticCap, shareOfDeadline);
-    return Number.isFinite(capMs) ? { _tag: "capped", capMs } : { _tag: "uncapped" };
+    if (!Number.isFinite(capMs)) return { _tag: "uncapped" };
+    return { _tag: "capped", capMs };
 };

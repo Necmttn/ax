@@ -356,6 +356,8 @@ a workflow worth codifying as a skill?). `--json` emits the arc array.
 - `axctl improve recommend [--limit=N] [--form=skill] [--apply]` - print N
   ranked proposals as paste-ready blocks (already wrapped in `<!--ax:id-->`
   provenance markers). `--apply` enters an interactive accept loop.
+  Harness filtering is not supported until proposal provenance can be stored
+  structurally; `--include-tools` on tool-oriented queries exposes provider tools.
 - `axctl improve accept <id> [--with-agent] [--auto-scaffold] [--force]` -
   Default emits `.ax/tasks/<id>.md`, a brief your agent (Claude Code,
   Codex) executes. `--auto-scaffold` writes `SKILL.md` directly.
