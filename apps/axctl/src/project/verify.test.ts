@@ -48,7 +48,7 @@ describe("deriveVerificationChecks", () => {
                 packageJsonPath: "/repo/frontend/package.json", packageManager: null, scripts: {}, dependencies: [], devDependencies: [],
             }] },
         });
-        expect(checks[0]).toMatchObject({ id: "typescript-typecheck:frontend", command: "npm --prefix frontend exec -- tsc --noEmit" });
+        expect(checks[0]).toMatchObject({ id: "typescript-typecheck:frontend", command: "cd frontend && ../node_modules/.bin/tsc --noEmit" });
     });
     test("uses the nearest npm package for nested frontend changes", () => {
         const checks = deriveVerificationChecks({

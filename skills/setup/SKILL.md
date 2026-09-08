@@ -29,11 +29,26 @@ an ax workflow (`ax improve list`, `ax recall …`).
 ```bash
 # 1. Download the installer and inspect it before executing. Review the target
 #    paths first; this repository does not publish a checksum for install.sh.
-curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh -o /tmp/ax-install.sh
-less /tmp/ax-install.sh
-read -r -p "Execute this installer? [y/N] " answer
-case "$answer" in [yY][eE][sS]|[yY]) bash /tmp/ax-install.sh ;; *) echo "Installer not run." ;; esac
+(
+    set -eu
+    ax_install_dir="$(mktemp -d "${TMPDIR:-/tmp}/ax-install.XXXXXXXX")"
+    trap 'rm -f "$ax_install_dir/install.sh"; rmdir "$ax_install_dir"' EXIT
+    curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh -o "$ax_install_dir/install.sh"
+    less "$ax_install_dir/install.sh"
+    read -r -p "Execute this installer? [y/N] " answer
+    case "$answer" in
+        [yY][eE][sS]|[yY]) bash "$ax_install_dir/install.sh" ;;
+        *) echo "Installer not run."; exit 1 ;;
+    esac
+)
+```
 
+Continue only after the installer completes successfully. A failed download,
+failed review command, declined approval, or end of input stops installation.
+Agents inspect the downloaded file and obtain approval before executing that
+same file. The private directory prevents another local user replacing it.
+
+```bash
 # 2. Review the skill changes and confirm before installing into the selected
 #    agent skill directory. Omit -g unless a global install is intentional.
 npx skills add Necmttn/ax -a codex

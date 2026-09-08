@@ -504,10 +504,9 @@ export const cmdIngest = (
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
         // redundant run is harmless and avoids the pile-up that wedges the DB).
-        // The timeout lives inside the lock so that a timed-out run LEAVES its
-        // lock to age into a cooldown - interrupting the fiber doesn't prove
-        // DuckDB stopped work, so the next ingest must hold off until
-        // the lock goes stale rather than charging a still-busy DB.
+        // A timed-out run leaves its lock in place. Interrupting the fiber does
+        // not prove DuckDB stopped work, so another process waits for the owner
+        // to exit. A live holder never loses its lock solely because of age.
         const outcome = yield* deps.withIngestLock(
             {
                 ...ingestLockOptions(path, cfg.paths.dataDir, commandName, timeoutSeconds),

@@ -2,6 +2,8 @@ import { Effect, FileSystem, Path } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import type { InstructionMatch, PackageInfo, ProjectStack, StackSignal } from "./types.ts";
 
+import { projectRelativePath } from "./package-path.ts";
+
 const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 
 function emptyPackageInfo(): PackageInfo {
@@ -28,7 +30,7 @@ function packageNames(value: unknown): ReadonlyArray<string> {
     return Object.keys(value as Record<string, unknown>).sort();
 }
 
-export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo, never, FileSystem.FileSystem | Path.Path> =>
+export const loadPackageInfo = (root: string | null, boundary: string | null = root): Effect.Effect<PackageInfo, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!root) return emptyPackageInfo();
 
@@ -36,11 +38,14 @@ export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo,
         const path = yield* Path.Path;
 
         const pkgPath = path.join(root, "package.json");
-        // existsSync probe → orAbsent(false): a fault means "treat as absent".
-        if (!(yield* fs.exists(pkgPath).pipe(orAbsent(false)))) return emptyPackageInfo();
+        const realBoundary = yield* fs.realPath(boundary ?? root).pipe(Effect.orElseSucceed(() => null));
+        const realManifest = yield* fs.realPath(pkgPath).pipe(Effect.orElseSucceed(() => null));
+        if (!realBoundary || !realManifest) return emptyPackageInfo();
+        const relative = path.relative(realBoundary, realManifest);
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return emptyPackageInfo();
 
         const parsed = yield* Effect.tryPromise({
-            try: () => Bun.file(pkgPath).json() as Promise<unknown>,
+            try: () => Bun.file(realManifest).json() as Promise<unknown>,
             catch: () => "PackageJsonReadError" as const,
         }).pipe(Effect.orElseSucceed(() => null));
 
@@ -75,19 +80,20 @@ export const loadPackageInfos = (
     Effect.gen(function* () {
         if (!root) return [];
         const path = yield* Path.Path;
-        const dirs = new Set([root]);
+        const checkout = path.resolve(root);
+        const dirs = new Set([checkout]);
         for (const changedPath of changedPaths) {
-            const relativePath = changedPath.replaceAll("\\", "/");
-            const absolutePath = path.resolve(root, relativePath);
-            const relativeToRoot = path.relative(root, absolutePath);
-            if (relativeToRoot === ".." || relativeToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue;
-            let dir = path.dirname(absolutePath);
-            while (dir !== root) {
+            const relativePath = projectRelativePath(changedPath);
+            if (relativePath === null) continue;
+            let dir = path.dirname(path.resolve(checkout, relativePath));
+            while (dir !== checkout) {
                 dirs.add(dir);
-                dir = path.dirname(dir);
+                const parent = path.dirname(dir);
+                if (parent === dir) break;
+                dir = parent;
             }
         }
-        const infos = yield* Effect.all([...dirs].map((dir) => loadPackageInfo(dir)), { concurrency: "unbounded" });
+        const infos = yield* Effect.all([...dirs].map((dir) => loadPackageInfo(dir, checkout)), { concurrency: 8 });
         return infos.filter((info) => info.packageJsonPath !== null);
     });
 

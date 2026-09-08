@@ -104,7 +104,7 @@ export const getGitState = (
         }
 
         const [status, head] = yield* Effect.all([
-            runGit(root, ["status", "--porcelain=v1", "-z", "-b"]),
+            runGit(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"]),
             runGit(root, ["rev-parse", "--short", "HEAD"]),
         ]);
 

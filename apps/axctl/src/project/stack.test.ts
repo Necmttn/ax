@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -111,5 +111,24 @@ describe("extractInstructionMatches", () => {
         );
 
         expect(matches).toEqual([]);
+    });
+});
+
+
+describe("package discovery boundaries", () => {
+    test("rejects directory and manifest symlinks outside the checkout", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-stack-boundary-"));
+        try {
+            const root = join(base, "repo");
+            const outside = join(base, "outside");
+            await mkdir(root);
+            await mkdir(outside);
+            await writeFile(join(outside, "package.json"), JSON.stringify({ scripts: { test: "external" } }));
+            await symlink(outside, join(root, "frontend"));
+            await mkdir(join(root, "backend"));
+            await symlink(join(outside, "package.json"), join(root, "backend", "package.json"));
+            const infos = await Effect.runPromise(loadPackageInfos(root, ["frontend/a.ts", "backend/b.ts"]).pipe(Effect.provide(fsLayer)));
+            expect(infos).toEqual([]);
+        } finally { await rm(base, { recursive: true, force: true }); }
     });
 });

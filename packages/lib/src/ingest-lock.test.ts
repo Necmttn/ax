@@ -295,18 +295,18 @@ describe("withIngestLock", () => {
         });
     });
 
-    test("steals a lock older than staleMs even when its owner is alive", async () => {
+    test("preserves a live holder even after staleMs", async () => {
         await withTempDir(async (dir) => {
             const lockPath = join(dir, "ingest.lock");
             writeFileSync(
                 lockPath,
-                encodeLockPayload({ pid: 1, startedAt: Date.now() - 120_000, command: "wedged" }),
+                encodeLockPayload({ pid: 1, startedAt: Date.now() - 120_000, command: "long-running" }),
             );
 
             const outcome = await run(
                 withIngestLock(opts(lockPath, { staleMs: 60_000 }), Effect.succeed("stolen")),
             );
-            expect(outcome).toEqual({ _tag: "completed", value: "stolen" });
+            expect(outcome).toEqual({ _tag: "busy", value: "busy:1:long-running" });
         });
     });
 

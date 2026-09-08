@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
+import { tmpdir } from "node:os";
 
 const skillsDir = join(import.meta.dir, "../../../skills");
 
@@ -35,4 +36,38 @@ describe("shipped skill safety", () => {
         expect(text).toContain("embedded DuckDB");
         expect(text).toContain("no database daemon is required");
     });
+});
+
+
+test("setup executes only a successfully downloaded and approved installer", () => {
+    const text = readFileSync(join(skillsDir, "setup", "SKILL.md"), "utf8");
+    const script = text.match(/```bash\n([\s\S]*?)```/)![1]!;
+    const root = mkdtempSync(join(tmpdir(), "ax-setup-security-"));
+    try {
+        const bin = join(root, "bin");
+        const temporary = join(root, "temporary");
+        mkdirSync(bin);
+        mkdirSync(temporary);
+        writeFileSync(join(bin, "curl"), `#!/bin/sh
+[ "$DOWNLOAD" = ok ] || exit 22
+while [ "$1" != -o ]; do shift; done
+shift
+printf '%s\n' '#!/bin/sh' 'printf installed > "$RESULT_FILE"' > "$1"
+`, { mode: 0o755 });
+        writeFileSync(join(bin, "less"), '#!/bin/sh\n[ "$REVIEW" = ok ]\n', { mode: 0o755 });
+        for (const [download, review, answer, success] of [
+            ["fail", "ok", "yes\n", false], ["ok", "fail", "yes\n", false],
+            ["ok", "ok", "no\n", false], ["ok", "ok", "", false], ["ok", "ok", "yes\n", true],
+        ] as const) {
+            const resultFile = join(root, "installed");
+            const result = Bun.spawnSync(["/bin/bash", "-c", script], {
+                stdin: Buffer.from(answer),
+                env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: temporary,
+                    DOWNLOAD: download, REVIEW: review, RESULT_FILE: resultFile },
+            });
+            expect(result.exitCode === 0).toBe(success);
+            expect(existsSync(resultFile)).toBe(success);
+            expect(readdirSync(temporary)).toEqual([]);
+        }
+    } finally { rmSync(root, { recursive: true, force: true }); }
 });
