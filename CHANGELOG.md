@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.2](https://github.com/Necmttn/ax/compare/v0.44.1...v0.44.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **ingest:** bound OpenCode extraction memory and update Bun ([#1150](https://github.com/Necmttn/ax/issues/1150)) ([7658717](https://github.com/Necmttn/ax/commit/7658717e8746bb50c1ae9b5ada288d147d6740a5))
+
 ## [0.44.1](https://github.com/Necmttn/ax/compare/v0.44.0...v0.44.1) (2026-09-08)
 
 
