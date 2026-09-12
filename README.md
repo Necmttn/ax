@@ -5,6 +5,8 @@
 **Make your agent learn.**
 Turn every agent session into a better next run.
 
+[Website](https://ax.necmttn.com) · [Documentation](https://ax.necmttn.com/docs)
+
 ---
 
 Every sub-agent you spawn finishes its work and disappears. Whatever it
