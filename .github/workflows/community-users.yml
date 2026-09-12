@@ -90,7 +90,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         if: steps.scope.outputs.mode == 'users-clean' || steps.scope.outputs.mode == 'patterns-clean'
         with:
-          bun-version: "1.3.10"
+          bun-version: "1.3.14"
 
       - name: Validate registrations
         if: steps.scope.outputs.mode == 'users-clean'
