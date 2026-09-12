@@ -2,7 +2,7 @@ import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Effect, Layer, Option } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
@@ -10,6 +10,8 @@ import {
     __testFindOpenCodeDbCandidates,
     __testIncludeOpenCodeByMtime,
     extractOpenCodeDatabase,
+    streamOpenCodeDatabase,
+    __testSliceOpenCodeExtractForSession,
 } from "./opencode.ts";
 import { turnRecordKey } from "./record-keys.ts";
 
@@ -479,6 +481,9 @@ describe("OpenCode SQLite extraction", () => {
             expect(extracted.warnings.join("\n")).toContain("invalid timestamp");
             expect(extracted.warnings.join("\n")).toContain("invalid message JSON");
             expect(extracted.warnings.join("\n")).toContain("missing session");
+            const streamed = [...streamOpenCodeDatabase(dbPath)];
+            expect(streamed.reduce((sum, batch) => sum + batch.skipped, 0)).toBe(extracted.skipped);
+            expect(streamed.flatMap((batch) => batch.warnings).sort()).toEqual([...extracted.warnings].sort());
         });
     });
 
@@ -493,6 +498,7 @@ describe("OpenCode SQLite extraction", () => {
             expect(extracted.providerEvents).toHaveLength(0);
             expect(extracted.turns).toHaveLength(0);
             expect(extracted.warnings.join("\n")).toContain("unsupported OpenCode schema");
+            expect([...streamOpenCodeDatabase(dbPath)]).toEqual([extracted]);
         });
     });
 
@@ -547,5 +553,57 @@ describe("OpenCode SQLite extraction", () => {
             false,
         );
         expect(__testIncludeOpenCodeByMtime(Option.none(), cutoffMs)).toBe(true);
+    });
+});
+
+
+describe("OpenCode session streaming", () => {
+    test("streams complete sessions without reading later session payloads", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER)");
+            db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)");
+            db.run("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT)");
+            for (const id of ["a", "b"]) {
+                db.query("INSERT INTO session VALUES (?, '/tmp/acme-app', 'stream', 1, 2)").run(id);
+                db.query("INSERT INTO message VALUES (?, ?, 1, ?)").run(id, id, '{"role":"assistant"}');
+                db.query("INSERT INTO part VALUES (?, ?, ?, 1, ?)").run(id, id, id, JSON.stringify({
+                    type: "tool", tool: "bash", callID: id,
+                    state: { status: "completed", input: { command: "pwd" }, output: id },
+                }));
+            }
+            const aggregate = extractOpenCodeDatabase(dbPath);
+            const extracts = streamOpenCodeDatabase(dbPath);
+            try {
+                expect(extracts.next().value).toEqual(__testSliceOpenCodeExtractForSession(aggregate, "a"));
+                // A later session must be read only after the consumer finishes
+                // the first write. A whole-store extract would return stale data.
+                db.query("UPDATE part SET data = ? WHERE id = 'b'").run(JSON.stringify({ type: "text", text: "later" }));
+                const second = extracts.next();
+                expect(second.done).toBe(false);
+                expect(second.value).toMatchObject({ sessions: [{ id: "b" }], turns: [{ seq: 1, text: "later" }], toolCalls: [] });
+                expect(extracts.next().done).toBe(true);
+            } finally {
+                extracts.return();
+            }
+        });
+    });
+
+    test("closes the SQLite connection when the consumer stops early", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run("CREATE TABLE session (id TEXT PRIMARY KEY, cwd TEXT, title TEXT, created_at TEXT, updated_at TEXT)");
+            db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at TEXT)");
+            db.run("INSERT INTO session VALUES ('a', '/tmp/acme-app', 'stream', '2026-01-01', '2026-01-01')");
+            const close = spyOn(Database.prototype, "close");
+            const extracts = streamOpenCodeDatabase(dbPath);
+            try {
+                expect(extracts.next().done).toBe(false);
+                expect(close).not.toHaveBeenCalled();
+                extracts.return();
+                expect(close).toHaveBeenCalledTimes(1);
+            } finally {
+                extracts.return();
+                close.mockRestore();
+            }
+        });
     });
 });

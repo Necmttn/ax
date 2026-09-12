@@ -482,36 +482,37 @@ function processStepFinishCompactions(input: {
     }
 }
 
-function syntheticRows(db: Database): {
+// Only session metadata is materialized. Raw messages are streamed and parts
+// are fetched for one message, so snapshot/tool payloads cannot accumulate for
+// the entire SQLite store (#1148). Parameters also serve the ingest session seam.
+function syntheticRows(db: Database, sessionId?: string): {
     sessions: SyntheticSessionRow[];
-    messages: SyntheticMessageRow[];
+    messages: Iterable<SyntheticMessageRow>;
 } {
+    const args: [string] | [] = sessionId === undefined ? [] : [sessionId];
     return {
-        sessions: db.query<SyntheticSessionRow, []>(
-            "SELECT id, cwd, title, created_at, updated_at FROM session ORDER BY created_at, id",
-        ).all(),
-        messages: db.query<SyntheticMessageRow, []>(
-            "SELECT id, session_id, role, content, created_at FROM message ORDER BY created_at, id",
-        ).all(),
+        sessions: db.query<SyntheticSessionRow, typeof args>(
+            `SELECT id, cwd, title, created_at, updated_at FROM session ${sessionId === undefined ? "" : "WHERE id = ?"} ORDER BY created_at, id`,
+        ).all(...args),
+        messages: db.query<SyntheticMessageRow, typeof args>(
+            `SELECT id, session_id, role, content, created_at FROM message ${sessionId === undefined ? "" : "WHERE session_id = ?"} ORDER BY created_at, id`,
+        ).iterate(...args),
     };
 }
 
-function observedRows(db: Database, hasModelColumn: boolean): {
+function observedRows(db: Database, hasModelColumn: boolean, sessionId?: string): {
     sessions: ObservedSessionRow[];
-    messages: ObservedMessageRow[];
-    parts: ObservedPartRow[];
+    messages: Iterable<ObservedMessageRow>;
 } {
     const modelSelect = hasModelColumn ? "model" : "NULL AS model";
+    const args: [string] | [] = sessionId === undefined ? [] : [sessionId];
     return {
-        sessions: db.query<ObservedSessionRow, []>(
-            `SELECT id, directory, title, ${modelSelect}, time_created, time_updated FROM session ORDER BY time_created, id`,
-        ).all(),
-        messages: db.query<ObservedMessageRow, []>(
-            "SELECT id, session_id, time_created, data FROM message ORDER BY time_created, id",
-        ).all(),
-        parts: db.query<ObservedPartRow, []>(
-            "SELECT id, message_id, session_id, time_created, data FROM part ORDER BY time_created, id",
-        ).all(),
+        sessions: db.query<ObservedSessionRow, typeof args>(
+            `SELECT id, directory, title, ${modelSelect}, time_created, time_updated FROM session ${sessionId === undefined ? "" : "WHERE id = ?"} ORDER BY time_created, id`,
+        ).all(...args),
+        messages: db.query<ObservedMessageRow, typeof args>(
+            `SELECT id, session_id, time_created, data FROM message ${sessionId === undefined ? "" : "WHERE session_id = ?"} ORDER BY time_created, id`,
+        ).iterate(...args),
     };
 }
 
@@ -729,19 +730,30 @@ function processToolPart(input: {
 export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
     const db = new Database(dbPath, { readonly: true });
     try {
-        const tables = tableNames(db);
-        if (!tables.has("session") || !tables.has("message")) {
-            return emptyExtract();
-        }
+        return extractOpenCodeConnection(db, dbPath);
+    } finally {
+        db.close();
+    }
+}
 
-        const sessionColumns = columnNames(db, "session");
-        const messageColumns = columnNames(db, "message");
-        const partColumns = tables.has("part") ? columnNames(db, "part") : new Set<string>();
-        const isSynthetic = hasColumns(sessionColumns, ["id", "cwd", "title", "created_at", "updated_at"]) &&
-            hasColumns(messageColumns, ["id", "session_id", "role", "content", "created_at"]);
-        const isObserved = hasColumns(sessionColumns, ["id", "directory", "title", "time_created", "time_updated"]) &&
-            hasColumns(messageColumns, ["id", "session_id", "time_created", "data"]) &&
-            hasColumns(partColumns, ["id", "message_id", "session_id", "time_created", "data"]);
+function openCodeSchema(db: Database) {
+    const tables = tableNames(db);
+    const sessionColumns = columnNames(db, "session");
+    const messageColumns = columnNames(db, "message");
+    const partColumns = tables.has("part") ? columnNames(db, "part") : new Set<string>();
+    const isSynthetic = hasColumns(sessionColumns, ["id", "cwd", "title", "created_at", "updated_at"]) &&
+        hasColumns(messageColumns, ["id", "session_id", "role", "content", "created_at"]);
+    const isObserved = hasColumns(sessionColumns, ["id", "directory", "title", "time_created", "time_updated"]) &&
+        hasColumns(messageColumns, ["id", "session_id", "time_created", "data"]) &&
+        hasColumns(partColumns, ["id", "message_id", "session_id", "time_created", "data"]);
+
+    return { sessionColumns, isSynthetic, isObserved, hasCoreTables: tables.has("session") && tables.has("message") };
+}
+
+function extractOpenCodeConnection(db: Database, dbPath: string, sessionId?: string): OpenCodeExtract {
+    try {
+        const { sessionColumns, isSynthetic, isObserved, hasCoreTables } = openCodeSchema(db);
+        if (!hasCoreTables) return emptyExtract();
 
         if (!isSynthetic && !isObserved) {
             return emptyExtract(["unsupported OpenCode schema: missing required session/message columns"]);
@@ -761,7 +773,7 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
         const compactionSeqBySession = new Map<string, number>();
 
         if (isSynthetic) {
-            const { sessions: sessionRows, messages: messageRows } = syntheticRows(db);
+            const { sessions: sessionRows, messages: messageRows } = syntheticRows(db, sessionId);
             for (const row of sessionRows) {
                 if (typeof row.id !== "string" || row.id.length === 0) {
                     skipped += 1;
@@ -816,9 +828,10 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                 });
             }
         } else {
-            const { sessions: sessionRows, messages: messageRows, parts } = observedRows(
+            const { sessions: sessionRows, messages: messageRows } = observedRows(
                 db,
                 sessionColumns.has("model"),
+                sessionId,
             );
             for (const row of sessionRows) {
                 if (typeof row.id !== "string" || row.id.length === 0) {
@@ -840,17 +853,17 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                 });
             }
 
-            const partsByMessage = new Map<string, ObservedPartRow[]>();
-            for (const part of parts) {
-                if (typeof part.message_id !== "string" || part.message_id.length === 0) {
-                    skipped += 1;
-                    warnings.push("skipped part row with missing message_id");
-                    continue;
-                }
-                const bucket = partsByMessage.get(part.message_id) ?? [];
-                bucket.push(part);
-                partsByMessage.set(part.message_id, bucket);
+            // Store-level malformed parts are counted once, not by rescanning
+            // the part table for every session in the production stream.
+            if (sessionId === undefined) {
+                const invalidParts = countInvalidOpenCodeParts(db);
+                skipped += invalidParts;
+                for (let i = 0; i < invalidParts; i++) warnings.push("skipped part row with missing message_id");
             }
+
+            const messageParts = db.query<ObservedPartRow, [string]>(
+                "SELECT id, message_id, session_id, time_created, data FROM part WHERE message_id = ? ORDER BY time_created, id",
+            );
 
             for (const row of messageRows) {
                 if (
@@ -875,7 +888,7 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                 }
                 const parsedParts: ParsedObservedPart[] = [];
                 const texts: string[] = [];
-                for (const part of partsByMessage.get(row.id) ?? []) {
+                for (const part of messageParts.iterate(row.id)) {
                     const partData = parseJsonRecord(part.data, `part ${part.id}`, warnings);
                     if (!partData) {
                         skipped += 1;
@@ -963,8 +976,60 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
             [`failed to extract OpenCode database ${dbPath}: ${error instanceof Error ? error.message : String(error)}`],
             1,
         );
+    }
+}
+
+function countInvalidOpenCodeParts(db: Database): number {
+    return db.query<{ count: number }, []>(
+        "SELECT COUNT(*) AS count FROM part WHERE message_id IS NULL OR message_id = ''",
+    ).get()?.count ?? 0;
+}
+
+/**
+ * Production extraction retains one normalized session at a time. The aggregate
+ * extractor above remains for fixture/analysis callers that need a whole batch.
+ * Closing the iterator releases SQLite even after cancellation or a write error.
+ */
+export function* streamOpenCodeDatabase(dbPath: string): Generator<OpenCodeExtract, void> {
+    let db: Database | undefined;
+    try {
+        db = new Database(dbPath, { readonly: true });
+        const schema = openCodeSchema(db);
+        if (!schema.hasCoreTables || (!schema.isSynthetic && !schema.isObserved)) {
+            yield extractOpenCodeConnection(db, dbPath);
+            return;
+        }
+        // IDs only: never retain transcript payloads between yields.
+        const sessions = db.query<{ id: string }, []>("SELECT id FROM session ORDER BY id").all();
+        for (const { id } of sessions) {
+            if (typeof id !== "string" || id.length === 0) {
+                yield emptyExtract(["skipped session row with missing id"], 1);
+                continue;
+            }
+            yield extractOpenCodeConnection(db, dbPath, id);
+        }
+        // Session-scoped reads exclude orphan messages. Preserve their existing
+        // diagnostics without reading their JSON/text payloads.
+        const tables = tableNames(db);
+        if (tables.has("message") && hasColumns(columnNames(db, "message"), ["id", "session_id"])) {
+            const warnings: string[] = [];
+            for (const row of db.query<{ id: string | null; session_id: string | null }, []>(
+                "SELECT id, session_id FROM message WHERE session_id IS NULL OR session_id = '' OR session_id NOT IN (SELECT id FROM session WHERE id IS NOT NULL AND id != '')",
+            ).iterate()) {
+                warnings.push(!row.id || !row.session_id
+                    ? "skipped message row with missing id or session_id"
+                    : `skipped message ${row.id}: missing session ${row.session_id}`);
+            }
+            if (tables.has("part") && columnNames(db, "part").has("message_id")) {
+                const invalidParts = countInvalidOpenCodeParts(db);
+                for (let i = 0; i < invalidParts; i++) warnings.push("skipped part row with missing message_id");
+            }
+            if (warnings.length > 0) yield emptyExtract(warnings, warnings.length);
+        }
+    } catch (error) {
+        yield failedExtract(dbPath, error);
     } finally {
-        db.close();
+        db?.close();
     }
 }
 
@@ -1192,27 +1257,6 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
         }
 
         const dbPath = dbPaths[0]!;
-        const extract = yield* Effect.sync(() => {
-            try {
-                return extractOpenCodeDatabase(dbPath);
-            } catch (error) {
-                return failedExtract(dbPath, error);
-            }
-        }).pipe(Effect.withSpan("opencode.extract", {
-            attributes: { "file.name": dbPath.slice(dbPath.lastIndexOf("/") + 1) },
-        }));
-
-        if (extract.sessions.length === 0) {
-            return {
-                sessions: 0,
-                turns: 0,
-                toolCalls: 0,
-                skipped: extract.skipped,
-                warnings: extract.warnings.length,
-                failedFiles: 0,
-            };
-        }
-
         // Snapshot the real skill catalog once (the skills stage is a declared
         // dep, so it is complete). A `skill` tool call records the name the
         // model typed - bare - while a project- or plugin-scoped skill is
@@ -1233,29 +1277,44 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
         let sessionCount = 0;
         let turnCount = 0;
         let toolCallCount = 0;
-        for (const session of extract.sessions) {
-            const slice = resolveOpenCodeCatalogSkills(
-                sliceOpenCodeExtractForSession(extract, session.id),
-                skillCatalog,
-            );
-            // Per-session failure isolation (#261): one undecodable / rejected
-            // session skips THIS session - the store is re-read next run -
-            // instead of aborting the whole stage (see file-isolation.ts).
-            yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
-                yield* writeNormalizedTranscriptBatch(write, toOpenCodeNormalizedBatch(slice, dbPath));
-                sessionCount += 1;
-                turnCount += slice.turns.length;
-                toolCallCount += slice.toolCalls.length;
-            }));
-        }
+        let skipped = 0;
+        let warnings = 0;
+        yield* Effect.acquireUseRelease(
+            Effect.sync(() => streamOpenCodeDatabase(dbPath)),
+            (extracts) => Effect.gen(function* () {
+                while (true) {
+                    const next = yield* Effect.sync(() => extracts.next()).pipe(
+                        Effect.withSpan("opencode.extract", {
+                            attributes: { "file.name": dbPath.slice(dbPath.lastIndexOf("/") + 1) },
+                        }),
+                    );
+                    if (next.done) break;
+                    const extract = next.value;
+                    skipped += extract.skipped;
+                    warnings += extract.warnings.length;
+                    const session = extract.sessions[0];
+                    if (!session) continue;
+                    const slice = resolveOpenCodeCatalogSkills(extract, skillCatalog);
+                    // Each session is written before reading the next one. A
+                    // rejected session is naturally retried on the next run.
+                    yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
+                        yield* writeNormalizedTranscriptBatch(write, toOpenCodeNormalizedBatch(slice, dbPath));
+                        sessionCount += 1;
+                        turnCount += slice.turns.length;
+                        toolCallCount += slice.toolCalls.length;
+                    }));
+                }
+            }),
+            (extracts) => Effect.sync(() => extracts.return()),
+        );
         yield* failures.report;
 
         return {
             sessions: sessionCount,
             turns: turnCount,
             toolCalls: toolCallCount,
-            skipped: extract.skipped,
-            warnings: extract.warnings.length,
+            skipped,
+            warnings,
             failedFiles: failures.count(),
         } satisfies OpenCodeStats;
     },
