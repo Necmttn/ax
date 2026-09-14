@@ -484,6 +484,7 @@ describe("release-please.yml: a trusted default-branch prime primes the same cac
                 if?: string;
                 "timeout-minutes"?: number;
                 outputs?: Record<string, string>;
+                concurrency?: { group?: string };
                 strategy?: { matrix?: { include?: Array<{ runner: string; artifact: string }> } };
                 steps?: WorkflowStep[];
             }
@@ -557,9 +558,10 @@ describe("release-please.yml: a trusted default-branch prime primes the same cac
         expect(provisionIdx).toBeGreaterThan(installIdx);
     });
 
-    test("the release publish-race protection is unchanged: publish-artifacts still gates on the release/tag-dispatch event only", () => {
-        expect(publishJob?.needs).toBe("build-artifacts");
+    test("the release uses one publisher after resolved successful builds", () => {
+        expect(publishJob?.needs).toEqual(["resolve-release", "build-artifacts"]);
         expect(publishJob?.if ?? "").not.toContain("prime-duckdb-cache");
-        expect(publishJob?.if ?? "").toContain("github.event_name == 'release'");
+        expect(publishJob?.if ?? "").toContain("needs.build-artifacts.result == 'success'");
+        expect(publishJob?.concurrency?.group).toBe("release-publication");
     });
 });
