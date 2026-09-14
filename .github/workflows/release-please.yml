@@ -114,8 +114,11 @@ jobs:
       release_id: ${{ steps.resolve.outputs.release_id }}
       release_sha: ${{ steps.resolve.outputs.release_sha }}
       published: ${{ steps.resolve.outputs.published }}
+    # GitHub returns draft releases only to callers with push access.
+    # https://docs.github.com/en/rest/releases/releases#list-releases
+    # This job uses the permission for visibility. Its helper performs reads only.
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:

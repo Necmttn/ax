@@ -369,6 +369,7 @@ describe("release workflow structure", () => {
         expect(workflow.on.release).toBeUndefined();
         expect(jobs["release-please"].outputs.sha).toContain("steps.release.outputs.sha");
         expect(jobs["resolve-release"].needs).toEqual(["validate-dispatch", "release-please"]);
+        expect(jobs["resolve-release"].permissions.contents).toBe("write");
         expect(jobs["resolve-release"].if).toContain("releases_created");
         expect(jobs["resolve-release"].if).toContain("inputs.tag_name != ''");
         expect(jobs["build-artifacts"].needs).toBe("resolve-release");
