@@ -78,6 +78,8 @@ export interface SpoolTotals {
     readonly rows: number;
     /** Load statements issued (one per (table, signature) per flush). */
     readonly statements: number;
+    /** Successful limit-triggered flush operations. Explicit flushes are excluded. */
+    readonly automaticFlushes: number;
     /** Text values that carried a U+0000 and were scrubbed. */
     readonly nulValues: number;
     /** Text values with an unpaired UTF-16 surrogate, made well-formed
@@ -234,6 +236,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
 
     let totalRows = 0;
     let totalStatements = 0;
+    let automaticFlushes = 0;
     let nulValues = 0;
     let illFormedValues = 0;
     let flushSeq = 0;
@@ -458,6 +461,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
                         (retainedRows >= limits.maxRows || retainedBytes >= limits.maxBytes)
                     ) {
                         yield* flushHeld(write);
+                        automaticFlushes += 1;
                     }
                 }
             }),
@@ -478,6 +482,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
         totals: () => ({
             rows: totalRows,
             statements: totalStatements,
+            automaticFlushes,
             nulValues,
             illFormedValues,
             peakPendingRows,

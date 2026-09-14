@@ -109,6 +109,7 @@ describe("makeTableSpool", () => {
                 expect(large).toBeGreaterThan(small);
                 expect(spool.pendingBytes()).toBeLessThan(large);
                 yield* spool.flush(write);
+                expect(spool.totals().automaticFlushes).toBe(0);
                 const stored = yield* write.raw("SELECT name FROM tool WHERE id = 'tool:r'");
                 expect(stored.rows[0]!["name"]).toBe("x");
             }),
@@ -132,6 +133,7 @@ describe("makeTableSpool", () => {
                 expect(totals.peakPendingRows).toBeGreaterThan(1);
                 expect(totals.peakPendingBytes).toBeGreaterThan(maxBytes);
                 expect(totals.peakPendingBytes).toBeLessThanOrEqual(maxBytes + Math.max(...encodedBytes));
+                expect(totals.automaticFlushes).toBeGreaterThan(0);
                 const visible = yield* write.raw("SELECT count(*) AS n FROM tool");
                 expect(visible.rows[0]!["n"]).toBeGreaterThan(0n);
                 yield* spool.flush(write);
@@ -278,6 +280,7 @@ describe("makeTableSpool", () => {
                 const outcome = yield* spool.flush(write);
                 expect(outcome.rows).toBe(2);
                 expect(outcome.statements).toBe(1);
+                expect(spool.totals().automaticFlushes).toBe(0);
                 expect(spool.pendingRows()).toBe(0);
 
                 const after = yield* write.raw("SELECT name FROM tool ORDER BY id");

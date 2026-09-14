@@ -23,7 +23,7 @@
  * several points mid-file (codex flushes) reads up-to-date numbers each time.
  */
 
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { fileWatermark, hashFileSha256, WATERMARK_TABLE } from "@ax/lib/duckdb/watermark";
 import type { CacheWriteError, CacheWriteService } from "@ax/lib/duckdb/seam";
@@ -198,27 +198,16 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
         // covers is in the drained buffers; rows appended by files still in
         // flight stay buffered, and their marks are not in this snapshot.
         const pendingMarks: Array<Record<string, DuckDbParam>> = [];
-        let flushing = false;
+        const checkpointGate = Semaphore.makeUnsafe(1);
         const flushCycle = (spool: TableSpool): Effect.Effect<void, CacheWriteError> =>
-            Effect.gen(function* () {
-                // Under file-concurrency two fibers can cross the threshold
-                // together; the loser skips - the next threshold crossing or
-                // the final flush picks its rows up.
-                if (flushing) return;
-                flushing = true;
-                yield* Effect.gen(function* () {
+            checkpointGate.withPermits(1)(
+                Effect.gen(function* () {
                     const marks = pendingMarks.splice(0);
                     yield* spool.flush(write);
                     yield* spool.assertHealthy();
                     if (marks.length > 0) yield* write.putMany(WATERMARK_TABLE, marks);
-                }).pipe(
-                    Effect.ensuring(
-                        Effect.sync(() => {
-                            flushing = false;
-                        }),
-                    ),
-                );
-            });
+                }),
+            );
 
         yield* Effect.forEach(
             opts.candidates,
@@ -261,6 +250,10 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                         }
                     }
                     activeFiles += 1;
+                    // Each file compares automatic flush progress across its
+                    // own work. There is no shared progress checkpoint for a
+                    // concurrent cycle to advance before this file completes.
+                    const flushesBeforeFile = opts.spool?.totals().automaticFlushes ?? 0;
                     yield* failures.isolate(
                         candidate.path,
                         Effect.gen(function* () {
@@ -300,15 +293,18 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                     // Cadence check OUTSIDE the isolate: a flush failure means
                     // the write path itself is broken, and that fails the
                     // stage instead of masquerading as one bad file.
-                    if (opts.spool !== undefined && opts.spool.pendingRows() >= SPOOL_FLUSH_PENDING_ROWS) {
-                        yield* flushCycle(opts.spool);
+                    if (opts.spool !== undefined) {
+                        const automaticFlushCompleted = opts.spool.totals().automaticFlushes > flushesBeforeFile;
+                        if (automaticFlushCompleted || opts.spool.pendingRows() >= SPOOL_FLUSH_PENDING_ROWS) {
+                            yield* flushCycle(opts.spool);
+                        }
                     }
                 }),
             { concurrency: opts.concurrency ?? 1, discard: true },
         );
 
         // Final flush: every buffered row and every deferred mark lands before
-        // the loop reports. All fibers are done, so `flushing` cannot be held.
+        // the loop reports. All file fibers are done here.
         if (opts.spool !== undefined) {
             yield* flushCycle(opts.spool);
             // Spooled values bypass the seam's bound-param NUL scrub, so its
