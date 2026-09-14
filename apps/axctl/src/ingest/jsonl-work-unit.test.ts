@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Deferred, Effect, Fiber, Schema } from "effect";
 import { hashFileSha256, importedMarkPath, WATERMARK_TABLE, watermarkRow } from "@ax/lib/duckdb/watermark";
 import { parseDuckdbColumnDefs } from "@ax/schema/duckdb-ddl";
 import type { CacheWriteError } from "@ax/lib/duckdb/seam";
+import { DuckDbQueryError } from "@ax/lib/duckdb/errors";
 import { makeTableSpool, withTableSpool } from "@ax/lib/duckdb/spool";
 import { DbError } from "@ax/lib/errors";
 import { publishCacheFixture, runWithPlatform } from "@ax/lib/testing/cache-fixture";
@@ -184,6 +185,236 @@ describe("spool mode", () => {
             }),
         ));
         expect(second).toMatchObject({ files: 0, skippedUnchanged: 2 });
+    });
+
+    dtest("a mid-file automatic flush failure escapes isolation and retry restores all rows", async () => {
+        const dir = tempDir("ax-jsonl-spool-failure-");
+        let firstExitTag = "";
+        let marksAfterFailure = -1;
+        let skippedOnRetry = -1;
+        let finalRows = -1;
+        let finalMarks = -1;
+        await runWithPlatform(publishCacheFixture(dir, dylibPath, (write) =>
+            Effect.gen(function* () {
+                let spoolLoads = 0;
+                const failedWrite = {
+                    ...write,
+                    exec: (sql: string, params?: readonly import("@ax/lib/duckdb/types").DuckDbParam[]) => {
+                        if (sql.startsWith('INSERT INTO "tool"')) {
+                            spoolLoads += 1;
+                            if (spoolLoads === 2) {
+                                return Effect.fail(new DuckDbQueryError({ sql, message: "forced spool load failure" }));
+                            }
+                        }
+                        return write.exec(sql, params);
+                    },
+                } satisfies typeof write;
+                const firstSpool = makeTableSpool({
+                    tables: ["tool"],
+                    dir: `${dir}/spool-first`,
+                    limits: { maxRows: 1, maxBytes: 10_000 },
+                });
+                const firstSpooled = withTableSpool(failedWrite, firstSpool);
+                const firstExit = yield* runJsonlProviderFiles(firstSpooled, {
+                    candidates: [candidate("a.jsonl", 10), candidate("b.jsonl", 20)],
+                    sourceKind: "codex_session",
+                    forceEnv: "AX_REDERIVE_TEST",
+                    source: "codex",
+                    spool: firstSpool,
+                    processFile: (item) =>
+                        firstSpooled.put("tool", { id: `tool:${item.path}`, name: item.path }).pipe(Effect.as(true)),
+                }).pipe(Effect.exit);
+                firstExitTag = firstExit._tag;
+                marksAfterFailure = Number((yield* write.raw("SELECT count(*) AS n FROM ingest_file_state")).rows[0]!["n"]);
+
+                const retrySpool = makeTableSpool({
+                    tables: ["tool"],
+                    dir: `${dir}/spool-retry`,
+                    limits: { maxRows: 1, maxBytes: 10_000 },
+                });
+                const retryWrite = withTableSpool(write, retrySpool);
+                const retry = yield* runJsonlProviderFiles(retryWrite, {
+                    candidates: [candidate("a.jsonl", 10), candidate("b.jsonl", 20)],
+                    sourceKind: "codex_session",
+                    forceEnv: "AX_REDERIVE_TEST",
+                    source: "codex",
+                    spool: retrySpool,
+                    processFile: (item) =>
+                        retryWrite.put("tool", { id: `tool:${item.path}`, name: item.path }).pipe(Effect.as(true)),
+                });
+                skippedOnRetry = retry.skippedUnchanged;
+                finalRows = Number((yield* write.raw("SELECT count(*) AS n FROM tool")).rows[0]!["n"]);
+                finalMarks = Number((yield* write.raw("SELECT count(*) AS n FROM ingest_file_state")).rows[0]!["n"]);
+            }),
+        ));
+        expect(firstExitTag).toBe("Failure");
+        expect(marksAfterFailure).toBe(1);
+        expect(skippedOnRetry).toBe(1);
+        expect(finalRows).toBe(2);
+        expect(finalMarks).toBe(2);
+    });
+
+    dtest("a byte-triggered flush checkpoints a completed file while a later file stays active", async () => {
+        const dir = tempDir("ax-jsonl-spool-checkpoint-");
+        let marksDuringRun: readonly unknown[] = [];
+        let skippedOnRetry = -1;
+        let laterActive = false;
+        const processedOnRetry: string[] = [];
+        await runWithPlatform(publishCacheFixture(dir, dylibPath, (write) =>
+            Effect.gen(function* () {
+                const laterEntered = yield* Deferred.make<void>();
+                const holdLater = yield* Deferred.make<void>();
+                const markWritten = yield* Deferred.make<void>();
+                const checkpointWrite = {
+                    ...write,
+                    putMany: (table: string, rows: readonly Readonly<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>>[]) =>
+                        write.putMany(table, rows).pipe(
+                            Effect.tap(() => table === WATERMARK_TABLE
+                                ? Deferred.succeed(markWritten, undefined)
+                                : Effect.void),
+                        ),
+                } satisfies typeof write;
+                const firstSpool = makeTableSpool({
+                    tables: ["tool"],
+                    dir: `${dir}/spool-checkpoint`,
+                    limits: { maxRows: 100, maxBytes: 64 },
+                });
+                const firstWrite = withTableSpool(checkpointWrite, firstSpool);
+                const activeRun = yield* runJsonlProviderFiles(firstWrite, {
+                    candidates: [candidate("first.jsonl", 1), candidate("later.jsonl", 2)],
+                    sourceKind: "codex_session",
+                    forceEnv: "AX_REDERIVE_TEST",
+                    source: "codex",
+                    spool: firstSpool,
+                    concurrency: 2,
+                    processFile: (item) => item.path === "first.jsonl"
+                        ? Effect.gen(function* () {
+                            yield* firstWrite.put("tool", {
+                                id: "tool:first",
+                                name: "x".repeat(256),
+                                provider: "codex",
+                            });
+                            yield* Deferred.await(laterEntered);
+                            return true;
+                        })
+                        : Effect.gen(function* () {
+                            laterActive = true;
+                            yield* Deferred.succeed(laterEntered, undefined);
+                            yield* Deferred.await(holdLater);
+                            laterActive = false;
+                            yield* firstWrite.put("tool", { id: "tool:later", name: "later", provider: "codex" });
+                            return true;
+                        }),
+                }).pipe(Effect.forkChild);
+
+                yield* Deferred.await(markWritten);
+                marksDuringRun = (yield* write.raw(
+                    "SELECT path FROM ingest_file_state ORDER BY path",
+                )).rows;
+                expect(laterActive).toBe(true);
+                expect(firstSpool.totals().automaticFlushes).toBeGreaterThan(0);
+                yield* Fiber.interrupt(activeRun);
+
+                const retrySpool = makeTableSpool({
+                    tables: ["tool"],
+                    dir: `${dir}/spool-checkpoint-retry`,
+                    limits: { maxRows: 100, maxBytes: 64 },
+                });
+                const retryWrite = withTableSpool(write, retrySpool);
+                const retry = yield* runJsonlProviderFiles(retryWrite, {
+                    candidates: [candidate("first.jsonl", 1), candidate("later.jsonl", 2)],
+                    sourceKind: "codex_session",
+                    forceEnv: "AX_REDERIVE_TEST",
+                    source: "codex",
+                    spool: retrySpool,
+                    processFile: (item) =>
+                        Effect.gen(function* () {
+                            processedOnRetry.push(item.path);
+                            yield* retryWrite.put("tool", {
+                                id: `tool:${item.path.replace(".jsonl", "")}`,
+                                name: item.path,
+                                provider: "codex",
+                            });
+                            return true;
+                        }),
+                });
+                skippedOnRetry = retry.skippedUnchanged;
+            }),
+        ));
+        expect(marksDuringRun).toEqual([{ path: "first.jsonl" }]);
+        expect(skippedOnRetry).toBe(1);
+        expect(processedOnRetry).toEqual(["later.jsonl"]);
+    });
+
+    dtest("a watermark batch failure keeps earlier marks and retry completes without duplicates", async () => {
+        const dir = tempDir("ax-jsonl-spool-mark-failure-");
+        let failedTag = "";
+        let marksAfterFailure = -1;
+        let skippedOnRetry = -1;
+        let finalRows = -1;
+        let finalMarks = -1;
+        await runWithPlatform(publishCacheFixture(dir, dylibPath, (write) =>
+            Effect.gen(function* () {
+                const run = (
+                    currentWrite: typeof write,
+                    paths: readonly JsonlFileCandidate[],
+                    spoolDir: string,
+                ) => {
+                    const spool = makeTableSpool({
+                        tables: ["tool"],
+                        dir: spoolDir,
+                        limits: { maxRows: 100, maxBytes: 10_000 },
+                    });
+                    const spooled = withTableSpool(currentWrite, spool);
+                    return runJsonlProviderFiles(spooled, {
+                        candidates: paths,
+                        sourceKind: "codex_session",
+                        forceEnv: "AX_REDERIVE_TEST",
+                        source: "codex",
+                        spool,
+                        processFile: (item) =>
+                            spooled.put("tool", { id: `tool:${item.path}`, name: item.path }).pipe(Effect.as(true)),
+                    });
+                };
+
+                yield* run(write, [candidate("durable.jsonl", 1)], `${dir}/spool-durable`);
+                let failMark = true;
+                const markFailWrite = {
+                    ...write,
+                    putMany: (table: string, rows: readonly Readonly<Record<string, import("@ax/lib/duckdb/types").DuckDbParam>>[]) => {
+                        if (table === WATERMARK_TABLE && failMark) {
+                            failMark = false;
+                            return Effect.fail(new DuckDbQueryError({
+                                sql: `putMany ${table}`,
+                                message: "forced watermark failure",
+                            }));
+                        }
+                        return write.putMany(table, rows);
+                    },
+                } satisfies typeof write;
+                const failed = yield* run(
+                    markFailWrite,
+                    [candidate("a.jsonl", 2), candidate("b.jsonl", 3)],
+                    `${dir}/spool-failed`,
+                ).pipe(Effect.exit);
+                failedTag = failed._tag;
+                marksAfterFailure = Number((yield* write.raw("SELECT count(*) AS n FROM ingest_file_state")).rows[0]!["n"]);
+
+                const retried = yield* run(
+                    write,
+                    [candidate("durable.jsonl", 1), candidate("a.jsonl", 2), candidate("b.jsonl", 3)],
+                    `${dir}/spool-retry-marks`,
+                );
+                skippedOnRetry = retried.skippedUnchanged;
+                finalRows = Number((yield* write.raw("SELECT count(*) AS n FROM tool")).rows[0]!["n"]);
+                finalMarks = Number((yield* write.raw("SELECT count(*) AS n FROM ingest_file_state")).rows[0]!["n"]);
+            }),
+        ));
+        expect(failedTag).toBe("Failure");
+        expect(marksAfterFailure).toBe(1);
+        expect(skippedOnRetry).toBe(1);
+        expect(finalRows).toBe(3);
+        expect(finalMarks).toBe(3);
     });
 });
 

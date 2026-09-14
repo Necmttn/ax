@@ -77,7 +77,7 @@ import {
     type ModelPricing,
 } from "./model-pricing.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
-import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, JSONL_SPOOL_LIMITS, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { skipPlatformStage } from "./platform-stage.ts";
 import {
     extractClaudeCompaction,
@@ -1771,7 +1771,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         // `write` below routes EVERY write in this stage through the decorator;
         // the work-unit owns the flush cadence and defers watermarks past it.
         const spoolDir = yield* fs.makeTempDirectory({ prefix: "ax-spool-claude-" });
-        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir, limits: JSONL_SPOOL_LIMITS });
         const write = withTableSpool(directWrite, spool);
         // Scratch dir holds raw turn text until the spool flushes - a failed
         // stage (including the flush itself) must not leak it, so the whole

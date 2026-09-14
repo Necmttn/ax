@@ -57,7 +57,7 @@ import { estimateCost, loadPricingCatalog, sumCostEstimates, type ModelPricing }
 import { codexSourceForThread } from "./source-origin.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 import type { FileFailureSnapshot } from "./file-isolation.ts";
-import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, JSONL_SPOOL_LIMITS, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { canonicalCwdInRepoScope, readCodexSessionCwd } from "./codex-scope.ts";
 import { skipPlatformStage } from "./platform-stage.ts";
 
@@ -452,7 +452,7 @@ export interface CodexExtract {
     tokenUsage: CodexTokenUsage | null;
 }
 
-interface MutableCodexExtract {
+export interface MutableCodexExtract {
     session: CodexSession | null;
     sourcePath: string | null;
     warnings: string[];
@@ -1192,6 +1192,36 @@ export const __testStreamCodexFileBatches = (
         return batches;
     });
 
+/** Test seam that sends each streaming batch to a caller before the next batch
+ * is parsed. This verifies parser-to-database behavior without collecting the
+ * complete transcript in the test process. */
+export const __testStreamCodexFileBatchesTo = <E = never, R = never>(
+    filePath: string,
+    flushEvery: number,
+    onBatch: (batch: MutableCodexExtract, final: boolean) => Effect.Effect<void, E, R>,
+): Effect.Effect<void, PlatformError.PlatformError | E, FileSystem.FileSystem | R> =>
+    Effect.gen(function* () {
+        const extractor = createCodexExtractor(filePath);
+        const keep = (batch: MutableCodexExtract): boolean =>
+            batch.session !== null && (
+                batch.turns.length > 0 ||
+                batch.turnTokenUsages.length > 0 ||
+                batch.invocations.length > 0 ||
+                batch.toolCalls.length > 0 ||
+                batch.providerEvents.length > 0 ||
+                batch.parentEdges.length > 0 ||
+                batch.skillRelations.length > 0 ||
+                batch.planSnapshots.length > 0 ||
+                batch.tokenUsage !== null
+            );
+        yield* streamCodexFile(filePath, extractor, {
+            flushEvery,
+            onFlush: (batch) => keep(batch) ? onBatch(batch, false) : Effect.void,
+        });
+        const final = extractor.drain(true);
+        if (keep(final)) yield* onBatch(final, true);
+    });
+
 /** Outcome of {@link __testStreamCodexFileGuarded}: which arm of the production
  *  NotFound guard was taken. `"skipped"` = benign vanished-file skip (nothing
  *  persisted); `"completed"` = stream finished; a Failure exit = NotFound (or any
@@ -1504,7 +1534,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         // per-session agent_event DELETE stays a pass-through exec and fires
         // before that session's first append, so delete-before-insert holds.
         const spoolDir = yield* spoolFs.makeTempDirectory({ prefix: "ax-spool-codex-" });
-        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir, limits: JSONL_SPOOL_LIMITS });
         const write = withTableSpool(directWrite, spool);
         // Scratch dir holds raw turn text until the spool flushes - a failed
         // stage (including the flush itself) must not leak it, so the whole

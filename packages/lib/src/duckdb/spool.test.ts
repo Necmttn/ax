@@ -8,13 +8,14 @@
  * None of that is visible to a mock.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Path } from "effect";
+import { Cause, Deferred, Effect, Fiber, FileSystem, Path } from "effect";
 import { DUCKDB_SCHEMA_SQL } from "@ax/schema/duckdb-ddl";
 import { withIngestLock } from "../ingest-lock.ts";
 import { runWithPlatform } from "../testing/cache-fixture.ts";
 import { duckdbTestSetup } from "../testing/duckdb-dylib.ts";
 import { withCacheWrite, type CacheWriteService } from "./seam.ts";
-import { makeTableSpool, withTableSpool, type TableSpool } from "./spool.ts";
+import { DuckDbQueryError } from "./errors.ts";
+import { makeTableSpool, withTableSpool, type TableSpool, type TableSpoolOptions } from "./spool.ts";
 
 const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cache spool");
 
@@ -23,6 +24,7 @@ const { dylibPath, dtest, tempDir } = await duckdbTestSetup("cache spool");
 const asIngestRun = <A>(
     dir: string,
     body: (write: CacheWriteService, spool: TableSpool, spoolDir: string) => Effect.Effect<A, unknown, never>,
+    options: Pick<TableSpoolOptions, "limits"> = {},
 ): Promise<A> =>
     runWithPlatform(
         Effect.gen(function* () {
@@ -50,6 +52,7 @@ const asIngestRun = <A>(
                         const spool = makeTableSpool({
                             tables: ["tool", "file", "invoked", "turn_token_usage"],
                             dir: spoolDir,
+                            ...options,
                         });
                         return body(write, spool, spoolDir);
                     },
@@ -61,6 +64,206 @@ const asIngestRun = <A>(
     );
 
 describe("makeTableSpool", () => {
+    dtest("bounded putMany flushes inside one input and records exact UTF-8 peaks", async () => {
+        const dir = tempDir("spool-bounded");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const spooled = withTableSpool(write, spool);
+                yield* spooled.putMany("tool", [
+                    { id: "tool:one", name: "a", provider: "codex" },
+                    { id: "tool:two", name: "漢字", provider: "codex" },
+                    { id: "tool:three", name: "c", provider: "codex" },
+                    { id: "tool:four", name: "d", provider: "codex" },
+                    { id: "tool:five", name: "e", provider: "codex" },
+                ]);
+
+                const visible = yield* write.raw("SELECT count(*) AS n FROM tool");
+                expect(visible.rows[0]!["n"]).toBeGreaterThan(0n);
+                expect(spool.totals().peakPendingRows).toBeLessThanOrEqual(2);
+                expect(spool.totals().peakPendingBytes).toBeGreaterThan(0);
+                yield* spool.flush(write);
+                const stored = yield* write.raw("SELECT id, name FROM tool ORDER BY id");
+                expect(stored.rows).toHaveLength(5);
+                expect(stored.rows.find((row) => row["id"] === "tool:two")?.["name"]).toBe("漢字");
+            }),
+        { limits: { maxRows: 2, maxBytes: 1_000 } });
+    });
+
+    dtest("bounded replacements update byte accounting and keep the last value", async () => {
+        const dir = tempDir("spool-bounded-replace");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const spooled = withTableSpool(write, spool);
+                yield* spooled.put("tool", { id: "tool:r", name: "a", provider: "codex" });
+                const small = spool.pendingBytes();
+                expect(small).toBe(new TextEncoder().encode(
+                    `${JSON.stringify({ id: "tool:r", name: "a", provider: "codex" })}\n`,
+                ).byteLength);
+                yield* spooled.put("tool", { id: "tool:r", name: "a much larger value", provider: "codex" });
+                const large = spool.pendingBytes();
+                expect(large).toBe(new TextEncoder().encode(
+                    `${JSON.stringify({ id: "tool:r", name: "a much larger value", provider: "codex" })}\n`,
+                ).byteLength);
+                yield* spooled.put("tool", { id: "tool:r", name: "x", provider: "codex" });
+                expect(spool.pendingRows()).toBe(1);
+                expect(large).toBeGreaterThan(small);
+                expect(spool.pendingBytes()).toBeLessThan(large);
+                yield* spool.flush(write);
+                expect(spool.totals().automaticFlushes).toBe(0);
+                const stored = yield* write.raw("SELECT name FROM tool WHERE id = 'tool:r'");
+                expect(stored.rows[0]!["name"]).toBe("x");
+            }),
+        { limits: { maxRows: 100, maxBytes: 10_000 } });
+    });
+
+    dtest("the byte limit flushes regular rows within one putMany", async () => {
+        const dir = tempDir("spool-bounded-bytes");
+        const rows = [
+            { id: "tool:byte-1", name: "alpha", provider: "codex" },
+            { id: "tool:byte-2", name: "bravo", provider: "codex" },
+            { id: "tool:byte-3", name: "charlie", provider: "codex" },
+            { id: "tool:byte-4", name: "delta", provider: "codex" },
+        ];
+        const encodedBytes = rows.map((row) => new TextEncoder().encode(`${JSON.stringify(row)}\n`).byteLength);
+        const maxBytes = encodedBytes[0]! + 1;
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                yield* withTableSpool(write, spool).putMany("tool", rows);
+                const totals = spool.totals();
+                expect(totals.peakPendingRows).toBeGreaterThan(1);
+                expect(totals.peakPendingBytes).toBeGreaterThan(maxBytes);
+                expect(totals.peakPendingBytes).toBeLessThanOrEqual(maxBytes + Math.max(...encodedBytes));
+                expect(totals.automaticFlushes).toBeGreaterThan(0);
+                const visible = yield* write.raw("SELECT count(*) AS n FROM tool");
+                expect(visible.rows[0]!["n"]).toBeGreaterThan(0n);
+                yield* spool.flush(write);
+                const stored = yield* write.raw("SELECT count(*) AS n FROM tool");
+                expect(stored.rows[0]!["n"]).toBe(4n);
+            }),
+        { limits: { maxRows: 100, maxBytes } });
+    });
+
+    dtest("one oversized row stays complete and flushes immediately", async () => {
+        const dir = tempDir("spool-bounded-oversized");
+        const value = "🚀".repeat(100);
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                yield* withTableSpool(write, spool).put("tool", { id: "tool:large", name: value, provider: "codex" });
+                expect(spool.pendingRows()).toBe(0);
+                expect(spool.totals().peakPendingBytes).toBeGreaterThan(32);
+                const stored = yield* write.raw("SELECT name FROM tool WHERE id = 'tool:large'");
+                expect(stored.rows[0]!["name"]).toBe(value);
+            }),
+        { limits: { maxRows: 100, maxBytes: 32 } });
+    });
+
+    dtest("a large invalid batch is fully validated before any bounded prefix loads", async () => {
+        const dir = tempDir("spool-bounded-invalid");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const outcome = yield* withTableSpool(write, spool).putMany("tool", [
+                    { id: "tool:valid", name: "valid" },
+                    { id: "tool:ragged", name: "invalid", provider: "codex" },
+                ]).pipe(Effect.exit);
+                expect(outcome._tag).toBe("Failure");
+                expect(spool.pendingRows()).toBe(0);
+                const stored = yield* write.raw("SELECT count(*) AS n FROM tool");
+                expect(stored.rows[0]!["n"]).toBe(0n);
+            }),
+        { limits: { maxRows: 1, maxBytes: 10_000 } });
+    });
+
+    dtest("concurrent bounded writes wait for one automatic flush", async () => {
+        const dir = tempDir("spool-bounded-concurrent");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const entered = yield* Deferred.make<void>();
+                const release = yield* Deferred.make<void>();
+                let execs = 0;
+                const blockedWrite: CacheWriteService = {
+                    ...write,
+                    exec: (sql, params) => Effect.gen(function* () {
+                        execs += 1;
+                        if (execs === 1) {
+                            yield* Deferred.succeed(entered, undefined);
+                            yield* Deferred.await(release);
+                        }
+                        return yield* write.exec(sql, params);
+                    }),
+                };
+                const spooled = withTableSpool(blockedWrite, spool);
+                const first = yield* spooled.put("tool", { id: "tool:a", name: "a" }).pipe(Effect.forkChild);
+                yield* Deferred.await(entered);
+                const explicit = yield* spool.flush(blockedWrite).pipe(Effect.forkChild);
+                const second = yield* spooled.put("tool", { id: "tool:b", name: "b" }).pipe(Effect.forkChild);
+                yield* Effect.yieldNow;
+                expect(spool.totals().peakPendingRows).toBe(1);
+                yield* Deferred.succeed(release, undefined);
+                yield* Fiber.join(first);
+                yield* Fiber.join(explicit);
+                yield* Fiber.join(second);
+                yield* spool.flush(blockedWrite);
+                const stored = yield* write.raw("SELECT id FROM tool ORDER BY id");
+                expect(stored.rows.map((row) => row["id"])).toEqual(["tool:a", "tool:b"]);
+            }),
+        { limits: { maxRows: 1, maxBytes: 10_000 } });
+    });
+
+    dtest("a queued health check observes the first flush failure", async () => {
+        const dir = tempDir("spool-bounded-health");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const entered = yield* Deferred.make<void>();
+                const release = yield* Deferred.make<void>();
+                const failure = new DuckDbQueryError({ sql: "forced", message: "forced flush failure" });
+                const failedWrite: CacheWriteService = {
+                    ...write,
+                    exec: () => Effect.gen(function* () {
+                        yield* Deferred.succeed(entered, undefined);
+                        yield* Deferred.await(release);
+                        return yield* Effect.fail(failure);
+                    }),
+                };
+                const first = yield* withTableSpool(failedWrite, spool)
+                    .put("tool", { id: "tool:fail", name: "x" })
+                    .pipe(Effect.exit, Effect.forkChild);
+                yield* Deferred.await(entered);
+                const health = yield* spool.assertHealthy().pipe(Effect.exit, Effect.forkChild);
+                yield* Effect.yieldNow;
+                yield* Deferred.succeed(release, undefined);
+                const firstExit = yield* Fiber.join(first);
+                const healthExit = yield* Fiber.join(health);
+                expect(firstExit._tag).toBe("Failure");
+                expect(healthExit._tag).toBe("Failure");
+                if (firstExit._tag === "Failure" && healthExit._tag === "Failure") {
+                    expect(Cause.pretty(healthExit.cause)).toContain("forced flush failure");
+                    expect(Cause.pretty(healthExit.cause)).toBe(Cause.pretty(firstExit.cause));
+                }
+            }),
+        { limits: { maxRows: 1, maxBytes: 10_000 } });
+    });
+
+    dtest("an interrupted flush stores its cause and releases the gate", async () => {
+        const dir = tempDir("spool-bounded-interrupt");
+        await asIngestRun(dir, (write, spool) =>
+            Effect.gen(function* () {
+                const entered = yield* Deferred.make<void>();
+                const blockedWrite: CacheWriteService = {
+                    ...write,
+                    exec: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+                };
+                const flush = yield* withTableSpool(blockedWrite, spool)
+                    .put("tool", { id: "tool:interrupt", name: "x" })
+                    .pipe(Effect.forkChild);
+                yield* Deferred.await(entered);
+                yield* Fiber.interrupt(flush);
+                const health = yield* spool.assertHealthy().pipe(Effect.exit);
+                expect(health._tag).toBe("Failure");
+                if (health._tag === "Failure") expect(Cause.hasInterrupts(health.cause)).toBe(true);
+            }),
+        { limits: { maxRows: 1, maxBytes: 10_000 } });
+    });
+
     dtest("flush lands buffered rows; a spooled row is invisible before it", async () => {
         const dir = tempDir("spool-basic");
         await asIngestRun(dir, (write, spool) =>
@@ -77,6 +280,7 @@ describe("makeTableSpool", () => {
                 const outcome = yield* spool.flush(write);
                 expect(outcome.rows).toBe(2);
                 expect(outcome.statements).toBe(1);
+                expect(spool.totals().automaticFlushes).toBe(0);
                 expect(spool.pendingRows()).toBe(0);
 
                 const after = yield* write.raw("SELECT name FROM tool ORDER BY id");
@@ -299,6 +503,17 @@ describe("makeTableSpool", () => {
                 },
             ]),
         ).toThrow(/64-bit/);
+    });
+
+    test("refuses nonpositive and nonfinite limits", () => {
+        for (const limits of [
+            { maxRows: 0, maxBytes: 1 },
+            { maxRows: 1, maxBytes: 0 },
+            { maxRows: Number.POSITIVE_INFINITY, maxBytes: 1 },
+            { maxRows: 1, maxBytes: Number.NaN },
+        ]) {
+            expect(() => makeTableSpool({ tables: ["tool"], dir: "/nonexistent", limits })).toThrow(/limit/);
+        }
     });
 });
 
