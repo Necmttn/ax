@@ -9,21 +9,34 @@ on:
         description: Existing release tag to build artifacts for. Leave empty to run release-please.
         required: false
         type: string
-  release:
-    types: [published]
-
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
+  validate-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require manual releases to run from main
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$WORKFLOW_REF" = "refs/heads/main" || {
+            echo "::error::manual release retries must run from main" >&2
+            exit 1
+          }
+
   release-please:
+    needs: validate-dispatch
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag_name == '') }}
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       version: ${{ steps.release.outputs.version }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -41,12 +54,11 @@ jobs:
   # Gated on `releases_created` (release-please's own output, set only on the
   # push where it actually cuts a release) so this doesn't run three
   # expensive full-matrix runners on every ordinary main push - just the rare
-  # push that creates a release. That push's `release: published` event also
-  # triggers build-artifacts on the new tag concurrently, so this prime run
-  # may race it and lose the save on a shared first-ever cache miss; it isn't
-  # racing to help ITS OWN release, only to seed every release after this one.
+  # push that creates a release. The artifact matrix starts from the same push
+  # after release resolution, so this prime run may race it and lose the save
+  # on a shared first-ever cache miss. It seeds releases after this one.
   # No release publishing happens here (build/smoke/save only), so the
-  # publish-race protection on build-artifacts/publish-artifacts is untouched.
+  # Publication stays in the single publish-artifacts job below.
   prime-duckdb-cache:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
@@ -88,13 +100,50 @@ jobs:
         with:
           label: ${{ matrix.artifact }} (default-branch prime)
 
-  # Artifacts build only on the `release: published` event (or manual dispatch
-  # with a tag). The push run that creates the release via release-please must
-  # NOT also build - when it did, its publish job raced the release-event run's
-  # publish job and --clobber uploads interleaved, leaving a checksums.txt from
-  # one build next to a tarball from the other (v0.24.0 incident).
+  resolve-release:
+    needs: [validate-dispatch, release-please]
+    if: >-
+      ${{ always()
+      && needs.validate-dispatch.result == 'success'
+      && ((needs.release-please.result == 'success'
+          && needs.release-please.outputs.releases_created == 'true')
+        || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')) }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      release_id: ${{ steps.resolve.outputs.release_id }}
+      release_sha: ${{ steps.resolve.outputs.release_sha }}
+      published: ${{ steps.resolve.outputs.published }}
+    # GitHub returns draft releases only to callers with push access.
+    # https://docs.github.com/en/rest/releases/releases#list-releases
+    # This job uses the permission for visibility. Its helper performs reads only.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Resolve immutable release source
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || needs.release-please.outputs.tag_name }}
+          RELEASE_PLEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: bun scripts/release-artifacts.ts resolve
+
+  # One release-please run creates the draft, resolves its immutable source,
+  # builds every platform, and publishes only after download verification.
+  # A manual tag dispatch resumes the same path for an existing draft.
   build-artifacts:
-    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
+    needs: resolve-release
+    if: ${{ needs.resolve-release.outputs.published == 'false' }}
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     # Recent cold-build durations ranged 12m22s-33m39s; 90m matches CI's own
@@ -118,7 +167,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
           fetch-depth: 0 # full history + tags so build-axctl.ts can bake the release tag
+
+      - name: Verify checkout source
+        env:
+          TAG_NAME: ${{ needs.resolve-release.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git rev-list -n 1 "$TAG_NAME^{}")" = "$RELEASE_SHA"
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -166,9 +225,14 @@ jobs:
       - run: bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl
 
       - name: Smoke compiled CLI
+        env:
+          TAG_NAME: ${{ needs.resolve-release.outputs.tag_name }}
         run: |
           set -euo pipefail
-          ./dist/axctl --version
+          version_output="$(./dist/axctl --version)"
+          test "${version_output%%$'\n'*}" = "axctl ${TAG_NAME#v}"
+          printf '%s\n' "$version_output" | grep -Eq "^build: $TAG_NAME \\(g[0-9a-f]+\\) - release tag $TAG_NAME$"
+          printf '%s\n' "$version_output" | grep -Fqx 'source: compiled binary'
           ./dist/axctl help
 
       - name: Package binary
@@ -187,59 +251,48 @@ jobs:
           if-no-files-found: error
 
   publish-artifacts:
-    needs: build-artifacts
-    # Run even when a build leg failed so the platforms that DID build still get
-    # published - a flaky test on one runner must not zero out the whole release
-    # (the v0.29.0 incident: darwin's build failed on a flaky shiki test, so this
-    # job was skipped and `latest` shipped with 0 assets, 404ing every install).
-    # The verify step below then fails the run loudly if any asset is missing.
+    needs: [resolve-release, build-artifacts]
+    # A draft requires every platform build. A published retry skips all builds
+    # and performs remote verification without changing release data.
     if: >-
       ${{ always()
-      && needs.build-artifacts.result != 'cancelled'
-      && (github.event_name == 'release'
-        || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')) }}
+      && needs.resolve-release.result == 'success'
+      && (needs.resolve-release.outputs.published == 'true'
+        || needs.build-artifacts.result == 'success') }}
     runs-on: ubuntu-latest
     concurrency:
-      group: release-assets-${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
+      group: release-publication
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
       GH_REPO: ${{ github.repository }}
+      TAG_NAME: ${{ needs.resolve-release.outputs.tag_name }}
+      RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}
+      RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+      RELEASE_PUBLISHED: ${{ needs.resolve-release.outputs.published }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
       - uses: actions/download-artifact@v4
+        if: ${{ needs.resolve-release.outputs.published == 'false' }}
         with:
           path: release-assets
           merge-multiple: true
 
-      - name: Upload release assets
-        run: |
-          set -euo pipefail
-          cd release-assets
-          if [ -z "$TAG_NAME" ]; then
-            echo "TAG_NAME is empty - refusing to guess the target release" >&2
-            exit 1
-          fi
-          if ! ls ./*.tar.gz >/dev/null 2>&1; then
-            echo "::error::no platform binaries were built for $TAG_NAME - every build leg failed; nothing to publish" >&2
-            exit 1
-          fi
-          shasum -a 256 ./*.tar.gz > checksums.txt
-          gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --repo "$GH_REPO" --clobber
+      - name: Upload, download, verify, and publish draft
+        if: ${{ needs.resolve-release.outputs.published == 'false' }}
+        run: bun scripts/release-artifacts.ts publish release-assets
 
-      - name: Verify release has every expected asset
-        run: |
-          set -euo pipefail
-          # Keep in sync with the build-artifacts matrix.
-          expected="axctl-darwin-arm64.tar.gz axctl-darwin-x64.tar.gz axctl-linux-x64.tar.gz checksums.txt"
-          have="$(gh release view "$TAG_NAME" --repo "$GH_REPO" --json assets --jq '.assets[].name')"
-          missing=""
-          for asset in $expected; do
-            printf '%s\n' "$have" | grep -qx "$asset" || missing="$missing $asset"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::release $TAG_NAME is missing assets:$missing - a 'latest' install will 404 for those platforms. Fix the build, then re-run: gh workflow run release-please.yml -f tag_name=$TAG_NAME" >&2
-            exit 1
-          fi
-          echo "release $TAG_NAME has all expected assets: $expected"
+      - name: Verify existing published release
+        if: ${{ needs.resolve-release.outputs.published == 'true' }}
+        run: bun scripts/release-artifacts.ts verify
