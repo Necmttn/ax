@@ -987,16 +987,15 @@ export function cmdSetup(
             }
         }
 
-        // 3. ingest is NOT run here. A full backfill can take minutes; blocking
-        // setup on it makes install feel frozen, and re-running it on every
-        // `ax update` is pure waste (the watcher + daily ETL keep the graph
-        // fresh). The onboarding brief hands ingest to the agent as a narrated
-        // step (dry-run ETA -> background run -> dashboard -> takeaways). Users
-        // without an agent get the explicit next-step below.
+        // 3. ingest is NOT run here. A full backfill can take minutes, so setup
+        // leaves the first ingest to the user or their agent. Explicit ingestion
+        // and optional ingestion started by later read commands keep data fresh.
+        // The onboarding brief gives the agent the ingest step. Users without
+        // an agent get the explicit next-step below.
         console.log("  ingest: not run yet (kept out of setup so it never blocks). populate the graph:");
         console.log("          ax ingest --dry-run   # see how long a full backfill will take");
-        console.log("          ax ingest             # full backfill (watch live in ax studio)");
-        console.log("          ...or the daily 04:00 sync fills it overnight.");
+        console.log("          ax ingest             # import your sessions");
+        console.log("          Run the first ingest now. Later read commands can refresh stale data.");
 
         // 4. verify.
         console.log();

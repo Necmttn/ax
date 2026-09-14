@@ -328,7 +328,7 @@ const improveAcceptCommand = Command.make(
             if (result.message) console.log(result.message);
             if (result.task_path) {
                 console.log(`task emitted at ${result.task_path}`);
-                console.log(`apply with your agent: \`claude "do ${result.task_path}"\``);
+                console.log("Open this task file in your coding agent and apply its instructions.");
                 console.log(`reconcile after edit: \`axctl improve lint\``);
             } else if (result.artifact_path) {
                 console.log(`scaffolded ${result.artifact_path}`);
