@@ -82,6 +82,13 @@ export const INGEST_SPOOL_TABLES: ReadonlyArray<string> = [
  *  each `read_ndjson` load big enough to amortize. */
 export const SPOOL_FLUSH_PENDING_ROWS = 25_000;
 
+/** Shared retained-data limits for transcript provider spools. The byte value
+ * measures serialized UTF-8 NDJSON data and is not a process memory limit. */
+export const JSONL_SPOOL_LIMITS = {
+    maxRows: SPOOL_FLUSH_PENDING_ROWS,
+    maxBytes: 32 * 1024 * 1024,
+} as const;
+
 /** Pure throttle decision, exported so the cadence cannot regress silently. */
 export const shouldHeartbeatIngestRun = (completedFiles: number): boolean =>
     completedFiles > 0 && completedFiles % INGEST_RUN_HEARTBEAT_EVERY_FILES === 0;
@@ -202,6 +209,7 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                 yield* Effect.gen(function* () {
                     const marks = pendingMarks.splice(0);
                     yield* spool.flush(write);
+                    yield* spool.assertHealthy();
                     if (marks.length > 0) yield* write.putMany(WATERMARK_TABLE, marks);
                 }).pipe(
                     Effect.ensuring(
@@ -286,6 +294,9 @@ export const runJsonlProviderFiles = <E = never, R = never, C extends JsonlFileC
                         }),
                     );
                     activeFiles -= 1;
+                    // A bounded flush can fail inside processFile. File
+                    // isolation catches typed errors, so replay that cause here.
+                    if (opts.spool !== undefined) yield* opts.spool.assertHealthy();
                     // Cadence check OUTSIDE the isolate: a flush failure means
                     // the write path itself is broken, and that fails the
                     // stage instead of masquerading as one bad file.

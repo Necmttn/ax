@@ -38,7 +38,7 @@ import {
     type MutableToolCallWrite,
 } from "./normalized/tool-call-write.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import { INGEST_SPOOL_TABLES, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
+import { INGEST_SPOOL_TABLES, JSONL_SPOOL_LIMITS, runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
@@ -760,7 +760,7 @@ const makePiLikeIngest = (desc: PiLikeProvider) => Effect.fn(`${desc.provider}.i
         // v3 Phase 2 (#886): high-volume tables buffer in an NDJSON spool; the
         // shadowed `write` routes every write in this stage through it.
         const spoolDir = yield* fs.makeTempDirectory({ prefix: `ax-spool-${desc.provider}-` });
-        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir });
+        const spool = makeTableSpool({ tables: INGEST_SPOOL_TABLES, dir: spoolDir, limits: JSONL_SPOOL_LIMITS });
         const write = withTableSpool(directWrite, spool);
         // Scratch dir holds raw turn text until the spool flushes - a failed
         // stage (including the flush itself) must not leak it, so the whole

@@ -60,7 +60,7 @@
  * Runtime module - no `node:fs`/`node:path`; `Bun.write`/`Bun.file` for the
  * spool files, `posixPath` for joins.
  */
-import { Effect } from "effect";
+import { Cause, Effect, Exit, Semaphore } from "effect";
 import { parseDuckdbColumnDefs } from "@ax/schema/duckdb-ddl";
 import { posixPath } from "../shared/path.ts";
 import { DuckDbQueryError } from "./errors.ts";
@@ -83,6 +83,10 @@ export interface SpoolTotals {
     /** Text values with an unpaired UTF-16 surrogate, made well-formed
      *  (lone half -> U+FFFD). See {@link encodeValue} for why. */
     readonly illFormedValues: number;
+    /** Highest number of retained rows observed after an append. */
+    readonly peakPendingRows: number;
+    /** Highest serialized UTF-8 byte count observed, including newlines. */
+    readonly peakPendingBytes: number;
 }
 
 export interface SpoolFlushOutcome {
@@ -97,8 +101,19 @@ export interface TableSpool {
      *  invariants as the seam's `putMany` (string `id` on every row, no ragged
      *  batch within one call). Synchronous; throws `DuckDbQueryError`. */
     readonly append: (table: string, rows: ReadonlyArray<Readonly<Record<string, DuckDbParam>>>) => void;
+    /** Validate a complete batch, then append it incrementally under the spool
+     *  gate. Configured limits can flush rows before this effect returns. */
+    readonly appendBounded: (
+        write: CacheWriteService,
+        table: string,
+        rows: ReadonlyArray<Readonly<Record<string, DuckDbParam>>>,
+    ) => Effect.Effect<void, CacheWriteError>;
     /** Rows currently buffered across all tables (post-dedup). */
     readonly pendingRows: () => number;
+    /** Serialized UTF-8 bytes currently buffered, including one newline per row. */
+    readonly pendingBytes: () => number;
+    /** Wait for active bounded work, then replay the first flush failure. */
+    readonly assertHealthy: () => Effect.Effect<void, CacheWriteError>;
     /** Land every buffered row. Rows appended DURING the flush (concurrent
      *  fibers mid-file) stay buffered for the next one. */
     readonly flush: (write: CacheWriteService) => Effect.Effect<SpoolFlushOutcome, CacheWriteError>;
@@ -115,6 +130,11 @@ export interface TableSpoolOptions {
     readonly dir: string;
     /** DDL override for tests. Defaults to the committed schema. */
     readonly ddlSql?: string;
+    /** Optional retained-data limits. Omission preserves manual buffering. */
+    readonly limits?: {
+        readonly maxRows: number;
+        readonly maxBytes: number;
+    };
 }
 
 /** JSON-safe encoding of one value, matching the bind path's semantics. */
@@ -163,11 +183,22 @@ interface SpoolBuffer {
     /** Sorted signature columns, the emit order of every line's keys. */
     readonly columns: ReadonlyArray<string>;
     /** id -> serialized NDJSON line (sans newline). Later append wins. */
-    readonly lines: Map<string, string>;
+    readonly lines: Map<string, { readonly text: string; readonly bytes: number }>;
 }
 
 export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
     const tables = new Set(options.tables);
+    const limits = options.limits;
+    if (
+        limits !== undefined &&
+        (!Number.isFinite(limits.maxRows) || limits.maxRows <= 0 ||
+            !Number.isFinite(limits.maxBytes) || limits.maxBytes <= 0)
+    ) {
+        throw new DuckDbQueryError({
+            sql: "",
+            message: "spool limits must contain positive finite maxRows and maxBytes values",
+        });
+    }
 
     /** table -> (column -> DDL type): the `columns={...}` source of truth. */
     const columnTypes = new Map<string, ReadonlyMap<string, string>>();
@@ -206,91 +237,126 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
     let nulValues = 0;
     let illFormedValues = 0;
     let flushSeq = 0;
+    let retainedRows = 0;
+    let retainedBytes = 0;
+    let peakPendingRows = 0;
+    let peakPendingBytes = 0;
+    let failedFlushCause: Cause.Cause<CacheWriteError> | null = null;
+    const gate = Semaphore.makeUnsafe(1);
+    const textEncoder = new TextEncoder();
 
-    const append: TableSpool["append"] = (table, rows) => {
-        if (rows.length === 0) return;
+    interface PreparedBatch {
+        readonly table: string;
+        readonly columns: ReadonlyArray<string>;
+        readonly signature: string;
+        readonly key: string;
+    }
+
+    const queryError = (table: string, message: string): DuckDbQueryError =>
+        new DuckDbQueryError({ sql: `spool INSERT INTO ${table}`, message });
+
+    /** Validate the complete input before bounded appends can flush any prefix. */
+    const prepareBatch = (
+        table: string,
+        rows: ReadonlyArray<Readonly<Record<string, DuckDbParam>>>,
+    ): PreparedBatch | null => {
+        if (rows.length === 0) return null;
         if (!tables.has(table)) {
-            throw new DuckDbQueryError({
-                sql: `spool INSERT INTO ${table}`,
-                message: `table "${table}" is not in this spool's allowlist - route it through putMany`,
-            });
+            throw queryError(table, `table "${table}" is not in this spool's allowlist - route it through putMany`);
         }
         const stamped = WRITE_STAMPED_COLUMNS[table];
         const types = columnTypes.get(table)!;
-
         const columnsOf = (row: Readonly<Record<string, DuckDbParam>>): string[] =>
-            Object.keys(row).filter((c) => c !== stamped);
-
+            Object.keys(row).filter((column) => column !== stamped);
         const columns = columnsOf(rows[0]!);
         if (!columns.includes("id")) {
-            throw new DuckDbQueryError({
-                sql: `spool INSERT INTO ${table}`,
-                message: `spooled rows for ${table} need an \`id\` on every row (same invariant as putMany); got [${columns.join(", ")}]`,
-            });
-        }
-        for (const column of columns) {
-            if (!types.has(column)) {
-                throw new DuckDbQueryError({
-                    sql: `spool INSERT INTO ${table}`,
-                    message:
-                        `spooled row for ${table} carries column "${column}" which the DDL does not declare - ` +
-                        "an explicit columns={} map cannot be built for it",
-                });
-            }
+            throw queryError(
+                table,
+                `spooled rows for ${table} need an \`id\` on every row (same invariant as putMany); got [${columns.join(", ")}]`,
+            );
         }
         const sorted = [...columns].sort();
         const signature = sorted.join(",");
-        const key = `${table} ${signature}`;
-        let buffer = buffers.get(key);
-        if (buffer === undefined) {
-            buffer = { table, columns: sorted, lines: new Map() };
-            buffers.set(key, buffer);
-        }
-
-        for (let i = 0; i < rows.length; i += 1) {
-            const row = rows[i]!;
-            if (i > 0) {
-                const rowSignature = [...columnsOf(row)].sort().join(",");
-                if (rowSignature !== signature) {
-                    throw new DuckDbQueryError({
-                        sql: `spool INSERT INTO ${table}`,
-                        message:
-                            `spooled batch for ${table} is ragged: row ${i} has [${rowSignature}] while row 0 has ` +
-                            `[${signature}]. Split into separate appends (same rule as putMany).`,
-                    });
+        for (let index = 0; index < rows.length; index += 1) {
+            const row = rows[index]!;
+            const rowColumns = columnsOf(row);
+            for (const column of rowColumns) {
+                if (!types.has(column)) {
+                    throw queryError(
+                        table,
+                        `spooled row for ${table} carries column "${column}" which the DDL does not declare - ` +
+                            "an explicit columns={} map cannot be built for it",
+                    );
                 }
+            }
+            const rowSignature = [...rowColumns].sort().join(",");
+            if (rowSignature !== signature) {
+                throw queryError(
+                    table,
+                    `spooled batch for ${table} is ragged: row ${index} has [${rowSignature}] while row 0 has ` +
+                        `[${signature}]. Split into separate appends (same rule as putMany).`,
+                );
             }
             const id = row["id"];
             if (typeof id !== "string" || id.length === 0) {
-                throw new DuckDbQueryError({
-                    sql: `spool INSERT INTO ${table}`,
-                    message: `spooled row ${i} for ${table} has a non-string id (${typeof id}); every id in this schema is VARCHAR`,
-                });
+                throw queryError(
+                    table,
+                    `spooled row ${index} for ${table} has a non-string id (${typeof id}); every id in this schema is VARCHAR`,
+                );
             }
-            const encodedId = encodeValue(table, "id", id, () => {
-                nulValues += 1;
-            }, () => {
-                illFormedValues += 1;
-            });
-            if (typeof encodedId !== "string") {
-                throw new DuckDbQueryError({
-                    sql: `spool INSERT INTO ${table}`,
-                    message: `spooled row ${i} for ${table} encoded its string id as ${typeof encodedId}`,
-                });
+            for (const column of sorted) {
+                const value = row[column];
+                if (typeof value === "bigint" && (value < I64_MIN || value > I64_MAX)) {
+                    throw queryError(
+                        table,
+                        `spooled value for ${table}.${column} (${value}) is outside the signed 64-bit range this ` +
+                            "store binds integers at; pass it as text (and store the column as VARCHAR or HUGEINT).",
+                    );
+                }
             }
-            const out: Record<string, unknown> = {};
-            for (const column of buffer.columns) {
-                out[column] =
-                    column === "id"
-                        ? encodedId
-                        : encodeValue(table, column, row[column], () => {
-                              nulValues += 1;
-                          }, () => {
-                              illFormedValues += 1;
-                          });
-            }
-            buffer.lines.set(encodedId, JSON.stringify(out));
         }
+        return { table, columns: sorted, signature, key: `${table} ${signature}` };
+    };
+
+    const appendRow = (prepared: PreparedBatch, row: Readonly<Record<string, DuckDbParam>>): void => {
+        let buffer = buffers.get(prepared.key);
+        if (buffer === undefined) {
+            buffer = { table: prepared.table, columns: prepared.columns, lines: new Map() };
+            buffers.set(prepared.key, buffer);
+        }
+        const encodedId = encodeValue(prepared.table, "id", row["id"], () => {
+            nulValues += 1;
+        }, () => {
+            illFormedValues += 1;
+        });
+        if (typeof encodedId !== "string") {
+            throw queryError(prepared.table, `spooled row encoded its string id as ${typeof encodedId}`);
+        }
+        const out: Record<string, unknown> = {};
+        for (const column of prepared.columns) {
+            out[column] = column === "id"
+                ? encodedId
+                : encodeValue(prepared.table, column, row[column], () => {
+                    nulValues += 1;
+                }, () => {
+                    illFormedValues += 1;
+                });
+        }
+        const line = JSON.stringify(out);
+        const lineBytes = textEncoder.encode(line).byteLength + 1;
+        const replaced = buffer.lines.get(encodedId);
+        if (replaced === undefined) retainedRows += 1;
+        else retainedBytes -= replaced.bytes;
+        buffer.lines.set(encodedId, { text: line, bytes: lineBytes });
+        retainedBytes += lineBytes;
+        peakPendingRows = Math.max(peakPendingRows, retainedRows);
+        peakPendingBytes = Math.max(peakPendingBytes, retainedBytes);
+    };
+
+    const append: TableSpool["append"] = (table, rows) => {
+        const prepared = prepareBatch(table, rows);
+        if (prepared === null) return;
+        for (const row of rows) appendRow(prepared, row);
     };
 
     const loadStatement = (buffer: SpoolBuffer, filePath: string): string => {
@@ -311,15 +377,16 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
         );
     };
 
-    const flush: TableSpool["flush"] = (write) =>
+    const healthyUnsafe = (): Effect.Effect<void, CacheWriteError> =>
+        failedFlushCause === null ? Effect.void : Effect.failCause(failedFlushCause);
+
+    const flushUnsafe = (write: CacheWriteService): Effect.Effect<SpoolFlushOutcome, CacheWriteError> =>
         Effect.gen(function* () {
-            // Snapshot-and-clear synchronously: rows appended by fibers still
-            // mid-file after this point belong to the NEXT flush, together
-            // with their files' watermarks (the work-unit snapshots marks
-            // BEFORE calling flush, so a mark is never committed ahead of a
-            // row it covers).
+            yield* healthyUnsafe();
             const drained = [...buffers.values()].filter((b) => b.lines.size > 0);
             buffers.clear();
+            retainedRows = 0;
+            retainedBytes = 0;
             if (drained.length === 0) return { rows: 0, statements: 0 };
 
             flushSeq += 1;
@@ -330,7 +397,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
                 yield* Effect.tryPromise({
                     try: async () => {
                         let text = "";
-                        for (const line of buffer.lines.values()) text += `${line}\n`;
+                        for (const line of buffer.lines.values()) text += `${line.text}\n`;
                         await Bun.write(filePath, text, { createPath: true });
                     },
                     catch: (err) =>
@@ -346,44 +413,78 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
                 yield* write.exec(loadStatement(buffer, filePath));
                 rows += buffer.lines.size;
                 statements += 1;
+                totalRows += buffer.lines.size;
+                totalStatements += 1;
                 yield* Effect.tryPromise({
                     try: () => Bun.file(filePath).unlink(),
                     catch: () => undefined,
                 }).pipe(Effect.ignore);
             }
-            totalRows += rows;
-            totalStatements += statements;
             return { rows, statements };
         });
+
+    const rememberFlushFailure = (
+        effect: Effect.Effect<SpoolFlushOutcome, CacheWriteError>,
+    ): Effect.Effect<SpoolFlushOutcome, CacheWriteError> =>
+        effect.pipe(
+            Effect.onExit((exit) =>
+                Effect.sync(() => {
+                    if (failedFlushCause === null && Exit.isFailure(exit)) failedFlushCause = exit.cause;
+                }),
+            ),
+        );
+
+    const flushHeld = (write: CacheWriteService): Effect.Effect<SpoolFlushOutcome, CacheWriteError> =>
+        rememberFlushFailure(flushUnsafe(write));
+
+    const flush: TableSpool["flush"] = (write) => gate.withPermits(1)(flushHeld(write));
+
+    const appendBounded: TableSpool["appendBounded"] = (write, table, rows) => {
+        const preparedEffect = Effect.try({
+            try: () => prepareBatch(table, rows),
+            catch: (error) => error instanceof DuckDbQueryError
+                ? error
+                : queryError(table, error instanceof Error ? error.message : String(error)),
+        });
+        return gate.withPermits(1)(
+            Effect.gen(function* () {
+                yield* healthyUnsafe();
+                const prepared = yield* preparedEffect;
+                if (prepared === null) return;
+                for (const row of rows) {
+                    appendRow(prepared, row);
+                    if (
+                        limits !== undefined &&
+                        (retainedRows >= limits.maxRows || retainedBytes >= limits.maxBytes)
+                    ) {
+                        yield* flushHeld(write);
+                    }
+                }
+            }),
+        );
+    };
+
+    const assertHealthy: TableSpool["assertHealthy"] = () =>
+        gate.withPermits(1)(Effect.suspend(healthyUnsafe));
 
     return {
         tables,
         append,
-        pendingRows: () => {
-            let n = 0;
-            for (const b of buffers.values()) n += b.lines.size;
-            return n;
-        },
+        appendBounded,
+        pendingRows: () => retainedRows,
+        pendingBytes: () => retainedBytes,
+        assertHealthy,
         flush,
-        totals: () => ({ rows: totalRows, statements: totalStatements, nulValues, illFormedValues }),
+        totals: () => ({
+            rows: totalRows,
+            statements: totalStatements,
+            nulValues,
+            illFormedValues,
+            peakPendingRows,
+            peakPendingBytes,
+        }),
     };
 };
-
-const appendVia = (
-    spool: TableSpool,
-    table: string,
-    rows: ReadonlyArray<Readonly<Record<string, DuckDbParam>>>,
-): Effect.Effect<void, CacheWriteError> =>
-    Effect.try({
-        try: () => spool.append(table, rows),
-        catch: (err) =>
-            err instanceof DuckDbQueryError
-                ? err
-                : new DuckDbQueryError({
-                      sql: `spool INSERT INTO ${table}`,
-                      message: err instanceof Error ? err.message : String(err),
-                  }),
-    });
 
 /**
  * Wrap a `CacheWriteService` so `put`/`putMany` for the spool's tables buffer
@@ -393,6 +494,7 @@ const appendVia = (
  */
 export const withTableSpool = (write: CacheWriteService, spool: TableSpool): CacheWriteService => ({
     ...write,
-    putMany: (table, rows) => (spool.tables.has(table) ? appendVia(spool, table, rows) : write.putMany(table, rows)),
-    put: (table, row) => (spool.tables.has(table) ? appendVia(spool, table, [row]) : write.put(table, row)),
+    putMany: (table, rows) =>
+        spool.tables.has(table) ? spool.appendBounded(write, table, rows) : write.putMany(table, rows),
+    put: (table, row) => spool.tables.has(table) ? spool.appendBounded(write, table, [row]) : write.put(table, row),
 });
