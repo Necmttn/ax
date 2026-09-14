@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.44.3](https://github.com/Necmttn/ax/compare/v0.44.2...v0.44.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* **cli:** correct setup and agent next steps ([#1155](https://github.com/Necmttn/ax/issues/1155)) ([5796903](https://github.com/Necmttn/ax/commit/579690327f5c818e22fe45358867ec33c6659bc9))
+* **ingest:** bound transcript spool writes ([#1158](https://github.com/Necmttn/ax/issues/1158)) ([c302a5d](https://github.com/Necmttn/ax/commit/c302a5d60572fd7d4cf8493e4dcc88e9b0ead6f7))
+* **release:** publish only complete verified downloads ([#1157](https://github.com/Necmttn/ax/issues/1157)) ([185ea81](https://github.com/Necmttn/ax/commit/185ea818ae7ba1a97c60ef0a4575a6e39aac11d4))
+
 ## [0.44.2](https://github.com/Necmttn/ax/compare/v0.44.1...v0.44.2) (2026-09-12)
 
 
