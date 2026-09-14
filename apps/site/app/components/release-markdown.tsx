@@ -21,6 +21,12 @@ export function MarkdownLite({ content }: { content: string }) {
           );
         }
         const { value } = block;
+        if (value === "---") {
+          return <hr key={index} />;
+        }
+        if (/^_[\s\S]+_$/.test(value)) {
+          return <p key={index}><em>{renderInline(value.slice(1, -1).replace(/\n/g, " "))}</em></p>;
+        }
         if (value.startsWith("# ")) {
           return <h2 key={index}>{renderInline(value.slice(2))}</h2>;
         }
