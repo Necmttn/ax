@@ -375,7 +375,7 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
         return (
             `INSERT INTO "${buffer.table}" (${allColumns.join(", ")}) ` +
             `SELECT ${selectList} FROM read_ndjson('${escapedPath}', ` +
-            `format = 'newline_delimited', columns = {${columnsMap}}) ` +
+            `format = 'newline_delimited', maximum_object_size = 1073741824, columns = {${columnsMap}}) ` +
             `ON CONFLICT ("id") ${onConflict}`
         );
     };
