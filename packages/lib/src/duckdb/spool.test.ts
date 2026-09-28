@@ -50,7 +50,7 @@ const asIngestRun = <A>(
                     },
                     (write) => {
                         const spool = makeTableSpool({
-                            tables: ["tool", "file", "invoked", "turn_token_usage"],
+                            tables: ["tool", "file", "invoked", "turn_token_usage", "agent_event"],
                             dir: spoolDir,
                             ...options,
                         });
@@ -64,6 +64,46 @@ const asIngestRun = <A>(
     );
 
 describe("makeTableSpool", () => {
+    dtest("small rows flush under a 256 MiB memory limit", async () => {
+        await asIngestRun(tempDir("spool-small-memory"), (write, spool) =>
+            Effect.gen(function* () {
+                yield* write.exec("SET memory_limit = '256MiB'");
+                spool.append("agent_event", [{
+                    id: "event:small", text: "small", agent_session: "session:test", provider: "claude",
+                    seq: 0, ts: "2026-09-28T00:00:00Z", type: "user",
+                }]);
+                yield* spool.flush(write);
+                const stored = yield* write.raw("SELECT text FROM agent_event WHERE id = 'event:small'");
+                expect(stored.rows[0]!["text"]).toBe("small");
+            }),
+        );
+    });
+
+    dtest("rows above 16 MiB preserve UTF-8 and JSON escapes under a 512 MiB memory limit", async () => {
+        // The encoded row exceeds 16 MiB, although its JS string length does not.
+        const value = '漢\n"\\'.repeat(4_000_000);
+        const row = {
+            id: "event:large", text: value, agent_session: "session:test", provider: "claude",
+            seq: 0, ts: "2026-09-28T00:00:00Z", type: "user",
+        };
+        expect(new TextEncoder().encode(JSON.stringify(row)).byteLength).toBeGreaterThan(16 * 1024 * 1024);
+        expect(value.length).toBeLessThan(16 * 1024 * 1024);
+        await asIngestRun(tempDir("spool-large-json"), (write, spool) =>
+            Effect.gen(function* () {
+                yield* write.exec("SET memory_limit = '512MiB'");
+                const spooled = withTableSpool(write, spool);
+                yield* spooled.put("agent_event", row);
+                expect(spool.pendingRows()).toBe(0);
+                const stored = yield* write.raw("SELECT text FROM agent_event WHERE id = 'event:large'");
+                expect(stored.rows[0]!["text"]).toBe(value);
+                yield* spooled.put("agent_event", { ...row, id: "event:after", seq: 1, text: "after" });
+                yield* spool.flush(write);
+                const after = yield* write.raw("SELECT text FROM agent_event WHERE id = 'event:after'");
+                expect(after.rows[0]!["text"]).toBe("after");
+            }),
+        { limits: { maxRows: 100, maxBytes: 1024 * 1024 } });
+    });
+
     dtest("bounded putMany flushes inside one input and records exact UTF-8 peaks", async () => {
         const dir = tempDir("spool-bounded");
         await asIngestRun(dir, (write, spool) =>
