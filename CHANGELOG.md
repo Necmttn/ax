@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.4](https://github.com/Necmttn/ax/compare/v0.44.3...v0.44.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* **spool:** size JSON reads for large transcript events ([#1160](https://github.com/Necmttn/ax/issues/1160)) ([9afbf53](https://github.com/Necmttn/ax/commit/9afbf53eee1974743bc16b66bc02b710b8befc9d))
+
 ## [0.44.3](https://github.com/Necmttn/ax/compare/v0.44.2...v0.44.3) (2026-09-14)
 
 
