@@ -12,7 +12,7 @@ const CLAUDE_WATCHED_SLUGS = [
     "hooks",
     "permissions",
     "mcp",
-    "plugins",
+    "plugins/overview",
     "skills",
     "sub-agents",
     "agent-sdk/observability",

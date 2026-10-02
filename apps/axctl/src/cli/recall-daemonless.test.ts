@@ -79,7 +79,8 @@ const CORPUS = (w: CacheWriteService) =>
             id: "call-one",
             session: "session-a",
             name: "Bash",
-            ts: T("2026-08-15T10:05:00.000Z"),
+            // The CLI uses the real clock for its --days=30 window.
+            ts: new Date(Date.now() - 24 * 60 * 60 * 1000),
             input_json: '{"command":"bun test"}',
             has_error: false,
         });
@@ -96,6 +97,7 @@ const runCli = (args: ReadonlyArray<string>, snapshotPath: string): CliRun => {
         env: {
             ...process.env,
             AX_DUCKDB_SNAPSHOT: snapshotPath,
+            AX_NO_AUTO_INGEST: "1",
             ...(dylibPath === null ? {} : { AX_DUCKDB_DYLIB: dylibPath }),
             // Keep the child's output machine-readable and animation-free.
             AX_PROGRESS: "off",

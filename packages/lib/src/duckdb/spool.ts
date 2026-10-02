@@ -372,10 +372,17 @@ export const makeTableSpool = (options: TableSpoolOptions): TableSpool => {
         const updates = allColumns.filter((c) => c !== '"id"').map((c) => `${c} = excluded.${c}`);
         const onConflict = updates.length === 0 ? "DO NOTHING" : `DO UPDATE SET ${updates.join(", ")}`;
         const escapedPath = filePath.replace(/'/g, "''");
+        // DuckDB allocates twice this limit, even for tiny files. Keep its
+        // 16 MiB default unless an encoded row needs more space. Stored byte
+        // counts include UTF-8, JSON escapes, and the terminating newline.
+        let maximumObjectSize = 16 * 1024 * 1024;
+        for (const line of buffer.lines.values()) {
+            maximumObjectSize = Math.max(maximumObjectSize, line.bytes);
+        }
         return (
             `INSERT INTO "${buffer.table}" (${allColumns.join(", ")}) ` +
             `SELECT ${selectList} FROM read_ndjson('${escapedPath}', ` +
-            `format = 'newline_delimited', columns = {${columnsMap}}) ` +
+            `format = 'newline_delimited', maximum_object_size = ${maximumObjectSize}, columns = {${columnsMap}}) ` +
             `ON CONFLICT ("id") ${onConflict}`
         );
     };
