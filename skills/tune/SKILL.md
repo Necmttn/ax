@@ -1,11 +1,11 @@
 ---
-name: env-retro
-description: Retrospective on one coding session that proposes changes to the agent's environment (hooks, checks, steering files, tool access) and files each as an ax proposal. Reads the raw session log through a bundled ledger script, with ax as the second source and the ledger. Triggers when the user says "environment retro", "env retro", "what should I change in my setup after this session", "retro this session's tooling", or invokes /ax:env-retro. Use /ax:retro to triage the proposals it files.
+name: tune
+description: Retrospective on one coding session that proposes changes to the agent's environment (hooks, checks, steering files, tool access) and files each as an ax proposal. Reads the raw session log through a bundled ledger script, with ax as the second source and the ledger. Triggers when the user says "environment retro", "env retro", "what should I change in my setup after this session", "retro this session's tooling", or invokes /ax:tune. Use /ax:retro to triage the proposals it files.
 ---
 
-# ax:env-retro - what to change in the environment after one session
+# ax:tune - what to change in the rig after one session
 
-The user has asked for an **environment retro**. You read what one session actually did, name the changes to the agent's **environment** (hooks, checks, steering files, tools, access) that would make the next run cheaper or safer, and file every candidate in ax so it is triageable later. The session log is the primary source; ax is the ledger.
+The user has asked to **tune** the rig. You read what one session actually did, name the changes to the agent's **environment** (hooks, checks, steering files, tools, access) that would make the next run cheaper or safer, and file every candidate in ax so it is triageable later. The session log is the primary source; ax is the ledger.
 
 ## Steps
 
