@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/Necmttn/ax/compare/v0.44.4...v0.45.0) (2026-10-07)
+
+
+### Features
+
+* **skills:** tune - rig retro for one session, filed into ax ([#1163](https://github.com/Necmttn/ax/issues/1163)) ([fca259c](https://github.com/Necmttn/ax/commit/fca259c0f7accfdac756ac323924bde8732fd9c0))
+
 ## [0.44.4](https://github.com/Necmttn/ax/compare/v0.44.3...v0.44.4) (2026-10-02)
 
 
