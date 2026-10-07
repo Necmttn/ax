@@ -686,6 +686,18 @@ that skill for the full workflow.
 Emit a read-only investigation snapshot (JSON) for an external AI
 agent to drive a deep retro-of-retros. Used by `/retro-meta`.
 
+### `/env-retro` - environment retro for one session
+
+Skill, not a subcommand. Reads one session's raw log through
+`skills/env-retro/scripts/turns.py` (one line per tool call, flagged
+`ERR` / `DENY` / `RETRY` / `AGENT` / `BIG`, with token totals), hunts
+improvement candidates in seven environment categories (navigation,
+automated checks, coding standards, always-loaded steering, tool
+economy, no-ops, information access), presents them by severity, then
+files each as a proposal via `axctl retro emit --from-file`.
+`skills/env-retro/PROPOSALS.md` copies the per-form payload schema so
+the emit validates first time. Ingest is always `axctl ingest here`.
+
 ### `axctl retro plan`
 
 Register an externally-drafted plan as a proposal (plus experiment
