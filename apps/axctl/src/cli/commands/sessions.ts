@@ -252,7 +252,7 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
         const { sessions, next } = buildSessionsNext(rows, { studio });
 
         if (json) {
-            console.log(prettyPrint({ sessions, next }));
+            yield* Effect.promise(() => writeJsonStdout(prettyPrint({ sessions, next })));
             return;
         }
         printNextLinks(next);
@@ -317,7 +317,7 @@ const cmdSessionsAround = (input: {
         });
 
         if (json) {
-            console.log(prettyPrint({ sessions, next }));
+            yield* Effect.promise(() => writeJsonStdout(prettyPrint({ sessions, next })));
             return;
         }
         printNextLinks(next);
@@ -381,7 +381,7 @@ const cmdSessionsNear = (input: {
         const { sessions, next } = buildSessionsNext(rows, { studio });
 
         if (json) {
-            console.log(prettyPrint({ sessions, next }));
+            yield* Effect.promise(() => writeJsonStdout(prettyPrint({ sessions, next })));
             return;
         }
         printNextLinks(next);

@@ -26,6 +26,7 @@ import { cacheRows } from "@ax/lib/duckdb/query";
 import { Judgment, type JudgmentError } from "@ax/lib/sqlite";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
+import { writeJsonStdout } from "./output.ts";
 import { listStoredProposals } from "../improve/judgment-proposals.ts";
 import { listStoredRetros } from "../queries/judgment-retros.ts";
 import {
@@ -456,5 +457,5 @@ export const cmdRetroMeta = (
         const out = pretty || process.stdout.isTTY
             ? prettyPrint(snapshot)
             : encodeJson(snapshot);
-        console.log(out);
+        yield* Effect.promise(() => writeJsonStdout(out));
     });
